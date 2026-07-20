@@ -13,7 +13,6 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `rgb.rs` | `Rgb`: an RGB color as three `f32` channels (`r`, `g`, `b`); `intensity()` (unweighted channel mean), `scale()`, `ZERO`. |
 | `shared.rs` | `Shared<T>`: `Arc<Mutex<T>>` convenience wrapper; derefs to the inner `Arc`. |
 | `shared_fn.rs` | `SharedFn<F>`: `Option`-like `Arc`-wrapped callable. |
-| `slot.rs` | `Slot<T>`: lockless single-slot async value channel (`ArcSwapOption` + `Notify`); only the latest value is retained. |
 | `pause_gate.rs` | `PauseGate`: pause/resume gate; `close()` returns a guard that reopens on drop. |
 | `ready_state.rs` | `ReadyState`: barrier-like counter that notifies waiters once `total` signals arrive. |
 | `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. `cancel()`/`is_cancelled()`/`reset()`; live clones share one flag. For cooperative bail-out in hot loops (`spawn_blocking`/rayon); `reset()` makes a live token reusable across operations. No async wait — use `tokio_util`'s token for that. |
@@ -35,7 +34,6 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 ## Key types
 
 - `BitBuffer2` — bit-packed 2D bool buffer; indexes by `(x, y)` tuple and linear `usize`. No `IndexMut` (bits aren't independently addressable); mutate via `set`/`set_xy`. (The generic pixel `Buffer2<T>` moved to `imaginarium`.)
-- `Slot<T>` — `send` (overwrites), `take`/`take_async`, `peek`/`peek_async` (Arc clone, keeps). For cross-task async value passing.
 - `PauseGate` / `ReadyState` — race-safe via registering the `Notify` future *before* checking the flag/count.
 - `SerdeFormat` — `Json | Bitcode | Toml | Lz4`; selected by file extension via `from_file_name`. (Lua, Rhai, and the old `Scn`/`ScnText` formats were removed.)
 
@@ -47,4 +45,4 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 ## Dependencies
 
-tokio, rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, arc-swap, thiserror.
+tokio, rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, thiserror.

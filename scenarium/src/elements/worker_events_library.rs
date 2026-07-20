@@ -7,7 +7,6 @@ use crate::node::definition::{Func, FuncInput, FuncOutput};
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
 use common::FloatExt;
-use common::Slot;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 
@@ -45,14 +44,13 @@ pub fn worker_events_library() -> Library {
                 "FPS",
                 EventLambda::new(|state| {
                     Box::pin(async move {
-                        // Get current state from per-node event state
-                        let slot = state
-                            .lock()
-                            .await
-                            .get::<Slot<FpsEventState>>()
-                            .expect("Node was never executed, nodes should be executed prior to registering events")
-                            .clone();
-                        let fps_state = slot.peek_async().await;
+                        let fps_state = {
+                            let state = state.lock().await;
+                            state
+                                .get::<FpsEventState>()
+                                .expect("Node was never executed, nodes should be executed prior to registering events")
+                                .clone()
+                        };
 
                         if fps_state.frequency.approximately_eq(0.0) {
                             tracing::info!("Frequency is zero, no FPS event");
@@ -79,36 +77,31 @@ pub fn worker_events_library() -> Library {
                         let frequency = inputs[0].value.as_f64().unwrap_or(1.0);
                         let now = Instant::now();
 
-                        // Get previous state from the event state
-                        let slot = event_state
-                            .lock()
-                            .await
-                            .get_or_default_with(|| {
-                                let slot = Slot::default();
-                                slot.send(FpsEventState {
-                                    frequency,
-                                    last_execution: now,
-                                    frame_no: 1,
-                                });
-                                slot
-                            })
-                            .clone();
-
-                        let prev_state = slot.peek().unwrap();
-                        let mut delta = prev_state.last_execution.elapsed().as_secs_f64();
-                        if delta.approximately_eq(0.0) {
-                            // to avoid
-                            delta = 1.0 / frequency;
+                        let delta;
+                        let frame_no;
+                        {
+                            let mut event_state = event_state.lock().await;
+                            let previous = event_state.get_or_default_with(|| FpsEventState {
+                                frequency,
+                                last_execution: now,
+                                frame_no: 1,
+                            });
+                            let elapsed = previous.last_execution.elapsed().as_secs_f64();
+                            delta = if elapsed.approximately_eq(0.0) {
+                                1.0 / frequency
+                            } else {
+                                elapsed
+                            };
+                            frame_no = previous.frame_no;
+                            *previous = FpsEventState {
+                                frequency,
+                                last_execution: now,
+                                frame_no: frame_no + 1,
+                            };
                         }
 
-                        slot.send(FpsEventState {
-                            frequency,
-                            last_execution: now,
-                            frame_no: prev_state.frame_no + 1,
-                        });
-
                         outputs[0] = delta.into();
-                        outputs[1] = prev_state.frame_no.into();
+                        outputs[1] = frame_no.into();
 
                         Ok(())
                     })
@@ -117,14 +110,4 @@ pub fn worker_events_library() -> Library {
     );
 
     library
-}
-
-impl Default for FpsEventState {
-    fn default() -> Self {
-        Self {
-            frequency: 1.0,
-            last_execution: Instant::now(),
-            frame_no: 0,
-        }
-    }
 }
