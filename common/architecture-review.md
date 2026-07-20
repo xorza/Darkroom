@@ -16,8 +16,8 @@ document module (`darkroom/src/core/document/mod.rs:180`,
 
 The remaining work is concentrated in two areas:
 
-1. Return Scenarium- and Lumos-specific primitives to their sole production
-   owners, reducing `common`'s dependency and API surface.
+1. Return Lumos-specific primitives to their sole production owner, reducing
+   `common`'s dependency and API surface.
 2. Remove avoidable copies and unconditional proc-macro build cost from the
    serialization/introspection layer.
 
@@ -34,7 +34,6 @@ test-support code were excluded from findings.
 | Disposition | Current modules |
 | --- | --- |
 | Keep in `common` | serialization and `SerdeFormat`, `CancelToken`, introspection traits/value types, typed-ID macro, `Span`, file discovery, `FloatExt`, constants/debug helpers |
-| Move to Scenarium | `Shared`, `PauseGate`, `ReadyState` |
 | Move to Lumos | `BitBuffer2`, `Vec2us`, `Rgb`, CPU detection, bounded parallel mapping, `FnvHasher`, `SharedFn` |
 
 ## Batch 1 — Critical: keep serialization pairs symmetric
@@ -49,9 +48,9 @@ test-support code were excluded from findings.
 
 ## Batch 3 — Medium: put runtime synchronization in Scenarium
 
-- [ ] **Move `Shared`, `PauseGate`, and `ReadyState` to their sole production owner and remove the resulting dependencies from `common`.** `Shared` only backs Scenarium's `SharedAnyState` (`common/src/shared.rs:5-28`, `scenarium/src/runtime/shared_any_state.rs:3-36`), while `PauseGate`/`ReadyState` only coordinate Scenarium's worker event loop (`scenarium/src/worker/mod.rs:101-105`, `scenarium/src/worker/event_loop.rs:23-57`). Their presence makes every `common` consumer receive Tokio (`common/Cargo.toml:20`). Move the modules and tests into Scenarium, remove their root exports, and then remove the unused dependency from `common`. Validate Scenarium independently and use `cargo tree` to confirm unrelated `common` consumers no longer receive Tokio through this crate.
+- [x] **Move Scenarium-owned runtime synchronization out of `common`.** `SharedAnyState` now owns `Arc<tokio::sync::Mutex<AnyState>>` directly, event-loop startup uses Tokio's `Barrier`, and `PauseGate` lives under Scenarium's worker. The former `Shared` and `ReadyState` wrappers, Common's root exports, and Common's Tokio dependency are deleted.
 
-- [ ] **Make `PauseGate` close guards composable while moving it.** Each `close()` writes the same boolean (`common/src/pause_gate.rs:49-57`), and dropping any guard clears that boolean and wakes every waiter (`common/src/pause_gate.rs:61-70`). Two overlapping guards therefore reopen the gate when the first drops even though the second remains alive. Replace the flag with a close count and notify only on the `1 -> 0` transition, or enforce unique close ownership in the type. Verify two guards dropped in both orders and guards created from separate clones. The worker currently serializes its one guard (`scenarium/src/worker/mod.rs:179-195`), so this hardens the primitive's promised public behavior rather than fixing a currently observed worker race.
+- [x] **Make `PauseGate` close guards composable while moving it.** A Tokio `watch<usize>` now holds the close count, and guard drops notify waiters only when the count reaches zero. Tests cover both drop orders, guards created from separate clones, repeated close/reopen cycles, and the boundary where a waiter has already passed.
 
 - [x] **Remove `Slot` in favor of the existing per-node state synchronization.** Scenarium's FPS event source now stores `FpsEventState` directly in `SharedAnyState`: the event lambda clones a snapshot under its existing Tokio mutex before sleeping, and the node lambda mutates the state under the same lock. The custom `Slot`, `SlotError`, ownership-transfer protocol, root export, and Common's `arc-swap` dependency are deleted. Existing worker tests verify repeated state updates and event-loop observation end to end.
 

@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
-use common::{CancelToken, PauseGate};
+use common::CancelToken;
 
 use crate::execution::report::RunEvent;
 use crate::execution::stats::ExecutionStats;
@@ -10,10 +10,12 @@ use crate::worker::batch::{GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{
     ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, LambdaPanic, StopOutcome, stop_event_loop,
 };
+use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerExited, WorkerMessage, WorkerReport};
 
 pub(crate) mod batch;
 pub(crate) mod event_loop;
+pub(crate) mod pause_gate;
 pub(crate) mod protocol;
 
 #[derive(Debug)]

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use common::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
@@ -22,6 +21,7 @@ use crate::execution::event::{EventRef, EventTrigger};
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::ActiveEventLoop;
+use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 
 /// Print messages a run logged, in order — `print` now logs via

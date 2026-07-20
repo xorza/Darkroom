@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
+use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::JoinHandle;
 
-use common::{PauseGate, ReadyState};
-
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::graph::NodeId;
+use crate::worker::pause_gate::PauseGate;
 
 pub(crate) const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
@@ -25,7 +27,11 @@ impl ActiveEventLoop {
         assert!(!event_triggers.is_empty());
 
         let (event_tx, events) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
-        let ready = ReadyState::new(event_triggers.len());
+        let participants = event_triggers
+            .len()
+            .checked_add(1)
+            .expect("event trigger count overflow");
+        let ready = Arc::new(Barrier::new(participants));
         let mut join_handles = Vec::with_capacity(event_triggers.len());
 
         for EventTrigger {
@@ -40,7 +46,7 @@ impl ActiveEventLoop {
                 let pause_gate = pause_gate.clone();
 
                 async move {
-                    ready.signal();
+                    ready.wait().await;
                     loop {
                         lambda.invoke(state.clone()).await;
                         if event_tx.send(event).await.is_err() {

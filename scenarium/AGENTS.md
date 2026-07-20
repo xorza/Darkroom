@@ -60,6 +60,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `worker/protocol.rs` | Host/worker messages and reports |
 | `worker/batch.rs` | Ordered batch reduction |
 | `worker/event_loop.rs` | Active event-task lifecycle |
+| `worker/pause_gate/` | Counted RAII pause gate for worker execution |
 | `worker/mod.rs` | Worker handle and task orchestration |
 
 ## Compile, plan, execute
@@ -95,8 +96,10 @@ One `Vec<WorkerMessage>` is one commit unit. `BatchIntent` preserves first-seen
 order while deduplicating node seeds and events; conflicting state slots are
 last-write-wins and `Exit` dominates its batch. `ActiveEventLoop` owns both its
 tasks and event receiver, so the lifecycle invariant is represented by one
-type. Worker reports stream progress and exact scoped pinned outputs before the
-matching finished result.
+type. Event tasks rendezvous through Tokio's `Barrier`; the worker's counted
+pause gate uses Tokio `watch` so overlapping close guards reopen it only after
+the last guard drops. Worker reports stream progress and exact scoped pinned
+outputs before the matching finished result.
 
 ## Built-ins and tests
 

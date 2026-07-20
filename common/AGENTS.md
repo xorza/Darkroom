@@ -1,8 +1,8 @@
 # common
 
 Shared utilities used across the workspace: 2D buffers, ID types, serialization,
-async synchronization primitives, primitive-type extension traits, and small
-helpers. Pure leaf crate — depended on by everything, depends on nothing in-tree.
+primitive-type extension traits, and small helpers. Pure leaf crate — depended
+on by everything, depends on nothing in-tree.
 
 ## Modules
 
@@ -11,10 +11,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `bit_buffer2.rs` | `BitBuffer2`: bit-packed 2D boolean buffer; u64 words, rows aligned to 128 bits, 16-byte-aligned for SIMD. 8× smaller than `Vec<bool>`. (The generic `Buffer2<T>` pixel buffer now lives in `imaginarium`.) |
 | `vec2us.rs` | `Vec2us`: 2D `usize` vector for pixel coordinates/dimensions (`x`, `y`); index conversions (`to_index`/`from_index`), `Add`/`Sub`, tuple `From`. |
 | `rgb.rs` | `Rgb`: an RGB color as three `f32` channels (`r`, `g`, `b`); `intensity()` (unweighted channel mean), `scale()`, `ZERO`. |
-| `shared.rs` | `Shared<T>`: `Arc<Mutex<T>>` convenience wrapper; derefs to the inner `Arc`. |
 | `shared_fn.rs` | `SharedFn<F>`: `Option`-like `Arc`-wrapped callable. |
-| `pause_gate.rs` | `PauseGate`: pause/resume gate; `close()` returns a guard that reopens on drop. |
-| `ready_state.rs` | `ReadyState`: barrier-like counter that notifies waiters once `total` signals arrive. |
 | `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. `cancel()`/`is_cancelled()`/`reset()`; live clones share one flag. For cooperative bail-out in hot loops (`spawn_blocking`/rayon); `reset()` makes a live token reusable across operations. No async wait — use `tokio_util`'s token for that. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures. |
@@ -34,7 +31,6 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 ## Key types
 
 - `BitBuffer2` — bit-packed 2D bool buffer; indexes by `(x, y)` tuple and linear `usize`. No `IndexMut` (bits aren't independently addressable); mutate via `set`/`set_xy`. (The generic pixel `Buffer2<T>` moved to `imaginarium`.)
-- `PauseGate` / `ReadyState` — race-safe via registering the `Notify` future *before* checking the flag/count.
 - `SerdeFormat` — `Json | Bitcode | Toml | Lz4`; selected by file extension via `from_file_name`. (Lua, Rhai, and the old `Scn`/`ScnText` formats were removed.)
 
 `id_type!` generates a `#[repr(transparent)]` UUID wrapper deriving Clone/Copy/Eq/Ord/Hash/serde, with `unique`/`nil`/`from_u128`/`is_nil`/`as_u128`/`as_u64_pair`, `FromStr` + `From<&str>`/`From<String>` parsing, and `Display`.
@@ -45,4 +41,4 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 ## Dependencies
 
-tokio, rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, thiserror.
+rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, thiserror.

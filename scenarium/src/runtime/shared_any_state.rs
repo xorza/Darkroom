@@ -1,13 +1,13 @@
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
-use common::Shared;
-use tokio::sync::MutexGuard;
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::runtime::any_state::AnyState;
 
 #[derive(Debug, Clone, Default)]
 pub struct SharedAnyState {
-    inner: Shared<AnyState>,
+    inner: Arc<Mutex<AnyState>>,
 }
 
 #[derive(Debug)]

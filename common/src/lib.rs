@@ -25,10 +25,7 @@ pub(crate) mod float_ext;
 pub(crate) mod fnv;
 pub(crate) mod introspect;
 pub(crate) mod normalize_string;
-pub(crate) mod pause_gate;
-pub(crate) mod ready_state;
 pub(crate) mod rgb;
-pub(crate) mod shared;
 pub(crate) mod shared_fn;
 pub(crate) mod span;
 pub(crate) mod vec2us;
@@ -45,11 +42,8 @@ pub use introspect::{
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
 pub use normalize_string::NormalizeString;
-pub use pause_gate::{PauseGate, PauseGateCloseGuard};
-pub use ready_state::ReadyState;
 pub use rgb::Rgb;
 pub use serde::{DeserializeError, Lz4SizeError, SerializeError, deserialize, serialize};
-pub use shared::Shared;
 pub use shared_fn::SharedFn;
 pub use span::Span;
 pub use vec2us::Vec2us;
