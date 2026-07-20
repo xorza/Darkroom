@@ -1,6 +1,6 @@
 //! Half-open axis-aligned rectangles.
 
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 
 // `usize::min`/`max` are not const-stable on the pinned toolchain.

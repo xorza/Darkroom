@@ -1,8 +1,8 @@
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::quality;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use common::Vec2us;
 use glam::{DVec2, Vec2};
 
 const TOL: f32 = 1e-5;

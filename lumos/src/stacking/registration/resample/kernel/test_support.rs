@@ -1,6 +1,6 @@
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel;
-use common::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 

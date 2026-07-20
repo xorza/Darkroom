@@ -22,11 +22,11 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use common::BitBuffer2;
+use crate::bit_buffer2::BitBuffer2;
 use imaginarium::Buffer2;
 
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 /// Per-pixel noise floor: the noise estimate is clamped to this before forming the threshold so a
 /// zero or negative σ can't collapse it. Every backend reads this same constant so the SIMD and
@@ -174,8 +174,8 @@ pub(crate) fn create_threshold_mask(
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let width = mask.width();
-    let height = mask.height();
+    let width = mask.width;
+    let height = mask.height;
     // Release asserts, not debug: the SIMD kernels do unchecked loads off these dims, so a mismatch
     // is out-of-bounds UB rather than a wrong pixel. The check is O(1) per whole-image call.
     assert_eq!(width, pixels.width());
@@ -190,7 +190,7 @@ pub(crate) fn create_threshold_mask(
     let bg = bg.pixels();
     let noise = noise.pixels();
 
-    mask.words_mut()
+    mask.words
         .par_chunks_mut(words_per_row)
         .enumerate()
         .for_each(|(y, row_words)| {
@@ -220,8 +220,8 @@ pub(crate) fn create_threshold_mask_filtered(
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let width = mask.width();
-    let height = mask.height();
+    let width = mask.width;
+    let height = mask.height;
     // Release asserts (see `create_threshold_mask`): these dims drive unchecked SIMD loads.
     assert_eq!(width, filtered.width());
     assert_eq!(height, filtered.height());
@@ -232,7 +232,7 @@ pub(crate) fn create_threshold_mask_filtered(
     let filtered = filtered.pixels();
     let noise = noise.pixels();
 
-    mask.words_mut()
+    mask.words
         .par_chunks_mut(words_per_row)
         .enumerate()
         .for_each(|(y, row_words)| {

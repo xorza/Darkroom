@@ -160,7 +160,7 @@ impl LMModel<6> for Gaussian2D {
         params: &[f64; 6],
     ) -> ([[f64; 6]; 6], [f64; 6], f64) {
         #[cfg(target_arch = "x86_64")]
-        if common::cpu_features::has_avx2_fma() {
+        if imaginarium::cpu_features::has_avx2_fma() {
             return unsafe {
                 simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
             };
@@ -185,7 +185,7 @@ impl LMModel<6> for Gaussian2D {
         params: &[f64; 6],
     ) -> f64 {
         #[cfg(target_arch = "x86_64")]
-        if common::cpu_features::has_avx2_fma() {
+        if imaginarium::cpu_features::has_avx2_fma() {
             return unsafe {
                 simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)
             };

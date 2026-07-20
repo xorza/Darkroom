@@ -24,7 +24,7 @@
 //! preserved and only intensity is remapped. A per-channel stretch instead ties an object's color
 //! to its brightness and burns bright star cores toward white.
 
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 use rayon::prelude::*;
 
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
@@ -42,7 +42,7 @@ mod simd_neon;
 mod tests;
 
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF
 /// collapses every interior value onto a single output.

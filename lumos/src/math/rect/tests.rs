@@ -1,4 +1,4 @@
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 
 use crate::math::rect::{Rect, URect};

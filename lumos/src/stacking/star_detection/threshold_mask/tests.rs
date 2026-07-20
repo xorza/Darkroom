@@ -7,10 +7,10 @@
 //! - Filtered threshold tests: Background-subtracted image thresholding
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 /// Helper to create threshold mask for tests using packed version
@@ -771,7 +771,7 @@ fn avx2_matches_scalar_packed() {
     use crate::stacking::star_detection::threshold_mask::avx2::process_words_avx2;
     use crate::stacking::star_detection::threshold_mask::process_words_scalar;
 
-    if !common::cpu_features::has_avx2() {
+    if !imaginarium::cpu_features::has_avx2() {
         return; // backend not present on this host
     }
 

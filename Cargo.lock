@@ -987,12 +987,10 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
- "aligned-vec",
  "bitcode",
  "common-derive",
  "glam 0.33.2",
  "lz4_flex",
- "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

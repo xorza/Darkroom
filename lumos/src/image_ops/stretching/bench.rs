@@ -8,6 +8,7 @@ use std::hint::black_box;
 use imaginarium::Image;
 
 use crate::Stretch;
+use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 
@@ -103,7 +104,7 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         #[cfg(not(target_arch = "aarch64"))]
         for px in buf.chunks_exact_mut(3) {
             let out = stretching::color_preserve_pixel(
-                common::Rgb {
+                Rgb {
                     r: px[0],
                     g: px[1],
                     b: px[2],

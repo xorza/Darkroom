@@ -3,12 +3,12 @@
 // Allow identity operations like `y * width + x` for clarity in 2D indexing
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
-use common::BitBuffer2;
 
 /// Verify dilation result against naive O(n²×r²) box dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
-    let (width, height) = (mask.width(), mask.height());
+    let (width, height) = (mask.width, mask.height);
     for y in 0..height {
         for x in 0..width {
             let mut expected = false;

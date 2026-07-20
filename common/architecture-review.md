@@ -14,15 +14,14 @@ state now uses `IndexMap` with its custom serialization beside the owning
 document module (`darkroom/src/core/document/mod.rs:180`,
 `darkroom/src/core/document/serde.rs:1-49`).
 
-The remaining work is concentrated in two areas:
-
-1. Return Lumos-specific primitives to their sole production owner, reducing
-   `common`'s dependency and API surface.
-2. Remove avoidable copies and unconditional proc-macro build cost from the
-   serialization/introspection layer.
+The remaining implementation work is concentrated in the
+serialization/introspection layer: removing avoidable copies and unconditional
+proc-macro build cost.
 
 The LZ4 size contract, authored-file publication, and persistent frame-cache
 identity findings are reflected in the current code and are no longer active.
+Lumos-specific image primitives and execution helpers now live with their
+production owner, leaving `common` focused on cross-crate contracts.
 
 ## Review scope
 
@@ -33,8 +32,7 @@ test-support code were excluded from findings.
 
 | Disposition | Current modules |
 | --- | --- |
-| Keep in `common` | serialization and `SerdeFormat`, `CancelToken`, introspection traits/value types, typed-ID macro, `Span`, file discovery, `FloatExt`, constants/debug helpers |
-| Move to Lumos | `BitBuffer2`, `Vec2us`, `Rgb`, CPU detection, bounded parallel mapping, `FnvHasher`, `SharedFn` |
+| Keep in `common` | serialization and `SerdeFormat`, `CancelToken`, introspection traits/value types, typed-ID macro, `Span`, file discovery/publication, `FloatExt`, constants/debug helpers |
 
 ## Batch 1 — Critical: keep serialization pairs symmetric
 
@@ -56,11 +54,11 @@ test-support code were excluded from findings.
 
 ## Batch 4 — Medium: return image-processing implementation to Lumos
 
-- [ ] **Move `BitBuffer2`, `Vec2us`, and `Rgb` into coherent Lumos modules.** These public types (`common/src/lib.rs:37`, `common/src/lib.rs:51`, `common/src/lib.rs:57`) have no production consumer outside Lumos. `BitBuffer2` is used by star-detection/background masks (`lumos/src/stacking/star_detection/threshold_mask/mod.rs:25`, `lumos/src/background_mesh/workspace.rs:4`), `Vec2us` by image geometry and registration (`lumos/src/io/astro_image/mod.rs:18`, `lumos/src/stacking/registration/resample/kernel/mod.rs`), and `Rgb` by image operations (`lumos/src/image_ops/mod.rs:32`, `lumos/src/image_ops/stretching/mod.rs:27`). Relocate each type beside its domain owner, narrow visibility where possible, remove the root exports, and remove `aligned-vec` from `common/Cargo.toml:17`. Validate Lumos independently, including its SIMD and serialization paths.
+- [x] **Move `BitBuffer2`, `Vec2us`, and `Rgb` into coherent Lumos modules.** `BitBuffer2` now lives beside Lumos's packed-mask algorithms, `Vec2us` under `math`, and `Rgb` under its sole production owner, `image_ops`. `BitBuffer2` and `Rgb` are crate-private; `Vec2us` remains public because `ImageDimensions` exposes it. Common's modules and root exports are deleted. The mask kernels need row padding but do not issue aligned loads, so `BitBuffer2` now uses `Vec<u64>` and `aligned-vec` was removed from both Common and Lumos rather than transferred.
 
-- [ ] **Fix `BitBuffer2`'s empty iteration, dimension arithmetic, and hot assertions as part of the move.** Either zero dimension makes a buffer empty (`common/src/bit_buffer2.rs:126-136`), but `BitIter::next` checks only height before reading `(0, 0)` (`common/src/bit_buffer2.rs:324-345`), so iterating or converting a `0 x N` buffer panics. Construction also multiplies dimensions/stride without checked overflow (`common/src/bit_buffer2.rs:39-43`, `common/src/bit_buffer2.rs:65-79`), and per-bit access pays release assertions (`common/src/bit_buffer2.rs:138-178`) despite being used in pixel loops. Track one logical index or terminate on either zero dimension, validate allocation sizes with checked arithmetic at construction, and use `debug_assert!` for per-bit internal bounds while retaining cold input validation. Verify `0 x N`, `N x 0`, `0 x 0`, exact iterator lengths/conversions, overflow rejection, debug out-of-bounds behavior, and scalar/SIMD agreement.
+- [x] **Fix `BitBuffer2`'s empty iteration, dimension arithmetic, and hot assertions as part of the move.** Layout construction returns an allocation-free empty layout when either dimension is zero, then checks row-stride, logical-dimension, and padded-storage overflow independently for non-empty buffers. Iteration tracks one logical index and terminates at the exact logical length. Per-bit internal bounds use `debug_assert!`; cold slice/layout validation remains unconditional. Tests cover ordinary and `usize::MAX` zero-dimension shapes, exact iteration/conversion order and length, every non-empty overflow stage, debug out-of-bounds access, padding exclusion, and the existing mask kernel comparisons.
 
-- [ ] **Move or remove the remaining Lumos-only utilities.** CPU dispatch and bounded parallel mapping are production-used only by Lumos (`lumos/src/math/sum/mod.rs:29-70`, `lumos/src/stacking/pipeline/streaming.rs:6-86`), while `SharedFn` only wraps the `ProgressCallback` alias (`common/src/shared_fn.rs:3-39`, `lumos/src/stacking/progress.rs:25-35`). Move the CPU and fallible batching helpers into Lumos, reconciling their shape with Imaginarium's standalone detector where practical (`imaginarium/src/cpu_features.rs:1-55`); retain the infallible batching variant only if a production caller remains. Replace `SharedFn` with a domain-local optional `Arc<dyn Fn...>`, move any transient FNV use after the persistent-cache change, and remove obsolete modules/exports. This should remove Rayon from `common/Cargo.toml:19` and substantially narrow its utility surface. Validate bounded concurrency, input-order preservation, error propagation, SIMD dispatch on supported architectures, and progress callback behavior.
+- [x] **Move or remove the remaining Lumos-only utilities.** Lumos reuses Imaginarium's public cached CPU detector, extended with the SSE2 and combined AVX2+FMA predicates Lumos needs. The only production batching variant, fallible input-order-preserving `try_par_map_limited`, now lives in Lumos's `concurrency` module; the unused infallible variant is deleted. `ProgressCallback` owns its optional `Arc<dyn Fn...>` directly, and the transient star-filter grid uses the standard randomized `HashMap` because it has no stable-order or persistent-identity requirement. Common's CPU, parallel, shared-function, and FNV modules/exports are gone, along with its Rayon dependency. Tests cover the concurrency cap, order, early error boundary, empty input, invalid limits, CPU predicates, and progress delivery/default behavior.
 
 ## Batch 5 — Low: remove avoidable copies and build dependencies
 

@@ -6,7 +6,7 @@
 use parking_lot::Mutex;
 use rayon::prelude::*;
 
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;

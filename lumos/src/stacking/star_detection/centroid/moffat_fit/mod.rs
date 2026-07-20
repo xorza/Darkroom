@@ -239,7 +239,7 @@ impl LMModel<5> for MoffatFixedBeta {
         params: &[f64; 5],
     ) -> ([[f64; 5]; 5], [f64; 5], f64) {
         #[cfg(target_arch = "x86_64")]
-        if common::cpu_features::has_avx2_fma() {
+        if imaginarium::cpu_features::has_avx2_fma() {
             // SAFETY: AVX2+FMA availability checked above
             return unsafe {
                 simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
@@ -265,7 +265,7 @@ impl LMModel<5> for MoffatFixedBeta {
         params: &[f64; 5],
     ) -> f64 {
         #[cfg(target_arch = "x86_64")]
-        if common::cpu_features::has_avx2_fma() {
+        if imaginarium::cpu_features::has_avx2_fma() {
             // SAFETY: AVX2+FMA availability checked above
             return unsafe {
                 simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)

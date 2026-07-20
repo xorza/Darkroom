@@ -5,7 +5,9 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::rect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::multi_threshold::{
@@ -14,8 +16,6 @@ use crate::stacking::star_detection::deblend::multi_threshold::{
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::fixtures::cluster_field;
-use common::BitBuffer2;
-use common::Vec2us;
 use imaginarium::Buffer2;
 
 /// Create components from a pixel buffer for benchmarking.

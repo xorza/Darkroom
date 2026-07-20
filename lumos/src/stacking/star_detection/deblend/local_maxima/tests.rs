@@ -1,11 +1,11 @@
 //! Tests for local maxima deblending.
 
 use crate::math::rect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::local_maxima::*;
 use crate::stacking::star_detection::deblend::test_support::{TestComponent, make_test_component};
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
-use common::Vec2us;
 
 use crate::stacking::star_detection::deblend::local_maxima::is_local_maximum;
 

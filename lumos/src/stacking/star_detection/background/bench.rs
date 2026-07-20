@@ -5,12 +5,12 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::background_mesh::workspace::MeshWorkspace;
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 /// Estimate background with automatic buffer pool management (bench helper).
@@ -83,7 +83,7 @@ fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
         }
     }
 
-    let masked_count: usize = mask.words().iter().map(|w| w.count_ones() as usize).sum();
+    let masked_count: usize = mask.words.iter().map(|w| w.count_ones() as usize).sum();
     println!(
         "Mask: {} pixels masked ({:.1}%)",
         masked_count,

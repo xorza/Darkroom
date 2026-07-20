@@ -21,7 +21,7 @@
    - 28 AVX2 accumulator registers: 21 upper-triangle Hessian + 6 gradient + 1 chi²
    - Exploits j5=1.0 (background Jacobian) to use `_mm256_add_pd` instead of FMA
    - Both `batch_build_normal_equations` and `batch_compute_chi2` overridden
-   - Runtime dispatch via `common::cpu_features::has_avx2_fma()` with scalar fallback
+   - Runtime dispatch via `imaginarium::cpu_features::has_avx2_fma()` with scalar fallback
 
 2. **Fast vectorized exp() approximation** (`simd_exp_fast`):
    - Cephes-derived rational polynomial approximation (P/Q degree 2/3)

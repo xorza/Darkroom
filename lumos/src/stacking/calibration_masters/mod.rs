@@ -17,12 +17,13 @@ use std::fs::File;
 use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::path::Path;
 
+use common::CancelToken;
 use common::file_utils;
 use common::serde as common_serde;
-use common::{CancelToken, Vec2us};
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::raw::raw_dimensions;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;

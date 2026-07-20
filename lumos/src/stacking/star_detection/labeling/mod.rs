@@ -16,9 +16,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::UnsafeSendPtr;
 use crate::stacking::star_detection::resources::DetectionResources;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::config::Connectivity;
@@ -204,8 +204,8 @@ impl LabelMap {
         connectivity: Connectivity,
         resources: &mut DetectionResources,
     ) -> Self {
-        debug_assert_eq!(mask.width(), resources.dimensions.x);
-        debug_assert_eq!(mask.height(), resources.dimensions.y);
+        debug_assert_eq!(mask.width, resources.dimensions.x);
+        debug_assert_eq!(mask.height, resources.dimensions.y);
 
         let mut labels = resources.acquire_u32();
         // Clear the buffer (it may contain old labels)
@@ -231,8 +231,8 @@ impl LabelMap {
         connectivity: Connectivity,
         mut labels: Buffer2<u32>,
     ) -> Self {
-        let width = mask.width();
-        let height = mask.height();
+        let width = mask.width;
+        let height = mask.height;
 
         assert_eq!(width, labels.width());
         assert_eq!(height, labels.height());
@@ -365,10 +365,10 @@ fn label_mask_sequential(
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
 ) -> usize {
-    let width = mask.width();
-    let height = mask.height();
+    let width = mask.width;
+    let height = mask.height;
     let words_per_row = mask.words_per_row();
-    let mask_words = mask.words();
+    let mask_words = &mask.words;
 
     let mut uf = UnionFind::new();
     let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
@@ -422,10 +422,10 @@ fn label_mask_parallel(
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
 ) -> usize {
-    let width = mask.width();
-    let height = mask.height();
+    let width = mask.width;
+    let height = mask.height;
     let words_per_row = mask.words_per_row();
-    let mask_words = mask.words();
+    let mask_words = &mask.words;
 
     let num_threads = rayon::current_num_threads();
     let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, num_threads);

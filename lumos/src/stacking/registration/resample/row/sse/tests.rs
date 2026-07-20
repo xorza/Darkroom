@@ -3,10 +3,10 @@ use crate::stacking::registration::resample::row;
 use crate::stacking::registration::resample::row::sse;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::synthetic::patterns;
-#[cfg(target_arch = "x86_64")]
-use common::cpu_features;
 use glam::DVec2;
 use imaginarium::Buffer2;
+#[cfg(target_arch = "x86_64")]
+use imaginarium::cpu_features;
 
 /// Helper: compare SIMD output against scalar reference for a given transform.
 #[cfg(target_arch = "x86_64")]

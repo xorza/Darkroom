@@ -23,6 +23,7 @@
 //! ```
 
 pub(crate) mod background_mesh;
+pub(crate) mod bit_buffer2;
 pub(crate) mod concurrency;
 pub(crate) mod image_ops;
 pub(crate) mod io;
@@ -39,6 +40,7 @@ pub use io::astro_image::{
 };
 pub use io::raw::demosaic::bayer::CfaPattern;
 pub use io::raw::{RAW_EXTENSIONS, load_raw, load_raw_cfa};
+pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
 

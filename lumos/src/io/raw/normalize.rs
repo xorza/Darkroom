@@ -51,12 +51,12 @@ pub(crate) fn normalize_u16_to_f32_into<const CLAMP: bool>(
     #[cfg(target_arch = "x86_64")]
     {
         // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
-        if common::cpu_features::has_sse4_1() {
+        if imaginarium::cpu_features::has_sse4_1() {
             // SAFETY: We've verified SSE4.1 is available
             unsafe {
                 normalize_chunk_sse41::<CLAMP>(input, output, black, inv_range);
             }
-        } else if common::cpu_features::has_sse2() {
+        } else if imaginarium::cpu_features::has_sse2() {
             // SAFETY: We've verified SSE2 is available
             unsafe {
                 normalize_chunk_sse2::<CLAMP>(input, output, black, inv_range);

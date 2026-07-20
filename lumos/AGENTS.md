@@ -1,6 +1,6 @@
 # Lumos
 
-Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, drizzle reconstruction, and non-linear display stretching. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `common::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
+Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, drizzle reconstruction, and non-linear display stretching. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `imaginarium::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
 
 ## Mission & scope
 
@@ -21,7 +21,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 5. **Combine** — `stacking::combine` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `stacking::drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
 6. **Stretch** (`stretching`, *display-domain, optional*) — map the linear stacked master to a viewable image with a non-linear tone curve (MTF/STF auto-stretch or color-preserving arcsinh), parameters auto-derived from the background. The science deliverable is the linear master from step 5; stretching is display-prep that runs strictly after all linear-domain work.
 
-`math` (SIMD sums, robust statistics, transforms) and `concurrency` (Rayon pointer safety and reusable per-job scratch) support all stages. `lib.rs` defines the entire public surface.
+`math` (SIMD sums, robust statistics, transforms) and `concurrency` (bounded Rayon mapping, pointer safety, and reusable per-job scratch) support all stages. `lib.rs` defines the entire public surface.
 
 ## Crate layout
 
@@ -33,13 +33,14 @@ src/
 │   ├── calibration_masters/   star_detection/   registration/
 │   └── frame_store/   combine/   drizzle/   pipeline/   progress.rs
 ├── image_ops/  feature: in-place display/processing ops on a linear f32 master (imaginarium Image)
-│   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   op.rs (OpError contract)   wavelet/
+│   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   rgb/   op.rs (OpError contract)   wavelet/
 │   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
 │   └── color_calibration/ (Scnr, NeutralizeBackground)   background_extraction/   ml/ (feature-gated)
 ├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
-├── math/       robust stats, SIMD sum, DMat3, bbox
+├── math/       robust stats, SIMD sum, DMat3, bbox, Vec2us
 ├── background_mesh/  shared SExtractor-style TileGrid (used by star_detection + background_extraction)
-├── concurrency.rs  UnsafeSendPtr + reusable Rayon job scratch leases
+├── bit_buffer2/  packed boolean masks with 128-bit row padding
+├── concurrency/  bounded mapping + UnsafeSendPtr + reusable Rayon job scratch leases
 └── testing/    #[cfg(test)] forward-model synthetic generator + real_data fixtures
 ```
 
@@ -62,11 +63,12 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `image_ops::ml` | `pub(crate)`, `#[cfg(feature = "ml")]` | ONNX-backed ML denoise + star removal (tiled inference). |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing; owns the authoritative `RAW_EXTENSIONS` policy. |
-| `math` | `pub(crate)` | `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
-| `concurrency` | `pub(crate)` | `UnsafeSendPtr` plus reusable per-job scratch leases for Rayon work. |
+| `math` | `pub(crate)` | `Vec2us`, `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. `Vec2us` is re-exported as part of Lumos's public image-dimension API. |
+| `bit_buffer2` | `pub(crate)` | Packed boolean masks with checked layout arithmetic and 128-bit row padding for word kernels. |
+| `concurrency` | `pub(crate)` | Input-order-preserving fallible bounded Rayon mapping, `UnsafeSendPtr`, and reusable per-job scratch leases. |
 | `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
 
-`common::{Buffer2, BitBuffer2, cpu_features}` (the workspace `common` crate, distinct from the in-crate `concurrency` module) underpin pixel storage and SIMD dispatch. This file is the crate-level map; read the code in each module for algorithm specifics.
+`imaginarium::Buffer2` underpins planar pixel storage, its shared `cpu_features` detector gates SIMD dispatch, and Lumos owns its packed `BitBuffer2` masks. The workspace `common` crate supplies cross-crate contracts such as serialization and cancellation. This file is the crate-level map; read the code in each module for algorithm specifics.
 
 ## io/astro_image — image container & loading
 
@@ -74,7 +76,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 - `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), opaque `ImageDimensions` (`mod.rs`, non-zero size + channels ∈ {1,3}, exposed through immutable accessors), `AstroImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
 - Entry points: `from_file` (`mod.rs`, dispatches FITS → `fits::load_fits`, `io::raw::RAW_EXTENSIONS` → `io::raw::load_raw`, standard formats → imaginarium) and owns the public `ASTRO_IMAGE_EXTENSIONS` policy; `from_pixels` (interleaved → planar); `from_planar_channels` (planar input). `mean()` uses parallel Kahan summation.
-- The `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`). Display transforms live in `image_ops` over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
+- The crate-private `image_ops::rgb::Rgb` value struct (`image_ops/rgb/mod.rs`, `.intensity()` / `.scale()`) supports display transforms over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract` and `demosaic()` → `AstroImage`). Calibration-master construction prepares the reusable flat divisor with **per-color-channel means** so non-white flats don't shift color.
 - `fits` (`fits-well` I/O, `physical_f32()` BSCALE/BZERO scaling, null rejection, physical float preservation, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
@@ -160,11 +162,11 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
 - `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative `sigma_clipped_median_mad` → `ClippedStats {median, sigma, mean}` (the survivors' mean exposes residual skew for the background's Pearson-mode estimator); `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
-- `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `rect/` (`Rect` for continuous geometry and `URect` for pixel regions; both use half-open min/max bounds). (`Vec2us` pixel indexing now lives in `common`.)
+- `vec2us/` (`Vec2us`, public pixel coordinates/dimensions with index conversion), `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), and `rect/` (`Rect` for continuous geometry and `URect` for pixel regions; both use half-open min/max bounds).
 
 ## SIMD dispatch
 
-Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `has_sse4_1()`); scalar fallback everywhere. Hand-written backends:
+Runtime feature detection reuses Imaginarium's cached detector (`imaginarium::cpu_features::{has_avx2, has_avx2_fma, has_sse4_1}`); scalar fallback everywhere. Hand-written backends:
 
 | Area | AVX2 | SSE4.1 | NEON |
 |------|------|--------|------|
@@ -175,7 +177,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 | `stacking/star_detection/threshold_mask` | | ✓ | ✓ |
 | `stacking/star_detection/median_filter` | ✓ | ✓ | ✓ |
 | `stacking/star_detection/centroid/{gaussian,moffat}_fit` | ✓ | | ✓ |
-| `stacking/registration/interpolation/warp` (bilinear; linear Lanczos FMA) | ✓ | ✓ | ✓ |
+| `stacking/registration/resample/row` (bilinear; linear Lanczos FMA) | ✓ | ✓ | ✓ |
 | `image_ops/stretching` (color-preserving arcsinh; Cephes `logf`/`asinh`) | ✓ | | ✓ |
 
 ## WIP / notes
@@ -203,7 +205,7 @@ scripts/clone-refs.sh          # clone core upstream refs into .tmp/refs/ (--all
 
 ## Benchmarks (quickbench)
 
-Benches are `#[quick_bench]` fns (expand to `#[test] #[ignore]`) in per-module `bench.rs` files — e.g. `stacking/registration/interpolation/bench.rs`, plus RCD/Bayer/stacking. No `cargo bench` target; they run through `cargo test`.
+Benches are `#[quick_bench]` fns (expand to `#[test] #[ignore]`) in per-module `bench.rs` files — e.g. `stacking/registration/resample/bench.rs`, plus RCD/Bayer/stacking. No `cargo bench` target; they run through `cargo test`.
 
 - **Run** — always `--release` (debug numbers are meaningless and print a warning):
   ```bash

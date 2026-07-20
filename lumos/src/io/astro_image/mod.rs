@@ -13,13 +13,11 @@ use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image};
 use std::ops::SubAssign;
 use std::path::Path;
 
-#[cfg(test)]
-use common::Rgb;
-use common::Vec2us;
 use imaginarium::{Buffer2, DeinterleavedImageData};
 
 use crate::io::raw;
 use crate::math::sum::sum_f32;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::StackableImage;
 
 const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
@@ -645,76 +643,74 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
         });
 }
 
-/// Per-pixel accessors used only by tests to inspect/construct planar buffers.
 #[cfg(test)]
-impl AstroImage {
-    /// Get pixel value at (x, y) for grayscale images.
-    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_grayscale());
-        self.channel(0)[y * self.width() + x]
-    }
+mod test_support {
+    use crate::image_ops::rgb::Rgb;
+    use crate::io::astro_image::{self, AstroImage, PixelData};
 
-    /// Get mutable reference to pixel at (x, y) for grayscale images.
-    pub fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_grayscale());
-        let width = self.width();
-        &mut self.channel_mut(0)[y * width + x]
-    }
+    impl AstroImage {
+        pub(crate) fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
+            debug_assert!(x < self.width() && y < self.height());
+            debug_assert!(self.is_grayscale());
+            self.channel(0)[y * self.width() + x]
+        }
 
-    /// Get pixel value at (x, y) for a specific channel.
-    pub fn get_pixel_channel(&self, x: usize, y: usize, c: usize) -> f32 {
-        debug_assert!(x < self.width() && y < self.height() && c < self.channels());
-        self.channel(c)[y * self.width() + x]
-    }
+        pub(crate) fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
+            debug_assert!(x < self.width() && y < self.height());
+            debug_assert!(self.is_grayscale());
+            let width = self.width();
+            &mut self.channel_mut(0)[y * width + x]
+        }
 
-    /// Get RGB pixel values at (x, y).
-    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> Rgb {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_rgb());
-        let idx = y * self.width() + x;
-        match &self.pixels {
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &img.channels;
-                Rgb {
-                    r: r[idx],
-                    g: g[idx],
-                    b: b[idx],
+        pub(crate) fn get_pixel_channel(&self, x: usize, y: usize, c: usize) -> f32 {
+            debug_assert!(x < self.width() && y < self.height() && c < self.channels());
+            self.channel(c)[y * self.width() + x]
+        }
+
+        pub(crate) fn get_pixel_rgb(&self, x: usize, y: usize) -> Rgb {
+            debug_assert!(x < self.width() && y < self.height());
+            debug_assert!(self.is_rgb());
+            let idx = y * self.width() + x;
+            match &self.pixels {
+                PixelData::Rgb(img) => {
+                    let [r, g, b] = &img.channels;
+                    Rgb {
+                        r: r[idx],
+                        g: g[idx],
+                        b: b[idx],
+                    }
                 }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
-    }
 
-    /// Set RGB pixel values at (x, y).
-    pub fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: Rgb) {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_rgb());
-        let idx = y * self.width() + x;
-        match &mut self.pixels {
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &mut img.channels;
-                r[idx] = rgb.r;
-                g[idx] = rgb.g;
-                b[idx] = rgb.b;
+        pub(crate) fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: Rgb) {
+            debug_assert!(x < self.width() && y < self.height());
+            debug_assert!(self.is_rgb());
+            let idx = y * self.width() + x;
+            match &mut self.pixels {
+                PixelData::Rgb(img) => {
+                    let [r, g, b] = &mut img.channels;
+                    r[idx] = rgb.r;
+                    g[idx] = rgb.g;
+                    b[idx] = rgb.b;
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
-    }
 
-    /// Consume and return interleaved pixels (RGBRGBRGB...).
-    pub fn into_interleaved_pixels(self) -> Vec<f32> {
-        match self.pixels {
-            PixelData::L(img) => {
-                let [data] = img.channels;
-                data.into_vec()
-            }
-            PixelData::Rgb(img) => {
-                let [r, g, b] = img.channels;
-                let mut interleaved = vec![0.0f32; r.len() * 3];
-                interleave_rgb(&r, &g, &b, &mut interleaved);
-                interleaved
+        pub(crate) fn into_interleaved_pixels(self) -> Vec<f32> {
+            match self.pixels {
+                PixelData::L(img) => {
+                    let [data] = img.channels;
+                    data.into_vec()
+                }
+                PixelData::Rgb(img) => {
+                    let [r, g, b] = img.channels;
+                    let mut interleaved = vec![0.0f32; r.len() * 3];
+                    astro_image::interleave_rgb(&r, &g, &b, &mut interleaved);
+                    interleaved
+                }
             }
         }
     }

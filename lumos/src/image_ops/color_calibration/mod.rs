@@ -6,7 +6,7 @@
 //! - [`Scnr`] (post-stretch): Subtractive Chromatic Noise Reduction — clamp green that exceeds the
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 use imaginarium::{ChannelCount, Image};
 
 use crate::image_ops::op::{OpError, ensure, require_f32_master};

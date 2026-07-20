@@ -14,7 +14,7 @@ mod simd;
 mod tests;
 pub(crate) mod workspace;
 
-use common::BitBuffer2;
+use crate::bit_buffer2::BitBuffer2;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 

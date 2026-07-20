@@ -47,7 +47,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
     #[cfg(target_arch = "x86_64")]
     {
         use crate::math::sum::sse;
-        if common::cpu_features::has_sse4_1() {
+        if imaginarium::cpu_features::has_sse4_1() {
             b.bench_labeled("sse", || unsafe {
                 black_box(sse::weighted_mean_f32(
                     black_box(&data),
@@ -57,7 +57,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
         }
 
         use crate::math::sum::avx2;
-        if common::cpu_features::has_avx2() {
+        if imaginarium::cpu_features::has_avx2() {
             b.bench_labeled("avx2", || unsafe {
                 black_box(avx2::weighted_mean_f32(
                     black_box(&data),
@@ -88,7 +88,7 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
         {
             use crate::math::sum::avx2;
 
-            if common::cpu_features::has_avx2() {
+            if imaginarium::cpu_features::has_avx2() {
                 b.bench_labeled(&format!("avx2_{len}"), || {
                     for _ in 0..calls {
                         black_box(unsafe { avx2::sum_f32(black_box(&data)) });
@@ -125,7 +125,7 @@ fn bench_weighted_mean_f32_crossover(b: ::quickbench::Bencher) {
         {
             use crate::math::sum::{avx2, sse};
 
-            if common::cpu_features::has_sse4_1() {
+            if imaginarium::cpu_features::has_sse4_1() {
                 b.bench_labeled(&format!("sse_{len}"), || {
                     for _ in 0..calls {
                         black_box(unsafe {
@@ -134,7 +134,7 @@ fn bench_weighted_mean_f32_crossover(b: ::quickbench::Bencher) {
                     }
                 });
             }
-            if common::cpu_features::has_avx2() {
+            if imaginarium::cpu_features::has_avx2() {
                 b.bench_labeled(&format!("avx2_{len}"), || {
                     for _ in 0..calls {
                         black_box(unsafe {

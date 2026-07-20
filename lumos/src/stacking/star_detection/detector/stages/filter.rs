@@ -4,9 +4,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 
-use common::FnvHasher;
 use smallvec::SmallVec;
 
 use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
@@ -118,8 +116,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
     // a 6k×6k field with a few thousand stars otherwise allocates (and zeroes) millions of empty
     // cells, which dominated the cost. A star is a duplicate of an earlier *kept* star within
     // `min_separation`; the grid only ever holds kept stars, so this matches the old behaviour.
-    let mut grid: HashMap<(i64, i64), SmallVec<[usize; 4]>, BuildHasherDefault<FnvHasher>> =
-        HashMap::default();
+    let mut grid: HashMap<(i64, i64), SmallVec<[usize; 4]>> = HashMap::new();
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {

@@ -1,7 +1,7 @@
 //! Test utilities for the labeling module.
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::config::Connectivity;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::labeling::LabelMap;
@@ -16,6 +16,6 @@ pub(crate) fn label_map_from_mask_with_connectivity(
     mask: &BitBuffer2,
     connectivity: Connectivity,
 ) -> LabelMap {
-    let labels = Buffer2::new_filled(mask.width(), mask.height(), 0u32);
+    let labels = Buffer2::new_filled(mask.width, mask.height, 0u32);
     LabelMap::from_buffer(mask, connectivity, labels)
 }

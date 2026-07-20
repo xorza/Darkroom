@@ -9,7 +9,7 @@ use common::{cfg_aarch64, cfg_x86_64};
 use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 cfg_x86_64! {
     mod sse;

@@ -6,7 +6,7 @@
 //! - Scalar fallback on other platforms
 
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 /// Natural cubic spline interpolation for a row segment using SIMD.
 ///

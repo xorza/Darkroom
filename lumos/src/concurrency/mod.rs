@@ -1,8 +1,10 @@
 //! Concurrency helpers for Rayon work and reusable per-job resources.
 
-use parking_lot::Mutex;
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use parking_lot::Mutex;
+use rayon::prelude::*;
 
 /// Wrapper to send raw pointers across thread boundaries in Rayon closures.
 ///
@@ -75,6 +77,35 @@ impl<T> Drop for JobScratchLease<'_, T> {
     }
 }
 
+/// Maps a fallible operation over consecutive parallel batches.
+///
+/// At most `max_concurrent` operations run at once. Results preserve input
+/// order, and batches after the first error are not started.
+pub(crate) fn try_par_map_limited<T, R, E, F>(
+    items: &[T],
+    max_concurrent: usize,
+    operation: F,
+) -> Result<Vec<R>, E>
+where
+    T: Sync,
+    R: Send,
+    E: Send,
+    F: Fn(&T) -> Result<R, E> + Sync,
+{
+    assert!(max_concurrent > 0, "max_concurrent must be positive");
+
+    let mut results = Vec::with_capacity(items.len());
+    for chunk in items.chunks(max_concurrent) {
+        results.extend(
+            chunk
+                .par_iter()
+                .map(&operation)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    Ok(results)
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::concurrency::JobScratchPool;
@@ -89,24 +120,4 @@ pub(crate) mod test_support {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::concurrency::JobScratchPool;
-
-    #[test]
-    fn job_scratch_leases_are_exclusive_and_reused() {
-        let pool = JobScratchPool::<Box<u8>>::default();
-        let mut first = pool.acquire();
-        **first = 1;
-        let mut second = pool.acquire();
-        **second = 2;
-        let first_address = (&raw const **first).addr();
-        let second_address = (&raw const **second).addr();
-        assert_ne!(first_address, second_address);
-
-        **first = 3;
-        drop(first);
-        let reused = pool.acquire();
-        assert_eq!((&raw const **reused).addr(), first_address);
-        assert_eq!(**reused, 3);
-    }
-}
+mod tests;

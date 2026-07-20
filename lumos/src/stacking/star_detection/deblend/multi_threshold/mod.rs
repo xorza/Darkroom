@@ -13,12 +13,12 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::deblend::{
     ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak, peaks_too_close,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
-use common::Vec2us;
 use imaginarium::Buffer2;
 
 #[cfg(test)]

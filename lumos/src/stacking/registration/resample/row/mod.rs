@@ -12,9 +12,9 @@
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
 
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
 mod sse;

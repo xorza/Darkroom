@@ -2,9 +2,9 @@
 //! statistics, and the crowding-aware Pearson-mode sky estimator for a single tile box.
 
 use crate::background_mesh::TileStats;
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::statistics::ClippedStats;
 use crate::math::statistics::sigma_clipped_median_mad;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
@@ -138,7 +138,7 @@ fn collect_unmasked_pixels(
         return;
     }
 
-    let mask_words = mask.words();
+    let mask_words = &mask.words;
     let words_per_row = mask.words_per_row();
     let ordinal_step = unmasked_count / sample_count;
     let ordinal_remainder = unmasked_count % sample_count;
@@ -189,7 +189,7 @@ fn count_unmasked_pixels(
     y_start: usize,
     y_end: usize,
 ) -> usize {
-    let mask_words = mask.words();
+    let mask_words = &mask.words;
     let words_per_row = mask.words_per_row();
     let mut count = 0;
 

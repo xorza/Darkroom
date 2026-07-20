@@ -26,10 +26,11 @@ pub(crate) mod local_contrast;
 #[cfg(feature = "ml")]
 pub(crate) mod ml;
 pub(crate) mod op;
+pub(crate) mod rgb;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;
 
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 

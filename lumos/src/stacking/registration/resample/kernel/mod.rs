@@ -7,7 +7,7 @@
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 

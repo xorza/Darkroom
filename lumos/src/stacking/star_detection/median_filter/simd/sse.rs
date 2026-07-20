@@ -190,7 +190,7 @@ unsafe fn median9_sse41(
 mod tests {
     use crate::stacking::star_detection::median_filter::simd::sse::*;
     #[cfg(target_arch = "x86_64")]
-    use common::cpu_features;
+    use imaginarium::cpu_features;
 
     fn median9_reference(values: &mut [f32; 9]) -> f32 {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());

@@ -7,7 +7,7 @@
 
 use std::arch::x86_64::*;
 
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::stretching::{
     AsinhCurve, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn avx2_matches_scalar_reference() {
-        if !common::cpu_features::has_avx2_fma() {
+        if !imaginarium::cpu_features::has_avx2_fma() {
             return;
         }
         let beta = 0.05f32;

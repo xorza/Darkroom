@@ -393,7 +393,7 @@ mod tests {
     use crate::stacking::star_detection::convolution::simd;
 
     use crate::stacking::star_detection::convolution::simd::sse::*;
-    use common::cpu_features;
+    use imaginarium::cpu_features;
 
     #[test]
     fn test_avx2_matches_scalar() {

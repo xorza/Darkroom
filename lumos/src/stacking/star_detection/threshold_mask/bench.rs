@@ -1,8 +1,8 @@
 //! Benchmarks for threshold mask creation.
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::threshold_mask::{process_words, process_words_scalar};
 use ::quickbench::quick_bench;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 use std::hint::black_box;
 
@@ -35,7 +35,7 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     let pixel_end = pixels.len();
 
     b.bench_labeled("simd", || {
-        let words = black_box(&mut mask).words_mut();
+        let words = &mut black_box(&mut mask).words;
         process_words::<true>(
             black_box(pixels.pixels()),
             black_box(bg.pixels()),
@@ -48,7 +48,7 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     });
 
     b.bench_labeled("scalar", || {
-        let words = black_box(&mut mask).words_mut();
+        let words = &mut black_box(&mut mask).words;
         process_words_scalar::<true>(
             black_box(pixels.pixels()),
             black_box(bg.pixels()),
@@ -61,7 +61,7 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     });
 
     b.bench_labeled("filtered_simd", || {
-        let words = black_box(&mut mask).words_mut();
+        let words = &mut black_box(&mut mask).words;
         process_words::<false>(
             black_box(pixels.pixels()),
             &[],
@@ -74,7 +74,7 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     });
 
     b.bench_labeled("filtered_scalar", || {
-        let words = black_box(&mut mask).words_mut();
+        let words = &mut black_box(&mut mask).words;
         process_words_scalar::<false>(
             black_box(pixels.pixels()),
             &[],

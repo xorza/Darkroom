@@ -1,8 +1,8 @@
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel::test_support as kernel_test_support;
 use crate::stacking::registration::resample::{plane, quality};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use common::Vec2us;
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 

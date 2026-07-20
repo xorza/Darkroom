@@ -9,7 +9,7 @@
 
 use std::arch::aarch64::*;
 
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::stretching::{
     AsinhCurve, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,

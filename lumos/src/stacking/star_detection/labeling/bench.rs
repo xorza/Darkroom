@@ -1,5 +1,6 @@
 //! Benchmarks for connected component labeling.
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
@@ -7,7 +8,6 @@ use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::estimate_background;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 use std::hint::black_box;
 

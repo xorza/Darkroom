@@ -22,7 +22,7 @@
 //! without a per-frame discriminator. (`xtrans_removes_cosmic_ray...` / `bayer_tight_star...` tests
 //! pin the tight-star behavior.)
 
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 

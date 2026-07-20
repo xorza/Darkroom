@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use common::CancelToken;
 
+use crate::concurrency;
 use crate::io::astro_image::cfa::CfaImage;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::CfaCache;
@@ -119,11 +120,12 @@ fn bench_full_pipeline() {
     assert!(!light_paths.is_empty(), "No light frames found");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
-    let calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
+    let calibrated: Vec<AstroImage> = concurrency::try_par_map_limited(&light_paths, 3, |p| {
         let mut cfa = load_raw_cfa(p).unwrap();
         masters.calibrate(&mut cfa).unwrap();
-        cfa.demosaic(&CancelToken::never()).unwrap()
-    });
+        Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
+    })
+    .unwrap();
 
     println!("  Elapsed: {:?}", step_start.elapsed());
 
@@ -146,10 +148,11 @@ fn bench_full_pipeline() {
     let step_start = Instant::now();
 
     let det_config = StarDetectionConfig::precise_ground();
-    let all_stars: Vec<_> = common::parallel::par_map_limited(&calibrated, 3, |img| {
+    let all_stars: Vec<_> = concurrency::try_par_map_limited(&calibrated, 3, |img| {
         let mut det = StarDetector::from_config(det_config.clone()).unwrap();
-        det.detect(img).stars
-    });
+        Ok::<_, ()>(det.detect(img).stars)
+    })
+    .unwrap();
     for (i, stars) in all_stars.iter().enumerate() {
         println!("  Frame {}: {} stars", i, stars.len());
     }
@@ -171,7 +174,7 @@ fn bench_full_pipeline() {
         .collect();
 
     let warped_frames: Vec<AstroImage> =
-        common::parallel::par_map_limited(&to_register, 3, |(img, stars)| {
+        concurrency::try_par_map_limited(&to_register, 3, |(img, stars)| {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
             let warp_start = Instant::now();
@@ -184,8 +187,9 @@ fn bench_full_pipeline() {
                 result.elapsed_ms(),
                 warp_ms,
             );
-            warped
-        });
+            Ok::<_, ()>(warped)
+        })
+        .unwrap();
 
     println!("  Elapsed: {:?}", step_start.elapsed());
 

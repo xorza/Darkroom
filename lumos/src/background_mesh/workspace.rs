@@ -1,7 +1,7 @@
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::TileStats;
+use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
-use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 #[derive(Debug, Default)]
@@ -76,7 +76,7 @@ impl MeshWorkspace {
 pub(crate) mod test_support {
     use crate::background_mesh::TileGrid;
     use crate::background_mesh::workspace::MeshWorkspace;
-    use common::BitBuffer2;
+    use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
 
     pub(crate) fn compute_grid(
@@ -102,8 +102,8 @@ pub(crate) mod test_support {
 mod tests {
     use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
+    use crate::bit_buffer2::BitBuffer2;
     use crate::concurrency::test_support::{all_by, job_count};
-    use common::BitBuffer2;
     use imaginarium::Buffer2;
 
     const SIGMA_CLIP_ITERATIONS: usize = 2;

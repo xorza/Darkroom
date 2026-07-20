@@ -14,7 +14,7 @@
 //! using SIMD for the min/max operations in the sorting network.
 
 #[cfg(target_arch = "x86_64")]
-use common::cpu_features;
+use imaginarium::cpu_features;
 
 /// 25-comparator sort network for 9 elements, parameterized by the lane type's `min`/`max` so the
 /// AVX2/SSE4.1/NEON kernels share one definition. After it runs, `$v4` holds the per-lane median.

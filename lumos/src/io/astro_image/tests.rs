@@ -1,4 +1,4 @@
-use common::Rgb;
+use crate::image_ops::rgb::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 

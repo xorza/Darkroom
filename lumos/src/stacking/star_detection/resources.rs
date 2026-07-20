@@ -2,9 +2,9 @@
 //!
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
+use crate::bit_buffer2::BitBuffer2;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
-use common::BitBuffer2;
-use common::Vec2us;
 use imaginarium::Buffer2;
 
 /// Reusable buffers and stage workspaces for star detection.
@@ -71,8 +71,8 @@ impl DetectionResources {
     pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.width(), self.dimensions.x);
-        assert_eq!(buffer.height(), self.dimensions.y);
+        assert_eq!(buffer.width, self.dimensions.x);
+        assert_eq!(buffer.height, self.dimensions.y);
         self.bit_buffers.push(buffer);
     }
 
@@ -142,11 +142,11 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use crate::math::vec2us::Vec2us;
     use crate::stacking::star_detection::resources::DetectionResources;
     use crate::stacking::star_detection::resources::test_support::BufferCounts;
     use crate::stacking::star_detection::resources::test_support::buffer_counts;
     use crate::stacking::star_detection::resources::test_support::matches_dimensions;
-    use common::Vec2us;
     use imaginarium::Buffer2;
 
     #[test]
@@ -186,13 +186,13 @@ mod tests {
         let mut pool = DetectionResources::new(128, 64);
 
         let buf1 = pool.acquire_bit();
-        assert_eq!(buf1.width(), 128);
-        assert_eq!(buf1.height(), 64);
+        assert_eq!(buf1.width, 128);
+        assert_eq!(buf1.height, 64);
 
         pool.release_bit(buf1);
 
         let buf2 = pool.acquire_bit();
-        assert_eq!(buf2.width(), 128);
+        assert_eq!(buf2.width, 128);
 
         pool.release_bit(buf2);
     }

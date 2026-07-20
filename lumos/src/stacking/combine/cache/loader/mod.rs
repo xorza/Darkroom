@@ -8,8 +8,8 @@ use std::time::UNIX_EPOCH;
 use arrayvec::ArrayVec;
 use common::CancelToken;
 use common::file_utils;
-use common::parallel::try_par_map_limited;
 
+use crate::concurrency;
 use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::math::statistics::ChannelStats;
@@ -224,7 +224,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         .enumerate()
         .map(|(i, p)| (i + start, p))
         .collect();
-    let loaded = try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
+    let loaded = concurrency::try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
         // Cancelled: stop decoding further frames (the slow phase).
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
@@ -312,15 +312,16 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         .enumerate()
         .map(|(i, p)| (i + 1, p))
         .collect();
-    let remaining = try_par_map_limited(&indexed_paths, concurrency, |&(idx, ref path)| {
-        // Cancelled: stop decoding further frames (the slow phase).
-        if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        let path_ref = path.as_ref();
-        let base_filename = cache_filename(path_ref);
-        load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
-    })?;
+    let remaining =
+        concurrency::try_par_map_limited(&indexed_paths, concurrency, |&(idx, ref path)| {
+            // Cancelled: stop decoding further frames (the slow phase).
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let path_ref = path.as_ref();
+            let base_filename = cache_filename(path_ref);
+            load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
+        })?;
 
     // Build final vectors
     let mut frames = Vec::with_capacity(paths.len());

@@ -2,10 +2,10 @@
 
 use rayon::prelude::*;
 
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::{kernel, row};
 use crate::stacking::registration::transform::WarpTransform;
-use common::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 

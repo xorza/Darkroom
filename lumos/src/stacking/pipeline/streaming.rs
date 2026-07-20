@@ -4,9 +4,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
-use common::parallel::try_par_map_limited;
 use rayon::prelude::*;
 
+use crate::concurrency;
 use crate::io::astro_image::AstroImage;
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
@@ -83,7 +83,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // (see `CfaImage::demosaic`), so the heavy phase stays interruptible at full
     // core utilization within a batch.
     let calibrated: Vec<AstroImage> =
-        try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
+        concurrency::try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));

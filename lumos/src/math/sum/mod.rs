@@ -26,7 +26,7 @@ pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     }
     #[cfg(target_arch = "x86_64")]
     {
-        if values.len() >= AVX2_SUM_MIN_LEN && common::cpu_features::has_avx2() {
+        if values.len() >= AVX2_SUM_MIN_LEN && imaginarium::cpu_features::has_avx2() {
             return unsafe { avx2::sum_f32(values) };
         }
     }
@@ -64,10 +64,10 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     }
     #[cfg(target_arch = "x86_64")]
     {
-        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && common::cpu_features::has_avx2() {
+        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && imaginarium::cpu_features::has_avx2() {
             return unsafe { avx2::weighted_mean_f32(values, weights) };
         }
-        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && common::cpu_features::has_sse4_1() {
+        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && imaginarium::cpu_features::has_sse4_1() {
             return unsafe { sse::weighted_mean_f32(values, weights) };
         }
     }

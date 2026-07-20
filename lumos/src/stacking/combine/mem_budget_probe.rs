@@ -163,7 +163,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let progress: ProgressCallback = {
         let (loaded, combine_start_us) = (loaded.clone(), combine_start_us.clone());
         let combining = combining.clone();
-        ProgressCallback::new(Arc::new(move |p: StackingProgress| match p.stage {
+        ProgressCallback::new(move |p: StackingProgress| match p.stage {
             StackingStage::Loading => {
                 let done = loaded.fetch_add(1, Ordering::Relaxed) + 1;
                 let secs = start.elapsed().as_secs_f64();
@@ -185,7 +185,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
                     )
                     .ok();
             }
-        }))
+        })
     };
 
     let result =

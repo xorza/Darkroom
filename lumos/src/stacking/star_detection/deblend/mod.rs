@@ -15,8 +15,8 @@ use std::cmp::Ordering;
 use arrayvec::ArrayVec;
 
 use crate::math::rect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::labeling::LabelMap;
-use common::Vec2us;
 use imaginarium::Buffer2;
 
 pub(crate) mod local_maxima;
@@ -165,7 +165,7 @@ pub(crate) fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use common::Vec2us;
+    use crate::math::vec2us::Vec2us;
     use imaginarium::Buffer2;
     use smallvec::SmallVec;
 

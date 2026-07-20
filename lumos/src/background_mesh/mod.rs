@@ -16,10 +16,10 @@ pub(crate) mod workspace;
 use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::compute_tile_stats;
 use crate::background_mesh::workspace::TileScratch;
+use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
 use crate::math::statistics::median_f32_mut;
-use common::BitBuffer2;
-use common::Vec2us;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 

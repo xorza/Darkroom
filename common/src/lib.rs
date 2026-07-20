@@ -9,41 +9,29 @@ extern crate self as common;
 
 #[macro_use]
 pub mod macros;
-pub mod cpu_features;
 pub mod file_utils;
-pub mod parallel;
 pub mod serde;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_utils;
 
-pub(crate) mod bit_buffer2;
 pub(crate) mod cancel_token;
 pub(crate) mod constants;
 pub(crate) mod debug;
 pub(crate) mod file_format;
 pub(crate) mod float_ext;
-pub(crate) mod fnv;
 pub(crate) mod introspect;
 pub(crate) mod normalize_string;
-pub(crate) mod rgb;
-pub(crate) mod shared_fn;
 pub(crate) mod span;
-pub(crate) mod vec2us;
 
-pub use bit_buffer2::{BitBuffer2, BitIter};
 pub use cancel_token::CancelToken;
 pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
-pub use fnv::FnvHasher;
 pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
 pub use normalize_string::NormalizeString;
-pub use rgb::Rgb;
 pub use serde::{DeserializeError, Lz4SizeError, SerializeError, deserialize, serialize};
-pub use shared_fn::SharedFn;
 pub use span::Span;
-pub use vec2us::Vec2us;

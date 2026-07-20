@@ -6,6 +6,7 @@ use glam::Vec2;
 
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::rect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::compute_roundness;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
@@ -19,7 +20,6 @@ use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::estimate_background;
 use crate::testing::synthetic::background_map;
-use common::Vec2us;
 use imaginarium::Buffer2;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).

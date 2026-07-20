@@ -14,9 +14,7 @@ test-support = []
 
 [dependencies]
 common-derive = { path = "common-derive" }
-aligned-vec = { workspace = true }
 glam = { workspace = true }
-rayon = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
