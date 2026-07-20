@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::io::astro_image::cfa::CfaType;
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
@@ -249,7 +250,7 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
         black,
         inv_range,
         Some(ChannelBlackDelta::LibRawFilter {
-            filters,
+            visible_filters: filters,
             values: channel_delta,
         }),
     );
@@ -259,12 +260,12 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
         black,
         inv_range,
         Some(ChannelBlackDelta::LibRawFilter {
-            filters,
+            visible_filters: filters,
             values: channel_delta,
         }),
     );
-    let clamped_expected = [0.0, 0.0, 0.0, 0.1, 0.8, 0.9];
-    let unclamped_expected = [-0.25, -0.3, -0.1, 0.1, 0.8, 1.0];
+    let clamped_expected = [0.0, 0.0, 0.0, 0.0, 0.7, 0.8];
+    let unclamped_expected = [-0.15, -0.2, 0.0, 0.0, 0.7, 0.9];
     for (index, ((got_clamped, got_unclamped), (want_clamped, want_unclamped))) in clamped
         .iter()
         .zip(&unclamped)
@@ -284,40 +285,72 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
 
 #[test]
 fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
-    let raw_data = [550, 460, 730, 820];
+    let raw_width = 3;
+    let raw_data = [600; 9];
     let black = 100.0;
-    let inv_range = 1.0 / 900.0;
+    let inv_range = 0.001;
     let filters = 0x94949494;
-    let channel_delta = [0.1, 0.05, 0.2, 0.05];
+    let channel_delta = [0.1, 0.02, 0.03, 0.04];
+    let visible_pattern = CfaPattern::Rggb;
+    let active_cfa = CfaType::Bayer(visible_pattern);
 
-    let mut direct = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
-    apply_bayer_black_deltas(&mut direct, 2, filters, &channel_delta);
-    let calibration = normalize_active_area::<false>(
-        &raw_data,
-        RawActiveArea {
-            raw_width: 2,
-            width: 2,
-            height: 2,
-            top_margin: 0,
-            left_margin: 0,
-        },
-        black,
-        inv_range,
-        Some(ChannelBlackDelta::LibRawFilter {
-            filters,
-            values: channel_delta,
-        }),
-    );
+    for top_margin in 0..2 {
+        for left_margin in 0..2 {
+            let raw_pattern = visible_pattern.at_raw_origin(top_margin, left_margin);
+            for raw_y in 0..3 {
+                for raw_x in 0..3 {
+                    assert_eq!(
+                        raw_filter_color(filters, raw_y, raw_x, top_margin, left_margin),
+                        raw_pattern.color_at(raw_y, raw_x)
+                    );
+                }
+            }
 
-    let expected = [0.4, 0.35, 0.65, 0.6];
-    for (index, ((direct, calibration), expected)) in
-        direct.iter().zip(&calibration).zip(expected).enumerate()
-    {
-        assert!((direct - expected).abs() < 1e-6, "direct[{index}]");
-        assert!(
-            (calibration - expected).abs() < 1e-6,
-            "calibration[{index}]"
-        );
+            let mut direct = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
+            apply_bayer_black_deltas(
+                &mut direct,
+                raw_width,
+                top_margin,
+                left_margin,
+                filters,
+                &channel_delta,
+            );
+            let area = RawActiveArea {
+                raw_width,
+                width: 2,
+                height: 2,
+                top_margin,
+                left_margin,
+            };
+            let calibration = normalize_active_area::<false>(
+                &raw_data,
+                area,
+                black,
+                inv_range,
+                Some(ChannelBlackDelta::LibRawFilter {
+                    visible_filters: filters,
+                    values: channel_delta,
+                }),
+            );
+
+            for y in 0..area.height {
+                for x in 0..area.width {
+                    let active_channel = active_cfa.color_at(x, y) as usize;
+                    assert_eq!(active_channel, libraw_filter_color(filters, y, x));
+                    let expected = 0.5 - channel_delta[active_channel];
+                    let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
+                    let calibration_value = calibration[y * area.width + x];
+                    assert!(
+                        (direct_value - expected).abs() < 1e-6,
+                        "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
+                    );
+                    assert!(
+                        (calibration_value - expected).abs() < 1e-6,
+                        "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -326,53 +359,73 @@ fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
     use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
-    let raw_width = 10;
-    let raw_height = 9;
-    let area = RawActiveArea {
-        raw_width,
-        width: 6,
-        height: 6,
-        top_margin: 1,
-        left_margin: 2,
-    };
-    let pattern = test_pattern_array();
+    let raw_width = 11;
+    let raw_height = 11;
+    let raw_pattern = test_pattern_array();
     let common_black = 100.0;
     let channel_black = [110.0, 120.0, 130.0];
     let inv_range = 0.001;
     let raw_data = vec![600u16; raw_width * raw_height];
-    let direct = XTransImage::with_margins(
-        &raw_data,
-        raw_width,
-        raw_height,
-        area.width,
-        area.height,
-        area.top_margin,
-        area.left_margin,
-        XTransPattern::new(pattern),
-        channel_black,
-        inv_range,
-    );
-    let calibration = normalize_active_area::<false>(
-        &raw_data,
-        area,
-        common_black,
-        inv_range,
-        Some(ChannelBlackDelta::XTrans {
-            pattern,
-            values: [0.01, 0.02, 0.03],
-        }),
-    );
 
-    for y in 0..area.height {
-        for x in 0..area.width {
-            let raw_y = y + area.top_margin;
-            let raw_x = x + area.left_margin;
-            let channel = pattern[raw_y % 6][raw_x % 6] as usize;
-            let expected = [0.49, 0.48, 0.47][channel];
-            let direct_value = direct.read_normalized(raw_y, raw_x);
-            let calibration_value = calibration[y * area.width + x];
-            assert!((direct_value - expected).abs() < 1e-7);
-            assert!((calibration_value - expected).abs() < 1e-7);
+    for top_margin in 0..6 {
+        for left_margin in 0..6 {
+            let area = RawActiveArea {
+                raw_width,
+                width: 6,
+                height: 6,
+                top_margin,
+                left_margin,
+            };
+            let visible_pattern = std::array::from_fn(|y| {
+                std::array::from_fn(|x| raw_pattern[(y + top_margin) % 6][(x + left_margin) % 6])
+            });
+            let active_cfa = CfaType::XTrans(visible_pattern);
+            let direct = XTransImage::with_margins(
+                &raw_data,
+                raw_width,
+                raw_height,
+                area.width,
+                area.height,
+                area.top_margin,
+                area.left_margin,
+                XTransPattern::new(raw_pattern),
+                channel_black,
+                inv_range,
+            );
+            let calibration = normalize_active_area::<false>(
+                &raw_data,
+                area,
+                common_black,
+                inv_range,
+                Some(ChannelBlackDelta::XTrans {
+                    visible_pattern,
+                    values: [0.01, 0.02, 0.03],
+                }),
+            );
+
+            for y in 0..area.height {
+                for x in 0..area.width {
+                    let raw_y = y + area.top_margin;
+                    let raw_x = x + area.left_margin;
+                    let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
+                    let visible_channel = visible_pattern[y % 6][x % 6] as usize;
+                    let active_channel = active_cfa.color_at(x, y) as usize;
+                    assert_eq!(raw_channel, visible_channel);
+                    assert_eq!(raw_channel, active_channel);
+
+                    let expected = [0.49, 0.48, 0.47][raw_channel];
+                    let direct_value = direct.read_normalized(raw_y, raw_x);
+                    let calibration_value = calibration[y * area.width + x];
+                    assert!(
+                        (direct_value - expected).abs() < 1e-7,
+                        "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
+                    );
+                    assert!(
+                        (calibration_value - expected).abs() < 1e-7,
+                        "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
+                    );
+                }
+            }
         }
     }
 }
@@ -403,7 +456,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
         return;
     };
     let raw_data = raw.raw_image_slice().unwrap();
-    let pattern = raw.xtrans_pattern();
+    let pattern = raw.raw_xtrans_pattern();
     let direct = XTransImage::with_margins(
         raw_data,
         raw.raw_width,
@@ -671,21 +724,21 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
 }
 
 #[test]
-fn test_fc_rggb() {
+fn test_libraw_filter_color_rggb() {
     // RGGB Bayer pattern: 0x94949494
     let filters = 0x94949494u32;
 
     // (0,0)=R=0, (0,1)=G=1, (1,0)=G=1, (1,1)=B=2
-    assert_eq!(fc(filters, 0, 0), 0); // R
-    assert_eq!(fc(filters, 0, 1), 1); // G
-    assert_eq!(fc(filters, 1, 0), 1); // G
-    assert_eq!(fc(filters, 1, 1), 2); // B
+    assert_eq!(libraw_filter_color(filters, 0, 0), 0); // R
+    assert_eq!(libraw_filter_color(filters, 0, 1), 1); // G
+    assert_eq!(libraw_filter_color(filters, 1, 0), 1); // G
+    assert_eq!(libraw_filter_color(filters, 1, 1), 2); // B
 
     // Pattern repeats
-    assert_eq!(fc(filters, 2, 0), 0);
-    assert_eq!(fc(filters, 2, 1), 1);
-    assert_eq!(fc(filters, 3, 0), 1);
-    assert_eq!(fc(filters, 3, 1), 2);
+    assert_eq!(libraw_filter_color(filters, 2, 0), 0);
+    assert_eq!(libraw_filter_color(filters, 2, 1), 1);
+    assert_eq!(libraw_filter_color(filters, 3, 0), 1);
+    assert_eq!(libraw_filter_color(filters, 3, 1), 2);
 }
 
 #[test]
@@ -693,7 +746,7 @@ fn test_apply_bayer_black_deltas_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
 
-    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
+    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
 
     // No change expected
     for &v in &data {
@@ -707,7 +760,7 @@ fn test_apply_bayer_black_deltas() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
 
-    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
+    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
 
     assert!(
         (data[0] - 0.4).abs() < 1e-6,
@@ -728,7 +781,7 @@ fn test_apply_bayer_black_deltas_clamps_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
 
-    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
+    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");

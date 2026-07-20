@@ -101,7 +101,7 @@ fn consolidate_black_levels(
     cblack_raw: &[u32; 4104],
     black_raw: u32,
     maximum_raw: u32,
-    filters: u32,
+    visible_filters: u32,
 ) -> Result<BlackLevel, String> {
     let mut cblack = [0u32; 4104];
     cblack.copy_from_slice(cblack_raw);
@@ -109,16 +109,14 @@ fn consolidate_black_levels(
 
     // Step 1: Fold spatial pattern into per-channel values.
     // For Bayer sensors with ~2x2 spatial pattern:
-    if filters > 1000 && cblack[4].div_ceil(2) == 1 && cblack[5].div_ceil(2) == 1 {
-        // Map position (c/2, c%2) to color channel using FC macro.
-        // FC(row,col) = (filters >> (((row<<1 & 14) | (col & 1)) << 1)) & 3
+    if visible_filters > 1000 && cblack[4].div_ceil(2) == 1 && cblack[5].div_ceil(2) == 1 {
         let mut clrs = [0u32; 4];
         let mut last_g: Option<usize> = None;
         let mut g_count = 0;
         for (c, clr) in clrs.iter_mut().enumerate() {
             let row = c / 2;
             let col = c % 2;
-            *clr = (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3;
+            *clr = libraw_filter_color(visible_filters, row, col) as u32;
             if *clr == 1 {
                 g_count += 1;
                 last_g = Some(c);
@@ -137,7 +135,7 @@ fn consolidate_black_levels(
         }
         cblack[4] = 0;
         cblack[5] = 0;
-    } else if filters <= 1000 && cblack[4] == 1 && cblack[5] == 1 {
+    } else if visible_filters <= 1000 && cblack[4] == 1 && cblack[5] == 1 {
         // X-Trans / Fuji RAF DNG: 1x1 spatial pattern
         for c in 0..4 {
             cblack[c] += cblack[6];
@@ -244,12 +242,14 @@ fn canonical_camera_white_balance(sensor_type: &SensorType, cam_mul: [f32; 4]) -
 /// Apply per-channel black delta correction to Bayer data.
 ///
 /// Operates on data already normalized with the common black level.
-/// Channel is determined by the libraw `filters` bitmask using the FC macro.
+/// LibRaw's `filters` is visible-origin, while `data` is the full raw buffer.
 /// Results are clamped to the direct light-frame `[0, 1]` contract.
 fn apply_bayer_black_deltas(
     data: &mut [f32],
     raw_width: usize,
-    filters: u32,
+    top_margin: usize,
+    left_margin: usize,
+    visible_filters: u32,
     delta_norm: &[f32; 4],
 ) {
     let has_delta = delta_norm.iter().any(|&d| d.abs() > f32::EPSILON);
@@ -261,7 +261,7 @@ fn apply_bayer_black_deltas(
         .enumerate()
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
-                let ch = fc(filters, row, col);
+                let ch = raw_filter_color(visible_filters, row, col, top_margin, left_margin);
                 *pixel = (*pixel - delta_norm[ch]).clamp(0.0, 1.0);
             }
         });
@@ -269,8 +269,28 @@ fn apply_bayer_black_deltas(
 
 /// Libraw FC macro: determine color channel at (row, col) from filters bitmask.
 #[inline(always)]
-fn fc(filters: u32, row: usize, col: usize) -> usize {
+fn libraw_filter_color(filters: u32, row: usize, col: usize) -> usize {
     ((filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3) as usize
+}
+
+#[inline(always)]
+fn raw_filter_color(
+    visible_filters: u32,
+    raw_row: usize,
+    raw_col: usize,
+    top_margin: usize,
+    left_margin: usize,
+) -> usize {
+    libraw_filter_color(
+        visible_filters,
+        raw_row.wrapping_sub(top_margin),
+        raw_col.wrapping_sub(left_margin),
+    )
+}
+
+#[allow(clippy::unnecessary_cast)]
+fn xtrans_pattern_from_libraw(pattern: [[std::ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
+    pattern.map(|row| row.map(|color| color as u8))
 }
 
 fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
@@ -292,23 +312,27 @@ struct RawActiveArea {
 #[derive(Debug, Clone, Copy)]
 enum ChannelBlackDelta {
     LibRawFilter {
-        filters: u32,
+        visible_filters: u32,
         values: [f32; 4],
     },
     XTrans {
-        pattern: [[u8; 6]; 6],
+        visible_pattern: [[u8; 6]; 6],
         values: [f32; 3],
     },
 }
 
 impl ChannelBlackDelta {
     #[inline(always)]
-    fn at(&self, row: usize, col: usize) -> f32 {
+    fn at_visible(&self, row: usize, col: usize) -> f32 {
         match self {
-            ChannelBlackDelta::LibRawFilter { filters, values } => values[fc(*filters, row, col)],
-            ChannelBlackDelta::XTrans { pattern, values } => {
-                values[pattern[row % 6][col % 6] as usize]
-            }
+            ChannelBlackDelta::LibRawFilter {
+                visible_filters,
+                values,
+            } => values[libraw_filter_color(*visible_filters, row, col)],
+            ChannelBlackDelta::XTrans {
+                visible_pattern,
+                values,
+            } => values[visible_pattern[row % 6][col % 6] as usize],
         }
     }
 }
@@ -334,7 +358,7 @@ fn normalize_active_area<const CLAMP: bool>(
 
             if let Some(delta) = &channel_delta {
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let corrected = *pixel - delta.at(raw_y, area.left_margin + x);
+                    let corrected = *pixel - delta.at_visible(y, x);
                     *pixel = if CLAMP {
                         corrected.clamp(0.0, 1.0)
                     } else {
@@ -360,7 +384,7 @@ struct UnpackedRaw {
     top_margin: usize,
     left_margin: usize,
     black_level: BlackLevel,
-    filters: u32,
+    visible_filters: u32,
     sensor_type: SensorType,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
@@ -408,7 +432,7 @@ impl UnpackedRaw {
             None
         } else if matches!(self.sensor_type, SensorType::XTrans) {
             Some(ChannelBlackDelta::XTrans {
-                pattern: self.xtrans_pattern(),
+                visible_pattern: self.visible_xtrans_pattern(),
                 values: [
                     self.black_level.channel_delta_norm[0],
                     self.black_level.channel_delta_norm[1],
@@ -417,7 +441,7 @@ impl UnpackedRaw {
             })
         } else {
             Some(ChannelBlackDelta::LibRawFilter {
-                filters: self.filters,
+                visible_filters: self.visible_filters,
                 values: self.black_level.channel_delta_norm,
             })
         };
@@ -438,7 +462,7 @@ impl UnpackedRaw {
 
     /// Process Bayer sensor data using our fast SIMD demosaic. Returns planar
     /// `[R, G, B]` channels.
-    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<[Vec<f32>; 3], ImageError> {
+    fn demosaic_bayer(&self, visible_cfa_pattern: CfaPattern) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -452,10 +476,13 @@ impl UnpackedRaw {
         apply_bayer_black_deltas(
             &mut normalized_data,
             self.raw_width,
-            self.filters,
+            self.top_margin,
+            self.left_margin,
+            self.visible_filters,
             &self.black_level.channel_delta_norm,
         );
 
+        let raw_cfa_pattern = visible_cfa_pattern.at_raw_origin(self.top_margin, self.left_margin);
         let bayer = BayerImage::with_margins(
             &normalized_data,
             self.raw_width,
@@ -464,7 +491,7 @@ impl UnpackedRaw {
             self.height,
             self.top_margin,
             self.left_margin,
-            cfa_pattern,
+            raw_cfa_pattern,
         );
 
         let demosaic_start = Instant::now();
@@ -483,30 +510,25 @@ impl UnpackedRaw {
         Ok(rgb_pixels)
     }
 
-    /// Extract X-Trans 6x6 pattern from libraw metadata.
-    fn xtrans_pattern(&self) -> [[u8; 6]; 6] {
-        // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
-        let xtrans_raw = unsafe { (*self.inner).idata.xtrans };
-        let mut pattern = [[0u8; 6]; 6];
-        for (i, row) in xtrans_raw.iter().enumerate() {
-            for (j, &val) in row.iter().enumerate() {
-                #[allow(clippy::unnecessary_cast)]
-                {
-                    pattern[i][j] = val as u8;
-                }
-            }
-        }
-        pattern
+    /// Extract LibRaw's visible-origin X-Trans pattern for active-area consumers.
+    fn visible_xtrans_pattern(&self) -> [[u8; 6]; 6] {
+        // SAFETY: inner is valid and xtrans is populated for X-Trans sensors.
+        let pattern = unsafe { (*self.inner).idata.xtrans };
+        xtrans_pattern_from_libraw(pattern)
+    }
+
+    /// Extract LibRaw's absolute X-Trans pattern for full-raw-buffer consumers.
+    fn raw_xtrans_pattern(&self) -> [[u8; 6]; 6] {
+        // SAFETY: inner is valid and xtrans_abs is populated for X-Trans sensors.
+        let pattern = unsafe { (*self.inner).idata.xtrans_abs };
+        xtrans_pattern_from_libraw(pattern)
     }
 
     /// Process X-Trans sensor data using our Markesteijn demosaic.
     ///
     /// Drops LibRaw state and any fallback input buffer before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(
-        &mut self,
-        xtrans_pattern: [[u8; 6]; 6],
-    ) -> Result<[Vec<f32>; 3], ImageError> {
+    fn demosaic_xtrans(&mut self, raw_pattern: [[u8; 6]; 6]) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Copy raw u16 data so we can drop libraw before demosaicing.
@@ -529,7 +551,7 @@ impl UnpackedRaw {
             self.height,
             self.top_margin,
             self.left_margin,
-            xtrans_pattern,
+            raw_pattern,
             channel_black,
             bl.inv_range,
         );
@@ -732,13 +754,13 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
 
     // Get sensor info from libraw metadata
     // SAFETY: inner is valid, idata struct is initialized after unpack.
-    let filters = unsafe { (*inner).idata.filters };
+    let visible_filters = unsafe { (*inner).idata.filters };
     let colors = unsafe { (*inner).idata.colors };
-    let sensor_type = detect_sensor_type(filters, colors);
+    let sensor_type = detect_sensor_type(visible_filters, colors);
 
     tracing::debug!(
         "libraw: filters=0x{:08x}, colors={}, sensor_type={:?}",
-        filters,
+        visible_filters,
         colors,
         sensor_type
     );
@@ -746,8 +768,9 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     // Consolidate per-channel black levels (replicates libraw adjust_bl)
     // SAFETY: inner is valid, color.cblack is initialized after unpack.
     let cblack_raw: [u32; 4104] = unsafe { (*inner).color.cblack };
-    let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters)
-        .map_err(|reason| raw_err(path, reason))?;
+    let black_level =
+        consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, visible_filters)
+            .map_err(|reason| raw_err(path, reason))?;
 
     // SAFETY: inner is valid, and color.cam_mul is initialized after unpack.
     let cam_mul = unsafe { (*inner).color.cam_mul };
@@ -766,7 +789,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         top_margin,
         left_margin,
         black_level,
-        filters,
+        visible_filters,
         sensor_type,
         camera_white_balance,
         iso,
@@ -857,27 +880,25 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
             let planes = raw.demosaic_bayer(cfa_pattern)?;
-            let active_cfa = CfaType::Bayer(cfa_pattern).shifted(raw.left_margin, raw.top_margin);
             (
                 DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,
-                Some(active_cfa),
+                Some(CfaType::Bayer(cfa_pattern)),
             )
         }
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
-            let xtrans_pattern = raw.xtrans_pattern();
-            let active_cfa =
-                CfaType::XTrans(xtrans_pattern).shifted(raw.left_margin, raw.top_margin);
-            let planes = raw.demosaic_xtrans(xtrans_pattern)?;
+            let visible_pattern = raw.visible_xtrans_pattern();
+            let raw_pattern = raw.raw_xtrans_pattern();
+            let planes = raw.demosaic_xtrans(raw_pattern)?;
             (
                 DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,
-                Some(active_cfa),
+                Some(CfaType::XTrans(visible_pattern)),
             )
         }
         SensorType::Unknown => {
@@ -947,10 +968,10 @@ pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
 pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path)?;
 
-    let raw_cfa_type = match &raw.sensor_type {
+    let cfa_type = match &raw.sensor_type {
         SensorType::Monochrome => CfaType::Mono,
         SensorType::Bayer(p) => CfaType::Bayer(*p),
-        SensorType::XTrans => CfaType::XTrans(raw.xtrans_pattern()),
+        SensorType::XTrans => CfaType::XTrans(raw.visible_xtrans_pattern()),
         SensorType::Unknown => {
             return Err(raw_err(
                 &raw.path,
@@ -958,7 +979,6 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
             ));
         }
     };
-    let cfa_type = raw_cfa_type.shifted(raw.left_margin, raw.top_margin);
 
     // Calibration path: keep signed, un-clamped values so stacked master
     // dark/bias means aren't biased upward by clipping the sub-pedestal tail.

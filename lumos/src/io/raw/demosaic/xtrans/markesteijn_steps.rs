@@ -43,7 +43,7 @@ pub(crate) fn compute_green_minmax(
             let raw_y = y + xtrans.top_margin;
             for x in 0..width {
                 let raw_x = x + xtrans.left_margin;
-                let color = xtrans.pattern.color_at(raw_y, raw_x);
+                let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
 
                 if color == 1 {
                     let val = xtrans.read_normalized(raw_y, raw_x);
@@ -124,7 +124,7 @@ pub(crate) fn interpolate_green(
 
         for x in 0..width {
             let raw_x = x + xtrans.left_margin;
-            let color = xtrans.pattern.color_at(raw_y, raw_x);
+            let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
 
             if color == 1 {
                 let val = xtrans.read_normalized(raw_y, raw_x);
@@ -240,7 +240,7 @@ fn solitary_green_candidate(
     let raw_x = x + xtrans.left_margin;
     let mut colors = [0.0; 2];
     let mut difference = 0.0;
-    let mut target = xtrans.pattern.color_at(raw_y, raw_x + 1);
+    let mut target = xtrans.raw_pattern.color_at(raw_y, raw_x + 1);
     if candidate & 1 != 0 {
         target ^= 2;
     }
@@ -257,9 +257,9 @@ fn solitary_green_candidate(
         let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
         let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
         let plus_native = xtrans
-            .pattern
+            .raw_pattern
             .color_at(raw_y.wrapping_add_signed(oy), raw_x.wrapping_add_signed(ox));
-        let minus_native = xtrans.pattern.color_at(
+        let minus_native = xtrans.raw_pattern.color_at(
             raw_y.wrapping_add_signed(-oy),
             raw_x.wrapping_add_signed(-ox),
         );
@@ -398,7 +398,7 @@ fn color_before_green_block(
     target: u8,
 ) -> f32 {
     let native = xtrans
-        .pattern
+        .raw_pattern
         .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
     debug_assert!(
         native != 1 || is_solitary_green(hex, y + xtrans.top_margin, x + xtrans.left_margin)
@@ -486,7 +486,7 @@ pub(crate) fn reconstruct_colors(
             let x = index % width;
             let raw_y = y + xtrans.top_margin;
             let raw_x = x + xtrans.left_margin;
-            let native = xtrans.pattern.color_at(raw_y, raw_x);
+            let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
             *output = [0.0; 2];
             if native != 1 {
                 output[rb_index(native)] = active_raw(xtrans, y, x);
@@ -512,7 +512,7 @@ pub(crate) fn reconstruct_colors(
         }
         let raw_y = y + xtrans.top_margin;
         let raw_x = x + xtrans.left_margin;
-        let native = xtrans.pattern.color_at(raw_y, raw_x);
+        let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
         if native == 1 {
             return;
         }
@@ -546,7 +546,7 @@ pub(crate) fn reconstruct_colors(
         }
         let raw_y = y + xtrans.top_margin;
         let raw_x = x + xtrans.left_margin;
-        if xtrans.pattern.color_at(raw_y, raw_x) != 1 || is_solitary_green(hex, raw_y, raw_x) {
+        if xtrans.raw_pattern.color_at(raw_y, raw_x) != 1 || is_solitary_green(hex, raw_y, raw_x) {
             return;
         }
         let value = green_block_colors(
@@ -969,7 +969,7 @@ fn demosaic_border(
                         (1, 1) => 0.25,
                         _ => unreachable!(),
                     };
-                    let color = xtrans.pattern.color_at(
+                    let color = xtrans.raw_pattern.color_at(
                         neighbor_y + xtrans.top_margin,
                         neighbor_x + xtrans.left_margin,
                     ) as usize;
@@ -980,7 +980,7 @@ fn demosaic_border(
 
             let index = y * width + x;
             let native = xtrans
-                .pattern
+                .raw_pattern
                 .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
             let raw = active_raw(xtrans, y, x);
             if native == 1 && weights[0] == 0.0 {
@@ -1023,7 +1023,7 @@ mod tests {
         let h = 12;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
         let mut gmax = vec![0.0f32; w * h];
@@ -1047,7 +1047,7 @@ mod tests {
             .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
         let mut gmax = vec![0.0f32; w * h];
@@ -1073,7 +1073,7 @@ mod tests {
         let h = 12;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
         let mut gmax = vec![0.0f32; w * h];
@@ -1206,7 +1206,7 @@ mod tests {
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
         let mut gmax = vec![1.0f32; pixels];
@@ -1255,7 +1255,7 @@ mod tests {
             })
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
         let mut gmax = vec![1.0f32; pixels];
@@ -1461,7 +1461,7 @@ mod tests {
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
         let mut gmin = vec![0.0; pixels];
         let mut gmax = vec![0.0; pixels];
         let mut green_dir = vec![0.0; NDIR * pixels];
@@ -1475,7 +1475,7 @@ mod tests {
                 for x in 3..w - 3 {
                     let raw_y = y + xtrans.top_margin;
                     let raw_x = x + xtrans.left_margin;
-                    let native = xtrans.pattern.color_at(raw_y, raw_x);
+                    let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
                     let [red, blue] = colors[direction * pixels + y * w + x];
                     match native {
                         0 => assert_eq!(red, active_raw(&xtrans, y, x)),
@@ -1529,7 +1529,7 @@ mod tests {
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
         let mut gmax = vec![1.0f32; pixels];
@@ -1567,7 +1567,7 @@ mod tests {
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let hex = HexLookup::new(&xtrans.pattern);
+        let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
         let mut gmax = vec![1.0f32; pixels];

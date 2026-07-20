@@ -56,6 +56,18 @@ impl CfaPattern {
         }
     }
 
+    /// Convert LibRaw's visible-origin pattern for consumers indexing the full raw buffer.
+    pub(crate) fn at_raw_origin(self, top_margin: usize, left_margin: usize) -> Self {
+        let mut pattern = self;
+        if top_margin & 1 != 0 {
+            pattern = pattern.flip_vertical();
+        }
+        if left_margin & 1 != 0 {
+            pattern = pattern.flip_horizontal();
+        }
+        pattern
+    }
+
     /// Get color index at position (y, x) in the Bayer pattern.
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
@@ -88,8 +100,8 @@ pub(crate) struct BayerImage<'a> {
     pub(crate) top_margin: usize,
     /// Left margin (offset from raw to active area)
     pub(crate) left_margin: usize,
-    /// CFA pattern
-    pub(crate) cfa: CfaPattern,
+    /// CFA pattern anchored at the full raw buffer origin.
+    pub(crate) raw_cfa_pattern: CfaPattern,
 }
 
 impl<'a> BayerImage<'a> {
@@ -110,7 +122,7 @@ impl<'a> BayerImage<'a> {
         height: usize,
         top_margin: usize,
         left_margin: usize,
-        cfa: CfaPattern,
+        raw_cfa_pattern: CfaPattern,
     ) -> Self {
         assert!(
             width > 0 && height > 0,
@@ -160,7 +172,7 @@ impl<'a> BayerImage<'a> {
             height,
             top_margin,
             left_margin,
-            cfa,
+            raw_cfa_pattern,
         }
     }
 }

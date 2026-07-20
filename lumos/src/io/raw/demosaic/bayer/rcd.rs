@@ -83,7 +83,7 @@ pub(crate) fn rcd_demosaic(
     let tm = bayer.top_margin;
     let lm = bayer.left_margin;
     let cfa = bayer.data;
-    let pattern = bayer.cfa;
+    let pattern = bayer.raw_cfa_pattern;
     let npix = rw * rh;
 
     // Cooperative cancel: each stage below is a full-image parallel pass. A

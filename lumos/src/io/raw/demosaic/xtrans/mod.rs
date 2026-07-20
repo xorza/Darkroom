@@ -35,11 +35,11 @@ pub(crate) fn process_xtrans(
     height: usize,
     top_margin: usize,
     left_margin: usize,
-    xtrans_pattern: [[u8; 6]; 6],
+    raw_pattern: [[u8; 6]; 6],
     channel_black: [f32; 3],
     inv_range: f32,
 ) -> [Vec<f32>; 3] {
-    let pattern = XTransPattern::new(xtrans_pattern);
+    let raw_pattern = XTransPattern::new(raw_pattern);
 
     let xtrans = XTransImage::with_margins(
         raw_data,
@@ -49,7 +49,7 @@ pub(crate) fn process_xtrans(
         height,
         top_margin,
         left_margin,
-        pattern,
+        raw_pattern,
         channel_black,
         inv_range,
     );
@@ -82,10 +82,10 @@ pub(crate) fn process_xtrans_f32(
     height: usize,
     top_margin: usize,
     left_margin: usize,
-    xtrans_pattern: [[u8; 6]; 6],
+    raw_pattern: [[u8; 6]; 6],
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let pattern = XTransPattern::new(xtrans_pattern);
+    let raw_pattern = XTransPattern::new(raw_pattern);
 
     let xtrans = XTransImage::with_margins_f32(
         data,
@@ -95,7 +95,7 @@ pub(crate) fn process_xtrans_f32(
         height,
         top_margin,
         left_margin,
-        pattern,
+        raw_pattern,
     );
 
     let demosaic_start = Instant::now();
@@ -200,8 +200,8 @@ pub(crate) struct XTransImage<'a> {
     pub(crate) top_margin: usize,
     /// Left margin (offset from raw to active area)
     pub(crate) left_margin: usize,
-    /// X-Trans CFA pattern
-    pub(crate) pattern: XTransPattern,
+    /// CFA pattern anchored at the full raw buffer origin.
+    pub(crate) raw_pattern: XTransPattern,
     /// Per-channel black levels [R=0, G=1, B=2] for u16 path normalization.
     channel_black: [f32; 3],
     /// 1.0 / (maximum - common_black) for normalization (u16 path only).
@@ -265,7 +265,7 @@ impl<'a> XTransImage<'a> {
         height: usize,
         top_margin: usize,
         left_margin: usize,
-        pattern: XTransPattern,
+        raw_pattern: XTransPattern,
         channel_black: [f32; 3],
         inv_range: f32,
     ) -> Self {
@@ -286,7 +286,7 @@ impl<'a> XTransImage<'a> {
             height,
             top_margin,
             left_margin,
-            pattern,
+            raw_pattern,
             channel_black,
             inv_range,
         }
@@ -304,7 +304,7 @@ impl<'a> XTransImage<'a> {
         height: usize,
         top_margin: usize,
         left_margin: usize,
-        pattern: XTransPattern,
+        raw_pattern: XTransPattern,
     ) -> Self {
         Self::validate_dimensions(
             data.len(),
@@ -323,7 +323,7 @@ impl<'a> XTransImage<'a> {
             height,
             top_margin,
             left_margin,
-            pattern,
+            raw_pattern,
             channel_black: [0.0; 3],
             inv_range: 1.0,
         }
@@ -339,7 +339,7 @@ impl<'a> XTransImage<'a> {
         match &self.data {
             PixelSource::U16(data) => {
                 let val = data[idx] as f32;
-                let ch = self.pattern.color_at(raw_y, raw_x) as usize;
+                let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
                 ((val - self.channel_black[ch]).max(0.0) * self.inv_range).min(1.0)
             }
             PixelSource::F32(data) => data[idx],

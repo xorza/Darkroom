@@ -84,7 +84,7 @@ pub(crate) fn demosaic_xtrans_markesteijn(
     let pixels = width * height;
 
     // Build lookup tables
-    let hex = HexLookup::new(&xtrans.pattern);
+    let hex = HexLookup::new(&xtrans.raw_pattern);
     // Allocate all working memory in one shot
     let mut arena = DemosaicArena::new(width, height);
 

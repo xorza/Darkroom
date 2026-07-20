@@ -105,6 +105,33 @@ fn test_flip_both_axes() {
 }
 
 #[test]
+fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
+    let visible_patterns = [
+        CfaPattern::Rggb,
+        CfaPattern::Bggr,
+        CfaPattern::Grbg,
+        CfaPattern::Gbrg,
+    ];
+
+    for visible in visible_patterns {
+        for top_margin in 0..2 {
+            for left_margin in 0..2 {
+                let raw = visible.at_raw_origin(top_margin, left_margin);
+                for y in 0..4 {
+                    for x in 0..4 {
+                        assert_eq!(
+                            raw.color_at(y + top_margin, x + left_margin),
+                            visible.color_at(y, x),
+                            "{visible:?}, margin ({top_margin}, {left_margin}), ({y}, {x})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
@@ -402,35 +429,56 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
 
 #[test]
 fn test_rcd_with_margins() {
-    // Test that margins are handled correctly.
-    // Raw buffer is 24x24, active area is 16x16 starting at (4,4).
-    let raw_w = 24;
-    let raw_h = 24;
+    let raw_w = 26;
+    let raw_h = 26;
     let act_w = 16;
     let act_h = 16;
-    let tm = 4;
-    let lm = 4;
+    let visible_pattern = CfaPattern::Rggb;
+    let channel_values = [0.8, 0.5, 0.2];
 
-    let data = vec![0.4f32; raw_w * raw_h];
-    let bayer =
-        BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, tm, lm, CfaPattern::Rggb);
-    let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
+    for top_margin in 4..6 {
+        for left_margin in 4..6 {
+            let raw_pattern = visible_pattern.at_raw_origin(top_margin, left_margin);
+            let mut data = vec![0.0f32; raw_w * raw_h];
+            for y in 0..raw_h {
+                for x in 0..raw_w {
+                    data[y * raw_w + x] = channel_values[raw_pattern.color_at(y, x)];
+                }
+            }
+            let bayer = BayerImage::with_margins(
+                &data,
+                raw_w,
+                raw_h,
+                act_w,
+                act_h,
+                top_margin,
+                left_margin,
+                raw_pattern,
+            );
+            let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
+            assert_eq!(rgb.len(), act_w * act_h * 3);
 
-    // Output should be active area size
-    assert_eq!(rgb.len(), act_w * act_h * 3);
+            for y in 0..act_h {
+                for x in 0..act_w {
+                    let native_channel = visible_pattern.color_at(y, x);
+                    let native = rgb[(y * act_w + x) * 3 + native_channel];
+                    assert!(
+                        (native - channel_values[native_channel]).abs() < 1e-7,
+                        "native margin ({top_margin}, {left_margin}), ({y}, {x})"
+                    );
+                }
+            }
 
-    // Uniform input → uniform output
-    let border = 5;
-    for y in border..act_h - border {
-        for x in border..act_w - border {
-            let idx = (y * act_w + x) * 3;
-            for c in 0..3 {
-                assert!(
-                    (rgb[idx + c] - 0.4).abs() < 0.01,
-                    "ch {} at ({x},{y})={}, expected ~0.4",
-                    c,
-                    rgb[idx + c]
-                );
+            for y in 5..act_h - 5 {
+                for x in 5..act_w - 5 {
+                    let index = (y * act_w + x) * 3;
+                    for channel in 0..3 {
+                        assert!(
+                            (rgb[index + channel] - channel_values[channel]).abs() < 0.01,
+                            "channel {channel}, margin ({top_margin}, {left_margin}), ({y}, {x})"
+                        );
+                    }
+                }
             }
         }
     }
