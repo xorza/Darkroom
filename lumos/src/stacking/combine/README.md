@@ -27,7 +27,7 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 stack(paths, config, progress, cancel)         -> Result<StackProduct, Error>
 stack_images(frames, config, progress, cancel) -> Result<StackProduct, Error>
 
-StackProduct       // { image, coverage, weight, variance }
+StackProduct       // { image, coverage, weight, linear_variance: Option<AstroImage> }
 StackConfig        // { method, weighting, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
@@ -153,10 +153,11 @@ the end-to-end pipeline:
    registered-frame location statistics on the common coverage-valid/confidence-positive domain
 3. **Normalize** (optional): Derive registered affine gains from paired common-sky samples
 4. **Process**: For each pixel and channel — apply normalization, reject outliers, combine, and
-   accumulate `Σwᵢ` plus `Σwᵢ²/(Σwᵢ)²` from the actual survivors
+   accumulate `Σwᵢ`; linear means also retain `Σwᵢ²/(Σwᵢ)²` from the actual survivors
 5. **Cleanup**: Remove cache files (unless `keep_cache = true`)
 
 Processing is chunked by rows and parallelized per-row with rayon. Each channel is processed
 independently for efficient planar data access. `StackProduct.coverage` remains a channel-independent
-geometric-support fraction; `weight` and `variance` are channel-shaped `AstroImage`s because
-rejection can retain a different frame set in R, G, and B.
+geometric-support fraction. `weight` is channel-shaped because rejection can retain a different
+frame set in R, G, and B. `linear_variance` has that same shape for means and drizzle, and is `None`
+for nonlinear median output.

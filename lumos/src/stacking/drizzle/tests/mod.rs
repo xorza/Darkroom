@@ -78,7 +78,9 @@ fn assert_product_finite(product: &StackProduct) {
         );
         assert!(
             product
-                .variance
+                .linear_variance
+                .as_ref()
+                .unwrap()
                 .channel(channel)
                 .pixels()
                 .iter()

@@ -43,7 +43,8 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ///
 /// # Returns
 ///
-/// The drizzled result: image plus coverage, weight (`Σwᵢ`), and variance (`Σwᵢ²/(Σwᵢ)²`) maps.
+/// The drizzled result: image plus coverage, weight (`Σwᵢ`), and linear-variance
+/// (`Σwᵢ²/(Σwᵢ)²`) maps.
 ///
 /// # Errors
 ///

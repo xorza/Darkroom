@@ -78,8 +78,8 @@ impl From<AstroImage> for StackFrame {
 /// # Returns
 ///
 /// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its channel-shaped weight and variance images describe the samples that survived
-/// per-channel outlier rejection.
+/// pixel. Its channel-shaped weight image describes the surviving samples; `linear_variance` is
+/// available for mean output and absent for median output.
 ///
 /// # Errors
 ///
@@ -495,9 +495,11 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 
     let combined = match method {
         CombineMethod::Median => {
-            cache.process_chunked_weighted(None, frame_norms, |values, w, _| {
+            let mut combined = cache.process_chunked_weighted(None, frame_norms, |values, w, _| {
                 CombinedSample::from_all(math::statistics::median_f32_mut(values), w)
-            })
+            });
+            combined.linear_variance = None;
+            combined
         }
         CombineMethod::Mean(rejection) => cache.process_chunked_weighted(
             weights.as_deref(),
@@ -779,6 +781,8 @@ mod tests {
             bits(&disk.coverage),
             "coverage differs"
         );
+        let ram_linear_variance = ram.linear_variance.as_ref().unwrap();
+        let disk_linear_variance = disk.linear_variance.as_ref().unwrap();
         for channel in 0..ram.image.channels() {
             assert_eq!(
                 bits(ram.weight.channel(channel)),
@@ -786,8 +790,8 @@ mod tests {
                 "weight channel {channel} differs"
             );
             assert_eq!(
-                bits(ram.variance.channel(channel)),
-                bits(disk.variance.channel(channel)),
+                bits(ram_linear_variance.channel(channel)),
+                bits(disk_linear_variance.channel(channel)),
                 "variance channel {channel} differs"
             );
         }
@@ -1354,12 +1358,13 @@ mod tests {
         assert_eq!(product.image.channel(0)[1], 10.0);
         assert_eq!(product.coverage.pixels(), &[1.0, 1.0]);
         assert_eq!(product.weight.channel(0).pixels(), &[1.5, 1.0]);
+        let linear_variance = product.linear_variance.as_ref().unwrap();
         assert!(
-            (product.variance.channel(0)[0] - 5.0 / 9.0).abs() < 1e-6,
+            (linear_variance.channel(0)[0] - 5.0 / 9.0).abs() < 1e-6,
             "variance = {}",
-            product.variance.channel(0)[0]
+            linear_variance.channel(0)[0]
         );
-        assert_eq!(product.variance.channel(0)[1], 1.0);
+        assert_eq!(linear_variance.channel(0)[1], 1.0);
     }
 
     #[test]
@@ -1670,16 +1675,17 @@ mod tests {
             CancelToken::never(),
         )
         .unwrap();
+        let linear_variance = r.linear_variance.as_ref().unwrap();
         assert_eq!(r.coverage[0], 1.0);
         assert_eq!(r.weight.channel(0)[0], 2.0);
-        assert_eq!(r.variance.channel(0)[0], 0.5);
+        assert_eq!(linear_variance.channel(0)[0], 0.5);
         assert_eq!(r.coverage[1], 0.5);
         assert_eq!(r.weight.channel(0)[1], 1.0);
-        assert_eq!(r.variance.channel(0)[1], 1.0);
+        assert_eq!(linear_variance.channel(0)[1], 1.0);
     }
 
     #[test]
-    fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
+    fn rejection_emits_channel_shaped_survivor_weight_and_linear_variance() {
         // Percentile clipping removes each channel's high value, hence a different source frame:
         // R keeps f0/f1, G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] normalize to
         // [1/6,2/6,3/6].
@@ -1710,7 +1716,8 @@ mod tests {
         assert_eq!(result.coverage[0], 1.0);
         let expected_values = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
         let expected_weights = [3.0 / 6.0, 5.0 / 6.0, 4.0 / 6.0];
-        let expected_variances = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
+        let expected_linear_variances = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
+        let linear_variance = result.linear_variance.as_ref().unwrap();
         for channel in 0..3 {
             assert!(
                 (result.image.channel(channel)[0] - expected_values[channel]).abs() < 1e-6,
@@ -1721,53 +1728,92 @@ mod tests {
                 "channel {channel} weight"
             );
             assert!(
-                (result.variance.channel(channel)[0] - expected_variances[channel]).abs() < 1e-6,
+                (linear_variance.channel(channel)[0] - expected_linear_variances[channel]).abs()
+                    < 1e-6,
                 "channel {channel} variance"
             );
         }
         assert_ne!(result.weight.channel(0)[0], result.weight.channel(1)[0]);
-        assert_ne!(result.variance.channel(1)[0], result.variance.channel(2)[0]);
+        assert_ne!(linear_variance.channel(1)[0], linear_variance.channel(2)[0]);
     }
 
     #[test]
-    fn median_quality_uses_equal_frame_weights_not_noise() {
-        // Median ignores per-frame weights. With 3 frames and Noise weighting, equal frame weights
-        // give weight = 3 and variance = 3/3² = 1/3; noise weights would misdescribe the estimator.
+    fn median_quality_uses_equal_weights_and_has_no_linear_variance() {
         let dims = ImageDimensions::new((8, 1), 1);
         let mk = |base: f32, spread: f32| -> Vec<f32> {
             (0..8).map(|i| base + i as f32 * spread / 7.0).collect()
         };
-        let frames: Vec<StackFrame> = vec![
-            AstroImage::from_pixels(dims, mk(100.0, 1.0)).into(),
-            AstroImage::from_pixels(dims, mk(100.0, 20.0)).into(),
-            AstroImage::from_pixels(dims, mk(100.0, 2.0)).into(),
-        ];
-        let config = StackConfig {
+        let frames = || -> Vec<StackFrame> {
+            vec![
+                AstroImage::from_pixels(dims, mk(100.0, 1.0)).into(),
+                AstroImage::from_pixels(dims, mk(100.0, 20.0)).into(),
+                AstroImage::from_pixels(dims, mk(100.0, 2.0)).into(),
+            ]
+        };
+        let stack = |config| {
+            stack_images(
+                frames(),
+                config,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
+        };
+
+        let explicit = stack(StackConfig {
             method: CombineMethod::Median,
             weighting: Weighting::Noise,
             normalization: Normalization::None,
             ..Default::default()
-        };
-        let r = stack_images(
-            frames,
-            config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap();
+        });
+        assert!(explicit.linear_variance.is_none());
         for p in 0..8 {
-            assert_eq!(r.coverage[p], 1.0);
+            let expected = 100.0 + p as f32 * 2.0 / 7.0;
+            assert!((explicit.image.channel(0)[p] - expected).abs() < 1e-5);
+            assert_eq!(explicit.coverage[p], 1.0);
             assert_eq!(
-                r.weight.channel(0)[p],
+                explicit.weight.channel(0)[p],
                 3.0,
-                "median quality must use equal frame weights (= 3)"
-            );
-            assert!(
-                (r.variance.channel(0)[p] - 1.0 / 3.0).abs() < 1e-6,
-                "variance = {}",
-                r.variance.channel(0)[p]
+                "median quality must count unit-confidence contributors (= 3)"
             );
         }
+
+        for (name, config) in [
+            ("default", StackConfig::default()),
+            ("sigma", StackConfig::sigma_clipped(2.5)),
+            ("linear fit", StackConfig::linear_fit(3.0)),
+            ("GESD", StackConfig::gesd()),
+            ("flat", StackConfig::flat()),
+            ("light", StackConfig::light()),
+            (
+                "manual weighting",
+                StackConfig::weighted(vec![1.0, 2.0, 3.0]),
+            ),
+        ] {
+            let downgraded = stack(config);
+            assert!(
+                downgraded.linear_variance.is_none(),
+                "{name} must expose no linear variance after its small-N median downgrade"
+            );
+            assert_eq!(
+                downgraded.weight.channel(0).pixels(),
+                &[3.0; 8],
+                "{name} median fallback must count unit-confidence contributors"
+            );
+        }
+
+        let linear_fallback = stack(StackConfig {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            small_n: SmallN {
+                min_frames: 4,
+                fallback: CombineMethod::Mean(Rejection::None),
+            },
+            ..Default::default()
+        });
+        assert_eq!(
+            linear_fallback.linear_variance.unwrap().channel(0).pixels(),
+            &[1.0 / 3.0; 8]
+        );
     }
 
     #[test]

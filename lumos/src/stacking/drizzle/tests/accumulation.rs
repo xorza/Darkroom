@@ -159,15 +159,16 @@ fn test_drizzle_rgb_image() {
     assert_eq!(result.image.height(), 100);
     assert_eq!(result.image.channels(), 3);
     assert_eq!(result.weight.dimensions(), result.image.dimensions());
-    assert_eq!(result.variance.dimensions(), result.image.dimensions());
+    let linear_variance = result.linear_variance.as_ref().unwrap();
+    assert_eq!(linear_variance.dimensions(), result.image.dimensions());
     for channel in 1..3 {
         assert_eq!(
             result.weight.channel(channel).pixels(),
             result.weight.channel(0).pixels()
         );
         assert_eq!(
-            result.variance.channel(channel).pixels(),
-            result.variance.channel(0).pixels()
+            linear_variance.channel(channel).pixels(),
+            linear_variance.channel(0).pixels()
         );
     }
 }
@@ -249,7 +250,7 @@ fn test_coverage_map() {
 }
 
 #[test]
-fn test_weight_and_variance_maps() {
+fn test_weight_and_linear_variance_maps() {
     // scale=1, pixfrac=1, Turbo, identity: each input pixel maps 1:1 onto its output pixel with
     // overlap=1 and Jacobian=1, so every contribution has weight = frame_weight exactly.
     let config = DrizzleConfig {
@@ -261,8 +262,8 @@ fn test_weight_and_variance_maps() {
     let idx = 2 * 4 + 2; // interior output pixel (2, 2)
 
     // (a) 3 equal-weight frames → Σw = 3, Σw² = 3, variance = 3/3² = 1/3 — the noise of an N=3
-    // average. The image RMS of these (identical) frames is 0, yet the true per-pixel variance is
-    // input_variance/3; the variance map reports that, which the RMS would understate.
+    // average. The image RMS of these identical frames is 0, while the linear factor correctly
+    // reports that equal unit input variance would become 1/3.
     let mut acc = accumulator(dims, config.clone());
     for _ in 0..3 {
         acc.add_image(
@@ -273,15 +274,16 @@ fn test_weight_and_variance_maps() {
         );
     }
     let equal = acc.finalize();
+    let equal_linear_variance = equal.linear_variance.as_ref().unwrap();
     assert!(
         (equal.weight.channel(0).pixels()[idx] - 3.0).abs() < 1e-5,
         "Σw should be 3, got {}",
         equal.weight.channel(0).pixels()[idx]
     );
     assert!(
-        (equal.variance.channel(0).pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
-        "variance should be 1/3, got {}",
-        equal.variance.channel(0).pixels()[idx]
+        (equal_linear_variance.channel(0).pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
+        "linear variance factor should be 1/3, got {}",
+        equal_linear_variance.channel(0).pixels()[idx]
     );
     assert!((equal.image.channel(0).pixels()[idx] - 5.0).abs() < 1e-5);
 
@@ -300,21 +302,22 @@ fn test_weight_and_variance_maps() {
         None,
     );
     let unequal = acc.finalize();
+    let unequal_linear_variance = unequal.linear_variance.as_ref().unwrap();
     assert!(
         (unequal.weight.channel(0).pixels()[idx] - 4.0).abs() < 1e-5,
         "Σw should be 4, got {}",
         unequal.weight.channel(0).pixels()[idx]
     );
     assert!(
-        (unequal.variance.channel(0).pixels()[idx] - 0.625).abs() < 1e-5,
-        "variance should be 0.625, got {}",
-        unequal.variance.channel(0).pixels()[idx]
+        (unequal_linear_variance.channel(0).pixels()[idx] - 0.625).abs() < 1e-5,
+        "linear variance factor should be 0.625, got {}",
+        unequal_linear_variance.channel(0).pixels()[idx]
     );
 
     // Concentrating weight on fewer frames raises variance above the equal-weight 2-frame optimum
     // (1/2) — the map responds to the weight distribution, not just the contribution count.
     assert!(
-        unequal.variance.channel(0).pixels()[idx] > 0.5,
+        unequal_linear_variance.channel(0).pixels()[idx] > 0.5,
         "unequal weighting should raise variance above 1/2"
     );
 }

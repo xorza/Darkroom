@@ -52,7 +52,7 @@ pub struct DrizzleAccumulator {
     /// Accumulated drizzle weight `Σ wᵢ` per output pixel. Channel-independent (the per-pixel
     /// `wᵢ` is purely geometric × frame weight), so a single map serves all channels.
     weight: Buffer2<f32>,
-    /// Accumulated squared weight `Σ wᵢ²` per output pixel — drives the output variance map
+    /// Accumulated squared weight `Σwᵢ²` per output pixel — drives the linear-variance factor
     /// (`Var = Σwᵢ²/(Σwᵢ)²` per unit input variance), which the correlation-suppressed image RMS
     /// understates.
     weight_sq: Buffer2<f32>,
@@ -549,15 +549,14 @@ impl DrizzleAccumulator {
             let flux = image.channel(c)[(ix, iy)];
             *d.get_mut(ox, oy) += flux * pixel_weight;
         }
-        // Weight is channel-independent, so accumulate it (and its square, for the variance map)
-        // once per output pixel rather than once per channel.
+        // Weight is channel-independent, so accumulate it and its square once per output pixel.
         *self.weight.get_mut(ox, oy) += pixel_weight;
         *self.weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
     }
 
-    /// Finalize the drizzle result: normalize flux by weight and emit the coverage, weight, and
-    /// variance maps. The weight `Σwᵢ` is channel-independent (shared geometric overlap), so one
-    /// map normalizes every channel and seeds the coverage/weight/variance outputs.
+    /// Finalize the drizzle result: normalize flux by weight and emit coverage, weight, and linear
+    /// variance. The weight `Σwᵢ` is channel-independent, so one map normalizes every channel and
+    /// seeds all quality outputs.
     pub fn finalize(self) -> StackProduct {
         let width = self.width();
         let height = self.height();
@@ -607,10 +606,9 @@ impl DrizzleAccumulator {
             })
             .collect();
 
-        // Output variance per unit input-pixel variance: Var(O) = Σ(wᵢ²)/(Σwᵢ)². `0` where
-        // uncovered. This is the true per-pixel noise that the correlated image RMS understates.
-        let mut variance = Buffer2::new_default(width, height);
-        variance
+        // Linear output-variance factor: Var(O) = Σ(wᵢ²)/(Σwᵢ)². `0` where uncovered.
+        let mut linear_variance = Buffer2::new_default(width, height);
+        linear_variance
             .pixels_mut()
             .par_iter_mut()
             .enumerate()
@@ -643,16 +641,16 @@ impl DrizzleAccumulator {
             quality_dimensions,
             (0..n_channels).map(|_| self.weight.pixels().to_vec()),
         );
-        let variance = AstroImage::from_planar_channels(
+        let linear_variance = AstroImage::from_planar_channels(
             quality_dimensions,
-            (0..n_channels).map(|_| variance.pixels().to_vec()),
+            (0..n_channels).map(|_| linear_variance.pixels().to_vec()),
         );
 
         StackProduct {
             image,
             coverage,
             weight,
-            variance,
+            linear_variance: Some(linear_variance),
         }
     }
 }

@@ -34,11 +34,12 @@ fn finish_product_uniform_equal_weights() {
         .map(|i| AstroImage::from_pixels(dims, vec![i as f32; 6]))
         .collect();
     let product = mean_product(&make_test_cache(images), None);
+    let linear_variance = product.linear_variance.as_ref().unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
     for p in 0..6 {
         assert_eq!(product.coverage[p], 1.0);
         assert_eq!(product.weight.channel(0)[p], 4.0);
-        assert_eq!(product.variance.channel(0)[p], 0.25);
+        assert_eq!(linear_variance.channel(0)[p], 0.25);
     }
 }
 
@@ -50,13 +51,14 @@ fn finish_product_uniform_manual_weights() {
         .map(|_| AstroImage::from_pixels(dims, vec![0.5; 2]))
         .collect();
     let product = mean_product(&make_test_cache(images), Some(&[1.0, 2.0, 3.0, 4.0]));
+    let linear_variance = product.linear_variance.as_ref().unwrap();
     for p in 0..2 {
         assert_eq!(product.coverage[p], 1.0);
         assert_eq!(product.weight.channel(0)[p], 10.0);
         assert!(
-            (product.variance.channel(0)[p] - 0.30).abs() < 1e-6,
+            (linear_variance.channel(0)[p] - 0.30).abs() < 1e-6,
             "variance = {}",
-            product.variance.channel(0)[p]
+            linear_variance.channel(0)[p]
         );
     }
 }
@@ -85,17 +87,18 @@ fn finish_product_partial_coverage() {
     )
     .expect("frames are valid");
     let product = mean_product(&cache, None);
+    let linear_variance = product.linear_variance.as_ref().unwrap();
 
     assert_eq!(product.coverage[0], 1.0);
     assert_eq!(product.weight.channel(0)[0], 4.0);
-    assert_eq!(product.variance.channel(0)[0], 0.25);
+    assert_eq!(linear_variance.channel(0)[0], 0.25);
 
     assert_eq!(product.coverage[1], 0.75);
     assert_eq!(product.weight.channel(0)[1], 3.0);
     assert!(
-        (product.variance.channel(0)[1] - 1.0 / 3.0).abs() < 1e-6,
+        (linear_variance.channel(0)[1] - 1.0 / 3.0).abs() < 1e-6,
         "variance = {}",
-        product.variance.channel(0)[1]
+        linear_variance.channel(0)[1]
     );
 }
 

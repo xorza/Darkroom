@@ -511,9 +511,11 @@ The STScI drizzle core propagates variance explicitly: `update_data_var`
 (`cdrizzlebox.c:91`) co-adds variance arrays using **squared weights**
 (`v = (var·vc² + dow²·d2)/vc_plus_dow²`, `:135`) — the correct propagation for a
 weighted average, since `Var(Σw x) = Σw² Var(x)`. lumos's stacker does **not**
-accept a distinct input-variance image for every frame, but both statistical stacking and drizzle
-emit `StackProduct.weight` and `StackProduct.variance`. Statistical combine derives these
-channel-shaped images from the samples that survive each channel's rejection; drizzle's channels
+accept a distinct input-variance image for every frame. Both statistical stacking and drizzle emit
+`StackProduct.weight`. Linear statistical combines and drizzle additionally emit
+`StackProduct.linear_variance = Some(Σw_i²/(Σw_i)²)` from the actual contributing samples; median
+output uses `None` because it has no linear coefficients. Statistical quality images are
+channel-shaped because rejection can select different survivors per channel; drizzle's channels
 are identical because its geometric weights are channel-independent.
 
 ### 4.2 Weight maps and coverage maps
@@ -522,7 +524,9 @@ Both paradigms benefit from carrying a per-pixel weight:
 
 - In **stacking**, a per-pixel weight (e.g. inverse-variance, or a quality mask
   flagging bad columns/edges) lets you down-weight rather than hard-reject, and the
-  output weight image records how many good samples each channel got after rejection.
+  output weight image records the surviving WHT after multiplying each frame weight by per-pixel
+  confidence. Equal weighting therefore tracks survivor count where confidence is one;
+  Noise/Manual frame weights are normalized before applying confidence.
   `StackProduct.coverage` stays a separate scalar fraction of frames with geometric support;
   zero confidence removes statistical weight without erasing that support.
 - In **drizzle**, the **coverage/weight map is mandatory** — it records `W_xy = Σ
@@ -1058,8 +1062,8 @@ quality varies.
 
 1. **No data-dependent variance propagation.** STScI's `update_data_var`
    (`cdrizzlebox.c:91`) propagates input variance with squared weights. lumos returns
-   `Σwᵢ²/(Σwᵢ)²`, the output variance per unit input variance, but does not accept a
-   distinct variance model for each input frame or pixel.
+   a conditional linear factor `Σwᵢ²/(Σwᵢ)²`, but does not accept a distinct variance model for
+   each input frame or pixel. Median output has no linear factor.
 2. **No drizzle CR rejection (median + blot + derivative).** lumos relies on
    caller-supplied `DrizzleFrame::pixel_weight_map` values. Implementing the DrizzlePac `drizCR` scheme
    (`drizzlepac/drizCR.py`) — drizzle→median→blot→derivative-thresholded mask — would

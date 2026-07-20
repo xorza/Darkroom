@@ -1,6 +1,6 @@
 //! Drizzle reconstruction tests on forward-model dithered frame sets.
 //!
-//! The unit tests in `tests.rs` cover the kernel geometry, weight/variance/coverage maps, and
+//! The unit tests in `tests.rs` cover the kernel geometry, weight/linear-variance/coverage maps, and
 //! pixel masks on hand-built frames. These verify the *reconstruction outcome* on realistic
 //! sub-pixel-dithered renders: total flux is conserved, a source lands at its scale-mapped truth
 //! position, and dithering recovers resolution a single undersampled frame cannot.
@@ -221,8 +221,8 @@ fn drizzle_dithering_recovers_resolution() {
 }
 
 #[test]
-fn drizzle_emits_coverage_weight_and_variance_maps() {
-    // The coverage / weight / variance maps are drizzle's science deliverable; verify them
+fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
+    // The coverage, weight, and linear-variance maps are drizzle's science deliverable; verify them
     // against the closed form for N equal-weight frames at full interior coverage.
     let (w, h) = (64, 64);
     let scene = Scene::single(
@@ -268,7 +268,7 @@ fn drizzle_emits_coverage_weight_and_variance_maps() {
     // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
     // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
     let weight_c = result.weight.channel(0).pixels()[32 * w + 32];
-    let var_c = result.variance.channel(0).pixels()[32 * w + 32];
+    let var_c = result.linear_variance.as_ref().unwrap().channel(0).pixels()[32 * w + 32];
     let n_eff = 1.0 / var_c;
     println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");
     assert!(

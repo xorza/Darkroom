@@ -62,7 +62,7 @@ impl ScratchBuffers {
 pub(crate) struct CombinedSample {
     pub(crate) value: f32,
     pub(crate) weight: f32,
-    pub(crate) variance: f32,
+    pub(crate) linear_variance: f32,
 }
 
 impl CombinedSample {
@@ -82,7 +82,7 @@ impl CombinedSample {
             weight += survivor_weight;
             weight_squared += survivor_weight * survivor_weight;
         }
-        let variance = if weight > 0.0 {
+        let linear_variance = if weight > 0.0 {
             weight_squared / (weight * weight)
         } else {
             0.0
@@ -90,7 +90,7 @@ impl CombinedSample {
         Self {
             value,
             weight,
-            variance,
+            linear_variance,
         }
     }
 }
@@ -100,7 +100,7 @@ impl CombinedSample {
 pub(crate) struct LightCombineOutput {
     pub(crate) pixels: PixelData,
     pub(crate) weight: PixelData,
-    pub(crate) variance: PixelData,
+    pub(crate) linear_variance: Option<PixelData>,
 }
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
@@ -528,11 +528,11 @@ impl LightCache {
             dimensions,
             pixels: combined.weight,
         };
-        let variance = AstroImage {
+        let linear_variance = combined.linear_variance.map(|pixels| AstroImage {
             metadata: AstroImageMetadata::default(),
             dimensions,
-            pixels: combined.variance,
-        };
+            pixels,
+        });
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
@@ -542,7 +542,7 @@ impl LightCache {
                 image,
                 coverage: Buffer2::new_filled(width, height, 1.0),
                 weight,
-                variance,
+                linear_variance,
             };
         }
 
@@ -599,13 +599,13 @@ impl LightCache {
             image,
             coverage,
             weight,
-            variance,
+            linear_variance,
         }
     }
 
     /// Warp-quality-aware combine: coverage gates inclusion, while confidence scales statistical
-    /// weight independently. Effective weight and variance use each channel reducer's actual
-    /// survivor set. A pixel no frame supports gets `0`.
+    /// weight independently. Effective weight and linear variance use each channel reducer's
+    /// actual survivor set. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked_weighted<Combine>(
         &self,
         weights: Option<&[f32]>,
@@ -631,7 +631,7 @@ impl LightCache {
             dimensions.height(),
             dimensions.channels(),
         );
-        let mut output_variance = PixelData::new_default(
+        let mut output_linear_variance = PixelData::new_default(
             dimensions.width(),
             dimensions.height(),
             dimensions.channels(),
@@ -670,12 +670,13 @@ impl LightCache {
                             .collect();
                     let weight_slice = &mut output_weight.channel_mut(channel).pixels_mut()
                         [pixel_offset..pixel_offset + chunk_pixels];
-                    let variance_slice = &mut output_variance.channel_mut(channel).pixels_mut()
-                        [pixel_offset..pixel_offset + chunk_pixels];
+                    let linear_variance_slice = &mut output_linear_variance
+                        .channel_mut(channel)
+                        .pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
                     output_slice
                     .par_chunks_mut(width)
                     .zip(weight_slice.par_chunks_mut(width))
-                    .zip(variance_slice.par_chunks_mut(width))
+                    .zip(linear_variance_slice.par_chunks_mut(width))
                     .enumerate()
                     .for_each_init(
                         || {
@@ -686,7 +687,7 @@ impl LightCache {
                             )
                         },
                         |(values, eff_weights, scratch),
-                         (row_in_chunk, ((row_output, row_weight), row_variance))| {
+                         (row_in_chunk, ((row_output, row_weight), row_linear_variance))| {
                             // Cancelled: skip the row's work (output stays zero; the
                             // caller discards the partial result and reports Cancelled).
                             if cancel.is_cancelled() {
@@ -734,7 +735,7 @@ impl LightCache {
                                 };
                                 row_output[pixel_in_row] = sample.value;
                                 row_weight[pixel_in_row] = sample.weight;
-                                row_variance[pixel_in_row] = sample.variance;
+                                row_linear_variance[pixel_in_row] = sample.linear_variance;
                             }
                         },
                     );
@@ -743,7 +744,7 @@ impl LightCache {
         LightCombineOutput {
             pixels,
             weight: output_weight,
-            variance: output_variance,
+            linear_variance: Some(output_linear_variance),
         }
     }
 }
