@@ -241,7 +241,8 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
     raw_data[area.raw_width + 2..area.raw_width + 5].copy_from_slice(&[50, 100, 200]);
     raw_data[2 * area.raw_width + 2..2 * area.raw_width + 5].copy_from_slice(&[300, 1100, 1200]);
 
-    let without_delta = normalize_active_area::<true>(&raw_data, area, black, inv_range, None);
+    let without_delta =
+        normalize_active_area::<true>(&raw_data, area, black, inv_range, None, None);
     assert_eq!(without_delta, [0.0, 0.0, 0.1, 0.2, 1.0, 1.0]);
 
     let clamped = normalize_active_area::<true>(
@@ -253,6 +254,7 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
             visible_filters: filters,
             values: channel_delta,
         }),
+        None,
     );
     let unclamped = normalize_active_area::<false>(
         &raw_data,
@@ -263,6 +265,7 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
             visible_filters: filters,
             values: channel_delta,
         }),
+        None,
     );
     let clamped_expected = [0.0, 0.0, 0.0, 0.0, 0.7, 0.8];
     let unclamped_expected = [-0.15, -0.2, 0.0, 0.0, 0.7, 0.9];
@@ -307,13 +310,14 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
             }
 
             let mut direct = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
-            apply_bayer_black_deltas(
+            apply_bayer_black_corrections(
                 &mut direct,
                 raw_width,
                 top_margin,
                 left_margin,
                 filters,
                 &channel_delta,
+                None,
             );
             let area = RawActiveArea {
                 raw_width,
@@ -331,6 +335,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                     visible_filters: filters,
                     values: channel_delta,
                 }),
+                None,
             );
 
             for y in 0..area.height {
@@ -355,7 +360,81 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
 }
 
 #[test]
-fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
+fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
+    let mut cblack = [0u32; 4104];
+    cblack[..4].copy_from_slice(&[10, 20, 30, 20]);
+    cblack[4] = 2;
+    cblack[5] = 3;
+    cblack[6..12].copy_from_slice(&[5, 7, 9, 11, 13, 15]);
+    let black = consolidate_black_levels(&cblack, 100, 1115, 0x94949494).unwrap();
+
+    assert_eq!(black.common, 115.0);
+    assert_eq!(black.per_channel, [115.0, 125.0, 135.0, 125.0]);
+    assert!((black.inv_range - 0.001).abs() < 1e-10);
+    for (&actual, expected) in black.channel_delta_norm.iter().zip([0.0, 0.01, 0.02, 0.01]) {
+        assert!((actual - expected).abs() < 1e-8);
+    }
+    let repeat = black.repeat.as_ref().unwrap();
+    assert_eq!(repeat.width, 3);
+    assert_eq!(repeat.height, 2);
+    for (&actual, expected) in repeat
+        .delta_norm
+        .iter()
+        .zip([0.0, 0.002, 0.004, 0.006, 0.008, 0.010])
+    {
+        assert!((actual - expected).abs() < 1e-8);
+    }
+
+    let area = RawActiveArea {
+        raw_width: 7,
+        width: 3,
+        height: 2,
+        top_margin: 1,
+        left_margin: 2,
+    };
+    let mut raw_data = vec![0u16; area.raw_width * 4];
+    raw_data[area.raw_width + 2..area.raw_width + 5].copy_from_slice(&[315, 327, 319]);
+    raw_data[2 * area.raw_width + 2..2 * area.raw_width + 5].copy_from_slice(&[331, 343, 335]);
+
+    let mut direct =
+        normalize::normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
+    apply_bayer_black_corrections(
+        &mut direct,
+        area.raw_width,
+        area.top_margin,
+        area.left_margin,
+        0x94949494,
+        &black.channel_delta_norm,
+        black.repeat.as_ref(),
+    );
+    let calibration = normalize_active_area::<false>(
+        &raw_data,
+        area,
+        black.common,
+        black.inv_range,
+        Some(ChannelBlackDelta::LibRawFilter {
+            visible_filters: 0x94949494,
+            values: black.channel_delta_norm,
+        }),
+        black.repeat.as_ref(),
+    );
+
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let direct_value =
+                direct[(y + area.top_margin) * area.raw_width + x + area.left_margin];
+            let calibration_value = calibration[y * area.width + x];
+            assert!((direct_value - 0.2).abs() < 1e-7, "direct ({x}, {y})");
+            assert!(
+                (calibration_value - 0.2).abs() < 1e-7,
+                "calibration ({x}, {y})"
+            );
+        }
+    }
+}
+
+#[test]
+fn xtrans_direct_and_calibration_black_corrections_match() {
     use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
@@ -366,6 +445,11 @@ fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
     let channel_black = [110.0, 120.0, 130.0];
     let inv_range = 0.001;
     let raw_data = vec![600u16; raw_width * raw_height];
+    let repeat = BlackRepeat {
+        width: 3,
+        height: 2,
+        delta_norm: [0.0, 0.002, 0.004, 0.006, 0.008, 0.010].into(),
+    };
 
     for top_margin in 0..6 {
         for left_margin in 0..6 {
@@ -391,6 +475,7 @@ fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
                 XTransPattern::new(raw_pattern),
                 channel_black,
                 inv_range,
+                Some(&repeat),
             );
             let calibration = normalize_active_area::<false>(
                 &raw_data,
@@ -401,6 +486,7 @@ fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
                     visible_pattern,
                     values: [0.01, 0.02, 0.03],
                 }),
+                Some(&repeat),
             );
 
             for y in 0..area.height {
@@ -413,7 +499,7 @@ fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
                     assert_eq!(raw_channel, visible_channel);
                     assert_eq!(raw_channel, active_channel);
 
-                    let expected = [0.49, 0.48, 0.47][raw_channel];
+                    let expected = [0.49, 0.48, 0.47][raw_channel] - repeat.at_visible(y, x);
                     let direct_value = direct.read_normalized(raw_y, raw_x);
                     let calibration_value = calibration[y * area.width + x];
                     assert!(
@@ -472,6 +558,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
             raw.black_level.per_channel[2],
         ],
         raw.black_level.inv_range,
+        raw.black_level.repeat.as_ref(),
     );
     let calibration = raw.extract_cfa_pixels::<false>().unwrap();
     let mut compared = 0usize;
@@ -724,6 +811,19 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
 }
 
 #[test]
+fn consolidate_black_levels_rejects_invalid_metadata() {
+    let cblack = [0u32; 4104];
+    let error = consolidate_black_levels(&cblack, 512, 512, 0x94949494).unwrap_err();
+    assert!(error.contains("common black 512 >= maximum 512"));
+
+    let mut oversized = [0u32; 4104];
+    oversized[4] = 64;
+    oversized[5] = 65;
+    let error = consolidate_black_levels(&oversized, 0, 4096, 0x94949494).unwrap_err();
+    assert!(error.contains("spatial black pattern 65x64 exceeds 4098 entries"));
+}
+
+#[test]
 fn test_libraw_filter_color_rggb() {
     // RGGB Bayer pattern: 0x94949494
     let filters = 0x94949494u32;
@@ -742,11 +842,11 @@ fn test_libraw_filter_color_rggb() {
 }
 
 #[test]
-fn test_apply_bayer_black_deltas_identity() {
+fn test_apply_bayer_black_corrections_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
 
-    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
+    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
 
     // No change expected
     for &v in &data {
@@ -755,12 +855,12 @@ fn test_apply_bayer_black_deltas_identity() {
 }
 
 #[test]
-fn test_apply_bayer_black_deltas() {
+fn test_apply_bayer_black_corrections() {
     // 2x2 RGGB: positions (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
 
-    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
+    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
 
     assert!(
         (data[0] - 0.4).abs() < 1e-6,
@@ -777,11 +877,11 @@ fn test_apply_bayer_black_deltas() {
 }
 
 #[test]
-fn test_apply_bayer_black_deltas_clamps_negative() {
+fn test_apply_bayer_black_corrections_clamp_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
 
-    apply_bayer_black_deltas(&mut data, 2, 0, 0, 0x94949494, &delta);
+    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");

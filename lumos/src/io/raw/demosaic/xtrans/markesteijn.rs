@@ -521,6 +521,7 @@ mod tests {
             pattern.clone(),
             [0.0; 3],
             TEST_INV_RANGE,
+            None,
         );
 
         let rgb =

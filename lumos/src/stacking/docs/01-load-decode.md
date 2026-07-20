@@ -342,7 +342,7 @@ carries black levels (and `BlackLevelDeltaH/V`) as rationals that need not be in
 LibRaw folds these into the same `black`/`cblack` model before `adjust_bl()`.
 
 `adjust_bl()` (and lumos's faithful port `consolidate_black_levels`,
-`src/raw/mod.rs:91-207`) does, in order:
+`src/io/raw/mod.rs`) does, in order:
 
 1. If the CFA is a 2×2 Bayer (`filters > 1000`) with a ~2×2 spatial pattern, fold the
    spatial `cblack[6+]` values into the four per-channel `cblack[0..3]` via the
@@ -365,15 +365,16 @@ lumos's port is structurally faithful but splits direct lights from calibration 
 
 - *Direct lights*: Bayer uses a SIMD pass to remove the `common` pedestal uniformly
   (`normalize_u16_to_f32_parallel`, which also applies `1/(max−common)`) and a second
-  vectorizable pass for the per-channel delta (`apply_bayer_black_deltas`). X-Trans
-  applies its `[R,G,B]` black levels while reading the raw-coordinate 6×6 CFA. Both are
-  exactly libraw's "common + delta" decomposition. RCD/Markesteijn interpolation remains
-  unclipped, and `load_raw` clamps the fully assembled image to `[0, 1]` once at its
-  direct-load boundary.
+  pass for the per-channel and residual spatial corrections
+  (`apply_bayer_black_corrections`). X-Trans applies the same corrections while reading
+  the raw-coordinate 6×6 CFA. Both preserve LibRaw's visible-coordinate phase for
+  spatial repeats. RCD/Markesteijn interpolation remains unclipped, and `load_raw`
+  clamps the fully assembled image to `[0, 1]` once at its direct-load boundary.
 - *Calibration inputs*: `normalize_active_area::<false>` performs the same common and
-  per-channel subtraction without a floor or ceiling, using LibRaw filter codes for
-  Bayer and the raw-coordinate 6×6 pattern for X-Trans. Dark and bias samples below the
-  pedestal therefore remain negative instead of biasing their stacked masters upward.
+  per-channel and spatial subtraction without a floor or ceiling, using LibRaw filter
+  codes for Bayer and the raw-coordinate 6×6 pattern for X-Trans. Dark and bias samples
+  below the pedestal therefore remain negative instead of biasing their stacked masters
+  upward.
 
 **Why per-channel matters:** if you subtract a single scalar black from a sensor
 whose green channels sit 8 ADU higher than red, the residual offset survives into the

@@ -75,26 +75,38 @@ impl Drop for ProcessedImageGuard {
     }
 }
 
-/// Per-channel black levels after consolidation.
-///
-/// Replicates libraw's `adjust_bl()` logic: folds spatial patterns into per-channel
-/// values, extracts the common minimum, and computes normalized deltas for efficient
-/// two-pass correction (SIMD uniform pass + per-pixel channel delta pass).
-#[derive(Debug, Clone)]
-struct BlackLevel {
-    /// Per-channel total black [R, G1, B, G2] (common + per-channel delta).
-    per_channel: [f32; 4],
-    /// Common (minimum) black across all channels. Used for SIMD first pass.
-    common: f32,
-    /// 1.0 / (maximum - common).
-    inv_range: f32,
-    /// `(per_channel[c] - common) * inv_range` — normalized delta per channel.
-    /// Applied in the second per-pixel pass.
-    channel_delta_norm: [f32; 4],
+#[derive(Debug)]
+pub(crate) struct BlackRepeat {
+    width: usize,
+    height: usize,
+    delta_norm: Box<[f32]>,
 }
 
-/// Replicate libraw's `adjust_bl()` to consolidate per-channel and spatial
-/// black level corrections into a single per-channel array.
+impl BlackRepeat {
+    #[inline(always)]
+    fn at_visible(&self, row: usize, col: usize) -> f32 {
+        self.delta_norm[(row % self.height) * self.width + col % self.width]
+    }
+
+    #[inline(always)]
+    fn at_raw(&self, raw_row: usize, raw_col: usize, top_margin: usize, left_margin: usize) -> f32 {
+        // LibRaw defines repeat phase after cropping, so margins shift full-buffer coordinates.
+        let row = (raw_row % self.height + self.height - top_margin % self.height) % self.height;
+        let col = (raw_col % self.width + self.width - left_margin % self.width) % self.width;
+        self.delta_norm[row * self.width + col]
+    }
+}
+
+#[derive(Debug)]
+struct BlackLevel {
+    per_channel: [f32; 4],
+    common: f32,
+    inv_range: f32,
+    channel_delta_norm: [f32; 4],
+    repeat: Option<BlackRepeat>,
+}
+
+/// Replicate libraw's `adjust_bl()` black-level consolidation.
 ///
 /// See libraw `utils_libraw.cpp:464-540` for the reference C++ implementation.
 fn consolidate_black_levels(
@@ -106,6 +118,25 @@ fn consolidate_black_levels(
     let mut cblack = [0u32; 4104];
     cblack.copy_from_slice(cblack_raw);
     let mut black = black_raw;
+
+    if cblack[4] > 0 && cblack[5] > 0 {
+        let pattern_size = (cblack[4] as usize)
+            .checked_mul(cblack[5] as usize)
+            .ok_or_else(|| {
+                format!(
+                    "invalid spatial black pattern dimensions: {}x{}",
+                    cblack[5], cblack[4]
+                )
+            })?;
+        if pattern_size > cblack.len() - 6 {
+            return Err(format!(
+                "spatial black pattern {}x{} exceeds {} entries",
+                cblack[5],
+                cblack[4],
+                cblack.len() - 6
+            ));
+        }
+    }
 
     // Step 1: Fold spatial pattern into per-channel values.
     // For Bayer sensors with ~2x2 spatial pattern:
@@ -174,16 +205,6 @@ fn consolidate_black_levels(
         }
     }
 
-    // Warn if spatial pattern still present after consolidation
-    if cblack[4] > 0 && cblack[5] > 0 {
-        tracing::warn!(
-            "Unhandled spatial black pattern: {}x{} (using per-channel only)",
-            cblack[4],
-            cblack[5]
-        );
-    }
-
-    // Step 4: Final per-channel = cblack[c] + black
     let mut per_channel = [0f32; 4];
     for c in 0..4 {
         per_channel[c] = (cblack[c] + black) as f32;
@@ -202,10 +223,27 @@ fn consolidate_black_levels(
     for c in 0..4 {
         channel_delta_norm[c] = (per_channel[c] - common) * inv_range;
     }
+    let repeat = if cblack[4] > 0 && cblack[5] > 0 {
+        let height = cblack[4] as usize;
+        let width = cblack[5] as usize;
+        let pattern_size = height * width;
+        Some(BlackRepeat {
+            width,
+            height,
+            delta_norm: cblack[6..6 + pattern_size]
+                .iter()
+                .map(|&delta| delta as f32 * inv_range)
+                .collect(),
+        })
+    } else {
+        None
+    };
 
     tracing::debug!(
         "Black levels: common={common}, per_channel={per_channel:?}, \
-         delta_norm={channel_delta_norm:?}, inv_range={inv_range}"
+         delta_norm={channel_delta_norm:?}, repeat={}x{}, inv_range={inv_range}",
+        repeat.as_ref().map_or(0, |pattern| pattern.width),
+        repeat.as_ref().map_or(0, |pattern| pattern.height)
     );
 
     Ok(BlackLevel {
@@ -213,6 +251,7 @@ fn consolidate_black_levels(
         common,
         inv_range,
         channel_delta_norm,
+        repeat,
     })
 }
 
@@ -239,21 +278,23 @@ fn canonical_camera_white_balance(sensor_type: &SensorType, cam_mul: [f32; 4]) -
     Some(multipliers)
 }
 
-/// Apply per-channel black delta correction to Bayer data.
+/// Apply residual black correction to Bayer data.
 ///
 /// Operates on data already normalized with the common black level.
 /// LibRaw's `filters` is visible-origin, while `data` is the full raw buffer.
 /// Results are clamped to the direct light-frame `[0, 1]` contract.
-fn apply_bayer_black_deltas(
+fn apply_bayer_black_corrections(
     data: &mut [f32],
     raw_width: usize,
     top_margin: usize,
     left_margin: usize,
     visible_filters: u32,
     delta_norm: &[f32; 4],
+    repeat: Option<&BlackRepeat>,
 ) {
-    let has_delta = delta_norm.iter().any(|&d| d.abs() > f32::EPSILON);
-    if !has_delta {
+    let has_correction =
+        repeat.is_some() || delta_norm.iter().any(|&delta| delta.abs() > f32::EPSILON);
+    if !has_correction {
         return;
     }
 
@@ -262,7 +303,10 @@ fn apply_bayer_black_deltas(
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
                 let ch = raw_filter_color(visible_filters, row, col, top_margin, left_margin);
-                *pixel = (*pixel - delta_norm[ch]).clamp(0.0, 1.0);
+                let repeat_delta = repeat.map_or(0.0, |pattern| {
+                    pattern.at_raw(row, col, top_margin, left_margin)
+                });
+                *pixel = (*pixel - delta_norm[ch] - repeat_delta).clamp(0.0, 1.0);
             }
         });
 }
@@ -343,6 +387,7 @@ fn normalize_active_area<const CLAMP: bool>(
     black: f32,
     inv_range: f32,
     channel_delta: Option<ChannelBlackDelta>,
+    repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
     let output_size = area.width * area.height;
     // SAFETY: Every element is written by the parallel row pass below.
@@ -356,9 +401,13 @@ fn normalize_active_area<const CLAMP: bool>(
             let source = &raw_data[src_start..src_start + area.width];
             normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
 
-            if let Some(delta) = &channel_delta {
+            if channel_delta.is_some() || repeat.is_some() {
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let corrected = *pixel - delta.at_visible(y, x);
+                    let channel_correction = channel_delta
+                        .as_ref()
+                        .map_or(0.0, |delta| delta.at_visible(y, x));
+                    let repeat_delta = repeat.map_or(0.0, |pattern| pattern.at_visible(y, x));
+                    let corrected = *pixel - channel_correction - repeat_delta;
                     *pixel = if CLAMP {
                         corrected.clamp(0.0, 1.0)
                     } else {
@@ -411,7 +460,7 @@ impl UnpackedRaw {
 
     /// Extract raw CFA pixels as normalized f32 (active area only).
     ///
-    /// Applies per-channel black correction but NO white balance. `CLAMP`
+    /// Applies channel and spatial black correction but NO white balance. `CLAMP`
     /// controls the `[0, 1]` floor/ceil (compile-time, like the kernels it
     /// dispatches to): `true` for monochrome **light** frames (the normalized
     /// output is the displayed image), `false` for the **calibration** path,
@@ -457,6 +506,7 @@ impl UnpackedRaw {
             self.black_level.common,
             self.black_level.inv_range,
             channel_delta,
+            self.black_level.repeat.as_ref(),
         ))
     }
 
@@ -472,14 +522,14 @@ impl UnpackedRaw {
             self.black_level.inv_range,
         );
 
-        // Pass 2: Per-channel black delta
-        apply_bayer_black_deltas(
+        apply_bayer_black_corrections(
             &mut normalized_data,
             self.raw_width,
             self.top_margin,
             self.left_margin,
             self.visible_filters,
             &self.black_level.channel_delta_norm,
+            self.black_level.repeat.as_ref(),
         );
 
         let raw_cfa_pattern = visible_cfa_pattern.at_raw_origin(self.top_margin, self.left_margin);
@@ -554,6 +604,7 @@ impl UnpackedRaw {
             raw_pattern,
             channel_black,
             bl.inv_range,
+            bl.repeat.as_ref(),
         );
 
         Ok(pixels)

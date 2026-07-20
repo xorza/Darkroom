@@ -18,6 +18,7 @@ use std::time::Instant;
 use common::CancelToken;
 use markesteijn::demosaic_xtrans_markesteijn;
 
+use crate::io::raw::BlackRepeat;
 use crate::io::raw::demosaic::Cancelled;
 
 /// Process X-Trans sensor data and demosaic to RGB.
@@ -38,6 +39,7 @@ pub(crate) fn process_xtrans(
     raw_pattern: [[u8; 6]; 6],
     channel_black: [f32; 3],
     inv_range: f32,
+    black_repeat: Option<&BlackRepeat>,
 ) -> [Vec<f32>; 3] {
     let raw_pattern = XTransPattern::new(raw_pattern);
 
@@ -52,6 +54,7 @@ pub(crate) fn process_xtrans(
         raw_pattern,
         channel_black,
         inv_range,
+        black_repeat,
     );
 
     let demosaic_start = Instant::now();
@@ -175,8 +178,12 @@ impl XTransPattern {
 /// The u16 path is used by the raw loader (saves ~47 MB by deferring normalization).
 /// The f32 path is used by CfaImage after calibration (avoids lossy f32->u16 roundtrip).
 #[derive(Debug)]
-pub(crate) enum PixelSource<'a> {
+enum PixelSource<'a> {
     U16(&'a [u16]),
+    U16WithRepeat {
+        data: &'a [u16],
+        repeat: &'a BlackRepeat,
+    },
     F32(&'a [f32]),
 }
 
@@ -187,7 +194,7 @@ pub(crate) enum PixelSource<'a> {
 #[derive(Debug)]
 pub(crate) struct XTransImage<'a> {
     /// Pixel data (u16 raw sensor values or calibrated f32)
-    pub(crate) data: PixelSource<'a>,
+    data: PixelSource<'a>,
     /// Width of the raw data buffer
     pub(crate) raw_width: usize,
     /// Height of the raw data buffer
@@ -268,6 +275,7 @@ impl<'a> XTransImage<'a> {
         raw_pattern: XTransPattern,
         channel_black: [f32; 3],
         inv_range: f32,
+        black_repeat: Option<&'a BlackRepeat>,
     ) -> Self {
         Self::validate_dimensions(
             data.len(),
@@ -278,8 +286,11 @@ impl<'a> XTransImage<'a> {
             top_margin,
             left_margin,
         );
+        let data = black_repeat.map_or(PixelSource::U16(data), |repeat| {
+            PixelSource::U16WithRepeat { data, repeat }
+        });
         Self {
-            data: PixelSource::U16(data),
+            data,
             raw_width,
             raw_height,
             width,
@@ -341,6 +352,12 @@ impl<'a> XTransImage<'a> {
                 let val = data[idx] as f32;
                 let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
                 ((val - self.channel_black[ch]).max(0.0) * self.inv_range).min(1.0)
+            }
+            PixelSource::U16WithRepeat { data, repeat } => {
+                let val = data[idx] as f32;
+                let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
+                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.top_margin, self.left_margin);
+                ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)
             }
             PixelSource::F32(data) => data[idx],
         }
@@ -404,8 +421,19 @@ mod tests {
     fn test_xtrans_image_valid() {
         let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        let img =
-            XTransImage::with_margins(&data, 6, 6, 4, 4, 1, 1, pattern, [0.0; 3], 1.0 / 65535.0);
+        let img = XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            4,
+            4,
+            1,
+            1,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            None,
+        );
         assert_eq!(img.raw_width, 6);
         assert_eq!(img.raw_height, 6);
         assert_eq!(img.width, 4);
@@ -417,7 +445,19 @@ mod tests {
     fn test_xtrans_image_zero_width() {
         let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 0, 4, 0, 0, pattern, [0.0; 3], 1.0 / 65535.0);
+        XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            0,
+            4,
+            0,
+            0,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            None,
+        );
     }
 
     #[test]
@@ -425,7 +465,19 @@ mod tests {
     fn test_xtrans_image_wrong_data_length() {
         let data = vec![32768u16; 30]; // Should be 36
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern, [0.0; 3], 1.0 / 65535.0);
+        XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            6,
+            6,
+            0,
+            0,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            None,
+        );
     }
 
     #[test]
@@ -442,6 +494,7 @@ mod tests {
             test_pattern_array(),
             [0.0; 3],
             1.0 / 4096.0,
+            None,
         );
 
         assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
@@ -469,6 +522,7 @@ mod tests {
             test_pattern_array(),
             [black; 3],
             inv_range,
+            None,
         );
 
         for &val in rgb.iter().flatten() {
@@ -496,6 +550,7 @@ mod tests {
             test_pattern_array(),
             [black; 3],
             inv_range,
+            None,
         );
 
         for &val in rgb.iter().flatten() {
@@ -521,6 +576,7 @@ mod tests {
             test_pattern_array(),
             [black; 3],
             inv_range,
+            None,
         );
 
         for &val in rgb.iter().flatten() {
@@ -546,6 +602,7 @@ mod tests {
             test_pattern(),
             [250.0, common_black, 220.0],
             inv_range,
+            None,
         );
 
         let expected_red = (2000.0 - 250.0) / 3896.0;
@@ -717,6 +774,7 @@ mod tests {
             test_pattern_array(),
             [black; 3],
             inv_range,
+            None,
         );
         let rgb_f32 = process_xtrans_f32(
             &raw_f32,
@@ -804,6 +862,7 @@ pub(crate) mod test_support {
             test_pattern(),
             [0.0; 3],
             TEST_INV_RANGE,
+            None,
         )
     }
 }
