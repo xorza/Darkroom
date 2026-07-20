@@ -139,29 +139,49 @@ impl ExecutionFrame<'_> {
         }
     }
 
-    fn collect_pinned_values(&mut self, node_id: NodeId) -> Option<PinnedOutputs> {
-        let e_node = &self.program.e_nodes[&node_id];
+    async fn emit_pinned_values(
+        &mut self,
+        node_id: NodeId,
+        events: Option<&UnboundedSender<RunEvent>>,
+    ) {
+        let Some(events) = events else { return };
+        let output_count = self.program.e_nodes[&node_id].outputs.len as usize;
         let pinned_root = self.plan.pinned.contains(&node_id);
-        let mut values = Vec::new();
-        for port_idx in 0..e_node.outputs.len as usize {
-            let output_idx = self.program.output_idx(node_id, port_idx);
-            if pinned_root || self.program.is_output_pinned(output_idx) {
+        let pinned_ports: Vec<_> = (0..output_count)
+            .filter(|&port_idx| {
+                pinned_root
+                    || self
+                        .program
+                        .is_output_pinned(self.program.output_idx(node_id, port_idx))
+            })
+            .collect();
+        if pinned_ports.is_empty() {
+            return;
+        }
+        if self.cache.slots[&node_id].output_values().is_none()
+            && !self.cache.hydrate_slot(self.program, node_id).await
+        {
+            return;
+        }
+
+        let values = pinned_ports
+            .into_iter()
+            .map(|port_idx| {
                 let value = self
                     .cache
                     .read_output_port(self.program, node_id, port_idx, false)
-                    .expect("a node's output is resident immediately after it succeeds");
-                values.push(PinnedOutput { port_idx, value });
-            }
-        }
-        if values.is_empty() {
-            return None;
-        }
+                    .expect("a node's pinned output must be resident when delivered");
+                PinnedOutput { port_idx, value }
+            })
+            .collect();
         let node = self
             .flatten
             .address(node_id)
             .expect("a node that just ran must have an authoring address")
             .clone();
-        Some(PinnedOutputs { node, values })
+        events
+            .send(RunEvent::PinnedOutputs(PinnedOutputs { node, values }))
+            .expect(EVENTS_OUTLIVE_RUN);
     }
 
     async fn collect_inputs(&mut self, node_id: NodeId) -> Result<(), RunError> {
@@ -382,6 +402,7 @@ impl Executor {
                 };
                 if reused {
                     *self.outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Reused;
+                    frame.emit_pinned_values(node_id, events).await;
                     continue;
                 }
 
@@ -507,21 +528,13 @@ impl Executor {
                         }))
                         .expect(EVENTS_OUTLIVE_RUN);
                 }
-                // Push immediately after a fresh success, before any later consumer can release
-                // the values. Host delivery does not participate in binding-reader accounting.
-                if succeeded
-                    && let Some(events) = events
-                    && let Some(payload) = frame.collect_pinned_values(node_id)
-                {
-                    events
-                        .send(RunEvent::PinnedOutputs(payload))
-                        .expect(EVENTS_OUTLIVE_RUN);
-                }
                 // Persist this node's cache the moment it finishes (durable as the run
                 // progresses), not at the end of the whole run. The snapshot is taken
                 // synchronously inside `store_node`; only the write awaits, so the cache
                 // borrow doesn't cross it.
                 if succeeded {
+                    // Deliver before later consumers can release values; host delivery is not a reader.
+                    frame.emit_pinned_values(node_id, events).await;
                     frame
                         .cache
                         .store_node(program, node_id, &mut self.ctx_manager)

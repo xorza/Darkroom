@@ -124,6 +124,7 @@ mod cache_persistence {
     use super::*;
     use crate::execution::cache::ValueState;
     use crate::execution::disk_store::DiskStore;
+    use crate::execution::report::RunEvent;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -200,6 +201,7 @@ mod cache_persistence {
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+        graph.set_output_pinned(OutputPort::new(mult_id, 0), true);
 
         // First run: everything computes; `mult` is stored to disk.
         let mut engine = disk_engine(&dir);
@@ -213,7 +215,19 @@ mod cache_persistence {
         // recomputed on reopen (the win the removed plan-time pass used to give).
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let stats = engine
+            .execute(
+                RunSeeds {
+                    sinks: true,
+                    ..Default::default()
+                },
+                Some(&tx),
+                CancelToken::never(),
+            )
+            .await
+            .unwrap();
+        drop(tx);
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             1,
@@ -231,6 +245,17 @@ mod cache_persistence {
             !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
             "mult did not recompute"
         );
+        let mut pinned = None;
+        while let Ok(event) = rx.try_recv() {
+            if let RunEvent::PinnedOutputs(outputs) = event {
+                pinned = Some(outputs);
+            }
+        }
+        let pinned = pinned.expect("the disk hit delivers its pinned output");
+        assert_eq!(pinned.node.node_id, mult_id);
+        assert_eq!(pinned.values.len(), 1);
+        assert_eq!(pinned.values[0].port_idx, 0);
+        assert_eq!(pinned.values[0].value.as_i64(), Some(49));
 
         // Changing one input to a const makes `mult` miss, while its other input
         // still needs `get_a`, so the cut keeps the source alive and it runs.

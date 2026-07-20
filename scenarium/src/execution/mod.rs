@@ -272,9 +272,9 @@ impl ExecutionEngine {
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
     /// feedback ahead of the final stats: a `RunEvent::Progress` before and
-    /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` right
-    /// after a node with a pinned output (or that is itself a pinned root)
-    /// finishes running, so a GUI preview updates without polling. When
+    /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` when a
+    /// node with a pinned output (or that is itself a pinned root) produces or
+    /// reuses its value, so a GUI preview updates without polling. When
     /// `cancel` is `Some` and gets set mid-run, scheduling stops after the
     /// in-flight node and the returned stats are marked `cancelled`.
     pub(crate) async fn execute(
