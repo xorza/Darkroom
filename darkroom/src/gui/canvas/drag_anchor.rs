@@ -33,9 +33,9 @@ pub(crate) struct GroupDragAnchor<K> {
 }
 
 impl<K> GroupDragAnchor<K> {
-    /// Rebuild this frame's `Intent::MoveSelection` from a zoom-adjusted
-    /// `offset` — the "start + offset" shape both callers' resolve step
-    /// shares, regardless of what kind of member grabbed the drag.
+    /// Rebuild this frame's `Intent::MoveSelection` from Aperture's
+    /// pre-transform drag `offset` — the "start + offset" shape both
+    /// callers share, regardless of what kind of member grabbed the drag.
     /// `grabbed` names the member for the intent's own record (the caller
     /// already knows which `ItemRef` variant wraps `self.key`).
     pub(crate) fn resolve(&self, offset: Vec2, grabbed: ItemRef) -> Intent {

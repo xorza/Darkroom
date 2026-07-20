@@ -325,14 +325,12 @@ impl NodeUI {
             self.drag_anchor = None;
             return;
         };
-        // `drag_delta` is in screen pixels; node positions live in the
-        // canvas's pre-transform frame. Divide by zoom so cursor travel
-        // matches node travel at every zoom level.
-        let offset = delta / scene.viewport.zoom;
+        // Aperture reports drag deltas in the widget's pre-transform frame,
+        // which is the same canvas-world coordinate space as node positions.
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
         let anchor = self.drag_anchor.as_ref().unwrap();
-        out.push(anchor.resolve(offset, ItemRef::Node(key)));
+        out.push(anchor.resolve(delta, ItemRef::Node(key)));
     }
 }
 

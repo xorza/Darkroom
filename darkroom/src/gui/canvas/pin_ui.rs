@@ -176,8 +176,7 @@ impl PinUi {
                     // widget; drop rather than fire with stale start data.
                     self.drag = None;
                 } else if let Some(delta) = resp.left.drag.delta() {
-                    let offset = delta / scene.viewport.zoom;
-                    out.push(anchor.resolve(offset, ItemRef::Pin(anchor.key)));
+                    out.push(anchor.resolve(delta, ItemRef::Pin(anchor.key)));
                     return;
                 } else {
                     // No delta means the drag isn't latched anymore
