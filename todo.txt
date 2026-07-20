@@ -19,8 +19,6 @@ visual node groups
 
 audit allocations overshoot , see where reserve_exxact would be better
 
-pinned output makes node store outputs in ram
-
 invert removed retain logic to optimize
 
 mesh once registrations
