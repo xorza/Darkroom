@@ -25,7 +25,9 @@ use crate::stacking::frame_store::{
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
-use crate::stacking::combine::cache::{CacheCore, CfaCache, LightCache};
+use crate::stacking::combine::cache::{
+    CacheCore, CfaCache, LightCache, validate_image_samples, validate_stored_samples,
+};
 
 #[derive(Debug)]
 struct LoadedTier {
@@ -237,6 +239,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
                 actual: image.dimensions(),
             });
         }
+        validate_image_samples(&image, idx)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = compute_frame_stats(&image);
         Ok(LoadedMemoryFrame {
@@ -250,6 +253,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     let mut all_stats = Vec::with_capacity(paths.len());
     let mut metadata = None;
     if let Some(first_image) = first {
+        validate_image_samples(&first_image, 0)?;
         metadata = Some(first_image.metadata().clone());
         all_stats.push(compute_frame_stats(&first_image));
         frames.push(frame_from_memory(first_image));
@@ -289,6 +293,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let cache_dir = &spill_directory.path;
 
     // Cache first image and compute stats. Frame 0 carries the stack metadata.
+    validate_image_samples(&first_image, 0)?;
     let metadata = first_image.metadata().clone();
     let first_stats = compute_frame_stats(&first_image);
     let first_path = paths[0].as_ref();
@@ -491,6 +496,7 @@ fn load_and_cache_frame<I: StackableImage>(
             "Reusing existing cache files"
         );
         let frame = StoredFrame { channels: planes };
+        validate_stored_samples(&frame.channels, dimensions.pixel_count(), frame_index)?;
         let stats = cached_stats.expect("valid cache has readable frame statistics");
         Ok(LoadedStoredFrame { frame, stats })
     } else {
@@ -504,6 +510,7 @@ fn load_and_cache_frame<I: StackableImage>(
                 actual: image.dimensions(),
             });
         }
+        validate_image_samples(&image, frame_index)?;
         let identity_after = source_identity(source_path)?;
         if identity_after != identity_before {
             return Err(FrameStoreError::SourceChanged {

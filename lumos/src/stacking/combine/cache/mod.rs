@@ -14,7 +14,8 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_light_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StoredFrame, StoredLightFrame, StoredPlane, optimal_chunk_rows,
+    FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
+    optimal_chunk_rows,
 };
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
@@ -164,6 +165,45 @@ struct ChunkContext<'a> {
     /// Global pixel index of this chunk's first pixel — for indexing full-frame,
     /// channel-independent maps such as coverage.
     pixel_offset: usize,
+}
+
+fn validate_sample_channels<'a>(
+    index: usize,
+    channels: impl IntoIterator<Item = &'a [f32]>,
+) -> Result<(), Error> {
+    for (channel, samples) in channels.into_iter().enumerate() {
+        if let Some((pixel, &value)) = samples
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            return Err(Error::NonFiniteImageSample {
+                index,
+                channel,
+                pixel,
+                value,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_image_samples(image: &impl StackableImage, index: usize) -> Result<(), Error> {
+    validate_sample_channels(
+        index,
+        (0..image.dimensions().channels()).map(|channel| image.channel(channel)),
+    )
+}
+
+fn validate_stored_samples(
+    channels: &[StoredPlane],
+    pixel_count: usize,
+    index: usize,
+) -> Result<(), Error> {
+    validate_sample_channels(
+        index,
+        channels.iter().map(|plane| plane.chunk(0, pixel_count)),
+    )
 }
 
 impl CacheCore {
@@ -366,6 +406,9 @@ impl LightCache {
             progress,
             cancel,
         } = params;
+        for (index, frame) in frames.iter().enumerate() {
+            validate_stored_samples(&frame.channels, dimensions.pixel_count(), index)?;
+        }
         let frame_norms = compute_light_frame_norms(&frames, dimensions, normalization)?;
         Ok(Self {
             frames,
@@ -402,6 +445,7 @@ impl LightCache {
                     actual: frame.image.dimensions(),
                 });
             }
+            validate_image_samples(&frame.image, index)?;
             for (plane_name, plane) in [
                 ("coverage", frame.coverage.as_ref()),
                 ("confidence", frame.confidence.as_ref()),

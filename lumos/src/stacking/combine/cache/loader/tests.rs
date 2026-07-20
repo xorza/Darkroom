@@ -1,4 +1,5 @@
 use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -141,6 +142,28 @@ fn test_load_and_cache_frame_reuse() {
         rewritten.frame.channels[0].chunk(0, dims.pixel_count()),
         rewritten_pixels
     );
+    drop(rewritten);
+
+    let cache_path = temp_dir.join(channel_filename(base_filename, 0));
+    let mut cache_file = OpenOptions::new().write(true).open(cache_path).unwrap();
+    cache_file
+        .seek(SeekFrom::Start((2 * std::mem::size_of::<f32>()) as u64))
+        .unwrap();
+    cache_file.write_all(&f32::INFINITY.to_le_bytes()).unwrap();
+    drop(cache_file);
+
+    let error =
+        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
+            .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::NonFiniteImageSample {
+            index: 1,
+            channel: 0,
+            pixel: 2,
+            value: f32::INFINITY,
+        }
+    ));
 }
 
 #[test]

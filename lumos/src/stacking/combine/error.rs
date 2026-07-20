@@ -77,6 +77,14 @@ pub enum Error {
         actual: ImageDimensions,
     },
 
+    #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]
+    NonFiniteImageSample {
+        index: usize,
+        channel: usize,
+        pixel: usize,
+        value: f32,
+    },
+
     #[error(
         "{plane} dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
     )]

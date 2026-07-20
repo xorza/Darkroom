@@ -88,6 +88,7 @@ impl From<AstroImage> for StackFrame {
 /// - The configuration is invalid or its manual-weight count doesn't match the paths
 /// - Image loading fails
 /// - Image dimensions don't match
+/// - A decoded image contains a non-finite sample
 /// - Cache directory creation fails (for disk-backed storage)
 ///
 /// # Examples
@@ -146,8 +147,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// source image plus its [`WarpResult`] without remeasuring noise after interpolation.
 ///
 /// Returns an error when the configuration is invalid, manual-weight count doesn't match the frame
-/// count, image/quality-plane dimensions differ, or normalization is requested for registered
-/// frames with no common valid support.
+/// count, an image contains a non-finite sample, image/quality-plane dimensions differ, or
+/// normalization is requested for registered frames with no common valid support.
 pub fn stack_images(
     frames: Vec<StackFrame>,
     config: StackConfig,
@@ -792,6 +793,52 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mapped_frames_reject_nonfinite_samples_before_combining() {
+        let dimensions = ImageDimensions::new((2, 1), 3);
+        let finite = AstroImage::from_planar_channels(
+            dimensions,
+            [vec![1.0; 2], vec![1.0; 2], vec![1.0; 2]],
+        );
+        let source_stats = compute_frame_stats(&finite);
+        let invalid = AstroImage::from_planar_channels(
+            dimensions,
+            [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
+        );
+        let scratch = ScratchDirectory::new("lumos_nonfinite_mapped_frame");
+        let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
+        let frame = store_light_frame(
+            &spill_directory.path,
+            "frame",
+            invalid,
+            None,
+            None,
+            source_stats,
+        )
+        .unwrap();
+
+        let error = stack_stored_frames(
+            vec![frame],
+            Some(spill_directory),
+            dimensions,
+            AstroImageMetadata::default(),
+            StackConfig::mean(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::NonFiniteImageSample {
+                index: 0,
+                channel: 2,
+                pixel: 1,
+                value: f32::NEG_INFINITY,
+            }
+        ));
+    }
+
     fn norm_params_for(cache: &LightCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
         normalization::compute_light_frame_norms(
             &cache.frames,
@@ -1058,6 +1105,47 @@ mod tests {
                     value,
                 } if plane == expected_plane && value == expected_value
             ));
+        }
+    }
+
+    #[test]
+    fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
+        let dimensions = ImageDimensions::new((2, 2), 3);
+        let finite = AstroImage::from_planar_channels(
+            dimensions,
+            [vec![1.0; 4], vec![1.0; 4], vec![1.0; 4]],
+        );
+
+        for invalid_value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let invalid = AstroImage::from_planar_channels(
+                dimensions,
+                [
+                    vec![1.0; 4],
+                    vec![2.0, 2.0, invalid_value, 2.0],
+                    vec![3.0; 4],
+                ],
+            );
+            let error = stack_images(
+                vec![finite.clone().into(), invalid.into()],
+                StackConfig::mean(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap_err();
+
+            let Error::NonFiniteImageSample {
+                index,
+                channel,
+                pixel,
+                value,
+            } = error
+            else {
+                panic!("expected a non-finite image sample error, got {error:?}");
+            };
+            assert_eq!(index, 1);
+            assert_eq!(channel, 1);
+            assert_eq!(pixel, 2);
+            assert_eq!(value.to_bits(), invalid_value.to_bits());
         }
     }
 
