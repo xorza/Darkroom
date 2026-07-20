@@ -1,6 +1,5 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
-use crate::io::raw::demosaic::DemosaicRange;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use crate::io::raw::demosaic::interleave_planes;
 use common::CancelToken;
@@ -109,101 +108,41 @@ fn test_flip_both_axes() {
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(
-        &data,
-        2,
-        2,
-        0,
-        2,
-        0,
-        0,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    BayerImage::with_margins(&data, 2, 2, 0, 2, 0, 0, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(
-        &data,
-        2,
-        2,
-        2,
-        0,
-        0,
-        0,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    BayerImage::with_margins(&data, 2, 2, 2, 0, 0, 0, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Data length")]
 fn test_bayer_image_wrong_data_length() {
     let data = vec![0.0f32; 3];
-    BayerImage::with_margins(
-        &data,
-        2,
-        2,
-        2,
-        2,
-        0,
-        0,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 0, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Top margin")]
 fn test_bayer_image_margin_exceeds_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(
-        &data,
-        2,
-        2,
-        2,
-        2,
-        1,
-        0,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    BayerImage::with_margins(&data, 2, 2, 2, 2, 1, 0, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Left margin")]
 fn test_bayer_image_margin_exceeds_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(
-        &data,
-        2,
-        2,
-        2,
-        2,
-        0,
-        1,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 1, CfaPattern::Rggb);
 }
 
 #[test]
 fn test_bayer_image_valid() {
     let data = vec![0.0f32; 16];
-    let bayer = BayerImage::with_margins(
-        &data,
-        4,
-        4,
-        2,
-        2,
-        1,
-        1,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    let bayer = BayerImage::with_margins(&data, 4, 4, 2, 2, 1, 1, CfaPattern::Rggb);
     assert_eq!(bayer.raw_width, 4);
     assert_eq!(bayer.raw_height, 4);
     assert_eq!(bayer.width, 2);
@@ -214,17 +153,7 @@ fn test_bayer_image_valid() {
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], width: usize, height: usize, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::with_margins(
-        data,
-        width,
-        height,
-        width,
-        height,
-        0,
-        0,
-        cfa,
-        DemosaicRange::Unit,
-    )
+    BayerImage::with_margins(data, width, height, width, height, 0, 0, cfa)
 }
 
 #[test]
@@ -294,17 +223,7 @@ fn test_rcd_uniform_input() {
     let data = vec![val; raw_w * raw_h];
     let act_w = 20;
     let act_h = 20;
-    let bayer = BayerImage::with_margins(
-        &data,
-        raw_w,
-        raw_h,
-        act_w,
-        act_h,
-        6,
-        6,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    let bayer = BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, 6, 6, CfaPattern::Rggb);
     let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
 
     // Check all output pixels. With 6 pixels of margin on each side of the raw
@@ -416,8 +335,7 @@ fn test_rcd_green_at_red_position_hand_computed() {
 }
 
 #[test]
-fn test_rcd_all_patterns_produce_valid_output() {
-    // All 4 CFA patterns should produce valid (non-NaN, in-range) output.
+fn test_rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let w = 20;
     let h = 20;
     let data: Vec<f32> = (0..w * h).map(|i| i as f32 / (w * h) as f32).collect();
@@ -432,14 +350,52 @@ fn test_rcd_all_patterns_produce_valid_output() {
         let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
         assert_eq!(rgb.len(), w * h * 3);
 
-        for (i, &val) in rgb.iter().enumerate() {
-            assert!(
-                val.is_finite() && (0.0..=1.0).contains(&val),
-                "Pattern {:?}: pixel {} = {} (out of range)",
-                pattern,
-                i,
-                val
-            );
+        for (sample, &value) in rgb.iter().enumerate() {
+            assert!(value.is_finite(), "{pattern:?}: sample {sample} = {value}");
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let pixel = y * w + x;
+                let channel = pattern.color_at(y, x);
+                assert_eq!(
+                    rgb[pixel * 3 + channel],
+                    data[pixel],
+                    "{pattern:?}: native sample changed at ({x}, {y})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
+    let width = 32;
+    let height = 24;
+    let slope = 0.125;
+    let data: Vec<f32> = (0..height)
+        .flat_map(|_| (0..width).map(|x| (x as f32 - 15.5) * slope))
+        .collect();
+
+    for pattern in [
+        CfaPattern::Rggb,
+        CfaPattern::Bggr,
+        CfaPattern::Grbg,
+        CfaPattern::Gbrg,
+    ] {
+        let bayer = make_bayer(&data, width, height, pattern);
+        let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
+
+        for y in 6..height - 6 {
+            for x in 6..width - 6 {
+                let expected = (x as f32 - 15.5) * slope;
+                for channel in 0..3 {
+                    let actual = rgb[(y * width + x) * 3 + channel];
+                    assert!(
+                        (actual - expected).abs() < 2e-4,
+                        "{pattern:?} channel {channel} at ({x}, {y}): expected {expected}, got {actual}"
+                    );
+                }
+            }
         }
     }
 }
@@ -456,17 +412,8 @@ fn test_rcd_with_margins() {
     let lm = 4;
 
     let data = vec![0.4f32; raw_w * raw_h];
-    let bayer = BayerImage::with_margins(
-        &data,
-        raw_w,
-        raw_h,
-        act_w,
-        act_h,
-        tm,
-        lm,
-        CfaPattern::Rggb,
-        DemosaicRange::Unit,
-    );
+    let bayer =
+        BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, tm, lm, CfaPattern::Rggb);
     let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
 
     // Output should be active area size
@@ -898,14 +845,8 @@ fn test_rcd_sharp_edge_no_excessive_artifacts() {
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
     let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
 
-    // All output values must be in [0, 1] (clamp works)
     for (i, &val) in rgb.iter().enumerate() {
-        assert!(
-            (0.0..=1.0).contains(&val),
-            "Pixel {} = {} out of [0,1]",
-            i,
-            val
-        );
+        assert!(val.is_finite(), "pixel {i} is non-finite: {val}");
     }
 
     // Far from edge: left side should be close to 0.9, right side close to 0.1

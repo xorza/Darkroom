@@ -10,8 +10,8 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
@@ -45,6 +45,32 @@ impl CfaType {
         match self {
             CfaType::Mono => 1,
             CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
+        }
+    }
+
+    /// Return the same CFA expressed with `(x_offset, y_offset)` as its new origin.
+    pub(crate) fn shifted(&self, x_offset: usize, y_offset: usize) -> Self {
+        match self {
+            CfaType::Mono => CfaType::Mono,
+            CfaType::Bayer(pattern) => {
+                let mut shifted = *pattern;
+                if x_offset & 1 != 0 {
+                    shifted = shifted.flip_horizontal();
+                }
+                if y_offset & 1 != 0 {
+                    shifted = shifted.flip_vertical();
+                }
+                CfaType::Bayer(shifted)
+            }
+            CfaType::XTrans(pattern) => {
+                let mut shifted = [[0; 6]; 6];
+                for y in 0..6 {
+                    for x in 0..6 {
+                        shifted[y][x] = pattern[(y + y_offset) % 6][(x + x_offset) % 6];
+                    }
+                }
+                CfaType::XTrans(shifted)
+            }
         }
     }
 }
@@ -153,7 +179,6 @@ impl CfaImage {
                     0,
                     0,
                     *cfa_pattern,
-                    DemosaicRange::Preserve,
                 );
                 let planes = demosaic_bayer(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
@@ -201,6 +226,7 @@ impl CfaImage {
 #[cfg(test)]
 mod tests {
     use crate::io::astro_image::cfa::*;
+    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
     use crate::testing::make_cfa;
 
     #[test]
@@ -282,6 +308,51 @@ mod tests {
         // Wrapping
         assert_eq!(xtrans.color_at(6, 0), xtrans.color_at(0, 0));
         assert_eq!(xtrans.color_at(0, 6), xtrans.color_at(0, 0));
+    }
+
+    #[test]
+    fn shifted_cfa_preserves_raw_color_identity_for_every_crop_phase() {
+        let bayer_patterns = [
+            CfaPattern::Rggb,
+            CfaPattern::Bggr,
+            CfaPattern::Grbg,
+            CfaPattern::Gbrg,
+        ];
+        for pattern in bayer_patterns {
+            let raw = CfaType::Bayer(pattern);
+            for y_offset in 0..2 {
+                for x_offset in 0..2 {
+                    let cropped = raw.shifted(x_offset, y_offset);
+                    for y in 0..4 {
+                        for x in 0..4 {
+                            assert_eq!(
+                                cropped.color_at(x, y),
+                                raw.color_at(x + x_offset, y + y_offset),
+                                "{pattern:?}, offset ({x_offset}, {y_offset}), ({x}, {y})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let raw = CfaType::XTrans(test_pattern_array());
+        for y_offset in 0..6 {
+            for x_offset in 0..6 {
+                let cropped = raw.shifted(x_offset, y_offset);
+                for y in 0..12 {
+                    for x in 0..12 {
+                        assert_eq!(
+                            cropped.color_at(x, y),
+                            raw.color_at(x + x_offset, y + y_offset),
+                            "offset ({x_offset}, {y_offset}), ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
+
+        assert_eq!(CfaType::Mono.shifted(5, 7), CfaType::Mono);
     }
 
     #[test]

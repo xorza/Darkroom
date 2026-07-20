@@ -187,14 +187,9 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
                 for y in 8..h - 8 {
                     for x in 8..w - 8 {
                         let actual = pixels[y * w + x];
-                        let preserved = if expected < 0.0 {
-                            actual < 0.0
-                        } else {
-                            actual > 1.0
-                        };
                         assert!(
-                            preserved,
-                            "{cfa:?} channel {channel} at ({x},{y}) clipped {expected} to {actual}"
+                            (actual - expected).abs() < 1e-4,
+                            "{cfa:?} channel {channel} at ({x},{y}) changed uniform {expected} to {actual}"
                         );
                     }
                 }

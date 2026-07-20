@@ -24,9 +24,10 @@ let warped = warp(
 non-finite catalog coordinates/FWHM, insufficient catalogs, pattern matching failure, RANSAC
 failure, SIP failure, and the final RMS gate are typed errors.
 
-`warp` returns `WarpResult { image, coverage }`. Coverage is the fraction of interpolation support
-that came from in-bounds source pixels. The stacking pipeline stores and applies it as a per-pixel
-weight, excluding extrapolated borders from rejection and combination.
+`warp` returns `WarpResult { image, coverage, confidence }`. Coverage is the in-bounds fraction of
+interpolation-kernel magnitude and gates geometric inclusion. Confidence is the inverse white-noise
+variance implied by the normalized interpolation coefficients and scales the per-pixel stacking
+weight independently.
 
 ## Registration flow
 
@@ -72,7 +73,7 @@ let mut config = RegistrationConfig::wide_field();
 config.transform_type = TransformType::Homography;
 config.matching.max_stars = 500;
 config.ransac.max_iterations = 5_000;
-config.warp.method = InterpolationMethod::Lanczos3 { deringing: 0.3 };
+config.warp.method = InterpolationMethod::Lanczos3;
 ```
 
 ## Transform models
@@ -97,11 +98,12 @@ Homography uses normalized DLT with SVD.
 - a 4096-sample-per-unit Lanczos LUT;
 - incremental coordinate stepping and interior fast paths;
 - x86 AVX2/SSE4.1 and aarch64 NEON bilinear paths;
-- 128-bit x86 FMA and NEON Lanczos interior kernels with soft-clamp deringing.
+- x86 FMA and NEON normalized linear Lanczos interior kernels.
 
-Nearest and bilinear have non-negative kernels, so zero-border partial pixels are divided by their
-coverage to recover the in-bounds weighted average. Bicubic and Lanczos retain their raw edge value
-because negative-lobe kernels require signed in-sampler weight accounting for exact normalization.
+Zero-border partial bilinear pixels are divided by a separate signed-weight normalization map to
+recover the in-bounds average. Partial Lanczos kernels use edge-extended bilinear interpolation;
+coverage remains based on Lanczos kernel magnitude, while confidence follows the coefficients that
+actually produced the sample.
 
 ## Module layout
 
@@ -111,7 +113,7 @@ because negative-lobe kernels require signed in-sampler weight accounting for ex
 | `config.rs` | Composed public configuration and validation |
 | `result/` | Public registration result and errors |
 | `transform.rs` | Linear transforms and `WarpTransform` |
-| `resample.rs` | Public image warp and coverage orchestration |
+| `resample.rs` | Public image warp and quality-map orchestration |
 | `triangle/` | Pattern formation, invariant matching, and voting |
 | `spatial/` | Flat implicit 2D k-d tree |
 | `ransac/` | Robust estimation and transform solvers |

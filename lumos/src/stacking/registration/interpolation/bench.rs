@@ -40,7 +40,7 @@ fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+            &WarpParams::new(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -56,7 +56,7 @@ fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+            &WarpParams::new(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -72,7 +72,7 @@ fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+            &WarpParams::new(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -100,28 +100,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
     let wt = WarpTransform::new(transform);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
-
-    b.bench(|| {
-        let width = input.width();
-        for (y, row) in black_box(&mut output)
-            .pixels_mut()
-            .chunks_mut(width)
-            .enumerate()
-        {
-            warp::warp_row_lanczos(black_box(&input), row, y, &wt, &params);
-        }
-    });
-}
-
-/// Single-threaded 1k warp WITHOUT deringing, to measure soft-clamp overhead.
-#[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_warp_lanczos3_1k_no_dering(b: quickbench::Bencher) {
-    let input = create_test_image(1024, 1024);
-    let mut output = Buffer2::new_default(1024, 1024);
-    let transform = create_test_transform();
-    let wt = WarpTransform::new(transform);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
+    let params = WarpParams::new(InterpolationMethod::Lanczos3);
 
     b.bench(|| {
         let width = input.width();
@@ -162,7 +141,7 @@ fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 }),
+            &WarpParams::new(InterpolationMethod::Lanczos4),
         );
     });
 }
@@ -178,7 +157,7 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 }),
+            &WarpParams::new(InterpolationMethod::Lanczos2),
         );
     });
 }

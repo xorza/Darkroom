@@ -5,13 +5,14 @@
 //!
 //! The algorithm uses directional discrimination and ratio-corrected
 //! interpolation in a low-pass filter domain to reduce color artifacts,
-//! particularly beneficial for astrophotography (star morphology).
+//! particularly beneficial for astrophotography (star morphology). Signed low-pass
+//! neighborhoods use an additive midpoint estimate where the ratio model is undefined.
 
 use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
-use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
+use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::{
     alloc_uninit_vec,
     demosaic::bayer::{BayerImage, CfaPattern},
@@ -48,6 +49,16 @@ impl Strides {
 #[inline(always)]
 fn intp(a: f32, b: f32, c: f32) -> f32 {
     b + a * (c - b)
+}
+
+#[inline(always)]
+fn estimate_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
+    if center_lpf > EPS && same_color_lpf > EPS {
+        neighbor_green * (center_lpf + center_lpf) / (EPS + center_lpf + same_color_lpf)
+    } else {
+        // Same-color LPFs are two pixels apart; midpoint correction halves their 4× gain.
+        neighbor_green + (center_lpf - same_color_lpf) * 0.125
+    }
 }
 
 /// Mean of the four diagonal neighbours of `idx` (stride `w1`): the direction-discriminator's
@@ -237,11 +248,10 @@ pub(crate) fn rcd_demosaic(
                     + (cfa[idx + 2] - cfa[idx + 4]).abs();
 
                 let lpfi = lpf[idx];
-                let two_lpfi = lpfi + lpfi;
-                let n_est = cfa[idx - w1] * two_lpfi / (EPS + lpfi + lpf[idx - w2]);
-                let s_est = cfa[idx + w1] * two_lpfi / (EPS + lpfi + lpf[idx + w2]);
-                let w_est = cfa[idx - 1] * two_lpfi / (EPS + lpfi + lpf[idx - 2]);
-                let e_est = cfa[idx + 1] * two_lpfi / (EPS + lpfi + lpf[idx + 2]);
+                let n_est = estimate_green(cfa[idx - w1], lpfi, lpf[idx - w2]);
+                let s_est = estimate_green(cfa[idx + w1], lpfi, lpf[idx + w2]);
+                let w_est = estimate_green(cfa[idx - 1], lpfi, lpf[idx - 2]);
+                let e_est = estimate_green(cfa[idx + 1], lpfi, lpf[idx + 2]);
 
                 let v_est = (s_grad * n_est + n_grad * s_est) / (n_grad + s_grad);
                 let h_est = (w_grad * e_est + e_grad * w_est) / (e_grad + w_grad);
@@ -254,7 +264,7 @@ pub(crate) fn rcd_demosaic(
                     vh_central
                 };
 
-                green_row[rx] = bayer.output_range.apply(intp(vh_disc, v_est, h_est));
+                green_row[rx] = intp(vh_disc, v_est, h_est);
 
                 rx += 2;
             }
@@ -346,29 +356,13 @@ pub(crate) fn rcd_demosaic(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
-    step4_2_rb_at_opposing(
-        &mut rgb_r,
-        &mut rgb_b,
-        &rgb_g,
-        &pq_dir,
-        &pattern,
-        bayer.output_range,
-        s,
-    );
+    step4_2_rb_at_opposing(&mut rgb_r, &mut rgb_b, &rgb_g, &pq_dir, &pattern, s);
 
     // Step 4.3: Red/Blue at Green CFA positions.
     // Reads rgb_r, rgb_b, rgb_g, vh_dir. Writes rgb_r and rgb_b at green positions.
     // Each row's green positions only read from neighboring rows' R/B values
     // (set in CFA copy or Step 4.2), so rows are independent.
-    step4_3_rb_at_green(
-        &mut rgb_r,
-        &mut rgb_b,
-        &rgb_g,
-        &vh_dir,
-        &pattern,
-        bayer.output_range,
-        s,
-    );
+    step4_3_rb_at_green(&mut rgb_r, &mut rgb_b, &rgb_g, &vh_dir, &pattern, s);
 
     drop(vh_dir);
     drop(pq_dir);
@@ -412,7 +406,6 @@ fn step4_2_rb_at_opposing(
     rgb_g: &[f32],
     pq_dir: &[f32],
     pattern: &CfaPattern,
-    output_range: DemosaicRange,
     s: Strides,
 ) {
     let rh = s.rh;
@@ -439,7 +432,7 @@ fn step4_2_rb_at_opposing(
             // SAFETY: Rows write disjoint indices. Diagonal reads land only on native CFA samples,
             // which this phase never writes.
             unsafe {
-                process_step4_2_row(ptr, rgb_g, pq_dir, ry, col_start, output_range, s);
+                process_step4_2_row(ptr, rgb_g, pq_dir, ry, col_start, s);
             }
         });
 }
@@ -452,7 +445,6 @@ unsafe fn process_step4_2_row(
     pq_dir: &[f32],
     ry: usize,
     col_start: usize,
-    output_range: DemosaicRange,
     s: Strides,
 ) {
     let Strides { rw, w1, w2, w3, .. } = s;
@@ -497,7 +489,7 @@ unsafe fn process_step4_2_row(
         let p_est = (nw_grad * se_est + se_grad * nw_est) / (nw_grad + se_grad);
         let q_est = (ne_grad * sw_est + sw_grad * ne_est) / (ne_grad + sw_grad);
 
-        let value = output_range.apply(rgb_g[idx] + intp(pq_disc, p_est, q_est));
+        let value = rgb_g[idx] + intp(pq_disc, p_est, q_est);
         // SAFETY: This row owns `idx`; no other phase worker reads or writes missing-color sites.
         unsafe { dst.add(idx).write(value) };
 
@@ -512,7 +504,6 @@ fn step4_3_rb_at_green(
     rgb_g: &[f32],
     vh_dir: &[f32],
     pattern: &CfaPattern,
-    output_range: DemosaicRange,
     s: Strides,
 ) {
     let Strides { rw, rh, w1, w2, w3 } = s;
@@ -575,7 +566,7 @@ fn step4_3_rb_at_green(
                     let v_est = (n_grad * s_est + s_grad * n_est) / (n_grad + s_grad);
                     let h_est = (e_grad * w_est + w_grad * e_est) / (e_grad + w_grad);
 
-                    let value = output_range.apply(g_center + intp(vh_disc, v_est, h_est));
+                    let value = g_center + intp(vh_disc, v_est, h_est);
                     // SAFETY: Each worker owns the green sites in its row.
                     unsafe { r_ptr.add(idx).write(value) };
                 }
@@ -597,7 +588,7 @@ fn step4_3_rb_at_green(
                     let v_est = (n_grad * s_est + s_grad * n_est) / (n_grad + s_grad);
                     let h_est = (e_grad * w_est + w_grad * e_est) / (e_grad + w_grad);
 
-                    let value = output_range.apply(g_center + intp(vh_disc, v_est, h_est));
+                    let value = g_center + intp(vh_disc, v_est, h_est);
                     // SAFETY: Each worker owns the green sites in its row.
                     unsafe { b_ptr.add(idx).write(value) };
                 }
@@ -693,5 +684,46 @@ fn border_interpolate(
                 border_pixel(ry, rx);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::raw::demosaic::bayer::rcd::{EPS, estimate_green};
+
+    #[test]
+    fn positive_green_estimate_matches_canonical_ratio() {
+        let actual = estimate_green(1.5, 4.0, 8.0);
+        let expected = 1.5 * 8.0 / (EPS + 12.0);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn signed_green_estimate_avoids_cancelling_denominator() {
+        let same_color_lpf = -1.0 - EPS;
+        let actual = estimate_green(0.25, 1.0, same_color_lpf);
+        let expected = 0.25 + (1.0 - same_color_lpf) / 8.0;
+        assert_eq!(actual, expected);
+        assert!(actual.is_finite());
+    }
+
+    #[test]
+    fn signed_green_estimate_preserves_constants_and_pedestals() {
+        assert_eq!(estimate_green(-0.75, -3.0, -3.0), -0.75);
+
+        let base = estimate_green(-0.75, -4.0, -2.0);
+        let pedestal = 0.25;
+        let shifted = estimate_green(
+            -0.75 + pedestal,
+            -4.0 + 4.0 * pedestal,
+            -2.0 + 4.0 * pedestal,
+        );
+        assert_eq!(base, -1.0);
+        assert_eq!(shifted, base + pedestal);
+    }
+
+    #[test]
+    fn signed_green_estimate_handles_zero_crossing_gradient() {
+        assert_eq!(estimate_green(0.0, -0.4, 0.4), -0.1);
     }
 }

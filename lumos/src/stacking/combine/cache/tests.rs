@@ -1,6 +1,7 @@
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::combine::cache::*;
+use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{frame_from_memory, store_frame};
 use crate::testing::ScratchDirectory;
 
@@ -11,6 +12,13 @@ pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
         .expect("test images must be non-empty and dimension-consistent")
 }
 
+fn mean_product(cache: &LightCache, weights: Option<&[f32]>) -> StackProduct {
+    let combined = cache.process_chunked_weighted(weights, None, |values, weights, scratch| {
+        Rejection::None.combine_mean_with_quality(values, weights, scratch)
+    });
+    cache.finish_product(combined)
+}
+
 #[test]
 fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
@@ -19,13 +27,12 @@ fn finish_product_uniform_equal_weights() {
     let images: Vec<AstroImage> = (0..4)
         .map(|i| AstroImage::from_pixels(dims, vec![i as f32; 6]))
         .collect();
-    let product =
-        make_test_cache(images).finish_product(AstroImage::from_pixels(dims, vec![0.25; 6]), None);
-    assert_eq!(product.image.channel(0).pixels(), &[0.25; 6]);
+    let product = mean_product(&make_test_cache(images), None);
+    assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
     for p in 0..6 {
         assert_eq!(product.coverage[p], 1.0);
-        assert_eq!(product.weight[p], 4.0);
-        assert_eq!(product.variance[p], 0.25);
+        assert_eq!(product.weight.channel(0)[p], 4.0);
+        assert_eq!(product.variance.channel(0)[p], 0.25);
     }
 }
 
@@ -36,27 +43,24 @@ fn finish_product_uniform_manual_weights() {
     let images: Vec<AstroImage> = (0..4)
         .map(|_| AstroImage::from_pixels(dims, vec![0.5; 2]))
         .collect();
-    let product = make_test_cache(images).finish_product(
-        AstroImage::from_pixels(dims, vec![0.25; 2]),
-        Some(&[1.0, 2.0, 3.0, 4.0]),
-    );
+    let product = mean_product(&make_test_cache(images), Some(&[1.0, 2.0, 3.0, 4.0]));
     for p in 0..2 {
         assert_eq!(product.coverage[p], 1.0);
-        assert_eq!(product.weight[p], 10.0);
+        assert_eq!(product.weight.channel(0)[p], 10.0);
         assert!(
-            (product.variance[p] - 0.30).abs() < 1e-6,
+            (product.variance.channel(0)[p] - 0.30).abs() < 1e-6,
             "variance = {}",
-            product.variance[p]
+            product.variance.channel(0)[p]
         );
     }
 }
 
 #[test]
 fn finish_product_partial_coverage() {
-    // width-2 frames; px0 fully covered by all 4, px1 covered by f0(1.0), f1(0.5), f3(1.0) and
-    // dropped by f2 (coverage 0 < ε). Equal weights. Exercises the per-pixel (non-fast) path.
-    //   px0: count 4, Σwc = 4,   Σ(wc)² = 4    → coverage 1.0,  weight 4.0, variance 4/16  = 0.25
-    //   px1: count 3, Σwc = 2.5, Σ(wc)² = 2.25 → coverage 0.75, weight 2.5, variance 2.25/6.25 = 0.36
+    // width-2 frames; px1 has support from f0, f1, and f3, while f2 is unsupported.
+    // Coverage gates inclusion but does not scale statistical weight.
+    //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, variance 0.25
+    //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, variance 1/3
     let dims = ImageDimensions::new((2, 1), 1);
     let cov = [[1.0_f32, 1.0], [1.0, 0.5], [1.0, 0.0], [1.0, 1.0]];
     let frames: Vec<StackFrame> = cov
@@ -64,23 +68,24 @@ fn finish_product_partial_coverage() {
         .map(|c| StackFrame {
             image: AstroImage::from_pixels(dims, vec![0.5, 0.5]),
             coverage: Some(Buffer2::new(2, 1, c.to_vec())),
+            confidence: None,
         })
         .collect();
     let cache =
         LightCache::from_stack_frames(frames, &CacheConfig::default(), ProgressCallback::default())
             .expect("frames are valid");
-    let product = cache.finish_product(AstroImage::from_pixels(dims, vec![0.25, 0.25]), None);
+    let product = mean_product(&cache, None);
 
     assert_eq!(product.coverage[0], 1.0);
-    assert_eq!(product.weight[0], 4.0);
-    assert_eq!(product.variance[0], 0.25);
+    assert_eq!(product.weight.channel(0)[0], 4.0);
+    assert_eq!(product.variance.channel(0)[0], 0.25);
 
     assert_eq!(product.coverage[1], 0.75);
-    assert_eq!(product.weight[1], 2.5);
+    assert_eq!(product.weight.channel(0)[1], 3.0);
     assert!(
-        (product.variance[1] - 0.36).abs() < 1e-6,
+        (product.variance.channel(0)[1] - 1.0 / 3.0).abs() < 1e-6,
         "variance = {}",
-        product.variance[1]
+        product.variance.channel(0)[1]
     );
 }
 
@@ -127,14 +132,14 @@ fn test_process_chunked_median() {
     let cache = make_test_cache(images);
 
     // Median of [1, 3, 2] = 2
-    let result = cache.process_chunked_weighted(None, None, |values, _, _| {
+    let result = cache.process_chunked_weighted(None, None, |values, weights, _| {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        values[values.len() / 2]
+        CombinedSample::from_all(values[values.len() / 2], weights)
     });
 
-    assert_eq!(result.channels(), 1);
-    assert_eq!(result.channel(0).len(), 16);
-    for &pixel in result.channel(0).pixels() {
+    assert_eq!(result.pixels.channels(), 1);
+    assert_eq!(result.pixels.channel(0).len(), 16);
+    for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 2.0).abs() < f32::EPSILON);
     }
 }
@@ -156,18 +161,18 @@ fn test_process_chunked_rgb() {
     let cache = make_test_cache(images);
 
     // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-    let result = cache.process_chunked_weighted(None, None, |values, _, _| {
-        values.iter().sum::<f32>() / values.len() as f32
+    let result = cache.process_chunked_weighted(None, None, |values, weights, _| {
+        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     });
 
-    assert_eq!(result.channels(), 3);
-    for &pixel in result.channel(0).pixels() {
+    assert_eq!(result.pixels.channels(), 3);
+    for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
     }
-    for &pixel in result.channel(1).pixels() {
+    for &pixel in result.pixels.channel(1).pixels() {
         assert!((pixel - 4.0).abs() < f32::EPSILON, "G channel");
     }
-    for &pixel in result.channel(2).pixels() {
+    for &pixel in result.pixels.channel(2).pixels() {
         assert!((pixel - 5.0).abs() < f32::EPSILON, "B channel");
     }
 }
@@ -185,13 +190,12 @@ fn test_process_chunked_with_weights() {
     // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
     let weights = vec![1.0, 3.0];
     let result = cache.process_chunked_weighted(Some(&weights), None, |values, w, _| {
-        let w = w.unwrap();
         let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
         let weight_sum: f32 = w.iter().sum();
-        sum / weight_sum
+        CombinedSample::from_all(sum / weight_sum, w)
     });
 
-    for &pixel in result.channel(0).pixels() {
+    for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 17.5).abs() < f32::EPSILON);
     }
 }

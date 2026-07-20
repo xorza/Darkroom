@@ -86,12 +86,15 @@ significant dark current. Flat dark takes priority over bias when both are provi
 Two defect classes from two masters (a dark has no light, so dead pixels are invisible in it;
 a flat reveals them as dark spots under uniform illumination):
 
-**Hot pixels — from the master dark**, via robust per-color Median Absolute Deviation (MAD):
+**Hot pixels — from the master dark**, after subtracting a robust broad dark-current model:
+- Fit per-color medians in balanced 64×64 tiles and bilinearly interpolate them across the sensor;
+  this follows smooth gradients and amp glow without letting adjacent same-color defects become
+  one another's reference
+- Apply the robust per-color Median Absolute Deviation (MAD) threshold to the residual
 - MAD is robust to outliers (unlike standard deviation — the very pixels being hunted inflate σ)
 - Default 5-sigma threshold (conservative, avoids false positives); clamped to ≥ 1σ
-- Per-color σ with two floors, `σ = max(1.4826·MAD, median·0.1, 5e-4)`: the absolute floor
-  (`5e-4`, ~33 ADU at 16-bit) stops a near-uniform stacked dark with MAD ≈ 0 from flagging its own
-  warm tail; the relative floor scales it on high-dark-current sensors
+- Per-color `σ = max(1.4826·MAD, 5e-4)`: the absolute floor (`5e-4`, ~33 ADU at 16-bit)
+  stops a near-uniform stacked dark with MAD ≈ 0 from flagging its own noise tail
 - Adaptive sampling (100K px per color) above 200K pixels for fast median/MAD
 
 **Cold/dead pixels — from the master flat**, via a local same-color-neighbor ratio: a pixel reading

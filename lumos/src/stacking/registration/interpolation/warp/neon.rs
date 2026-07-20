@@ -14,7 +14,6 @@ use common::Vec2us;
 use glam::{DVec2, IVec2, Vec2};
 use imaginarium::Buffer2;
 
-use crate::stacking::registration::interpolation::warp::SoftClampAccum;
 use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel};
 use crate::stacking::registration::transform::Transform;
 
@@ -108,26 +107,22 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
     }
 }
 
-/// NEON counterpart of [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`]:
-/// separable Lanczos over a `SIZE×SIZE` window with optional PixInsight-style soft-clamp deringing
-/// (positive/negative contributions split). 128-bit lo+hi where the x86 kernel is 256-bit (SIZE>4).
+/// NEON counterpart of
+/// [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`]: separable
+/// Lanczos over a `SIZE×SIZE` window. 128-bit lo+hi where the x86 kernel is 256-bit (SIZE>4).
 ///
 /// # Safety
 /// - Caller must be on aarch64.
 /// - The `SIZE×SIZE` window at `(kx, ky)` must be fully in bounds. For `SIZE > 4`,
 ///   `kx + 7 < input_width` (reads 8 floats/row); for `SIZE = 4`, `kx + 3 < input_width`.
-pub(crate) unsafe fn lanczos_kernel_neon<
-    const A: usize,
-    const SIZE: usize,
-    const DERINGING: bool,
->(
+pub(crate) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,
     ky: usize,
     wx: &[f32; SIZE],
     wy: &[f32; SIZE],
-) -> SoftClampAccum {
+) -> f32 {
     unsafe {
         // Horizontal weights, constant across rows. For SIZE=6 the top half is zero-padded; the
         // dispatch guarantees the extra two columns are in bounds, and their zero weight nulls them.
@@ -141,85 +136,28 @@ pub(crate) unsafe fn lanczos_kernel_neon<
             vdupq_n_f32(0.0)
         };
 
-        let zero = vdupq_n_f32(0.0);
-        let mut acc_lo = zero;
-        let mut acc_hi = zero;
-        let mut sp_lo = zero;
-        let mut sp_hi = zero;
-        let mut sn_lo = zero;
-        let mut sn_hi = zero;
-        let mut wp_lo = zero;
-        let mut wp_hi = zero;
-        let mut wn_lo = zero;
-        let mut wn_hi = zero;
+        let mut acc_lo = vdupq_n_f32(0.0);
+        let mut acc_hi = vdupq_n_f32(0.0);
 
         for j in 0..SIZE {
             let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
             let src_lo = vld1q_f32(row_ptr);
             let wyj = vdupq_n_f32(wy[j]);
 
-            if DERINGING {
-                let w_lo = vmulq_f32(wx_lo, wyj);
-                let s_lo = vmulq_f32(src_lo, w_lo);
-                // pos lanes: s >= 0; the complement (s < 0) feeds the negative accumulators.
-                let pos_lo = vcgeq_f32(s_lo, zero);
-                sp_lo = vaddq_f32(sp_lo, vbslq_f32(pos_lo, s_lo, zero));
-                wp_lo = vaddq_f32(wp_lo, vbslq_f32(pos_lo, w_lo, zero));
-                sn_lo = vsubq_f32(sn_lo, vbslq_f32(pos_lo, zero, s_lo));
-                wn_lo = vsubq_f32(wn_lo, vbslq_f32(pos_lo, zero, w_lo));
+            let sx_lo = vmulq_f32(src_lo, wx_lo);
+            acc_lo = vfmaq_f32(acc_lo, sx_lo, wyj);
 
-                if SIZE > 4 {
-                    let src_hi = vld1q_f32(row_ptr.add(4));
-                    let w_hi = vmulq_f32(wx_hi, wyj);
-                    let s_hi = vmulq_f32(src_hi, w_hi);
-                    let pos_hi = vcgeq_f32(s_hi, zero);
-                    sp_hi = vaddq_f32(sp_hi, vbslq_f32(pos_hi, s_hi, zero));
-                    wp_hi = vaddq_f32(wp_hi, vbslq_f32(pos_hi, w_hi, zero));
-                    sn_hi = vsubq_f32(sn_hi, vbslq_f32(pos_hi, zero, s_hi));
-                    wn_hi = vsubq_f32(wn_hi, vbslq_f32(pos_hi, zero, w_hi));
-                }
-            } else {
-                let sx_lo = vmulq_f32(src_lo, wx_lo);
-                acc_lo = vfmaq_f32(acc_lo, sx_lo, wyj);
-
-                if SIZE > 4 {
-                    let src_hi = vld1q_f32(row_ptr.add(4));
-                    let sx_hi = vmulq_f32(src_hi, wx_hi);
-                    acc_hi = vfmaq_f32(acc_hi, sx_hi, wyj);
-                }
+            if SIZE > 4 {
+                let src_hi = vld1q_f32(row_ptr.add(4));
+                let sx_hi = vmulq_f32(src_hi, wx_hi);
+                acc_hi = vfmaq_f32(acc_hi, sx_hi, wyj);
             }
         }
 
-        if DERINGING {
-            if SIZE > 4 {
-                SoftClampAccum {
-                    sp: vaddvq_f32(vaddq_f32(sp_lo, sp_hi)),
-                    sn: vaddvq_f32(vaddq_f32(sn_lo, sn_hi)),
-                    wp: vaddvq_f32(vaddq_f32(wp_lo, wp_hi)),
-                    wn: vaddvq_f32(vaddq_f32(wn_lo, wn_hi)),
-                }
-            } else {
-                SoftClampAccum {
-                    sp: vaddvq_f32(sp_lo),
-                    sn: vaddvq_f32(sn_lo),
-                    wp: vaddvq_f32(wp_lo),
-                    wn: vaddvq_f32(wn_lo),
-                }
-            }
-        } else if SIZE > 4 {
-            SoftClampAccum {
-                sp: vaddvq_f32(vaddq_f32(acc_lo, acc_hi)),
-                sn: 0.0,
-                wp: 0.0,
-                wn: 0.0,
-            }
+        if SIZE > 4 {
+            vaddvq_f32(vaddq_f32(acc_lo, acc_hi))
         } else {
-            SoftClampAccum {
-                sp: vaddvq_f32(acc_lo),
-                sn: 0.0,
-                wp: 0.0,
-                wn: 0.0,
-            }
+            vaddvq_f32(acc_lo)
         }
     }
 }
@@ -265,21 +203,10 @@ mod tests {
             }
         }
 
-        let simd = unsafe { lanczos_kernel_neon::<A, SIZE, false>(&data, width, kx, ky, &wx, &wy) };
+        let simd = unsafe { lanczos_kernel_neon::<SIZE>(&data, width, kx, ky, &wx, &wy) };
         assert!(
-            (simd.sp - scalar_sum).abs() < 1e-4,
-            "{label} no-dering: NEON {} vs scalar {scalar_sum}",
-            simd.sp
-        );
-        assert_eq!(simd.sn, 0.0);
-
-        // With deringing, sp - sn reconstructs the same weighted sum.
-        let simd_d =
-            unsafe { lanczos_kernel_neon::<A, SIZE, true>(&data, width, kx, ky, &wx, &wy) };
-        let total = simd_d.sp - simd_d.sn;
-        assert!(
-            (total - scalar_sum).abs() < 1e-4,
-            "{label} dering: sp-sn={total} vs scalar {scalar_sum}"
+            (simd - scalar_sum).abs() < 1e-4,
+            "{label}: NEON {simd} vs scalar {scalar_sum}",
         );
     }
 

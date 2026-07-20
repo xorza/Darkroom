@@ -227,7 +227,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 let calibrated = detected.image.load();
                 let name = format!("warped_{idx}");
                 if idx == reference {
-                    return store_light_frame(cache_dir, &name, calibrated, None)
+                    return store_light_frame(cache_dir, &name, calibrated, None, None)
                         .map(Some)
                         .map_err(StackError::from)
                         .map_err(Error::Stack);
@@ -253,10 +253,16 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                     inliers = registration.num_inliers(),
                     "registered (streaming)"
                 );
-                store_light_frame(cache_dir, &name, warped.image, Some(warped.coverage))
-                    .map(Some)
-                    .map_err(StackError::from)
-                    .map_err(Error::Stack)
+                store_light_frame(
+                    cache_dir,
+                    &name,
+                    warped.image,
+                    Some(warped.coverage),
+                    Some(warped.confidence),
+                )
+                .map(Some)
+                .map_err(StackError::from)
+                .map_err(Error::Stack)
             })
             .collect();
         outcomes.extend(batch_outcomes?);

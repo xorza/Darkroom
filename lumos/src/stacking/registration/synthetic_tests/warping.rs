@@ -90,9 +90,9 @@ fn all_interpolation_methods() -> Vec<InterpolationMethod> {
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2 { deringing: 0.3 },
-        InterpolationMethod::Lanczos3 { deringing: 0.3 },
-        InterpolationMethod::Lanczos4 { deringing: 0.3 },
+        InterpolationMethod::Lanczos2,
+        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos4,
     ]
 }
 
@@ -182,7 +182,7 @@ fn test_warp_translation_roundtrip() {
         &[
             (InterpolationMethod::Nearest, 15.0, 0.25),
             (InterpolationMethod::Bilinear, 22.0, 0.70),
-            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 25.0, 0.80),
+            (InterpolationMethod::Lanczos3, 25.0, 0.80),
         ],
     );
 }
@@ -197,7 +197,7 @@ fn test_warp_euclidean_roundtrip() {
         &[
             (InterpolationMethod::Nearest, 12.0, 0.25),
             (InterpolationMethod::Bilinear, 25.0, 0.85),
-            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 30.0, 0.90),
+            (InterpolationMethod::Lanczos3, 30.0, 0.90),
         ],
     );
 }
@@ -212,7 +212,7 @@ fn test_warp_similarity_roundtrip() {
         &[
             (InterpolationMethod::Nearest, 12.0, 0.85),
             (InterpolationMethod::Bilinear, 22.0, 0.85),
-            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 28.0, 0.85),
+            (InterpolationMethod::Lanczos3, 28.0, 0.85),
         ],
     );
 }
@@ -240,7 +240,7 @@ fn test_warp_affine_roundtrip() {
         &[
             (InterpolationMethod::Nearest, 12.0, 0.85),
             (InterpolationMethod::Bilinear, 22.0, 0.85),
-            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 26.0, 0.85),
+            (InterpolationMethod::Lanczos3, 26.0, 0.85),
         ],
     );
 }
@@ -259,7 +259,7 @@ fn test_warp_homography_roundtrip() {
         &[
             (InterpolationMethod::Nearest, 10.0, 0.80),
             (InterpolationMethod::Bilinear, 20.0, 0.80),
-            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 24.0, 0.80),
+            (InterpolationMethod::Lanczos3, 24.0, 0.80),
         ],
     );
 }
@@ -286,11 +286,7 @@ fn test_warp_with_detected_transform() {
     let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
 
     // Create target by warping reference
-    let target_pixels = do_warp(
-        &ref_pixels,
-        &true_transform,
-        InterpolationMethod::Lanczos3 { deringing: 0.3 },
-    );
+    let target_pixels = do_warp(&ref_pixels, &true_transform, InterpolationMethod::Lanczos3);
 
     // Detect stars in both images
     let mut detection_config = StarConfig::default();
@@ -327,7 +323,7 @@ fn test_warp_with_detected_transform() {
         target_pixels.into_vec(),
     );
     let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
     let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config).image;
@@ -396,7 +392,7 @@ fn test_interpolation_quality_ordering() {
         .1;
     let lanczos3_psnr = results
         .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Lanczos3 { deringing: 0.3 })
+        .find(|(m, _)| *m == InterpolationMethod::Lanczos3)
         .unwrap()
         .1;
 
@@ -428,7 +424,7 @@ fn test_warp_grayscale_translation() {
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
 
     let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
     let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
@@ -488,7 +484,7 @@ fn test_warp_rgb() {
 
     // Warp the RGB image
     let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
     let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
@@ -649,13 +645,13 @@ fn test_warp_with_sip_correction() {
         &ref_buf,
         &mut output_no_sip,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+        &WarpParams::new(InterpolationMethod::Lanczos3),
     );
     warp_image(
         &ref_buf,
         &mut output_with_sip,
         &WarpTransform::with_sip(transform, sip),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+        &WarpParams::new(InterpolationMethod::Lanczos3),
     );
 
     // The two outputs should differ — SIP applies nonlinear correction
@@ -768,9 +764,8 @@ fn test_warp_api_with_sip() {
     );
 }
 
-/// `warp` emits a per-pixel coverage map (the in-bounds kernel-weight fraction)
-/// and renormalizes partially-covered bilinear border pixels back to the
-/// in-bounds average instead of darkening them toward the zero border.
+/// `warp` emits independent geometric support and interpolation-confidence maps and renormalizes
+/// partially-covered bilinear border pixels back to the in-bounds average.
 #[test]
 fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // Constant image so any darkening is unambiguous: a covered output pixel
@@ -791,6 +786,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 
     let result = warp(&image, &WarpTransform::new(transform), &config);
     let cov = result.coverage.pixels();
+    let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
     let at = |x: usize, y: usize| y * w + x;
 
@@ -810,6 +806,20 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     );
     assert_eq!(cov[at(14, y)], 0.0, "col 14 is outside the source");
     assert_eq!(cov[at(15, y)], 0.0, "col 15 is outside the source");
+    for x in 0..=12 {
+        assert!(
+            (confidence[at(x, y)] - 2.0).abs() < 1e-5,
+            "two equal x taps have confidence 1²/(0.5²+0.5²) = 2, got {} at col {x}",
+            confidence[at(x, y)]
+        );
+    }
+    assert!(
+        (confidence[at(13, y)] - 1.0).abs() < 1e-5,
+        "one surviving tap has confidence 0.5²/0.5² = 1, got {}",
+        confidence[at(13, y)]
+    );
+    assert_eq!(confidence[at(14, y)], 0.0);
+    assert_eq!(confidence[at(15, y)], 0.0);
 
     // Renormalization: every covered pixel — including the half-covered
     // column 13 — reads back V, not a darkened 0.5·V; fully-outside columns
@@ -824,17 +834,17 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     assert_eq!(val[at(14, y)], 0.0);
     assert_eq!(val[at(15, y)], 0.0);
 
-    // Coverage stays in [0, 1] everywhere; every pixel is either border-zero or V.
-    for (&c, &v) in cov.iter().zip(val.iter()) {
+    // Coverage stays in [0, 1], confidence is finite and non-negative, and every pixel is either
+    // border-zero or V.
+    for ((&c, &q), &v) in cov.iter().zip(confidence.iter()).zip(val.iter()) {
         assert!((0.0..=1.0).contains(&c), "coverage {c} out of range");
+        assert!(q.is_finite() && q >= 0.0, "invalid confidence {q}");
         assert!(v == 0.0 || (v - V).abs() < 1e-5, "unexpected value {v}");
     }
 }
 
-/// The default negative-lobe kernel (Lanczos3) emits coverage — 1.0 interior, 0.0 fully
-/// outside, fractional across an `a`-wide border band — AND renormalizes the value by the
-/// in-bounds weight: a partially-covered edge pixel of a flat field reads V (recovered),
-/// not V·coverage (darkened). Coverage stays as the downstream stacking weight.
+/// The default negative-lobe kernel (Lanczos3) emits magnitude-based coverage and independent
+/// interpolation confidence while preserving a flat field through its edge fallback.
 #[test]
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
@@ -845,17 +855,18 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     // for x ≳ 26 and lands entirely outside by x = 31.
     let transform = Transform::translation(DVec2::new(3.5, 0.0));
     let config = WarpParams {
-        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
 
     let result = warp(&image, &WarpTransform::new(transform), &config);
     let cov = result.coverage.pixels();
+    let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
     let at = |x: usize, y: usize| y * w + x;
     let y = 4;
 
-    // Interior: every kernel tap is in bounds, so Σ_in/Σ_all == 1 exactly.
+    // Interior: every kernel tap is in bounds, so the magnitude support fraction is 1 exactly.
     assert!(
         (cov[at(10, y)] - 1.0).abs() < 1e-5,
         "interior coverage should be 1.0, got {}",
@@ -872,9 +883,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         "expected a fractional coverage band, got {partial} columns"
     );
 
-    // Lanczos is renormalized by the in-bounds weight: a flat field reads V everywhere it
-    // has any coverage — interior AND partially-covered edge columns — instead of being
-    // darkened to V·coverage as it was before in-sampler weight tracking.
+    // Fully supported Lanczos and its edge-extended bilinear fallback both preserve a flat field.
     assert!(
         (val[at(10, y)] - V).abs() < 1e-4,
         "interior value should be V, got {}",
@@ -889,8 +898,17 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         val[at(edge_x, y)],
         cov[at(edge_x, y)]
     );
+    assert!(
+        confidence[at(10, y)].is_finite() && confidence[at(10, y)] > 0.0,
+        "interior confidence should be finite and positive"
+    );
+    assert!(
+        confidence[at(edge_x, y)].is_finite() && confidence[at(edge_x, y)] > 0.0,
+        "partial-kernel confidence should follow the finite bilinear fallback"
+    );
 
-    for &c in cov {
+    for (&c, &q) in cov.iter().zip(confidence.iter()) {
         assert!((0.0..=1.0).contains(&c), "coverage {c} out of range");
+        assert!(q.is_finite() && q >= 0.0, "invalid confidence {q}");
     }
 }

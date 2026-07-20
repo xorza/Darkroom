@@ -206,6 +206,15 @@ pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32
 }
 
 #[inline]
+pub(crate) fn bilinear_sample_edge_extended(input: &Buffer2<f32>, pos: Vec2) -> f32 {
+    let max = Vec2::new(
+        input.width().saturating_sub(1) as f32,
+        input.height().saturating_sub(1) as f32,
+    );
+    bilinear_sample(input, pos.clamp(Vec2::ZERO, max), 0.0)
+}
+
+#[inline]
 fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     sample_pixel(
         data.pixels(),
@@ -276,11 +285,29 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     border_value: f32,
 ) -> f32 {
     let (x, y) = (pos.x, pos.y);
+    let (w, h) = (data.width(), data.height());
+    let support_min = -(A as f32);
+    let support_max = Vec2::new(w as f32 + A as f32 - 1.0, h as f32 + A as f32 - 1.0);
+    if !pos.is_finite()
+        || x < support_min
+        || y < support_min
+        || x >= support_max.x
+        || y >= support_max.y
+    {
+        return border_value;
+    }
+
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
     let a_i32 = A as i32;
+    let kx0 = x0 - a_i32 + 1;
+    let ky0 = y0 - a_i32 + 1;
+    if kx0 < 0 || ky0 < 0 || kx0 + SIZE as i32 > w as i32 || ky0 + SIZE as i32 > h as i32 {
+        return bilinear_sample_edge_extended(data, pos);
+    }
+
     let lut = get_lanczos_lut(A);
 
     let mut wx = [0.0f32; SIZE];
@@ -292,33 +319,22 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
         *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
     }
 
-    let (pixels, w, h) = (data.pixels(), data.width(), data.height());
-    let (wi, hi) = (w as i32, h as i32);
-    // Drop out-of-bounds taps and divide by the in-bounds weight (the in-bounds weighted
-    // average). Interior pixels are unchanged: `w_in` equals the full kernel sum that the
-    // old `inv_wx * inv_wy` normalization divided by.
+    let pixels = data.pixels();
     let mut sum = 0.0f32;
-    let mut w_in = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
-        if py < 0 || py >= hi {
-            continue;
-        }
         let row_off = py as usize * w;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            if px < 0 || px >= wi {
-                continue;
-            }
             let weight = wxi * wyj;
             sum += pixels[row_off + px as usize] * weight;
-            w_in += weight;
         }
     }
-    if w_in.abs() < 1e-10 {
-        border_value
+    let total_weight = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
+    if total_weight.abs() < 1e-10 {
+        sum
     } else {
-        sum / w_in
+        sum / total_weight
     }
 }
 
@@ -331,49 +347,116 @@ fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
         InterpolationMethod::Nearest => interpolate_nearest(data, pos, params.border_value),
         InterpolationMethod::Bilinear => bilinear_sample(data, pos, params.border_value),
         InterpolationMethod::Bicubic => interpolate_bicubic(data, pos, params.border_value),
-        InterpolationMethod::Lanczos2 { .. } => {
-            interpolate_lanczos(data, pos, 2, params.border_value)
-        }
-        InterpolationMethod::Lanczos3 { .. } => {
-            interpolate_lanczos(data, pos, 3, params.border_value)
-        }
-        InterpolationMethod::Lanczos4 { .. } => {
-            interpolate_lanczos(data, pos, 4, params.border_value)
-        }
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, pos, 2, params.border_value),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, pos, 3, params.border_value),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, pos, 4, params.border_value),
     }
 }
 
-/// Fraction of the interpolation kernel's weight at one output pixel that lands
-/// on in-bounds source samples — `Σ_in(w) / Σ_all(w) ∈ [0, 1]`. Pure geometry:
-/// it mirrors each sampler's tap layout + weights but reads no pixel data, so
-/// it needs neither a scratch source buffer nor a second sampling pass. The
-/// `1.0` for fully-interior pixels and `0.0` for fully-extrapolated ones is the
-/// per-pixel data-fraction weight [`warp_coverage`] feeds to downstream stacking.
-/// The warped *value* is renormalized to the in-bounds weighted average, but *where*
-/// depends on the kernel: bicubic/Lanczos (negative lobes) renormalize inside the
-/// sampler, while nearest/bilinear keep raw border-blended values that
-/// `registration::resample::warp` divides by this coverage afterward
-/// (`renormalize_by_coverage`).
-/// Either way the value is already an average, so it is not divided by coverage again.
-fn coverage_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> f32 {
+#[derive(Debug, Clone, Copy, Default)]
+struct AxisWeightStats {
+    signed: f32,
+    magnitude: f32,
+    square: f32,
+    in_signed: f32,
+    in_magnitude: f32,
+    in_square: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SampleQuality {
+    coverage: f32,
+    confidence: f32,
+    normalization: f32,
+}
+
+#[derive(Debug)]
+pub(crate) struct WarpQualityMaps {
+    pub(crate) coverage: Buffer2<f32>,
+    pub(crate) confidence: Buffer2<f32>,
+    pub(crate) normalization: Option<Buffer2<f32>>,
+}
+
+fn axis_weight_stats(start: i32, weights: &[f32], length: usize) -> AxisWeightStats {
+    let mut stats = AxisWeightStats::default();
+    for (i, &weight) in weights.iter().enumerate() {
+        let magnitude = weight.abs();
+        let square = weight * weight;
+        stats.signed += weight;
+        stats.magnitude += magnitude;
+        stats.square += square;
+        let coordinate = start + i as i32;
+        if coordinate >= 0 && (coordinate as usize) < length {
+            stats.in_signed += weight;
+            stats.in_magnitude += magnitude;
+            stats.in_square += square;
+        }
+    }
+    stats
+}
+
+fn separable_coverage(x: AxisWeightStats, y: AxisWeightStats) -> f32 {
+    let total = x.magnitude * y.magnitude;
+    if total <= f32::EPSILON {
+        0.0
+    } else {
+        ((x.in_magnitude * y.in_magnitude) / total).clamp(0.0, 1.0)
+    }
+}
+
+fn separable_confidence(x: AxisWeightStats, y: AxisWeightStats) -> f32 {
+    let normalization = x.in_signed * y.in_signed;
+    let square = x.in_square * y.in_square;
+    if normalization.abs() <= 1e-10 || square <= f32::EPSILON {
+        0.0
+    } else {
+        normalization * normalization / square
+    }
+}
+
+fn bilinear_quality(pos: Vec2, dims: Vec2us) -> SampleQuality {
     let (sx, sy) = (pos.x, pos.y);
-    let in_bounds =
-        |c: IVec2| c.x >= 0 && c.y >= 0 && (c.x as usize) < dims.x && (c.y as usize) < dims.y;
+    let x0 = sx.floor() as i32;
+    let y0 = sy.floor() as i32;
+    let fx = sx - x0 as f32;
+    let fy = sy - y0 as f32;
+    let x = axis_weight_stats(x0, &[1.0 - fx, fx], dims.x);
+    let y = axis_weight_stats(y0, &[1.0 - fy, fy], dims.y);
+    SampleQuality {
+        coverage: separable_coverage(x, y),
+        confidence: separable_confidence(x, y),
+        normalization: x.in_signed * y.in_signed,
+    }
+}
+
+fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQuality {
+    if dims.x == 0 || dims.y == 0 {
+        return SampleQuality::default();
+    }
+    let (sx, sy) = (pos.x, pos.y);
+    let radius = method.kernel_radius() as f32;
+    if sx < -radius || sy < -radius || sx >= dims.x as f32 + radius || sy >= dims.y as f32 + radius
+    {
+        return SampleQuality::default();
+    }
     match method {
         InterpolationMethod::Nearest => {
-            if in_bounds(IVec2::new(sx.round() as i32, sy.round() as i32)) {
-                1.0
+            let coordinate = IVec2::new(sx.round() as i32, sy.round() as i32);
+            if coordinate.x >= 0
+                && coordinate.y >= 0
+                && (coordinate.x as usize) < dims.x
+                && (coordinate.y as usize) < dims.y
+            {
+                SampleQuality {
+                    coverage: 1.0,
+                    confidence: 1.0,
+                    normalization: 1.0,
+                }
             } else {
-                0.0
+                SampleQuality::default()
             }
         }
-        InterpolationMethod::Bilinear => {
-            let x0 = sx.floor() as i32;
-            let y0 = sy.floor() as i32;
-            let fx = sx - x0 as f32;
-            let fy = sy - y0 as f32;
-            separable_in_bounds_fraction(x0, &[1.0 - fx, fx], y0, &[1.0 - fy, fy], dims)
-        }
+        InterpolationMethod::Bilinear => bilinear_quality(pos, dims),
         InterpolationMethod::Bicubic => {
             let x0 = sx.floor() as i32;
             let y0 = sy.floor() as i32;
@@ -381,14 +464,20 @@ fn coverage_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> f32 {
             let fy = sy - y0 as f32;
             let wx = bicubic_weights(fx);
             let wy = bicubic_weights(fy);
-            separable_in_bounds_fraction(x0 - 1, &wx, y0 - 1, &wy, dims)
+            let x = axis_weight_stats(x0 - 1, &wx, dims.x);
+            let y = axis_weight_stats(y0 - 1, &wy, dims.y);
+            SampleQuality {
+                coverage: separable_coverage(x, y),
+                confidence: separable_confidence(x, y),
+                normalization: 1.0,
+            }
         }
-        InterpolationMethod::Lanczos2 { .. }
-        | InterpolationMethod::Lanczos3 { .. }
-        | InterpolationMethod::Lanczos4 { .. } => {
+        InterpolationMethod::Lanczos2
+        | InterpolationMethod::Lanczos3
+        | InterpolationMethod::Lanczos4 => {
             let a = match method {
-                InterpolationMethod::Lanczos2 { .. } => 2,
-                InterpolationMethod::Lanczos3 { .. } => 3,
+                InterpolationMethod::Lanczos2 => 2,
+                InterpolationMethod::Lanczos3 => 3,
                 _ => 4,
             };
             let lut = get_lanczos_lut(a);
@@ -405,54 +494,83 @@ fn coverage_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> f32 {
                 wx[i] = lut.lookup(fx - (i as i32 - ai + 1) as f32);
                 wy[i] = lut.lookup(fy - (i as i32 - ai + 1) as f32);
             }
-            separable_in_bounds_fraction(x0 - ai + 1, &wx[..size], y0 - ai + 1, &wy[..size], dims)
-        }
-    }
-}
-
-/// Sum the in-bounds tap weights of a separable kernel and divide by the total
-/// weight — the fraction of the kernel that landed on real samples. The samplers
-/// themselves divide their in-bounds value sum by the in-bounds weight, so this is
-/// the downstream stacking weight, not a value-renormalization factor.
-fn separable_in_bounds_fraction(x0: i32, wx: &[f32], y0: i32, wy: &[f32], dims: Vec2us) -> f32 {
-    let wsum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
-    if wsum.abs() < 1e-10 {
-        return 0.0;
-    }
-    let mut in_sum = 0.0f32;
-    for (j, &wyj) in wy.iter().enumerate() {
-        let py = y0 + j as i32;
-        if py < 0 || py as usize >= dims.y {
-            continue;
-        }
-        for (i, &wxi) in wx.iter().enumerate() {
-            let px = x0 + i as i32;
-            if px >= 0 && (px as usize) < dims.x {
-                in_sum += wxi * wyj;
+            let start_x = x0 - ai + 1;
+            let start_y = y0 - ai + 1;
+            let x = axis_weight_stats(start_x, &wx[..size], dims.x);
+            let y = axis_weight_stats(start_y, &wy[..size], dims.y);
+            let coverage = separable_coverage(x, y);
+            let fully_supported = start_x >= 0
+                && start_y >= 0
+                && start_x + size as i32 <= dims.x as i32
+                && start_y + size as i32 <= dims.y as i32;
+            let confidence = if coverage == 0.0 {
+                0.0
+            } else if fully_supported {
+                separable_confidence(x, y)
+            } else {
+                let max = Vec2::new(
+                    dims.x.saturating_sub(1) as f32,
+                    dims.y.saturating_sub(1) as f32,
+                );
+                bilinear_quality(pos.clamp(Vec2::ZERO, max), dims).confidence
+            };
+            SampleQuality {
+                coverage,
+                confidence,
+                normalization: 1.0,
             }
         }
     }
-    (in_sum / wsum).clamp(0.0, 1.0)
 }
 
-/// Per-pixel coverage map for a warp — the geometric companion to
-/// [`warp_image`], computed in the same inverse-mapped row order with the same
-/// incremental coordinate stepping but reading no pixel data (see
-/// [`coverage_at`]). Channel-independent, so the caller computes it once.
-pub(crate) fn warp_coverage(
+/// Geometric support and interpolation confidence for one warp.
+pub(crate) fn warp_quality_maps(
     dims: Vec2us,
     wt: &WarpTransform,
     method: InterpolationMethod,
-) -> Buffer2<f32> {
+) -> WarpQualityMaps {
     let mut coverage = Buffer2::new_default(dims.x, dims.y);
-    coverage
-        .pixels_mut()
-        .par_chunks_mut(dims.x)
-        .enumerate()
-        .for_each(|(y, row)| {
-            warp::warp_row_with(y, wt, row, 0.0, |pos| coverage_at(pos, dims, method));
-        });
-    coverage
+    let mut confidence = Buffer2::new_default(dims.x, dims.y);
+    let normalization = if method == InterpolationMethod::Bilinear {
+        let mut normalization = Buffer2::new_default(dims.x, dims.y);
+        coverage
+            .pixels_mut()
+            .par_chunks_mut(dims.x)
+            .zip(confidence.pixels_mut().par_chunks_mut(dims.x))
+            .zip(normalization.pixels_mut().par_chunks_mut(dims.x))
+            .enumerate()
+            .for_each(|(y, ((coverage_row, confidence_row), normalization_row))| {
+                warp::for_each_source_position(y, wt, dims.x, |x, pos| {
+                    let quality = pos
+                        .map_or_else(SampleQuality::default, |pos| quality_at(pos, dims, method));
+                    coverage_row[x] = quality.coverage;
+                    confidence_row[x] = quality.confidence;
+                    normalization_row[x] = quality.normalization;
+                });
+            });
+        Some(normalization)
+    } else {
+        coverage
+            .pixels_mut()
+            .par_chunks_mut(dims.x)
+            .zip(confidence.pixels_mut().par_chunks_mut(dims.x))
+            .enumerate()
+            .for_each(|(y, (coverage_row, confidence_row))| {
+                warp::for_each_source_position(y, wt, dims.x, |x, pos| {
+                    let quality = pos
+                        .map_or_else(SampleQuality::default, |pos| quality_at(pos, dims, method));
+                    coverage_row[x] = quality.coverage;
+                    confidence_row[x] = quality.confidence;
+                });
+            });
+        None
+    };
+
+    WarpQualityMaps {
+        coverage,
+        confidence,
+        normalization,
+    }
 }
 
 /// Warp an image using a [`WarpTransform`] (linear transform + optional SIP correction).

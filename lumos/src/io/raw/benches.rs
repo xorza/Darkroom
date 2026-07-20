@@ -134,23 +134,25 @@ fn bench_markesteijn_quality_vs_libraw() {
     let height = ours.dimensions().height();
     let border = 6;
 
-    // Per-channel comparison using linear regression to remove WB/scale differences
-    let channel_names = ["Red", "Green", "Blue"];
-    let mut overall_mae = 0.0f64;
-
     println!("\n--- Ours vs libraw 1-pass (linear regression normalized) ---");
-    for (c, name) in channel_names.iter().enumerate() {
-        let stats = compare_channels(ours.channel(c), reference.channel(c), width, height, border);
+    let ours_vs_one = compare_images(&ours, &reference, width, height, border);
+    for (name, stats) in ["Red", "Green", "Blue"].iter().zip(&ours_vs_one.channels) {
         println!(
-            "  {}: MAE={:.6}, PSNR={:.1}dB, r={:.6}  (scale={:.4}, offset={:.6})",
-            name, stats.mae, stats.psnr, stats.correlation, stats.scale, stats.offset,
+            "  {}: MAE={:.6}, max={:.6}, PSNR={:.1}dB, r={:.6}  (scale={:.4}, offset={:.6})",
+            name,
+            stats.mae,
+            stats.max_abs,
+            stats.psnr,
+            stats.correlation,
+            stats.scale,
+            stats.offset,
         );
-        overall_mae += stats.mae;
     }
-
     println!(
-        "\n  Avg MAE: {:.6}, Speedup: {:.1}x",
-        overall_mae / 3.0,
+        "  Avg MAE={:.6}, chroma error: mean={:.6}, max={:.6}, speedup={:.1}x",
+        ours_vs_one.average_mae,
+        ours_vs_one.color_structure.mean,
+        ours_vs_one.color_structure.max,
         ref_time.as_secs_f64() / our_time.as_secs_f64()
     );
 
@@ -163,23 +165,19 @@ fn bench_markesteijn_quality_vs_libraw() {
         ref3_time.as_secs_f64() * 1000.0
     );
 
-    // Ours vs 3-pass
-    let mut mae_3 = 0.0f64;
-    for c in 0..3 {
-        let stats = compare_channels(ours.channel(c), ref3.channel(c), width, height, border);
-        mae_3 += stats.mae;
-    }
-    println!("  Ours vs 3-pass:   avg MAE={:.6}", mae_3 / 3.0);
-
-    // 1-pass vs 3-pass (baseline: how much do libraw's own passes differ?)
-    let mut mae_1v3 = 0.0f64;
-    for c in 0..3 {
-        let stats = compare_channels(reference.channel(c), ref3.channel(c), width, height, border);
-        mae_1v3 += stats.mae;
-    }
+    let ours_vs_three = compare_images(&ours, &ref3, width, height, border);
+    let one_vs_three = compare_images(&reference, &ref3, width, height, border);
     println!(
-        "  1-pass vs 3-pass: avg MAE={:.6}  (baseline)\n",
-        mae_1v3 / 3.0
+        "  Ours vs 3-pass:   avg MAE={:.6}, chroma mean={:.6}, max={:.6}",
+        ours_vs_three.average_mae,
+        ours_vs_three.color_structure.mean,
+        ours_vs_three.color_structure.max,
+    );
+    println!(
+        "  1-pass vs 3-pass: avg MAE={:.6}, chroma mean={:.6}, max={:.6}  (baseline)\n",
+        one_vs_three.average_mae,
+        one_vs_three.color_structure.mean,
+        one_vs_three.color_structure.max,
     );
 }
 
@@ -353,7 +351,6 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 #[test]
 #[ignore]
 fn bench_rcd_demosaic_core() {
-    use demosaic::DemosaicRange;
     use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 
     println!("Benchmarking RCD demosaic core (synthetic data)\n");
@@ -367,17 +364,7 @@ fn bench_rcd_demosaic_core() {
             }
         }
 
-        let bayer = BayerImage::with_margins(
-            &data,
-            w,
-            h,
-            w,
-            h,
-            0,
-            0,
-            CfaPattern::Rggb,
-            DemosaicRange::Unit,
-        );
+        let bayer = BayerImage::with_margins(&data, w, h, w, h, 0, 0, CfaPattern::Rggb);
 
         // Warmup
         let _ = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();
@@ -425,10 +412,88 @@ fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, I
 #[derive(Debug)]
 struct ChannelCompareStats {
     mae: f64,
+    max_abs: f64,
     psnr: f64,
     correlation: f64,
     scale: f64,
     offset: f64,
+}
+
+#[derive(Debug)]
+struct ColorStructureStats {
+    mean: f64,
+    max: f64,
+}
+
+#[derive(Debug)]
+struct ImageCompareStats {
+    channels: [ChannelCompareStats; 3],
+    average_mae: f64,
+    color_structure: ColorStructureStats,
+}
+
+fn compare_images(
+    a: &AstroImage,
+    b: &AstroImage,
+    width: usize,
+    height: usize,
+    border: usize,
+) -> ImageCompareStats {
+    let channels = std::array::from_fn(|channel| {
+        compare_channels(
+            a.channel(channel),
+            b.channel(channel),
+            width,
+            height,
+            border,
+        )
+    });
+    let average_mae = channels.iter().map(|stats| stats.mae).sum::<f64>() / 3.0;
+    let color_structure = compare_color_structure(a, b, &channels, width, height, border);
+
+    ImageCompareStats {
+        channels,
+        average_mae,
+        color_structure,
+    }
+}
+
+fn compare_color_structure(
+    a: &AstroImage,
+    b: &AstroImage,
+    transforms: &[ChannelCompareStats; 3],
+    width: usize,
+    height: usize,
+    border: usize,
+) -> ColorStructureStats {
+    let mut sum = 0.0;
+    let mut max = 0.0_f64;
+    let mut count = 0usize;
+
+    for y in border..(height - border) {
+        for x in border..(width - border) {
+            let index = y * width + x;
+            let mut predicted = [0.0; 3];
+            let mut actual = [0.0; 3];
+            for channel in 0..3 {
+                let transform = &transforms[channel];
+                predicted[channel] =
+                    a.channel(channel)[index] as f64 * transform.scale + transform.offset;
+                actual[channel] = b.channel(channel)[index] as f64;
+            }
+            let red_green = (predicted[0] - predicted[1]) - (actual[0] - actual[1]);
+            let blue_green = (predicted[2] - predicted[1]) - (actual[2] - actual[1]);
+            let error = red_green.hypot(blue_green);
+            sum += error;
+            max = max.max(error);
+            count += 1;
+        }
+    }
+
+    ColorStructureStats {
+        mean: sum / count as f64,
+        max,
+    }
 }
 
 /// Compare two channels using linear regression to remove scale/offset differences.
@@ -474,6 +539,7 @@ fn compare_channels(
     // Compute residuals after regression
     let mut sum_abs_err = 0.0f64;
     let mut sum_sq_err = 0.0f64;
+    let mut max_abs = 0.0_f64;
     let mean_b = sum_b / nf;
 
     for y in border..(height - border) {
@@ -482,8 +548,10 @@ fn compare_channels(
             let predicted = (a[idx] as f64) * scale + offset;
             let actual = b[idx] as f64;
             let diff = predicted - actual;
-            sum_abs_err += diff.abs();
+            let abs = diff.abs();
+            sum_abs_err += abs;
             sum_sq_err += diff * diff;
+            max_abs = max_abs.max(abs);
         }
     }
 
@@ -501,9 +569,38 @@ fn compare_channels(
 
     ChannelCompareStats {
         mae,
+        max_abs,
         psnr,
         correlation,
         scale,
         offset,
     }
+}
+
+#[test]
+fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
+    let source = imaginarium::Buffer2::new(3, 1, vec![0.0, 1.0, 2.0]);
+    let reference = imaginarium::Buffer2::new(3, 1, vec![1.0, 3.0, 5.0]);
+    let channel = compare_channels(&source, &reference, 3, 1, 0);
+    assert!((channel.scale - 2.0).abs() < 1e-12);
+    assert!((channel.offset - 1.0).abs() < 1e-12);
+    assert_eq!(channel.mae, 0.0);
+    assert_eq!(channel.max_abs, 0.0);
+    assert!((channel.correlation - 1.0).abs() < 1e-12);
+
+    let dimensions = ImageDimensions::new((1, 1), 3);
+    let black = AstroImage::from_pixels(dimensions, vec![0.0; 3]);
+    let colored = AstroImage::from_pixels(dimensions, vec![3.0, 1.0, 5.0]);
+    let transforms = std::array::from_fn(|_| ChannelCompareStats {
+        mae: 0.0,
+        max_abs: 0.0,
+        psnr: f64::INFINITY,
+        correlation: 1.0,
+        scale: 1.0,
+        offset: 0.0,
+    });
+    let chroma = compare_color_structure(&black, &colored, &transforms, 1, 1, 0);
+    let expected = 20.0_f64.sqrt();
+    assert!((chroma.mean - expected).abs() < 1e-12);
+    assert!((chroma.max - expected).abs() < 1e-12);
 }

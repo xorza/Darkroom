@@ -50,6 +50,25 @@ fn test_load_raw_rejects_invalid_files() {
     }
 }
 
+#[test]
+fn direct_raw_boundary_clamps_finished_image_once() {
+    let dimensions = ImageDimensions::new((3, 1), 3);
+    let mut image = AstroImage::from_planar_channels(
+        dimensions,
+        [
+            vec![-0.25, 0.5, 1.25],
+            vec![1.5, -0.5, 0.25],
+            vec![0.0, 1.0, 2.0],
+        ],
+    );
+
+    clamp_direct_raw_image(&mut image);
+
+    assert_eq!(image.channel(0).pixels(), &[0.0, 0.5, 1.0]);
+    assert_eq!(image.channel(1).pixels(), &[1.0, 0.0, 0.25]);
+    assert_eq!(image.channel(2).pixels(), &[0.0, 1.0, 1.0]);
+}
+
 #[cfg(feature = "real-data")]
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
@@ -221,8 +240,7 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
     raw_data[area.raw_width + 2..area.raw_width + 5].copy_from_slice(&[50, 100, 200]);
     raw_data[2 * area.raw_width + 2..2 * area.raw_width + 5].copy_from_slice(&[300, 1100, 1200]);
 
-    let without_delta =
-        normalize_active_area::<true>(&raw_data, area, black, inv_range, filters, None);
+    let without_delta = normalize_active_area::<true>(&raw_data, area, black, inv_range, None);
     assert_eq!(without_delta, [0.0, 0.0, 0.1, 0.2, 1.0, 1.0]);
 
     let clamped = normalize_active_area::<true>(
@@ -230,16 +248,20 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
         area,
         black,
         inv_range,
-        filters,
-        Some(&channel_delta),
+        Some(ChannelBlackDelta::LibRawFilter {
+            filters,
+            values: channel_delta,
+        }),
     );
     let unclamped = normalize_active_area::<false>(
         &raw_data,
         area,
         black,
         inv_range,
-        filters,
-        Some(&channel_delta),
+        Some(ChannelBlackDelta::LibRawFilter {
+            filters,
+            values: channel_delta,
+        }),
     );
     let clamped_expected = [0.0, 0.0, 0.0, 0.1, 0.8, 0.9];
     let unclamped_expected = [-0.25, -0.3, -0.1, 0.1, 0.8, 1.0];
@@ -281,8 +303,10 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
         },
         black,
         inv_range,
-        filters,
-        Some(&channel_delta),
+        Some(ChannelBlackDelta::LibRawFilter {
+            filters,
+            values: channel_delta,
+        }),
     );
 
     let expected = [0.4, 0.35, 0.65, 0.6];
@@ -295,6 +319,123 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
             "calibration[{index}]"
         );
     }
+}
+
+#[test]
+fn xtrans_calibration_normalization_matches_direct_channel_black_subtraction() {
+    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+
+    let raw_width = 10;
+    let raw_height = 9;
+    let area = RawActiveArea {
+        raw_width,
+        width: 6,
+        height: 6,
+        top_margin: 1,
+        left_margin: 2,
+    };
+    let pattern = test_pattern_array();
+    let common_black = 100.0;
+    let channel_black = [110.0, 120.0, 130.0];
+    let inv_range = 0.001;
+    let raw_data = vec![600u16; raw_width * raw_height];
+    let direct = XTransImage::with_margins(
+        &raw_data,
+        raw_width,
+        raw_height,
+        area.width,
+        area.height,
+        area.top_margin,
+        area.left_margin,
+        XTransPattern::new(pattern),
+        channel_black,
+        inv_range,
+    );
+    let calibration = normalize_active_area::<false>(
+        &raw_data,
+        area,
+        common_black,
+        inv_range,
+        Some(ChannelBlackDelta::XTrans {
+            pattern,
+            values: [0.01, 0.02, 0.03],
+        }),
+    );
+
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let raw_y = y + area.top_margin;
+            let raw_x = x + area.left_margin;
+            let channel = pattern[raw_y % 6][raw_x % 6] as usize;
+            let expected = [0.49, 0.48, 0.47][channel];
+            let direct_value = direct.read_normalized(raw_y, raw_x);
+            let calibration_value = calibration[y * area.width + x];
+            assert!((direct_value - expected).abs() < 1e-7);
+            assert!((calibration_value - expected).abs() < 1e-7);
+        }
+    }
+}
+
+#[test]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
+fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
+    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+    use crate::testing::calibration_image_paths;
+
+    let paths = calibration_image_paths("Lights")
+        .or_else(|| calibration_image_paths("Flats"))
+        .expect("No calibration images found");
+    let Some(raw) = paths
+        .iter()
+        .filter_map(|path| open_raw(path).ok())
+        .find(|raw| {
+            matches!(raw.sensor_type, SensorType::XTrans)
+                && raw
+                    .black_level
+                    .channel_delta_norm
+                    .iter()
+                    .take(3)
+                    .any(|delta| delta.abs() > f32::EPSILON)
+        })
+    else {
+        eprintln!("No X-Trans test file with nonzero channel black deltas");
+        return;
+    };
+    let raw_data = raw.raw_image_slice().unwrap();
+    let pattern = raw.xtrans_pattern();
+    let direct = XTransImage::with_margins(
+        raw_data,
+        raw.raw_width,
+        raw.raw_height,
+        raw.width,
+        raw.height,
+        raw.top_margin,
+        raw.left_margin,
+        XTransPattern::new(pattern),
+        [
+            raw.black_level.per_channel[0],
+            raw.black_level.per_channel[1],
+            raw.black_level.per_channel[2],
+        ],
+        raw.black_level.inv_range,
+    );
+    let calibration = raw.extract_cfa_pixels::<false>().unwrap();
+    let mut compared = 0usize;
+
+    for y in (0..raw.height).step_by(101) {
+        for x in (0..raw.width).step_by(113) {
+            let raw_y = y + raw.top_margin;
+            let raw_x = x + raw.left_margin;
+            let calibration_value = calibration[y * raw.width + x];
+            if (0.0..=1.0).contains(&calibration_value) {
+                let direct_value = direct.read_normalized(raw_y, raw_x);
+                assert!((direct_value - calibration_value).abs() < 1e-7);
+                compared += 1;
+            }
+        }
+    }
+    assert!(compared > 100);
 }
 
 #[test]

@@ -32,9 +32,6 @@ pub enum StackConfigError {
     #[error("GESD alpha must be finite and between 0 and 1, got {value}")]
     InvalidGesdAlpha { value: f32 },
 
-    #[error("GESD low_relaxation must be finite and at least 1, got {value}")]
-    InvalidGesdLowRelaxation { value: f32 },
-
     #[error("manual weight {index} must be finite and non-negative, got {value}")]
     InvalidManualWeight { index: usize, value: f32 },
 
@@ -63,6 +60,9 @@ pub enum Error {
     #[error("stacking cancelled")]
     Cancelled,
 
+    #[error("registered frames have no pixels with common valid warp support")]
+    NoCommonCoverage,
+
     #[error("Failed to load image '{path}': {source}")]
     ImageLoad {
         path: PathBuf,
@@ -78,14 +78,23 @@ pub enum Error {
     },
 
     #[error(
-        "Coverage dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
+        "{plane} dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
     )]
-    CoverageDimensionMismatch {
+    WarpPlaneDimensionMismatch {
         index: usize,
+        plane: &'static str,
         expected_width: usize,
         expected_height: usize,
         actual_width: usize,
         actual_height: usize,
+    },
+
+    #[error("{plane} for frame {index} has invalid value {value} at pixel {pixel}")]
+    InvalidWarpPlaneValue {
+        index: usize,
+        plane: &'static str,
+        pixel: usize,
+        value: f32,
     },
 }
 
@@ -97,6 +106,10 @@ mod tests {
     fn test_no_frames_error_message() {
         let err = Error::NoFrames;
         assert_eq!(err.to_string(), "No frames provided for stacking");
+        assert_eq!(
+            Error::NoCommonCoverage.to_string(),
+            "registered frames have no pixels with common valid warp support"
+        );
     }
 
     #[test]

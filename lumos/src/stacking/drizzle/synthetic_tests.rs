@@ -267,8 +267,8 @@ fn drizzle_emits_coverage_weight_and_variance_maps() {
     // weight = Σwᵢ ≈ the 4 frames' total. variance = Σwᵢ²/(Σwᵢ)² = 1/N_eff; drizzle pools each
     // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
     // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
-    let weight_c = result.weight.pixels()[32 * w + 32];
-    let var_c = result.variance.pixels()[32 * w + 32];
+    let weight_c = result.weight.channel(0).pixels()[32 * w + 32];
+    let var_c = result.variance.channel(0).pixels()[32 * w + 32];
     let n_eff = 1.0 / var_c;
     println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");
     assert!(

@@ -52,6 +52,11 @@ makes the most reliable target for matching everyone else's statistics.
   with the lowest mean MAD (median absolute deviation) across channels. MAD is used
   rather than standard deviation because it is robust to the stars/objects in the
   frame — it measures background noise, not signal.
+- **Registered-frame domain**: every frame's median/MAD is measured over the intersection of
+  coverage-valid, confidence-positive pixels. Warp fill outside support cannot lower a frame's
+  MAD, change the reference, alter normalization gains, or inflate its inverse-variance weight.
+  Frames with disjoint support can still combine with no normalization and equal/manual weights;
+  requesting cross-frame statistics for them returns `NoCommonCoverage`.
 - **siril**: the reference image is user-selectable but defaults to the best-quality
   frame; normalization coefficients are computed relative to it
   (`src/stacking/normalization.c:142`, `compute normalization factors based on the
@@ -447,35 +452,17 @@ that, neither the t- nor the normal-approximation should be trusted much.
   *exactly* the λ formula above. The max number of outliers is
   `floor(N · sig[0])` (`:1480`), i.e. a fraction of the stack.
 - lumos `Gesd` (`GesdConfig`, `rejection.rs:616`; `reject` at `:668`) implements the
-  same backward-scan Grubbs procedure (`floats_b` holds the `G_k`, the backward scan
-  at `:736-749` finds the largest passing `k`), with `max_outliers` defaulting to `N/4`
-  (`max_outliers_for_size`, `rejection.rs:657`). It diverges from siril/NIST in **three**
-  ways, the first two of which are correctness gaps and all of which bias toward
-  over-rejection:
-  1. **Critical value uses the inverse-*normal*, not Student-t.** `inverse_normal_approx`
-     (Abramowitz-Stegun, `rejection.rs:759`) replaces the exact t-inverse. For small `N`
-     the t-distribution's heavier tails make the true critical value larger, so the
-     normal **under-estimates λ and over-rejects**.
-  2. **Wrong effective sample size in the λ formula (pass-3 finding).** The backward scan
-     sets `ni = len + num_candidates − i = n − i` and its own comment calls this the
-     "effective n at step i" — but it then evaluates λ with `ni − i = n − 2i` everywhere
-     (`p`, numerator, denominator at `rejection.rs:737-742`) instead of `ni = n − i`.
-     `ni = n − i` *is* the correct live sample count for backward-scan index `i`
-     (identically NIST's `n − k + 1` at 1-indexed step `k = i + 1`, i.e. siril's
-     decrementing `size`, `median_and_mean.c:1480-1484`); the extra `− i` is the bug.
-     The two agree only at the first step (`i = 0`); for
-     every later step lumos plugs in too small an `m`, so λ is too small and rejection
-     too eager. (Worked example `n=20`, 5 candidates: at `i=4` lumos uses `m=12,
-     λ≈2.13`, where the correct live count is `m=16, λ≈2.32`.)
-  3. **Grubbs statistic from median + MAD, not mean + sd.** lumos forms `G = |x−median| /
-     (1.4826·MAD)` with an asymmetric `low_relaxation` factor for dark pixels
-     (`rejection.rs:695-722`) — more robust than the textbook/siril `G = max|x−mean|/sd`
-     (`grubbs_stat`, `rejection_float.c:82`), but no longer the statistic the t-critical
-     values are strictly derived for.
+  same two-sided mean/sample-sd statistic and backward scan as NIST. Critical values use
+  an accurate Student-t inverse CDF and the live sample count, and are cached per rayon
+  worker for a `(sample count, max outliers, α)` configuration. `max_outliers` defaults
+  to `N/4`; the `StackConfig::gesd()` preset falls back to median below 15 frames.
+  The implementation is checked against NIST's 54-value worked example and all ten
+  tabulated statistics and critical values. Deterministic Gaussian Monte Carlo at
+  `N = 15, 25, 50, 100` verifies the family-wise false-positive rate against `α = 0.05`.
 
 **Assumptions:** approximately Gaussian core, outlier fraction below `r/N`. GESD needs
 `n ≥ ~3` to even compute (siril guards `nb_frames < 3` at `median_and_mean.c:1281`)
-and only makes statistical sense with `N ≳ 10–15`.
+and only makes statistical sense with `N ≥ 15`; the Lumos preset enforces that floor.
 
 ### 3.6 MAD-based clipping
 
@@ -497,7 +484,7 @@ case (`rejection_float.c:175-181`), identical to sigma clipping but with
 | Winsorized σ-clip | ~6 | 6–20 frames | Winsorized σ (×1.134) |
 | Sigma / kappa-σ | ~8 | 8–20 frames | sd or MAD |
 | Linear-fit | ~15 | 20+ frames | mean abs residual |
-| GESD | ~10–15 | 15+ frames, controlled FPR | sd, t-critical |
+| GESD | 15 | 15+ frames, controlled FPR | sample sd, exact t-critical |
 
 ---
 
@@ -520,8 +507,10 @@ The STScI drizzle core propagates variance explicitly: `update_data_var`
 (`cdrizzlebox.c:91`) co-adds variance arrays using **squared weights**
 (`v = (var·vc² + dow²·d2)/vc_plus_dow²`, `:135`) — the correct propagation for a
 weighted average, since `Var(Σw x) = Σw² Var(x)`. lumos's stacker does **not**
-currently produce an output variance/uncertainty map; its drizzle produces a coverage
-map but not a variance map (see §8).
+accept a distinct input-variance image for every frame, but both statistical stacking and drizzle
+emit `StackProduct.weight` and `StackProduct.variance`. Statistical combine derives these
+channel-shaped images from the samples that survive each channel's rejection; drizzle's channels
+are identical because its geometric weights are channel-independent.
 
 ### 4.2 Weight maps and coverage maps
 
@@ -529,13 +518,15 @@ Both paradigms benefit from carrying a per-pixel weight:
 
 - In **stacking**, a per-pixel weight (e.g. inverse-variance, or a quality mask
   flagging bad columns/edges) lets you down-weight rather than hard-reject, and the
-  output weight map records how many good samples each pixel got.
+  output weight image records how many good samples each channel got after rejection.
+  `StackProduct.coverage` stays a separate scalar fraction of frames with geometric support;
+  zero confidence removes statistical weight without erasing that support.
 - In **drizzle**, the **coverage/weight map is mandatory** — it records `W_xy = Σ
   a_xy·w_i` (the accumulated overlap-area × input-weight; **per F&H Eq. 4 there is no
   `s²` in the weight** — the `s²` lives only in the flux numerator, Eq. 5) and is what
   the flux is normalized by. Edge pixels and chip gaps get low coverage; `min_coverage`
-  masks them. lumos returns this as `StackProduct.coverage` normalized to [0,1]
-  (`drizzle/mod.rs:680`); STScI returns `output_counts` (`cdrizzlebox.c`,
+  masks them. lumos returns this as `StackProduct.coverage` normalized to [0,1];
+  STScI returns `output_counts` (`cdrizzlebox.c`,
   `p->output_counts`).
 
 ### 4.3 Correlated noise from resampling
@@ -1032,7 +1023,7 @@ quality varies.
    flux-conservation errors. (lumos guards this; some pipelines don't.)
 10. **GESD/clipping critical values from a normal instead of Student-t.** For small N
     the t-distribution's heavy tails matter; using the normal under-estimates the
-    threshold and over-rejects (lumos's current GESD approximation — §8).
+    threshold and over-rejects.
 
 ---
 
@@ -1047,55 +1038,39 @@ quality varies.
 - Lowest-MAD reference selection (`stack.rs:165`), Global (additive+multiplicative)
   and Multiplicative normalization (`stack.rs:189`), inverse-variance noise weighting
   (`stack.rs:271`), equal/manual weighting.
-- Winsorized σ with the correct 1.134 bias factor (`rejection.rs:203`); GESD with the
-  backward-scan Grubbs procedure (`rejection.rs:668`); MAD-based robust spread
-  throughout.
+- Winsorized σ with the correct 1.134 bias factor (`rejection.rs:203`); textbook
+  two-sided GESD with mean/sample-sd statistics, accurate Student-t critical values,
+  and a backward scan (`rejection.rs`); MAD-based robust spread in the clipping and
+  frame-statistics paths.
 - Drizzle: all five kernels, exact `boxer` polygon clipping for Square, Jacobian
   weight conservation, deferred weighted-average `accumulate`/`finalize`, coverage map
   with `min_coverage` masking, Lanczos **warned** (not blocked — it still runs) off
   pixfrac=scale=1 with negative-lobe clamping (`drizzle/mod.rs:271`, `:669`).
 - Memory-tiered stacking caches (in-memory vs mmap, `combine/cache/loader/mod.rs`) so large stacks
-  don't OOM, with per-frame `FrameStats` (median + MAD) precomputed by `frame_store/mod.rs`.
+  don't OOM. `LightCache` computes registered-frame `FrameStats` (median + MAD) sequentially with
+  one reused scratch buffer over the shared valid-support mask, identically for RAM and mmap planes.
 
 **Gaps / opportunities (ranked):**
 
-1. **GESD critical values are doubly wrong (pass 3).** Two independent bugs, both
-   over-rejecting (§3.5): (a) the critical value uses an inverse-*normal* approximation
-   (`inverse_normal_approx`, `rejection.rs:759`) instead of siril's exact
-   `gsl_cdf_tdist_Pinv(...)` (`median_and_mean.c:1481`); and (b) the backward scan feeds
-   `n − 2i` into the λ formula (`rejection.rs:737-742`) where it should use the live
-   count `n − i` (siril's decrementing `size`). The two errors agree only at the first
-   step; for later steps both shrink λ and reject too eagerly. Fix: use the live count
-   *and* a proper t-inverse (or t-correction) to match siril's
-   `λ = (size−1)t / √(size(size−2+t²))`, `t = t_inv(1 − α/(2·size), size−2)`.
-2. **No data-dependent variance propagation.** STScI's `update_data_var`
+1. **No data-dependent variance propagation.** STScI's `update_data_var`
    (`cdrizzlebox.c:91`) propagates input variance with squared weights. lumos returns
    `Σwᵢ²/(Σwᵢ)²`, the output variance per unit input variance, but does not accept a
    distinct variance model for each input frame or pixel.
-3. **No drizzle CR rejection (median + blot + derivative).** lumos relies on
+2. **No drizzle CR rejection (median + blot + derivative).** lumos relies on
    caller-supplied `DrizzleFrame::pixel_weight_map` values. Implementing the DrizzlePac `drizCR` scheme
    (`drizzlepac/drizCR.py`) — drizzle→median→blot→derivative-thresholded mask — would
    make the drizzle path self-contained. This also needs a **blot** (inverse-drizzle)
    operation, which lumos lacks (STScI: `cdrizzleblot.c`).
-4. **Normalization is scalar-per-channel only; no surface/gradient background
+3. **Normalization is scalar-per-channel only; no surface/gradient background
    matching.** Fine for uniform pedestal shifts, insufficient for mosaics or strong
    gradients. A low-order plane/poly background match (cf. `reproject`'s
    `mosaicking/background.py`, SWarp's mesh background) would be needed for mosaics.
-5. **Noise weighting omits the normalization scale factor.** siril uses `w = 1/(pscale²
-   · bgnoise²)` (`median_and_mean.c:1122`) — the `pscale²` keeps weights consistent in
-   the normalized frame. lumos's `Weighting::Noise` (`stack.rs:271`) uses `1/σ²`
-   without the scaling term; if multiplicative normalization is active the weights are
-   slightly inconsistent.
-6. **No FWHM / star-count quality weighting.** lumos has only Equal/Noise/Manual;
+4. **No FWHM / star-count quality weighting.** lumos has only Equal/Noise/Manual;
    siril and PixInsight additionally weight by seeing/star-count, which catches bloated
    frames that the background-noise estimate alone would not.
-7. **No explicit small-N rejection guard surfaced to the user.** lumos's rejection
-   methods should refuse (or warn and fall back to percentile/median) below ~8 frames,
-   the way siril's `N−r>4` floor and `nb_frames<3` GESD guard do; relying on the
-   algorithm to "do nothing" silently is a footgun (§7 #1).
-8. **Drizzle does not validate dither diversity.** It will happily drizzle un-dithered
+5. **Drizzle does not validate dither diversity.** It will happily drizzle un-dithered
    data and produce a correlated-noise-inflated result with no warning (§5.7).
-9. **Drizzle output omits F&H's `s²` flux factor (pass 3).** `accumulate`/`finalize`
+6. **Drizzle output omits F&H's `s²` flux factor (pass 3).** `accumulate`/`finalize`
    compute `Σ(a·w·flux)/Σ(a·w)` with no `s²` term (`mod.rs:603`/`:667`), so the output
    preserves the input per-pixel DN scale (flat field DN `F` → `F`) rather than F&H
    Eq. 5's surface-intensity normalization (STScI folds `s² = scale²` into the flux via
@@ -1152,12 +1127,11 @@ Jacobian `0.5((x₁−x₃)(y₀−y₂)−(x₀−x₂)(y₁−y₃))` with `w 
 (`:1376`/`:1393`), Gaussian `pfo` clamp `≥1.2/pscale_ratio` (`:1576`), Lanczos pixfrac
 warning (`:1701`); DrizzlePac `drizCR.py` threshold `t2 = mult·blot_deriv + snr·ta/gain`,
 defaults `3.5 3.0` / `1.2 0.7`, `tmp2 ≥ 9` (`:320-336`). **lumos confirmed:**
-`inverse_normal_approx` Abramowitz-Stegun for the GESD critical value (`rejection.rs:759`)
-vs siril's exact Student-t — the over-rejection gap is real; Winsorized constants
+the GESD statistic, live-count λ formula, and exact Student-t quantile now match the
+NIST/Siril contract; Winsorized constants
 `HUBER_C=1.5 / WINSORIZED_CORRECTION=1.134` (`rejection.rs:201-203`); lowest-mean-MAD
-reference (`stack.rs:165`); noise weight `1/σ²` *without* the `pscale²` term
-(`stack.rs:271`); drizzle `accumulate`/`finalize` deferred weighted average
-(`mod.rs:603`/`:625`, `val = data/w` at `:667`).
+reference (`stack.rs:165`); normalization-aware inverse-variance noise weighting;
+drizzle `accumulate`/`finalize` deferred weighted average (`mod.rs`).
 
 **Resolved in pass 3 (were "open"):** the **1.134** factor is now nailed by direct
 numerical integration — `E[ψ_{1.5}(z)²] = 0.47783 + 0.30063 = 0.77846`, so
@@ -1178,7 +1152,7 @@ cloned references, and ran the two numerical integrations above. New corrections
 | § | Pass-1/2 said | Pass-3 corrected to |
 |---|---------------|---------------------|
 | 2.1 | median penalty "worse at small N (~0.74), approached from below" | RE approached **from above**; small N is *more* efficient (N=3: var 0.743 / SD 0.862 vs asymptotic 0.637 / 0.798); the `0.74` is the *variance* efficiency at N=3 |
-| 3.5 / 8 | lumos GESD differs from siril only by normal-vs-t | **also** uses `n − 2i` (not the live count `n − i`) in λ (`rejection.rs:737-742`), and a median+MAD Grubbs statistic — two further over-rejection sources |
+| 3.5 / 8 | lumos GESD differed from siril only by normal-vs-t | It also used `n − 2i` instead of the live count `n − i` and a median+MAD statistic. All three divergences are now resolved by the textbook implementation. |
 | 5.1 / 5.5 / 5.6 | "`s = scale`", "`s=2` (output pixel = ½ input)", "`r = pixfrac/scale`" | lumos's `scale = 1/s_F&H`; for lumos parameters **`r = pixfrac·scale`** (= `drop_size` in output px). `s=0.5` (not 2) gives a half-size output pixel |
 | 5.5 / 6 | (implicit) lumos defaults are coverage-/noise-balanced | lumos defaults `scale=2, pixfrac=0.8` give `r = 1.6`, `R ≈ 2.0` (x3 → `r=2.1`, `R ≈ 2.5`) — **high** correlated noise, above the F&H/Casertano `r ≈ 1.2` sweet spot |
 | 5.3 / 8 | drizzle "total flux preserved … same as Eqs. 4–5" | lumos **omits F&H's global `s²` flux factor** (no `iscale`), preserving the input per-pixel DN scale instead; integrated counts scale by `scale²` (benign: a global constant) |

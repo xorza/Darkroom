@@ -638,11 +638,20 @@ impl DrizzleAccumulator {
             ImageDimensions::new((width, height), n_channels),
             output_channels,
         );
+        let quality_dimensions = ImageDimensions::new((width, height), n_channels);
+        let weight = AstroImage::from_planar_channels(
+            quality_dimensions,
+            (0..n_channels).map(|_| self.weight.pixels().to_vec()),
+        );
+        let variance = AstroImage::from_planar_channels(
+            quality_dimensions,
+            (0..n_channels).map(|_| variance.pixels().to_vec()),
+        );
 
         StackProduct {
             image,
             coverage,
-            weight: self.weight,
+            weight,
             variance,
         }
     }

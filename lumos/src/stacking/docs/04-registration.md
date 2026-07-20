@@ -798,7 +798,7 @@ interpolated from neighbors with a kernel:
   best practical frequency response — it preserves the most detail / smallest FWHM
   growth — and is the de-facto astrophotography default. Larger `a` → closer to the
   ideal sinc (sharper) but larger negative lobes (more ringing). lumos defaults to
-  **Lanczos3** with deringing (`InterpolationMethod::default()`, `config.rs:39-45`),
+  **Lanczos3** (`InterpolationMethod::default()`, `config.rs`),
   with a 4096-sample LUT per kernel (`interpolation/mod.rs:39-111`, ~0.00024
   precision). The kernel is exactly `(sin(πx)/πx)·(sin(πx/a)/(πx/a))` for `|x|<a`
   (`lanczos_kernel_compute`, `mod.rs:45-55`). swarp implements the identical
@@ -808,7 +808,7 @@ interpolated from neighbors with a kernel:
   preferred when photometric PSF fidelity beats sharpness (verified — "smooth,
   centrally peaked PSFs … better behaved for photometry").
 
-### 6.3 Ringing & deringing
+### 6.3 Ringing and signed data
 
 The Lanczos kernel has negative lobes, so near a sharp bright edge (a saturated
 star, a hot column) it overshoots into negative values — the **Gibbs/ringing**
@@ -816,13 +816,12 @@ phenomenon, seen as **dark halos around bright stars** (verified across sources;
 explicitly noted for Lanczos-3 in astrophotography). For `a=2` the ringing is
 < 1%, growing with `a`. Mitigations:
 
-- **Clamp / deringing.** lumos applies PixInsight-style **soft clamping** that
-  tracks the positive and negative weighted contributions separately and fades the
-  negative overshoot with a quadratic above a threshold (`soft_clamp`,
-  `interpolation/warp/mod.rs:141-168`; threshold from
-  `InterpolationMethod::deringing()`, default 0.3, `config.rs:9, 64-77`). Negative
-  threshold disables it. This is the right default for stacking: it kills the dark
-  halos while keeping most of Lanczos's sharpness.
+- **Preserve linearity on calibrated data.** lumos uses normalized linear Lanczos
+  only where the complete kernel is available. Partial kernels use edge-extended
+  bilinear interpolation rather than division by a potentially near-zero truncated
+  signed weight sum. The former absolute-intensity soft clamp was removed because
+  calibrated samples can be negative; classifying taps by `sample × weight` was not
+  translation invariant and could amplify ordinary negative values catastrophically.
 - **Lower `a`** (Lanczos2 instead of 3/4) or fall back to bicubic/bilinear in
   high-contrast regions.
 
@@ -861,8 +860,8 @@ wrong model, distortion uncorrected at field edge), stacking *blurs* rather than
 sharpens. This is why every earlier stage matters: tight centroids (Stage 3),
 the right transform model (§2), robust fitting (§3), match recovery (§4), and
 distortion correction at the field edge (§5) all exist to keep that RMS small.
-Choosing nearest-neighbor or skipping deringing then squanders the budget at the
-last step.
+Choosing nearest-neighbor or an unnecessarily blurry kernel then squanders the
+budget at the last step.
 
 ---
 
@@ -890,10 +889,10 @@ A defensible end-to-end registration stage:
 6. **Distortion** (wide field only): fit SIP order 2–3, require ≥3× points per
    term, normalize coordinates, sigma-clip, and inspect `max_correction`/RMS for
    overfit. Apply SIP *before* the linear transform.
-7. **Resample** by inverse mapping with **Lanczos-3 + deringing** for science
+7. **Resample** by inverse mapping with **normalized linear Lanczos-3** for science
    stacks; **drizzle** instead when dithered & undersampled; bilinear only for
-   masks/previews. **Propagate a footprint/coverage map** marking extrapolated
-   (out-of-input) output pixels so the stacker can down-weight them.
+   masks/previews. **Propagate separate support and confidence maps** so the stacker
+   can exclude extrapolated pixels and account for interpolation noise independently.
 8. **Gate on RMS** — reject the registration if the final RMS exceeds a fraction of
    the FWHM (lumos: `max_rms_error`, `mod.rs:199`).
 
@@ -928,8 +927,8 @@ lumos already implements 1–6 and 8 closely to this; see §9 for the gaps.
   aliasing, destroyed sub-pixel registration. *Fix:* Lanczos/bicubic; NN only for
   integer-labeled masks.
 - **Ignoring ringing.** Lanczos dark halos around bright stars corrupt photometry
-  and look ugly when stacked. *Fix:* deringing/soft-clamp (lumos default), or lower
-  `a`.
+  and look ugly when stacked. *Fix:* use a lower `a`, bicubic, or bilinear where
+  ringing is more damaging than the corresponding loss of sharpness.
 - **Double interpolation.** Warping an already-warped/resampled image compounds
   blur. *Fix:* compose all transforms (linear ∘ distortion ∘ …) and resample the
   *original* pixels **once** (lumos's `WarpTransform` bundles SIP + linear so a
@@ -937,9 +936,8 @@ lumos already implements 1–6 and 8 closely to this; see §9 for the gaps.
 - **Not propagating which pixels were extrapolated.** Output pixels mapped from
   outside the input have no real data (border fill); silently stacking them biases
   the result. *Fix:* emit a footprint/coverage mask (astroalign returns `footprint`,
-  `astroalign.py:452-458`; drizzle emits a coverage map). **lumos's `warp()` fills
-  out-of-bounds pixels with a constant `border_value` but returns no footprint** —
-  see §9.
+  `astroalign.py:452-458`; drizzle emits a coverage map). lumos's `warp()` returns
+  magnitude-based geometric support plus independent coefficient-energy confidence.
 - **Mismatched transform direction.** Confusing `apply` vs `apply_inverse` flips the
   alignment. *Fix:* document the convention rigorously (lumos: `T.apply(ref)→target`,
   warp samples target at reference-mapped positions, `transform.rs:220-248`).
@@ -974,16 +972,15 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
 - **Seeing-derived** noise scale and recovery gate (`mod.rs:128, 311`).
 - **SIP** matching the FITS convention, normalized coordinates, 3×-points-per-term
   guard, MAD sigma-clipping, Cholesky→LU fallback (`distortion/sip/mod.rs`).
-- **Lanczos-3 + PixInsight deringing** default, single-pass `WarpTransform` that
-  applies SIP+linear together (no double interpolation) (`interpolation/`,
-  `transform.rs:346`).
+- **Normalized linear Lanczos-3** default with a signed-safe partial-kernel fallback,
+  plus a single-pass `WarpTransform` that applies SIP+linear together (no double
+  interpolation) (`interpolation/`, `transform.rs`).
 
 **Gaps / opportunities.**
-1. **No footprint / coverage mask from `warp()`.** Out-of-bounds output pixels are
-   filled with `border_value` but not flagged (`mod.rs:243-265`). The stacker cannot
-   tell real pixels from border fill, risking edge bias. *Add* a boolean footprint
-   output (astroalign does; drizzle already emits coverage). **This is the most
-   impactful gap for stacking correctness.**
+1. **Resolved: warp quality is explicit.** `warp()` returns an in-bounds kernel-
+   magnitude coverage map and a separate coefficient-energy confidence map. The
+   stacker uses coverage only for inclusion and confidence only for inverse-variance
+   weighting (`registration/resample.rs`, `combine/cache/mod.rs`).
 2. **TPS is implemented, tested, but unwired** (`distortion/tps/`,
    `#![allow(dead_code)]`). For optical paths poorly modeled by low-order SIP it is
    the better distortion model; wiring it as an alternative post-RANSAC option (with

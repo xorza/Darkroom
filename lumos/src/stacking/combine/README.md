@@ -25,6 +25,7 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 stack(paths, config, progress, cancel)         -> Result<StackProduct, Error>
 stack_images(frames, config, progress, cancel) -> Result<StackProduct, Error>
 
+StackProduct       // { image, coverage, weight, variance }
 StackConfig        // { method, weighting, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
@@ -78,7 +79,7 @@ and disk-backed combines check between chunks. Cancellation discards partial out
 | Winsorized Sigma | `Winsorized` | Small stacks, data preservation | 5+ |
 | Linear Fit | `LinearFit` | Sky gradients, temporal trends | 15+ |
 | Percentile Clipping | `Percentile` | Very small stacks | 3+ |
-| GESD | `Gesd` | Large stacks, rigorous detection | 50+ |
+| GESD | `Gesd` | Gaussian stacks, controlled false-positive rate | 15+ |
 
 ### Sigma Thresholds
 
@@ -106,7 +107,10 @@ gain   = ref_MAD / frame_MAD
 offset = ref_median - frame_median * gain
 ```
 
-Per-frame, per-channel median and MAD (robust scale) are computed from the full frame data. This corrects brightness and contrast differences between frames from different sessions, changing sky conditions, or sensor temperature drift.
+Per-frame, per-channel median and MAD (robust scale) are computed from the full image for
+unregistered inputs, or from one common coverage-valid/confidence-positive coordinate domain for
+registered inputs. This keeps warp fill from changing reference selection, normalization, or noise
+weighting.
 
 ## Key Design Decisions
 
@@ -126,14 +130,21 @@ the end-to-end pipeline:
 - **In-memory**: channel and coverage planes use resident `Buffer2<f32>` storage.
 - **Disk-backed**: channel and coverage planes use memory-mapped f32 files owned by a
   `SpillDirectory`; dropping the final cache releases mappings before cleanup.
-- `StoredLightFrame` keeps channels, optional coverage, and per-channel median/MAD statistics in one
-  record. Combine consumes these records without exposing its cache internals to pipeline.
+- `StoredLightFrame` keeps channels plus optional coverage/confidence planes in one record. Once
+  all registered records are assembled, `LightCache` intersects their valid support and computes
+  every frame's per-channel median/MAD over exactly that shared pixel domain.
 
 ### Processing Pipeline
 
 1. **Load**: Decode images, cache to disk or memory (parallelized via rayon)
-2. **Normalize** (optional): Compute per-frame median/MAD, derive affine parameters
-3. **Process**: For each pixel position across all frames — apply normalization, reject outliers, combine
-4. **Cleanup**: Remove cache files (unless `keep_cache = true`)
+2. **Measure**: Compute per-frame median/MAD on the full image for unregistered inputs, or on the
+   common coverage-valid/confidence-positive domain for registered inputs
+3. **Normalize** (optional): Derive affine parameters from the comparable frame statistics
+4. **Process**: For each pixel and channel — apply normalization, reject outliers, combine, and
+   accumulate `Σwᵢ` plus `Σwᵢ²/(Σwᵢ)²` from the actual survivors
+5. **Cleanup**: Remove cache files (unless `keep_cache = true`)
 
-Processing is chunked by rows and parallelized per-row with rayon. Each channel is processed independently for efficient planar data access.
+Processing is chunked by rows and parallelized per-row with rayon. Each channel is processed
+independently for efficient planar data access. `StackProduct.coverage` remains a channel-independent
+geometric-support fraction; `weight` and `variance` are channel-shaped `AstroImage`s because
+rejection can retain a different frame set in R, G, and B.

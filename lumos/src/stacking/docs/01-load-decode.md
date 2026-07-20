@@ -363,14 +363,16 @@ post-black values to zero by default.**
 
 lumos's port is structurally faithful but splits direct lights from calibration inputs:
 
-- *Direct lights*: a SIMD pass removes the
-  `common` pedestal uniformly (`normalize_u16_to_f32_parallel`, which also does the
-  `1/(max−common)` scale in the same pass), then a second pass that applies the
-  per-channel delta (`apply_bayer_black_deltas`). This is
-  exactly libraw's "common + delta" decomposition, just executed in two vectorizable
-  passes, with the final result clamped to `[0, 1]`.
+- *Direct lights*: Bayer uses a SIMD pass to remove the `common` pedestal uniformly
+  (`normalize_u16_to_f32_parallel`, which also applies `1/(max−common)`) and a second
+  vectorizable pass for the per-channel delta (`apply_bayer_black_deltas`). X-Trans
+  applies its `[R,G,B]` black levels while reading the raw-coordinate 6×6 CFA. Both are
+  exactly libraw's "common + delta" decomposition. RCD/Markesteijn interpolation remains
+  unclipped, and `load_raw` clamps the fully assembled image to `[0, 1]` once at its
+  direct-load boundary.
 - *Calibration inputs*: `normalize_active_area::<false>` performs the same common and
-  per-channel subtraction without a floor or ceiling. Dark and bias samples below the
+  per-channel subtraction without a floor or ceiling, using LibRaw filter codes for
+  Bayer and the raw-coordinate 6×6 pattern for X-Trans. Dark and bias samples below the
   pedestal therefore remain negative instead of biasing their stacked masters upward.
 
 **Why per-channel matters:** if you subtract a single scalar black from a sensor
@@ -729,11 +731,17 @@ reference and is wrong; the actual per-direction estimate is
 `N_Est = cfa[N]·2·lpf₀/(eps + lpf₀ + lpf_N)` (algebraically a different quantity — it is
 `G·2L₀/(L₀+L_N)`, not `G·(1+(L₀−L₂)/(L₀+L₂))`), combined with gradient-weighted V/H
 blending and the `VH_Disc` direction refinement above. lumos's
-`src/raw/demosaic/bayer/rcd.rs:227-249` is a faithful SIMD port of the corrected math
-(`n_est = cfa[idx-w1]·two_lpfi/(EPS + lpfi + lpf[idx-w2])`); it stores the LPF at full
-resolution where the reference half-packs it (`lpindx = indx/2`), so its `lpf[idx − w2]`
-equals the reference's `lpf[lpindx − w1]`. The `eps = 1e-5` / `epssq = 1e-10`
-divide-by-zero guards (`rcd.cc:72-73`) must be ported verbatim.
+`src/io/raw/demosaic/bayer/rcd.rs` matches that equation whenever both low-pass terms are
+safely positive. It stores the LPF at full resolution where the reference half-packs it
+(`lpindx = indx/2`), so its `lpf[idx − w2]` equals the reference's
+`lpf[lpindx − w1]`.
+
+Calibrated signed data invalidates the ratio model: opposite-signed LPFs can make its
+denominator zero despite `eps`. In that case lumos uses
+`G₁ + (LPF₀−LPF₂)/8`. The binomial LPF has gain 4 and the same-color comparison is two
+pixels away, so dividing by 8 gives the midpoint additive correction. It exactly
+preserves signed constants and linear gradients without changing canonical positive
+RCD output.
 
 ### 3.2 X-Trans: Markesteijn
 
@@ -757,10 +765,12 @@ RawTherapee `xtrans_demosaic.cc`). The pipeline, read out of
    cross term.
 3. **Iterate green + R/B (`markesteijn.cc:428-…`, the `for pass` loop).** For passes ≥ 2
    the green is *recomputed* from the now-interpolated closer pixels (this is what
-   "3-pass" iterates — the green refinement, not merely the direction selection), then R
-   and B are filled per direction from color differences.
-4. **Homogeneity voting (`markesteijn.cc:728-870`).** Each directional candidate is taken
-   to CIELab, per-direction derivatives `drv` are formed, and a per-pixel
+   "3-pass" iterates — the green refinement, not merely the direction selection). R and B
+   are then reconstructed per direction in three geometry-specific stages: solitary green
+   sites, the opposite color at native red/blue sites, and the 2×2 green blocks.
+4. **Homogeneity voting (`markesteijn.cc:728-870`).** For one-pass processing, each
+   directional candidate is transformed to BT.2020 YPbPr, per-direction derivatives `drv`
+   are formed, and a per-pixel
    **homogeneity map** counts how many neighbors have `drv ≤ 8·min_drv` (lumos
    `markesteijn_steps.rs:766-820` uses exactly the `threshold = 8 × min` rule). A 5×5 sum
    of the homogeneity maps selects the most homogeneous direction(s) at each pixel.
@@ -768,8 +778,9 @@ RawTherapee `xtrans_demosaic.cc`). The pipeline, read out of
    homogeneous) directions — directly analogous to AHD, generalized to the hex geometry.
 
 lumos implements Markesteijn **1-pass** (4 directions) across `markesteijn.rs` +
-`markesteijn_steps.rs` + `hex_lookup.rs`, recomputing RGB on-the-fly in the blend rather
-than materializing all `ndir` RGB candidates (memory ~10·P f32).
+`markesteijn_steps.rs` + `hex_lookup.rs`. It materializes four green and four `[red, blue]`
+directional candidates in an 18·P-f32 arena so derivative voting and the final blend use the
+same geometry-specific candidates as the reference algorithm.
 
 **Correction (pass 2):** the prior draft said 3-pass "iterates the direction selection
 three times." More precisely, multi-pass doubles the direction count (`ndir` 4→8) and
@@ -972,7 +983,9 @@ workflows. Sensor dispatch picks our fast RCD (Bayer) / Markesteijn-1-pass (X-Tr
 and falls back to libraw configured for **linear**, unity-WB output (`gamm={1,1}`,
 `output_color=0`, `no_auto_bright`). The separate `load_raw_cfa` path
 returning an un-demosaiced `CfaImage` is exactly right and enables the
-calibrate-then-debayer ordering, with flat division using per-CFA-color means.
+calibrate-then-debayer ordering, with flat division using per-CFA-color means. Both
+native kernels now emit unclipped linear RGB for direct and calibrated sources; only
+`load_raw` applies a final unit-range boundary.
 
 **Gaps / opportunities:**
 

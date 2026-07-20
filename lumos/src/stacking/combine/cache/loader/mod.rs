@@ -140,9 +140,8 @@ impl CfaCache {
 }
 
 impl LightCache {
-    /// Build a light-frame cache from image files (tiered per available RAM). These carry no
-    /// coverage (`None`) — disk files don't store it — so the weighted combine treats every pixel
-    /// as fully covered, matching a plain stack.
+    /// Build a light-frame cache from image files (tiered per available RAM). Disk files carry no
+    /// warp quality planes, so every pixel has full support and unit confidence.
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
@@ -153,10 +152,13 @@ impl LightCache {
             load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
         let frames = frames
             .into_iter()
-            .zip(core.channel_stats.iter().cloned())
-            .map(|(frame, stats)| StoredLightFrame::from_stored(frame, stats))
+            .map(StoredLightFrame::from_stored)
             .collect();
-        Ok(Self { frames, core })
+        Ok(Self {
+            frames,
+            stats_share_domain: true,
+            core,
+        })
     }
 }
 

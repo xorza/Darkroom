@@ -9,7 +9,8 @@
 
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::math::sum::{mean_f32, weighted_mean_f32};
-use crate::stacking::combine::cache::ScratchBuffers;
+use crate::stacking::combine::cache::{CombinedSample, ScratchBuffers};
+use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Configuration for sigma clipping.
 ///
@@ -594,8 +595,8 @@ impl PercentileClipConfig {
 
 /// Configuration for Generalized Extreme Studentized Deviate (GESD) test.
 ///
-/// A rigorous statistical test for detecting multiple outliers.
-/// Best for large datasets (> 50 frames).
+/// A rigorous statistical test for detecting multiple outliers in approximately Gaussian samples.
+/// The stacking preset enables it from 15 frames.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GesdConfig {
     /// Significance level for the test (typically 0.05).
@@ -603,11 +604,6 @@ pub struct GesdConfig {
     /// Maximum number of outliers to detect.
     /// If None, uses 25% of data size.
     pub max_outliers: Option<usize>,
-    /// Relaxation factor for pixels below the center (>= 1.0).
-    /// Multiplies sigma when computing test statistics for dark outliers,
-    /// making the test more tolerant of low-side deviations.
-    /// Default: 1.5 (matching PixInsight).
-    pub low_relaxation: f32,
 }
 
 impl Default for GesdConfig {
@@ -615,7 +611,6 @@ impl Default for GesdConfig {
         Self {
             alpha: 0.05,
             max_outliers: None,
-            low_relaxation: 1.5,
         }
     }
 }
@@ -625,14 +620,7 @@ impl GesdConfig {
         Self {
             alpha,
             max_outliers,
-            low_relaxation: 1.5,
         }
-    }
-
-    /// Create GESD config with custom low relaxation factor.
-    pub fn with_low_relaxation(mut self, low_relaxation: f32) -> Self {
-        self.low_relaxation = low_relaxation;
-        self
     }
 
     /// Get maximum outliers, defaulting to 25% of data size.
@@ -642,147 +630,107 @@ impl GesdConfig {
 
     /// Partition values by GESD test, returning the number of survivors.
     ///
-    /// Uses median + MAD for robust test statistics (matching PixInsight),
-    /// with t-distribution critical values via inverse normal approximation.
+    /// Uses Rosner's two-sided statistic: distance from the sample mean divided by sample standard
+    /// deviation, with critical values from the Student-t inverse CDF.
     ///
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
     pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
-        reset_indices(&mut scratch.indices, values.len());
-
         let original_len = values.len();
+        reset_indices(&mut scratch.indices, original_len);
 
-        if values.len() <= 3 {
-            return values.len();
+        if original_len <= 3 {
+            return original_len;
         }
 
         let max_outliers = self
             .max_outliers_for_size(original_len)
             .min(original_len - 3);
+        prepare_gesd_critical_values(self, original_len, max_outliers, scratch);
         let mut len = original_len;
+        let mut mean = 0.0f64;
+        let mut squared_deviations = 0.0f64;
+        for (index, &value) in values.iter().enumerate() {
+            let value = f64::from(value);
+            let delta = value - mean;
+            mean += delta / (index + 1) as f64;
+            squared_deviations += delta * (value - mean);
+        }
 
-        // Phase 1: Compute test statistics for each candidate outlier
-        scratch.floats_b.clear();
+        scratch.gesd_statistics.clear();
 
         for _ in 0..max_outliers {
-            if len <= 3 {
+            let sample_deviation = (squared_deviations / (len - 1) as f64).sqrt();
+            if sample_deviation == 0.0 {
                 break;
             }
 
-            // Compute median of remaining values
-            scratch.floats_a.clear();
-            scratch.floats_a.extend_from_slice(&values[..len]);
-            let median = median_f32_fast(&mut scratch.floats_a);
-
-            // Compute MAD
-            let mad = mad_f32_fast(&values[..len], median, &mut scratch.floats_a);
-            let sigma = mad_to_sigma(mad);
-
-            if sigma < f32::EPSILON {
-                break;
-            }
-
-            // Find the most extreme value from median, applying asymmetric
-            // relaxation: dark pixels (below median) use sigma * low_relaxation,
-            // making them harder to reject.
-            let mut max_r = 0.0f32;
+            let mut max_deviation = 0.0f64;
             let mut max_idx = 0;
-            for (idx, &v) in values[..len].iter().enumerate() {
-                let diff = v - median;
-                let effective_sigma = if diff < 0.0 {
-                    sigma * self.low_relaxation
-                } else {
-                    sigma
-                };
-                let r = diff.abs() / effective_sigma;
-                if r > max_r {
-                    max_r = r;
+            for (idx, &value) in values[..len].iter().enumerate() {
+                let deviation = (f64::from(value) - mean).abs();
+                if deviation > max_deviation {
+                    max_deviation = deviation;
                     max_idx = idx;
                 }
             }
 
-            scratch.floats_b.push(max_r);
+            scratch
+                .gesd_statistics
+                .push(max_deviation / sample_deviation);
 
-            // Tentatively remove the most deviant value
+            let removed = f64::from(values[max_idx]);
+            let next_len = len - 1;
+            let next_mean = mean - (removed - mean) / next_len as f64;
+            // Reverse Welford's update so each candidate needs only the extreme-value scan.
+            squared_deviations =
+                (squared_deviations - (removed - mean) * (removed - next_mean)).max(0.0);
+            mean = next_mean;
             values.swap(max_idx, len - 1);
             scratch.indices.swap(max_idx, len - 1);
-            len -= 1;
+            len = next_len;
         }
 
-        // Phase 2: Determine actual outlier count using critical values (backward scan)
-        let num_candidates = scratch.floats_b.len();
-        let mut num_outliers = 0;
-
-        for i in (0..num_candidates).rev() {
-            // `ni` is already the effective sample size at this step
-            // (`len + num_candidates - i == n - i`); the Rosner/GESD critical
-            // value uses that live count directly. The earlier `ni - i` form
-            // double-subtracted `i` (an effective `n - 2i`), shrinking the count,
-            // shrinking λ, and over-rejecting.
-            let ni = (len + num_candidates - i) as f32;
-            let p = 1.0 - self.alpha / (2.0 * ni);
-            // Rosner's λ uses the Student-t quantile with ν = ni − 2 d.o.f.; the normal quantile
-            // under-estimates it for small samples and over-rejects.
-            let t_crit = student_t_inverse(p, ni - 2.0);
-
-            let numerator = (ni - 1.0) * t_crit;
-            let denominator = ((ni - 2.0 + t_crit * t_crit) * ni).sqrt();
-            let lambda = numerator / denominator;
-
-            if scratch.floats_b[i] > lambda {
-                num_outliers = i + 1;
-                break;
-            }
-        }
-
-        // The outliers were swapped to the end during phase 1.
-        // Return the number of survivors.
-        len + num_candidates - num_outliers
+        let num_outliers = scratch
+            .gesd_statistics
+            .iter()
+            .zip(&scratch.gesd_critical_values)
+            .rposition(|(statistic, critical)| statistic > critical)
+            .map_or(0, |index| index + 1);
+        original_len - num_outliers
     }
 }
 
-/// Approximate inverse of standard normal CDF.
-/// Uses Abramowitz and Stegun approximation.
-fn inverse_normal_approx(p: f32) -> f32 {
-    // Constrain p to valid range
-    let p = p.clamp(0.0001, 0.9999);
+fn prepare_gesd_critical_values(
+    config: &GesdConfig,
+    sample_count: usize,
+    max_outliers: usize,
+    scratch: &mut ScratchBuffers,
+) {
+    if scratch.gesd_sample_count == sample_count
+        && scratch.gesd_critical_values.len() == max_outliers
+        && scratch.gesd_alpha_bits == config.alpha.to_bits()
+    {
+        return;
+    }
 
-    // Use symmetry: if p > 0.5, compute for 1-p and negate
-    let (p_adj, sign) = if p > 0.5 { (1.0 - p, 1.0) } else { (p, -1.0) };
+    scratch.gesd_critical_values.clear();
+    for removed in 0..max_outliers {
+        let live_count = sample_count - removed;
+        let live = live_count as f64;
+        let probability = 1.0 - f64::from(config.alpha) / (2.0 * live);
+        let distribution = StudentsT::new(0.0, 1.0, (live_count - 2) as f64)
+            .expect("GESD live sample count guarantees positive degrees of freedom");
+        let critical_t = distribution.inverse_cdf(probability);
+        let critical =
+            (live - 1.0) / (live * (1.0 + (live - 2.0) / (critical_t * critical_t))).sqrt();
+        scratch.gesd_critical_values.push(critical);
+    }
 
-    // Rational approximation coefficients
-    let t = (-2.0 * p_adj.ln()).sqrt();
-
-    // Coefficients for approximation
-    let c0 = 2.515517;
-    let c1 = 0.802853;
-    let c2 = 0.010328;
-    let d1 = 1.432788;
-    let d2 = 0.189269;
-    let d3 = 0.001308;
-
-    let numerator = c0 + c1 * t + c2 * t * t;
-    let denominator = 1.0 + d1 * t + d2 * t * t + d3 * t * t * t;
-
-    sign * (t - numerator / denominator)
-}
-
-/// Inverse CDF of Student's t-distribution, via the Cornish-Fisher expansion from the normal
-/// quantile. The GESD critical value needs `t_{p, ν}` (not the normal quantile); the normal
-/// under-estimates it for small `ν`, which over-rejects on small stacks. Accurate to ~1% for
-/// `ν ≥ 3` (e.g. t₀.₉₇₅,₁₀ = 2.2281, ν,₅ = 2.5706), converging to the normal as `ν → ∞`.
-fn student_t_inverse(p: f32, dof: f32) -> f32 {
-    let z = inverse_normal_approx(p) as f64;
-    let n = (dof as f64).max(1.0);
-    let (z2, z3) = (z * z, z * z * z);
-    let (z5, z7, z9) = (z3 * z2, z3 * z2 * z2, z3 * z2 * z2 * z2);
-    let g1 = (z3 + z) / 4.0;
-    let g2 = (5.0 * z5 + 16.0 * z3 + 3.0 * z) / 96.0;
-    let g3 = (3.0 * z7 + 19.0 * z5 + 17.0 * z3 - 15.0 * z) / 384.0;
-    let g4 = (79.0 * z9 + 776.0 * z7 + 1482.0 * z5 - 1920.0 * z3 - 945.0 * z) / 92160.0;
-    (z + g1 / n + g2 / (n * n) + g3 / (n * n * n) + g4 / (n * n * n * n)) as f32
+    scratch.gesd_sample_count = sample_count;
+    scratch.gesd_alpha_bits = config.alpha.to_bits();
 }
 
 /// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
@@ -956,7 +904,7 @@ impl Rejection {
 
     /// Create GESD with default alpha.
     pub fn gesd() -> Self {
-        Self::Gesd(GesdConfig::new(0.05, None))
+        Self::Gesd(GesdConfig::default())
     }
 
     /// Partition values by rejection algorithm, returning the number of survivors.
@@ -1005,6 +953,33 @@ impl Rejection {
             _ => mean_f32(&values[..remaining]),
         }
     }
+
+    /// Reject outliers, compute the weighted mean, and describe the weights of its survivors.
+    pub(crate) fn combine_mean_with_quality(
+        &self,
+        values: &mut [f32],
+        weights: &[f32],
+        scratch: &mut ScratchBuffers,
+    ) -> CombinedSample {
+        debug_assert_eq!(values.len(), weights.len());
+        if let Rejection::None = self {
+            return CombinedSample::from_all(weighted_mean_f32(values, weights), weights);
+        }
+
+        let remaining = self.reject(values, scratch);
+        let survivors = &scratch.indices[..remaining];
+        let value = if remaining > 0 {
+            weighted_mean_indexed(
+                &values[..remaining],
+                weights,
+                survivors,
+                &mut scratch.floats_a,
+            )
+        } else {
+            0.0
+        };
+        CombinedSample::from_survivors(value, weights, survivors.iter().copied())
+    }
 }
 
 /// Weighted mean of rejection-reordered `values`: gathers each survivor's weight
@@ -1031,6 +1006,9 @@ fn weighted_mean_indexed(
 
 #[cfg(test)]
 mod tests {
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
+
     use crate::math::sum::mean_f32;
 
     use crate::stacking::combine::rejection::*;
@@ -1085,12 +1063,6 @@ mod tests {
         let config = GesdConfig::default();
         assert!((config.alpha - 0.05).abs() < f32::EPSILON);
         assert!(config.max_outliers.is_none());
-        assert!((config.low_relaxation - 1.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_gesd_config_max_outliers_for_size() {
-        let config = GesdConfig::default();
         assert_eq!(config.max_outliers_for_size(100), 25);
 
         let config_explicit = GesdConfig::new(0.05, Some(10));
@@ -1321,15 +1293,9 @@ mod tests {
 
     #[test]
     fn test_gesd_removes_single_bright_outlier() {
-        // n=8, max_outliers=default(25%=2), relax=1.0 (symmetric).
-        // Hand-computed: step 0 removes 100.0 (r=667.8), step 1 tries 1.2
-        // (r=1.35 < λ≈1.74 → keep; λ from the live count n−i=7). Phase 2
-        // confirms 1 outlier. Result: 7.
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let mut s = scratch();
-        let remaining = GesdConfig::new(0.05, None)
-            .with_low_relaxation(1.0)
-            .reject(&mut values, &mut s);
+        let remaining = GesdConfig::new(0.05, None).reject(&mut values, &mut s);
         assert_eq!(
             remaining, 7,
             "Exactly the bright outlier should be rejected"
@@ -1339,9 +1305,6 @@ mod tests {
             "Index 7 (100.0) must be rejected, survivors: {:?}",
             &s.indices[..remaining]
         );
-        for &v in &values[..remaining] {
-            assert!(v < 2.0, "Outlier {v} should not survive");
-        }
     }
 
     #[test]
@@ -1353,27 +1316,23 @@ mod tests {
     }
 
     #[test]
-    fn test_gesd_keeps_tight_cluster() {
-        // Tight cluster, no real outliers. max_outliers=default(25%=2).
-        // Hand-computed: step 0 tries 1.2 (r=1.35 < λ≈1.84, live count n−i=8),
-        // step 1 tries 0.8 (r=0.90 < λ≈1.74, live count n−i=7). Phase 2: both
-        // keep. Result: 8.
-        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
-        let remaining = GesdConfig::default().reject(&mut values, &mut scratch());
-        assert_eq!(remaining, 8, "Tight cluster should have no rejections");
+    fn test_gesd_tiny_alpha_uses_finite_limiting_critical_value() {
+        let mut values: Vec<f32> = (0..15).map(|value| value as f32).collect();
+        let mut scratch = scratch();
+
+        let remaining =
+            GesdConfig::new(f32::MIN_POSITIVE, Some(3)).reject(&mut values, &mut scratch);
+
+        assert_eq!(remaining, 15);
+        let expected = 14.0 / 15.0f64.sqrt();
+        assert!((scratch.gesd_critical_values[0] - expected).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn test_inverse_normal_approx() {
-        let z_95 = inverse_normal_approx(0.95);
-        assert!((z_95 - 1.645).abs() < 0.05);
-
-        let z_975 = inverse_normal_approx(0.975);
-        assert!((z_975 - 1.96).abs() < 0.05);
-
-        // Symmetry check
-        let z_05 = inverse_normal_approx(0.05);
-        assert!((z_05 + z_95).abs() < 0.1);
+    fn test_gesd_keeps_tight_cluster() {
+        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
+        let remaining = GesdConfig::default().reject(&mut values, &mut scratch());
+        assert_eq!(remaining, 8, "Tight cluster should have no rejections");
     }
 
     #[test]
@@ -1404,23 +1363,6 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let mut s = scratch();
         let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut s);
-
-        let surviving = &s.indices[..remaining];
-        assert!(
-            !surviving.contains(&7),
-            "Frame 7 (outlier) should not survive, survivors: {:?}",
-            surviving
-        );
-        for &idx in surviving {
-            assert!(idx < 8, "Invalid surviving index: {}", idx);
-        }
-    }
-
-    #[test]
-    fn test_gesd_indices_track_survivors() {
-        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
-        let mut s = scratch();
-        let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut values, &mut s);
 
         let surviving = &s.indices[..remaining];
         assert!(
@@ -1515,13 +1457,7 @@ mod tests {
     }
 
     fn scratch() -> ScratchBuffers {
-        ScratchBuffers {
-            indices: vec![],
-            floats_a: vec![],
-            floats_b: vec![],
-            usize_a: vec![],
-            usize_b: vec![],
-        }
+        ScratchBuffers::default()
     }
 
     #[test]
@@ -1642,144 +1578,113 @@ mod tests {
     }
 
     #[test]
-    fn test_gesd_relaxation_correctness() {
-        // Cluster of 10 around 10.0, dark pixel at 9.6 (idx 10), bright at 50.0 (idx 11).
-        // Hand-computed with our median+MAD+A&S inverse normal:
-        //   Initial (n=12): median=10.0, MAD=0.125, sigma=0.1853
-        //   Phase 1, step 0: 50.0 removed (r=215.8 >> any lambda)
-        //   Phase 1, step 1: after removing 50.0 (n=11), sigma=0.1483
-        //     relax=1.0: r = 0.4/0.1483 = 2.698 > lambda(2.005) → candidate
-        //     relax=1.5: r = 0.4/(0.1483×1.5) = 1.799 < lambda(2.005) → not candidate
-        //   Phase 2 backward: relax=1.0 rejects dark; relax=1.5 does not.
-        let cluster = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85];
-
-        // With default relaxation (1.5): dark pixel survives, only bright rejected
-        let mut v1: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
-        let mut s1 = scratch();
-        let r1 = GesdConfig::new(0.05, Some(3)).reject(&mut v1, &mut s1);
-        let surv1: Vec<usize> = s1.indices[..r1].to_vec();
-        assert_eq!(r1, 11, "relax=1.5: only bright outlier rejected");
-        assert!(
-            surv1.contains(&10),
-            "relax=1.5: dark pixel must survive: {:?}",
-            surv1
-        );
-        assert!(!surv1.contains(&11), "relax=1.5: bright must be rejected");
-
-        // Without relaxation: both outliers rejected, survivors = clean cluster
-        let mut v2: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
-        let mut s2 = scratch();
-        let r2 = GesdConfig::new(0.05, Some(3))
-            .with_low_relaxation(1.0)
-            .reject(&mut v2, &mut s2);
-        let surv2: Vec<usize> = s2.indices[..r2].to_vec();
-        assert_eq!(r2, 10, "relax=1.0: both outliers rejected");
-        assert!(
-            !surv2.contains(&10),
-            "relax=1.0: dark pixel must be rejected"
-        );
-        assert!(!surv2.contains(&11), "relax=1.0: bright must be rejected");
-
-        // Verify surviving values match the clean cluster exactly
-        let mut got: Vec<f32> = v2[..r2].to_vec();
-        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let mut want = cluster.clone();
-        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(got, want, "survivors must be exactly the clean cluster");
-    }
-
-    #[test]
-    fn test_gesd_relaxation_boundary() {
-        // dark=8.5 is far below the cluster (~8σ): even the relax=1.5 down-weighting of dark
-        // pixels cannot save it, so both outliers are rejected. (With the Student-t critical
-        // values a mild dark like 9.5 — only ~2σ out — is correctly kept; see
-        // `test_gesd_relaxation_correctness`.)
-        let cluster = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85];
-        let mut v: Vec<f32> = cluster.iter().copied().chain([8.5, 50.0]).collect();
-        let mut s = scratch();
-        let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut v, &mut s);
-        assert_eq!(
-            remaining, 10,
-            "dark=8.5 far below cluster, both rejected even with relax=1.5"
-        );
-    }
-
-    #[test]
-    fn test_student_t_inverse_known_values() {
-        // t_{0.975, ν} from standard tables. Cornish-Fisher is ~1% at small ν, tighter as ν grows,
-        // and converges to the normal quantile (1.960) as ν → ∞.
-        assert!((student_t_inverse(0.975, 10.0) - 2.2281).abs() < 0.01);
-        assert!((student_t_inverse(0.975, 5.0) - 2.5706).abs() < 0.02);
-        assert!((student_t_inverse(0.975, 30.0) - 2.0423).abs() < 0.01);
-        assert!((student_t_inverse(0.975, 1.0e6) - 1.9600).abs() < 0.01);
-        // A larger ν must give a smaller (tighter) critical value than a smaller ν.
-        assert!(student_t_inverse(0.975, 30.0) < student_t_inverse(0.975, 5.0));
-    }
-
-    #[test]
-    fn test_gesd_relaxation_symmetry() {
-        // With relaxation=1.0, equidistant dark/bright outliers must produce
-        // identical survivor counts (no asymmetric bias).
-        let config = GesdConfig::new(0.05, Some(2)).with_low_relaxation(1.0);
-
-        let mut v_dark = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.1, 0.0];
-        let mut s1 = scratch();
-        let r_dark = config.reject(&mut v_dark, &mut s1);
-
-        let mut v_bright = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.1, 20.0];
-        let mut s2 = scratch();
-        let r_bright = config.reject(&mut v_bright, &mut s2);
-
-        assert_eq!(r_dark, r_bright, "relax=1.0 must be symmetric");
-    }
-
-    #[test]
-    fn test_gesd_relaxation_does_not_affect_bright() {
-        // Relaxation only applies to below-median pixels. A bright-only outlier
-        // must be rejected identically regardless of relaxation value.
-        let data: Vec<f32> = vec![
-            10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85, 50.0,
+    fn test_gesd_matches_nist_reference_example() {
+        let mut values = vec![
+            -0.25, 0.68, 0.94, 1.15, 1.20, 1.26, 1.26, 1.34, 1.38, 1.43, 1.49, 1.49, 1.55, 1.56,
+            1.58, 1.65, 1.69, 1.70, 1.76, 1.77, 1.81, 1.91, 1.94, 1.96, 1.99, 2.06, 2.09, 2.10,
+            2.14, 2.15, 2.23, 2.24, 2.26, 2.35, 2.37, 2.40, 2.47, 2.54, 2.62, 2.64, 2.90, 2.92,
+            2.92, 2.93, 3.21, 3.26, 3.30, 3.59, 3.68, 4.30, 4.64, 5.34, 5.42, 6.01,
         ];
-        for relax in [1.0, 1.5, 3.0, 5.0] {
-            let mut v = data.clone();
-            let mut s = scratch();
-            let r = GesdConfig::new(0.05, Some(3))
-                .with_low_relaxation(relax)
-                .reject(&mut v, &mut s);
-            assert_eq!(
-                r, 10,
-                "relax={}: bright outlier must always be rejected",
-                relax
+        let expected = [
+            (3.118, 3.158),
+            (2.942, 3.151),
+            (3.179, 3.143),
+            (2.810, 3.136),
+            (2.815, 3.128),
+            (2.848, 3.120),
+            (2.279, 3.111),
+            (2.310, 3.103),
+            (2.101, 3.094),
+            (2.067, 3.085),
+        ];
+        let mut scratch = scratch();
+
+        let remaining = GesdConfig::new(0.05, Some(10)).reject(&mut values, &mut scratch);
+
+        assert_eq!(remaining, 51);
+        assert_eq!(
+            scratch.indices[..remaining]
+                .iter()
+                .filter(|&&index| index >= 51)
+                .count(),
+            0
+        );
+        for ((statistic, critical), (expected_statistic, expected_critical)) in scratch
+            .gesd_statistics
+            .iter()
+            .zip(&scratch.gesd_critical_values)
+            .zip(expected)
+        {
+            assert!(
+                (statistic - expected_statistic).abs() <= 0.0015,
+                "expected statistic {expected_statistic}, got {statistic}"
             );
             assert!(
-                !s.indices[..r].contains(&10),
-                "relax={}: idx 10 must be rejected",
-                relax
+                (critical - expected_critical).abs() <= 0.0015,
+                "expected critical value {expected_critical}, got {critical}"
             );
         }
     }
 
     #[test]
-    fn test_gesd_combined_mean_with_relaxation() {
-        // Verify final pixel value: cluster + dark=9.6 survives, bright=50.0 rejected.
-        // Expected mean = (sum_of_cluster + 9.6) / 11
-        let cluster = [
-            10.0f32, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85,
+    fn test_gesd_is_sign_symmetric_for_asymmetric_outliers() {
+        let values = vec![
+            -1.4, -1.2, -1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, -8.0,
+            10.0,
         ];
-        let expected_mean = (cluster.iter().sum::<f32>() + 9.6) / 11.0;
+        let mut original = values.clone();
+        let mut mirrored: Vec<f32> = values.iter().map(|value| -value).collect();
+        let config = GesdConfig::new(0.05, Some(2));
+        let mut original_scratch = scratch();
+        let mut mirrored_scratch = scratch();
 
-        let mut values: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
-        let mean = Rejection::Gesd(GesdConfig::new(0.05, Some(3))).combine_mean(
-            &mut values,
-            None,
-            &mut scratch(),
-        );
-        assert!(
-            (mean - expected_mean).abs() < 0.001,
-            "mean should be {:.4}, got {:.4}",
-            expected_mean,
-            mean
-        );
+        let original_remaining = config.reject(&mut original, &mut original_scratch);
+        let mirrored_remaining = config.reject(&mut mirrored, &mut mirrored_scratch);
+
+        assert_eq!(original_remaining, 15);
+        assert_eq!(mirrored_remaining, 15);
+        let mut original_survivors = original_scratch.indices[..original_remaining].to_vec();
+        let mut mirrored_survivors = mirrored_scratch.indices[..mirrored_remaining].to_vec();
+        original_survivors.sort_unstable();
+        mirrored_survivors.sort_unstable();
+        assert_eq!(original_survivors, mirrored_survivors);
+        assert_eq!(original_survivors, (0..15).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_gesd_gaussian_false_positive_rate_matches_alpha() {
+        const ALPHA: f32 = 0.05;
+        const TRIALS: usize = 4_000;
+
+        let mut rng = ChaCha8Rng::seed_from_u64(0x947e_4d3a_7c16_b205);
+        for sample_count in [15, 25, 50, 100] {
+            let config = GesdConfig::new(ALPHA, Some(sample_count / 4));
+            let mut scratch = scratch();
+            let mut false_positives = 0usize;
+
+            for _ in 0..TRIALS {
+                let mut values: Vec<f32> = (0..sample_count)
+                    .map(|_| standard_normal(&mut rng))
+                    .collect();
+                if config.reject(&mut values, &mut scratch) < sample_count {
+                    false_positives += 1;
+                }
+            }
+
+            let actual = false_positives as f64 / TRIALS as f64;
+            let expected = f64::from(ALPHA);
+            let standard_error = (expected * (1.0 - expected) / TRIALS as f64).sqrt();
+            assert!(
+                (actual - expected).abs() <= 5.0 * standard_error,
+                "n={sample_count}: expected false-positive rate {expected}, got {actual}"
+            );
+        }
+    }
+
+    fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
+        let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+        let u2 = rng.random::<f64>();
+        ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()) as f32
     }
 
     #[test]

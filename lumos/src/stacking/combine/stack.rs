@@ -15,7 +15,7 @@ use imaginarium::Buffer2;
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
-use crate::stacking::combine::cache::{CfaCache, LightCache};
+use crate::stacking::combine::cache::{CfaCache, CombinedSample, LightCache};
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::frame_store::{FrameStats, SpillDirectory, StackableImage, StoredLightFrame};
@@ -44,17 +44,16 @@ pub(crate) struct FrameNorm {
     pub channels: ArrayVec<ChannelNorm, 3>,
 }
 
-/// One input frame for [`stack_images`]: the image plus optional per-pixel coverage.
+/// One input frame for [`stack_images`] with optional per-pixel support and confidence.
 ///
-/// `coverage` (e.g. produced by warping) marks how much of each output pixel landed on real source
-/// data; the combine includes a frame at a pixel only where its coverage is meaningful, weighted by
-/// it, so warped-frame borders don't drag the stacked edges dark. `None` means the frame fully
-/// covers every pixel (weight 1) — e.g. an unwarped reference. Plain `AstroImage`s convert with
-/// `.into()`.
+/// `coverage` gates whether a warped sample has meaningful source support. `confidence` is an
+/// independent inverse-variance multiplier. `None` means full support or unit confidence,
+/// respectively. Plain `AstroImage`s convert with `.into()`.
 #[derive(Debug)]
 pub struct StackFrame {
     pub image: AstroImage,
     pub coverage: Option<Buffer2<f32>>,
+    pub confidence: Option<Buffer2<f32>>,
 }
 
 impl From<AstroImage> for StackFrame {
@@ -62,6 +61,7 @@ impl From<AstroImage> for StackFrame {
         Self {
             image,
             coverage: None,
+            confidence: None,
         }
     }
 }
@@ -78,8 +78,9 @@ impl From<AstroImage> for StackFrame {
 ///
 /// # Returns
 ///
-/// A [`StackProduct`] whose coverage is the fraction of frames contributing at each pixel. Its
-/// weight and variance planes are computed before per-channel outlier rejection.
+/// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
+/// pixel. Its channel-shaped weight and variance images describe the samples that survived
+/// per-channel outlier rejection.
 ///
 /// # Errors
 ///
@@ -126,7 +127,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     let cache = LightCache::from_paths(paths, &config.cache, progress, cancel)?;
     // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking_weighted(&cache, &config)?;
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -139,12 +140,13 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// owns the decoded frames (e.g. straight off calibration or warping). The frames are consumed.
 /// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
 ///
-/// Each [`StackFrame`] may carry per-pixel `coverage`; the combine then includes a frame at a
-/// pixel only where it actually covers, so warped-frame borders don't drag the stacked edges
-/// dark. Frames with no coverage count fully everywhere. Plain `AstroImage`s convert via `.into()`.
+/// Each [`StackFrame`] may carry per-pixel `coverage` and `confidence`. Coverage gates inclusion;
+/// confidence scales inverse-variance weight. Frames without either plane use full support and unit
+/// confidence. Plain `AstroImage`s convert via `.into()`.
 ///
 /// Returns an error when the configuration is invalid, manual-weight count doesn't match the frame
-/// count, or any image/coverage dimensions differ.
+/// count, image/quality-plane dimensions differ, or normalization/noise weighting is requested for
+/// registered frames with no common valid support.
 pub fn stack_images(
     frames: Vec<StackFrame>,
     config: StackConfig,
@@ -163,14 +165,16 @@ pub fn stack_images(
         weighting = ?config.weighting,
         normalization = ?config.normalization,
         frame_count = frames.len(),
-        coverage_weighted = frames.iter().any(|f| f.coverage.is_some()),
+        warp_quality_weighted = frames
+            .iter()
+            .any(|f| f.coverage.is_some() || f.confidence.is_some()),
         "Starting unified stack (in memory)"
     );
 
     let mut cache = LightCache::from_stack_frames(frames, &config.cache, progress)?;
     cache.core.cancel = cancel;
     // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking_weighted(&cache, &config)?;
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -211,7 +215,7 @@ pub(crate) fn stack_stored_frames(
         progress,
         cancel,
     );
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking_weighted(&cache, &config)?;
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -429,46 +433,51 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
 
 /// Coverage-weighted counterpart to [`run_stacking`] for a [`LightCache`]: identical combine math,
 /// but each frame contributes only where it covers (`process_chunked_weighted`).
-pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> StackProduct {
+pub(crate) fn run_stacking_weighted(
+    cache: &LightCache,
+    config: &StackConfig,
+) -> Result<StackProduct, Error> {
     let stats = &cache.core.channel_stats;
-    let method = config.small_n.resolve(config.method, stats.len());
+    let method = config.small_n.resolve(config.method, cache.frames.len());
     warn_if_weights_ignored(method, &config.weighting);
+    let weighted_combine = matches!(method, CombineMethod::Mean(_));
+    let needs_common_stats = config.normalization != Normalization::None
+        || (weighted_combine && config.weighting == Weighting::Noise);
+    if needs_common_stats && !cache.stats_share_domain {
+        return Err(Error::NoCommonCoverage);
+    }
     let frame_norms = compute_frame_norms(stats, config.normalization);
-    let weights = resolve_weights(&config.weighting, stats, frame_norms.as_deref());
+    let weights = weighted_combine
+        .then(|| resolve_weights(&config.weighting, stats, frame_norms.as_deref()))
+        .flatten();
     let norms = frame_norms.as_deref();
 
-    // Median ignores per-frame weights (each contributing frame counts equally), so the geometry
-    // planes must too — otherwise the weight/variance maps wouldn't describe the image produced.
-    let weighted_combine = matches!(method, CombineMethod::Mean(_));
-
-    let pixels = match method {
-        CombineMethod::Median => cache.process_chunked_weighted(None, norms, |values, _, _| {
-            math::statistics::median_f32_mut(values)
+    let combined = match method {
+        CombineMethod::Median => cache.process_chunked_weighted(None, norms, |values, w, _| {
+            CombinedSample::from_all(math::statistics::median_f32_mut(values), w)
         }),
         CombineMethod::Mean(rejection) => {
             cache.process_chunked_weighted(weights.as_deref(), norms, move |values, w, scratch| {
-                rejection.combine_mean(values, w, scratch)
+                rejection.combine_mean_with_quality(values, w, scratch)
             })
         }
     };
 
-    let geometry_weights = if weighted_combine {
-        weights.as_deref()
-    } else {
-        None
-    };
-    let image =
-        AstroImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions);
-    cache.finish_product(image, geometry_weights)
+    Ok(cache.finish_product(combined))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::io::astro_image::PixelData;
     use crate::stacking::combine::cache_config::CacheConfig;
-    use crate::stacking::combine::rejection::Rejection;
+    use crate::stacking::combine::config::SmallN;
+    use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::store_light_frame;
+    use crate::stacking::registration::config::InterpolationMethod;
+    use crate::stacking::registration::interpolation::WarpParams;
+    use crate::stacking::registration::resample;
+    use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::ScratchDirectory;
     use crate::{
         io::astro_image::{AstroImage, ImageDimensions},
@@ -495,10 +504,15 @@ mod tests {
             // Every other frame gets a partial coverage map (warped-border emulation).
             let coverage = f.is_multiple_of(2).then(|| {
                 let mut c = vec![1.0f32; w * h];
-                c[0] = 0.3;
+                c[0] = 0.0;
                 Buffer2::new(w, h, c)
             });
-            StackFrame { image, coverage }
+            let confidence = coverage.clone();
+            StackFrame {
+                image,
+                coverage,
+                confidence,
+            }
         };
         let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
         let config = StackConfig::light();
@@ -509,6 +523,7 @@ mod tests {
                 .map(|f| StackFrame {
                     image: f.image.clone(),
                     coverage: f.coverage.clone(),
+                    confidence: f.confidence.clone(),
                 })
                 .collect(),
             config.clone(),
@@ -524,8 +539,14 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, f)| {
-                store_light_frame(&spill_directory.path, &format!("f{i}"), f.image, f.coverage)
-                    .unwrap()
+                store_light_frame(
+                    &spill_directory.path,
+                    &format!("f{i}"),
+                    f.image,
+                    f.coverage,
+                    f.confidence,
+                )
+                .unwrap()
             })
             .collect();
         let disk = stack_stored_frames(
@@ -550,12 +571,18 @@ mod tests {
             bits(&disk.coverage),
             "coverage differs"
         );
-        assert_eq!(bits(&ram.weight), bits(&disk.weight), "weight differs");
-        assert_eq!(
-            bits(&ram.variance),
-            bits(&disk.variance),
-            "variance differs"
-        );
+        for channel in 0..ram.image.channels() {
+            assert_eq!(
+                bits(ram.weight.channel(channel)),
+                bits(disk.weight.channel(channel)),
+                "weight channel {channel} differs"
+            );
+            assert_eq!(
+                bits(ram.variance.channel(channel)),
+                bits(disk.variance.channel(channel)),
+                "variance channel {channel} differs"
+            );
+        }
     }
 
     /// Convenience wrapper: compute stats + norm params from cache (for tests).
@@ -611,6 +638,10 @@ mod tests {
                 pixel
             );
         }
+    }
+
+    fn mean_sample(values: &[f32], weights: &[f32]) -> CombinedSample {
+        CombinedSample::from_all(math::sum::mean_f32(values), weights)
     }
 
     #[test]
@@ -729,6 +760,7 @@ mod tests {
         let frame = StackFrame {
             image: AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
             coverage: Some(Buffer2::new_filled(2, 2, 1.0)),
+            confidence: None,
         };
         let error = stack_images(
             vec![frame],
@@ -739,14 +771,79 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             error,
-            Error::CoverageDimensionMismatch {
+            Error::WarpPlaneDimensionMismatch {
                 index: 0,
+                plane: "coverage",
                 expected_width: 4,
                 expected_height: 4,
                 actual_width: 2,
                 actual_height: 2,
             }
         ));
+
+        let frame = StackFrame {
+            image: AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            coverage: None,
+            confidence: Some(Buffer2::new_filled(2, 2, 1.0)),
+        };
+        let error = stack_images(
+            vec![frame],
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::WarpPlaneDimensionMismatch {
+                index: 0,
+                plane: "confidence",
+                expected_width: 4,
+                expected_height: 4,
+                actual_width: 2,
+                actual_height: 2,
+            }
+        ));
+    }
+
+    #[test]
+    fn stack_images_rejects_invalid_warp_quality_values() {
+        let dims = ImageDimensions::new((2, 1), 1);
+        for (coverage, confidence, expected_plane, expected_value) in [
+            (
+                Some(Buffer2::new(2, 1, vec![1.0, 1.1])),
+                None,
+                "coverage",
+                1.1,
+            ),
+            (
+                None,
+                Some(Buffer2::new(2, 1, vec![1.0, -0.1])),
+                "confidence",
+                -0.1,
+            ),
+        ] {
+            let error = stack_images(
+                vec![StackFrame {
+                    image: AstroImage::from_pixels(dims, vec![1.0; 2]),
+                    coverage,
+                    confidence,
+                }],
+                StackConfig::default(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                Error::InvalidWarpPlaneValue {
+                    index: 0,
+                    plane,
+                    pixel: 1,
+                    value,
+                } if plane == expected_plane && value == expected_value
+            ));
+        }
     }
 
     #[test]
@@ -781,10 +878,12 @@ mod tests {
             StackFrame {
                 image: a,
                 coverage: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+                confidence: None,
             },
             StackFrame {
                 image: b,
                 coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+                confidence: None,
             },
         ];
         let out = stack_images(
@@ -809,11 +908,110 @@ mod tests {
     }
 
     #[test]
-    fn coverage_weights_partial_contributions() {
-        // 1 px: A (cov 1.0, val 10) + B (cov 0.5, val 20) → (10·1 + 20·0.5)/1.5 = 40/3.
-        let dims = ImageDimensions::new((1, 1), 1);
-        let a = AstroImage::from_pixels(dims, vec![10.0]);
-        let b = AstroImage::from_pixels(dims, vec![20.0]);
+    fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
+        let dims = ImageDimensions::new((6, 1), 1);
+        let coverage = Buffer2::new(6, 1, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
+        let make_cache = |fill: [f32; 4]| {
+            let frames = [
+                [fill[0], fill[1], 10.0, 14.0, fill[2], fill[3]],
+                [fill[3], fill[2], 20.0, 28.0, fill[1], fill[0]],
+                [fill[1], fill[3], 30.0, 32.0, fill[0], fill[2]],
+            ]
+            .into_iter()
+            .map(|pixels| StackFrame {
+                image: AstroImage::from_pixels(dims, pixels.to_vec()),
+                coverage: Some(coverage.clone()),
+                confidence: None,
+            })
+            .collect();
+            LightCache::from_stack_frames(
+                frames,
+                &CacheConfig::default(),
+                ProgressCallback::default(),
+            )
+            .unwrap()
+        };
+
+        let caches = [
+            make_cache([0.0, 0.0, 0.0, 0.0]),
+            make_cache([-1e20, 1e20, -123_456.0, 789_012.0]),
+        ];
+        for cache in &caches {
+            let stats = &cache.core.channel_stats;
+            assert_eq!(stats[0].channels[0].median, 12.0);
+            assert_eq!(stats[0].channels[0].mad, 2.0);
+            assert_eq!(stats[1].channels[0].median, 24.0);
+            assert_eq!(stats[1].channels[0].mad, 4.0);
+            assert_eq!(stats[2].channels[0].median, 31.0);
+            assert_eq!(stats[2].channels[0].mad, 1.0);
+            assert_eq!(select_reference_frame(stats), 2);
+
+            let norms = compute_frame_norms(stats, Normalization::Multiplicative).unwrap();
+            assert_eq!(norms[0].channels[0].gain, 31.0 / 12.0);
+            assert_eq!(norms[1].channels[0].gain, 31.0 / 24.0);
+            assert_eq!(norms[2].channels[0].gain, 1.0);
+            assert!(norms.iter().all(|norm| norm.channels[0].offset == 0.0));
+
+            let weights = resolve_weights(&Weighting::Noise, stats, Some(&norms)).unwrap();
+            assert!((weights[0] - 36.0 / 1033.0).abs() < 1e-7);
+            assert!((weights[1] - 36.0 / 1033.0).abs() < 1e-7);
+            assert!((weights[2] - 961.0 / 1033.0).abs() < 1e-7);
+        }
+
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            weighting: Weighting::Noise,
+            normalization: Normalization::Multiplicative,
+            ..Default::default()
+        };
+        let first = run_stacking_weighted(&caches[0], &config).unwrap();
+        let second = run_stacking_weighted(&caches[1], &config).unwrap();
+        assert_eq!(
+            first.image.channel(0).pixels(),
+            second.image.channel(0).pixels()
+        );
+        assert_eq!(first.image.channel(0).pixels()[0..2], [0.0, 0.0]);
+        assert!((first.image.channel(0).pixels()[2] - 30_690.0 / 1033.0).abs() < 1e-5);
+        assert!((first.image.channel(0).pixels()[3] - 33_356.0 / 1033.0).abs() < 1e-5);
+        assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn stack_images_rejects_an_empty_common_coverage_domain() {
+        let dims = ImageDimensions::new((2, 1), 1);
+        let frames = vec![
+            StackFrame {
+                image: AstroImage::from_pixels(dims, vec![1.0, 2.0]),
+                coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+                confidence: None,
+            },
+            StackFrame {
+                image: AstroImage::from_pixels(dims, vec![3.0, 4.0]),
+                coverage: Some(Buffer2::new(2, 1, vec![0.0, 1.0])),
+                confidence: None,
+            },
+        ];
+        let error = stack_images(
+            frames,
+            StackConfig {
+                normalization: Normalization::Global,
+                ..Default::default()
+            },
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::NoCommonCoverage));
+    }
+
+    #[test]
+    fn confidence_weights_contributions_independently_of_coverage() {
+        // px0: A (q 1, val 10) + B (q .5, val 20) → 40/3. At px1 B has zero
+        // confidence, so only A contributes statistically while both frames retain geometric
+        // coverage.
+        let dims = ImageDimensions::new((2, 1), 1);
+        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
+        let b = AstroImage::from_pixels(dims, vec![20.0, 20.0]);
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::None,
@@ -822,35 +1020,93 @@ mod tests {
         let frames = vec![
             StackFrame {
                 image: a,
-                coverage: Some(Buffer2::new(1, 1, vec![1.0])),
+                coverage: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+                confidence: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
             },
             StackFrame {
                 image: b,
-                coverage: Some(Buffer2::new(1, 1, vec![0.5])),
+                coverage: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+                confidence: Some(Buffer2::new(2, 1, vec![0.5, 0.0])),
             },
         ];
-        let out = stack_images(
+        let product = stack_images(
             frames,
             config,
             ProgressCallback::default(),
             CancelToken::never(),
         )
-        .unwrap()
-        .image;
-        let v = out.channel(0).pixels()[0];
-        assert!((v - 40.0 / 3.0).abs() < 1e-4, "expected 40/3, got {v}");
+        .unwrap();
+        assert!(
+            (product.image.channel(0)[0] - 40.0 / 3.0).abs() < 1e-4,
+            "expected 40/3, got {}",
+            product.image.channel(0)[0]
+        );
+        assert_eq!(product.image.channel(0)[1], 10.0);
+        assert_eq!(product.coverage.pixels(), &[1.0, 1.0]);
+        assert_eq!(product.weight.channel(0).pixels(), &[1.5, 1.0]);
+        assert!(
+            (product.variance.channel(0)[0] - 5.0 / 9.0).abs() < 1e-6,
+            "variance = {}",
+            product.variance.channel(0)[0]
+        );
+        assert_eq!(product.variance.channel(0)[1], 1.0);
+    }
+
+    #[test]
+    fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
+        let dims = ImageDimensions::new((24, 20), 1);
+        let expected = -0.7;
+        let source = AstroImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
+        let transform = WarpTransform::new(Transform::translation(glam::DVec2::new(-2.37, 1.43)));
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+
+        for method in [
+            InterpolationMethod::Nearest,
+            InterpolationMethod::Bilinear,
+            InterpolationMethod::Bicubic,
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos4,
+        ] {
+            let warped = resample::warp(&source, &transform, &WarpParams::new(method));
+            let frames = vec![
+                StackFrame::from(source.clone()),
+                StackFrame {
+                    image: warped.image,
+                    coverage: Some(warped.coverage),
+                    confidence: Some(warped.confidence),
+                },
+            ];
+            let product = stack_images(
+                frames,
+                config.clone(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap();
+            for (pixel, &actual) in product.image.channel(0).pixels().iter().enumerate() {
+                assert!(
+                    (actual - expected).abs() < 2e-5,
+                    "{method:?} pixel {pixel}: expected {expected}, got {actual}"
+                );
+            }
+        }
     }
 
     #[test]
     fn coverage_none_frame_counts_fully() {
-        // A `coverage: None` frame (e.g. the unwarped reference) must count fully (weight 1)
-        // alongside coverage-carrying frames — not be excluded.
+        // An unwarped reference with no quality planes must have full support and unit confidence.
         let dims = ImageDimensions::new((1, 1), 1);
         let frames = vec![
             StackFrame::from(AstroImage::from_pixels(dims, vec![10.0])),
             StackFrame {
                 image: AstroImage::from_pixels(dims, vec![20.0]),
                 coverage: Some(Buffer2::new(1, 1, vec![1.0])),
+                confidence: None,
             },
         ];
         let config = StackConfig {
@@ -887,6 +1143,7 @@ mod tests {
         let frames = vec![StackFrame {
             image: a,
             coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+            confidence: None,
         }];
         let out = stack_images(
             frames,
@@ -917,6 +1174,7 @@ mod tests {
             .map(|(&v, c)| StackFrame {
                 image: AstroImage::from_pixels(dims, vec![v]),
                 coverage: Some(Buffer2::new(1, 1, vec![c])),
+                confidence: None,
             })
             .collect();
         let config = StackConfig {
@@ -976,10 +1234,12 @@ mod tests {
             StackFrame {
                 image: AstroImage::from_pixels(dims, vec![10.0, 10.0]),
                 coverage: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+                confidence: None,
             },
             StackFrame {
                 image: AstroImage::from_pixels(dims, vec![20.0, 20.0]),
                 coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+                confidence: None,
             },
         ];
         let config = StackConfig {
@@ -995,18 +1255,68 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.coverage[0], 1.0);
-        assert_eq!(r.weight[0], 2.0);
-        assert_eq!(r.variance[0], 0.5);
+        assert_eq!(r.weight.channel(0)[0], 2.0);
+        assert_eq!(r.variance.channel(0)[0], 0.5);
         assert_eq!(r.coverage[1], 0.5);
-        assert_eq!(r.weight[1], 1.0);
-        assert_eq!(r.variance[1], 1.0);
+        assert_eq!(r.weight.channel(0)[1], 1.0);
+        assert_eq!(r.variance.channel(0)[1], 1.0);
     }
 
     #[test]
-    fn median_geometry_uses_equal_weights_not_noise() {
-        // Median ignores per-frame weights, so the geometry planes must too. With 3 frames and
-        // Noise weighting, equal weights give weight = 3 (frame count) and variance = 3/3² = 1/3;
-        // noise weights would (mis)report a normalized Σw ≈ 1 instead.
+    fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
+        // Percentile clipping removes each channel's high value, hence a different source frame:
+        // R keeps f0/f1, G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] normalize to
+        // [1/6,2/6,3/6].
+        let dims = ImageDimensions::new((1, 1), 3);
+        let frames = vec![
+            AstroImage::from_pixels(dims, vec![1.0, 100.0, 1.0]).into(),
+            AstroImage::from_pixels(dims, vec![2.0, 2.0, 100.0]).into(),
+            AstroImage::from_pixels(dims, vec![100.0, 3.0, 3.0]).into(),
+        ];
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
+                0.0, 34.0,
+            ))),
+            weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
+            normalization: Normalization::None,
+            small_n: SmallN::none(),
+            ..Default::default()
+        };
+
+        let result = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+
+        assert_eq!(result.coverage[0], 1.0);
+        let expected_values = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
+        let expected_weights = [3.0 / 6.0, 5.0 / 6.0, 4.0 / 6.0];
+        let expected_variances = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
+        for channel in 0..3 {
+            assert!(
+                (result.image.channel(channel)[0] - expected_values[channel]).abs() < 1e-6,
+                "channel {channel} value"
+            );
+            assert!(
+                (result.weight.channel(channel)[0] - expected_weights[channel]).abs() < 1e-6,
+                "channel {channel} weight"
+            );
+            assert!(
+                (result.variance.channel(channel)[0] - expected_variances[channel]).abs() < 1e-6,
+                "channel {channel} variance"
+            );
+        }
+        assert_ne!(result.weight.channel(0)[0], result.weight.channel(1)[0]);
+        assert_ne!(result.variance.channel(1)[0], result.variance.channel(2)[0]);
+    }
+
+    #[test]
+    fn median_quality_uses_equal_frame_weights_not_noise() {
+        // Median ignores per-frame weights. With 3 frames and Noise weighting, equal frame weights
+        // give weight = 3 and variance = 3/3² = 1/3; noise weights would misdescribe the estimator.
         let dims = ImageDimensions::new((8, 1), 1);
         let mk = |base: f32, spread: f32| -> Vec<f32> {
             (0..8).map(|i| base + i as f32 * spread / 7.0).collect()
@@ -1032,13 +1342,14 @@ mod tests {
         for p in 0..8 {
             assert_eq!(r.coverage[p], 1.0);
             assert_eq!(
-                r.weight[p], 3.0,
-                "median geometry must use equal weights (= 3)"
+                r.weight.channel(0)[p],
+                3.0,
+                "median quality must use equal frame weights (= 3)"
             );
             assert!(
-                (r.variance[p] - 1.0 / 3.0).abs() < 1e-6,
+                (r.variance.channel(0)[p] - 1.0 / 3.0).abs() < 1e-6,
                 "variance = {}",
-                r.variance[p]
+                r.variance.channel(0)[p]
             );
         }
     }
@@ -1105,10 +1416,10 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 150.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
-            math::sum::mean_f32(values)
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
+            mean_sample(values, w)
         });
-        assert_channel_near(&result, 0, 100.0, 1.0);
+        assert_channel_near(&result.pixels, 0, 100.0, 1.0);
     }
 
     #[test]
@@ -1157,10 +1468,10 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
-            math::sum::mean_f32(values)
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
+            mean_sample(values, w)
         });
-        assert_channel_near(&result, 0, 100.0, 1.0);
+        assert_channel_near(&result.pixels, 0, 100.0, 1.0);
     }
 
     #[test]
@@ -1178,12 +1489,12 @@ mod tests {
             let norm_params = norm_params_for(&cache, mode).unwrap();
 
             let result =
-                cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
-                    math::sum::mean_f32(values)
+                cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
+                    mean_sample(values, w)
                 });
 
             for (ch, &expected) in ref_rgb.iter().enumerate() {
-                assert_channel_near(&result, ch, expected, 2.0);
+                assert_channel_near(&result.pixels, ch, expected, 2.0);
             }
         }
     }
@@ -1195,14 +1506,14 @@ mod tests {
 
         let result_norm =
             cache.process_chunked_weighted(None, Some(&norm_params), |values, w, scratch| {
-                Rejection::None.combine_mean(values, w, scratch)
+                Rejection::None.combine_mean_with_quality(values, w, scratch)
             });
         let result_unnorm = cache.process_chunked_weighted(None, None, |values, w, scratch| {
-            Rejection::None.combine_mean(values, w, scratch)
+            Rejection::None.combine_mean_with_quality(values, w, scratch)
         });
 
-        let norm_pixel = result_norm.channel(0)[0];
-        let unnorm_pixel = result_unnorm.channel(0)[0];
+        let norm_pixel = result_norm.pixels.channel(0)[0];
+        let unnorm_pixel = result_unnorm.pixels.channel(0)[0];
         assert!(
             (norm_pixel - 100.0).abs() < 1.0,
             "Normalized should be ~100, got {}",
@@ -1393,10 +1704,10 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
-            math::sum::mean_f32(values)
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
+            mean_sample(values, w)
         });
-        assert_channel_near(&result, 0, 200.0, 2.0);
+        assert_channel_near(&result.pixels, 0, 200.0, 2.0);
     }
 
     #[test]
@@ -1493,7 +1804,7 @@ mod tests {
             weighting: Weighting::Noise,
             ..Default::default()
         };
-        let result = run_stacking_weighted(&cache, &config);
+        let result = run_stacking_weighted(&cache, &config).unwrap();
         let pixel = result.image.channel(0).pixels()[0];
         // Result should be near 100 (clean frame value), not near 999 (outlier)
         assert!(

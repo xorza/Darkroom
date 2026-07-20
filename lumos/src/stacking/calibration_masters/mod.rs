@@ -113,9 +113,9 @@ pub struct DefectSummary {
 
 /// Master calibration frames, prepared flat divisor, and derived defect map.
 ///
-/// Construction detects cold pixels from the raw flat before consuming it into a normalized,
-/// clamped divisor. Calibration operates on raw CFA data before demosaicing so defect correction
-/// can use same-color neighbors.
+/// Construction subtracts the flat's bias/flat-dark, detects cold pixels from that unfloored
+/// response, then consumes it into a normalized, clamped divisor. Calibration operates on raw CFA
+/// data before demosaicing so defect correction can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
     dark: Option<CfaImage>,
@@ -367,22 +367,6 @@ impl CalibrationMasters {
             return Err(Error::Cancelled);
         }
 
-        // Hot pixels from the dark, cold/dead pixels from the flat — None if we have neither.
-        // Both detections poll `cancel` per pixel (the defect-map scan dominates a cached-master
-        // build, so a cancel must bail it mid-scan).
-        let defect_map = if images.dark.is_some() || images.flat.is_some() {
-            let mut map = DefectMap::default();
-            if let Some(dark) = images.dark.as_ref() {
-                map = map.detect_hot(dark, sigma_threshold, &cancel)?;
-            }
-            if let Some(flat) = images.flat.as_ref() {
-                map = map.detect_cold(flat, &cancel)?;
-            }
-            Some(map)
-        } else {
-            None
-        };
-
         let CalibrationSet {
             dark,
             flat,
@@ -390,7 +374,24 @@ impl CalibrationMasters {
             flat_dark,
         } = images;
         let flat_subtractor = flat_dark.as_ref().or(bias.as_ref());
-        let flat = flat.map(|flat| prepared_flat::prepare(flat, flat_subtractor));
+        let subtracted_flat = flat.map(|flat| prepared_flat::subtract(flat, flat_subtractor));
+
+        // Hot pixels from the dark, cold/dead pixels from the subtracted flat — None if neither
+        // exists. Detection must precede normalization's near-zero floor.
+        let defect_map = if dark.is_some() || subtracted_flat.is_some() {
+            let mut map = DefectMap::default();
+            if let Some(dark) = dark.as_ref() {
+                map = map.detect_hot(dark, sigma_threshold, &cancel)?;
+            }
+            if let Some(flat) = subtracted_flat.as_ref() {
+                map = map.detect_cold(flat, &cancel)?;
+            }
+            Some(map)
+        } else {
+            None
+        };
+
+        let flat = subtracted_flat.map(prepared_flat::normalize);
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }

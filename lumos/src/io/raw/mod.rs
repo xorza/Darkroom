@@ -25,7 +25,6 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use common::{CancelToken, Vec2us};
-use demosaic::DemosaicRange;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 use imaginarium::Buffer2;
@@ -290,13 +289,36 @@ struct RawActiveArea {
     left_margin: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ChannelBlackDelta {
+    LibRawFilter {
+        filters: u32,
+        values: [f32; 4],
+    },
+    XTrans {
+        pattern: [[u8; 6]; 6],
+        values: [f32; 3],
+    },
+}
+
+impl ChannelBlackDelta {
+    #[inline(always)]
+    fn at(&self, row: usize, col: usize) -> f32 {
+        match self {
+            ChannelBlackDelta::LibRawFilter { filters, values } => values[fc(*filters, row, col)],
+            ChannelBlackDelta::XTrans { pattern, values } => {
+                values[pattern[row % 6][col % 6] as usize]
+            }
+        }
+    }
+}
+
 fn normalize_active_area<const CLAMP: bool>(
     raw_data: &[u16],
     area: RawActiveArea,
     black: f32,
     inv_range: f32,
-    filters: u32,
-    channel_delta: Option<&[f32; 4]>,
+    channel_delta: Option<ChannelBlackDelta>,
 ) -> Vec<f32> {
     let output_size = area.width * area.height;
     // SAFETY: Every element is written by the parallel row pass below.
@@ -310,10 +332,9 @@ fn normalize_active_area<const CLAMP: bool>(
             let source = &raw_data[src_start..src_start + area.width];
             normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
 
-            if let Some(delta) = channel_delta {
+            if let Some(delta) = &channel_delta {
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let channel = fc(filters, raw_y, area.left_margin + x);
-                    let corrected = *pixel - delta[channel];
+                    let corrected = *pixel - delta.at(raw_y, area.left_margin + x);
                     *pixel = if CLAMP {
                         corrected.clamp(0.0, 1.0)
                     } else {
@@ -375,19 +396,31 @@ impl UnpackedRaw {
     fn extract_cfa_pixels<const CLAMP: bool>(&self) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
 
-        let is_xtrans = matches!(self.sensor_type, SensorType::XTrans);
-        let has_delta = self
-            .black_level
-            .channel_delta_norm
+        let delta_channels = if matches!(self.sensor_type, SensorType::XTrans) {
+            &self.black_level.channel_delta_norm[..3]
+        } else {
+            &self.black_level.channel_delta_norm
+        };
+        let has_delta = delta_channels
             .iter()
-            .any(|&d| d.abs() > f32::EPSILON);
-        if has_delta && is_xtrans {
-            tracing::debug!(
-                "X-Trans per-channel black delta present but unsupported; applying common black only"
-            );
-        }
-        let channel_delta =
-            (has_delta && !is_xtrans).then_some(&self.black_level.channel_delta_norm);
+            .any(|&delta| delta.abs() > f32::EPSILON);
+        let channel_delta = if !has_delta {
+            None
+        } else if matches!(self.sensor_type, SensorType::XTrans) {
+            Some(ChannelBlackDelta::XTrans {
+                pattern: self.xtrans_pattern(),
+                values: [
+                    self.black_level.channel_delta_norm[0],
+                    self.black_level.channel_delta_norm[1],
+                    self.black_level.channel_delta_norm[2],
+                ],
+            })
+        } else {
+            Some(ChannelBlackDelta::LibRawFilter {
+                filters: self.filters,
+                values: self.black_level.channel_delta_norm,
+            })
+        };
         Ok(normalize_active_area::<CLAMP>(
             raw_data,
             RawActiveArea {
@@ -399,7 +432,6 @@ impl UnpackedRaw {
             },
             self.black_level.common,
             self.black_level.inv_range,
-            self.filters,
             channel_delta,
         ))
     }
@@ -433,7 +465,6 @@ impl UnpackedRaw {
             self.top_margin,
             self.left_margin,
             cfa_pattern,
-            DemosaicRange::Unit,
         );
 
         let demosaic_start = Instant::now();
@@ -472,9 +503,11 @@ impl UnpackedRaw {
     ///
     /// Drops LibRaw state and any fallback input buffer before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(&mut self) -> Result<[Vec<f32>; 3], ImageError> {
+    fn demosaic_xtrans(
+        &mut self,
+        xtrans_pattern: [[u8; 6]; 6],
+    ) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
-        let xtrans_pattern = self.xtrans_pattern();
 
         // Copy raw u16 data so we can drop libraw before demosaicing.
         // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
@@ -794,6 +827,16 @@ enum DemosaicedPixels {
     Flat(Vec<f32>),
 }
 
+fn clamp_direct_raw_image(image: &mut AstroImage) {
+    for channel in 0..image.channels() {
+        image
+            .channel_mut(channel)
+            .pixels_mut()
+            .par_iter_mut()
+            .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
+    }
+}
+
 pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     let mut raw = open_raw(path)?;
 
@@ -814,24 +857,27 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
             let planes = raw.demosaic_bayer(cfa_pattern)?;
+            let active_cfa = CfaType::Bayer(cfa_pattern).shifted(raw.left_margin, raw.top_margin);
             (
                 DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,
-                Some(CfaType::Bayer(cfa_pattern)),
+                Some(active_cfa),
             )
         }
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
             let xtrans_pattern = raw.xtrans_pattern();
-            let planes = raw.demosaic_xtrans()?;
+            let active_cfa =
+                CfaType::XTrans(xtrans_pattern).shifted(raw.left_margin, raw.top_margin);
+            let planes = raw.demosaic_xtrans(xtrans_pattern)?;
             (
                 DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,
-                Some(CfaType::XTrans(xtrans_pattern)),
+                Some(active_cfa),
             )
         }
         SensorType::Unknown => {
@@ -856,6 +902,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         DemosaicedPixels::Planar(planes) => AstroImage::from_planar_channels(dimensions, planes),
         DemosaicedPixels::Flat(px) => AstroImage::from_pixels(dimensions, px),
     };
+    clamp_direct_raw_image(&mut astro);
     astro.metadata = metadata;
     Ok(astro)
 }
@@ -900,7 +947,7 @@ pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
 pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path)?;
 
-    let cfa_type = match &raw.sensor_type {
+    let raw_cfa_type = match &raw.sensor_type {
         SensorType::Monochrome => CfaType::Mono,
         SensorType::Bayer(p) => CfaType::Bayer(*p),
         SensorType::XTrans => CfaType::XTrans(raw.xtrans_pattern()),
@@ -911,6 +958,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
             ));
         }
     };
+    let cfa_type = raw_cfa_type.shifted(raw.left_margin, raw.top_margin);
 
     // Calibration path: keep signed, un-clamped values so stacked master
     // dark/bias means aren't biased upward by clipping the sub-pedestal tail.

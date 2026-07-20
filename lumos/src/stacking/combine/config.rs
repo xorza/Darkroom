@@ -18,9 +18,11 @@ pub enum CombineMethod {
     Median,
 }
 
-/// Default frames below which σ-based rejection (sigma-clip / linear-fit / GESD) is too unreliable
-/// to trust and the combine falls back to the median. Winsorized/Percentile are stable at smaller N.
+/// Default frames below which sigma-clip and linear-fit rejection are too unreliable to trust and
+/// the combine falls back to the median. GESD has its own stricter floor; Winsorized/Percentile are
+/// stable at smaller N.
 const MIN_FRAMES_FOR_REJECTION: usize = 5;
+const MIN_FRAMES_FOR_GESD: usize = 15;
 
 /// Small-stack fallback policy for [`StackConfig`]. When a stack has fewer than `min_frames` frames
 /// the configured [`StackConfig::method`]'s rejection statistics are unreliable, so the combine uses
@@ -214,10 +216,11 @@ impl StackConfig {
         }
     }
 
-    /// Preset: GESD (rigorous, for large stacks >50).
+    /// Preset: GESD with a median fallback below its supported sample size.
     pub fn gesd() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::gesd()),
+            small_n: SmallN::median_below(MIN_FRAMES_FOR_GESD),
             ..Default::default()
         }
     }
@@ -327,11 +330,6 @@ impl StackConfig {
                 Rejection::Gesd(c) => {
                     if !c.alpha.is_finite() || !(0.0..1.0).contains(&c.alpha) {
                         return Err(StackConfigError::InvalidGesdAlpha { value: c.alpha });
-                    }
-                    if !c.low_relaxation.is_finite() || c.low_relaxation < 1.0 {
-                        return Err(StackConfigError::InvalidGesdLowRelaxation {
-                            value: c.low_relaxation,
-                        });
                     }
                 }
             }
@@ -524,15 +522,6 @@ mod tests {
                 StackConfigError::InvalidGesdAlpha { value: 1.0 },
             ),
             (
-                StackConfig {
-                    method: CombineMethod::Mean(Rejection::Gesd(
-                        GesdConfig::new(0.05, None).with_low_relaxation(0.5),
-                    )),
-                    ..Default::default()
-                },
-                StackConfigError::InvalidGesdLowRelaxation { value: 0.5 },
-            ),
-            (
                 StackConfig::weighted(vec![1.0, -0.5]),
                 StackConfigError::InvalidManualWeight {
                     index: 1,
@@ -603,5 +592,15 @@ mod tests {
         ));
         assert_eq!(config.weighting, Weighting::Noise);
         assert_eq!(config.normalization, Normalization::Global);
+    }
+
+    #[test]
+    fn test_gesd_preset_uses_supported_sample_floor() {
+        let config = StackConfig::gesd();
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::Gesd(..))
+        ));
+        assert_eq!(config.small_n, SmallN::median_below(15));
     }
 }

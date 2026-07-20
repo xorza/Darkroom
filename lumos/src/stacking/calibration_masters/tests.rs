@@ -6,7 +6,7 @@ use crate::stacking::calibration_masters::{
     CACHE_MAGIC, CACHE_VERSION, CalibrationError, DEFAULT_SIGMA_THRESHOLD,
 };
 use crate::stacking::combine::error::Error;
-use crate::testing::constant_cfa;
+use crate::testing::{constant_cfa, make_cfa};
 use crate::{
     AstroImageMetadata, CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary,
 };
@@ -222,6 +222,49 @@ fn test_new_constructor() {
             percentage: 0.0,
         })
     );
+}
+
+#[test]
+fn cold_detection_uses_subtracted_unfloored_flat_response() {
+    #[derive(Debug, Clone, Copy)]
+    enum SubtractorKind {
+        Bias,
+        FlatDark,
+    }
+
+    let width = 7;
+    let height = 7;
+    let dead = 3 * width + 3;
+
+    for kind in [SubtractorKind::Bias, SubtractorKind::FlatDark] {
+        let mut flat_pixels = vec![11.0; width * height];
+        flat_pixels[dead] = 10.0;
+        let flat = make_cfa(width, height, flat_pixels, CfaType::Mono);
+        let subtractor = constant_cfa(width, height, 10.0, CfaType::Mono);
+        let mut images = CalibrationSet {
+            flat: Some(flat),
+            ..Default::default()
+        };
+        match kind {
+            SubtractorKind::Bias => images.bias = Some(subtractor),
+            SubtractorKind::FlatDark => images.flat_dark = Some(subtractor),
+        }
+
+        let masters =
+            CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+                .unwrap();
+        let defects = masters.defect_map.as_ref().unwrap();
+        assert_eq!(defects.cold_indices, [dead], "{kind:?}");
+
+        let prepared = masters.flat.as_ref().unwrap();
+        assert_eq!(prepared.data[dead], 0.1, "{kind:?}");
+        let expected_normal = 49.0 / 48.0;
+        assert!(
+            (prepared.data[0] - expected_normal).abs() < 1e-6,
+            "{kind:?}: {} != {expected_normal}",
+            prepared.data[0]
+        );
+    }
 }
 
 #[test]

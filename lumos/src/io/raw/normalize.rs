@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use crate::io::raw::alloc_uninit_vec;
 
 /// Light-frame normalization: `clamp((value - black).max(0) * inv_range, 0, 1)`.
-/// The `[0, 1]` clamp is the display / demosaic contract for light frames.
+/// This bounds direct RAW sensor input; demosaic interpolation itself remains unclipped.
 pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
     normalize_generic::<true>(data, black, inv_range)
 }

@@ -7,11 +7,13 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::math::statistics::{ChannelStats, median_and_mad_f32_mut};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::{FrameNorm, StackFrame};
 use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StoredFrame, StoredLightFrame, StoredPlane, optimal_chunk_rows,
+    FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
+    optimal_chunk_rows,
 };
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
@@ -19,7 +21,7 @@ use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress
 /// Per-thread scratch buffers for stacking combine closures.
 ///
 /// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ScratchBuffers {
     /// Tracks original frame indices after rejection reordering.
     pub(crate) indices: Vec<usize>,
@@ -31,6 +33,10 @@ pub(crate) struct ScratchBuffers {
     pub(crate) usize_a: Vec<usize>,
     /// Second usize scratch (large-N `sort_with_indices` index copy).
     pub(crate) usize_b: Vec<usize>,
+    pub(crate) gesd_statistics: Vec<f64>,
+    pub(crate) gesd_critical_values: Vec<f64>,
+    pub(crate) gesd_sample_count: usize,
+    pub(crate) gesd_alpha_bits: u32,
 }
 
 impl ScratchBuffers {
@@ -41,8 +47,58 @@ impl ScratchBuffers {
             floats_b: Vec::with_capacity(frame_count),
             usize_a: Vec::with_capacity(frame_count),
             usize_b: Vec::with_capacity(frame_count),
+            gesd_statistics: Vec::with_capacity(frame_count / 4),
+            gesd_critical_values: Vec::with_capacity(frame_count / 4),
+            gesd_sample_count: 0,
+            gesd_alpha_bits: 0,
         }
     }
+}
+
+/// One reduced channel sample and the effective quality of the samples that survived rejection.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CombinedSample {
+    pub(crate) value: f32,
+    pub(crate) weight: f32,
+    pub(crate) variance: f32,
+}
+
+impl CombinedSample {
+    pub(crate) fn from_all(value: f32, weights: &[f32]) -> Self {
+        Self::from_survivors(value, weights, 0..weights.len())
+    }
+
+    pub(crate) fn from_survivors(
+        value: f32,
+        weights: &[f32],
+        survivor_indices: impl IntoIterator<Item = usize>,
+    ) -> Self {
+        let mut weight = 0.0f32;
+        let mut weight_squared = 0.0f32;
+        for index in survivor_indices {
+            let survivor_weight = weights[index];
+            weight += survivor_weight;
+            weight_squared += survivor_weight * survivor_weight;
+        }
+        let variance = if weight > 0.0 {
+            weight_squared / (weight * weight)
+        } else {
+            0.0
+        };
+        Self {
+            value,
+            weight,
+            variance,
+        }
+    }
+}
+
+/// Channel-shaped result of one light-frame combine pass.
+#[derive(Debug)]
+pub(crate) struct LightCombineOutput {
+    pub(crate) pixels: PixelData,
+    pub(crate) weight: PixelData,
+    pub(crate) variance: PixelData,
 }
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
@@ -55,7 +111,8 @@ pub(crate) struct CacheCore {
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
     pub(crate) metadata: AstroImageMetadata,
-    /// Per-frame channel statistics (median + MAD), computed at load time.
+    /// Per-frame channel statistics (median + MAD). Registered lights use one shared valid
+    /// support domain; unregistered/calibration frames use the full image.
     pub(crate) channel_stats: Vec<FrameStats>,
     /// Configuration for cache operations.
     pub(crate) config: CacheConfig,
@@ -76,12 +133,12 @@ pub(crate) struct CfaCache {
     pub(crate) core: CacheCore,
 }
 
-/// Light-frame stacking cache: `AstroImage` frames with optional per-pixel coverage, coverage-
-/// weighted combine. Built in-memory from [`StackFrame`]s ([`LightCache::from_stack_frames`]) or
-/// from disk ([`LightCache::from_paths`], coverage `None`); stacks to an `AstroImage`.
+/// Light-frame stacking cache with optional support and interpolation-confidence planes.
 #[derive(Debug)]
 pub(crate) struct LightCache {
     pub(crate) frames: Vec<StoredLightFrame>,
+    /// Whether `core.channel_stats` use one shared contribution domain across every frame.
+    pub(crate) stats_share_domain: bool,
     pub(crate) core: CacheCore,
 }
 
@@ -302,14 +359,15 @@ impl LightCache {
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Self {
-        let channel_stats = frames.iter().map(|frame| frame.stats.clone()).collect();
+        let stats = compute_light_frame_stats(&frames, dimensions);
         Self {
             frames,
+            stats_share_domain: stats.share_domain,
             core: CacheCore {
                 spill_directory,
                 dimensions,
                 metadata,
-                channel_stats,
+                channel_stats: stats.frames,
                 config: config.clone(),
                 progress,
                 cancel,
@@ -317,8 +375,7 @@ impl LightCache {
         }
     }
 
-    /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
-    /// per-pixel coverage), moving channels and coverage into resident storage without copying.
+    /// Build an in-memory warp-quality-aware cache from [`StackFrame`]s.
     pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
         config: &CacheConfig,
@@ -338,32 +395,63 @@ impl LightCache {
                     actual: frame.image.dimensions(),
                 });
             }
-            if let Some(coverage) = &frame.coverage
-                && (coverage.width(), coverage.height())
-                    != (dimensions.width(), dimensions.height())
-            {
-                return Err(Error::CoverageDimensionMismatch {
-                    index,
-                    expected_width: dimensions.width(),
-                    expected_height: dimensions.height(),
-                    actual_width: coverage.width(),
-                    actual_height: coverage.height(),
-                });
+            for (plane_name, plane) in [
+                ("coverage", frame.coverage.as_ref()),
+                ("confidence", frame.confidence.as_ref()),
+            ] {
+                if let Some(plane) = plane
+                    && (plane.width(), plane.height()) != (dimensions.width(), dimensions.height())
+                {
+                    return Err(Error::WarpPlaneDimensionMismatch {
+                        index,
+                        plane: plane_name,
+                        expected_width: dimensions.width(),
+                        expected_height: dimensions.height(),
+                        actual_width: plane.width(),
+                        actual_height: plane.height(),
+                    });
+                }
+                if let Some(plane) = plane {
+                    let invalid = plane
+                        .pixels()
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .find(|(_, value)| {
+                            !value.is_finite()
+                                || if plane_name == "coverage" {
+                                    !(0.0..=1.0).contains(value)
+                                } else {
+                                    *value < 0.0
+                                }
+                        });
+                    if let Some((pixel, value)) = invalid {
+                        return Err(Error::InvalidWarpPlaneValue {
+                            index,
+                            plane: plane_name,
+                            pixel,
+                            value,
+                        });
+                    }
+                }
             }
         }
         let stored = frames
             .into_iter()
-            .map(|frame| StoredLightFrame::from_memory(frame.image, frame.coverage))
+            .map(|frame| {
+                StoredLightFrame::from_memory(frame.image, frame.coverage, frame.confidence)
+            })
             .collect::<Vec<_>>();
-        let channel_stats = stored.iter().map(|frame| frame.stats.clone()).collect();
+        let stats = compute_light_frame_stats(&stored, dimensions);
 
         Ok(Self {
             frames: stored,
+            stats_share_domain: stats.share_domain,
             core: CacheCore {
                 spill_directory: None,
                 dimensions,
                 metadata,
-                channel_stats,
+                channel_stats: stats.frames,
                 config: config.clone(),
                 progress,
                 // Set by the public stacking entry before the combine, if any.
@@ -372,54 +460,33 @@ impl LightCache {
         })
     }
 
-    /// Geometric per-pixel quality planes — `coverage` (fraction of frames contributing, `[0,1]`),
-    /// `weight` (`Σ wᵢcᵢ`, the WHT), and `variance` (`Σ(wᵢcᵢ)²/(Σ wᵢcᵢ)²`, output variance per unit
-    /// input variance) — matching the `Σwᵢ`/`Σwᵢ²` maps drizzle reports. The weight `wᵢ·cᵢ`
-    /// (per-frame weight × per-pixel coverage) doesn't depend on channel, so this rides cheaply on
-    /// data the combine already touches and stays one plane each.
-    ///
-    /// **Pre-rejection:** a frame counts wherever its coverage clears [`COVERAGE_EPSILON`] — the set
-    /// the combine draws from *before* outlier rejection narrows it per channel. Computed in a
-    /// standalone pass so the combine engine is untouched; under aggressive rejection the variance
-    /// is a slight under-estimate (see the per-channel follow-up in `docs/pipeline/roadmap.md`).
-    ///
-    /// `weights` are the same per-frame weights the combine used (`None` = equal, e.g. median).
-    pub(crate) fn finish_product(
-        &self,
-        image: AstroImage,
-        weights: Option<&[f32]>,
-    ) -> StackProduct {
+    /// Assemble the combined image, geometric coverage, and channel-shaped survivor quality.
+    pub(crate) fn finish_product(&self, combined: LightCombineOutput) -> StackProduct {
+        let dimensions = self.core.dimensions;
+        let image =
+            AstroImage::from_stacked(combined.pixels, self.core.metadata.clone(), dimensions);
+        let weight =
+            AstroImage::from_stacked(combined.weight, AstroImageMetadata::default(), dimensions);
+        let variance =
+            AstroImage::from_stacked(combined.variance, AstroImageMetadata::default(), dimensions);
         let frame_count = self.frames.len();
-        if let Some(w) = weights {
-            assert_eq!(w.len(), frame_count, "weight count must match frame count");
-        }
-        let width = self.core.dimensions.width();
-        let height = self.core.dimensions.height();
-        let frame_weight = |f: usize| weights.map_or(1.0, |w| w[f]);
+        let width = dimensions.width();
+        let height = dimensions.height();
 
-        // No frame carries a coverage map → every pixel is fully covered and the planes are
-        // spatially uniform; fill constants and skip the per-pixel pass. (`stack()`-from-disk
-        // always lands here, as does an all-reference in-memory stack.)
-        if self.frames.iter().all(|f| f.coverage.is_none()) {
-            let wsum: f32 = (0..frame_count).map(frame_weight).sum();
-            let wsq: f32 = (0..frame_count).map(|f| frame_weight(f).powi(2)).sum();
-            let variance = if wsum > 0.0 { wsq / (wsum * wsum) } else { 0.0 };
+        if self.frames.iter().all(|frame| frame.coverage.is_none()) {
             return StackProduct {
                 image,
                 coverage: Buffer2::new_filled(width, height, 1.0),
-                weight: Buffer2::new_filled(width, height, wsum),
-                variance: Buffer2::new_filled(width, height, variance),
+                weight,
+                variance,
             };
         }
 
         let mut coverage = Buffer2::new_default(width, height);
-        let mut weight = Buffer2::new_default(width, height);
-        let mut variance = Buffer2::new_default(width, height);
         let inv_frames = 1.0 / frame_count as f32;
 
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
-        // same row-aligned chunks the combine uses. The output planes are small single-channel RAM
-        // buffers, written in parallel across the three at once, one row per task.
+        // same row-aligned chunks the combine uses.
         let chunk_rows = if self.core.spill_directory.is_none() {
             height
         } else {
@@ -444,32 +511,18 @@ impl LightCache {
                 .collect();
 
             let cov_out = &mut coverage.pixels_mut()[base..base + span];
-            let wt_out = &mut weight.pixels_mut()[base..base + span];
-            let var_out = &mut variance.pixels_mut()[base..base + span];
             cov_out
                 .par_chunks_mut(width)
-                .zip(wt_out.par_chunks_mut(width))
-                .zip(var_out.par_chunks_mut(width))
                 .enumerate()
-                .for_each(|(row_in_chunk, ((cov_row, wt_row), var_row))| {
+                .for_each(|(row_in_chunk, cov_row)| {
                     let row_base = row_in_chunk * width;
-                    for px in 0..width {
+                    for (px, output) in cov_row.iter_mut().enumerate() {
                         let local = row_base + px;
-                        let mut count = 0u32;
-                        let mut wsum = 0.0f32;
-                        let mut wsq = 0.0f32;
-                        for (frame_idx, cov) in cov_chunks.iter().enumerate() {
-                            let c = cov.map_or(1.0, |map| map[local]);
-                            if c > COVERAGE_EPSILON {
-                                let w = frame_weight(frame_idx) * c;
-                                wsum += w;
-                                wsq += w * w;
-                                count += 1;
-                            }
-                        }
-                        cov_row[px] = count as f32 * inv_frames;
-                        wt_row[px] = wsum;
-                        var_row[px] = if wsum > 0.0 { wsq / (wsum * wsum) } else { 0.0 };
+                        let count = cov_chunks
+                            .iter()
+                            .filter(|cov| cov.map_or(1.0, |map| map[local]) > COVERAGE_EPSILON)
+                            .count();
+                        *output = count as f32 * inv_frames;
                     }
                 });
 
@@ -484,18 +537,17 @@ impl LightCache {
         }
     }
 
-    /// Coverage-weighted combine: a frame contributes at a pixel only where its coverage exceeds
-    /// [`COVERAGE_EPSILON`], weighted by `coverage × per-frame weight`. Excluding sub-ε coverage
-    /// keeps warp border-fill out of the rejection set, so warped-frame borders don't drag the
-    /// stacked edges dark; a pixel no frame covers gets `0`.
+    /// Warp-quality-aware combine: coverage gates inclusion, while confidence scales statistical
+    /// weight independently. Effective weight and variance use each channel reducer's actual
+    /// survivor set. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked_weighted<Combine>(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
         combine: Combine,
-    ) -> PixelData
+    ) -> LightCombineOutput
     where
-        Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
+        Combine: Fn(&mut [f32], &[f32], &mut ScratchBuffers) -> CombinedSample + Sync,
     {
         if let Some(w) = weights {
             assert_eq!(
@@ -507,31 +559,57 @@ impl LightCache {
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
-        self.core.process_chunks(
-            &self.frames,
-            |frame| &frame.channels,
-            |output_slice, ctx| {
-                let ChunkContext {
-                    frames,
-                    width,
-                    channel,
-                    pixel_offset,
-                } = ctx;
-                let frame_count = frames.len();
-                let chunk_pixels = output_slice.len();
-                // Per-frame coverage slice for this chunk's rows; `None` = fully covered.
-                let coverage: Vec<Option<&[f32]>> = self
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        frame
-                            .coverage
-                            .as_ref()
-                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
-                    })
-                    .collect();
-                output_slice
+        let dimensions = self.core.dimensions;
+        let mut output_weight = PixelData::new_default(
+            dimensions.width(),
+            dimensions.height(),
+            dimensions.channels(),
+        );
+        let mut output_variance = PixelData::new_default(
+            dimensions.width(),
+            dimensions.height(),
+            dimensions.channels(),
+        );
+        let pixels =
+            self.core.process_chunks(
+                &self.frames,
+                |frame| &frame.channels,
+                |output_slice, ctx| {
+                    let ChunkContext {
+                        frames,
+                        width,
+                        channel,
+                        pixel_offset,
+                    } = ctx;
+                    let frame_count = frames.len();
+                    let chunk_pixels = output_slice.len();
+                    // Per-frame support and confidence slices; `None` means full support/unit confidence.
+                    let coverage: Vec<Option<&[f32]>> =
+                        self.frames
+                            .iter()
+                            .map(|frame| {
+                                frame.coverage.as_ref().map(|plane| {
+                                    plane.chunk(pixel_offset, pixel_offset + chunk_pixels)
+                                })
+                            })
+                            .collect();
+                    let confidence: Vec<Option<&[f32]>> =
+                        self.frames
+                            .iter()
+                            .map(|frame| {
+                                frame.confidence.as_ref().map(|plane| {
+                                    plane.chunk(pixel_offset, pixel_offset + chunk_pixels)
+                                })
+                            })
+                            .collect();
+                    let weight_slice = &mut output_weight.channel_mut(channel).pixels_mut()
+                        [pixel_offset..pixel_offset + chunk_pixels];
+                    let variance_slice = &mut output_variance.channel_mut(channel).pixels_mut()
+                        [pixel_offset..pixel_offset + chunk_pixels];
+                    output_slice
                     .par_chunks_mut(width)
+                    .zip(weight_slice.par_chunks_mut(width))
+                    .zip(variance_slice.par_chunks_mut(width))
                     .enumerate()
                     .for_each_init(
                         || {
@@ -541,14 +619,15 @@ impl LightCache {
                                 ScratchBuffers::new(frame_count),
                             )
                         },
-                        |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
+                        |(values, eff_weights, scratch),
+                         (row_in_chunk, ((row_output, row_weight), row_variance))| {
                             // Cancelled: skip the row's work (output stays zero; the
                             // caller discards the partial result and reports Cancelled).
                             if cancel.is_cancelled() {
                                 return;
                             }
                             let row_offset = row_in_chunk * width;
-                            for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                            for pixel_in_row in 0..width {
                                 let pixel_idx = row_offset + pixel_in_row;
                                 let mut covered = 0usize;
                                 for (frame_idx, chunk) in frames.iter().enumerate() {
@@ -556,7 +635,11 @@ impl LightCache {
                                         Some(map) => map[pixel_idx],
                                         None => 1.0,
                                     };
-                                    if c > COVERAGE_EPSILON {
+                                    let q = match confidence[frame_idx] {
+                                        Some(map) => map[pixel_idx],
+                                        None => 1.0,
+                                    };
+                                    if c > COVERAGE_EPSILON && q > 0.0 {
                                         let v = match frame_norms {
                                             Some(fnm) => {
                                                 let cn = fnm[frame_idx].channels[channel];
@@ -566,12 +649,12 @@ impl LightCache {
                                         };
                                         values[covered] = v;
                                         eff_weights[covered] =
-                                            weights.map_or(1.0, |w| w[frame_idx]) * c;
+                                            weights.map_or(1.0, |w| w[frame_idx]) * q;
                                         covered += 1;
                                     }
                                 }
-                                *out = if covered == 0 {
-                                    0.0
+                                let sample = if covered == 0 {
+                                    CombinedSample::default()
                                 } else {
                                     debug_assert!(
                                         values[..covered].iter().all(|v| v.is_finite()),
@@ -579,15 +662,97 @@ impl LightCache {
                                     );
                                     combine(
                                         &mut values[..covered],
-                                        Some(&eff_weights[..covered]),
+                                        &eff_weights[..covered],
                                         scratch,
                                     )
                                 };
+                                row_output[pixel_in_row] = sample.value;
+                                row_weight[pixel_in_row] = sample.weight;
+                                row_variance[pixel_in_row] = sample.variance;
                             }
                         },
                     );
-            },
-        )
+                },
+            );
+        LightCombineOutput {
+            pixels,
+            weight: output_weight,
+            variance: output_variance,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ComputedLightStats {
+    frames: Vec<FrameStats>,
+    share_domain: bool,
+}
+
+/// Compute every frame's robust channel statistics on one shared contribution domain.
+///
+/// A registered frame's warp fill is arbitrary and must not influence reference selection,
+/// normalization, or noise weights. The intersection of all coverage-valid, confidence-positive
+/// samples gives every frame exactly the same sky coordinates. Unregistered stacks take the
+/// allocation-free full-frame path.
+fn compute_light_frame_stats(
+    frames: &[StoredLightFrame],
+    dimensions: ImageDimensions,
+) -> ComputedLightStats {
+    let pixel_count = dimensions.pixel_count();
+    let needs_common_domain = frames
+        .iter()
+        .any(|frame| frame.coverage.is_some() || frame.confidence.is_some());
+    let common_domain = needs_common_domain.then(|| {
+        let mut common = vec![true; pixel_count];
+        for frame in frames {
+            if let Some(coverage) = &frame.coverage {
+                for (valid, &value) in common.iter_mut().zip(coverage.chunk(0, pixel_count)) {
+                    *valid &= value > COVERAGE_EPSILON;
+                }
+            }
+            if let Some(confidence) = &frame.confidence {
+                for (valid, &value) in common.iter_mut().zip(confidence.chunk(0, pixel_count)) {
+                    *valid &= value > 0.0;
+                }
+            }
+        }
+        common
+    });
+    let sample_count = common_domain.as_ref().map_or(pixel_count, |domain| {
+        domain.iter().filter(|&&valid| valid).count()
+    });
+    let share_domain = sample_count > 0;
+    if !share_domain {
+        return ComputedLightStats {
+            frames: Vec::new(),
+            share_domain: false,
+        };
+    }
+
+    let mut all_stats = Vec::with_capacity(frames.len());
+    let mut samples = Vec::with_capacity(sample_count);
+    for frame in frames {
+        let mut channels = arrayvec::ArrayVec::new();
+        for channel in &frame.channels {
+            let pixels = channel.chunk(0, pixel_count);
+            samples.clear();
+            match &common_domain {
+                Some(domain) => samples.extend(
+                    pixels
+                        .iter()
+                        .zip(domain)
+                        .filter_map(|(&value, &valid)| valid.then_some(value)),
+                ),
+                None => samples.extend_from_slice(pixels),
+            }
+            let (median, mad) = median_and_mad_f32_mut(&mut samples);
+            channels.push(ChannelStats { median, mad });
+        }
+        all_stats.push(FrameStats { channels });
+    }
+    ComputedLightStats {
+        frames: all_stats,
+        share_domain,
     }
 }
 

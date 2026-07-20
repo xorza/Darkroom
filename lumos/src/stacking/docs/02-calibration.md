@@ -519,22 +519,31 @@ wrong value regardless of incident light, so averaging cannot fix them and they 
 a dark), though a defect map can also be built from a master flat (dead pixels) or supplied
 externally.
 
-### 3.1 Detection: robust thresholds via MAD
+### 3.1 Detection: broad dark subtraction + robust residual thresholds
 
-The robust recipe — used by lumos and structurally identical to Siril's cosmetic
-correction — is:
+Lumos first separates sensor-scale dark structure from point defects:
 
-1. Compute the **median** of the (per-color) pixel population.
-2. Compute **MAD** (median absolute deviation): `MAD = median(|xᵢ − median|)`.
-3. Convert to a robust sigma: `σ ≈ 1.4826 · MAD` (the constant is `1/Φ⁻¹(0.75)`; for a
+1. Compute a robust median for each CFA color in balanced 64×64 tiles.
+2. Bilinearly interpolate those medians, including linear extrapolation from the outer tile
+   centers to the sensor edges, to obtain a smooth per-color dark-current model.
+3. Subtract the model. Sensor gradients and amp glow therefore remain calibration signal rather
+   than being misclassified as point defects.
+4. Compute the **median** and **MAD** of each color's residual population:
+   `MAD = median(|rᵢ − median(r)|)`.
+5. Convert to a robust sigma: `σ ≈ 1.4826 · MAD` (the constant is `1/Φ⁻¹(0.75)`; for a
    normal distribution MAD ≈ 0.6745·σ).
-4. Flag **hot** if `x > median + k·σ`, **cold** if `x < median − k·σ`.
+6. Flag **hot** if `r > median(r) + k·σ`.
 
 **Why MAD, not standard deviation:** std is itself inflated by the very outliers you are
 hunting (a few 60000-ADU hot pixels balloon σ and hide the merely-warm ones). MAD has a 50%
 breakdown point — up to half the pixels can be outliers and the median/MAD stay valid. lumos
-documents this rationale precisely
-(`$HOME/Projects/Scenarium/lumos/src/calibration_masters/defect_map.rs:7–17`).
+documents this rationale in `stacking/calibration_masters/defect_map.rs`.
+
+**Why a tiled model instead of a same-color neighbor median:** a compact hot cluster can dominate
+the immediate neighborhood of every member, making the cluster its own reference. A 64×64 tile
+has enough red/blue samples for a robust median while remaining small relative to broad sensor
+gradients. The interpolated model follows amp glow, but isolated points, hot columns, and compact
+same-color clusters remain positive residuals.
 
 **Correction (pass 2):** the prior pass stated Siril's `find_deviant_pixels` uses
 *"mean ± k·σ"*. The source actually computes thresholds as **`median ± k·σ`** —
@@ -556,24 +565,22 @@ caught. Net: the *threshold statistic* varies by implementation (lumos median+MA
 Siril median+stddev·σ, DSS median+16·stddev), all per-color; lumos's MAD-based estimator is
 the most robust; the σ-multiplier is a tuning knob, not a correctness issue.
 
-**Per-CFA-color statistics.** On raw CFA data, the green pixels (50% of a Bayer frame) sit at
+**Per-CFA-color modeling and statistics.** On raw CFA data, the green pixels (50% of a Bayer frame) sit at
 a different baseline than red/blue. Computing one global median/MAD lets green dominate and
-masks defects in red/blue. lumos computes **per-color** thresholds so a hot red pixel is
-tested only against other red pixels
-(`defect_map.rs:60–92, 163–206`; tests `test_per_channel_detection_bayer` and
-`test_per_channel_detection_cold_in_blue` verify a hot R / dead B pixel is caught when a
-global threshold would miss it).
+masks defects in red/blue. Lumos fits the dark model and computes residual thresholds
+**per color**, so a hot red pixel is tested only against red residuals. The synthetic regression
+combines unequal color baselines, unequal gradients, unequal amp-glow strength, isolated R/G/B
+points, and a 25-member same-color cluster; the detected list is exactly the injected list.
 
 **Sigma-floor guard.** A pristine, near-uniform dark has MAD ≈ 0, which would make *any*
 slightly-warm pixel exceed `k·σ` and flag 3%+ of the sensor. lumos floors σ with
-`σ = max(1.4826·MAD, median·0.1, 5e-4)` — the absolute floor (`5e-4` ≈ 33 ADU in 16-bit
-space) prevents flagging the continuous warm tail of clean CMOS darks
-(`defect_map.rs:186–195`). This is a real, non-obvious robustness fix worth keeping.
+`σ = max(1.4826·MAD, 5e-4)` — the absolute floor (`5e-4` ≈ 33 ADU in 16-bit space)
+prevents flagging the noise tail of clean CMOS darks. The former `median·0.1` floor was removed
+because it hid warm pixels at 1.1–1.4× a positive dark baseline.
 
 **Adaptive sampling.** Exact median over a 60-megapixel channel is slow; lumos subsamples to
-100K pixels per color when the channel exceeds 200K, citing <0.5% median error with >99%
-confidence by the order-statistics CLT (`defect_map.rs:24–27, 145–146, 211–250`). Sound for
-detection thresholds (you only need an accurate *distribution estimate*, not every pixel).
+at most 100K residuals per color. This is sound for detection thresholds: the model is evaluated
+for every pixel during classification, while only the robust distribution estimate is sampled.
 
 ### 3.2 Correction: same-CFA-color neighbor median
 
@@ -606,13 +613,13 @@ fix them at all:
 - **Hot pixels** — elevated, *stable* dark current. The bread-and-butter of a defect map:
   they read the same high value in every dark, so `median + k·σ` on the master dark catches
   them and a neighbor median repairs them. Stable across frames → a static map suffices.
-- **Cold / dead pixels** — stuck low or zero (a dead photosite or a broken readout). Detected
-  by the *lower* threshold `median − k·σ` (floored at 0) and corrected identically. Often
+- **Cold / dead pixels** — stuck low or zero (a dead photosite or a broken readout). Often
   *invisible in a dark* (a dead pixel reads ~0, indistinguishable from the dark floor) — these
   are better found in a **flat**, where an unresponsive pixel shows as a dark spot under
-  uniform illumination. lumos derives cold/dead pixels from the **master flat** via a local
-  same-color-neighbor ratio (`< DEAD_PIXEL_FRACTION × local median`), which tracks vignetting
-  where a global `median − k·σ` cut cannot (`defect_map.rs`, `detect_cold`).
+  uniform illumination. lumos first subtracts bias or flat-dark from the master flat, then
+  detects cold/dead pixels on that unfloored response via a local same-color-neighbor ratio
+  (`< DEAD_PIXEL_FRACTION × local median`). The local reference tracks vignetting and dust
+  shadows where a global `median − k·σ` cut cannot (`defect_map.rs`, `detect_cold`).
 - **RTS / "flickering" / telegraph pixels** — random-telegraph-signal pixels that hop between
   two or more levels *between frames*. They are the trap for static maps: a single master dark
   catches them only if they happened to be "high" during that capture, and a fixed map then
@@ -888,7 +895,7 @@ median for mono. (lumos already does all three.)
   Siril on X-Trans.
 - **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct,
   and repaired from a **defect mask** so clustered defects draw only on good (non-defect) neighbors.
-- **Cold/dead pixels from the master flat** via a local same-color-neighbor ratio
+- **Cold/dead pixels from the bias/flat-dark-subtracted, unfloored master-flat response** via a local same-color-neighbor ratio
   (`< DEAD_PIXEL_FRACTION × local median`, `defect_map.rs` `detect_cold`) — catches the dead pixels
   that read normal in a dark, and tracks vignetting where a global `median − k·σ` cut cannot.
 - **Sensible combine presets:** winsorized-mean darks/bias (κ=3), sigma-clip flats (κ=2.5),

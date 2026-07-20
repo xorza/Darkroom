@@ -23,14 +23,21 @@ fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
 }
 
 #[test]
-fn light_frame_keeps_statistics_with_its_planes() {
+fn light_frame_keeps_quality_with_its_planes() {
     let dimensions = ImageDimensions::new((2, 2), 1);
     let image = AstroImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
-    let frame = StoredLightFrame::from_memory(image, None);
+    let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
+    let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
+    let frame = StoredLightFrame::from_memory(image, Some(coverage), Some(confidence));
     assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
-    assert_eq!(frame.stats.channels[0].median, 2.5);
-    assert_eq!(frame.stats.channels[0].mad, 1.0);
-    assert!(frame.coverage.is_none());
+    assert_eq!(
+        frame.coverage.as_ref().unwrap().chunk(0, 4),
+        &[1.0, 0.5, 0.25, 0.0]
+    );
+    assert_eq!(
+        frame.confidence.as_ref().unwrap().chunk(0, 4),
+        &[4.0, 3.0, 2.0, 1.0]
+    );
 }
 
 #[test]

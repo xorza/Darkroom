@@ -340,24 +340,14 @@ fn test_lanczos_at_pixel_centers() {
     let data_buf = Buffer2::new(8, 8, data);
 
     // pixel (3,3) = 3*8+3 = 27
-    let val_3_3 = interp(
-        &data_buf,
-        3.0,
-        3.0,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
+    let val_3_3 = interp(&data_buf, 3.0, 3.0, InterpolationMethod::Lanczos3);
     assert!(
         (val_3_3 - 27.0).abs() < 0.05,
         "L3 at (3,3): expected 27.0, got {val_3_3}"
     );
 
     // pixel (4,4) = 4*8+4 = 36
-    let val_4_4 = interp(
-        &data_buf,
-        4.0,
-        4.0,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
+    let val_4_4 = interp(&data_buf, 4.0, 4.0, InterpolationMethod::Lanczos3);
     assert!(
         (val_4_4 - 36.0).abs() < 0.05,
         "L3 at (4,4): expected 36.0, got {val_4_4}"
@@ -370,18 +360,8 @@ fn test_lanczos_preserves_dc() {
     // This tests that weights sum to ~1 (partition of unity).
     let input_buf = Buffer2::new_filled(8, 8, 0.5f32);
 
-    let val1 = interp(
-        &input_buf,
-        3.3,
-        4.7,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
-    let val2 = interp(
-        &input_buf,
-        2.1,
-        5.9,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
+    let val1 = interp(&input_buf, 3.3, 4.7, InterpolationMethod::Lanczos3);
+    let val2 = interp(&input_buf, 2.1, 5.9, InterpolationMethod::Lanczos3);
 
     assert!(
         (val1 - 0.5).abs() < 0.01,
@@ -400,18 +380,8 @@ fn test_lanczos2_vs_lanczos3_different_results() {
     let input: Vec<f32> = (0..64).map(|i| (i as f32).sin()).collect();
     let input_buf = Buffer2::new(8, 8, input);
 
-    let v2 = interp(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos2 { deringing: -1.0 },
-    );
-    let v3 = interp(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
+    let v2 = interp(&input_buf, 3.5, 4.5, InterpolationMethod::Lanczos2);
+    let v3 = interp(&input_buf, 3.5, 4.5, InterpolationMethod::Lanczos3);
 
     // They should be close but not identical
     assert!(
@@ -436,12 +406,7 @@ fn test_different_methods_produce_different_results() {
     let nearest = interp(&data_buf, x, y, InterpolationMethod::Nearest);
     let bilinear = interp(&data_buf, x, y, InterpolationMethod::Bilinear);
     let bicubic = interp(&data_buf, x, y, InterpolationMethod::Bicubic);
-    let lanczos3 = interp(
-        &data_buf,
-        x,
-        y,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-    );
+    let lanczos3 = interp(&data_buf, x, y, InterpolationMethod::Lanczos3);
 
     // Nearest should differ from the rest (it picks one pixel)
     assert!(
@@ -502,9 +467,9 @@ fn test_all_methods_exact_at_pixel_centers() {
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2 { deringing: -1.0 },
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-        InterpolationMethod::Lanczos4 { deringing: -1.0 },
+        InterpolationMethod::Lanczos2,
+        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos4,
     ];
 
     for method in &methods {
@@ -540,7 +505,7 @@ fn test_interpolation_gradient_preservation() {
     let methods = [
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
+        InterpolationMethod::Lanczos3,
     ];
 
     for method in &methods {
@@ -590,12 +555,7 @@ fn test_bicubic_vs_lanczos_analytic_quality() {
 
             let expected = (x / 10.0).sin() * (y / 10.0).cos();
             let bicubic_val = interp(&input_buf, x, y, InterpolationMethod::Bicubic);
-            let lanczos_val = interp(
-                &input_buf,
-                x,
-                y,
-                InterpolationMethod::Lanczos3 { deringing: -1.0 },
-            );
+            let lanczos_val = interp(&input_buf, x, y, InterpolationMethod::Lanczos3);
 
             bicubic_error_sum += (bicubic_val - expected).abs();
             lanczos_error_sum += (lanczos_val - expected).abs();
@@ -682,7 +642,7 @@ fn test_warp_image_lanczos3_identity() {
         &input_buf,
         &mut output,
         &WarpTransform::new(Transform::identity()),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+        &WarpParams::new(InterpolationMethod::Lanczos3),
     );
 
     // Interior pixels should match input closely
@@ -712,7 +672,7 @@ fn test_warp_image_lanczos3_integer_translation() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
+        &WarpParams::new(InterpolationMethod::Lanczos3),
     );
 
     for y in 8..height - 8 {
@@ -730,7 +690,6 @@ fn test_warp_image_lanczos3_integer_translation() {
 #[test]
 fn test_warp_image_lanczos3_matches_per_pixel() {
     // Verify the optimized warp_image Lanczos3 path matches per-pixel interpolate().
-    // Uses deringing=-1.0 (disabled) so the scalar interpolate() path is the reference.
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height)
@@ -740,7 +699,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
 
     let mut output = Buffer2::new_filled(width, height, 0.0);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
+    let params = WarpParams::new(InterpolationMethod::Lanczos3);
     warp_image(
         &input_buf,
         &mut output,
@@ -839,7 +798,7 @@ fn test_generic_stepping_lanczos2_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(5.0, -1.0), 0.03, 0.98);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+    let params = WarpParams::new(InterpolationMethod::Lanczos2);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -869,7 +828,7 @@ fn test_generic_stepping_lanczos4_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(2.0, 3.0), -0.02, 1.01);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+    let params = WarpParams::new(InterpolationMethod::Lanczos4);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -981,10 +940,10 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
         }
 
         for method in [
-            InterpolationMethod::Lanczos2 { deringing: -1.0 },
-            InterpolationMethod::Lanczos3 { deringing: -1.0 },
-            InterpolationMethod::Lanczos3 { deringing: 0.3 },
-            InterpolationMethod::Lanczos4 { deringing: -1.0 },
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos4,
         ] {
             let params = WarpParams {
                 method,
@@ -992,7 +951,7 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
             };
             let mut output = Buffer2::new_default(WIDTH, HEIGHT);
             warp_image(&input, &mut output, &wt, &params);
-            let coverage = warp_coverage(Vec2us::new(WIDTH, HEIGHT), &wt, method);
+            let coverage = warp_quality_maps(Vec2us::new(WIDTH, HEIGHT), &wt, method).coverage;
 
             for y in 0..HEIGHT {
                 assert_eq!(
@@ -1018,34 +977,27 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
     }
 }
 
-/// In-bounds renormalization: on a flat field the in-bounds weighted average is the
-/// constant V no matter how many kernel taps fall off the image, so a renormalized edge
-/// sample reads exactly V. Before in-bounds weight tracking, bicubic read `V·Σ_in(w)` and
-/// Lanczos read `V·(Σ_in/Σ_all)` — both ≠ V at a partially-covered edge.
 #[test]
-fn samplers_renormalize_partial_kernel_at_edge() {
-    const V: f32 = 0.7;
-    let img = Buffer2::new_filled(16, 16, V);
-
-    for method in [
-        InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2 { deringing: -1.0 },
-        InterpolationMethod::Lanczos3 { deringing: -1.0 },
-        InterpolationMethod::Lanczos4 { deringing: -1.0 },
-    ] {
-        // x = 0.5 forces the leftmost tap(s) out of bounds (the renormalized partial-kernel
-        // path); y = 8.5 is fully interior.
-        let edge = interp(&img, 0.5, 8.5, method);
-        assert!(
-            (edge - V).abs() < TOL,
-            "{method:?}: partial-kernel edge should recover V={V}, got {edge}"
-        );
-        // Fully interior: all taps in bounds, value unchanged.
-        let interior = interp(&img, 8.5, 8.5, method);
-        assert!(
-            (interior - V).abs() < TOL,
-            "{method:?}: interior should be V={V}, got {interior}"
-        );
+fn signed_kernels_preserve_constants_at_partial_edges() {
+    for expected in [-0.7, 0.7] {
+        let img = Buffer2::new_filled(16, 16, expected);
+        for method in [
+            InterpolationMethod::Bicubic,
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos4,
+        ] {
+            let edge = interp(&img, 0.5, 8.5, method);
+            assert!(
+                (edge - expected).abs() < TOL,
+                "{method:?}: edge should recover {expected}, got {edge}"
+            );
+            let interior = interp(&img, 8.5, 8.5, method);
+            assert!(
+                (interior - expected).abs() < TOL,
+                "{method:?}: interior should recover {expected}, got {interior}"
+            );
+        }
     }
 }
 
@@ -1053,7 +1005,7 @@ fn samplers_renormalize_partial_kernel_at_edge() {
 fn warp_coverage_nearest_identity_is_all_ones() {
     let (w, h) = (8, 8);
     let wt = WarpTransform::new(Transform::identity());
-    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Nearest);
+    let cov = warp_quality_maps(Vec2us::new(w, h), &wt, InterpolationMethod::Nearest).coverage;
     for &c in cov.pixels() {
         assert!(
             (c - 1.0).abs() < TOL,
@@ -1067,7 +1019,7 @@ fn warp_coverage_fully_outside_is_zero() {
     let (w, h) = (8, 8);
     // Source translated far outside the image: every kernel tap is out of bounds.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
-    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear);
+    let cov = warp_quality_maps(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
     for &c in cov.pixels() {
         assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
     }
@@ -1079,7 +1031,7 @@ fn warp_coverage_bilinear_edge_is_partial() {
     // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
     // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
-    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear);
+    let cov = warp_quality_maps(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
     let edge = cov.pixels()[4 * w];
     assert!(
         (edge - 0.5).abs() < TOL,
@@ -1094,6 +1046,57 @@ fn warp_coverage_bilinear_edge_is_partial() {
 }
 
 #[test]
+fn bilinear_quality_has_hand_computed_support_and_confidence() {
+    let dims = Vec2us::new(8, 8);
+    let interior = quality_at(Vec2::new(0.5, 4.0), dims, InterpolationMethod::Bilinear);
+    assert!((interior.coverage - 1.0).abs() < TOL);
+    assert!((interior.normalization - 1.0).abs() < TOL);
+    // Coefficients [0.5, 0.5] have variance gain 0.5, so inverse variance is 2.
+    assert!((interior.confidence - 2.0).abs() < TOL);
+
+    let edge = quality_at(Vec2::new(-0.5, 4.0), dims, InterpolationMethod::Bilinear);
+    assert!((edge.coverage - 0.5).abs() < TOL);
+    assert!((edge.normalization - 0.5).abs() < TOL);
+    // Renormalization leaves the sole in-bounds coefficient equal to one.
+    assert!((edge.confidence - 1.0).abs() < TOL);
+}
+
+#[test]
+fn coverage_is_continuous_and_monotonic_across_left_border() {
+    let dims = Vec2us::new(32, 32);
+    for method in [
+        InterpolationMethod::Nearest,
+        InterpolationMethod::Bilinear,
+        InterpolationMethod::Bicubic,
+        InterpolationMethod::Lanczos2,
+        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos4,
+    ] {
+        let radius = method.kernel_radius() as i32;
+        let mut previous = 0.0;
+        for integer in -radius..=radius {
+            let coverage =
+                quality_at(Vec2::new(integer as f32 + 0.37, 16.0), dims, method).coverage;
+            assert!(
+                coverage + 1e-6 >= previous,
+                "{method:?}: coverage decreased from {previous} to {coverage} at x={integer}"
+            );
+            previous = coverage;
+        }
+        assert!((previous - 1.0).abs() < TOL, "{method:?}: {previous}");
+
+        if method != InterpolationMethod::Nearest {
+            let left = quality_at(Vec2::new(-1e-4, 16.0), dims, method).coverage;
+            let right = quality_at(Vec2::new(1e-4, 16.0), dims, method).coverage;
+            assert!(
+                (left - right).abs() < 1e-3,
+                "{method:?}: discontinuity across x=0: {left} vs {right}"
+            );
+        }
+    }
+}
+
+#[test]
 fn warp_tiny_image_smaller_than_lanczos4_kernel() {
     // 3×3 image with Lanczos4 (8-tap window > image): every output pixel's kernel is mostly
     // out of bounds, exercising the renormalized slow path. DC must be preserved.
@@ -1101,7 +1104,7 @@ fn warp_tiny_image_smaller_than_lanczos4_kernel() {
     let input = Buffer2::new_filled(w, h, 0.5f32);
     let mut output = Buffer2::new_default(w, h);
     let wt = WarpTransform::new(Transform::identity());
-    let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+    let params = WarpParams::new(InterpolationMethod::Lanczos4);
     warp_image(&input, &mut output, &wt, &params);
     for &v in output.pixels() {
         assert!(v.is_finite(), "tiny-image warp produced non-finite {v}");

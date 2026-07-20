@@ -6,9 +6,9 @@
 use rayon::prelude::*;
 
 use crate::io::raw::alloc_uninit_vec;
+use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
-use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
 use crate::concurrency::UnsafeSendPtr;
 
@@ -18,123 +18,7 @@ use crate::concurrency::UnsafeSendPtr;
 /// Dir 2 = diagonal (1,1), Dir 3 = anti-diagonal (1,-1).
 const DIR_OFFSETS: [(i32, i32); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
 
-/// For each X-Trans position, which interpolation strategy to use for a missing color.
-/// Precomputed from the 6×6 pattern to avoid per-pixel pattern lookups.
-#[derive(Debug, Clone, Copy)]
-enum ColorInterpStrategy {
-    /// Opposing pair found: average color differences from both neighbors.
-    /// (dy_a, dx_a, dy_b, dx_b) are the offsets to the two neighbors.
-    Pair {
-        dy_a: i32,
-        dx_a: i32,
-        dy_b: i32,
-        dx_b: i32,
-    },
-    /// Single neighbor found (no opposing pair has both matching).
-    /// (dy, dx) is the offset to the neighbor.
-    Single { dy: i32, dx: i32 },
-    /// No neighbor of this color exists at distance 1 (shouldn't happen in valid X-Trans).
-    None,
-}
-
-/// Precomputed interpolation strategies for all 36 X-Trans positions × 2 target colors.
-/// Indexed as [row%6][col%6][target_color_index] where target_color_index: 0=red, 1=blue.
-#[derive(Debug)]
-pub(crate) struct ColorInterpLookup {
-    /// For each position, the best strategies for interpolating red and blue.
-    /// [row%6][col%6][0=red, 1=blue] = array of up to 2 strategies (H pair, V pair)
-    /// sorted by expected quality (pairs first, then singles).
-    strategies: [[[InterpEntry; 2]; 6]; 6],
-}
-
-/// A precomputed interpolation entry for one position + one target color.
-#[derive(Debug, Clone, Copy)]
-struct InterpEntry {
-    /// Primary strategy (best pair or single neighbor).
-    primary: ColorInterpStrategy,
-    /// Secondary strategy (second pair, if available, for gradient comparison).
-    secondary: ColorInterpStrategy,
-}
-
-impl ColorInterpLookup {
-    pub(crate) fn new(pattern: &XTransPattern) -> Self {
-        let mut strategies = [[[InterpEntry {
-            primary: ColorInterpStrategy::None,
-            secondary: ColorInterpStrategy::None,
-        }; 2]; 6]; 6];
-
-        // Cardinal direction pairs: horizontal (0,1)/(0,-1) and vertical (1,0)/(-1,0)
-        let pairs: [((i32, i32), (i32, i32)); 2] = [((0, 1), (0, -1)), ((1, 0), (-1, 0))];
-        // Single directions for fallback
-        let singles: [(i32, i32); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-
-        for (row, row_strategies) in strategies.iter_mut().enumerate() {
-            for (col, col_strategies) in row_strategies.iter_mut().enumerate() {
-                for (tc_idx, &target_color) in [0u8, 2u8].iter().enumerate() {
-                    // At most 2 pairs and 4 singles possible — use fixed arrays
-                    let mut found_pairs = [ColorInterpStrategy::None; 2];
-                    let mut n_pairs = 0usize;
-                    let mut found_singles = [ColorInterpStrategy::None; 4];
-                    let mut n_singles = 0usize;
-
-                    // Check pairs first
-                    for &((dy_a, dx_a), (dy_b, dx_b)) in &pairs {
-                        // +6 handles negative offsets in modular arithmetic
-                        let nr_a = (row as i32 + dy_a + 6) as usize;
-                        let nc_a = (col as i32 + dx_a + 6) as usize;
-                        let nr_b = (row as i32 + dy_b + 6) as usize;
-                        let nc_b = (col as i32 + dx_b + 6) as usize;
-
-                        if pattern.color_at(nr_a, nc_a) == target_color
-                            && pattern.color_at(nr_b, nc_b) == target_color
-                        {
-                            found_pairs[n_pairs] = ColorInterpStrategy::Pair {
-                                dy_a,
-                                dx_a,
-                                dy_b,
-                                dx_b,
-                            };
-                            n_pairs += 1;
-                        }
-                    }
-
-                    // Check singles as fallback
-                    for &(dy, dx) in &singles {
-                        let nr = (row as i32 + dy + 6) as usize;
-                        let nc = (col as i32 + dx + 6) as usize;
-                        if pattern.color_at(nr, nc) == target_color {
-                            found_singles[n_singles] = ColorInterpStrategy::Single { dy, dx };
-                            n_singles += 1;
-                        }
-                    }
-
-                    let entry = &mut col_strategies[tc_idx];
-                    if n_pairs >= 2 {
-                        entry.primary = found_pairs[0];
-                        entry.secondary = found_pairs[1];
-                    } else if n_pairs == 1 {
-                        entry.primary = found_pairs[0];
-                        if n_singles > 0 {
-                            entry.secondary = found_singles[0];
-                        }
-                    } else if n_singles > 0 {
-                        entry.primary = found_singles[0];
-                        if n_singles >= 2 {
-                            entry.secondary = found_singles[1];
-                        }
-                    }
-                }
-            }
-        }
-
-        Self { strategies }
-    }
-
-    #[inline(always)]
-    fn get(&self, row: usize, col: usize, target_color_idx: usize) -> &InterpEntry {
-        &self.strategies[row % 6][col % 6][target_color_idx]
-    }
-}
+const MARK_INFO_BORDER: usize = 8;
 
 /// Compute green min/max bounds at each non-green pixel.
 ///
@@ -235,10 +119,8 @@ pub(crate) fn interpolate_green(
         let dir_ptrs = dir_send.get();
         let raw_y = y + xtrans.top_margin;
         let row_off = y * width;
-        // `flip` depends only on the row, so compute it once. A true modulo is required: a
-        // `wrapping_sub(sgrow)` mis-handles `raw_y < sgrow` (2⁶⁴ mod 3 = 1 shifts the parity),
-        // which happens when the top margin is smaller than `sgrow`.
-        let flip = ((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) != 0) as usize;
+        // librtprocess stores the alternating-row candidates in the opposite direction slots.
+        let flip = ((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) == 0) as usize;
 
         for x in 0..width {
             let raw_x = x + xtrans.left_margin;
@@ -310,15 +192,389 @@ pub(crate) fn interpolate_green(
     });
 }
 
-/// Compute YPbPr spatial derivatives by recomputing RGB on-the-fly from green_dir.
+#[inline(always)]
+fn rb_index(color: u8) -> usize {
+    debug_assert!(color == 0 || color == 2);
+    (color / 2) as usize
+}
+
+#[inline(always)]
+fn is_solitary_green(hex: &HexLookup, raw_y: usize, raw_x: usize) -> bool {
+    raw_y % 3 == hex.sgrow && raw_x % 3 == hex.sgcol
+}
+
+#[inline(always)]
+fn active_raw(xtrans: &XTransImage, y: usize, x: usize) -> f32 {
+    xtrans.read_normalized(y + xtrans.top_margin, x + xtrans.left_margin)
+}
+
+#[inline(always)]
+fn green_at(green_dir: &[f32], green_base: usize, width: usize, y: usize, x: usize) -> f32 {
+    green_dir[green_base + y * width + x]
+}
+
+#[derive(Debug)]
+struct SolitaryGreenCandidate {
+    colors: [f32; 2],
+    difference: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn solitary_green_candidate(
+    xtrans: &XTransImage,
+    green_dir: &[f32],
+    green_base: usize,
+    y: usize,
+    x: usize,
+    candidate: usize,
+) -> SolitaryGreenCandidate {
+    let width = xtrans.width;
+    let (dy, dx) = if candidate & 1 == 0 {
+        (0isize, 1isize)
+    } else {
+        (1, 0)
+    };
+    let center_green = green_at(green_dir, green_base, width, y, x);
+    let raw_y = y + xtrans.top_margin;
+    let raw_x = x + xtrans.left_margin;
+    let mut colors = [0.0; 2];
+    let mut difference = 0.0;
+    let mut target = xtrans.pattern.color_at(raw_y, raw_x + 1);
+    if candidate & 1 != 0 {
+        target ^= 2;
+    }
+
+    for distance in 1..=2 {
+        let oy = dy * distance;
+        let ox = dx * distance;
+        let plus_y = y.wrapping_add_signed(oy);
+        let plus_x = x.wrapping_add_signed(ox);
+        let minus_y = y.wrapping_add_signed(-oy);
+        let minus_x = x.wrapping_add_signed(-ox);
+        debug_assert_ne!(target, 1);
+
+        let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
+        let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
+        let plus_native = xtrans
+            .pattern
+            .color_at(raw_y.wrapping_add_signed(oy), raw_x.wrapping_add_signed(ox));
+        let minus_native = xtrans.pattern.color_at(
+            raw_y.wrapping_add_signed(-oy),
+            raw_x.wrapping_add_signed(-ox),
+        );
+        let raw_plus = if plus_native == target {
+            active_raw(xtrans, plus_y, plus_x)
+        } else {
+            0.0
+        };
+        let raw_minus = if minus_native == target {
+            active_raw(xtrans, minus_y, minus_x)
+        } else {
+            0.0
+        };
+        let green_correction = 2.0 * center_green - green_plus - green_minus;
+
+        colors[rb_index(target)] = 0.5 * (green_correction + raw_plus + raw_minus);
+        difference +=
+            (green_plus - green_minus - raw_plus + raw_minus).powi(2) + green_correction.powi(2);
+        target ^= 2;
+    }
+
+    SolitaryGreenCandidate { colors, difference }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn solitary_green_colors(
+    xtrans: &XTransImage,
+    green_dir: &[f32],
+    green_base: usize,
+    y: usize,
+    x: usize,
+    direction: usize,
+) -> [f32; 2] {
+    match direction {
+        0 | 1 => solitary_green_candidate(xtrans, green_dir, green_base, y, x, direction).colors,
+        2 | 3 => {
+            let first = direction * 2 - 2;
+            let horizontal = solitary_green_candidate(xtrans, green_dir, green_base, y, x, first);
+            let vertical = solitary_green_candidate(xtrans, green_dir, green_base, y, x, first + 1);
+            if horizontal.difference < vertical.difference {
+                horizontal.colors
+            } else {
+                vertical.colors
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[inline(always)]
+fn color_before_opposite(
+    colors: *mut [f32; 2],
+    pixels: usize,
+    direction: usize,
+    width: usize,
+    y: usize,
+    x: usize,
+    target: u8,
+) -> f32 {
+    // SAFETY: Initialization and the solitary-green stage are complete before this stage.
+    unsafe { (*colors.add(direction * pixels + y * width + x))[rb_index(target)] }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn opposite_color(
+    xtrans: &XTransImage,
+    hex: &HexLookup,
+    green_dir: &[f32],
+    colors: *mut [f32; 2],
+    pixels: usize,
+    green_base: usize,
+    y: usize,
+    x: usize,
+    direction: usize,
+    target: u8,
+) -> f32 {
+    let width = xtrans.width;
+    let raw_y = y + xtrans.top_margin;
+    let center_green = green_at(green_dir, green_base, width, y, x);
+    let primary_vertical = (raw_y as i64 - hex.sgrow as i64).rem_euclid(3) != 0;
+    let (primary_dy, primary_dx) = if primary_vertical {
+        (1isize, 0isize)
+    } else {
+        (0, 1)
+    };
+    let (long_dy, long_dx) = if primary_vertical {
+        (0isize, 3isize)
+    } else {
+        (3, 0)
+    };
+
+    let gradient = |dy: isize, dx: isize| {
+        let plus_y = y.wrapping_add_signed(dy);
+        let plus_x = x.wrapping_add_signed(dx);
+        let minus_y = y.wrapping_add_signed(-dy);
+        let minus_x = x.wrapping_add_signed(-dx);
+        (center_green - green_at(green_dir, green_base, width, plus_y, plus_x)).abs()
+            + (center_green - green_at(green_dir, green_base, width, minus_y, minus_x)).abs()
+    };
+
+    let primary_gradient = gradient(primary_dy, primary_dx);
+    let long_gradient = gradient(long_dy, long_dx);
+    let primary_parity = usize::from(!primary_vertical);
+    let use_primary = direction > 1
+        || ((direction ^ primary_parity) & 1) != 0
+        || primary_gradient < 2.0 * long_gradient;
+    let (dy, dx) = if use_primary {
+        (primary_dy, primary_dx)
+    } else {
+        (long_dy, long_dx)
+    };
+    let plus_y = y.wrapping_add_signed(dy);
+    let plus_x = x.wrapping_add_signed(dx);
+    let minus_y = y.wrapping_add_signed(-dy);
+    let minus_x = x.wrapping_add_signed(-dx);
+    let color_plus =
+        color_before_opposite(colors, pixels, direction, width, plus_y, plus_x, target);
+    let color_minus =
+        color_before_opposite(colors, pixels, direction, width, minus_y, minus_x, target);
+    let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
+    let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
+
+    center_green + 0.5 * (color_plus + color_minus - green_plus - green_minus)
+}
+
+#[inline(always)]
+fn color_before_green_block(
+    xtrans: &XTransImage,
+    hex: &HexLookup,
+    colors: *mut [f32; 2],
+    direction: usize,
+    y: usize,
+    x: usize,
+    target: u8,
+) -> f32 {
+    let native = xtrans
+        .pattern
+        .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
+    debug_assert!(
+        native != 1 || is_solitary_green(hex, y + xtrans.top_margin, x + xtrans.left_margin)
+    );
+    if native == target {
+        active_raw(xtrans, y, x)
+    } else {
+        let pixels = xtrans.width * xtrans.height;
+        // SAFETY: The solitary-green and opposite-color stages are complete before this stage.
+        unsafe { (*colors.add(direction * pixels + y * xtrans.width + x))[rb_index(target)] }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn green_block_colors(
+    xtrans: &XTransImage,
+    hex: &HexLookup,
+    green_dir: &[f32],
+    colors: *mut [f32; 2],
+    green_base: usize,
+    y: usize,
+    x: usize,
+    direction: usize,
+) -> [f32; 2] {
+    if direction >= 2 {
+        return [0.0; 2];
+    }
+
+    let width = xtrans.width;
+    let offsets = hex.get(y + xtrans.top_margin, x + xtrans.left_margin);
+    let first = offsets[direction * 2];
+    let second = offsets[direction * 2 + 1];
+    let first_y = y.wrapping_add_signed(first.dy as isize);
+    let first_x = x.wrapping_add_signed(first.dx as isize);
+    let second_y = y.wrapping_add_signed(second.dy as isize);
+    let second_x = x.wrapping_add_signed(second.dx as isize);
+    let center_green = green_at(green_dir, green_base, width, y, x);
+    let first_green = green_at(green_dir, green_base, width, first_y, first_x);
+    let second_green = green_at(green_dir, green_base, width, second_y, second_x);
+    let asymmetric = first.dy + second.dy != 0 || first.dx + second.dx != 0;
+    let (first_weight, divisor, green_correction) = if asymmetric {
+        (
+            2.0,
+            3.0,
+            3.0 * center_green - 2.0 * first_green - second_green,
+        )
+    } else {
+        (1.0, 2.0, 2.0 * center_green - first_green - second_green)
+    };
+    let mut result = [0.0; 2];
+
+    for target in [0, 2] {
+        let first_color =
+            color_before_green_block(xtrans, hex, colors, direction, first_y, first_x, target);
+        let second_color =
+            color_before_green_block(xtrans, hex, colors, direction, second_y, second_x, target);
+        result[rb_index(target)] =
+            (green_correction + first_weight * first_color + second_color) / divisor;
+    }
+
+    result
+}
+
+/// Reconstruct directional red/blue candidates in Markesteijn's three geometry stages.
+pub(crate) fn reconstruct_colors(
+    xtrans: &XTransImage,
+    hex: &HexLookup,
+    green_dir: &[f32],
+    colors: &mut [[f32; 2]],
+) {
+    let width = xtrans.width;
+    let height = xtrans.height;
+    let pixels = width * height;
+    assert_eq!(green_dir.len(), NDIR * pixels);
+    assert_eq!(colors.len(), NDIR * pixels);
+
+    colors
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(flat, output)| {
+            let direction = flat / pixels;
+            let index = flat % pixels;
+            let y = index / width;
+            let x = index % width;
+            let raw_y = y + xtrans.top_margin;
+            let raw_x = x + xtrans.left_margin;
+            let native = xtrans.pattern.color_at(raw_y, raw_x);
+            *output = [0.0; 2];
+            if native != 1 {
+                output[rb_index(native)] = active_raw(xtrans, y, x);
+            } else if is_solitary_green(hex, raw_y, raw_x)
+                && y >= 2
+                && y + 2 < height
+                && x >= 2
+                && x + 2 < width
+            {
+                *output =
+                    solitary_green_colors(xtrans, green_dir, direction * pixels, y, x, direction);
+            }
+        });
+
+    let color_ptr = UnsafeSendPtr::new(colors.as_mut_ptr());
+    (0..NDIR * pixels).into_par_iter().for_each(|flat| {
+        let direction = flat / pixels;
+        let index = flat % pixels;
+        let y = index / width;
+        let x = index % width;
+        if y < 3 || y + 3 >= height || x < 3 || x + 3 >= width {
+            return;
+        }
+        let raw_y = y + xtrans.top_margin;
+        let raw_x = x + xtrans.left_margin;
+        let native = xtrans.pattern.color_at(raw_y, raw_x);
+        if native == 1 {
+            return;
+        }
+        let target = 2 - native;
+        let value = opposite_color(
+            xtrans,
+            hex,
+            green_dir,
+            color_ptr.get(),
+            pixels,
+            direction * pixels,
+            y,
+            x,
+            direction,
+            target,
+        );
+        // SAFETY: Each task writes one unique colored site after reading only native or
+        // solitary-green sites initialized by the preceding stage.
+        unsafe {
+            (*color_ptr.get().add(flat))[rb_index(target)] = value;
+        }
+    });
+
+    (0..NDIR * pixels).into_par_iter().for_each(|flat| {
+        let direction = flat / pixels;
+        let index = flat % pixels;
+        let y = index / width;
+        let x = index % width;
+        if y < 2 || y + 2 >= height || x < 2 || x + 2 >= width {
+            return;
+        }
+        let raw_y = y + xtrans.top_margin;
+        let raw_x = x + xtrans.left_margin;
+        if xtrans.pattern.color_at(raw_y, raw_x) != 1 || is_solitary_green(hex, raw_y, raw_x) {
+            return;
+        }
+        let value = green_block_colors(
+            xtrans,
+            hex,
+            green_dir,
+            color_ptr.get(),
+            direction * pixels,
+            y,
+            x,
+            direction,
+        );
+        // SAFETY: Each task writes one unique 2×2-green site after reading only sites
+        // completed by the preceding two stages.
+        unsafe {
+            *color_ptr.get().add(flat) = value;
+        }
+    });
+}
+
+/// Compute YPbPr spatial derivatives from the materialized directional candidates.
 ///
 /// For each direction, computes a Laplacian in that direction's offset,
-/// storing the squared derivative magnitude per pixel. RGB is computed
-/// per-pixel using `compute_rgb_pixel` instead of reading from a materialized buffer.
+/// storing the squared derivative magnitude per pixel.
 pub(crate) fn compute_derivatives(
     xtrans: &XTransImage,
     green_dir: &[f32],
-    color_lookup: &ColorInterpLookup,
+    colors: &[[f32; 2]],
     drv: &mut [f32],
 ) {
     let width = xtrans.width;
@@ -329,7 +585,7 @@ pub(crate) fn compute_derivatives(
     // Split each direction's rows into chunks for parallelism, and within each
     // chunk process rows sequentially with a sliding 3-row YPbPr cache.
     // This gives both multi-core utilization AND 3x reduction in
-    // compute_rgb_pixel calls (each row computed once, reused as neighbor).
+    // RGB row loads (each row computed once, reused as neighbor).
     // At chunk boundaries, one row is recomputed (negligible overhead).
     let chunk_size = 64;
     let chunks_per_dir = height.div_ceil(chunk_size);
@@ -358,16 +614,7 @@ pub(crate) fn compute_derivatives(
                 // Direction 0: horizontal (0, +1). Forward/backward are in the same row.
                 // Reuse rows[0] as the single row buffer.
                 for y in y_start..y_end {
-                    compute_ypbpr_row(
-                        xtrans,
-                        green_dir,
-                        color_lookup,
-                        green_base,
-                        y,
-                        width,
-                        height,
-                        &mut rows[0],
-                    );
+                    compute_ypbpr_row(xtrans, green_dir, colors, green_base, y, &mut rows[0]);
 
                     let drv_off = drv_base + y * width;
                     for x in 0..width {
@@ -404,33 +651,20 @@ pub(crate) fn compute_derivatives(
                     compute_ypbpr_row(
                         xtrans,
                         green_dir,
-                        color_lookup,
+                        colors,
                         green_base,
                         y_start - 1,
-                        width,
-                        height,
                         &mut rows[0],
                     );
                 }
-                compute_ypbpr_row(
-                    xtrans,
-                    green_dir,
-                    color_lookup,
-                    green_base,
-                    y_start,
-                    width,
-                    height,
-                    &mut rows[1],
-                );
+                compute_ypbpr_row(xtrans, green_dir, colors, green_base, y_start, &mut rows[1]);
                 if y_start + 1 < height {
                     compute_ypbpr_row(
                         xtrans,
                         green_dir,
-                        color_lookup,
+                        colors,
                         green_base,
                         y_start + 1,
-                        width,
-                        height,
                         &mut rows[2],
                     );
                 }
@@ -471,16 +705,7 @@ pub(crate) fn compute_derivatives(
                     std::mem::swap(r0, r1);
                     std::mem::swap(r1, r2);
                     if y + 2 < height {
-                        compute_ypbpr_row(
-                            xtrans,
-                            green_dir,
-                            color_lookup,
-                            green_base,
-                            y + 2,
-                            width,
-                            height,
-                            r2,
-                        );
+                        compute_ypbpr_row(xtrans, green_dir, colors, green_base, y + 2, r2);
                     }
                 }
             }
@@ -494,18 +719,15 @@ pub(crate) fn compute_derivatives(
 fn compute_ypbpr_row(
     xtrans: &XTransImage,
     green_dir: &[f32],
-    color_lookup: &ColorInterpLookup,
+    colors: &[[f32; 2]],
     green_base: usize,
     y: usize,
-    width: usize,
-    height: usize,
     out: &mut [(f32, f32, f32)],
 ) {
-    let y_interior = y >= 1 && y + 1 < height;
     for (x, val) in out.iter_mut().enumerate() {
-        let interior = y_interior && x >= 1 && x + 1 < width;
-        let (r, g, b) =
-            compute_rgb_pixel(xtrans, green_dir, color_lookup, green_base, y, x, interior);
+        let index = green_base + y * xtrans.width + x;
+        let [r, b] = colors[index];
+        let g = green_dir[index];
         *val = rgb_to_ypbpr(r, g, b);
     }
 }
@@ -517,224 +739,6 @@ fn rgb_to_ypbpr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let pb = (b - luma) * 0.56433;
     let pr = (r - luma) * 0.67815;
     (luma, pb, pr)
-}
-
-/// Compute RGB for a single pixel given its direction's green estimate.
-///
-/// Returns (R, G, B) by filling in missing channels using green-guided
-/// color difference interpolation. Used by `compute_derivatives` and
-/// `blend_final` to recompute RGB on-the-fly without materializing rgb_dir.
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn compute_rgb_pixel(
-    xtrans: &XTransImage,
-    green_dir: &[f32],
-    color_lookup: &ColorInterpLookup,
-    green_base: usize,
-    y: usize,
-    x: usize,
-    interior: bool,
-) -> (f32, f32, f32) {
-    let width = xtrans.width;
-    let raw_y = y + xtrans.top_margin;
-    let raw_x = x + xtrans.left_margin;
-    let color = xtrans.pattern.color_at(raw_y, raw_x);
-    let raw_val = xtrans.read_normalized(raw_y, raw_x);
-    let green = green_dir[green_base + y * width + x];
-
-    let interp = |target_color_idx: usize| -> f32 {
-        interpolate_missing_color_fast(
-            xtrans,
-            green_dir,
-            color_lookup,
-            green_base,
-            y,
-            x,
-            target_color_idx,
-            interior,
-        )
-    };
-
-    match color {
-        0 => (raw_val, green, interp(1)),
-        1 => (interp(0), raw_val, interp(1)),
-        2 => (interp(0), green, raw_val),
-        _ => unreachable!(),
-    }
-}
-
-/// Interpolate a missing color using precomputed lookup table.
-///
-/// Uses green-guided color difference method with precomputed neighbor positions.
-/// When two opposing pairs are available, picks the one with smaller green gradient.
-///
-/// `interior` hint: when true, skips all bounds checks (caller guarantees all neighbors
-/// are within bounds). This eliminates the main overhead for ~99% of pixels.
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn interpolate_missing_color_fast(
-    xtrans: &XTransImage,
-    green_dir: &[f32],
-    color_lookup: &ColorInterpLookup,
-    green_base: usize,
-    y: usize,
-    x: usize,
-    target_color_idx: usize, // 0=red, 1=blue
-    interior: bool,
-) -> f32 {
-    let width = xtrans.width;
-    let raw_width = xtrans.raw_width;
-    let raw_y = y + xtrans.top_margin;
-    let raw_x = x + xtrans.left_margin;
-    let green_center = green_dir[green_base + y * width + x];
-
-    let entry = color_lookup.get(raw_y, raw_x, target_color_idx);
-
-    if interior {
-        // Fast path: no bounds checks needed. All neighbors at distance ±1 are valid
-        // because we're at least 1 pixel from any edge in both raw and active coordinates.
-        let eval_unchecked = |strategy: &ColorInterpStrategy| -> Option<(f32, f32)> {
-            match *strategy {
-                ColorInterpStrategy::Pair {
-                    dy_a,
-                    dx_a,
-                    dy_b,
-                    dx_b,
-                } => {
-                    let oy_a = (y as i32 + dy_a) as usize;
-                    let ox_a = (x as i32 + dx_a) as usize;
-                    let oy_b = (y as i32 + dy_b) as usize;
-                    let ox_b = (x as i32 + dx_b) as usize;
-
-                    let ga = green_dir[green_base + oy_a * width + ox_a];
-                    let gb = green_dir[green_base + oy_b * width + ox_b];
-                    let grad = (green_center - ga).abs() + (green_center - gb).abs();
-
-                    let raw_a = xtrans.read_normalized(
-                        (raw_y as i32 + dy_a) as usize,
-                        (raw_x as i32 + dx_a) as usize,
-                    );
-                    let raw_b = xtrans.read_normalized(
-                        (raw_y as i32 + dy_b) as usize,
-                        (raw_x as i32 + dx_b) as usize,
-                    );
-
-                    Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
-                }
-                ColorInterpStrategy::Single { dy, dx } => {
-                    let oy = (y as i32 + dy) as usize;
-                    let ox = (x as i32 + dx) as usize;
-
-                    let g_n = green_dir[green_base + oy * width + ox];
-                    let raw_n = xtrans.read_normalized(
-                        (raw_y as i32 + dy) as usize,
-                        (raw_x as i32 + dx) as usize,
-                    );
-                    Some((green_center + (raw_n - g_n), f32::MAX))
-                }
-                ColorInterpStrategy::None => None,
-            }
-        };
-
-        let val = match (
-            eval_unchecked(&entry.primary),
-            eval_unchecked(&entry.secondary),
-        ) {
-            (Some((vp, gp)), Some((vs, gs))) => {
-                if gs < gp {
-                    vs
-                } else {
-                    vp
-                }
-            }
-            (Some((v, _)), None) | (None, Some((v, _))) => v,
-            (None, None) => green_center,
-        };
-        return xtrans.output_value(val);
-    }
-
-    // Slow path: full bounds checking for border pixels.
-    let height = xtrans.height;
-
-    let eval = |strategy: &ColorInterpStrategy| -> Option<(f32, f32)> {
-        match *strategy {
-            ColorInterpStrategy::Pair {
-                dy_a,
-                dx_a,
-                dy_b,
-                dx_b,
-            } => {
-                let ay = raw_y as i32 + dy_a;
-                let ax = raw_x as i32 + dx_a;
-                let by = raw_y as i32 + dy_b;
-                let bx = raw_x as i32 + dx_b;
-
-                if ay < 0
-                    || ax < 0
-                    || by < 0
-                    || bx < 0
-                    || ay as usize >= xtrans.raw_height
-                    || ax as usize >= raw_width
-                    || by as usize >= xtrans.raw_height
-                    || bx as usize >= raw_width
-                {
-                    return None;
-                }
-
-                let oy_a = (ay as usize).wrapping_sub(xtrans.top_margin);
-                let ox_a = (ax as usize).wrapping_sub(xtrans.left_margin);
-                let oy_b = (by as usize).wrapping_sub(xtrans.top_margin);
-                let ox_b = (bx as usize).wrapping_sub(xtrans.left_margin);
-
-                if oy_a >= height || ox_a >= width || oy_b >= height || ox_b >= width {
-                    return None;
-                }
-
-                let ga = green_dir[green_base + oy_a * width + ox_a];
-                let gb = green_dir[green_base + oy_b * width + ox_b];
-                let grad = (green_center - ga).abs() + (green_center - gb).abs();
-
-                let raw_a = xtrans.read_normalized(ay as usize, ax as usize);
-                let raw_b = xtrans.read_normalized(by as usize, bx as usize);
-
-                Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
-            }
-            ColorInterpStrategy::Single { dy, dx } => {
-                let ny = raw_y as i32 + dy;
-                let nx = raw_x as i32 + dx;
-
-                if ny < 0 || nx < 0 || ny as usize >= xtrans.raw_height || nx as usize >= raw_width
-                {
-                    return None;
-                }
-
-                let oy = (ny as usize).wrapping_sub(xtrans.top_margin);
-                let ox = (nx as usize).wrapping_sub(xtrans.left_margin);
-                if oy >= height || ox >= width {
-                    return None;
-                }
-
-                let g_n = green_dir[green_base + oy * width + ox];
-                let raw_n = xtrans.read_normalized(ny as usize, nx as usize);
-                Some((green_center + (raw_n - g_n), f32::MAX))
-            }
-            ColorInterpStrategy::None => None,
-        }
-    };
-
-    let val = match (eval(&entry.primary), eval(&entry.secondary)) {
-        (Some((vp, gp)), Some((vs, gs))) => {
-            if gs < gp {
-                vs
-            } else {
-                vp
-            }
-        }
-        (Some((v, _)), None) | (None, Some((v, _))) => v,
-        (None, None) => green_center,
-    };
-
-    xtrans.output_value(val)
 }
 
 /// Build homogeneity maps from per-direction derivatives.
@@ -793,10 +797,11 @@ pub(crate) fn compute_homogeneity(
                 .take(width.saturating_sub(2))
             {
                 let mut count = 0u8;
+                let center_threshold = threshold[y * width + x];
                 for vy in y - 1..=y + 1 {
                     for vx in x - 1..=x + 1 {
                         let nidx = vy * width + vx;
-                        if drv[d * pixels + nidx] <= threshold[nidx] {
+                        if drv[d * pixels + nidx] <= center_threshold {
                             count += 1;
                         }
                     }
@@ -846,7 +851,7 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 }
 
 /// Final blending: sum homogeneity in 5×5 window, select best directions,
-/// recompute RGB on-the-fly for qualifying directions and average.
+/// and average the materialized RGB candidates.
 ///
 /// Uses summed area tables for O(1) per-pixel window queries instead of O(25).
 /// SATs are built one direction at a time to reduce peak memory from ~4P to ~1P.
@@ -858,7 +863,7 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 pub(crate) fn blend_final(
     xtrans: &XTransImage,
     green_dir: &[f32],
-    color_lookup: &ColorInterpLookup,
+    colors: &[[f32; 2]],
     homo: &[u8],
     width: usize,
     height: usize,
@@ -894,15 +899,13 @@ pub(crate) fn blend_final(
         }
     }
 
-    // Pass 2: Parallel blend into planar channels, recomputing RGB on-the-fly.
+    // Pass 2: Parallel blend into planar channels.
     out_r
         .par_chunks_mut(width)
         .zip(out_g.par_chunks_mut(width))
         .zip(out_b.par_chunks_mut(width))
         .enumerate()
         .for_each(|(y, ((r_row, g_row), b_row))| {
-            let y_interior = y >= 1 && y + 1 < height;
-
             for x in 0..width {
                 let hm = &hm_buf[y * width + x];
 
@@ -910,44 +913,99 @@ pub(crate) fn blend_final(
                 let max_hm = *hm.iter().max().unwrap();
                 let threshold = max_hm - (max_hm >> 3); // 7/8 of max
 
-                // Average RGB from qualifying directions, recomputing on-the-fly
+                // Average RGB from qualifying directions.
                 let mut avg_r = 0.0f32;
                 let mut avg_g = 0.0f32;
                 let mut avg_b = 0.0f32;
                 let mut count = 0u32;
-                let interior = y_interior && x >= 1 && x + 1 < width;
-
                 for (d, &h) in hm.iter().enumerate() {
                     if h >= threshold {
                         let green_base = d * pixels;
-                        let (r, g, b) = compute_rgb_pixel(
-                            xtrans,
-                            green_dir,
-                            color_lookup,
-                            green_base,
-                            y,
-                            x,
-                            interior,
-                        );
+                        let index = green_base + y * width + x;
+                        let [r, b] = colors[index];
                         avg_r += r;
-                        avg_g += g;
+                        avg_g += green_dir[index];
                         avg_b += b;
                         count += 1;
                     }
                 }
 
-                if count > 0 {
-                    let inv = 1.0 / count as f32;
-                    r_row[x] = xtrans.output_value(avg_r * inv);
-                    g_row[x] = xtrans.output_value(avg_g * inv);
-                    b_row[x] = xtrans.output_value(avg_b * inv);
-                } else {
-                    r_row[x] = 0.0;
-                    g_row[x] = 0.0;
-                    b_row[x] = 0.0;
-                }
+                debug_assert!(count > 0);
+                let inv = 1.0 / count as f32;
+                r_row[x] = avg_r * inv;
+                g_row[x] = avg_g * inv;
+                b_row[x] = avg_b * inv;
             }
         });
+
+    demosaic_border(xtrans, out_r, out_g, out_b, MARK_INFO_BORDER);
+}
+
+fn demosaic_border(
+    xtrans: &XTransImage,
+    out_r: &mut [f32],
+    out_g: &mut [f32],
+    out_b: &mut [f32],
+    border: usize,
+) {
+    let width = xtrans.width;
+    let height = xtrans.height;
+
+    for y in 0..height {
+        for x in 0..width {
+            if y >= border && y + border < height && x >= border && x + border < width {
+                continue;
+            }
+
+            let mut sums = [0.0f32; 3];
+            let mut weights = [0.0f32; 3];
+            for neighbor_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+                for neighbor_x in x.saturating_sub(1)..=(x + 1).min(width - 1) {
+                    let dy = neighbor_y.abs_diff(y);
+                    let dx = neighbor_x.abs_diff(x);
+                    let weight = match (dy, dx) {
+                        (0, 0) => 0.0,
+                        (0, 1) | (1, 0) => 0.5,
+                        (1, 1) => 0.25,
+                        _ => unreachable!(),
+                    };
+                    let color = xtrans.pattern.color_at(
+                        neighbor_y + xtrans.top_margin,
+                        neighbor_x + xtrans.left_margin,
+                    ) as usize;
+                    sums[color] += active_raw(xtrans, neighbor_y, neighbor_x) * weight;
+                    weights[color] += weight;
+                }
+            }
+
+            let index = y * width + x;
+            let native = xtrans
+                .pattern
+                .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
+            let raw = active_raw(xtrans, y, x);
+            if native == 1 && weights[0] == 0.0 {
+                out_r[index] = raw;
+                out_g[index] = raw;
+                out_b[index] = raw;
+                continue;
+            }
+            out_r[index] = if native == 0 || weights[0] == 0.0 {
+                raw
+            } else {
+                sums[0] / weights[0]
+            };
+            out_g[index] = if native == 1 || weights[1] == 0.0 {
+                raw
+            } else {
+                sums[1] / weights[1]
+            };
+            out_b[index] = if native == 2 || weights[2] == 0.0 {
+                raw
+            } else {
+                sums[2] / weights[2]
+            };
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1070,6 +1128,27 @@ mod tests {
     }
 
     #[test]
+    fn homogeneity_uses_the_center_threshold_for_the_entire_window() {
+        let width = 3;
+        let height = 3;
+        let pixels = width * height;
+        let center = 4;
+        let mut drv = vec![100.0f32; NDIR * pixels];
+        drv[..pixels].copy_from_slice(&[1.0, 2.0, 3.0, 4.0, 1.0, 5.0, 6.0, 7.0, 8.0]);
+        drv[pixels..2 * pixels].fill(0.1);
+        for direction in 1..NDIR {
+            drv[direction * pixels + center] = 2.0;
+        }
+        let mut homo = vec![0u8; NDIR * pixels];
+        let mut threshold = vec![0.0f32; pixels];
+
+        compute_homogeneity(&drv, width, height, &mut homo, &mut threshold);
+
+        assert_eq!(threshold[center], 8.0);
+        assert_eq!(homo[center], 9);
+    }
+
+    #[test]
     fn test_ypbpr_conversion_white() {
         // White (1,1,1) → Y=1, Pb=0, Pr=0
         let y: f32 = 0.2627 * 1.0 + 0.6780 * 1.0 + 0.0593 * 1.0;
@@ -1119,8 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_derivatives_uniform_input_near_zero() {
-        // Uniform input → all RGB values the same → YPbPr Laplacian ≈ 0 everywhere.
+    fn test_derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
         let raw_w = 24;
         let raw_h = 24;
         let w = 12;
@@ -1137,23 +1215,24 @@ mod tests {
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+        let mut colors = vec![[0.0; 2]; NDIR * pixels];
+        reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
         let mut drv = vec![f32::NAN; NDIR * pixels];
-        compute_derivatives(&xtrans, &green_dir, &color_lookup, &mut drv);
+        compute_derivatives(&xtrans, &green_dir, &colors, &mut drv);
 
-        // Interior pixels should have near-zero derivatives for uniform input
+        let mut nonzero = [0usize; NDIR];
         for d in 0..NDIR {
             for y in 2..h - 2 {
                 for x in 2..w - 2 {
                     let val = drv[d * pixels + y * w + x];
                     assert!(val.is_finite(), "NaN derivative at d={d} y={y} x={x}");
-                    assert!(
-                        val < 0.01,
-                        "Expected near-zero derivative at d={d} y={y} x={x}, got {val}"
-                    );
+                    assert!(val >= 0.0, "Negative derivative at d={d} y={y} x={x}");
+                    nonzero[d] += usize::from(val > 1e-6);
                 }
             }
         }
+        assert!(nonzero[0] > 0);
+        assert_ne!(nonzero[0], nonzero[2]);
     }
 
     #[test]
@@ -1185,9 +1264,10 @@ mod tests {
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+        let mut colors = vec![[0.0; 2]; NDIR * pixels];
+        reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
         let mut drv = vec![0.0f32; NDIR * pixels];
-        compute_derivatives(&xtrans, &green_dir, &color_lookup, &mut drv);
+        compute_derivatives(&xtrans, &green_dir, &colors, &mut drv);
 
         // All derivatives should be finite and non-negative (squared values)
         for (i, &val) in drv.iter().enumerate() {
@@ -1349,163 +1429,90 @@ mod tests {
     }
 
     #[test]
-    fn test_color_interp_lookup_coverage() {
+    fn geometry_stages_cover_each_xtrans_site() {
         let pattern = test_pattern();
-        let lookup = ColorInterpLookup::new(&pattern);
+        let hex = HexLookup::new(&pattern);
+        let mut solitary = 0;
+        let mut colored = 0;
+        let mut green_block = 0;
 
-        let mut has_pair = 0;
-        let mut has_single = 0;
-        let mut has_none = 0;
-
-        // Verify all 36×2 entries are valid (Pair, Single, or None) and count coverage
-        for row in 0..6 {
-            for col in 0..6 {
-                for tc_idx in 0..2 {
-                    let entry = lookup.get(row, col, tc_idx);
-                    match entry.primary {
-                        ColorInterpStrategy::Pair { .. } => has_pair += 1,
-                        ColorInterpStrategy::Single { .. } => has_single += 1,
-                        ColorInterpStrategy::None => has_none += 1,
-                    }
+        for y in 0..6 {
+            for x in 0..6 {
+                match pattern.color_at(y, x) {
+                    0 | 2 => colored += 1,
+                    1 if is_solitary_green(&hex, y, x) => solitary += 1,
+                    1 => green_block += 1,
+                    _ => unreachable!(),
                 }
             }
         }
 
-        // X-Trans has good color coverage — most positions should have pairs or singles.
-        // Some positions may have None (no neighbor of that color at distance ±1).
-        assert!(
-            has_pair + has_single > has_none,
-            "Too many None entries: pair={has_pair} single={has_single} none={has_none}"
-        );
-        // At least some pairs should exist
-        assert!(has_pair > 0, "No pair strategies found");
+        assert_eq!(solitary, 4);
+        assert_eq!(colored, 16);
+        assert_eq!(green_block, 16);
     }
 
     #[test]
-    fn test_color_interp_lookup_pair_symmetry() {
-        let pattern = test_pattern();
-        let lookup = ColorInterpLookup::new(&pattern);
-
-        // For Pair strategies, the two neighbors should be in opposing directions
-        for row in 0..6 {
-            for col in 0..6 {
-                for tc_idx in 0..2 {
-                    let entry = lookup.get(row, col, tc_idx);
-                    if let ColorInterpStrategy::Pair {
-                        dy_a,
-                        dx_a,
-                        dy_b,
-                        dx_b,
-                    } = entry.primary
-                    {
-                        // Opposing means dy_a = -dy_b and dx_a = -dx_b
-                        assert_eq!(
-                            dy_a, -dy_b,
-                            "Pair at ({row},{col},tc={tc_idx}) dy not opposing"
-                        );
-                        assert_eq!(
-                            dx_a, -dx_b,
-                            "Pair at ({row},{col},tc={tc_idx}) dx not opposing"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_interpolate_interior_matches_border_path() {
-        // For interior pixels, the fast (unchecked) and slow (checked) paths
-        // should produce identical results.
-        let raw_w = 24;
-        let raw_h = 24;
-        let w = 12;
-        let h = 12;
-        // Gradient data to exercise actual interpolation
-        let data: Vec<u16> = (0..raw_w * raw_h)
-            .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
-            .collect();
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
-
+    fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
+        let raw_w = 30;
+        let raw_h = 30;
+        let w = 18;
+        let h = 18;
         let pixels = w * h;
-        let mut green_dir = vec![0.0f32; NDIR * pixels];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
+        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
-        let mut gmin = vec![0.0f32; pixels];
-        let mut gmax = vec![1.0f32; pixels];
+        let mut gmin = vec![0.0; pixels];
+        let mut gmax = vec![0.0; pixels];
+        let mut green_dir = vec![0.0; NDIR * pixels];
+        let mut colors = vec![[f32::NAN; 2]; NDIR * pixels];
         compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+        reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
 
-        // Test interior pixels (y in 1..h-1, x in 1..w-1) with both paths
-        for d in 0..NDIR {
-            let green_base = d * pixels;
-            for y in 1..h - 1 {
-                for x in 1..w - 1 {
-                    for tc_idx in 0..2 {
-                        let fast = interpolate_missing_color_fast(
-                            &xtrans,
-                            &green_dir,
-                            &color_lookup,
-                            green_base,
-                            y,
-                            x,
-                            tc_idx,
-                            true, // interior
-                        );
-                        let slow = interpolate_missing_color_fast(
-                            &xtrans,
-                            &green_dir,
-                            &color_lookup,
-                            green_base,
-                            y,
-                            x,
-                            tc_idx,
-                            false, // border path
-                        );
-                        assert!(
-                            (fast - slow).abs() < 1e-6,
-                            "Mismatch at d={d} y={y} x={x} tc={tc_idx}: fast={fast} slow={slow}"
-                        );
+        for direction in 0..NDIR {
+            for y in 3..h - 3 {
+                for x in 3..w - 3 {
+                    let raw_y = y + xtrans.top_margin;
+                    let raw_x = x + xtrans.left_margin;
+                    let native = xtrans.pattern.color_at(raw_y, raw_x);
+                    let [red, blue] = colors[direction * pixels + y * w + x];
+                    match native {
+                        0 => assert_eq!(red, active_raw(&xtrans, y, x)),
+                        2 => assert_eq!(blue, active_raw(&xtrans, y, x)),
+                        1 if !is_solitary_green(&hex, raw_y, raw_x) && direction >= 2 => {
+                            assert_eq!([red, blue], [0.0, 0.0]);
+                            continue;
+                        }
+                        1 => {}
+                        _ => unreachable!(),
                     }
+                    assert!(red.is_finite(), "d={direction} ({y},{x}) R={red}");
+                    assert!(blue.is_finite(), "d={direction} ({y},{x}) B={blue}");
                 }
             }
         }
     }
 
     #[test]
-    fn test_interpolate_border_pixels_dont_panic() {
-        // Border pixels with bounds checking should not panic
-        let raw_w = 14;
-        let raw_h = 14;
-        let w = 6;
-        let h = 6;
-        let data: Vec<u16> = (0..raw_w * raw_h)
-            .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
-            .collect();
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 4, 4);
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+    fn reconstruction_geometry_dependencies_are_completed_by_earlier_stages() {
+        let pattern = test_pattern();
+        let hex = HexLookup::new(&pattern);
 
-        let pixels = w * h;
-        let green_dir = vec![0.5f32; NDIR * pixels];
-
-        // Test all edge pixels with border (slow) path
-        for d in 0..NDIR {
-            let green_base = d * pixels;
-            for y in 0..h {
-                for x in 0..w {
-                    for tc_idx in 0..2 {
-                        let val = interpolate_missing_color_fast(
-                            &xtrans,
-                            &green_dir,
-                            &color_lookup,
-                            green_base,
-                            y,
-                            x,
-                            tc_idx,
-                            false,
+        for y in 3..9 {
+            for x in 3..9 {
+                let native = pattern.color_at(y, x);
+                if native == 1 && !is_solitary_green(&hex, y, x) {
+                    let offsets = hex.get(y, x);
+                    for offset in &offsets[..4] {
+                        let neighbor_y = y.wrapping_add_signed(offset.dy as isize);
+                        let neighbor_x = x.wrapping_add_signed(offset.dx as isize);
+                        let neighbor = pattern.color_at(neighbor_y, neighbor_x);
+                        assert!(
+                            neighbor != 1 || is_solitary_green(&hex, neighbor_y, neighbor_x),
+                            "2x2-green dependency at ({y},{x}) reaches another block at \
+                             ({neighbor_y},{neighbor_x})"
                         );
-                        assert!(val.is_finite(), "NaN at d={d} y={y} x={x} tc={tc_idx}");
-                        assert!(val >= 0.0, "Negative at d={d} y={y} x={x} tc={tc_idx}");
                     }
                 }
             }
@@ -1530,24 +1537,17 @@ mod tests {
 
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+        let mut colors = vec![[0.0; 2]; NDIR * pixels];
+        reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
 
         // Uniform homogeneity → all directions qualify
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let homo = vec![9u8; NDIR * pixels];
 
         let mut r = vec![0.0f32; pixels];
         let mut g = vec![0.0f32; pixels];
         let mut b = vec![0.0f32; pixels];
         blend_final(
-            &xtrans,
-            &green_dir,
-            &color_lookup,
-            &homo,
-            w,
-            h,
-            &mut r,
-            &mut g,
-            &mut b,
+            &xtrans, &green_dir, &colors, &homo, w, h, &mut r, &mut g, &mut b,
         );
 
         // Uniform 0.5 input → output should be approximately 0.5 for all channels
@@ -1575,9 +1575,10 @@ mod tests {
 
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+        let mut colors = vec![[0.0; 2]; NDIR * pixels];
+        reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
 
         // Dir 0 has highest homogeneity (9), others have 0
-        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let mut homo = vec![0u8; NDIR * pixels];
         homo[..pixels].fill(9);
 
@@ -1585,15 +1586,7 @@ mod tests {
         let mut g_one = vec![0.0f32; pixels];
         let mut b_one = vec![0.0f32; pixels];
         blend_final(
-            &xtrans,
-            &green_dir,
-            &color_lookup,
-            &homo,
-            w,
-            h,
-            &mut r_one,
-            &mut g_one,
-            &mut b_one,
+            &xtrans, &green_dir, &colors, &homo, w, h, &mut r_one, &mut g_one, &mut b_one,
         );
         let output_one = interleave_planes([r_one, g_one, b_one]);
 
@@ -1603,27 +1596,25 @@ mod tests {
         let mut g_all = vec![0.0f32; pixels];
         let mut b_all = vec![0.0f32; pixels];
         blend_final(
-            &xtrans,
-            &green_dir,
-            &color_lookup,
-            &homo_all,
-            w,
-            h,
-            &mut r_all,
-            &mut g_all,
-            &mut b_all,
+            &xtrans, &green_dir, &colors, &homo_all, w, h, &mut r_all, &mut g_all, &mut b_all,
         );
         let output_all = interleave_planes([r_all, g_all, b_all]);
 
-        // With uniform input, both should give similar results
-        for i in 0..output_one.len() {
-            assert!(
-                (output_one[i] - output_all[i]).abs() < 0.05,
-                "Pixel {i}: one_dir={} all_dir={}",
-                output_one[i],
-                output_all[i]
-            );
+        let mut changed = false;
+        for y in MARK_INFO_BORDER..h - MARK_INFO_BORDER {
+            for x in MARK_INFO_BORDER..w - MARK_INFO_BORDER {
+                let pixel = y * w + x;
+                let [expected_r, expected_b] = colors[pixel];
+                let expected_g = green_dir[pixel];
+                assert_eq!(
+                    &output_one[pixel * 3..pixel * 3 + 3],
+                    &[expected_r, expected_g, expected_b]
+                );
+                changed |=
+                    output_one[pixel * 3..pixel * 3 + 3] != output_all[pixel * 3..pixel * 3 + 3];
+            }
         }
+        assert!(changed);
 
         // Output should have no NaN or negative values
         for (i, &v) in output_one.iter().enumerate() {

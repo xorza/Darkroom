@@ -1,9 +1,9 @@
 //! Defective-pixel detection and correction.
 //!
-//! **Hot** pixels (abnormally high dark current) come from the master dark via a robust per-color
-//! MAD threshold; **cold/dead** pixels (abnormally low response) come from the master flat via a
-//! local-neighbourhood ratio test. Both are corrected by replacing the pixel with the median of
-//! its same-color CFA neighbours.
+//! **Hot** pixels (abnormally high dark current) come from the master dark after subtracting a
+//! robust per-color tiled background, then applying a MAD threshold to the residual; **cold/dead**
+//! pixels (abnormally low response) come from the master flat via a local-neighbourhood ratio test.
+//! Both are corrected by replacing the pixel with the median of its same-color CFA neighbours.
 //!
 //! # Hot pixels (from the dark)
 //!
@@ -24,7 +24,12 @@
 //!    neighbors (e.g., for Bayer, the nearest pixels of the same R/G/B filter).
 //!    This preserves the CFA pattern for subsequent demosaicing.
 //!
-//! 4. **Adaptive sampling for large images:**
+//! 4. **Broad dark structure:**
+//!    Per-color tile medians are bilinearly interpolated into a smooth dark-current model before
+//!    thresholding. This prevents gradients and amp glow from becoming false point defects while
+//!    preserving isolated pixels and same-color clusters as positive residuals.
+//!
+//! 5. **Adaptive sampling for large images:**
 //!    For images >200K pixels, exact median computation is slow. We sample 100K
 //!    pixels uniformly, which gives <0.5% median error with >99% confidence
 //!    (by the central limit theorem for order statistics).
@@ -57,7 +62,8 @@ use rayon::prelude::*;
 /// dark pixel) — they only reveal themselves as dark spots in an illuminated flat.
 #[derive(Debug, Clone, Default)]
 pub struct DefectMap {
-    /// Flat indices of hot pixels (above `median + kσ` in the dark), ascending.
+    /// Flat indices of hot pixels (above `median + kσ` in the background-subtracted dark),
+    /// ascending.
     pub hot_indices: Vec<usize>,
     /// Flat indices of cold/dead pixels (below [`DEAD_PIXEL_FRACTION`] of their same-color
     /// local-neighbourhood median in the flat), ascending.
@@ -72,8 +78,9 @@ impl DefectMap {
         (self.hot_indices.len() + self.cold_indices.len()) * std::mem::size_of::<usize>()
     }
 
-    /// Detect **hot** pixels from a master dark — those above `median + sigma_threshold·σ` for
-    /// their CFA color — and store them. Calls are chainable with `?`, in any order.
+    /// Detect **hot** pixels from a master dark — those whose residual above a smooth per-color
+    /// dark background exceeds `median + sigma_threshold·σ` — and store them. Calls are chainable
+    /// with `?`, in any order.
     ///
     /// # Errors
     ///
@@ -175,6 +182,10 @@ impl DefectMap {
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
+/// Broad dark-current model tile size. Each tile has enough Bayer red/blue samples for a robust
+/// median while remaining much smaller than normal sensor-scale gradients and amp glow.
+const DARK_BACKGROUND_TILE_SIZE: usize = 64;
+
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
     match cfa_type {
@@ -195,8 +206,9 @@ const MIN_SIGMA_THRESHOLD: f32 = 1.0;
 /// flagged.
 const DEAD_PIXEL_FRACTION: f32 = 0.5;
 
-/// Flag hot pixels in a master dark: those above `median + kσ` for their CFA color (robust
-/// per-color MAD stats). Per-color keeps green (50% of Bayer data) from masking red/blue defects.
+/// Flag hot pixels in a master dark: fit a robust broad per-color background, then threshold the
+/// residual at `median + kσ` for its CFA color. Per-color keeps green (50% of Bayer data) from
+/// masking red/blue defects.
 fn detect_hot_pixels(
     image: &CfaImage,
     sigma_threshold: f32,
@@ -210,14 +222,12 @@ fn detect_hot_pixels(
     let width = data.width();
     let total = width * data.height();
     let cfa_type = image.metadata.cfa_type.as_ref();
-    let stats = compute_per_color_stats(data, cfa_type);
+    let background = DarkBackground::fit(data, cfa_type, cancel)?;
+    let stats = compute_per_color_residual_stats(data, cfa_type, &background);
 
-    // Parallel like `detect_cold_pixels`: indexed `collect` keeps the result ascending, preserving
-    // the `binary_search` invariant the map relies on. The center is the global per-color median
-    // (not a local neighbour median): a local center can't detect dense hot-pixel *clusters* — each
-    // pixel's same-color neighbours are themselves hot, so the local median rises to the hot value.
-    // (A gradient-/glow-robust *and* cluster-robust center would need large-box background
-    // subtraction, à la IRAF `ccdmask` — deferred.)
+    // Indexed collect keeps the result ascending, preserving the map's binary-search invariant.
+    // The broad model uses tile medians rather than same-color neighbour medians so a compact
+    // same-color cluster remains an outlier instead of becoming its own local reference.
     let indices = (0..total)
         .into_par_iter()
         .filter(|&i| {
@@ -226,7 +236,7 @@ fn detect_hot_pixels(
             }
             let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
             let ColorStats { median, sigma } = stats[color];
-            data[i] > median + sigma_threshold * sigma
+            data[i] - background.at(i % width, i / width, color) > median + sigma_threshold * sigma
         })
         .collect();
 
@@ -234,6 +244,163 @@ fn detect_hot_pixels(
         return Err(Error::Cancelled);
     }
     Ok(indices)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InterpolationSpan {
+    lower: usize,
+    upper: usize,
+    fraction: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DarkTile {
+    values: [f32; 3],
+}
+
+/// Smooth per-CFA-color dark-current model sampled from robust tile medians.
+#[derive(Debug)]
+struct DarkBackground {
+    tiles: Buffer2<DarkTile>,
+    x_spans: Vec<InterpolationSpan>,
+    y_spans: Vec<InterpolationSpan>,
+}
+
+impl DarkBackground {
+    fn fit(
+        data: &Buffer2<f32>,
+        cfa_type: Option<&CfaType>,
+        cancel: &CancelToken,
+    ) -> Result<Self, Error> {
+        let width = data.width();
+        let height = data.height();
+        assert!(
+            width > 0 && height > 0,
+            "dark background needs non-zero dimensions"
+        );
+        let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
+        let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
+        let num_colors = cfa_type.map_or(1, CfaType::num_colors);
+
+        let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)
+            .into_par_iter()
+            .map(|index| {
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+
+                let tx = index % tiles_x;
+                let ty = index / tiles_x;
+                let x_start = tx * width / tiles_x;
+                let x_end = (tx + 1) * width / tiles_x;
+                let y_start = ty * height / tiles_y;
+                let y_end = (ty + 1) * height / tiles_y;
+                let mut samples: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+
+                for y in y_start..y_end {
+                    for x in x_start..x_end {
+                        let color = cfa_color_at(cfa_type, x, y) as usize;
+                        samples[color].push(data[y * width + x]);
+                    }
+                }
+
+                let mut values = [f32::NAN; 3];
+                for color in 0..num_colors {
+                    if !samples[color].is_empty() {
+                        values[color] = median_f32_mut(&mut samples[color]);
+                    }
+                }
+                Ok(DarkTile { values })
+            })
+            .collect::<Result<_, Error>>()?;
+
+        let missing: [bool; 3] = std::array::from_fn(|color| {
+            color < num_colors && tiles.iter().any(|tile| tile.values[color].is_nan())
+        });
+        for (color, &is_missing) in missing.iter().enumerate().take(num_colors) {
+            if !is_missing {
+                continue;
+            }
+            let mut samples = collect_color_samples(data, cfa_type, color as u8);
+            if samples.is_empty() {
+                continue;
+            }
+            let fallback = median_f32_mut(&mut samples);
+            for tile in &mut tiles {
+                if tile.values[color].is_nan() {
+                    tile.values[color] = fallback;
+                }
+            }
+        }
+
+        let centers_x = tile_centers(width, tiles_x);
+        let centers_y = tile_centers(height, tiles_y);
+        Ok(Self {
+            tiles: Buffer2::new(tiles_x, tiles_y, tiles),
+            x_spans: interpolation_spans(width, &centers_x),
+            y_spans: interpolation_spans(height, &centers_y),
+        })
+    }
+
+    #[inline]
+    fn at(&self, x: usize, y: usize, color: usize) -> f32 {
+        let xs = self.x_spans[x];
+        let ys = self.y_spans[y];
+        let top = lerp(
+            self.tiles[(xs.lower, ys.lower)].values[color],
+            self.tiles[(xs.upper, ys.lower)].values[color],
+            xs.fraction,
+        );
+        let bottom = lerp(
+            self.tiles[(xs.lower, ys.upper)].values[color],
+            self.tiles[(xs.upper, ys.upper)].values[color],
+            xs.fraction,
+        );
+        lerp(top, bottom, ys.fraction)
+    }
+}
+
+fn tile_centers(length: usize, tile_count: usize) -> Vec<f32> {
+    (0..tile_count)
+        .map(|tile| {
+            let start = tile * length / tile_count;
+            let end = (tile + 1) * length / tile_count;
+            (start + end - 1) as f32 * 0.5
+        })
+        .collect()
+}
+
+fn interpolation_spans(length: usize, centers: &[f32]) -> Vec<InterpolationSpan> {
+    if centers.len() == 1 {
+        return vec![
+            InterpolationSpan {
+                lower: 0,
+                upper: 0,
+                fraction: 0.0,
+            };
+            length
+        ];
+    }
+
+    (0..length)
+        .map(|position| {
+            let position = position as f32;
+            let upper = centers
+                .partition_point(|&center| center <= position)
+                .clamp(1, centers.len() - 1);
+            let lower = upper - 1;
+            InterpolationSpan {
+                lower,
+                upper,
+                fraction: (position - centers[lower]) / (centers[upper] - centers[lower]),
+            }
+        })
+        .collect()
+}
+
+#[inline]
+fn lerp(start: f32, end: f32, fraction: f32) -> f32 {
+    start + fraction * (end - start)
 }
 
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of
@@ -271,31 +438,32 @@ fn detect_cold_pixels(
     Ok(indices)
 }
 
-/// Per-CFA-color robust background statistics used to threshold hot pixels.
+/// Per-CFA-color robust residual statistics used to threshold hot pixels.
 #[derive(Debug, Clone, Copy)]
 struct ColorStats {
-    /// Median pixel value for the color (the hot-detection center).
+    /// Median residual for the color (the hot-detection center).
     median: f32,
     /// Robust σ (`MAD · 1.4826`, floored). A color with no samples gets `∞` so it never flags.
     sigma: f32,
 }
 
-/// Per-CFA-color robust stats, indexed by color (0=R/mono, 1=G, 2=B).
+/// Per-CFA-color robust background-subtracted stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
 /// `sigma` is `MAD · 1.4826` floored only at an absolute `5e-4` (~33 ADU/16-bit) so a clean
 /// near-uniform master can't flag its own noise tail. (A former relative floor `median · 0.1` was
 /// dropped: it capped sensitivity at ~1.5× the median, hiding warm pixels at 1.1–1.4× median, and
 /// has no precedent in PixInsight/Siril/APP/ccdmask. The absolute floor alone is the standard
 /// guard.) A color with no samples gets `sigma = ∞` so it never flags.
-fn compute_per_color_stats(
+fn compute_per_color_residual_stats(
     data: &Buffer2<f32>,
     cfa_type: Option<&CfaType>,
+    background: &DarkBackground,
 ) -> ArrayVec<ColorStats, 3> {
     let num_colors = cfa_type.map_or(1, |c| c.num_colors());
     let mut stats = ArrayVec::new();
 
     for color in 0..num_colors as u8 {
-        let mut samples = collect_color_samples(data, cfa_type, color);
+        let mut samples = collect_color_residual_samples(data, cfa_type, color, background);
 
         if samples.is_empty() {
             stats.push(ColorStats {
@@ -313,12 +481,26 @@ fn compute_per_color_stats(
         let sigma = (mad * MAD_TO_SIGMA).max(5e-4);
 
         tracing::debug!(
-            "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
+            "Defect residual stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
         );
         stats.push(ColorStats { median, sigma });
     }
 
     stats
+}
+
+fn collect_color_residual_samples(
+    data: &Buffer2<f32>,
+    cfa_type: Option<&CfaType>,
+    target_color: u8,
+    background: &DarkBackground,
+) -> Vec<f32> {
+    let width = data.width();
+    collect_color_sample_indices(data, cfa_type, target_color)
+        .map(|index| {
+            data[index] - background.at(index % width, index / width, target_color as usize)
+        })
+        .collect()
 }
 
 /// Collect pixel samples for a specific CFA color channel.
@@ -329,44 +511,35 @@ fn collect_color_samples(
     cfa_type: Option<&CfaType>,
     target_color: u8,
 ) -> Vec<f32> {
+    collect_color_sample_indices(data, cfa_type, target_color)
+        .map(|index| data[index])
+        .collect()
+}
+
+fn collect_color_sample_indices<'a>(
+    data: &'a Buffer2<f32>,
+    cfa_type: Option<&'a CfaType>,
+    target_color: u8,
+) -> impl Iterator<Item = usize> + 'a {
     let width = data.width();
     let height = data.height();
     let total = width * height;
-
-    if cfa_type.map_or(1, |c| c.num_colors()) == 1 {
-        // Mono: all pixels belong to color 0, use strided sampling
-        let use_sampling = total > MAX_MEDIAN_SAMPLES * 2;
-        let sample_count = if use_sampling {
-            MAX_MEDIAN_SAMPLES
-        } else {
-            total
-        };
-        let stride = if use_sampling {
-            total / sample_count
-        } else {
-            1
-        };
-        return (0..sample_count).map(|i| data[i * stride]).collect();
-    }
-
-    // CFA: stride-sample this color in a single pass so we never materialize all of its
-    // pixels — the old "collect every matching pixel, then subsample" path allocated tens of MB
-    // of throwaway. `keep_stride` from the pixel total (color count ≤ total) keeps well under
-    // `MAX_MEDIAN_SAMPLES` samples, ample for a robust median/MAD.
-    let keep_stride = (total / MAX_MEDIAN_SAMPLES).max(1);
-    let mut samples = Vec::with_capacity(MAX_MEDIAN_SAMPLES.min(total));
+    let keep_stride = if total > MAX_MEDIAN_SAMPLES * 2 {
+        total.div_ceil(MAX_MEDIAN_SAMPLES)
+    } else {
+        1
+    };
     let mut seen = 0usize;
-    for y in 0..height {
-        for (x, &val) in data.row(y).iter().enumerate() {
-            if cfa_color_at(cfa_type, x, y) == target_color {
-                if seen.is_multiple_of(keep_stride) {
-                    samples.push(val);
-                }
-                seen += 1;
-            }
+    (0..total).filter(move |&index| {
+        let x = index % width;
+        let y = index / width;
+        if cfa_color_at(cfa_type, x, y) != target_color {
+            return false;
         }
-    }
-    samples
+        let keep = seen.is_multiple_of(keep_stride);
+        seen += 1;
+        keep
+    })
 }
 
 /// Calculate median of 8-connected neighbors from raw channel data, skipping any flagged in
@@ -915,6 +1088,81 @@ mod tests {
     }
 
     #[test]
+    fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
+        let (width, height) = (192usize, 128usize);
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|index| {
+                let x = (index % width) as f32;
+                let y = (index / width) as f32;
+                0.02 + 0.0001 * x + 0.0002 * y
+            })
+            .collect();
+        let data = Buffer2::new(width, height, pixels);
+        let background =
+            DarkBackground::fit(&data, Some(&CfaType::Mono), &CancelToken::never()).unwrap();
+
+        for y in 0..height {
+            for x in 0..width {
+                let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
+                assert!(
+                    (background.at(x, y, 0) - expected).abs() < 2e-7,
+                    "affine background mismatch at ({x}, {y}): expected {expected}, got {}",
+                    background.at(x, y, 0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hot_detection_removes_per_color_gradient_and_amp_glow_but_keeps_clusters() {
+        let (width, height) = (384usize, 256usize);
+        let cfa = CfaType::Bayer(CfaPattern::Rggb);
+        let isolated = [(17usize, 23usize), (201, 48), (312, 190)];
+        let mut cluster = Vec::new();
+        for y in (124..=132).step_by(2) {
+            for x in (156..=164).step_by(2) {
+                assert_eq!(cfa.color_at(x, y), 0);
+                cluster.push((x, y));
+            }
+        }
+
+        let mut pixels = vec![0.0f32; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let color = cfa.color_at(x, y) as usize;
+                let x_unit = x as f32 / (width - 1) as f32;
+                let y_unit = y as f32 / (height - 1) as f32;
+                let baseline = [0.01, 0.02, 0.03][color];
+                let gradient = [0.012, 0.018, 0.024][color] * x_unit + 0.01 * y_unit;
+                let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
+                let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
+                pixels[y * width + x] = baseline + gradient + amp_glow + noise;
+            }
+        }
+
+        let mut expected: Vec<usize> = isolated
+            .iter()
+            .chain(&cluster)
+            .map(|&(x, y)| y * width + x)
+            .collect();
+        expected.sort_unstable();
+        for &index in &expected {
+            pixels[index] += 0.08;
+        }
+
+        let dark = make_cfa(width, height, pixels, cfa);
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
+
+        assert_eq!(
+            defect_map.hot_indices, expected,
+            "smooth per-color structure must not become defects, while every injected point and \
+             same-color cluster member must remain detectable"
+        );
+    }
+
+    #[test]
     fn test_cfa_no_defective_pixels() {
         let pixels = vec![100.0; 36];
         let dark = make_cfa(6, 6, pixels, CfaType::Mono);
@@ -1003,6 +1251,11 @@ mod tests {
         let mut pixels: Vec<f32> = (0..w * h)
             .map(|i| 0.2 + 0.6 * (i % w) as f32 / (w - 1) as f32)
             .collect();
+        for y in 6..10 {
+            for x in 2..6 {
+                pixels[y * w + x] *= 0.65;
+            }
+        }
         let dead = 8 * w + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
         pixels[dead] = 0.0;
         let flat = make_cfa(w, h, pixels, CfaType::Mono);
@@ -1022,6 +1275,14 @@ mod tests {
             !is_cold(&defect_map, 8 * w + 15),
             "bright edge (0.8) is fine"
         );
+        for y in 6..10 {
+            for x in 2..6 {
+                assert!(
+                    !is_cold(&defect_map, y * w + x),
+                    "dust shadow ({x}, {y}) is attenuated, not dead"
+                );
+            }
+        }
     }
 
     /// `detect_hot` + `detect_cold` combine hot pixels (from the dark) and cold pixels (from the

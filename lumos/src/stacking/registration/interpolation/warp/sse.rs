@@ -8,7 +8,6 @@ use imaginarium::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::stacking::registration::interpolation::warp::SoftClampAccum;
 use crate::stacking::registration::transform::Transform;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
@@ -284,10 +283,6 @@ use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel
 /// - SIZE=4: single `__m128` (4 weights), one 128-bit load per row
 /// - SIZE=6: one `__m256` (6 weights + 2 zero-padded lanes), one 256-bit load per row
 /// - SIZE=8: one `__m256` (8 weights), one 256-bit load per row
-///
-/// When `DERINGING=true`, tracks positive and negative weighted contributions
-/// separately for PixInsight-style soft clamping.
-///
 /// # Safety
 /// - Caller must ensure FMA is available.
 /// - The SIZE×SIZE pixel window at `(kx, ky)` must be fully in bounds.
@@ -297,18 +292,14 @@ use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn lanczos_kernel_fma<
-    const A: usize,
-    const SIZE: usize,
-    const DERINGING: bool,
->(
+pub(crate) unsafe fn lanczos_kernel_fma<const SIZE: usize>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,
     ky: usize,
     wx: &[f32; SIZE],
     wy: &[f32; SIZE],
-) -> SoftClampAccum {
+) -> f32 {
     // SIZE > 4 (Lanczos3=6, Lanczos4=8): one 256-bit (8-wide) load + accumulate per row. SIZE=6
     // zero-pads the top 2 lanes of wx, so their products contribute 0 to every accumulator. SIZE=4
     // stays 128-bit below — 256-bit would waste half the register. `SIZE > 4` is const, so the dead
@@ -322,89 +313,34 @@ pub(crate) unsafe fn lanczos_kernel_fma<
         };
         let wx256 = _mm256_insertf128_ps(_mm256_castps128_ps256(wx_lo), wx_hi, 1);
 
-        let zero = _mm256_setzero_ps();
-        let mut acc = zero;
-        let (mut sp, mut sn, mut wp, mut wn) = (zero, zero, zero, zero);
+        let mut acc = _mm256_setzero_ps();
 
         for j in 0..SIZE {
             let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
             let src = _mm256_loadu_ps(row_ptr);
             let wyj = _mm256_set1_ps(wy[j]);
 
-            if DERINGING {
-                let w = _mm256_mul_ps(wx256, wyj);
-                let s = _mm256_mul_ps(src, w);
-                // For finite `s`, `s < 0` is exactly `!(s >= 0)`, so the negative lanes are
-                // `andnot(pos, ·)` — one compare/row instead of two (matches the NEON kernel).
-                let pos = _mm256_cmp_ps::<_CMP_GE_OQ>(s, zero);
-                sp = _mm256_add_ps(sp, _mm256_and_ps(pos, s));
-                wp = _mm256_add_ps(wp, _mm256_and_ps(pos, w));
-                sn = _mm256_sub_ps(sn, _mm256_andnot_ps(pos, s));
-                wn = _mm256_sub_ps(wn, _mm256_andnot_ps(pos, w));
-            } else {
-                let sx = _mm256_mul_ps(src, wx256);
-                acc = _mm256_fmadd_ps(sx, wyj, acc);
-            }
+            let sx = _mm256_mul_ps(src, wx256);
+            acc = _mm256_fmadd_ps(sx, wyj, acc);
         }
 
-        return if DERINGING {
-            SoftClampAccum {
-                sp: hsum256_ps(sp),
-                sn: hsum256_ps(sn),
-                wp: hsum256_ps(wp),
-                wn: hsum256_ps(wn),
-            }
-        } else {
-            SoftClampAccum {
-                sp: hsum256_ps(acc),
-                sn: 0.0,
-                wp: 0.0,
-                wn: 0.0,
-            }
-        };
+        return hsum256_ps(acc);
     }
 
     // SIZE = 4 (Lanczos2): single 128-bit load + accumulate per row.
     let wx_lo = _mm_loadu_ps(wx.as_ptr());
-    let zero = _mm_setzero_ps();
-    let mut acc = zero;
-    let (mut sp, mut sn, mut wp, mut wn) = (zero, zero, zero, zero);
+    let mut acc = _mm_setzero_ps();
 
     for j in 0..SIZE {
         let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
         let src = _mm_loadu_ps(row_ptr);
         let wyj = _mm_set1_ps(wy[j]);
 
-        if DERINGING {
-            let w = _mm_mul_ps(wx_lo, wyj);
-            let s = _mm_mul_ps(src, w);
-            // Negative lanes via `andnot(pos, ·)` — one compare/row (see the 256-bit path above).
-            let pos = _mm_cmpge_ps(s, zero);
-            sp = _mm_add_ps(sp, _mm_and_ps(pos, s));
-            wp = _mm_add_ps(wp, _mm_and_ps(pos, w));
-            sn = _mm_sub_ps(sn, _mm_andnot_ps(pos, s));
-            wn = _mm_sub_ps(wn, _mm_andnot_ps(pos, w));
-        } else {
-            let sx = _mm_mul_ps(src, wx_lo);
-            acc = _mm_fmadd_ps(sx, wyj, acc);
-        }
+        let sx = _mm_mul_ps(src, wx_lo);
+        acc = _mm_fmadd_ps(sx, wyj, acc);
     }
 
-    if DERINGING {
-        SoftClampAccum {
-            sp: hsum_ps(sp),
-            sn: hsum_ps(sn),
-            wp: hsum_ps(wp),
-            wn: hsum_ps(wn),
-        }
-    } else {
-        SoftClampAccum {
-            sp: hsum_ps(acc),
-            sn: 0.0,
-            wp: 0.0,
-            wn: 0.0,
-        }
-    }
+    hsum_ps(acc)
 }
 
 /// Horizontal sum of 8 floats in an AVX register.
@@ -645,7 +581,6 @@ mod tests {
             };
         }
 
-        // Scalar reference (no deringing)
         let mut scalar_sum = 0.0f32;
         for j in 0..SIZE {
             for k in 0..SIZE {
@@ -654,23 +589,10 @@ mod tests {
             }
         }
 
-        // SIMD no-deringing
-        let simd_acc =
-            unsafe { lanczos_kernel_fma::<A, SIZE, false>(&data, width, kx, ky, &wx, &wy) };
+        let simd_acc = unsafe { lanczos_kernel_fma::<SIZE>(&data, width, kx, ky, &wx, &wy) };
         assert!(
-            (simd_acc.sp - scalar_sum).abs() < 1e-4,
-            "{label} no-dering: SIMD {} vs scalar {scalar_sum}",
-            simd_acc.sp
-        );
-        assert_eq!(simd_acc.sn, 0.0);
-
-        // SIMD with deringing: sp - sn should equal scalar_sum
-        let simd_dering =
-            unsafe { lanczos_kernel_fma::<A, SIZE, true>(&data, width, kx, ky, &wx, &wy) };
-        let dering_total = simd_dering.sp - simd_dering.sn;
-        assert!(
-            (dering_total - scalar_sum).abs() < 1e-4,
-            "{label} dering: sp-sn={dering_total} vs scalar {scalar_sum}"
+            (simd_acc - scalar_sum).abs() < 1e-4,
+            "{label}: SIMD {simd_acc} vs scalar {scalar_sum}",
         );
     }
 

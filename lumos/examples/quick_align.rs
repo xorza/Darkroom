@@ -82,7 +82,7 @@ fn main() {
     // Warp target to align with reference
     println!("\nWarping target image...");
     let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
     let aligned = warp(&target_image, &result.warp_transform(), &warp_config).image;

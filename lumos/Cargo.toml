@@ -32,6 +32,7 @@ sysinfo = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
+statrs = { workspace = true }
 arrayvec = { workspace = true }
 smallvec = { workspace = true }
 parking_lot = { workspace = true }

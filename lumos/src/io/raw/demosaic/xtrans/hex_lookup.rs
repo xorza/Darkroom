@@ -37,6 +37,8 @@ pub(crate) struct HexLookup {
     offsets: [[[HexOffset; HEX_ENTRIES]; 3]; 3],
     /// The "solitary green" row position (mod 3)
     pub(crate) sgrow: usize,
+    /// The "solitary green" column position (mod 3)
+    pub(crate) sgcol: usize,
 }
 
 /// A single hex neighbor offset.
@@ -56,6 +58,7 @@ impl HexLookup {
     pub(crate) fn new(pattern: &XTransPattern) -> Self {
         let mut offsets = [[[HexOffset::default(); HEX_ENTRIES]; 3]; 3];
         let mut sgrow = 0usize;
+        let mut sgcol = 0usize;
 
         // Sentinel value to detect unfilled entries
         for row_offsets in &mut offsets {
@@ -96,6 +99,7 @@ impl HexLookup {
                     // this marks the "solitary green" position
                     if ng == 4 {
                         sgrow = row;
+                        sgcol = col;
                     }
 
                     // Build hex offsets when we hit the right count
@@ -132,7 +136,11 @@ impl HexLookup {
             }
         }
 
-        Self { offsets, sgrow }
+        Self {
+            offsets,
+            sgrow,
+            sgcol,
+        }
     }
 
     /// Get hex offsets for a given (row, col) position.
@@ -148,12 +156,12 @@ mod tests {
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([
-            [1, 0, 1, 1, 2, 1], // G R G G B G
-            [2, 1, 2, 0, 1, 0], // B G B R G R
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [0, 1, 0, 2, 1, 2], // R G R B G B
-            [1, 0, 1, 1, 2, 1], // G R G G B G
+            [1, 1, 0, 1, 1, 2],
+            [1, 1, 2, 1, 1, 0],
+            [2, 0, 1, 0, 2, 1],
+            [1, 1, 2, 1, 1, 0],
+            [1, 1, 0, 1, 1, 2],
+            [0, 2, 1, 2, 0, 1],
         ])
     }
 
@@ -198,12 +206,20 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_sgrow() {
+    fn test_hex_lookup_solitary_green_phase() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 
-        // sgrow should be within 0..3
         assert!(hex.sgrow < 3);
+        assert!(hex.sgcol < 3);
+        assert_eq!(pattern.color_at(hex.sgrow, hex.sgcol), 1);
+        for (dy, dx) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+            let color = pattern.color_at(
+                (hex.sgrow as i32 + dy + 6) as usize,
+                (hex.sgcol as i32 + dx + 6) as usize,
+            );
+            assert_ne!(color, 1);
+        }
     }
 
     #[test]

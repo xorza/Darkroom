@@ -158,6 +158,18 @@ fn test_drizzle_rgb_image() {
     assert_eq!(result.image.width(), 100);
     assert_eq!(result.image.height(), 100);
     assert_eq!(result.image.channels(), 3);
+    assert_eq!(result.weight.dimensions(), result.image.dimensions());
+    assert_eq!(result.variance.dimensions(), result.image.dimensions());
+    for channel in 1..3 {
+        assert_eq!(
+            result.weight.channel(channel).pixels(),
+            result.weight.channel(0).pixels()
+        );
+        assert_eq!(
+            result.variance.channel(channel).pixels(),
+            result.variance.channel(0).pixels()
+        );
+    }
 }
 
 #[test]
@@ -262,14 +274,14 @@ fn test_weight_and_variance_maps() {
     }
     let equal = acc.finalize();
     assert!(
-        (equal.weight.pixels()[idx] - 3.0).abs() < 1e-5,
+        (equal.weight.channel(0).pixels()[idx] - 3.0).abs() < 1e-5,
         "Σw should be 3, got {}",
-        equal.weight.pixels()[idx]
+        equal.weight.channel(0).pixels()[idx]
     );
     assert!(
-        (equal.variance.pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
+        (equal.variance.channel(0).pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
         "variance should be 1/3, got {}",
-        equal.variance.pixels()[idx]
+        equal.variance.channel(0).pixels()[idx]
     );
     assert!((equal.image.channel(0).pixels()[idx] - 5.0).abs() < 1e-5);
 
@@ -289,20 +301,20 @@ fn test_weight_and_variance_maps() {
     );
     let unequal = acc.finalize();
     assert!(
-        (unequal.weight.pixels()[idx] - 4.0).abs() < 1e-5,
+        (unequal.weight.channel(0).pixels()[idx] - 4.0).abs() < 1e-5,
         "Σw should be 4, got {}",
-        unequal.weight.pixels()[idx]
+        unequal.weight.channel(0).pixels()[idx]
     );
     assert!(
-        (unequal.variance.pixels()[idx] - 0.625).abs() < 1e-5,
+        (unequal.variance.channel(0).pixels()[idx] - 0.625).abs() < 1e-5,
         "variance should be 0.625, got {}",
-        unequal.variance.pixels()[idx]
+        unequal.variance.channel(0).pixels()[idx]
     );
 
     // Concentrating weight on fewer frames raises variance above the equal-weight 2-frame optimum
     // (1/2) — the map responds to the weight distribution, not just the contribution count.
     assert!(
-        unequal.variance.pixels()[idx] > 0.5,
+        unequal.variance.channel(0).pixels()[idx] > 0.5,
         "unequal weighting should raise variance above 1/2"
     );
 }

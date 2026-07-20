@@ -6,7 +6,7 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
-pub(crate) fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
+pub(crate) fn subtract(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
     if let Some(subtractor) = subtractor {
         assert!(
             subtractor.data.width() == flat.data.width()
@@ -17,17 +17,21 @@ pub(crate) fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaI
             flat.data.width(),
             flat.data.height()
         );
+        flat.data
+            .par_iter_mut()
+            .zip(subtractor.data.par_iter())
+            .for_each(|(flat, subtractor)| *flat -= subtractor);
     }
 
+    flat
+}
+
+pub(crate) fn normalize(mut flat: CfaImage) -> CfaImage {
     match flat.metadata.cfa_type.as_ref() {
         Some(cfa_type) if cfa_type.num_colors() == 3 => {
-            prepare_cfa(
-                &mut flat.data,
-                subtractor.map(|image| &image.data),
-                cfa_type,
-            );
+            normalize_cfa(&mut flat.data, cfa_type);
         }
-        _ => prepare_mono(&mut flat.data, subtractor.map(|image| &image.data)),
+        _ => normalize_mono(&mut flat.data),
     }
 
     flat
@@ -50,18 +54,8 @@ pub(crate) fn apply(flat: &CfaImage, image: &mut CfaImage) {
         .for_each(|(pixel, divisor)| *pixel /= divisor);
 }
 
-fn prepare_mono(flat: &mut Buffer2<f32>, subtractor: Option<&Buffer2<f32>>) {
-    let sum: f64 = match subtractor {
-        Some(subtractor) => flat
-            .par_iter_mut()
-            .zip(subtractor.par_iter())
-            .map(|(flat, subtractor)| {
-                *flat -= subtractor;
-                *flat as f64
-            })
-            .sum(),
-        None => flat.par_iter().map(|&value| value as f64).sum(),
-    };
+fn normalize_mono(flat: &mut Buffer2<f32>) {
+    let sum: f64 = flat.par_iter().map(|&value| value as f64).sum();
     let mean = (sum / flat.len() as f64) as f32;
     assert!(
         mean > f32::EPSILON,
@@ -73,19 +67,15 @@ fn prepare_mono(flat: &mut Buffer2<f32>, subtractor: Option<&Buffer2<f32>>) {
         .for_each(|value| *value = (*value * inv_mean).max(MIN_NORMALIZED_FLAT));
 }
 
-fn prepare_cfa(flat: &mut Buffer2<f32>, subtractor: Option<&Buffer2<f32>>, cfa_type: &CfaType) {
+fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
     let width = flat.width();
     let (sums, counts) = flat
         .par_chunks_mut(width)
         .enumerate()
         .map(|(y, row)| {
-            let subtractor_row = subtractor.map(|image| image.row(y));
             let mut sums = [0.0f64; 3];
             let mut counts = [0u64; 3];
             for (x, value) in row.iter_mut().enumerate() {
-                if let Some(subtractor_row) = subtractor_row {
-                    *value -= subtractor_row[x];
-                }
                 let color = cfa_type.color_at(x, y) as usize;
                 sums[color] += *value as f64;
                 counts[color] += 1;

@@ -3,11 +3,11 @@
 //! Runtime dispatch to the best available implementation:
 //! - **Bilinear**: AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping
 //!   elsewhere
-//! - **Lanczos2/3/4**: incremental stepping, fast-path interior bounds skipping, const-generic
-//!   deringing, and a SIMD interior kernel — x86_64 AVX2/FMA and aarch64 NEON, with the deringing
-//!   soft-clamp vectorized too. On x86 the Lanczos3/4 (SIZE=6/8) kernel is 256-bit (one `__m256`
-//!   load/accumulate per row) and the per-pixel tap weights come from a vector `i32gather` of the
-//!   LUT; SIZE=4 and aarch64 use the 128-bit kernel and scalar weight lookups.
+//! - **Lanczos2/3/4**: incremental stepping, fast-path interior bounds skipping, and a SIMD
+//!   interior kernel — x86_64 AVX2/FMA and aarch64 NEON. On x86 the Lanczos3/4 (SIZE=6/8) kernel
+//!   is 256-bit (one `__m256` load/accumulate per row) and the per-pixel tap weights come from a
+//!   vector `i32gather` of the LUT; SIZE=4 and aarch64 use the 128-bit kernel and scalar weight
+//!   lookups.
 //!
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
@@ -26,46 +26,11 @@ use crate::stacking::registration::interpolation::LANCZOS_LUT_RESOLUTION;
 use crate::stacking::registration::interpolation::LanczosLut;
 use crate::stacking::registration::interpolation::WarpParams;
 use crate::stacking::registration::interpolation::{
-    bilinear_sample, fast_floor_i32, get_lanczos_lut,
+    bilinear_sample, bilinear_sample_edge_extended, fast_floor_i32, get_lanczos_lut,
 };
 use crate::stacking::registration::transform::WarpTransform;
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
-
-/// Positive/negative weighted contribution accumulators for soft clamping. Built either by the SIMD
-/// kernels (vectorized) or tap-by-tap via [`SoftClampAccum::accumulate`] in the scalar paths.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SoftClampAccum {
-    /// Sum of positive weighted values (pixel * weight where result >= 0)
-    pub(crate) sp: f32,
-    /// Sum of absolute negative weighted values
-    pub(crate) sn: f32,
-    /// Sum of weights for positive contributions
-    pub(crate) wp: f32,
-    /// Sum of weights for negative contributions
-    pub(crate) wn: f32,
-}
-
-impl SoftClampAccum {
-    /// Fold one tap (`v · weight`) into the accumulators. With `DERINGING`, splits by sign for the
-    /// soft clamp; without it, only `sp` (the plain weighted sum) is tracked. Single source of the
-    /// per-tap split shared by both scalar paths (the SIMD kernels vectorize the same logic).
-    #[inline]
-    fn accumulate<const DERINGING: bool>(&mut self, v: f32, weight: f32) {
-        let s = v * weight;
-        if DERINGING {
-            if s < 0.0 {
-                self.sn -= s;
-                self.wn -= weight;
-            } else {
-                self.sp += s;
-                self.wp += weight;
-            }
-        } else {
-            self.sp += s;
-        }
-    }
-}
 
 #[inline]
 fn finite_source_position(src_x: f64, src_y: f64) -> Option<Vec2> {
@@ -90,20 +55,12 @@ fn lanczos_source_position<const A: usize>(
         .then_some(pos)
 }
 
-/// Inverse-map one output row to source coordinates and fill it via `sample`.
-///
-/// Centralizes the linear incremental-stepping fast path — for non-perspective transforms the
-/// source coordinate advances by a constant `(m[0], m[3])` per output pixel, so the per-pixel matrix
-/// multiply is skipped. Shared by the scalar bilinear, generic per-pixel, and coverage row loops so
-/// the stepping logic lives in exactly one place (value and coverage cannot drift). Non-finite
-/// projected coordinates produce `invalid_value` without reaching a sampler.
 #[inline]
-pub(crate) fn warp_row_with(
+pub(crate) fn for_each_source_position(
     output_y: usize,
     wt: &WarpTransform,
-    output_row: &mut [f32],
-    invalid_value: f32,
-    mut sample: impl FnMut(Vec2) -> f32,
+    output_width: usize,
+    mut visit: impl FnMut(usize, Option<Vec2>),
 ) {
     let m = wt.transform.matrix();
     let can_step = wt.is_linear();
@@ -113,21 +70,38 @@ pub(crate) fn warp_row_with(
     let dx_step = m[0];
     let dy_step = m[3];
 
-    for (x, out) in output_row.iter_mut().enumerate() {
+    for x in 0..output_width {
         if !can_step {
             let src = wt.apply(DVec2::new(x as f64, output_y as f64));
             src_x = src.x;
             src_y = src.y;
         }
-        *out = match finite_source_position(src_x, src_y) {
-            Some(pos) => sample(pos),
-            None => invalid_value,
-        };
+        visit(x, finite_source_position(src_x, src_y));
         if can_step {
             src_x += dx_step;
             src_y += dy_step;
         }
     }
+}
+
+/// Inverse-map one output row to source coordinates and fill it via `sample`.
+///
+/// Centralizes the linear incremental-stepping fast path — for non-perspective transforms the
+/// source coordinate advances by a constant `(m[0], m[3])` per output pixel, so the per-pixel matrix
+/// multiply is skipped. Shared by the scalar bilinear, generic per-pixel, and quality-map row loops
+/// so value and support coordinates cannot drift. Non-finite projected coordinates produce
+/// `invalid_value` without reaching a sampler.
+#[inline]
+pub(crate) fn warp_row_with(
+    output_y: usize,
+    wt: &WarpTransform,
+    output_row: &mut [f32],
+    invalid_value: f32,
+    mut sample: impl FnMut(Vec2) -> f32,
+) {
+    for_each_source_position(output_y, wt, output_row.len(), |x, pos| {
+        output_row[x] = pos.map_or(invalid_value, &mut sample);
+    });
 }
 
 /// Warp a row of pixels using bilinear interpolation.
@@ -189,42 +163,16 @@ pub(crate) fn warp_row_bilinear_scalar(
     });
 }
 
-/// PixInsight-style soft clamping for Lanczos deringing.
-///
-/// Tracks positive (`sp`) and negative (`sn`) weighted contributions separately.
-/// When the ratio `sn/sp` exceeds the threshold, a quadratic fade reduces the
-/// negative contribution, preserving sharpness while suppressing ringing.
-///
-/// Reference: PCL LanczosInterpolation.h (BSD license)
-#[inline]
-fn soft_clamp(sp: f32, sn: f32, wp: f32, wn: f32, th: f32, th_inv: f32) -> f32 {
-    if sp == 0.0 {
-        return 0.0;
-    }
-    let r = sn / sp;
-    if r >= 1.0 {
-        return sp / wp;
-    }
-    if r > th {
-        let fade = (r - th) * th_inv;
-        let c = 1.0 - fade * fade;
-        return (sp - sn * c) / (wp - wn * c);
-    }
-    (sp - sn) / (wp - wn)
-}
-
 /// Optimized Lanczos row warping with incremental coordinate stepping.
 ///
-/// Dispatches to the appropriate monomorphization based on `lanczos_param()` and
-/// `deringing_enabled()`. Works for Lanczos2 (4×4), Lanczos3 (6×6), and Lanczos4 (8×8).
+/// Dispatches to the appropriate monomorphization based on `lanczos_param()`. Works for Lanczos2
+/// (4×4), Lanczos3 (6×6), and Lanczos4 (8×8).
 ///
 /// Key optimizations:
-/// 1. Const-generic DERINGING: eliminates inner-loop branch, letting LLVM fully vectorize
-/// 2. PixInsight-style soft clamping (positive/negative contribution tracking)
-/// 3. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
-/// 4. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
-/// 5. SIMD tap-weight computation: x86 gathers the LUT for Lanczos3/4; otherwise scalar lookups
-/// 6. SIMD interior fast path: x86_64 AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
+/// 1. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
+/// 2. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
+/// 3. SIMD tap-weight computation: x86 gathers the LUT for Lanczos3/4; otherwise scalar lookups
+/// 4. SIMD interior fast path: x86_64 AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
 ///    aarch64 NEON (128-bit, all sizes)
 pub(crate) fn warp_row_lanczos(
     input: &Buffer2<f32>,
@@ -234,19 +182,10 @@ pub(crate) fn warp_row_lanczos(
     params: &WarpParams,
 ) {
     let a = params.method.lanczos_param().unwrap();
-    match (a, params.method.deringing_enabled()) {
-        (2, false) => {
-            warp_row_lanczos_inner::<2, 4, false>(input, output_row, output_y, wt, params)
-        }
-        (2, true) => warp_row_lanczos_inner::<2, 4, true>(input, output_row, output_y, wt, params),
-        (3, false) => {
-            warp_row_lanczos_inner::<3, 6, false>(input, output_row, output_y, wt, params)
-        }
-        (3, true) => warp_row_lanczos_inner::<3, 6, true>(input, output_row, output_y, wt, params),
-        (4, false) => {
-            warp_row_lanczos_inner::<4, 8, false>(input, output_row, output_y, wt, params)
-        }
-        (4, true) => warp_row_lanczos_inner::<4, 8, true>(input, output_row, output_y, wt, params),
+    match a {
+        2 => warp_row_lanczos_inner::<2, 4>(input, output_row, output_y, wt, params),
+        3 => warp_row_lanczos_inner::<3, 6>(input, output_row, output_y, wt, params),
+        4 => warp_row_lanczos_inner::<4, 8>(input, output_row, output_y, wt, params),
         _ => panic!("Unsupported Lanczos parameter: {a}"),
     }
 }
@@ -270,7 +209,7 @@ fn lanczos_weights_scalar<const A: usize, const SIZE: usize>(
     w
 }
 
-fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bool>(
+fn warp_row_lanczos_inner<const A: usize, const SIZE: usize>(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -306,14 +245,6 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             }
         }
         (base, sign)
-    };
-
-    // Pre-compute clamping threshold parameters (only used when DERINGING=true)
-    let clamp_th = params.method.deringing().clamp(0.0, 1.0);
-    let clamp_th_inv = if clamp_th < 1.0 {
-        1.0 / (1.0 - clamp_th)
-    } else {
-        0.0
     };
 
     let m = wt.transform.matrix();
@@ -378,17 +309,11 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fy),
         );
 
-        // Only the non-deringing path divides by the full-kernel weight; deringing normalizes
-        // inside `soft_clamp`. `DERINGING` is const, so this block vanishes when it's true.
-        let inv_total = if DERINGING {
-            1.0 // unused
+        let total_sum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
+        let inv_total = if total_sum.abs() > 1e-10 {
+            1.0 / total_sum
         } else {
-            let total_sum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
-            if total_sum.abs() > 1e-10 {
-                1.0 / total_sum
-            } else {
-                1.0
-            }
+            1.0
         };
 
         // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON): needs all SIZE rows and enough columns for
@@ -410,7 +335,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                 let acc = unsafe {
                     #[cfg(target_arch = "x86_64")]
                     {
-                        sse::lanczos_kernel_fma::<A, SIZE, DERINGING>(
+                        sse::lanczos_kernel_fma::<SIZE>(
                             pixels,
                             input_width,
                             kx0 as usize,
@@ -421,7 +346,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                     }
                     #[cfg(target_arch = "aarch64")]
                     {
-                        neon::lanczos_kernel_neon::<A, SIZE, DERINGING>(
+                        neon::lanczos_kernel_neon::<SIZE>(
                             pixels,
                             input_width,
                             kx0 as usize,
@@ -431,11 +356,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                         )
                     }
                 };
-                *out_pixel = if DERINGING {
-                    soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
-                } else {
-                    acc.sp * inv_total
-                };
+                *out_pixel = acc * inv_total;
 
                 if can_step {
                     src_x += dx_step;
@@ -451,51 +372,19 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             let ky = ky0 as usize;
             let w = input_width;
 
-            let mut acc = SoftClampAccum::default();
+            let mut acc = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let row_off = (ky + j) * w + kx;
                 for (k, &wxk) in wx.iter().enumerate() {
                     let v = unsafe { *pixels.get_unchecked(row_off + k) };
-                    acc.accumulate::<DERINGING>(v, wxk * wyj);
+                    acc += v * wxk * wyj;
                 }
             }
-            *out_pixel = if DERINGING {
-                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
-            } else {
-                acc.sp * inv_total
-            };
+            *out_pixel = acc * inv_total;
         } else {
-            // Slow path: border pixels. Out-of-bounds taps are dropped (not substituted
-            // with border_value) and the result is normalized by the in-bounds weight, so
-            // edge pixels get the true in-bounds weighted average instead of being darkened
-            // by the missing taps. `inv_total` (the full-kernel reciprocal) is wrong here
-            // because it divides by the out-of-bounds weight too.
-            let mut acc = SoftClampAccum::default();
-            let mut w_in = 0.0f32;
-            for (j, &wyj) in wy.iter().enumerate() {
-                let py = ky0 + j as i32;
-                if py < 0 || py >= ih {
-                    continue;
-                }
-                let row_off = py as usize * input_width;
-                for (i, &wxi) in wx.iter().enumerate() {
-                    let px = kx0 + i as i32;
-                    if px < 0 || px >= iw {
-                        continue;
-                    }
-                    let v = unsafe { *pixels.get_unchecked(row_off + px as usize) };
-                    let weight = wxi * wyj;
-                    w_in += weight;
-                    acc.accumulate::<DERINGING>(v, weight);
-                }
-            }
-            *out_pixel = if w_in.abs() < 1e-10 {
-                border_value
-            } else if DERINGING {
-                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
-            } else {
-                acc.sp / w_in
-            };
+            // Truncating a signed Lanczos kernel can make its remaining weight arbitrarily close
+            // to zero, so partial support uses stable edge-extended bilinear interpolation.
+            *out_pixel = bilinear_sample_edge_extended(input, pos);
         }
 
         if can_step {
@@ -529,13 +418,26 @@ mod tests {
 
         for (x, out_pixel) in output_row.iter_mut().enumerate() {
             let src = wt.apply(DVec2::new(x as f64, y));
-            let sx = src.x as f32;
-            let sy = src.y as f32;
+            let Some(pos) = lanczos_source_position::<A>(src.x, src.y, input_width, input_height)
+            else {
+                *out_pixel = 0.0;
+                continue;
+            };
+            let sx = pos.x;
+            let sy = pos.y;
 
             let x0 = sx.floor() as i32;
             let y0 = sy.floor() as i32;
             let fx = sx - x0 as f32;
             let fy = sy - y0 as f32;
+            let kx0 = x0 - 2;
+            let ky0 = y0 - 2;
+
+            if kx0 < 0 || ky0 < 0 || kx0 + 5 >= input_width as i32 || ky0 + 5 >= input_height as i32
+            {
+                *out_pixel = bilinear_sample_edge_extended(input, Vec2::new(sx, sy));
+                continue;
+            }
 
             let lut = get_lanczos_lut(A);
 
@@ -551,19 +453,12 @@ mod tests {
                 *w = lut.lookup(dy);
             }
 
-            let (iw, ih) = (input_width as i32, input_height as i32);
             let mut sum = 0.0f32;
             let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = y0 - 2 + j as i32;
-                if py < 0 || py >= ih {
-                    continue;
-                }
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - 2 + i as i32;
-                    if px < 0 || px >= iw {
-                        continue;
-                    }
                     let weight = wxi * wyj;
                     sum += pixels[py as usize * input_width + px as usize] * weight;
                     w_in += weight;
@@ -743,7 +638,7 @@ mod tests {
         // This replaces a weaker test that only checked is_finite().
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
-        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos3);
 
         for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
@@ -783,7 +678,7 @@ mod tests {
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
         // Disable clamping to match unclamped scalar reference
-        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos3);
 
         let transforms = vec![
             Transform::identity(),
@@ -814,11 +709,78 @@ mod tests {
     }
 
     #[test]
+    fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
+        let (width, height) = (24, 20);
+        let identity = WarpTransform::new(Transform::identity());
+
+        for method in [
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos4,
+        ] {
+            let params = WarpParams::new(method);
+            for expected in [-1.25, 0.0, 2.5] {
+                let input = patterns::uniform(width, height, expected);
+                for y in [0, 1, 4, 10, height - 1] {
+                    let mut output = vec![0.0; width];
+                    warp_row_lanczos(&input, &mut output, y, &identity, &params);
+                    for (x, actual) in output.into_iter().enumerate() {
+                        assert!(
+                            (actual - expected).abs() < 2e-5,
+                            "{method:?} ({x}, {y}): expected {expected}, got {actual}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos_is_translation_invariant_for_signed_data() {
+        let (width, height) = (24, 20);
+        let input = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| ((i * 13 + i / width * 7) % 31) as f32 / 9.0 - 1.7)
+                .collect(),
+        );
+        let offset = 2.25;
+        let shifted = Buffer2::new(
+            width,
+            height,
+            input.pixels().iter().map(|value| value + offset).collect(),
+        );
+        let inverse = WarpTransform::new(Transform::translation(DVec2::new(0.37, -0.43)).inverse());
+
+        for method in [
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+            InterpolationMethod::Lanczos4,
+        ] {
+            let params = WarpParams::new(method);
+            for y in [0, 1, 5, 10, height - 1] {
+                let mut output = vec![0.0; width];
+                let mut shifted_output = vec![0.0; width];
+                warp_row_lanczos(&input, &mut output, y, &inverse, &params);
+                warp_row_lanczos(&shifted, &mut shifted_output, y, &inverse, &params);
+                for x in 1..width {
+                    let actual_offset = shifted_output[x] - output[x];
+                    assert!(
+                        (actual_offset - offset).abs() < 5e-5,
+                        "{method:?} ({x}, {y}): expected offset {offset}, got {actual_offset}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_warp_row_lanczos_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
         // Disable clamping to match unclamped scalar reference
-        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos3);
 
         for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
@@ -849,320 +811,6 @@ mod tests {
                     output_scalar[x]
                 );
             }
-        }
-    }
-
-    #[test]
-    fn test_soft_clamp_pure_positive() {
-        let result = soft_clamp(2.0, 0.0, 1.0, 0.0, 0.3, 1.0 / 0.7);
-        assert!((result - 2.0).abs() < 1e-6, "got {result}");
-    }
-
-    #[test]
-    fn test_soft_clamp_all_zero() {
-        assert_eq!(soft_clamp(0.0, 0.0, 0.0, 0.0, 0.3, 1.0 / 0.7), 0.0);
-    }
-
-    #[test]
-    fn test_soft_clamp_below_threshold() {
-        // r = 0.1/1.0 = 0.1 < 0.3 → no fade
-        let result = soft_clamp(1.0, 0.1, 0.8, 0.15, 0.3, 1.0 / 0.7);
-        let expected = (1.0 - 0.1) / (0.8 - 0.15);
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "got {result}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_soft_clamp_above_threshold() {
-        // sp=1.0, sn=0.5 => r = 0.5/1.0 = 0.5 > th=0.3 => fade branch
-        // fade = (0.5 - 0.3) * (1.0 / 0.7) = 0.2 / 0.7 = 2/7 ~ 0.28571
-        // c = 1 - (2/7)^2 = 1 - 4/49 = 45/49 ~ 0.91837
-        // result = (1.0 - 0.5 * 45/49) / (0.8 - 0.3 * 45/49)
-        //        = (1.0 - 22.5/49) / (0.8 - 13.5/49)
-        //        = (49/49 - 22.5/49) / (39.2/49 - 13.5/49)
-        //        = (26.5/49) / (25.7/49)
-        //        = 26.5 / 25.7 ~ 1.03113
-        let th = 0.3f32;
-        let th_inv = 1.0 / (1.0 - th);
-        let sp = 1.0f32;
-        let sn = 0.5f32;
-        let wp = 0.8f32;
-        let wn = 0.3f32;
-
-        let fade = (sn / sp - th) * th_inv;
-        let c = 1.0 - fade * fade;
-        let expected = (sp - sn * c) / (wp - wn * c);
-
-        let result = soft_clamp(sp, sn, wp, wn, th, th_inv);
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "got {result}, expected {expected}"
-        );
-        // Sanity: result should be between sp/wp=1.25 (all positive) and (sp-sn)/(wp-wn)=1.0
-        assert!(
-            result > 1.0 && result < 1.25,
-            "result={result} not in (1.0, 1.25)"
-        );
-    }
-
-    #[test]
-    fn test_soft_clamp_ratio_at_one() {
-        let result = soft_clamp(1.0, 1.0, 0.8, 0.3, 0.3, 1.0 / 0.7);
-        assert!((result - 1.0 / 0.8).abs() < 1e-6, "got {result}");
-    }
-
-    #[test]
-    fn test_soft_clamp_ratio_above_one() {
-        let result = soft_clamp(1.0, 1.5, 0.8, 0.5, 0.3, 1.0 / 0.7);
-        assert!((result - 1.0 / 0.8).abs() < 1e-6, "got {result}");
-    }
-
-    #[test]
-    fn test_soft_clamp_threshold_zero() {
-        let th = 0.0f32;
-        let th_inv = 1.0f32;
-        let fade = 0.01 * 1.0;
-        let c = 1.0 - fade * fade;
-        let expected = (1.0 - 0.01 * c) / (0.9 - 0.05 * c);
-        let result = soft_clamp(1.0, 0.01, 0.9, 0.05, th, th_inv);
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "got {result}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_soft_clamp_threshold_one() {
-        let expected = (1.0f32 - 0.5) / (0.8f32 - 0.3);
-        let result = soft_clamp(1.0, 0.5, 0.8, 0.3, 1.0, 0.0);
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "got {result}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_soft_clamp_monotonic_in_negative_contribution() {
-        // As sn increases (more negative contribution), the result should decrease
-        // monotonically until it hits the sp/wp floor.
-        // We test three specific sn values and verify ordering.
-        let th = 0.3f32;
-        let th_inv = 1.0 / (1.0 - th);
-        let sp = 1.0f32;
-        let wp = 0.9f32;
-
-        // sn=0: r=0, below threshold => (1.0 - 0.0) / (0.9 - 0.0) = 1.1111
-        let r0 = soft_clamp(sp, 0.0, wp, 0.0, th, th_inv);
-        let expected_0 = 1.0 / 0.9;
-        assert!(
-            (r0 - expected_0).abs() < 1e-6,
-            "sn=0: expected {expected_0}, got {r0}"
-        );
-
-        // sn=0.2: r=0.2 < 0.3 => no fade => (1.0 - 0.2) / (0.9 - 0.1) = 0.8/0.8 = 1.0
-        let r1 = soft_clamp(sp, 0.2, wp, 0.1, th, th_inv);
-        let expected_1 = 0.8 / 0.8;
-        assert!(
-            (r1 - expected_1).abs() < 1e-6,
-            "sn=0.2: expected {expected_1}, got {r1}"
-        );
-
-        // sn=0.5: r=0.5 > 0.3 => fade branch
-        // fade = (0.5 - 0.3) / 0.7 = 0.2/0.7 = 2/7
-        // c = 1 - (2/7)^2 = 1 - 4/49 = 45/49
-        // result = (1.0 - 0.5 * 45/49) / (0.9 - 0.25 * 45/49)
-        let r2 = soft_clamp(sp, 0.5, wp, 0.25, th, th_inv);
-
-        // Monotonic decrease: r0 > r1 > r2
-        assert!(r0 > r1, "r0={r0} should be > r1={r1}");
-        assert!(r1 > r2, "r1={r1} should be > r2={r2}");
-        assert!(r2 >= 0.0, "result should be non-negative: {r2}");
-    }
-
-    #[test]
-    fn test_soft_clamp_at_exact_threshold() {
-        // When r == th exactly, the fade branch gives fade=0, c=1.
-        // So result = (sp - sn * 1) / (wp - wn * 1) = (sp - sn) / (wp - wn),
-        // same as below-threshold branch. Continuity check.
-        let th = 0.3f32;
-        let th_inv = 1.0 / (1.0 - th);
-        let sp = 1.0;
-        let sn = 0.3; // r = 0.3 / 1.0 = 0.3 = th exactly
-        let wp = 0.8;
-        let wn = 0.2;
-
-        // fade = (0.3 - 0.3) * th_inv = 0, c = 1.0
-        // result = (1.0 - 0.3 * 1.0) / (0.8 - 0.2 * 1.0) = 0.7 / 0.6
-        let expected = 0.7 / 0.6;
-        let result = soft_clamp(sp, sn, wp, wn, th, th_inv);
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "At threshold: expected {expected}, got {result}"
-        );
-    }
-
-    /// Naive scalar Lanczos3 with deringing for reference testing.
-    fn warp_row_lanczos_scalar_deringing(
-        input: &Buffer2<f32>,
-        output_row: &mut [f32],
-        output_y: usize,
-        wt: &WarpTransform,
-        th: f32,
-        th_inv: f32,
-    ) {
-        let pixels = input.pixels();
-        let input_width = input.width();
-        let input_height = input.height();
-        let y = output_y as f64;
-        let lut = get_lanczos_lut(3);
-
-        for (x, out_pixel) in output_row.iter_mut().enumerate() {
-            let src = wt.apply(DVec2::new(x as f64, y));
-            let sx = src.x as f32;
-            let sy = src.y as f32;
-            let x0 = sx.floor() as i32;
-            let y0 = sy.floor() as i32;
-            let fx = sx - x0 as f32;
-            let fy = sy - y0 as f32;
-
-            let mut wx = [0.0f32; 6];
-            for (i, w) in wx.iter_mut().enumerate() {
-                *w = lut.lookup(fx - (i as i32 - 2) as f32);
-            }
-            let mut wy = [0.0f32; 6];
-            for (j, w) in wy.iter_mut().enumerate() {
-                *w = lut.lookup(fy - (j as i32 - 2) as f32);
-            }
-
-            let (iw, ih) = (input_width as i32, input_height as i32);
-            let mut sp = 0.0f32;
-            let mut sn = 0.0f32;
-            let mut wp = 0.0f32;
-            let mut wn = 0.0f32;
-            for (j, &wyj) in wy.iter().enumerate() {
-                let py = y0 - 2 + j as i32;
-                if py < 0 || py >= ih {
-                    continue;
-                }
-                for (i, &wxi) in wx.iter().enumerate() {
-                    let px = x0 - 2 + i as i32;
-                    if px < 0 || px >= iw {
-                        continue;
-                    }
-                    let v = pixels[py as usize * input_width + px as usize];
-                    let weight = wxi * wyj;
-                    let s = v * weight;
-                    if s < 0.0 {
-                        sn -= s;
-                        wn -= weight;
-                    } else {
-                        sp += s;
-                        wp += weight;
-                    }
-                }
-            }
-            *out_pixel = soft_clamp(sp, sn, wp, wn, th, th_inv);
-        }
-    }
-
-    #[test]
-    fn test_warp_row_lanczos_deringing_simd_vs_scalar() {
-        let width = 128;
-        let height = 128;
-        let input = patterns::checkerboard(width, height, 8, 0.0, 1.0);
-        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
-        let th = 0.3f32;
-        let th_inv = 1.0 / (1.0 - th);
-
-        for transform in [
-            Transform::translation(DVec2::new(2.5, 1.7)),
-            Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
-        ] {
-            let inverse = WarpTransform::new(transform.inverse());
-            for y in [20, 50, 80] {
-                let mut output_fast = vec![0.0f32; width];
-                let mut output_scalar = vec![0.0f32; width];
-                warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
-                warp_row_lanczos_scalar_deringing(
-                    &input,
-                    &mut output_scalar,
-                    y,
-                    &inverse,
-                    th,
-                    th_inv,
-                );
-                for x in 0..width {
-                    assert!(
-                        (output_fast[x] - output_scalar[x]).abs() < 1e-3,
-                        "y={y}, x={x}: fast {} vs scalar {}",
-                        output_fast[x],
-                        output_scalar[x]
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_deringing_suppresses_ringing_on_bright_star() {
-        let size = 32;
-        let mut input = patterns::uniform(size, size, 0.0);
-        input[(size / 2, size / 2)] = 1.0;
-
-        let transform = Transform::translation(DVec2::new(0.3, 0.3));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        // Without deringing: expect negative ringing
-        let params_off = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
-        let mut row_off = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
-        let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(min_off < -0.001, "Expected negative ringing, min={min_off}");
-
-        // With deringing: negative values should be suppressed
-        let params_on = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
-        let mut row_on = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
-        let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(
-            min_on > min_off,
-            "Deringing should help: {min_on} vs {min_off}"
-        );
-        assert!(min_on >= -0.01, "Should suppress negatives, got {min_on}");
-    }
-
-    #[test]
-    fn test_deringing_preserves_smooth_gradient() {
-        let width = 128;
-        let height = 64;
-        let input = patterns::horizontal_gradient(width, height, 0.2, 0.8);
-        let transform = Transform::translation(DVec2::new(0.5, 0.5));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let params_on = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
-        let params_off = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
-        let y = height / 2;
-        let mut row_on = vec![0.0f32; width];
-        let mut row_off = vec![0.0f32; width];
-        warp_row_lanczos(&input, &mut row_on, y, &inverse, &params_on);
-        warp_row_lanczos(&input, &mut row_off, y, &inverse, &params_off);
-
-        // Smooth gradient: deringing should produce nearly identical results
-        let max_diff = row_on[5..width - 5]
-            .iter()
-            .zip(&row_off[5..width - 5])
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0f32, f32::max);
-        assert!(max_diff < 0.005, "max diff = {max_diff}");
-
-        // Monotonicity preserved
-        for x in 6..width - 5 {
-            assert!(
-                row_on[x] >= row_on[x - 1] - 0.01,
-                "Monotonicity broken at x={x}"
-            );
         }
     }
 
@@ -1241,38 +889,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_deringing_threshold_sensitivity() {
-        // Different deringing thresholds should produce different results
-        // on data with ringing (checkerboard = worst case for Lanczos).
-        let size = 64;
-        let input = patterns::checkerboard(size, size, 4, 0.0, 1.0);
-        let transform = Transform::translation(DVec2::new(0.3, 0.3));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let params_low = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.1 });
-        let params_high = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.9 });
-
-        let mut row_low = vec![0.0f32; size];
-        let mut row_high = vec![0.0f32; size];
-        let y = size / 2;
-
-        warp_row_lanczos(&input, &mut row_low, y, &inverse, &params_low);
-        warp_row_lanczos(&input, &mut row_high, y, &inverse, &params_high);
-
-        // They should differ: more aggressive clamping (lower th) should produce
-        // different values than less aggressive (higher th).
-        let max_diff = row_low
-            .iter()
-            .zip(&row_high)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0f32, f32::max);
-        assert!(
-            max_diff > 0.001,
-            "Different thresholds should produce different results, max_diff={max_diff}"
-        );
-    }
-
     /// Naive scalar Lanczos row warp for arbitrary `a`, used as reference.
     fn warp_row_lanczos_scalar_ref(
         input: &Buffer2<f32>,
@@ -1293,10 +909,32 @@ mod tests {
             let src = wt.apply(DVec2::new(x as f64, y));
             let sx = src.x as f32;
             let sy = src.y as f32;
+            let pos = Vec2::new(sx, sy);
+            let support_min = -(a as f32);
+            if !pos.is_finite()
+                || sx < support_min
+                || sy < support_min
+                || sx >= input_width as f32 + a as f32 - 1.0
+                || sy >= input_height as f32 + a as f32 - 1.0
+            {
+                *out_pixel = 0.0;
+                continue;
+            }
             let x0 = sx.floor() as i32;
             let y0 = sy.floor() as i32;
             let fx = sx - x0 as f32;
             let fy = sy - y0 as f32;
+            let kx0 = x0 - a_i32 + 1;
+            let ky0 = y0 - a_i32 + 1;
+
+            if kx0 < 0
+                || ky0 < 0
+                || kx0 + size as i32 > input_width as i32
+                || ky0 + size as i32 > input_height as i32
+            {
+                *out_pixel = bilinear_sample_edge_extended(input, pos);
+                continue;
+            }
 
             let mut wx = vec![0.0f32; size];
             for (i, w) in wx.iter_mut().enumerate() {
@@ -1306,19 +944,12 @@ mod tests {
             for (j, w) in wy.iter_mut().enumerate() {
                 *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
             }
-            let (iw, ih) = (input_width as i32, input_height as i32);
             let mut sum = 0.0f32;
             let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = y0 - a_i32 + 1 + j as i32;
-                if py < 0 || py >= ih {
-                    continue;
-                }
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - a_i32 + 1 + i as i32;
-                    if px < 0 || px >= iw {
-                        continue;
-                    }
                     let weight = wxi * wyj;
                     sum += pixels[py as usize * input_width + px as usize] * weight;
                     w_in += weight;
@@ -1333,7 +964,7 @@ mod tests {
         let width = 128;
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
-        let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos2);
 
         for transform in [
             Transform::identity(),
@@ -1363,7 +994,7 @@ mod tests {
         let width = 128;
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
-        let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos4);
 
         for transform in [
             Transform::identity(),
@@ -1392,7 +1023,7 @@ mod tests {
     fn test_warp_row_lanczos2_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
-        let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos2);
 
         for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
@@ -1430,7 +1061,7 @@ mod tests {
     fn test_warp_row_lanczos4_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
-        let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+        let params = WarpParams::new(InterpolationMethod::Lanczos4);
 
         for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
@@ -1462,100 +1093,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_lanczos2_deringing_suppresses_ringing() {
-        // Same test as Lanczos3 deringing but for Lanczos2.
-        let size = 32;
-        let mut input = patterns::uniform(size, size, 0.0);
-        input[(size / 2, size / 2)] = 1.0;
-
-        let transform = Transform::translation(DVec2::new(0.3, 0.3));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        // Without deringing: expect negative ringing
-        let params_off = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
-        let mut row_off = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
-        let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(
-            min_off < -0.001,
-            "L2: Expected negative ringing, min={min_off}"
-        );
-
-        // With deringing: negative values should be suppressed
-        let params_on = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.3 });
-        let mut row_on = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
-        let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(
-            min_on > min_off,
-            "L2: Deringing should help: {min_on} vs {min_off}"
-        );
-        assert!(
-            min_on >= -0.01,
-            "L2: Should suppress negatives, got {min_on}"
-        );
-    }
-
-    #[test]
-    fn test_lanczos4_deringing_suppresses_ringing() {
-        let size = 32;
-        let mut input = patterns::uniform(size, size, 0.0);
-        input[(size / 2, size / 2)] = 1.0;
-
-        let transform = Transform::translation(DVec2::new(0.3, 0.3));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let params_off = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
-        let mut row_off = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
-        let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(
-            min_off < -0.001,
-            "L4: Expected negative ringing, min={min_off}"
-        );
-
-        let params_on = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: 0.3 });
-        let mut row_on = vec![0.0f32; size];
-        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
-        let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(
-            min_on > min_off,
-            "L4: Deringing should help: {min_on} vs {min_off}"
-        );
-        assert!(
-            min_on >= -0.01,
-            "L4: Should suppress negatives, got {min_on}"
-        );
-    }
-
-    #[test]
-    fn test_lanczos2_deringing_threshold_sensitivity() {
-        let size = 64;
-        let input = patterns::checkerboard(size, size, 4, 0.0, 1.0);
-        let transform = Transform::translation(DVec2::new(0.3, 0.3));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let params_low = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.1 });
-        let params_high = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.9 });
-
-        let mut row_low = vec![0.0f32; size];
-        let mut row_high = vec![0.0f32; size];
-        let y = size / 2;
-
-        warp_row_lanczos(&input, &mut row_low, y, &inverse, &params_low);
-        warp_row_lanczos(&input, &mut row_high, y, &inverse, &params_high);
-
-        let max_diff = row_low
-            .iter()
-            .zip(&row_high)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0f32, f32::max);
-        assert!(
-            max_diff > 0.001,
-            "L2: Different thresholds should produce different results, max_diff={max_diff}"
-        );
     }
 }

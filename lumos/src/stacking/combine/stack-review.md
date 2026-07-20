@@ -20,9 +20,12 @@ Review of `lumos/src/stacking/` against [Siril source](https://gitlab.com/free-a
 
 Fixed: now sorts values with index co-array, fits `y = a + b * sorted_index`, uses MAD of residuals for sigma, fit value at median position as center. First pass uses initial median+MAD (robust starting point), subsequent passes refine with linear fit. Matches PixInsight/Siril.
 
-### ~~2. GESD uses mean+stddev instead of median+MAD~~ (FIXED)
+### ~~2. GESD mixed a robust statistic with textbook critical values~~ (FIXED)
 
-Fixed: switched to median+MAD for test statistics (more robust against masking effect). Implemented proper two-phase approach: Phase 1 iteratively finds most deviant value and records test statistic; Phase 2 backward scans comparing test statistics against critical values to determine actual outlier count. Matches PixInsight.
+Fixed: the implementation now follows the NIST/Rosner contract throughout: two-sided
+mean/sample-standard-deviation statistics, iterative extreme removal, backward selection of the
+largest passing outlier count, and accurate Student-t critical values computed from the live sample
+count. The preset falls back to median below 15 frames.
 
 ## Resolved
 
@@ -76,7 +79,7 @@ Always uses frame 0. Should pick best-quality frame (lowest noise, best FWHM).
 | **Sigma Clip** | median + MAD, iterative | Single-pass median+MAD | mean + stddev, iterative |
 | **Winsorized** | Clamps outliers to boundary | Iterative reject + recompute median+MAD | mean for sigma, median for center, σ×1.134 |
 | **Linear Fit** | Sorted-value index as x, MAD of residuals | Sorted-value index as x | Sorted-value index as x |
-| **GESD** | median + MAD, two-phase, inverse normal approx | median + MAD, t-distribution CDF | mean + stddev, Grubbs lookup table (≤25) |
+| **GESD** | mean + sample sd, two-phase, accurate t CDF | median + MAD, t-distribution CDF | mean + stddev, exact t CDF |
 | **Percentile** | Rank-based (clip N% from ends) | Distance from median | Distance from median (multiplicative) |
 
 ## Priority
@@ -84,7 +87,7 @@ Always uses frame 0. Should pick best-quality frame (lowest noise, best FWHM).
 | # | Item | Impact | Effort |
 |---|------|--------|--------|
 | ~~1~~ | ~~Fix linear fit x-values~~ | ~~Critical~~ | ~~Done~~ |
-| ~~2~~ | ~~GESD: switch to median+MAD~~ | ~~Medium~~ | ~~Done~~ |
+| ~~2~~ | ~~GESD: align statistic and critical values with Rosner~~ | ~~Critical~~ | ~~Done~~ |
 | 3 | IKSS normalization | Quality | Medium |
 | 4 | Auto weighting | Feature | High |
 | 5 | Sum stacking | Completeness | Trivial |

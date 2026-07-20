@@ -22,6 +22,7 @@ use common::file_utils;
 use quickbench::quick_bench;
 
 use crate::io::raw;
+use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
@@ -117,6 +118,7 @@ fn builds_full_master_set() {
         masters.defect_map.is_some(),
         "defect map should be derived from dark + flat"
     );
+    println!("  defects: {:?}", masters.defect_summary().unwrap());
 
     // Masters are calibration-normalized CFA data: `(value - black) * inv_range`, deliberately
     // *unclamped* (unlike the light path) so master dark/bias keep their signed noise
@@ -157,6 +159,135 @@ fn builds_full_master_set() {
         flat_max > flat_min,
         "prepared flat is degenerate (constant buffer)"
     );
+}
+
+#[derive(Debug)]
+struct HotMaskMetrics {
+    hot_count: usize,
+    edge_count: usize,
+    max_bin_count: usize,
+}
+
+#[derive(Debug)]
+struct DetectedHotMask {
+    map: DefectMap,
+    width: usize,
+    height: usize,
+}
+
+fn hot_mask_metrics(map: &DefectMap, width: usize, height: usize) -> HotMaskMetrics {
+    const BINS: usize = 8;
+
+    let margin_x = width / 10;
+    let margin_y = height / 10;
+    let edge_count = map
+        .hot_indices
+        .iter()
+        .filter(|&&index| {
+            let x = index % width;
+            let y = index / width;
+            x < margin_x || x >= width - margin_x || y < margin_y || y >= height - margin_y
+        })
+        .count();
+    let mut bins = [0usize; BINS * BINS];
+    for &index in &map.hot_indices {
+        let x = index % width;
+        let y = index / width;
+        let bx = (x * BINS / width).min(BINS - 1);
+        let by = (y * BINS / height).min(BINS - 1);
+        bins[by * BINS + bx] += 1;
+    }
+
+    HotMaskMetrics {
+        hot_count: map.hot_indices.len(),
+        edge_count,
+        max_bin_count: *bins.iter().max().unwrap(),
+    }
+}
+
+fn sorted_intersection_count(left: &[usize], right: &[usize]) -> usize {
+    let mut left_index = 0;
+    let mut right_index = 0;
+    let mut count = 0;
+    while left_index < left.len() && right_index < right.len() {
+        match left[left_index].cmp(&right[right_index]) {
+            std::cmp::Ordering::Less => left_index += 1,
+            std::cmp::Ordering::Equal => {
+                count += 1;
+                left_index += 1;
+                right_index += 1;
+            }
+            std::cmp::Ordering::Greater => right_index += 1,
+        }
+    }
+    count
+}
+
+#[test]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
+fn hot_mask_spatial_distribution_and_repeatability() {
+    let Some(paths) = calibration_paths() else {
+        panic!("calibration frames missing — run scripts/fetch-test-data.sh");
+    };
+    let first_paths: Vec<_> = paths
+        .darks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, path)| index.is_multiple_of(2).then_some(path))
+        .collect();
+    let second_paths: Vec<_> = paths
+        .darks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, path)| (!index.is_multiple_of(2)).then_some(path))
+        .collect();
+    let full_paths: Vec<_> = paths.darks.iter().collect();
+
+    let detect = |dark_paths: &[&PathBuf]| {
+        let dark = stack_cfa_master(dark_paths, StackConfig::dark(), CancelToken::never())
+            .expect("master-dark stack failed")
+            .expect("master dark");
+        let width = dark.data.width();
+        let height = dark.data.height();
+        let map = DefectMap::default()
+            .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+            .expect("hot detection failed");
+        DetectedHotMask { map, width, height }
+    };
+
+    let first = detect(&first_paths);
+    let second = detect(&second_paths);
+    let full = detect(&full_paths);
+    assert_eq!((second.width, second.height), (first.width, first.height));
+    assert_eq!((full.width, full.height), (first.width, first.height));
+
+    let intersection = sorted_intersection_count(&first.map.hot_indices, &second.map.hot_indices);
+    let union = first.map.hot_indices.len() + second.map.hot_indices.len() - intersection;
+    let jaccard = intersection as f32 / union as f32;
+    let first_metrics = hot_mask_metrics(&first.map, first.width, first.height);
+    let second_metrics = hot_mask_metrics(&second.map, second.width, second.height);
+    let full_metrics = hot_mask_metrics(&full.map, full.width, full.height);
+    println!(
+        "  alternating master-dark hot masks: {} and {}, intersection {}, Jaccard {:.4}",
+        first.map.hot_indices.len(),
+        second.map.hot_indices.len(),
+        intersection,
+        jaccard
+    );
+    println!("  first spatial metrics: {first_metrics:?}");
+    println!("  second spatial metrics: {second_metrics:?}");
+    println!("  full spatial metrics: {full_metrics:?}");
+
+    assert_eq!(first_metrics.hot_count, 63_799);
+    assert_eq!(first_metrics.edge_count, 23_667);
+    assert_eq!(first_metrics.max_bin_count, 1_111);
+    assert_eq!(second_metrics.hot_count, 63_198);
+    assert_eq!(second_metrics.edge_count, 23_486);
+    assert_eq!(second_metrics.max_bin_count, 1_091);
+    assert_eq!(full_metrics.hot_count, 63_338);
+    assert_eq!(full_metrics.edge_count, 23_474);
+    assert_eq!(full_metrics.max_bin_count, 1_096);
+    assert_eq!(intersection, 57_465);
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]

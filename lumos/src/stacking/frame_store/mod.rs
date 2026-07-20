@@ -161,17 +161,20 @@ pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
 }
 
-/// Stored channels, coverage, and statistics for one registered light frame.
+/// Stored channels and warp quality for one registered light frame.
 #[derive(Debug)]
 pub(crate) struct StoredLightFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     pub(crate) coverage: Option<StoredPlane>,
-    pub(crate) stats: FrameStats,
+    pub(crate) confidence: Option<StoredPlane>,
 }
 
 impl StoredLightFrame {
-    pub(crate) fn from_memory(image: AstroImage, coverage: Option<Buffer2<f32>>) -> Self {
-        let stats = compute_frame_stats(&image);
+    pub(crate) fn from_memory(
+        image: AstroImage,
+        coverage: Option<Buffer2<f32>>,
+        confidence: Option<Buffer2<f32>>,
+    ) -> Self {
         let channels = image
             .into_planes()
             .into_iter()
@@ -180,15 +183,15 @@ impl StoredLightFrame {
         Self {
             channels,
             coverage: coverage.map(StoredPlane::Memory),
-            stats,
+            confidence: confidence.map(StoredPlane::Memory),
         }
     }
 
-    pub(crate) fn from_stored(frame: StoredFrame, stats: FrameStats) -> Self {
+    pub(crate) fn from_stored(frame: StoredFrame) -> Self {
         Self {
             channels: frame.channels,
             coverage: None,
-            stats,
+            confidence: None,
         }
     }
 }
@@ -256,8 +259,8 @@ pub(crate) fn store_light_frame(
     name: &str,
     image: AstroImage,
     coverage: Option<Buffer2<f32>>,
+    confidence: Option<Buffer2<f32>>,
 ) -> Result<StoredLightFrame, FrameStoreError> {
-    let stats = compute_frame_stats(&image);
     let channels = spill_channels(directory, name, &image)?.planes;
     let coverage = match coverage {
         Some(coverage) => {
@@ -267,10 +270,18 @@ pub(crate) fn store_light_frame(
         }
         None => None,
     };
+    let confidence = match confidence {
+        Some(confidence) => {
+            let path = directory.join(format!("{name}_confidence.bin"));
+            write_plane(&path, &confidence)?;
+            Some(StoredPlane::Mapped(map_plane(path)?))
+        }
+        None => None,
+    };
     Ok(StoredLightFrame {
         channels,
         coverage,
-        stats,
+        confidence,
     })
 }
 

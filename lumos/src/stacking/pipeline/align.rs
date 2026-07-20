@@ -107,11 +107,11 @@ pub fn align_and_stack(
         .enumerate()
         .map(|(index, detected)| {
             if index == reference {
-                // Reference goes in unwarped → fully covered; `coverage: None` weights it 1
-                // everywhere (no throwaway full-coverage map to allocate).
+                // The unwarped reference has full support and unit interpolation confidence.
                 return Ok(StackFrame {
                     image: detected.image,
                     coverage: None,
+                    confidence: None,
                 });
             }
             // Cancelled: drop this frame (skips the heavy register + warp); the
@@ -139,6 +139,7 @@ pub fn align_and_stack(
                     Ok(StackFrame {
                         image: warped.image,
                         coverage: Some(warped.coverage),
+                        confidence: Some(warped.confidence),
                     })
                 }
                 Err(error) => {
@@ -152,9 +153,8 @@ pub fn align_and_stack(
         return Err(Error::Stack(StackError::Cancelled));
     }
 
-    // Each warped frame carries its coverage (how much of each output pixel landed on real
-    // source); the stack uses it so warped-frame borders don't drag the edges dark. The reference
-    // is already in `outcomes` (in its index position, unwarped).
+    // Warped frames carry separate support and interpolation-confidence planes. The reference is
+    // already in `outcomes` at its original index.
     let mut frames: Vec<StackFrame> = Vec::with_capacity(outcomes.len());
     let mut dropped = Vec::new();
     for outcome in outcomes {

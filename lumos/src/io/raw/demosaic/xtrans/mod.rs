@@ -18,7 +18,7 @@ use std::time::Instant;
 use common::CancelToken;
 use markesteijn::demosaic_xtrans_markesteijn;
 
-use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
+use crate::io::raw::demosaic::Cancelled;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -124,14 +124,38 @@ impl XTransPattern {
     /// Create a new X-Trans pattern from a 6x6 array.
     ///
     /// # Panics
-    /// Panics if any value in the pattern is not 0, 1, or 2.
+    /// Panics unless the values, color counts, and green neighborhoods form an X-Trans CFA.
     pub(crate) fn new(pattern: [[u8; 6]; 6]) -> Self {
+        let mut counts = [0usize; 3];
         for row in &pattern {
             for &val in row {
                 assert!(
                     val <= 2,
                     "Invalid X-Trans pattern value: {} (must be 0, 1, or 2)",
                     val
+                );
+                counts[val as usize] += 1;
+            }
+        }
+        assert_eq!(
+            counts,
+            [8, 20, 8],
+            "Invalid X-Trans color counts: expected [8 red, 20 green, 8 blue], got {counts:?}"
+        );
+        for row in 0..6 {
+            for col in 0..6 {
+                if pattern[row][col] != 1 {
+                    continue;
+                }
+                let mut neighbors = [0usize; 3];
+                for (dy, dx) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                    let y = (row as i32 + dy).rem_euclid(6) as usize;
+                    let x = (col as i32 + dx).rem_euclid(6) as usize;
+                    neighbors[pattern[y][x] as usize] += 1;
+                }
+                assert_eq!(
+                    neighbors[0], neighbors[2],
+                    "Invalid X-Trans green neighborhood at ({row},{col}): {neighbors:?}"
                 );
             }
         }
@@ -182,7 +206,6 @@ pub(crate) struct XTransImage<'a> {
     channel_black: [f32; 3],
     /// 1.0 / (maximum - common_black) for normalization (u16 path only).
     inv_range: f32,
-    output_range: DemosaicRange,
 }
 
 impl<'a> XTransImage<'a> {
@@ -266,7 +289,6 @@ impl<'a> XTransImage<'a> {
             pattern,
             channel_black,
             inv_range,
-            output_range: DemosaicRange::NonNegative,
         }
     }
 
@@ -304,7 +326,6 @@ impl<'a> XTransImage<'a> {
             pattern,
             channel_black: [0.0; 3],
             inv_range: 1.0,
-            output_range: DemosaicRange::Preserve,
         }
     }
 
@@ -324,11 +345,6 @@ impl<'a> XTransImage<'a> {
             PixelSource::F32(data) => data[idx],
         }
     }
-
-    #[inline(always)]
-    pub(crate) fn output_value(&self, value: f32) -> f32 {
-        self.output_range.apply(value)
-    }
 }
 
 #[cfg(test)]
@@ -341,9 +357,9 @@ mod tests {
         let pattern = test_pattern();
         // Check corners
         assert_eq!(pattern.color_at(0, 0), 1); // G
-        assert_eq!(pattern.color_at(0, 1), 0); // R
-        assert_eq!(pattern.color_at(0, 4), 2); // B
-        assert_eq!(pattern.color_at(1, 0), 2); // B
+        assert_eq!(pattern.color_at(0, 2), 0); // R
+        assert_eq!(pattern.color_at(0, 5), 2); // B
+        assert_eq!(pattern.color_at(2, 0), 2); // B
         // Check wrapping
         assert_eq!(pattern.color_at(6, 0), pattern.color_at(0, 0));
         assert_eq!(pattern.color_at(0, 6), pattern.color_at(0, 0));
@@ -356,6 +372,27 @@ mod tests {
         XTransPattern::new([
             [1, 0, 1, 1, 2, 1],
             [2, 1, 3, 0, 1, 0], // 3 is invalid
+            [1, 2, 1, 1, 0, 1],
+            [1, 2, 1, 1, 0, 1],
+            [0, 1, 0, 2, 1, 2],
+            [1, 0, 1, 1, 2, 1],
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid X-Trans color counts")]
+    fn test_xtrans_pattern_invalid_color_counts() {
+        let mut pattern = test_pattern_array();
+        pattern[0][2] = 1;
+        XTransPattern::new(pattern);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid X-Trans green neighborhood")]
+    fn test_xtrans_pattern_invalid_geometry() {
+        XTransPattern::new([
+            [1, 0, 1, 1, 2, 1],
+            [2, 1, 2, 0, 1, 0],
             [1, 2, 1, 1, 0, 1],
             [1, 2, 1, 1, 0, 1],
             [0, 1, 0, 2, 1, 2],
@@ -514,9 +551,9 @@ mod tests {
         let expected_red = (2000.0 - 250.0) / 3896.0;
         let expected_green = (2000.0 - 200.0) / 3896.0;
         let expected_blue = (2000.0 - 220.0) / 3896.0;
-        assert!((image.read_normalized(0, 1) - expected_red).abs() < 1e-7);
+        assert!((image.read_normalized(0, 2) - expected_red).abs() < 1e-7);
         assert!((image.read_normalized(0, 0) - expected_green).abs() < 1e-7);
-        assert!((image.read_normalized(0, 4) - expected_blue).abs() < 1e-7);
+        assert!((image.read_normalized(0, 5) - expected_blue).abs() < 1e-7);
     }
 
     #[test]
@@ -559,13 +596,111 @@ mod tests {
     }
 
     #[test]
+    fn f32_demosaic_preserves_signed_native_samples() {
+        let raw_width = 30;
+        let raw_height = 30;
+        let width = 18;
+        let height = 18;
+        let top = 6;
+        let left = 6;
+        let pattern = test_pattern_array();
+        let data: Vec<f32> = (0..raw_width * raw_height)
+            .map(|index| (index % 17) as f32 * 0.25 - 2.0)
+            .collect();
+
+        let rgb = process_xtrans_f32(
+            &data,
+            raw_width,
+            raw_height,
+            width,
+            height,
+            top,
+            left,
+            pattern,
+            &CancelToken::never(),
+        )
+        .unwrap();
+
+        for y in 0..height {
+            for x in 0..width {
+                let raw_y = y + top;
+                let raw_x = x + left;
+                let channel = pattern[raw_y % 6][raw_x % 6] as usize;
+                let expected = data[raw_y * raw_width + raw_x];
+                let actual = rgb[channel][y * width + x];
+                assert!(
+                    (actual - expected).abs() < 1e-6,
+                    "native channel {channel} at ({x}, {y}) changed from {expected} to {actual}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
+        let raw_width = 30;
+        let raw_height = 30;
+        let width = 18;
+        let height = 18;
+        let top = 6;
+        let left = 6;
+        let pedestal = 0.375;
+        let base: Vec<f32> = (0..raw_width * raw_height)
+            .map(|index| 0.2 + (index * 37 % 101) as f32 / 200.0)
+            .collect();
+        let shifted: Vec<f32> = base.iter().map(|value| value + pedestal).collect();
+        let demosaic = |data: &[f32]| {
+            process_xtrans_f32(
+                data,
+                raw_width,
+                raw_height,
+                width,
+                height,
+                top,
+                left,
+                test_pattern_array(),
+                &CancelToken::never(),
+            )
+            .unwrap()
+        };
+
+        let base_rgb = demosaic(&base);
+        let shifted_rgb = demosaic(&shifted);
+        for (channel, (base_channel, shifted_channel)) in
+            base_rgb.iter().zip(&shifted_rgb).enumerate()
+        {
+            for (pixel, (&base_value, &shifted_value)) in
+                base_channel.iter().zip(shifted_channel).enumerate()
+            {
+                assert!(
+                    (shifted_value - base_value - pedestal).abs() < 2e-6,
+                    "channel {channel} pixel {pixel}: expected pedestal {pedestal}, got {}",
+                    shifted_value - base_value
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_process_xtrans_f32_matches_u16_path() {
-        // Verify f32 path produces equivalent output to u16 path for the same input.
         let black = 0.0_f32;
         let inv_range = 1.0 / 65535.0_f32;
-
-        // Create u16 data and equivalent normalized f32 data
-        let raw_u16: Vec<u16> = (0..12 * 12).map(|i| (i * 400 + 1000) as u16).collect();
+        let raw_width = 30;
+        let raw_height = 30;
+        let width = 18;
+        let height = 18;
+        let margin = 6;
+        let raw_u16: Vec<u16> = (0..raw_width * raw_height)
+            .map(|index| {
+                let y = index / raw_width;
+                let x = index % raw_width;
+                if (x / 2 + y / 3) % 2 == 0 {
+                    512
+                } else {
+                    64_000
+                }
+            })
+            .collect();
         let raw_f32: Vec<f32> = raw_u16
             .iter()
             .map(|&v| (v as f32 - black).max(0.0) * inv_range)
@@ -573,24 +708,24 @@ mod tests {
 
         let rgb_u16 = process_xtrans(
             &raw_u16,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            raw_width,
+            raw_height,
+            width,
+            height,
+            margin,
+            margin,
             test_pattern_array(),
             [black; 3],
             inv_range,
         );
         let rgb_f32 = process_xtrans_f32(
             &raw_f32,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            raw_width,
+            raw_height,
+            width,
+            height,
+            margin,
+            margin,
             test_pattern_array(),
             &CancelToken::never(),
         )
@@ -612,6 +747,13 @@ mod tests {
                 (a - b).abs()
             );
         }
+        assert!(
+            rgb_u16
+                .iter()
+                .flatten()
+                .any(|value| !(0.0..=1.0).contains(value)),
+            "high-contrast interpolation should retain a legitimate overshoot"
+        );
     }
 }
 
@@ -620,12 +762,12 @@ pub(crate) mod test_support {
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     const TEST_PATTERN: [[u8; 6]; 6] = [
-        [1, 0, 1, 1, 2, 1],
-        [2, 1, 2, 0, 1, 0],
-        [1, 2, 1, 1, 0, 1],
-        [1, 2, 1, 1, 0, 1],
-        [0, 1, 0, 2, 1, 2],
-        [1, 0, 1, 1, 2, 1],
+        [1, 1, 0, 1, 1, 2],
+        [1, 1, 2, 1, 1, 0],
+        [2, 0, 1, 0, 2, 1],
+        [1, 1, 2, 1, 1, 0],
+        [1, 1, 0, 1, 1, 2],
+        [0, 2, 1, 2, 0, 1],
     ];
 
     pub(crate) const TEST_INV_RANGE: f32 = 1.0 / 65535.0;

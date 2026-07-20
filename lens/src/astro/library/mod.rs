@@ -341,7 +341,7 @@ pub fn astro_library() -> Library {
                         &plane_to_frame(result.product.coverage),
                     )));
                     outputs[2] = DynamicValue::from_custom(Image::from(RawImage::from(
-                        &plane_to_frame(result.product.weight),
+                        &result.product.weight,
                     )));
 
                     Ok(())

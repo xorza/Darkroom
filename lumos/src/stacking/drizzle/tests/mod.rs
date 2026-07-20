@@ -67,20 +67,24 @@ fn assert_product_finite(product: &StackProduct) {
             .iter()
             .all(|value| value.is_finite())
     );
-    assert!(
-        product
-            .weight
-            .pixels()
-            .iter()
-            .all(|value| value.is_finite())
-    );
-    assert!(
-        product
-            .variance
-            .pixels()
-            .iter()
-            .all(|value| value.is_finite())
-    );
+    for channel in 0..product.image.dimensions.channels() {
+        assert!(
+            product
+                .weight
+                .channel(channel)
+                .pixels()
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!(
+            product
+                .variance
+                .channel(channel)
+                .pixels()
+                .iter()
+                .all(|value| value.is_finite())
+        );
+    }
 }
 
 fn drizzle_frames(
