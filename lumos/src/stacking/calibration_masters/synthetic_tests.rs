@@ -1,9 +1,9 @@
 //! Calibration tests on realistic forward-model frames.
 //!
-//! The unit tests in `tests.rs` / `defect_map.rs` cover the calibrate/defect logic on uniform
-//! `constant_cfa` frames. These exercise it on **non-uniform, noisy, defect-laden** frames built
-//! from the CCD equation (`light = bias + dark + flat·signal + noise`): calibration removes a
-//! vignette + dark + bias, recovers a star field through a single noisy light, and the
+//! The unit tests in `tests.rs` and `defect_map/tests.rs` cover the calibrate/defect logic on
+//! uniform `constant_cfa` frames. These exercise it on **non-uniform, noisy, defect-laden** frames
+//! built from the CCD equation (`light = bias + dark + flat·signal + noise`): calibration removes
+//! a vignette + dark + bias, recovers a star field through a single noisy light, and the
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
 use crate::stacking::calibration_masters::defect_map::DefectMap;

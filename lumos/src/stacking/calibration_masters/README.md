@@ -99,7 +99,9 @@ a flat reveals them as dark spots under uniform illumination):
   combines retain a conservative bound when no exact scalar exists. f32 resolution is the
   fallback when CFA provenance is unavailable. This prevents a zero-MAD plateau from flagging
   every representable deviation without imposing an arbitrary ADU threshold
-- Adaptive sampling (100K px per color) above 200K pixels for fast median/MAD
+- At most 100K samples per color, allocated proportionally across same-color CFA phases and
+  stratified across sensor rows and columns so fixed-pattern structure cannot alias with a
+  row-major stride
 
 **Cold/dead pixels — from the master flat**, via a local same-color-neighbor ratio: a pixel reading
 below `DEAD_PIXEL_FRACTION` (0.5) of the median of its same-color local neighbors is dead. The local

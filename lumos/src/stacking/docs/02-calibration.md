@@ -542,7 +542,7 @@ Lumos first separates sensor-scale dark structure from point defects:
 **Why MAD, not standard deviation:** std is itself inflated by the very outliers you are
 hunting (a few 60000-ADU hot pixels balloon σ and hide the merely-warm ones). MAD has a 50%
 breakdown point — up to half the pixels can be outliers and the median/MAD stay valid. lumos
-documents this rationale in `stacking/calibration_masters/defect_map.rs`.
+documents this rationale in `stacking/calibration_masters/defect_map/mod.rs`.
 
 **Why a tiled model instead of a same-color neighbor median:** a compact hot cluster can dominate
 the immediate neighborhood of every member, making the cluster its own reference. A 64×64 tile
@@ -585,9 +585,12 @@ each pixel; the single master value is the conservative maximum. Defect detectio
 floor, with f32 resolution only when CFA provenance is absent. No fixed normalized/ADU threshold
 remains.
 
-**Adaptive sampling.** Exact median over a 60-megapixel channel is slow; lumos subsamples to
-at most 100K residuals per color. This is sound for detection thresholds: the model is evaluated
-for every pixel during classification, while only the robust distribution estimate is sampled.
+**Adaptive sampling.** Exact median over a 60-megapixel channel is slow. Lumos allocates a real
+100K-sample cap independently to each color, apportions it by the population of every same-color
+CFA phase, and samples spatially distributed rows with a rotating uniform column lattice. This
+avoids the column aliasing of a row-major stride while preserving the full sensor extent. The
+background model is still evaluated for every pixel during classification; only the robust
+distribution estimate is sampled.
 
 ### 3.2 Correction: same-CFA-color neighbor median
 
@@ -595,17 +598,17 @@ A defect is replaced by a **robust local estimate**, never by zero or by a raw n
 wrong color:
 
 - **Mono:** median of the 8-connected neighbors (lumos `median_of_neighbors_raw`,
-  `defect_map.rs:253–285`).
+  `defect_map/mod.rs:253–285`).
 - **Bayer:** median of **same-color** neighbors at **stride 2** (the nearest pixels behind the
   *same* color filter). Replacing a hot red pixel with adjacent green/blue values would inject
   a false color into the demosaic. lumos `bayer_same_color_median` uses the 8 stride-2
-  neighbors (`defect_map.rs:307–334`); Siril's cosmetic median uses `step = 2` for CFA data,
+  neighbors (`defect_map/mod.rs:307–334`); Siril's cosmetic median uses `step = 2` for CFA data,
   same idea (`cosmetic_correction.c:46, 73–74, 131–132`).
 - **X-Trans:** lumos searches a ±6-pixel window (13×13 = 169 candidates; since the X-Trans
   mosaic repeats every 6 px this spans roughly two full periods in each direction) for
   same-color pixels, sorts by Manhattan distance, and medians the closest 24 to avoid
-  directional bias (`defect_map.rs:340–383`). (The in-code comments are loose about this —
-  `defect_map.rs:290` says "2*period", `:337` says "one full period"; the literal value is
+  directional bias (`defect_map/mod.rs:340–383`). (The in-code comments are loose about this —
+  `defect_map/mod.rs:290` says "2*period", `:337` says "one full period"; the literal value is
   `radius = 6`.) (Siril explicitly refuses cosmetic correction on X-Trans —
   `preprocess.c:388–390` — so lumos is *more* capable here.)
 
@@ -626,7 +629,7 @@ fix them at all:
   uniform illumination. lumos first subtracts bias or flat-dark from the master flat, then
   detects cold/dead pixels on that unfloored response via a local same-color-neighbor ratio
   (`< DEAD_PIXEL_FRACTION × local median`). The local reference tracks vignetting and dust
-  shadows where a global `median − k·σ` cut cannot (`defect_map.rs`, `detect_cold`).
+  shadows where a global `median − k·σ` cut cannot (`defect_map/mod.rs`, `detect_cold`).
 - **RTS / "flickering" / telegraph pixels** — random-telegraph-signal pixels that hop between
   two or more levels *between frames*. They are the trap for static maps: a single master dark
   catches them only if they happened to be "high" during that capture, and a fixed map then
@@ -898,13 +901,13 @@ median for mono. (lumos already does all three.)
   (`astro_image/cfa.rs:253–289`).
 - **Preserves negative pixels** through subtraction (`cfa.rs:142`) — correct for linearity.
 - **Robust per-color defect thresholds with a data-derived resolution floor and adaptive
-  sampling** (`defect_map.rs`) — the scale combines MAD, a protected upper residual quantile, and
+  sampling** (`defect_map/mod.rs`) — the scale combines MAD, a protected upper residual quantile, and
   propagated RAW quantization uncertainty rather than Siril/DSS's ordinary σ; more capable than
   Siril on X-Trans.
 - **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct,
   and repaired from a **defect mask** so clustered defects draw only on good (non-defect) neighbors.
 - **Cold/dead pixels from the bias/flat-dark-subtracted, unfloored master-flat response** via a local same-color-neighbor ratio
-  (`< DEAD_PIXEL_FRACTION × local median`, `defect_map.rs` `detect_cold`) — catches the dead pixels
+  (`< DEAD_PIXEL_FRACTION × local median`, `defect_map/mod.rs` `detect_cold`) — catches the dead pixels
   that read normal in a dark, and tracks vignetting where a global `median − k·σ` cut cannot.
 - **Sensible combine presets:** winsorized-mean darks/bias (κ=3), sigma-clip flats (κ=2.5),
   with median fallback below 8 frames (`stacking/config.rs:163–197`; `mod.rs:92`).
@@ -1013,7 +1016,7 @@ DSS C++ source**, superseding the pass-1 search snippet).
   - `src/calibration_masters/mod.rs` (`calibrate` order, flat-dark priority, presets/fallback).
   - `src/calibration_masters/prepared_flat.rs` (one-time Mono/per-CFA normalization and divisor
     application).
-  - `src/calibration_masters/defect_map.rs` (robust per-color thresholds, quantization floor,
+  - `src/calibration_masters/defect_map/mod.rs` (robust per-color thresholds, quantization floor,
     CFA-color neighbor median, X-Trans handling).
   - `src/astro_image/cfa.rs` `subtract` (preserves negatives).
   - `src/stacking/config.rs:163` frame-type combine presets.
