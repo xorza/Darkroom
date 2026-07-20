@@ -108,11 +108,7 @@ pub fn align_and_stack(
         .map(|(index, detected)| {
             if index == reference {
                 // The unwarped reference has full support and unit interpolation confidence.
-                return Ok(StackFrame {
-                    image: detected.image,
-                    coverage: None,
-                    confidence: None,
-                });
+                return Ok(StackFrame::from(detected.image));
             }
             // Cancelled: drop this frame (skips the heavy register + warp); the
             // post-loop check below turns the run into `Cancelled`.
@@ -136,11 +132,7 @@ pub fn align_and_stack(
                         &result.warp_transform(),
                         &config.registration.warp,
                     );
-                    Ok(StackFrame {
-                        image: warped.image,
-                        coverage: Some(warped.coverage),
-                        confidence: Some(warped.confidence),
-                    })
+                    Ok(StackFrame::registered(&detected.image, warped))
                 }
                 Err(error) => {
                     tracing::info!(frame = n, total = reg_total, %error, "registration failed");

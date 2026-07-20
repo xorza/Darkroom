@@ -12,6 +12,7 @@ fn from_paths_reports_empty_and_missing_sources() {
     let empty = LightCache::from_paths(
         &Vec::<PathBuf>::new(),
         &config,
+        Normalization::None,
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -21,6 +22,7 @@ fn from_paths_reports_empty_and_missing_sources() {
     let missing = LightCache::from_paths(
         &[missing_path],
         &config,
+        Normalization::None,
         ProgressCallback::default(),
         CancelToken::never(),
     );

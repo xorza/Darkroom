@@ -42,3 +42,5 @@ blobs and serialization directly to file to avoid memallocs
 build masters cache changes directory and invalidates digest
 
 node runtime is not refershed
+
+wrong 1-1 image view scale

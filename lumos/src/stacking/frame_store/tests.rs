@@ -28,7 +28,9 @@ fn light_frame_keeps_quality_with_its_planes() {
     let image = AstroImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
     let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
-    let frame = StoredLightFrame::from_memory(image, Some(coverage), Some(confidence));
+    let source_stats = compute_frame_stats(&image);
+    let frame =
+        StoredLightFrame::from_memory(image, Some(coverage), Some(confidence), source_stats);
     assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
         frame.coverage.as_ref().unwrap().chunk(0, 4),
@@ -38,6 +40,8 @@ fn light_frame_keeps_quality_with_its_planes() {
         frame.confidence.as_ref().unwrap().chunk(0, 4),
         &[4.0, 3.0, 2.0, 1.0]
     );
+    assert_eq!(frame.source_stats.channels[0].median, 2.5);
+    assert_eq!(frame.source_stats.channels[0].mad, 1.0);
 }
 
 #[test]

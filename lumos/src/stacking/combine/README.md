@@ -8,7 +8,9 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 |------|-------------|
 | `mod.rs` | Public API exports |
 | `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
-| `stack.rs` | `stack()` (from paths) / `stack_images()` (in-memory) entry points, dispatch, normalization |
+| `stack.rs` | `stack()` (from paths) / `stack_images()` (in-memory) entry points and dispatch |
+| `normalization/mod.rs` | Reference selection, common-domain measurement, and affine fitting |
+| `normalization/tests.rs` | Normalization unit tests |
 | `rejection.rs` | Pixel rejection algorithms |
 | `../frame_store/mod.rs` | Shared memory planning, RAM/mmap planes, spill cleanup, stored frames |
 | `cache/mod.rs` | Chunked combine engine and product quality planes |
@@ -99,18 +101,23 @@ and disk-backed combines check between chunks. Cancellation discards partial out
 
 ## Global Normalization
 
-When `Normalization::Global` is set, each frame is affine-transformed before combining to match the reference frame (frame 0):
+When `Normalization::Global` is set, each frame is affine-transformed before combining to match the
+lowest-noise source frame:
 
 ```
 normalized = pixel * gain + offset
-gain   = ref_MAD / frame_MAD
 offset = ref_median - frame_median * gain
 ```
 
-Per-frame, per-channel median and MAD (robust scale) are computed from the full image for
-unregistered inputs, or from one common coverage-valid/confidence-positive coordinate domain for
-registered inputs. This keeps warp fill from changing reference selection, normalization, or noise
-weighting.
+For unregistered inputs, `gain = ref_MAD / frame_MAD` retains the full-image robust-scale
+normalization. Registered inputs instead estimate gain from paired pixels on one common
+coverage-valid/confidence-positive sky domain using a residual-clipped Deming fit. Its error ratio
+uses the source MAD and interpolation confidence, so interpolation phase cannot become a
+photometric scale.
+
+Noise weighting always uses the pre-warp source MAD. The combine multiplies that frame-level
+inverse variance by interpolation confidence once at each output pixel, producing
+`q / (gain² σ_source²)`.
 
 ## Key Design Decisions
 
@@ -130,16 +137,17 @@ the end-to-end pipeline:
 - **In-memory**: channel and coverage planes use resident `Buffer2<f32>` storage.
 - **Disk-backed**: channel and coverage planes use memory-mapped f32 files owned by a
   `SpillDirectory`; dropping the final cache releases mappings before cleanup.
-- `StoredLightFrame` keeps channels plus optional coverage/confidence planes in one record. Once
-  all registered records are assembled, `LightCache` intersects their valid support and computes
-  every frame's per-channel median/MAD over exactly that shared pixel domain.
+- `StoredLightFrame` keeps channels, pre-warp source statistics, and optional
+  coverage/confidence planes in one record.
+- `LightCache` stores only the final affine parameters needed by the combine; temporary
+  common-domain measurements remain inside the normalization module.
 
 ### Processing Pipeline
 
 1. **Load**: Decode images, cache to disk or memory (parallelized via rayon)
-2. **Measure**: Compute per-frame median/MAD on the full image for unregistered inputs, or on the
-   common coverage-valid/confidence-positive domain for registered inputs
-3. **Normalize** (optional): Derive affine parameters from the comparable frame statistics
+2. **Measure**: Preserve source-domain median/MAD and, when normalization is enabled, compute
+   registered-frame location statistics on the common coverage-valid/confidence-positive domain
+3. **Normalize** (optional): Derive registered affine gains from paired common-sky samples
 4. **Process**: For each pixel and channel — apply normalization, reject outliers, combine, and
    accumulate `Σwᵢ` plus `Σwᵢ²/(Σwᵢ)²` from the actual survivors
 5. **Cleanup**: Remove cache files (unless `keep_cache = true`)

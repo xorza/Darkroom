@@ -167,6 +167,7 @@ pub(crate) struct StoredLightFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     pub(crate) coverage: Option<StoredPlane>,
     pub(crate) confidence: Option<StoredPlane>,
+    pub(crate) source_stats: FrameStats,
 }
 
 impl StoredLightFrame {
@@ -174,6 +175,7 @@ impl StoredLightFrame {
         image: AstroImage,
         coverage: Option<Buffer2<f32>>,
         confidence: Option<Buffer2<f32>>,
+        source_stats: FrameStats,
     ) -> Self {
         let channels = image
             .into_planes()
@@ -184,14 +186,16 @@ impl StoredLightFrame {
             channels,
             coverage: coverage.map(StoredPlane::Memory),
             confidence: confidence.map(StoredPlane::Memory),
+            source_stats,
         }
     }
 
-    pub(crate) fn from_stored(frame: StoredFrame) -> Self {
+    pub(crate) fn from_stored(frame: StoredFrame, source_stats: FrameStats) -> Self {
         Self {
             channels: frame.channels,
             coverage: None,
             confidence: None,
+            source_stats,
         }
     }
 }
@@ -260,6 +264,7 @@ pub(crate) fn store_light_frame(
     image: AstroImage,
     coverage: Option<Buffer2<f32>>,
     confidence: Option<Buffer2<f32>>,
+    source_stats: FrameStats,
 ) -> Result<StoredLightFrame, FrameStoreError> {
     let channels = spill_channels(directory, name, &image)?.planes;
     let coverage = match coverage {
@@ -282,6 +287,7 @@ pub(crate) fn store_light_frame(
         channels,
         coverage,
         confidence,
+        source_stats,
     })
 }
 

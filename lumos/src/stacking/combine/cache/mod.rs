@@ -7,10 +7,12 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::math::statistics::{ChannelStats, median_and_mad_f32_mut};
+use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
+use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::stack::{FrameNorm, StackFrame};
+use crate::stacking::combine::normalization::{FrameNorm, compute_light_frame_norms};
+use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
     FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
     optimal_chunk_rows,
@@ -111,9 +113,6 @@ pub(crate) struct CacheCore {
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
     pub(crate) metadata: AstroImageMetadata,
-    /// Per-frame channel statistics (median + MAD). Registered lights use one shared valid
-    /// support domain; unregistered/calibration frames use the full image.
-    pub(crate) channel_stats: Vec<FrameStats>,
     /// Configuration for cache operations.
     pub(crate) config: CacheConfig,
     /// Progress callback.
@@ -130,6 +129,7 @@ pub(crate) struct CacheCore {
 pub(crate) struct CfaCache {
     // Stored planes drop before the spill directory owner in `core`.
     pub(crate) frames: Vec<StoredFrame>,
+    pub(crate) frame_stats: Vec<FrameStats>,
     pub(crate) core: CacheCore,
 }
 
@@ -137,16 +137,20 @@ pub(crate) struct CfaCache {
 #[derive(Debug)]
 pub(crate) struct LightCache {
     pub(crate) frames: Vec<StoredLightFrame>,
-    /// Whether `core.channel_stats` use one shared contribution domain across every frame.
-    pub(crate) stats_share_domain: bool,
+    pub(crate) frame_norms: Option<Vec<FrameNorm>>,
     pub(crate) core: CacheCore,
 }
 
-/// Minimum coverage for a warped frame to contribute at a pixel. Below this the frame's value
-/// there is (near-)entirely warp border-fill, so it's *excluded* from the combine rather than
-/// down-weighted — otherwise its fill would skew rejection and re-introduce the dark warped-edge
-/// ring this weighting exists to remove.
-const COVERAGE_EPSILON: f32 = 1e-3;
+#[derive(Debug)]
+pub(crate) struct StoredLightCacheParams {
+    pub(crate) spill_directory: Option<SpillDirectory>,
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) metadata: AstroImageMetadata,
+    pub(crate) config: CacheConfig,
+    pub(crate) normalization: Normalization,
+    pub(crate) progress: ProgressCallback,
+    pub(crate) cancel: CancelToken,
+}
 
 /// Per-chunk context handed to the [`CacheCore::process_chunks`] closure: the input frame
 /// slices for this chunk plus the geometry to map a within-chunk pixel to a global frame index.
@@ -352,33 +356,37 @@ impl LightCache {
     /// Build a cache from frames already placed in the shared frame store.
     pub(crate) fn from_stored_frames(
         frames: Vec<StoredLightFrame>,
-        spill_directory: Option<SpillDirectory>,
-        dimensions: ImageDimensions,
-        metadata: AstroImageMetadata,
-        config: &CacheConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
-    ) -> Self {
-        let stats = compute_light_frame_stats(&frames, dimensions);
-        Self {
+        params: StoredLightCacheParams,
+    ) -> Result<Self, Error> {
+        let StoredLightCacheParams {
+            spill_directory,
+            dimensions,
+            metadata,
+            config,
+            normalization,
+            progress,
+            cancel,
+        } = params;
+        let frame_norms = compute_light_frame_norms(&frames, dimensions, normalization)?;
+        Ok(Self {
             frames,
-            stats_share_domain: stats.share_domain,
+            frame_norms,
             core: CacheCore {
                 spill_directory,
                 dimensions,
                 metadata,
-                channel_stats: stats.frames,
-                config: config.clone(),
+                config,
                 progress,
                 cancel,
             },
-        }
+        })
     }
 
     /// Build an in-memory warp-quality-aware cache from [`StackFrame`]s.
     pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
         config: &CacheConfig,
+        normalization: Normalization,
         progress: ProgressCallback,
     ) -> Result<Self, Error> {
         if frames.is_empty() {
@@ -439,19 +447,23 @@ impl LightCache {
         let stored = frames
             .into_iter()
             .map(|frame| {
-                StoredLightFrame::from_memory(frame.image, frame.coverage, frame.confidence)
+                StoredLightFrame::from_memory(
+                    frame.image,
+                    frame.coverage,
+                    frame.confidence,
+                    frame.source_stats,
+                )
             })
             .collect::<Vec<_>>();
-        let stats = compute_light_frame_stats(&stored, dimensions);
+        let frame_norms = compute_light_frame_norms(&stored, dimensions, normalization)?;
 
         Ok(Self {
             frames: stored,
-            stats_share_domain: stats.share_domain,
+            frame_norms,
             core: CacheCore {
                 spill_directory: None,
                 dimensions,
                 metadata,
-                channel_stats: stats.frames,
                 config: config.clone(),
                 progress,
                 // Set by the public stacking entry before the combine, if any.
@@ -520,7 +532,9 @@ impl LightCache {
                         let local = row_base + px;
                         let count = cov_chunks
                             .iter()
-                            .filter(|cov| cov.map_or(1.0, |map| map[local]) > COVERAGE_EPSILON)
+                            .filter(|cov| {
+                                cov.map_or(1.0, |map| map[local]) > MIN_CONTRIBUTING_COVERAGE
+                            })
                             .count();
                         *output = count as f32 * inv_frames;
                     }
@@ -639,7 +653,7 @@ impl LightCache {
                                         Some(map) => map[pixel_idx],
                                         None => 1.0,
                                     };
-                                    if c > COVERAGE_EPSILON && q > 0.0 {
+                                    if c > MIN_CONTRIBUTING_COVERAGE && q > 0.0 {
                                         let v = match frame_norms {
                                             Some(fnm) => {
                                                 let cn = fnm[frame_idx].channels[channel];
@@ -679,80 +693,6 @@ impl LightCache {
             weight: output_weight,
             variance: output_variance,
         }
-    }
-}
-
-#[derive(Debug)]
-struct ComputedLightStats {
-    frames: Vec<FrameStats>,
-    share_domain: bool,
-}
-
-/// Compute every frame's robust channel statistics on one shared contribution domain.
-///
-/// A registered frame's warp fill is arbitrary and must not influence reference selection,
-/// normalization, or noise weights. The intersection of all coverage-valid, confidence-positive
-/// samples gives every frame exactly the same sky coordinates. Unregistered stacks take the
-/// allocation-free full-frame path.
-fn compute_light_frame_stats(
-    frames: &[StoredLightFrame],
-    dimensions: ImageDimensions,
-) -> ComputedLightStats {
-    let pixel_count = dimensions.pixel_count();
-    let needs_common_domain = frames
-        .iter()
-        .any(|frame| frame.coverage.is_some() || frame.confidence.is_some());
-    let common_domain = needs_common_domain.then(|| {
-        let mut common = vec![true; pixel_count];
-        for frame in frames {
-            if let Some(coverage) = &frame.coverage {
-                for (valid, &value) in common.iter_mut().zip(coverage.chunk(0, pixel_count)) {
-                    *valid &= value > COVERAGE_EPSILON;
-                }
-            }
-            if let Some(confidence) = &frame.confidence {
-                for (valid, &value) in common.iter_mut().zip(confidence.chunk(0, pixel_count)) {
-                    *valid &= value > 0.0;
-                }
-            }
-        }
-        common
-    });
-    let sample_count = common_domain.as_ref().map_or(pixel_count, |domain| {
-        domain.iter().filter(|&&valid| valid).count()
-    });
-    let share_domain = sample_count > 0;
-    if !share_domain {
-        return ComputedLightStats {
-            frames: Vec::new(),
-            share_domain: false,
-        };
-    }
-
-    let mut all_stats = Vec::with_capacity(frames.len());
-    let mut samples = Vec::with_capacity(sample_count);
-    for frame in frames {
-        let mut channels = arrayvec::ArrayVec::new();
-        for channel in &frame.channels {
-            let pixels = channel.chunk(0, pixel_count);
-            samples.clear();
-            match &common_domain {
-                Some(domain) => samples.extend(
-                    pixels
-                        .iter()
-                        .zip(domain)
-                        .filter_map(|(&value, &valid)| valid.then_some(value)),
-                ),
-                None => samples.extend_from_slice(pixels),
-            }
-            let (median, mad) = median_and_mad_f32_mut(&mut samples);
-            channels.push(ChannelStats { median, mad });
-        }
-        all_stats.push(FrameStats { channels });
-    }
-    ComputedLightStats {
-        frames: all_stats,
-        share_domain,
     }
 }
 

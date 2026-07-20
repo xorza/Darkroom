@@ -11,7 +11,9 @@ use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache_config::CacheConfig;
+use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
+use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::{
     FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame,
     StoredPlane, cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes,
@@ -26,7 +28,7 @@ use crate::stacking::combine::cache::{CacheCore, CfaCache, LightCache};
 struct LoadedTier {
     frames: Vec<StoredFrame>,
     spill_directory: Option<SpillDirectory>,
-    channel_stats: Vec<FrameStats>,
+    frame_stats: Vec<FrameStats>,
     metadata: AstroImageMetadata,
 }
 
@@ -34,6 +36,7 @@ struct LoadedTier {
 #[derive(Debug)]
 struct LoadedCache {
     frames: Vec<StoredFrame>,
+    frame_stats: Vec<FrameStats>,
     core: CacheCore,
 }
 
@@ -75,7 +78,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let LoadedTier {
         frames,
         spill_directory,
-        channel_stats,
+        frame_stats,
         metadata,
     } = if use_in_memory {
         load_in_memory::<I, P>(
@@ -106,11 +109,11 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     Ok(LoadedCache {
         frames,
+        frame_stats,
         core: CacheCore {
             spill_directory,
             dimensions,
             metadata,
-            channel_stats,
             config: config.clone(),
             progress,
             cancel,
@@ -133,9 +136,16 @@ impl CfaCache {
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
-        let LoadedCache { frames, core } =
-            load_tiered::<CfaImage, P>(paths, config, progress, cancel)?;
-        Ok(Self { frames, core })
+        let LoadedCache {
+            frames,
+            frame_stats,
+            core,
+        } = load_tiered::<CfaImage, P>(paths, config, progress, cancel)?;
+        Ok(Self {
+            frames,
+            frame_stats,
+            core,
+        })
     }
 }
 
@@ -145,18 +155,24 @@ impl LightCache {
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
+        normalization: Normalization,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
-        let LoadedCache { frames, core } =
-            load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
+        let LoadedCache {
+            frames,
+            frame_stats,
+            core,
+        } = load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
+        let frame_norms = compute_frame_norms(&frame_stats, normalization);
         let frames = frames
             .into_iter()
-            .map(StoredLightFrame::from_stored)
+            .zip(frame_stats)
+            .map(|(frame, stats)| StoredLightFrame::from_stored(frame, stats))
             .collect();
         Ok(Self {
             frames,
-            stats_share_domain: true,
+            frame_norms,
             core,
         })
     }
@@ -242,7 +258,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedTier {
         frames,
         spill_directory: None,
-        channel_stats: all_stats,
+        frame_stats: all_stats,
         metadata: metadata.expect("frame 0 provides metadata"),
     })
 }
@@ -318,7 +334,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedTier {
         frames,
         spill_directory: Some(spill_directory),
-        channel_stats: all_stats,
+        frame_stats: all_stats,
         metadata,
     })
 }

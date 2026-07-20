@@ -2,8 +2,12 @@ pub(crate) mod cache;
 pub(crate) mod cache_config;
 pub(crate) mod config;
 pub(crate) mod error;
+pub(crate) mod normalization;
 pub(crate) mod rejection;
 pub(crate) mod stack;
+
+/// Coverage below this threshold is dominated by warp border fill.
+pub(crate) const MIN_CONTRIBUTING_COVERAGE: f32 = 1e-3;
 
 #[cfg(test)]
 mod bench;

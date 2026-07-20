@@ -48,15 +48,17 @@ The normalization and weighting are defined *relative to a reference frame*. The
 standard choice is the **lowest-noise frame** — it has the most stable background and
 makes the most reliable target for matching everyone else's statistics.
 
-- **lumos**: `select_reference_frame` (`src/stacking/stack.rs:165`) picks the frame
+- **lumos**: `select_reference_frame` (`src/stacking/combine/normalization/mod.rs`) picks the frame
   with the lowest mean MAD (median absolute deviation) across channels. MAD is used
   rather than standard deviation because it is robust to the stars/objects in the
   frame — it measures background noise, not signal.
-- **Registered-frame domain**: every frame's median/MAD is measured over the intersection of
-  coverage-valid, confidence-positive pixels. Warp fill outside support cannot lower a frame's
-  MAD, change the reference, alter normalization gains, or inflate its inverse-variance weight.
-  Frames with disjoint support can still combine with no normalization and equal/manual weights;
-  requesting cross-frame statistics for them returns `NoCommonCoverage`.
+- **Registered-frame domain**: reference selection and inverse-variance weighting use MAD captured
+  from each source before interpolation. Global normalization fits paired samples over the
+  intersection of coverage-valid, confidence-positive pixels, while multiplicative normalization
+  uses medians over that same domain. Warp fill and interpolation smoothing therefore cannot change
+  source-noise weights or become a false gain. Frames with disjoint support can still combine
+  without normalization using equal, manual, or source-noise weights; normalization returns
+  `NoCommonCoverage`.
 - **siril**: the reference image is user-selectable but defaults to the best-quality
   frame; normalization coefficients are computed relative to it
   (`src/stacking/normalization.c:142`, `compute normalization factors based on the
@@ -91,7 +93,7 @@ The crucial subtlety in siril's additive transform: `poffset = pscale·offset �
 offset0` (`normalization.c:167`) — the offset is applied *after* the scale, so the two
 compose correctly.
 
-- **lumos**: `compute_frame_norms` (`src/stacking/stack.rs:189`) implements two of
+- **lumos**: `compute_frame_norms` (`src/stacking/combine/normalization/mod.rs`) implements two of
   these. `Normalization::Global` is full additive+multiplicative
   (`gain = ref_mad/frame_mad`, `offset = ref_median − frame_median·gain`), and
   `Normalization::Multiplicative` is scale-only (`gain = ref_median/frame_median`).
@@ -1035,9 +1037,9 @@ quality varies.
   Gesd` (`src/stacking/rejection.rs:831`), matching the siril set, with
   presets `sigma_clipped / winsorized / linear_fit / median / mean / gesd / percentile
   / weighted` (`config.rs:98`) and frame presets `light/flat/dark/bias` (`config.rs:164`).
-- Lowest-MAD reference selection (`stack.rs:165`), Global (additive+multiplicative)
-  and Multiplicative normalization (`stack.rs:189`), inverse-variance noise weighting
-  (`stack.rs:271`), equal/manual weighting.
+- Pre-warp lowest-MAD reference selection, paired Global (additive+multiplicative) and
+  common-domain Multiplicative normalization, source-noise × interpolation-confidence
+  inverse-variance weighting, and equal/manual weighting.
 - Winsorized σ with the correct 1.134 bias factor (`rejection.rs:203`); textbook
   two-sided GESD with mean/sample-sd statistics, accurate Student-t critical values,
   and a backward scan (`rejection.rs`); MAD-based robust spread in the clipping and
@@ -1130,7 +1132,8 @@ defaults `3.5 3.0` / `1.2 0.7`, `tmp2 ≥ 9` (`:320-336`). **lumos confirmed:**
 the GESD statistic, live-count λ formula, and exact Student-t quantile now match the
 NIST/Siril contract; Winsorized constants
 `HUBER_C=1.5 / WINSORIZED_CORRECTION=1.134` (`rejection.rs:201-203`); lowest-mean-MAD
-reference (`stack.rs:165`); normalization-aware inverse-variance noise weighting;
+reference; paired registered-frame normalization; source-domain inverse-variance noise weighting
+with interpolation confidence applied once;
 drizzle `accumulate`/`finalize` deferred weighted average (`mod.rs`).
 
 **Resolved in pass 3 (were "open"):** the **1.134** factor is now nailed by direct

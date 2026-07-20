@@ -1,6 +1,7 @@
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::combine::cache::*;
+use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{frame_from_memory, store_frame};
 use crate::testing::ScratchDirectory;
@@ -8,8 +9,13 @@ use crate::testing::ScratchDirectory;
 /// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
 pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
     let frames = images.into_iter().map(StackFrame::from).collect();
-    LightCache::from_stack_frames(frames, &CacheConfig::default(), ProgressCallback::default())
-        .expect("test images must be non-empty and dimension-consistent")
+    LightCache::from_stack_frames(
+        frames,
+        &CacheConfig::default(),
+        Normalization::None,
+        ProgressCallback::default(),
+    )
+    .expect("test images must be non-empty and dimension-consistent")
 }
 
 fn mean_product(cache: &LightCache, weights: Option<&[f32]>) -> StackProduct {
@@ -65,15 +71,19 @@ fn finish_product_partial_coverage() {
     let cov = [[1.0_f32, 1.0], [1.0, 0.5], [1.0, 0.0], [1.0, 1.0]];
     let frames: Vec<StackFrame> = cov
         .iter()
-        .map(|c| StackFrame {
-            image: AstroImage::from_pixels(dims, vec![0.5, 0.5]),
-            coverage: Some(Buffer2::new(2, 1, c.to_vec())),
-            confidence: None,
+        .map(|c| {
+            let mut frame = StackFrame::from(AstroImage::from_pixels(dims, vec![0.5, 0.5]));
+            frame.coverage = Some(Buffer2::new(2, 1, c.to_vec()));
+            frame
         })
         .collect();
-    let cache =
-        LightCache::from_stack_frames(frames, &CacheConfig::default(), ProgressCallback::default())
-            .expect("frames are valid");
+    let cache = LightCache::from_stack_frames(
+        frames,
+        &CacheConfig::default(),
+        Normalization::None,
+        ProgressCallback::default(),
+    )
+    .expect("frames are valid");
     let product = mean_product(&cache, None);
 
     assert_eq!(product.coverage[0], 1.0);
@@ -90,7 +100,7 @@ fn finish_product_partial_coverage() {
 }
 
 /// Build an in-memory [`CfaCache`] from single-channel CFA frame pixels (test helper for the
-/// plain combine; `process_chunked` ignores stats, so `channel_stats` is left empty).
+/// plain combine; `process_chunked` ignores statistics.
 fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCache {
     let frames = frames_pixels
         .into_iter()
@@ -107,11 +117,11 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         .collect();
     CfaCache {
         frames,
+        frame_stats: vec![],
         core: CacheCore {
             spill_directory: None,
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -273,11 +283,11 @@ fn test_cleanup_removes_files() {
 
     let cache = CfaCache {
         frames: vec![cached_frame],
+        frame_stats: vec![],
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            channel_stats: vec![],
             config,
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -331,11 +341,11 @@ fn test_read_channel_chunk_disk_backed() {
 
     let cache = CfaCache {
         frames: vec![cached_frame],
+        frame_stats: vec![],
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -379,11 +389,11 @@ fn test_frame_count_disk_backed() {
 
     let cache = CfaCache {
         frames,
+        frame_stats: vec![],
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -413,7 +423,11 @@ fn test_compute_channel_stats_grayscale() {
     );
 
     let cache = make_test_cache(vec![frame0, frame1, frame2]);
-    let stats = &cache.core.channel_stats;
+    let stats: Vec<_> = cache
+        .frames
+        .iter()
+        .map(|frame| &frame.source_stats)
+        .collect();
 
     assert_eq!(stats.len(), 3); // 3 frames
     assert_eq!(stats[0].channels.len(), 1);
@@ -459,7 +473,11 @@ fn test_compute_channel_stats_rgb() {
     //   B: median=25.0, deviations=[15,5,5,15] → MAD=10.0
 
     let cache = make_test_cache(vec![frame0, frame1]);
-    let stats = &cache.core.channel_stats;
+    let stats: Vec<_> = cache
+        .frames
+        .iter()
+        .map(|frame| &frame.source_stats)
+        .collect();
 
     assert_eq!(stats.len(), 2); // 2 frames
     assert_eq!(stats[0].channels.len(), 3); // 3 channels each
