@@ -26,9 +26,9 @@
 //!
 //! Region A holds green_dir (4 directions), written in Step 2, read through Step 6.
 //! Region E holds directional `[red, blue]` pairs, written in Step 3 and read through Step 6.
-//! Region B is used as `drv` in Steps 4–5, then dead in Step 6.
+//! Region B is used as `drv` in Steps 4–5, then as four `u32` scores per pixel in Step 6.
 //! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 5–6.
-//! Region D is used as `gmax` in Steps 1–2, then reused as `threshold` in Step 5.
+//! Region D is used as `gmax` in Steps 1–2, `threshold` in Step 5, then a `u32` SAT in Step 6.
 
 use common::CancelToken;
 
@@ -40,6 +40,7 @@ use crate::io::raw::demosaic::xtrans::markesteijn_steps;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
+const ARENA_WORDS_PER_PIXEL: usize = 18;
 
 /// Preallocated arena for all Markesteijn demosaic working memory.
 ///
@@ -50,23 +51,61 @@ struct DemosaicArena {
     storage: Vec<f32>,
 }
 
+#[derive(Debug)]
+struct FinalBlendBuffers<'a> {
+    green_dir: &'a [f32],
+    colors: &'a [[f32; 2]],
+    scores: &'a mut [[u32; NDIR]],
+    homo: &'a [u8],
+    sat: &'a mut [u32],
+}
+
 impl DemosaicArena {
     fn new(width: usize, height: usize) -> Self {
         let pixels = width * height;
-        let total = 18 * pixels; // 4P + 8P + 4P + P + P
+        let total = ARENA_WORDS_PER_PIXEL * pixels;
 
         // SAFETY: Every element in every region is fully written by parallel passes
         // before being read. See per-step comments in demosaic_xtrans_markesteijn().
         let storage = unsafe { alloc_uninit_vec::<f32>(total) };
 
         tracing::debug!(
-            "Demosaic arena: {:.1} MB ({} × {} × 18 × 4 bytes)",
+            "Demosaic arena: {:.1} MB ({} × {} × {} × 4 bytes)",
             (total * 4) as f64 / (1024.0 * 1024.0),
             width,
             height,
+            ARENA_WORDS_PER_PIXEL,
         );
 
         Self { storage }
+    }
+
+    fn final_blend_buffers(&mut self) -> FinalBlendBuffers<'_> {
+        const {
+            assert!(std::mem::size_of::<f32>() == std::mem::size_of::<u32>());
+            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<u32>());
+            assert!(NDIR * std::mem::size_of::<f32>() == std::mem::size_of::<[u32; NDIR]>());
+            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<[u32; NDIR]>());
+        }
+        debug_assert_eq!(self.storage.len() % ARENA_WORDS_PER_PIXEL, 0);
+        let pixels = self.storage.len() / ARENA_WORDS_PER_PIXEL;
+
+        let (regions_ae, regions_bcd) = self.storage.split_at_mut(12 * pixels);
+        let (region_b, regions_cd) = regions_bcd.split_at_mut(4 * pixels);
+        let (region_c, region_d) = regions_cd.split_at_mut(pixels);
+        let green_dir = &regions_ae[..4 * pixels];
+        let colors = bytemuck::cast_slice(&regions_ae[4 * pixels..]);
+        let scores = bytemuck::cast_slice_mut(region_b);
+        let homo = bytemuck::cast_slice(region_c);
+        let sat = bytemuck::cast_slice_mut(region_d);
+
+        FinalBlendBuffers {
+            green_dir,
+            colors,
+            scores,
+            homo,
+            sat,
+        }
     }
 }
 
@@ -181,8 +220,8 @@ pub(crate) fn demosaic_xtrans_markesteijn(
     );
 
     // Step 6: Final blend.
-    // Reads: Regions A, E, and C (homo via SATs). Writes planar [R, G, B]
-    // directly into the output buffers — no interleave, no extract copy.
+    // Reads: Regions A, E, and C. Reuses B for scores and D for the SAT, and writes planar
+    // [R, G, B] directly into the output buffers.
     // SAFETY: blend_final writes every element of each output buffer.
     if cancel.is_cancelled() {
         return Err(Cancelled);
@@ -192,20 +231,17 @@ pub(crate) fn demosaic_xtrans_markesteijn(
     let mut b = unsafe { alloc_uninit_vec::<f32>(pixels) };
     let t = Instant::now();
     {
-        let green_dir = &arena.storage[..4 * pixels];
-        // SAFETY: Region E was fully initialized as `[f32; 2]` in Step 3.
-        let colors = unsafe {
-            let ptr = arena.storage[4 * pixels..].as_ptr() as *const [f32; 2];
-            std::slice::from_raw_parts(ptr, NDIR * pixels)
-        };
-        // SAFETY: Region C (f32 at [16P..17P]) holds the homogeneity map written as u8
-        // in Step 5; f32 alignment (4) satisfies u8 alignment (1). Read-only here.
-        let homo = unsafe {
-            let ptr = arena.storage[16 * pixels..].as_ptr() as *const u8;
-            std::slice::from_raw_parts(ptr, pixels * 4)
-        };
+        let buffers = arena.final_blend_buffers();
         markesteijn_steps::blend_final(
-            xtrans, green_dir, colors, homo, width, height, &mut r, &mut g, &mut b,
+            xtrans,
+            buffers.green_dir,
+            buffers.colors,
+            buffers.homo,
+            buffers.scores,
+            buffers.sat,
+            &mut r,
+            &mut g,
+            &mut b,
         );
     }
     tracing::debug!(
@@ -243,6 +279,47 @@ mod tests {
     struct GoldenCase {
         scene: SyntheticScene,
         samples: [GoldenSample; 4],
+    }
+
+    #[test]
+    fn final_blend_scratch_reuses_the_exact_dead_arena_regions() {
+        let width = 5;
+        let height = 3;
+        let pixels = width * height;
+        let bytes_per_word = std::mem::size_of::<f32>();
+        let mut arena = DemosaicArena::new(width, height);
+        arena.storage.fill(0.0);
+        let arena_start = arena.storage.as_ptr() as usize;
+        let arena_end = arena_start + arena.storage.len() * bytes_per_word;
+
+        let buffers = arena.final_blend_buffers();
+
+        assert_eq!(buffers.green_dir.len(), 4 * pixels);
+        assert_eq!(buffers.colors.len(), 4 * pixels);
+        assert_eq!(buffers.scores.len(), pixels);
+        assert_eq!(buffers.homo.len(), 4 * pixels);
+        assert_eq!(buffers.sat.len(), pixels);
+        assert_eq!(buffers.green_dir.as_ptr() as usize, arena_start);
+        assert_eq!(
+            buffers.colors.as_ptr().cast::<f32>() as usize,
+            arena_start + 4 * pixels * bytes_per_word
+        );
+        assert_eq!(
+            buffers.scores.as_ptr().cast::<u32>() as usize,
+            arena_start + 12 * pixels * bytes_per_word
+        );
+        assert_eq!(
+            buffers.homo.as_ptr() as usize,
+            arena_start + 16 * pixels * bytes_per_word
+        );
+        assert_eq!(
+            buffers.sat.as_ptr() as usize,
+            arena_start + 17 * pixels * bytes_per_word
+        );
+        assert_eq!(
+            buffers.sat.as_ptr().wrapping_add(pixels) as usize,
+            arena_end
+        );
     }
 
     fn synthetic_value(scene: SyntheticScene, channel: usize, x: usize, y: usize) -> f32 {

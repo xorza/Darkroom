@@ -5,7 +5,6 @@
 
 use rayon::prelude::*;
 
-use crate::io::raw::alloc_uninit_vec;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
@@ -17,6 +16,7 @@ use crate::concurrency::UnsafeSendPtr;
 /// Dir 0 = horizontal (0,1), Dir 1 = vertical (1,0),
 /// Dir 2 = diagonal (1,1), Dir 3 = anti-diagonal (1,-1).
 const DIR_OFFSETS: [(i32, i32); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
+const GREEN_BLOCK_DIRECTIONS: usize = 2;
 
 const MARK_INFO_BORDER: usize = 8;
 
@@ -424,9 +424,7 @@ fn green_block_colors(
     x: usize,
     direction: usize,
 ) -> [f32; 2] {
-    if direction >= 2 {
-        return [0.0; 2];
-    }
+    debug_assert!(direction < GREEN_BLOCK_DIRECTIONS);
 
     let width = xtrans.width;
     let offsets = hex.get(y + xtrans.top_margin, x + xtrans.left_margin);
@@ -536,35 +534,39 @@ pub(crate) fn reconstruct_colors(
         }
     });
 
-    (0..NDIR * pixels).into_par_iter().for_each(|flat| {
-        let direction = flat / pixels;
-        let index = flat % pixels;
-        let y = index / width;
-        let x = index % width;
-        if y < 2 || y + 2 >= height || x < 2 || x + 2 >= width {
-            return;
-        }
-        let raw_y = y + xtrans.top_margin;
-        let raw_x = x + xtrans.left_margin;
-        if xtrans.raw_pattern.color_at(raw_y, raw_x) != 1 || is_solitary_green(hex, raw_y, raw_x) {
-            return;
-        }
-        let value = green_block_colors(
-            xtrans,
-            hex,
-            green_dir,
-            color_ptr.get(),
-            direction * pixels,
-            y,
-            x,
-            direction,
-        );
-        // SAFETY: Each task writes one unique 2×2-green site after reading only sites
-        // completed by the preceding two stages.
-        unsafe {
-            *color_ptr.get().add(flat) = value;
-        }
-    });
+    (0..GREEN_BLOCK_DIRECTIONS * pixels)
+        .into_par_iter()
+        .for_each(|flat| {
+            let direction = flat / pixels;
+            let index = flat % pixels;
+            let y = index / width;
+            let x = index % width;
+            if y < 2 || y + 2 >= height || x < 2 || x + 2 >= width {
+                return;
+            }
+            let raw_y = y + xtrans.top_margin;
+            let raw_x = x + xtrans.left_margin;
+            if xtrans.raw_pattern.color_at(raw_y, raw_x) != 1
+                || is_solitary_green(hex, raw_y, raw_x)
+            {
+                return;
+            }
+            let value = green_block_colors(
+                xtrans,
+                hex,
+                green_dir,
+                color_ptr.get(),
+                direction * pixels,
+                y,
+                x,
+                direction,
+            );
+            // SAFETY: Each task writes one unique 2×2-green site after reading only sites
+            // completed by the preceding two stages.
+            unsafe {
+                *color_ptr.get().add(flat) = value;
+            }
+        });
 }
 
 /// Compute YPbPr spatial derivatives from the materialized directional candidates.
@@ -811,31 +813,16 @@ pub(crate) fn compute_homogeneity(
         });
 }
 
-/// Build a summed area table (SAT) from a u8 slice.
-///
-/// For an input `data` of size `height × width`, produces `(height+1) × (width+1)` u32 values
-/// where `sat[(y+1)*(width+1) + (x+1)]` = sum of data[0..=y][0..=x].
-/// Row 0 and column 0 of the SAT are zero (sentinel row/col for boundary handling).
-fn build_summed_area_table(data: &[u8], width: usize, height: usize, sat: &mut Vec<u32>) {
-    let sat_w = width + 1;
-    let sat_h = height + 1;
-    let needed = sat_w * sat_h;
-
-    // Reuse existing allocation if large enough; otherwise grow once.
-    if sat.len() < needed {
-        sat.resize(needed, 0);
-    }
-
-    // Zero the sentinel row (y=0)
-    sat[..sat_w].fill(0);
-
+/// Build an inclusive summed-area table in exactly one `width × height` plane.
+fn build_summed_area_table(data: &[u8], width: usize, height: usize, sat: &mut [u32]) {
+    debug_assert_eq!(data.len(), width * height);
+    debug_assert_eq!(sat.len(), width * height);
     for y in 0..height {
-        // Zero the sentinel column (x=0)
-        sat[(y + 1) * sat_w] = 0;
         let mut row_sum = 0u32;
         for x in 0..width {
             row_sum += data[y * width + x] as u32;
-            sat[(y + 1) * sat_w + (x + 1)] = row_sum + sat[y * sat_w + (x + 1)];
+            let above = if y == 0 { 0 } else { sat[(y - 1) * width + x] };
+            sat[y * width + x] = row_sum + above;
         }
     }
 }
@@ -843,19 +830,53 @@ fn build_summed_area_table(data: &[u8], width: usize, height: usize, sat: &mut V
 /// Query a rectangular sum from a summed area table.
 /// Computes sum of data[y0..=y1][x0..=x1] in O(1).
 #[inline(always)]
-fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usize) -> u32 {
-    // SAT is offset by +1 in both dimensions, so (y1+1, x1+1) maps to bottom-right inclusive.
-    sat[(y1 + 1) * sat_w + (x1 + 1)] + sat[y0 * sat_w + x0]
-        - sat[y0 * sat_w + (x1 + 1)]
-        - sat[(y1 + 1) * sat_w + x0]
+fn sat_query(sat: &[u32], width: usize, y0: usize, x0: usize, y1: usize, x1: usize) -> u32 {
+    let bottom_right = sat[y1 * width + x1];
+    let above = if y0 == 0 {
+        0
+    } else {
+        sat[(y0 - 1) * width + x1]
+    };
+    let left = if x0 == 0 { 0 } else { sat[y1 * width + x0 - 1] };
+    let above_left = if y0 == 0 || x0 == 0 {
+        0
+    } else {
+        sat[(y0 - 1) * width + x0 - 1]
+    };
+    bottom_right + above_left - above - left
+}
+
+fn score_homogeneity(
+    homo: &[u8],
+    width: usize,
+    height: usize,
+    scores: &mut [[u32; NDIR]],
+    sat: &mut [u32],
+) {
+    let pixels = width * height;
+    debug_assert_eq!(homo.len(), NDIR * pixels);
+    debug_assert_eq!(scores.len(), pixels);
+    debug_assert_eq!(sat.len(), pixels);
+
+    for d in 0..NDIR {
+        build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height, sat);
+
+        for y in 0..height {
+            let y0 = y.saturating_sub(2);
+            let y1 = (y + 2).min(height - 1);
+            for x in 0..width {
+                let x0 = x.saturating_sub(2);
+                let x1 = (x + 2).min(width - 1);
+                scores[y * width + x][d] = sat_query(sat, width, y0, x0, y1, x1);
+            }
+        }
+    }
 }
 
 /// Final blending: sum homogeneity in 5×5 window, select best directions,
 /// and average the materialized RGB candidates.
 ///
-/// Uses summed area tables for O(1) per-pixel window queries instead of O(25).
-/// SATs are built one direction at a time to reduce peak memory from ~4P to ~1P.
-/// Per-pixel scores are stored in a temporary `hm_buf` between passes.
+/// Uses a summed-area table for O(1) per-pixel window queries instead of O(25).
 ///
 /// `out_r`/`out_g`/`out_b` are preallocated planar channels (each length `pixels`) that the
 /// final RGB is written into.
@@ -865,41 +886,21 @@ pub(crate) fn blend_final(
     green_dir: &[f32],
     colors: &[[f32; 2]],
     homo: &[u8],
-    width: usize,
-    height: usize,
+    scores: &mut [[u32; NDIR]],
+    sat: &mut [u32],
     out_r: &mut [f32],
     out_g: &mut [f32],
     out_b: &mut [f32],
 ) {
+    let width = xtrans.width;
+    let height = xtrans.height;
     let pixels = width * height;
     assert_eq!(out_r.len(), pixels);
     assert_eq!(out_g.len(), pixels);
     assert_eq!(out_b.len(), pixels);
 
-    let sat_w = width + 1;
+    score_homogeneity(homo, width, height, scores, sat);
 
-    // Pass 1: Build one SAT at a time, query all pixels, store scores.
-    // This keeps only one SAT (~1P) alive at a time instead of all 4 (~4P).
-    // The SAT buffer is reused across all 4 directions (allocated once, ~1P u32).
-    // SAFETY: Every element of hm_buf is written by the loop below before being read.
-    let mut hm_buf: Vec<[u32; NDIR]> = unsafe { alloc_uninit_vec(pixels) };
-    let mut sat = Vec::new();
-
-    for d in 0..NDIR {
-        build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height, &mut sat);
-
-        for y in 0..height {
-            let y0 = y.saturating_sub(2);
-            let y1 = (y + 2).min(height - 1);
-            for x in 0..width {
-                let x0 = x.saturating_sub(2);
-                let x1 = (x + 2).min(width - 1);
-                hm_buf[y * width + x][d] = sat_query(&sat, sat_w, y0, x0, y1, x1);
-            }
-        }
-    }
-
-    // Pass 2: Parallel blend into planar channels.
     out_r
         .par_chunks_mut(width)
         .zip(out_g.par_chunks_mut(width))
@@ -907,7 +908,7 @@ pub(crate) fn blend_final(
         .enumerate()
         .for_each(|(y, ((r_row, g_row), b_row))| {
             for x in 0..width {
-                let hm = &hm_buf[y * width + x];
+                let hm = &scores[y * width + x];
 
                 // Find max homogeneity score
                 let max_hm = *hm.iter().max().unwrap();
@@ -1296,76 +1297,112 @@ mod tests {
     fn test_sat_uniform_ones() {
         // 4×3 grid of all 1s
         let data = vec![1u8; 4 * 3];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 4, 3, &mut sat);
+        assert_eq!(sat, [1, 2, 3, 4, 2, 4, 6, 8, 3, 6, 9, 12]);
 
         // Full image sum = 12
-        assert_eq!(sat_query(&sat, 5, 0, 0, 2, 3), 12);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 3), 12);
         // Single pixel (0,0) = 1
-        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 0), 1);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 0, 0), 1);
         // First row sum = 4
-        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 3), 4);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 0, 3), 4);
         // First column sum = 3
-        assert_eq!(sat_query(&sat, 5, 0, 0, 2, 0), 3);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 0), 3);
         // 2×2 top-left corner = 4
-        assert_eq!(sat_query(&sat, 5, 0, 0, 1, 1), 4);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 1, 1), 4);
         // 2×2 bottom-right corner = 4
-        assert_eq!(sat_query(&sat, 5, 1, 2, 2, 3), 4);
+        assert_eq!(sat_query(&sat, 4, 1, 2, 2, 3), 4);
     }
 
     #[test]
     fn test_sat_sequential_values() {
         // 3×3 grid: [1,2,3; 4,5,6; 7,8,9]
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 3, 3, &mut sat);
 
         // Full sum = 45
-        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 2), 45);
+        assert_eq!(sat_query(&sat, 3, 0, 0, 2, 2), 45);
         // Center pixel only = 5
-        assert_eq!(sat_query(&sat, 4, 1, 1, 1, 1), 5);
+        assert_eq!(sat_query(&sat, 3, 1, 1, 1, 1), 5);
         // Middle row = 4+5+6 = 15
-        assert_eq!(sat_query(&sat, 4, 1, 0, 1, 2), 15);
+        assert_eq!(sat_query(&sat, 3, 1, 0, 1, 2), 15);
         // Bottom-right 2×2 = 5+6+8+9 = 28
-        assert_eq!(sat_query(&sat, 4, 1, 1, 2, 2), 28);
+        assert_eq!(sat_query(&sat, 3, 1, 1, 2, 2), 28);
     }
 
     #[test]
     fn test_sat_single_pixel() {
         let data = vec![42u8];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 1, 1, &mut sat);
-        assert_eq!(sat_query(&sat, 2, 0, 0, 0, 0), 42);
+        assert_eq!(sat_query(&sat, 1, 0, 0, 0, 0), 42);
     }
 
     #[test]
     fn test_sat_single_row() {
         let data = vec![1, 2, 3, 4, 5];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 5, 1, &mut sat);
         // Full row = 15
-        assert_eq!(sat_query(&sat, 6, 0, 0, 0, 4), 15);
+        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 4), 15);
         // Middle 3 elements = 2+3+4 = 9
-        assert_eq!(sat_query(&sat, 6, 0, 1, 0, 3), 9);
+        assert_eq!(sat_query(&sat, 5, 0, 1, 0, 3), 9);
     }
 
     #[test]
     fn test_sat_single_column() {
         let data = vec![1, 2, 3, 4, 5];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 1, 5, &mut sat);
         // Full column = 15
-        assert_eq!(sat_query(&sat, 2, 0, 0, 4, 0), 15);
+        assert_eq!(sat_query(&sat, 1, 0, 0, 4, 0), 15);
         // Middle 3 = 2+3+4 = 9
-        assert_eq!(sat_query(&sat, 2, 1, 0, 3, 0), 9);
+        assert_eq!(sat_query(&sat, 1, 1, 0, 3, 0), 9);
     }
 
     #[test]
     fn test_sat_zeros() {
         let data = vec![0u8; 4 * 4];
-        let mut sat = Vec::new();
+        let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, 4, 4, &mut sat);
-        assert_eq!(sat_query(&sat, 5, 0, 0, 3, 3), 0);
+        assert_eq!(sat_query(&sat, 4, 0, 0, 3, 3), 0);
+    }
+
+    #[test]
+    fn homogeneity_scores_match_direct_five_by_five_windows() {
+        let width = 6;
+        let height = 5;
+        let pixels = width * height;
+        let mut homo = vec![0u8; NDIR * pixels];
+        for direction in 0..NDIR {
+            for y in 0..height {
+                for x in 0..width {
+                    homo[direction * pixels + y * width + x] =
+                        ((3 * direction + 2 * y + x) % 10) as u8;
+                }
+            }
+        }
+        let mut scores = vec![[u32::MAX; NDIR]; pixels];
+        let mut sat = vec![u32::MAX; pixels];
+
+        score_homogeneity(&homo, width, height, &mut scores, &mut sat);
+
+        for direction in 0..NDIR {
+            for y in 0..height {
+                for x in 0..width {
+                    let mut expected = 0u32;
+                    for sample_y in y.saturating_sub(2)..=(y + 2).min(height - 1) {
+                        for sample_x in x.saturating_sub(2)..=(x + 2).min(width - 1) {
+                            expected +=
+                                homo[direction * pixels + sample_y * width + sample_x] as u32;
+                        }
+                    }
+                    assert_eq!(scores[y * width + x][direction], expected);
+                }
+            }
+        }
     }
 
     #[test]
@@ -1546,8 +1583,18 @@ mod tests {
         let mut r = vec![0.0f32; pixels];
         let mut g = vec![0.0f32; pixels];
         let mut b = vec![0.0f32; pixels];
+        let mut scores = vec![[0; NDIR]; pixels];
+        let mut sat = vec![0; pixels];
         blend_final(
-            &xtrans, &green_dir, &colors, &homo, w, h, &mut r, &mut g, &mut b,
+            &xtrans,
+            &green_dir,
+            &colors,
+            &homo,
+            &mut scores,
+            &mut sat,
+            &mut r,
+            &mut g,
+            &mut b,
         );
 
         // Uniform 0.5 input → output should be approximately 0.5 for all channels
@@ -1585,8 +1632,18 @@ mod tests {
         let mut r_one = vec![0.0f32; pixels];
         let mut g_one = vec![0.0f32; pixels];
         let mut b_one = vec![0.0f32; pixels];
+        let mut scores = vec![[0; NDIR]; pixels];
+        let mut sat = vec![0; pixels];
         blend_final(
-            &xtrans, &green_dir, &colors, &homo, w, h, &mut r_one, &mut g_one, &mut b_one,
+            &xtrans,
+            &green_dir,
+            &colors,
+            &homo,
+            &mut scores,
+            &mut sat,
+            &mut r_one,
+            &mut g_one,
+            &mut b_one,
         );
         let output_one = interleave_planes([r_one, g_one, b_one]);
 
@@ -1596,7 +1653,15 @@ mod tests {
         let mut g_all = vec![0.0f32; pixels];
         let mut b_all = vec![0.0f32; pixels];
         blend_final(
-            &xtrans, &green_dir, &colors, &homo_all, w, h, &mut r_all, &mut g_all, &mut b_all,
+            &xtrans,
+            &green_dir,
+            &colors,
+            &homo_all,
+            &mut scores,
+            &mut sat,
+            &mut r_all,
+            &mut g_all,
+            &mut b_all,
         );
         let output_all = interleave_planes([r_all, g_all, b_all]);
 
