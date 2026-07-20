@@ -1,1082 +1,1751 @@
-# Stage 2 — Calibration: Best Practices & Algorithms
+# Stage 2 — Sensor calibration and transient rejection
+
+This document specifies calibration of linear, undemosaiced sensor samples. It is a
+normative implementation contract, not an acquisition tutorial. “MUST”, “SHOULD”, and
+“MAY” have their usual normative meanings.
+
+Calibration estimates the celestial signal by removing additive instrument structure,
+dividing out multiplicative response, recording samples that cannot be trusted, and
+optionally identifying single-exposure transients. It does not remove photon noise,
+read noise, or dark-current shot noise. In fact, noisy calibration masters increase the
+variance of the result.
+
+The required per-light order is:
+
+~~~text
+decode to one linear CFA domain
+→ validate the complete calibration contract
+→ subtract additive calibration
+→ divide by a prepared flat response
+→ repair or mask persistent defects
+→ optionally detect cosmic rays
+→ demosaic
+→ register and combine
+~~~
+
+All sensor calibration happens before demosaicing. A demosaicer spreads one defective
+photosite into several color samples; registration spreads it spatially. Calibration
+after either operation is no longer the same measurement problem.
+
+The adjacent [load/decode specification](01-load-decode.md) owns container parsing,
+RAW linearization, active-area selection, black-model subtraction, and normalization.
+This stage assumes those operations succeeded and must not repeat them.
+
+## 1. Input and output contract
+
+### 1.1 The scientific data domain
+
+Every light and calibration frame in one set MUST be represented by the same affine
+decoder transform:
+
+~~~text
+x = (linearized_code - decoder_black(y, x, phase)) / decoder_scale
+~~~
+
+The transform is fixed by acquisition metadata, not by the observed minimum or maximum
+of a frame. In particular:
+
+- camera white balance is unity;
+- no transfer function, tone curve, denoising, sharpening, or color matrix was applied;
+- samples are not clipped to [0, 1];
+- the active rectangle and its CFA origin are identical;
+- decoder black semantics and the normalization denominator are identical;
+- finite negative values and values above one are legal.
+
+This point changes the usual textbook notation. In conventional raw ADU equations, a
+bias frame contains the camera pedestal. Stage 1 has already subtracted the decoder's
+best black model. A Lumos bias master therefore estimates the residual repeatable
+offset left after decoding, not necessarily the original positive pedestal. A matched
+dark still estimates every repeatable additive term remaining in the decoded domain:
+residual bias, dark current, amplifier glow, and stable readout pattern.
+
+Mixing a master decoded with one black model or scale with a light decoded with another
+is invalid even when both arrays have the same dimensions. No scalar rescaling can
+generally repair a different per-phase or spatial black model.
+
+### 1.2 Required products
+
+A complete calibration bundle SHOULD contain:
+
+1. an additive master for lights:
+   - a matched raw master dark, or
+   - a master residual bias plus a bias-free scalable dark-current master, or
+   - a residual bias alone;
+2. a prepared normalized flat divisor;
+3. a persistent-defect mask with class bits;
+4. variance or uncertainty for every master and prepared divisor;
+5. acquisition/decode compatibility metadata;
+6. construction provenance and quality measurements.
+
+The per-light result SHOULD contain:
+
+- calibrated CFA samples;
+- a bit mask distinguishing source-invalid, saturated, persistent-defect,
+  cosmic-ray, interpolated, and flat-invalid samples;
+- a variance plane in the same sample units squared;
+- immutable provenance identifying every master and operation;
+- a calibrated-state marker that prevents accidental second application.
+
+An implementation without mask and variance planes can produce a displayable image,
+but cannot claim the full scientific contract in this document.
+
+### 1.3 Global invariants
+
+Before mutating a light, the implementation MUST validate all of the following:
+
+1. width, height, active rectangle, orientation, and CFA phase are identical;
+2. every sample and required scalar is finite;
+3. the light has not already been calibrated;
+4. every master was built in the same decoder domain;
+5. acquisition settings meet the role-specific compatibility rules in section 2;
+6. every divisor used for arithmetic is positive and valid;
+7. masks and uncertainty planes have exactly the sensor dimensions;
+8. a requested scaled-dark path has a bias-free dark and a valid scale;
+9. a requested flat has a valid normalization for every CFA color present;
+10. cancellation or validation failure leaves the light unchanged.
 
-## Scope & Goal
+Set the calibrated marker only after validation and successful publication of the
+complete result. An assertion or error halfway through calibration must not leave an
+apparently calibrated partial frame.
 
-Calibration is the second stage of the astrophotography pipeline (after decode/ingest,
-before star detection / registration / stacking). Its job is to convert a *raw sensor
-readout* — which carries the instrument's additive and multiplicative signatures on top
-of the sky signal — into a *linear estimate of the light that actually fell on each
-pixel*, with sensor artifacts removed. Concretely it must:
+### 1.4 Mask semantics
 
-1. Remove **additive** instrument signal: bias/offset (read-out pedestal + fixed-pattern
-   read noise) and dark current (thermally generated electrons + amp glow).
-2. Remove **multiplicative** instrument signal: the flat field (vignetting, optical
-   throughput variation, dust-mote shadows, pixel-to-pixel quantum-efficiency variation).
-3. Repair **deterministic defects**: hot/cold/dead pixels and bad columns that no
-   amount of averaging can fix because they carry no real signal.
-4. Optionally reject **transient outliers** (cosmic rays / satellite/airplane streaks)
-   that survive into a single frame.
+Use a bit mask, not a single Boolean, because several facts can apply at once:
 
-The non-negotiable invariant across all of this is **linearity**: every operation must
-keep pixel value proportional to incident photons (plus a known constant), because every
-*later* stage — flux-weighted centroids, noise-weighted stacking, photometry, drizzle —
-assumes a linear scale. Calibration that subtracts the wrong constant, divides by a
-mis-normalized flat, or clamps negative pixels to zero quietly destroys that invariant
-and biases everything downstream.
-
-This document separates **best practice** (what the authoritative implementations do and
-agree on) from **anti-patterns** (documented failure modes). Source code is cited by path
-into the cloned reference repos under `.tmp/refs/`; online claims are cited by URL and
-cross-checked against at least two independent sources.
-
----
-
-## 1. The calibration equation
-
-### 1.1 The canonical form
-
-Every reference reduces to the same per-pixel equation. With `L` the raw light frame,
-`B` master bias, `D` master dark, `F` master flat, `FD` flat-dark (a dark taken at the
-flat's exposure), and `m` a scalar normalization of the flat:
-
-```
-                 L − D                              L − (B + k·Dc)
-calibrated  =  ───────── · m       (full form:  ─────────────────── · m)
-                 F − FD                              (F − FD)
-```
-
-The DeepSkyStacker theory page states it as
-`Light = (RawLight − Offset − DarkFactor·(Dark − Offset)) / (Flat − Offset)`
-where `Offset` is the bias, `Dark − Offset` is the bias-free dark current, and
-`DarkFactor` is the dark-scaling coefficient (see §2.4). ccdproc's `ccd_process`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:138`) applies
-the identical sequence as discrete steps: overscan → trim → gain → bias → dark → flat
-(lines 294–375). Siril's `preprocess()`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/preprocess.c:124`)
-does bias-subtract → dark-subtract → flat-divide in that exact order (lines 127–156).
-
-The decomposition into bias `B` and scaled dark current `k·Dc` only matters when you
-*scale* the dark (§2.4). When the dark is used 1:1 (matched exposure/temperature/gain),
-the dark already contains the bias, and you subtract `D` in a single step — subtracting
-bias *and* an unscaled `D` would remove the bias twice. ccdproc's flat-calibration guide
-makes this explicit: *"If the combined dark frame needs to be scaled to a different
-exposure time, then bias and dark must be handled separately; otherwise, the dark and
-bias can be removed in a single step because dark frames also include bias."*
-(https://www.astropy.org/ccd-reduction-and-photometry-guide/v/dev/notebooks/05-03-Calibrating-the-flats.html)
-
-**Verified against the Astropy guide's own forward model** (pass 2, parsed from the
-calibration-overview notebook). The guide writes the *raw* readout as
-
-```
-raw image = bias + noise + dark_current + flat·(sky + stars)
-```
-
-and solves it for the science signal:
-
-```
-stars + noise = (raw_image − bias − dark_current)/flat − sky
-```
-
-This is identical in form to the lumos equation above (sky-subtraction is a later,
-post-calibration step). The single most important line in that notebook is *"It is
-impossible to remove the noise from the raw image because the noise is random"* — the
-`+ noise` term never cancels; calibration removes the *deterministic* structure (bias,
-dark, flat) and leaves a noise floor that the **stacking** stage then beats down by √N.
-This framing is why §2 obsesses over making the masters quiet: a master is the only place
-where you can drive the calibration term's *own* noise toward zero before it is mixed in.
-
-### 1.2 Why this order
-
-The order is forced by the *physics of how the signals combine*. The sensor readout is
-
-```
-L = (sky·QE·throughput·vignette  +  dark_current·t  +  bias)   [+ shot/read noise]
-```
-
-Bias and dark are **additive** and must be removed by **subtraction**; the flat is
-**multiplicative** and must be removed by **division**. You cannot divide before
-subtracting, because the additive pedestal is *not* scaled by the flat — dividing first
-would spread the bias/dark pedestal through the (non-flat) flat field and imprint
-vignetting onto what should be a constant offset. Subtract the additive terms first to
-get a clean `sky·(multiplicative)`, *then* divide out the multiplicative term. This is
-the "additive-before-multiplicative" rule and every reference enforces it
-(opticalmechanics, celestron, astropy guide — three independent sources agree).
-
-The same logic applies *inside* the flat: the flat frame itself contains bias + (small)
-dark current, which are additive and must be removed from `F` **before** `F` is used as a
-divisor — hence `F − FD` (or `F − B`). If you divide lights by a flat that still has its
-own pedestal in it, you inject the flat's bias signal into your data
-(opticalmechanics; astropy guide). Lumos therefore subtracts `flat_dark` (or `bias` as
-fallback) while preparing the normalized flat once in `CalibrationMasters::from_images`.
-
-### 1.3 Linearity and the pedestal problem
-
-After dark subtraction, background pixels straddle zero: dark-frame shot noise means a
-sky-free pixel is `0 ± σ`, so roughly half its noise excursions are **negative**. These
-negative values are *real information*. Clamping them to zero biases the mean upward and
-corrupts later noise-weighted statistics. lumos handles this correctly: `CfaImage::subtract`
-deliberately keeps negatives — *"Clamping to zero would introduce a positive bias in the
-stacked result"* (`$HOME/Projects/Scenarium/lumos/src/astro_image/cfa.rs:144`, in
-`subtract` at line 146).
-
-The classic workaround in integer pipelines (MaxIm DL, some CCD software) is a **pedestal**:
-add a fixed constant (commonly 100 ADU) after subtraction so values stay non-negative,
-and account for it at every later step
-(verified: grokipedia "Dark-frame subtraction"; AAVSO DSLR photometry guide). A float
-pipeline like lumos (`f32`, normalized `[0,1]`) needs no pedestal because it represents
-negatives natively — the better solution. The pedestal is only an integer-storage hack.
-
-### 1.4 Noise & error propagation through calibration (Newberry 1991)
-
-Every arithmetic step in calibration *adds* the calibration frame's noise to the data,
-and because the random fluctuations are uncorrelated they **add in quadrature**. The
-canonical derivation is Newberry 1991, *Signal-to-noise considerations for sky-subtracted
-CCD data* (PASP 103, 122; parsed pass 2). Work in **electrons** throughout (multiply ADU
-by gain `g`), because counting statistics are Poisson in electrons, not ADU.
-
-**The base-level (per-pixel, signal-independent) noise** is the sum in quadrature of three
-fixed terms (Newberry eq. defining `B²`):
-
-```
-B² = R² + T² + F²        [electrons²]
-```
-
-- `R` — **read noise** (intrinsic to the readout electronics; present in *every* frame,
-  including bias). Astropy: read noise "is impossible to eliminate."
-- `T` — **truncation/digitization noise**, `T² = (g²−1)/12` electrons² (the variance of a
-  uniform distribution over one ADU). Negligible at low gain; Newberry's worked example
-  has `g = 10 e⁻/ADU` → `T² = 99/12 ≈ 8 e⁻²` vs `R² = 400 e⁻²`. A float pipeline that never
-  re-quantizes to integers carries `T ≈ 0` after the first read.
-- `F` — **processing noise**: everything the *calibration frames* inject. This is the term
-  calibration controls.
-
-**Per-pixel shot terms** add on top of `B²` for an exposed pixel: object shot noise
-`σ²_obj = C_obj` and sky shot noise `σ²_sky = C_sky` (Poisson: variance = count). The
-total noise in a single calibrated science pixel is therefore approximately
-
-```
-σ²_pix ≈ C_obj + C_sky + dark_current·t + R² + F²        [electrons²]
-```
-
-with `F²` the accumulated calibration noise derived below. The take-away: **the flat and
-dark only matter through `F`; make `F` small and the pixel returns to its photon+read-noise
-limit.**
-
-**Stage-by-stage propagation** (Newberry eqs. 16–21; each operation combines independent
-noises in quadrature):
-
-| Operation | S/N transform | Consequence |
-|-----------|---------------|-------------|
-| Subtract a bias/dark frame (eq. 18) | `(S/N) → (S/N)₁·[1 + (σ₂/σ₁)²]^(−1/2)` | subtracting an *equally-noisy* single frame **doubles the variance** (√2 worse). |
-| Combine N frames (eq. 17) | variance ÷ N | averaging N subs cuts the master's variance by N (noise by √N). |
-| Divide by a flat (eq. 19) | `(S/N) → (S/N)₁·[1 + ((S/N)₁/(S/N)_FF)²]^(−1/2)` | the flat's *relative* error adds in quadrature; harmless only if `(S/N)_FF ≫ (S/N)₁`. |
-| Multiply/divide by a noiseless constant (eq. 21) | `(S/N)` unchanged | pure normalization (e.g. dividing the flat by its mean) costs no S/N. |
-
-**Why many darks/bias matter — the √2 / √N argument.** Newberry's eq. 18 shows that
-subtracting a master that has the *same* per-pixel noise as the light **doubles** the
-base-level variance (the new readout-equivalent noise is `√2·R`). To make the master's
-contribution negligible you must average enough subs that the master variance `R²/N` is
-small versus the light's own `R²` — i.e. `N` large. Newberry's worked example (20 e⁻ read
-noise, `g = 10`) shows the data reduction adds ≈20–50 e⁻ of *processing* noise per pixel
-across bias+dark+flat — *"we have effectively increased the readout noise by these
-amounts."* The Astropy guide states the same conclusion non-mathematically: *"If one tried
-to calibrate images by taking a single bias image and a single dark image, the final result
-might well look worse than before the image is reduced."* This is the quantitative basis for
-the "50–100 bias, 20–50 dark" rules of thumb in §2.1.
-
-**Why the flat is the dangerous divisor.** Newberry's eq. 19 makes the flat's cost depend on
-the data's *own* S/N: for a bright pixel (`(S/N)₁` large) even a 0.5%-uncertain flat
-(`(S/N)_FF ≈ 200`) injects significant noise, while for a faint sky-limited pixel the same
-flat is harmless. In Newberry's example the **flat-field division is the single largest S/N
-degradation for the high-count case** precisely because its 50 000 e⁻ carry shot noise that
-is divided into the data without adding any signal. Practical corollary: a flat must be both
-*well-exposed* (high `(S/N)_FF` per sub) **and** built from many subs — a dim or few-sub flat
-is the easiest way to ruin an otherwise high-S/N image.
-
-**Gain / electrons treatment.** All of the above is in electrons. ccdproc bakes this in:
-`ccd_process` builds an **uncertainty (deviation) frame** via `create_deviation(gain,
-readnoise)` immediately after trim and *before* gain/bias/dark/flat
-(`.tmp/refs/ccdproc/ccdproc/core.py:318`), so every subsequent operation propagates a
-Poisson+read-noise error array alongside the data. `cosmicray_lacosmic` likewise *"always
-need[s] to work in electrons"* and takes `gain`/`readnoise` explicitly (core.py:1541+). lumos
-does not carry a per-pixel uncertainty frame; it instead uses a normalized-domain
-**NoiseModel{electrons_per_normalized_unit, read_noise_electrons}** in star detection and
-**noise weighting** at the stack — equivalent in spirit
-(variance ∝ `1/σ²`) but it cannot propagate the flat's pixel-by-pixel error the way an
-explicit uncertainty array does. *Opportunity (see §7): an optional uncertainty plane.*
-
----
-
-## 2. Master frame creation
-
-A master frame exists to make calibration **noise-free relative to the lights**. If your
-master adds its own noise, you are trading one noise source for another. The widely cited
-rule of thumb: with too few subs you can *triple* the post-calibration noise versus the
-uncalibrated light, requiring ~9× more lights to recover — so masters must be built from
-enough subs that their noise is negligible
-(opticalmechanics "Mastering Calibration Frames"; corroborated by practicalastrophotography).
-
-### 2.1 How many subs, and which combine method
-
-Consensus across sources (opticalmechanics, celestron, practicalastrophotography,
-chaoticnebula):
-
-| Frame   | Typical count | Combine method                         | Notes |
-|---------|---------------|----------------------------------------|-------|
-| Bias    | 50–100 (100+) | average + outlier rejection, or median | cheap (0 s); take many |
-| Dark    | 20–50         | average + sigma/winsorized clip, or median | must NOT clip amp-glow region as outlier |
-| Flat    | 20–50 per filter | average + sigma clip after per-frame normalization | normalize each sub before combining |
-| Flat-dark | 20–50       | same as dark                           | matched to flat exposure |
-
-Sigma-clip threshold for *combining calibration subs* is typically **κ ≈ 3.0** high
-(starfieldview "Sigma Clipping"; opticalmechanics). **Winsorized** sigma clipping (replace
-outliers with the clip boundary rather than discarding) is recommended because it rejects
-outliers without throwing away the pixel's statistical weight — useful for the modest sub
-counts typical of calibration. DSS additionally offers median, kappa-sigma, auto-adaptive
-weighted average, and entropy-weighted average
-(http://deepskystacker.free.fr/english/technical.htm via search).
-
-**Why average-with-rejection beats plain median for masters:** the median of N frames has
-~1.57× (π/2) the variance of the mean for Gaussian noise — equivalently ~1.25× the *standard
-deviation* (√(π/2) ≈ 1.25; this is the asymptotic median variance (π/2)·σ²/N, derived in full
-below) — so a sigma-clipped/winsorized *mean* keeps more SNR while still rejecting cosmic rays
-and the occasional satellite. Median is the
-robust fallback when N is too small for rejection statistics to be reliable. lumos encodes
-exactly this heuristic: `stack_cfa_frames` uses the frame-type preset (winsorized mean for
-darks/bias at σ=3.0, sigma-clip mean for flats at σ=2.5) when N ≥ 8, and falls back to
-median below 8 frames
-(`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:92`;
-presets at `$HOME/Projects/Scenarium/lumos/src/stacking/config.rs:163`).
-
-ccdproc's `Combiner` exposes the same toolbox: `average_combine`, `median_combine`,
-`sum_combine`, plus `sigma_clipping`, `minmax_clipping`, and `clip_extrema` masking, and
-supports per-frame `weights`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/combiner.py:298–740`).
-
-**Combine-method choice by frame type — the rationale.** The choice is driven by *what kind
-of outlier* each frame type must reject and *how many subs* are typically available:
-
-- **Bias / dark** — no transient sky signal, so the only outliers are CRs and occasional RTS
-  flicker. With the 50–100+ subs you can cheaply take, **winsorized or sigma-clipped mean**
-  maximizes S/N (it keeps the √N advantage of the mean while rejecting the rare hit). lumos
-  uses winsorized κ=3 (`stacking/config.rs:163,171`); PixInsight recommends Winsorized sigma
-  clipping with a permissive ~3σ for large bias/dark sets (verified via search, pass 2).
-- **Flat** — must reject *moving* contaminants (a passing satellite, a stray hot pixel that
-  drifts if the panel shifts) **and** equalize the per-frame illumination level, so flats are
-  **per-frame normalized first, then sigma-clip-mean combined** (lumos κ=2.5 +
-  `Normalization::Multiplicative`, `config.rs:185`). Normalizing *before* combining is what
-  lets clipping see real outliers rather than illumination drift.
-- **Light** — sigma/winsorized clip at the stack is the CR/plane/satellite remover (§4.1);
-  lumos adds **noise weighting** so quieter subs count more (`config.rs:191`).
-
-The deeper reason mean-with-rejection beats median is variance: for Gaussian noise the
-sample **median has π/2 ≈ 1.57× the variance of the mean** (often quoted as the ~1.25×
-*standard-deviation* ratio, √1.57 ≈ 1.25). A sigma-clipped/winsorized mean recovers almost
-all of that lost S/N while still being robust; median is the fallback only when N is too
-small for clip statistics to be trustworthy — which is exactly lumos's `< 8 frames → median`
-switch (`calibration_masters/mod.rs:92`).
-
-### 2.2 Bias vs superbias
-
-A **master bias** is the average of many zero-(or minimum-)exposure frames; it captures the
-read-out pedestal and the fixed-pattern read noise. Because bias subs are free to take,
-take 100+ — the master bias should be far quieter than anything it calibrates. A
-**"superbias"** (PixInsight term) is a *modeled/smoothed* master bias: the master bias is
-decomposed (e.g. multiscale/wavelet) and the random component discarded, keeping only the
-deterministic fixed pattern. This yields an essentially noise-free bias model. lumos has no
-superbias modeling — its bias master is a straight winsorized mean (a reasonable v1).
-
-**How SuperBias actually works** (PixInsight, verified pass 2). The module *"simulates the
-result of stacking thousands of individual bias frames"* by running a **multiscale
-decomposition** (default **7 layers**) over an ordinary master bias whose dominant signal is
-*"a pattern of vertical and/or horizontal stripes."* It then reconstructs **only the
-structured (large-scale) component and discards the small-scale detail layers** that carry the
-random noise: the output has *"absolutely no random noise"* (Blackwater Skies, verbatim) yet
-retains the fixed pattern. The layer count works in the *opposite* sense to first intuition:
-because the small-scale layers are the ones thrown away, **fewer layers preserve more (finer)
-structure** while **more layers discard progressively coarser detail**, smoothing harder and so
-attenuating large-scale banding. Default is **7**; reduce to ~6 when the master bias already
-came from ≥50 subs (so finer real structure survives), and *raise* it (Blackwater Skies found
-10 layers "reduces the effect of the large scale horizontal band pattern" along the top edge)
-when a broad band must be suppressed. The precondition: SuperBias only helps when
-the bias's fixed-pattern noise is *structured* (amplifier banding). For a featureless,
-well-randomized bias it gains little — and on CMOS where the bias itself is unreliable (next
-subsection) the concept is moot because you skip the bias entirely.
-
-### 2.3 When each frame type is actually needed
-
-- **Bias**: needed if (a) you scale darks (§2.4) — then bias must be removed separately, or
-  (b) you calibrate flats with bias instead of flat-darks, or (c) you synthesize a master
-  dark for a different exposure. **Caveat:** many modern CMOS sensors (e.g. ASI294,
-  IMX571/455 families) *cannot produce a reliable bias frame* — their shortest exposures are
-  non-linear / the bias drifts, so a "bias" frame makes calibration *worse*
-  (britastro CMOS bias thread; astroworldcreations Part 3; cloudynights). For these, **skip
-  bias entirely** and keep the bias signal inside matched darks and flat-darks.
-- **Dark**: removes dark current and (critically) **amp glow**. Needed for any exposure long
-  enough that thermal signal or amp glow is significant. Must match the lights' **exposure,
-  gain/ISO, and temperature** (sensor temperature for CMOS, ideally set-point cooled).
-- **Flat**: removes vignetting, dust shadows, and pixel-QE variation. Needed essentially
-  always for deep-sky; it is the frame that most visibly improves images (flat field is what
-  makes a gradient-free, dust-free background possible).
-- **Flat-dark** (a.k.a. dark-flat): a dark matched to the **flat's** exposure time. The
-  modern best practice for CMOS — subtract a flat-dark from the flat instead of a bias,
-  because the flat-dark captures the (non-linear, drifting) short-exposure pedestal that a
-  bias frame cannot. Switching bias→flat-dark is the documented fix for **residual rings**
-  after flat correction on CMOS with unstable bias
-  (astroworldcreations Part 3; cloudynights; mypetstars). lumos models this directly:
-  `flat_darks` is its own role and takes **priority over bias** when normalizing the flat
-  (`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:181`).
-
-### 2.4 Dark scaling / dark optimization — and when it fails
-
-**Dark scaling** multiplies the bias-subtracted master dark by a factor `k` before
-subtraction, to compensate when the dark's exposure or temperature does not exactly match
-the light. Two ways to compute `k`:
-
-1. **Exposure ratio** (the linear, physically-motivated factor): `k = t_light / t_dark`.
-   Siril's `darkOptimization` uses this when `use_exposure` is set (and warns if the dark is
-   *shorter* than the lights)
-   (`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/preprocess.c:178–198`).
-   ccdproc's `subtract_dark(scale=True)` computes
-   `scale_factor = data_exposure / dark_exposure` and multiplies the master before
-   subtracting
-   (`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:843–856`).
-
-2. **Noise/entropy minimization** (the empirical "dark optimization"): search `k` to
-   minimize the noise (or entropy) of the *calibrated* background. Siril does a
-   **golden-section search** (golden ratio `GR = (√5−1)/2`) over `k ∈ [0, 2]` to tolerance
-   `0.001`, evaluating, for each trial `k`, the **mean background σ over a 512×512 central
-   square** of the dark-subtracted image (`evaluateNoiseOfCalibratedImage`, summed across
-   channels as `Σ σ/normValue`) and minimizing it
-   (`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/preprocess.c:44–122,161–198`,
-   verified pass 2). The central-square restriction keeps amp-glow corners and vignetted edges
-   from biasing the noise estimate. DeepSkyStacker searches `k ∈ [0, 5]` in 0.01 steps
-   minimizing either Shannon **entropy** (`ComputeMinimumEntropyFactor`) or RMS
-   (`ComputeMinimumRMSFactor`), **per color channel** for OSC (`fRedFactor`/`fGreenFactor`/
-   `fBlueFactor`)
-   (`$HOME/Projects/Scenarium/lumos/.tmp/refs/DeepSkyStacker/DeepSkyStackerKernel/DarkFrame.cpp:127–265, 574–791`).
-   Notably DSS treats amp glow *separately* from the dark factor: `CDarkAmpGlowParameters`
-   models the glow gradient (hottest-minus-coldest region medians, `DarkFrame.cpp:1051+`)
-   rather than folding it into the single multiplicative `k` — an implicit admission that one
-   scalar `k` cannot fit both dark current and glow.
-
-**Mandatory precondition:** dark scaling is only valid on the **bias-free** dark
-(`Dark − Offset`). The bias pedestal does *not* scale with exposure; scaling a dark that
-still contains bias multiplies the pedestal by `k` and leaves a residual offset. This is why
-the ccdproc *guide* insists bias and dark be handled separately whenever the dark is scaled,
-and why DSS works on `Dark − Offset`. Note the precondition is a *workflow* rule, not enforced
-by the code: `subtract_dark(scale=True)` simply computes `scale_factor =
-data_exposure/dark_exposure` and multiplies whatever master it is handed before subtracting
-(core.py:851, verified pass 2); keeping that master bias-free is the caller's responsibility,
-which `ccd_process` arranges by subtracting the master bias (core.py:346) *before* the scaled
-dark (core.py:355).
-
-**When dark scaling fails (anti-pattern territory):**
-- **Scaling *up* a short dark amplifies its noise** (a failure mode independent of amp glow).
-  The Astropy guide is explicit: *"Do not take short dark frames and scale them up to longer
-  exposure times … If you rescale those images to a longer exposure time then you
-  inappropriately amplify that noise"* (parsed pass 2). Multiplying a dark by `k > 1` scales
-  its read+shot noise by `k` too, so a `k = 10` scale-up injects 10× the dark's noise — worse
-  than no dark. Scaling *down* (`k < 1`) is safer but still imperfect. Siril guards exactly
-  this: it **warns when `k = t_L/t_D > 1`** (master dark shorter than the lights, preprocess.c:191).
-- **Amp glow does not scale with the dark-current pedestal.** Subtlety worth stating
-  precisely: amp glow *does* grow roughly linearly with **exposure time at fixed gain and
-  temperature** (Astropy LFC example: sensor glow *"grows linearly with exposure time"*), but
-  it does **not** track the thermal dark-current pedestal when **temperature or gain** change,
-  and its spatial profile is fixed by the readout electronics, not by integration. So a single
-  multiplicative `k` chosen to match the dark-current level cannot simultaneously match the
-  glow, leaving a residual glow gradient. *"amp glow does not behave linearly so it's always
-  important to not use dark scaling if your sensor has significant amp glow"* (telescope.live;
-  cloudynights; astropixelprocessor — three sources). The cure is *matched* darks (same
-  exposure/gain/temperature) so the glow subtracts 1:1, never scaling.
-- **CMOS pattern/telegraph noise** doesn't scale cleanly either (cloudynights IMX455/571).
-- **Over-correction** from scaling produces dark mottle/holes where the scaled dark exceeded
-  the light's true dark signal (cloudynights "Darks over-correcting").
-
-**Bias-dependence and temperature.** Two preconditions underlie all scaling: (1) the
-dark-current rate must itself be *stable* — the Astropy guide recommends a **hot-pixel
-stability test**: shoot darks at several exposures; *"If the dark current is constant then
-the dark counts will be properly removed … If the dark current is not constant, the pixel
-should be excluded"* (parsed pass 2). Unstable (RTS) hot pixels cannot be scaled and belong
-in the defect map (§3). (2) Dark current roughly **doubles every ~5–7 °C**, so even a small
-temperature mismatch breaks the `k = t_L/t_D` linearity that assumes only exposure differs —
-which is why CMOS guidance insists on *set-point cooled* temperature matching, not scaling.
-
-**Best practice:** match darks to lights in exposure/gain/temperature and use `k = 1` (no
-scaling). Reserve scaling for well-behaved, glow-free CCDs where exact matching is
-impractical. **Disable dark optimization when the sensor has amp glow** (universal advice).
-lumos currently does **not** scale darks at all (always `k = 1`), which is the safe default
-but means it cannot reuse a dark library across exposures — see §7.
-
-### 2.5 Flat illumination & normalization
-
-**Illumination requirements.** A flat must be (a) **uniform** — sky flats (twilight), an EL
-panel, or a T-shirt over the OTA — and (b) exposed into the sensor's **linear regime**:
-roughly 1/3–1/2 of full well (ADU ~20k–35k for a 16-bit sensor), never near saturation and
-never so dim that read noise dominates. PixInsight notes that with *"sufficiently exposed
-flat frames, no clipping will arise, so the application of an output pedestal is never needed
-in the calibration of flat frames"*
-(https://www.pixinsight.com/tutorials/master-frames/ via search). Each flat must use the
-**same optical train, focus, and camera rotation** as the lights (dust shadows move
-otherwise), and a fresh flat set is required per filter.
-
-**Illumination source trade-offs** (sky vs dome vs panel). All three aim for the same thing —
-a *spatially flat, spectrally representative* illumination filling the same light cone as the
-sky — but trade differently:
-
-| Source | Uniformity | Spectrum match | Gotchas |
-|--------|-----------|----------------|---------|
-| **Twilight/sky flats** | excellent (sky is intrinsically smooth) | best for broadband (true sky-like SED) | narrow time window; sky gradient + stars require dither-and-median across many subs; level changes fast → variable exposures, hence per-frame normalization |
-| **Dome / wall (white screen)** | good if evenly lit | depends on lamp color temperature | uneven dome lighting imprints a false large-scale gradient; reflections |
-| **EL/LED panel** | very good (Lambertian emitter) | LED SED is *not* white → strong per-channel level imbalance on OSC | drives the per-CFA-channel color-shift problem (below); cheap and repeatable |
-
-The panel's spectral mismatch is exactly why per-channel flat normalization (below) became
-standard: a "white" LED panel is typically blue-heavy and green-rich, so R/G/B land at very
-different ADU even though the *vignetting/dust pattern* — the only thing a flat must capture —
-is identical across channels.
-
-**Why divide, not subtract.** The flat encodes a **multiplicative** response: each pixel's
-recorded value is `true_flux · s(x,y)` where `s` is the local sensitivity (QE · transmission ·
-vignette · dust-shadow factor), `s ∈ (0, 1]`. Vignetting that darkens a corner to 60 % means
-`s = 0.6` there; the *fix* is `value / 0.6 = value · 1.667`, i.e. **division**, which is
-flux-conserving and restores the corner to its true level. Subtracting a flat would instead
-remove a *constant* — wrong dimensionally (you'd be subtracting a sensitivity from a flux) and
-it would leave the multiplicative gradient intact while corrupting the zero point. A dust
-shadow at `s = 0.7` is similarly *restored* by `÷0.7`, not by adding back a fixed ADU. The
-additive terms (bias, dark) were already removed first (§1.2) precisely so that what remains is
-a clean `true_flux · s` that division cleanly inverts.
-
-**Normalization — divide by the mean.** Before a flat can be a divisor it is normalized to
-unity mean (or median): `F_norm = (F − FD) / mean(F − FD)`. ccdproc's `flat_correct`
-normalizes the (optionally min-clipped) flat by its mean (or a supplied `norm_value`) and
-then divides
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:927–1013`).
-Siril computes the normalization as the **mean of a central region** of the flat
-(`startx = width/3 … `, to avoid the vignetted edges biasing the mean) and divides by it via
-`siril_fdiv`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/preprocess.c:332–366`).
-Dividing by the mean keeps the calibrated light at the same overall flux scale (the flat
-only *reshapes*, it does not rescale brightness). ccdproc also exposes `min_value` to floor
-the flat and prevent division by near-zero in deeply vignetted corners (core.py:970–975) —
-lumos guards the same case by only dividing where `norm_flat > f32::EPSILON`
-(`$HOME/Projects/Scenarium/lumos/src/astro_image/cfa.rs:232,243`).
-
-**Per-channel normalization for OSC / CFA flats — the color-shift fix.** A flat taken with a
-non-white source (LED panel, twilight) has *different mean levels in R, G, and B*. If you
-normalize an OSC flat by a single global mean, division rescales the channels unequally and
-**shifts the color** of every calibrated light.
-
-*Derivation of the failure.* Let the per-color sensitivity be `s_c(x,y)` and the panel emit
-color-dependent flux `P_c`, so a flat pixel of color `c` reads `F_c = P_c · s_c`. The *only*
-thing a flat should remove is the **shape** `s_c(x,y)/⟨s_c⟩` (vignette + dust); the per-color
-*level* `P_c·⟨s_c⟩` is an illumination artifact that must cancel. Normalizing the *whole*
-mosaic by one global mean `m = ⟨F⟩` gives a divisor `F_c/m`, and dividing a light `L_c` by it
-yields `L_c · m / (P_c·s_c)`. The residual factor `m/P_c` differs per channel → a fixed
-**color cast** baked into every light. Normalizing **each color by its own mean** `m_c =
-⟨F_c⟩` instead gives divisor `F_c/m_c = s_c/⟨s_c⟩` — the pure shape, with `P_c` cancelled — so
-the light comes out as `L_c·⟨s_c⟩/s_c`, no per-channel rescale. That is the fix, and it is now
-standard:
-- **PixInsight** added *"Separate CFA flat scaling factors"* in ImageCalibration 1.8.8-6,
-  computing 3 CFA scaling factors so *"the color shift that occurred with flat field
-  correction in previous versions is avoided"*
-  (Landmann ImageCalibration guide; pixinsight.com — verified).
-- **Siril** `compute_grey_flat` computes per-color channel means over the CFA pattern via
-  Welford's online mean/variance, **infers the Bayer pattern as the candidate with minimum
-  green-channel variance** (a robustness trick — the correct pattern makes the two green
-  sub-lattices most self-consistent), then applies `coeff1 = R̄/Ḡ`, `coeff2 = B̄/Ḡ` to equalize
-  R and B *to green* before division
-  (`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/siril.c:453–514`,
-  re-verified pass 2), gated by the `equalize_cfa` option (`preprocess.c:329`).
-- **DeepSkyStacker** computes per-channel (R/G/B) dark factors and flat handling.
-- **lumos** does this natively: `calibration_masters::prepared_flat` accumulates
-  independent R/G/B sums once, normalizes each color by its own mean, and stores the
-  resulting divisor for every light.
-
-Note the subtle policy difference: lumos/PixInsight normalize each channel to its **own**
-mean (color balance deferred to a later white-balance/PCC step), whereas Siril's
-`compute_grey_flat` equalizes the channels **relative to green** (preserving the flat's
-green-referenced balance). Both avoid the global-mean color shift; they differ only in
-which neutral point they pick.
-
-### 2.6 Overscan / bias drift
-
-True CCDs have a physical **overscan** region (non-illuminated readout columns) used to track
-the bias level *per frame*, absorbing slow bias drift between exposures. ccdproc supports
-this with `subtract_overscan` (median or modeled per row/column) and `trim_image`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:487` and
-`ccd_process` lines 294–315). Consumer CMOS/DSLR sensors expose no overscan; the bias-drift
-problem there is handled either by frequent bias re-takes or — better — by folding bias into
-matched darks/flat-darks (§2.3). lumos has no overscan support (irrelevant for its RAW/CMOS
-target audience, but a gap for scientific CCD data).
-
----
-
-## 3. Defect / hot-pixel maps
-
-Hot, cold, and dead pixels and bad columns are **deterministic** sensor defects: they read a
-wrong value regardless of incident light, so averaging cannot fix them and they must be
-*detected* and *replaced*. The master dark is the natural detector (hot pixels are obvious in
-a dark), though a defect map can also be built from a master flat (dead pixels) or supplied
-externally.
-
-### 3.1 Detection: broad dark subtraction + robust residual thresholds
-
-Lumos first separates sensor-scale dark structure from point defects:
-
-1. Compute a robust median for each CFA color in balanced 64×64 tiles.
-2. Bilinearly interpolate those medians, including linear extrapolation from the outer tile
-   centers to the sensor edges, to obtain a smooth per-color dark-current model.
-3. Subtract the model. Sensor gradients and amp glow therefore remain calibration signal rather
-   than being misclassified as point defects.
-4. Compute the **median** and **MAD** of each color's residual population:
-   `MAD = median(|rᵢ − median(r)|)`.
-5. Convert MAD to `σ_MAD ≈ 1.4826 · MAD`, and independently convert the 99th percentile of
-   absolute residuals to `σ_tail = P99(|rᵢ − median(r)|) / 2.5758`. Use the larger scale so
-   column structure and broad-model error do not enter the point-defect tail.
-6. Floor the scale at the RAW ADC quantization uncertainty (`q/√12`) propagated per frame through
-   the master combine's normalization, weights, and actual rejection survivors. Exact linear-mean
-   and equal-source median results are retained; nonlinear/heterogeneous order statistics use a
-   conservative source bound. When CFA provenance is unavailable, use f32 numeric resolution.
-7. Flag **hot** if `r > median(r) + k·max(σ_MAD, σ_tail, σ_resolution)`.
-
-**Why MAD, not standard deviation:** std is itself inflated by the very outliers you are
-hunting (a few 60000-ADU hot pixels balloon σ and hide the merely-warm ones). MAD has a 50%
-breakdown point — up to half the pixels can be outliers and the median/MAD stay valid. lumos
-documents this rationale in `stacking/calibration_masters/defect_map/mod.rs`.
-
-**Why a tiled model instead of a same-color neighbor median:** a compact hot cluster can dominate
-the immediate neighborhood of every member, making the cluster its own reference. A 64×64 tile
-has enough red/blue samples for a robust median while remaining small relative to broad sensor
-gradients. The interpolated model follows amp glow, but isolated points, hot columns, and compact
-same-color clusters remain positive residuals.
-
-**Correction (pass 2):** the prior pass stated Siril's `find_deviant_pixels` uses
-*"mean ± k·σ"*. The source actually computes thresholds as **`median ± k·σ`** —
-`median = stat->median`, `sigma = stat->sigma` (ordinary STATS_BASIC stddev), then
-`thresHot = median + sig[1]·sigma`, `thresCold = max(median − sig[0]·sigma, 0)`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/filters/cosmetic_correction.c:200–213`,
-re-verified pass 2). So Siril and lumos agree on the **median** as the central statistic; they
-differ only in the **σ estimator** — Siril uses the ordinary (outlier-inflated) standard
-deviation, while lumos uses robust MAD and upper-bulk residual scales with a data-resolution
-floor. The central-statistic difference asserted in pass 1 was wrong.
-
-**Correction (pass 2):** the DSS *"median + 16·σ"* figure was flagged in pass 1 as
-search-snippet-sourced. It is now **primary-verified** in the DSS source: hot-pixel detection
-computes, *per RGB channel*, `threshold = histogram.GetMedian() + 16.0 · histogram.GetStdDeviation()`
-and flags any pixel above its channel threshold
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/DeepSkyStacker/DeepSkyStackerKernel/DarkFrame.cpp:1738–1745`).
-The `16.0` is hardcoded — a deliberately loose multiplier so only genuine hot pixels are
-caught. Net: the *threshold statistic* varies by implementation (lumos median plus its robust
-residual σ at k=5, Siril median+stddev·σ, DSS median+16·stddev), all per-color; the
-σ-multiplier is a tuning knob, not a correctness issue.
-
-**Per-CFA-color modeling and statistics.** On raw CFA data, the green pixels (50% of a Bayer frame) sit at
-a different baseline than red/blue. Computing one global median/MAD lets green dominate and
-masks defects in red/blue. Lumos fits the dark model and computes residual thresholds
-**per color**, so a hot red pixel is tested only against red residuals. The synthetic regression
-combines unequal color baselines, unequal gradients, unequal amp-glow strength, isolated R/G/B
-points, and a 25-member same-color cluster; the detected list is exactly the injected list.
-
-**Resolution guard.** A pristine, near-uniform dark can have MAD ≈ 0, which would make every
-representable deviation exceed `k·σ`. RAW decode stores `q/√12` on the CFA image from the camera's
-actual black-to-maximum ADC step. CFA frame statistics carry each value through RAM and disk
-tiers, and stacking propagates it through normalization, weights, and the rejection survivors at
-each pixel; the single master value is the conservative maximum. Defect detection uses it as the
-floor, with f32 resolution only when CFA provenance is absent. No fixed normalized/ADU threshold
-remains.
-
-**Adaptive sampling.** Exact median over a 60-megapixel channel is slow. Lumos allocates a real
-100K-sample cap independently to each color, apportions it by the population of every same-color
-CFA phase, and samples spatially distributed rows with a rotating uniform column lattice. This
-avoids the column aliasing of a row-major stride while preserving the full sensor extent. The
-background model is still evaluated for every pixel during classification; only the robust
-distribution estimate is sampled.
-
-### 3.2 Correction: same-CFA-color neighbor median
-
-A defect is replaced by a **robust local estimate**, never by zero or by a raw neighbor of the
-wrong color:
-
-- **Mono:** median of the 8-connected neighbors (lumos `median_of_neighbors_raw`,
-  `defect_map/mod.rs:253–285`).
-- **Bayer:** median of **same-color** neighbors at **stride 2** (the nearest pixels behind the
-  *same* color filter). Replacing a hot red pixel with adjacent green/blue values would inject
-  a false color into the demosaic. lumos `bayer_same_color_median` uses the 8 stride-2
-  neighbors (`defect_map/mod.rs:307–334`); Siril's cosmetic median uses `step = 2` for CFA data,
-  same idea (`cosmetic_correction.c:46, 73–74, 131–132`).
-- **X-Trans:** lumos searches a ±6-pixel window (13×13 = 169 candidates; since the X-Trans
-  mosaic repeats every 6 px this spans roughly two full periods in each direction) for
-  same-color pixels, sorts by Manhattan distance, and medians the closest 24 to avoid
-  directional bias (`defect_map/mod.rs:340–383`). (The in-code comments are loose about this —
-  `defect_map/mod.rs:290` says "2*period", `:337` says "one full period"; the literal value is
-  `radius = 6`.) (Siril explicitly refuses cosmetic correction on X-Trans —
-  `preprocess.c:388–390` — so lumos is *more* capable here.)
-
-Using the **median** (not mean) of neighbors is important: a defect often clusters with other
-defects or sits next to a star, and the median resists those.
-
-### 3.3 The defect taxonomy: hot, cold, RTS, bad columns
-
-Not all defects are alike, and the distinction matters for whether a *static* defect map can
-fix them at all:
-
-- **Hot pixels** — elevated, *stable* dark current. The bread-and-butter of a defect map:
-  they read the same high value in every dark, so `median + k·σ` on the master dark catches
-  them and a neighbor median repairs them. Stable across frames → a static map suffices.
-- **Cold / dead pixels** — stuck low or zero (a dead photosite or a broken readout). Often
-  *invisible in a dark* (a dead pixel reads ~0, indistinguishable from the dark floor) — these
-  are better found in a **flat**, where an unresponsive pixel shows as a dark spot under
-  uniform illumination. lumos first subtracts bias or flat-dark from the master flat, then
-  detects cold/dead pixels on that unfloored response via a local same-color-neighbor ratio
-  (`< DEAD_PIXEL_FRACTION × local median`). The local reference tracks vignetting and dust
-  shadows where a global `median − k·σ` cut cannot (`defect_map/mod.rs`, `detect_cold`).
-- **RTS / "flickering" / telegraph pixels** — random-telegraph-signal pixels that hop between
-  two or more levels *between frames*. They are the trap for static maps: a single master dark
-  catches them only if they happened to be "high" during that capture, and a fixed map then
-  mis-corrects the frames where they were "low." The Astropy hot-pixel **stability test**
-  (§2.4) is exactly how you flag them — *"If the dark current is not constant, the pixel should
-  be excluded"* — and once excluded, the *correct* tool is **dither + stack rejection** (§3.4),
-  not the defect map.
-
-**Bad columns** are a special
-case neither lumos nor Siril's dark-map path handles directly: a full bad column has no good
-same-color *horizontal* neighbors nearby, so a per-pixel neighbor median degrades (it pulls
-from the adjacent bad column). DSS specifically offers *"detect and remove hot pixels **and
-bad columns**"* as a stacking option (DSS technical docs via search), and the robust general
-remedy is **dithering** (§3.4) + outlier rejection at the stack: shifting the column across
-the sky between frames turns a fixed bad column into a rejectable per-frame outlier.
-**Gap:** lumos has no explicit bad-column model.
-
-### 3.4 Dithering as a complement to defect maps
-
-Defect maps fix *known, static* defects. **Dithering** — nudging the mount a few pixels
-between exposures — is the complementary technique for everything else: residual hot pixels,
-walking noise, fixed-pattern noise, and bad columns become *non-coincident* across frames in
-sky coordinates, so the stacking rejection (sigma/winsorized clip) removes them and they
-average down (opticalmechanics; multiple guides). The practical doctrine: **dither + robust
-stack first, defect map as cleanup** — the defect map then only has to handle the few pixels
-too consistently bad to reject. Calibration and acquisition strategy are coupled here.
-
----
-
-## 4. Cosmic ray rejection
-
-Cosmic rays (and satellite/airplane streaks) are sharp, localized, single-frame events. Two
-families of methods:
-
-### 4.1 Multi-frame rejection (sigma clipping at the stack)
-
-When you have many registered lights, **per-pixel sigma/winsorized clipping during stacking**
-removes any value far from the stack median — cosmic rays included. This is the cheapest and
-most reliable CR removal *when you have enough frames* and is what lumos relies on (its light
-preset uses σ=2.5 sigma-clip,
-`$HOME/Projects/Scenarium/lumos/src/stacking/config.rs:191`). Caveats: it needs
-enough frames for robust statistics, and stacks with very different PSF widths force a
-lenient-vs-strict tradeoff (cambridge.org PASA "Evaluation of CR rejection"; swarp clipped-mean paper).
-
-### 4.2 Single-frame rejection: L.A.Cosmic (van Dokkum 2001)
-
-**L.A.Cosmic** identifies cosmic rays in a *single* image by **Laplacian edge detection**: a
-CR has *sharper edges* than a (PSF-broadened) star, so a Laplacian highlights it independently
-of its shape or size. The key insight is that sharpness, not contrast, separates CRs from real
-sources — so the method works even when a CR is larger than a median-filter kernel or the PSF
-is undersampled. The full algorithm, parsed from the paper (van Dokkum 2001, PASP; arXiv
-astro-ph/0108003, `.tmp/papers/lacosmic_vandokkum2001.txt`), per iteration is:
-
-1. **Subsample ×2.** Block-replicate the image to `2n×2n` (`I⁽²⁾`). Done so the Laplacian's
-   negative cross-pattern around bright pixels doesn't attenuate adjacent CR pixels; results
-   are independent of the factor and ×2 is cheapest (paper eq. 5).
-2. **Convolve with the Laplacian kernel** `∇²f = [[0,−1,0],[−1,4,−1],[0,−1,0]]` (eq. 4),
-   giving `L⁽²⁾`. CR edges are positive inside, negative outside.
-3. **Clip negatives** to zero: `L⁽²⁾⁺ = max(L⁽²⁾, 0)` (eq. 7) — retains CR flux, removes the
-   cross-pattern.
-4. **Resample back ×2** (block-average) to `L⁺` at native resolution (eq. 8).
-5. **Build the noise model** `N = (1/g)·√(g·(M₅∘I) + σ_rn²)` where `g` = gain (e⁻/ADU),
-   `σ_rn` = read noise (e⁻), `M₅` = 5×5 median filter (eq. 10). The median-filtered image gives
-   a CR-free estimate of the expected Poisson level per pixel.
-6. **Significance image** `S = L⁺ / (f_s·N)` (eq. 11, `f_s` = subsampling factor). This is the
-   Laplacian in units of *σ above expected Poisson noise*.
-7. **Remove sampling flux** so bright smooth structure doesn't trip the threshold:
-   `S′ = S − (S∘M₅)` (eq. 12) — a 5×5 median removes structure smooth on ≳5 px while leaving
-   CRs and noise untouched.
-8. **Build the fine-structure image** `F = (M₃∘I) − ((M₃∘I)∘M₇)` (eq. 14). `F` is large for
-   *symmetric* point sources (stars retain flux) but **near-zero for CRs** (asymmetric).
-9. **Flag** a pixel as a CR iff **`S′ > σ_lim`** AND **`L⁺/F > f_lim`**. `σ_lim` (≈`sigclip`)
-   is the Laplacian-to-noise limit; `f_lim` (≈`objlim`) is the minimum CR-to-fine-structure
-   contrast. Defaults: `f_lim = 2` for well-sampled data, `≈5` for undersampled (HST WFPC2).
-   The paper's worked numbers: a critically-sampled star has `L⁺/F = 0.7`, an undersampled
-   star `1.8`, but a CR `21` — easily separated.
-10. **Grow + replace + iterate.** Optionally lower the threshold for pixels *neighboring*
-    flagged CRs (the `sigfrac` mechanism), replace flagged pixels with the median of
-    surrounding good pixels, and repeat — large CRs need several passes because the Laplacian
-    only retains ~50% of an interior CR pixel's flux per iteration (paper eq. 13).
-
-Reported reliability (van Dokkum's WFPC2 test): found **98.1% of >6σ** and **99.1% of >10σ**
-CR-affected pixels, with only **1.2% false positives at ≥6σ and 0.02% at ≥10σ** — better than
-neural-net morphological classifiers.
-
-ccdproc wraps the astroscrappy port as `cosmicray_lacosmic` with canonical defaults — verified
-in source pass 2 — `sigclip=4.5, sigfrac=0.3, objlim=5.0, gain=1.0, readnoise=6.5, niter=4`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:1541+`), where:
-- **`sigclip`** = `σ_lim`, the Laplacian-to-noise limit (lower → more sensitive);
-- **`sigfrac`** = the *neighbor* threshold is `sigfrac·sigclip` (step 10 above), so 0.3 means
-  pixels touching a CR are flagged at `0.3·4.5 = 1.35σ`;
-- **`objlim`** = `f_lim`, the minimum `L⁺/F` contrast (raise to protect bright stellar cores);
-- **`niter`** = iteration count.
-It *"always need[s] to work in electrons"* — hence the explicit `gain`/`readnoise` — i.e. it
-must run on **linear, calibrated** data. ccdproc also offers a simpler `cosmicray_median`
-(subtract an 11×11 median, threshold at `k·σ`, optionally grow and replace) (`core.py:1949`).
-
-### 4.3 Where CR rejection belongs in the pipeline
-
-The important, well-sourced nuance: **single-frame CR rejection (L.A.Cosmic) belongs before
-registration/warping**. Van Dokkum 2001 motivates single-frame rejection precisely for this
-case — it is desirable *"if the images are shifted with respect to each other by a non-integer
-number of pixels"* (arXiv astro-ph/0108003, verified) — because a non-integer shift forces the
-warp to *interpolate*, and a CR smeared by a Lanczos kernel becomes a low-amplitude blob that
-sigma clipping can no longer reject. (The "interpolation spreads unrejected CRs" framing is the
-standard operational rationale behind this ordering; it is *not* a verbatim van Dokkum quote —
-the paper states it through the non-integer-shift argument above.) So:
-
-- **Few frames / single frame** → run L.A.Cosmic on each *calibrated, pre-registration* frame.
-- **Many frames** → dither + sigma/winsorized clip at the stack catches most CRs, but running
-  L.A.Cosmic first still protects against interpolation smearing of the brightest hits.
-
-L.A.Cosmic is itself **not** part of master-frame creation (you reject CRs in the *masters*
-via the same combine-time clipping). It is a *light-frame* operation, logically after
-calibration (it needs linear data + gain/read-noise) and before warp. **Gap:** lumos has no
-single-frame CR rejection; it relies entirely on stack-time clipping.
-
-**L.A.Cosmic vs median-stack rejection — when to use which.** They are complementary, not
-redundant, and the boundary is *frame count and dither*:
-
-| | Median / sigma-clip at the stack | L.A.Cosmic (single frame) |
+| Bit | Meaning | Arithmetic policy |
 |---|---|---|
-| Needs | many frames (≳5–8 for robust stats) | works on **one** frame |
-| Discriminates CR from star by | a CR hits one frame, a star is in all | edge *sharpness* + fine-structure symmetry |
-| Fails when | a CR lands on the same sky pixel in ≥half the frames; few frames; CRs smeared by warp interpolation | very crowded fields with severely undersampled stars (needs higher `objlim`) |
-| Cost | free (already in the stack) | a per-frame convolution pass |
+| SOURCE_INVALID | undefined or non-finite source sample | never use as data |
+| SATURATED | source or calibration sample reached the sensor's non-linear/saturation region | exclude from estimation |
+| HOT | persistent high dark-current photosite | repair for demosaic; zero stack weight |
+| COLD | persistent low-response photosite | repair for demosaic; zero stack weight |
+| UNSTABLE | RTS/fading/intermittent photosite | zero stack weight |
+| BAD_COLUMN | column or segment defect | zero stack weight; optional interpolation |
+| FLAT_INVALID | response is non-positive, too uncertain, or below the permitted response | zero stack weight |
+| COSMIC_RAY | transient detected in this exposure | zero stack weight |
+| INTERPOLATED | value was synthesized for downstream geometry/demosaic | never treat as an independent measurement |
 
-The decision rule: **with many dithered frames, the stack rejection is the workhorse** and is
-all lumos has. **With few frames, a single frame, or before any interpolating warp**, run
-L.A.Cosmic first — because the paper itself motivates single-frame rejection precisely for the
-cases where stacking fails: *"pixels can be hit by cosmic-rays in more than one exposure, and
-some affected pixels may remain after combining individual images,"* and *"images … shifted by
-a non-integer number of pixels."* Running L.A.Cosmic *before* warp turns the brightest hits
-into flagged/replaced pixels so the subsequent Lanczos resampling can't smear them into
-un-rejectable low-amplitude blobs.
+Masks from the source, masters, and calibration arithmetic combine by bitwise OR. A
+filled value may be useful to a demosaicer, but its mask remains set so stacking does
+not give synthetic data normal statistical weight. This is the approach used by
+scientific open-source ISR systems such as
+[Rubin Science Pipelines](https://pipelines.lsst.io/modules/lsst.ip.isr/index.html),
+which carry image, variance, and mask planes together.
 
----
+Determine saturation from the original linearized sensor code and the instrument's
+validated linearity/saturation threshold, before black or master subtraction changes
+the numeric value. Preserve that bit throughout calibration. When blooming or amplifier
+cross-talk makes neighboring samples unreliable, the instrument profile also defines
+the directional mask growth; a generic circular dilation is not a substitute for the
+readout geometry.
 
-## 5. Recommended best-practice implementation
+Master construction is the one place where input masks do not simply OR into the
+output. A masked contributor is excluded at that coordinate. The master coordinate is
+invalid only if no acceptable contributor survives or a persistent condition is being
+deliberately encoded. Store rejected/masked contributor counts so this exception is
+auditable.
 
-An opinionated, concrete target for a CFA-aware float pipeline like lumos.
+## 2. Calibration compatibility and selection
 
-### 5.1 Process raw CFA *before* demosaic
+### 2.1 Compatibility key
 
-Do **all** calibration on the un-demosaiced single-channel CFA frame, then demosaic. Two hard
-reasons: (1) defect correction must use **same-color** neighbors, which is only well-defined
-on the mosaic — demosaicing first smears a hot pixel across a 2–3 px color neighborhood and
-makes correct repair impossible; (2) dark/bias/flat are sensor-domain quantities that pair
-1:1 with mosaic pixels. Siril (`debayer` is the *last* step in `prepro_image_hook`,
-`preprocess.c:440`) and lumos (`calibrate` operates on `CfaImage`, README + `mod.rs:165`)
-both do this. **Anti-pattern:** demosaic → calibrate (§6).
+Do not group frames by filename or frame-type label alone. Build a typed compatibility
+key from decoded facts. Missing metadata is not a wildcard: either an explicit
+instrument profile supplies the value, or the set is rejected as unverifiable.
 
-### 5.2 Canonical order (per light frame)
+All roles MUST match:
 
-```
-1. (optional) overscan-subtract + trim          [CCD only]
-2. additive removal:
-      if matched dark:        L −= D            (D contains bias)
-      elif scaled dark:       L −= B; L −= k·(D − B)   (k = t_L/t_D; CCD, glow-free only)
-      elif bias only:         L −= B
-3. multiplicative removal:    L /= normalize(F − FD_or_B)   [per-CFA-channel mean]
-4. defect correction:         replace hot/cold via same-color neighbor median
-5. (optional) L.A.Cosmic on the calibrated frame, if few subs / before warp
-   → then hand off to registration & stacking
-```
+- camera/sensor identity and, where relevant, amplifier/readout channel;
+- active width, height, crop, orientation, binning, and pixel aspect;
+- Mono/Bayer/X-Trans pattern anchored to active coordinate (0, 0);
+- decoder name/version/profile, linearization semantics, black model, and scale;
+- gain/ISO, camera offset, ADC/readout mode, bit depth, and hardware conversion mode;
+- on-camera processing state and RAW compression mode;
+- exposure unit and metadata interpretation.
 
-lumos's `calibrate` implements steps 2–4 exactly (`mod.rs:171–189`). Note: do defect
-correction **after** flat division (Siril order, `preprocess.c`) so the neighbor medians are
-computed on fully-calibrated values; lumos matches this.
+Role-specific rules are:
 
-### 5.3 Master-frame parameters
+| Relation | Required match |
+|---|---|
+| raw dark ↔ light | exposure time, gain/ISO, offset, readout mode, and normally sensor temperature |
+| bias ↔ any consumer | gain/ISO, offset, readout mode, minimum-exposure mode; temperature policy is instrument-specific |
+| flat ↔ light | camera geometry/settings plus filter, aperture, focus, optical train, camera rotation, and dust configuration |
+| flat-dark ↔ flat | exposure time, gain/ISO, offset, readout mode, and temperature |
+| scalable dark ↔ light | same sensor mode; bias-free; exposure/temperature scaling explicitly supported and validated |
 
-- **Bias:** 100+ subs, winsorized mean κ=3, no normalization. Consider a smoothed
-  superbias model. *Skip entirely on CMOS with unreliable short exposures.*
-- **Dark:** 20–50 subs matched in exposure/gain/temp, winsorized mean κ=3, **no scaling by
-  default**; expose scaling only as an opt-in for glow-free CCDs, and force separate bias when
-  scaling.
-- **Flat:** 20–50 per filter, exposed into the linear regime (~1/3–1/2 well, roughly
-  20k–35k ADU on a 16-bit sensor — never saturated, never read-noise-dominated), sigma-clip
-  mean κ≈2.5 *after per-frame normalization*; central-region mean for the normalization
-  constant; **per-CFA-channel** scaling for OSC; floor the flat (`min_value`) to avoid
-  div-by-near-zero. Both axes matter: Newberry eq. 19 shows the flat must have *high per-sub
-  S/N* (well-exposed) **and** *many subs* — either alone is insufficient for high-S/N lights.
-- **Flat-dark:** prefer over bias for flat calibration on CMOS.
+No universal temperature tolerance is correct. A cooled sensor profile may require the
+same set point. An uncooled camera may group a narrow measured-temperature interval only
+after real dark data show the residual is acceptable. Record both the requested set
+point and measured sensor temperature when available.
 
-### 5.4 Numerical care
+Flat exposure need not equal light exposure, but every flat sample used must be inside
+the detector's measured linear range. “Half the histogram” is only an acquisition hint,
+not a substitute for a camera-specific saturation and linearity limit. The
+[Astropy CCD Reduction Guide](https://www.astropy.org/ccd-reduction-and-photometry-guide/v/dev/notebooks/05-01-about-flat-corrections.html)
+recommends high-count, unsaturated flats and per-frame normalization; the implementation
+must enforce the actual numeric limits carried by the instrument profile.
 
-- Keep everything in **f32 (or accumulate in f64)** and **preserve negatives** through
-  subtraction; never clamp to 0. lumos accumulates flat means in f64
-  (`cfa.rs:207–217, 263–289`) — correct.
-- Guard flat division: skip/floor pixels where the normalized flat ≤ ε (lumos: `> f32::EPSILON`).
-- Per-color means must use **exact pixel counts** per CFA color (lumos asserts `counts[c] > 0`).
-- Defect σ via robust MAD/upper-bulk residual scales with a propagated quantization-resolution
-  floor to avoid over-detection on clean darks.
+### 2.2 Overscan and trim consistency
 
-### 5.5 CFA-aware defect correction
+If a format exposes overscan, overscan correction occurs before master combination and
+before the arrays are trimmed to their common active rectangle. Apply the identical
+geometry and estimator to lights, bias, darks, flat-darks, and flats.
 
-Stride-2 same-color median for Bayer; full-period same-color search for X-Trans; 8-neighbor
-median for mono. (lumos already does all three.)
+For an amplifier with overscan samples o(r, j) in row r:
 
----
+1. mask invalid and saturated overscan samples;
+2. reject isolated outliers robustly;
+3. estimate b(r) by a median, trimmed mean, or a validated low-order fit;
+4. subtract b(r) from every science pixel in that amplifier row;
+5. record estimator, fit order, region, residual RMS, and rejected count;
+6. trim overscan from every frame using the same section.
 
-## 6. Pitfalls & anti-patterns
+A per-row median is a safe default when enough overscan columns exist. A polynomial or
+spline is allowed only when residual tests justify it; a high-order fit can turn
+overscan noise into structured signal. ccdproc exposes row/column median and model-fit
+overscan paths in its
+[reduction toolbox](https://ccdproc.readthedocs.io/en/latest/reduction_toolbox.html#subtract-overscan-and-trim-images).
 
-1. **Wrong operation order — dividing before subtracting.** Imprints vignetting onto the
-   additive pedestal. Always additive (subtract) before multiplicative (divide). (§1.2)
-2. **Scaling a dark that still contains bias.** `k·(D)` scales the bias pedestal too,
-   leaving a residual offset. Scale only `D − B`, and handle bias separately when scaling
-   (ccdproc forces this). (§2.4)
-3. **Dark scaling / dark optimization on amp-glow sensors.** Amp glow is non-linear; a single
-   `k` can't match both glow and dark current → residual glow gradient or over-correction.
-   *Disable dark optimization when amp glow is present* (three independent sources). (§2.4)
-4. **White-balancing / globally normalizing OSC flats.** A single global mean on a non-white
-   flat rescales R/G/B unequally → permanent **color shift** in every calibrated light. Use
-   per-CFA-channel scaling. (§2.5)
-5. **Clamping negative pixels to zero after dark subtraction.** Half of a sky-free pixel's
-   noise is legitimately negative; clamping injects a **positive bias** and corrupts
-   noise-weighted stacking. Preserve negatives (use float / a pedestal). (§1.3)
-6. **Demosaicing before calibrating.** Destroys the 1:1 sensor mapping and makes same-color
-   defect repair impossible; smears hot pixels. Calibrate on the raw CFA, demosaic last. (§5.1)
-7. **Darks not matched in temperature / exposure / gain.** Mismatched darks leave dark-current
-   residuals or, worse, over-subtract → dark mottle. Match all three (CMOS temperature is the
-   sensor set-point). (§2.3)
-8. **Using bias to calibrate flats on CMOS with unstable bias.** Causes residual rings; switch
-   to **flat-darks**. (§2.3)
-9. **Too few calibration subs.** A noisy master *adds* noise — can triple post-calibration
-   noise. Use the recommended counts. (§2)
-10. **Flats clipped/saturated or too dim.** Saturated flat pixels are non-linear (bad
-    divisor); too-dim flats are read-noise-dominated. Aim ~1/2 well. (§2.5)
-11. **Dividing by an un-floored flat.** Deeply vignetted corners → near-zero divisor →
-    exploding values / NaN. Floor the flat (`min_value`) or skip ε-small pixels. (§2.5)
-12. **Replacing a defect with a wrong-color or zero value.** Injects false color / dark holes.
-    Use same-CFA-color neighbor median. (§3.2)
-13. **Ordinary standard deviation for defect thresholds.** It is inflated by the outliers being
-    hunted; use robust residual scales such as MAD and a protected upper-bulk quantile. (§3.1)
-14. **Rejecting cosmic rays only after warping.** Interpolation smears CRs across pixels,
-    defeating sigma clipping; run single-frame CR rejection *before* registration. (§4.3)
-15. **Treating defect maps as a substitute for dithering** (or vice-versa). They're
-    complementary — dither + robust stack handles transients & bad columns; the defect map
-    handles persistent hot/cold pixels. (§3.4)
-16. **Scaling a *short* dark *up* to a longer exposure.** `k > 1` multiplies the dark's own
-    read+shot noise by `k`, injecting more noise than it removes — *"you inappropriately
-    amplify that noise"* (Astropy). Take darks at least as long as the lights; Siril warns when
-    `k = t_L/t_D > 1`. (§2.4)
-17. **Putting RTS/flickering pixels in a static defect map.** A pixel that hops between levels
-    between frames is "high" in only some of them; a fixed correction mis-repairs the rest.
-    Detect via the multi-exposure stability test, exclude, and let dither + stack rejection
-    handle them. (§2.4, §3.3)
-18. **A dim or few-sub flat on high-S/N data.** Newberry eq. 19: flat-field division is the
-    *dominant* S/N degradation for bright pixels, scaling with `(S/N)_data/(S/N)_flat`. A dim
-    or few-sub flat (low `(S/N)_flat`) ruins an otherwise high-S/N image even though it "looks
-    fine." Well-expose the flat *and* take many subs. (§1.4, §2.5)
-19. **Running L.A.Cosmic on un-calibrated / non-linear data.** It builds a Poisson+read-noise
-    model and *"always need[s] to work in electrons"* — run it on linear, calibrated frames
-    with correct gain/read-noise, never on gamma-encoded or pedestal-shifted data. (§4.2)
+Camera RAW decoders commonly expose only the active area. In that case Stage 1's black
+model is the only offset correction available and this stage records “no overscan,”
+rather than inventing one.
 
----
+### 2.3 Master selection
 
-## 7. How lumos currently does it — and gaps/opportunities
+Choose exactly one additive path:
 
-**What lumos gets right (matches authoritative practice):**
+1. Prefer a fully matched raw dark and subtract it once.
+2. Otherwise, if validated scaling is enabled, use a residual bias plus a bias-free
+   dark-current master.
+3. Otherwise use a residual bias alone.
+4. Otherwise leave additive structure uncorrected and report that fact.
 
-- **Order is correct:** dark (or bias) subtract → flat divide → defect correct, all on raw
-  CFA before demosaic (`calibration_masters/mod.rs:171–189`). Matches Siril/ccdproc.
-- **Flat-dark over bias** for flat calibration — the modern CMOS best practice
-  (`mod.rs:181`).
-- **Per-CFA-channel flat normalization** — avoids OSC color shift; aligns with PixInsight
-  1.8.8-6 "separate CFA flat scaling factors" and Siril's `compute_grey_flat`
-  (`astro_image/cfa.rs:253–289`).
-- **Preserves negative pixels** through subtraction (`cfa.rs:142`) — correct for linearity.
-- **Robust per-color defect thresholds with a data-derived resolution floor and adaptive
-  sampling** (`defect_map/mod.rs`) — the scale combines MAD, a protected upper residual quantile, and
-  propagated RAW quantization uncertainty rather than Siril/DSS's ordinary σ; more capable than
-  Siril on X-Trans.
-- **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct,
-  and repaired from a **defect mask** so clustered defects draw only on good (non-defect) neighbors.
-- **Cold/dead pixels from the bias/flat-dark-subtracted, unfloored master-flat response** via a local same-color-neighbor ratio
-  (`< DEAD_PIXEL_FRACTION × local median`, `defect_map/mod.rs` `detect_cold`) — catches the dead pixels
-  that read normal in a dark, and tracks vignetting where a global `median − k·σ` cut cannot.
-- **Sensible combine presets:** winsorized-mean darks/bias (κ=3), sigma-clip flats (κ=2.5),
-  with median fallback below 8 frames (`stacking/config.rs:163–197`; `mod.rs:92`).
+Never subtract a bias and then subtract a matched raw dark that still contains the same
+residual bias. Never scale a raw dark that still contains bias. These are both
+double-subtraction errors, not harmless alternative workflows.
 
-**Gaps and opportunities (in rough priority):**
+For a flat, prefer a matched flat-dark. Use a residual bias only if dark signal during
+the flat exposure is demonstrably negligible or already represented by the bias model.
+If neither exists, a flat may be used only through an explicit “uncalibrated flat”
+policy with a prominent quality warning; its additive pedestal will bias the response.
 
-1. **No dark scaling / optimization.** Always `k = 1`. Safe (avoids the amp-glow failure
-   mode), but cannot reuse a dark library across exposures. *Opportunity:* add an opt-in
-   exposure-ratio scaling (`k = t_L/t_D`) that **requires** separate bias subtraction (like
-   ccdproc `scale=True`), explicitly gated off when amp glow is detected; optionally a Siril-
-   style noise-minimizing or DSS-style entropy-minimizing search for glow-free CCDs.
-2. **No single-frame cosmic-ray rejection.** Relies entirely on stack-time sigma clipping —
-   fine for many dithered frames, weak for short sequences and vulnerable to warp-smearing.
-   *Opportunity:* an L.A.Cosmic pass on calibrated frames before registration (needs
-   normalized signal-to-electron conversion and read noise, which lumos models in `NoiseModel`).
-3. **No bad-column handling.** Per-pixel neighbor median degrades on full columns. *Opportunity:*
-   detect persistent columns from the master dark and repair from cross-column same-color
-   neighbors, or document reliance on dither + clip.
-4. **No superbias / no bias modeling, no overscan.** Bias is a plain winsorized mean; no
-   overscan support for scientific CCDs. Lower priority for the RAW/CMOS target.
-5. **No hot-pixel stability (RTS) test.** Hot pixels are flagged from a single master dark, so a
-   random-telegraph pixel that happened to read low during that capture is missed (and a fixed map
-   mis-corrects the frames where it later reads high). *Opportunity:* Astropy-style per-pixel
-   stability test across the dark sub-stack (§2.4, §3.3) to exclude RTS pixels from the static map
-   and leave them to dither + stack rejection. (Cold/dead-from-flat detection — previously listed
-   here — is now implemented; see "what lumos gets right" above.)
-6. **No defect-map persistence / external bad-pixel-map import** (Siril supports
-   `apply_cosme_to_image` from a file, `preprocess.c:437`). *Opportunity:* serialize the
-   `DefectMap` so it can be reused / hand-edited.
-7. **Flat normalization uses the whole-frame mean**, not Siril's central-region mean. For
-   heavily vignetted optics the edge pixels pull the mean down slightly; a central-region (or
-   median) normalization would be marginally more robust. Minor.
-8. **No per-pixel uncertainty plane.** ccdproc carries a Poisson+read-noise error array
-   through every step (`create_deviation`, core.py:318) so the flat's pixel-by-pixel error
-   propagates into the final variance (Newberry §1.4). lumos approximates this with a scalar
-   normalized-domain `NoiseModel` + noise-weighted stacking, which captures *frame-level* but
-   not *pixel-level* flat/dark noise. *Opportunity:* an optional uncertainty `Buffer2<f32>` per
-   channel, propagated through subtract/divide, would make noise-weighted stacking and SNR
-   estimates rigorous. Lower priority but the principled endpoint.
+## 3. Forward model and calibration equations
 
----
+### 3.1 Per-pixel model
 
-## 8. References
+For decoded CFA pixel p of color c:
 
-### Primary sources parsed (pass 2)
+~~~text
+L_p = R_p S_p + A_L,p + n_L,p
+F_j,p = R_p I_j,c + A_F,j,p + n_F,j,p
+~~~
 
-PDFs fetched and converted with `pdftotext`; local text under
-`$HOME/Projects/Scenarium/lumos/.tmp/papers/`.
+where:
 
-- **van Dokkum 2001, *Cosmic-Ray Rejection by Laplacian Edge Detection* (L.A.Cosmic)** —
-  full algorithm extracted: subsample×2 → Laplacian kernel `[[0,−1,0],[−1,4,−1],[0,−1,0]]` →
-  clip negatives → noise model `N=(1/g)√(g·M₅∘I + σ_rn²)` → significance `S=L⁺/(f_s·N)` →
-  fine-structure `F=(M₃∘I)−((M₃∘I)∘M₇)` → flag `S′>σ_lim ∧ L⁺/F>f_lim`; `f_lim=2` well-sampled,
-  ≈5 undersampled; 98–99% CR recovery at >6σ. → `.tmp/papers/lacosmic_vandokkum2001.txt`
-  (arXiv astro-ph/0108003).
-- **Newberry 1991, *Signal-to-Noise Considerations for Sky-Subtracted CCD Data* (PASP 103,
-  122)** — full error propagation: base-level noise `B²=R²+T²+F²` (read+truncation+processing,
-  `T²=(g²−1)/12`); each calibration subtraction adds noise in quadrature (a single equal-noise
-  bias frame **doubles** the variance); flat division degrades S/N as
-  `[1+((S/N)_data/(S/N)_FF)²]^(−1/2)` — flat is the dominant degrader for high-count pixels.
-  → `.tmp/papers/newberry1991.txt` (fetched from ADS gateway after retry).
-- **Astropy CCD Data Reduction Guide — Calibration overview & Real dark current** (web, parsed
-  pass 2): forward model `raw = bias + noise + dark_current + flat·(sky+stars)`; *"impossible
-  to remove the noise … it is random"*; *"Do not take short dark frames and scale them up …
-  you inappropriately amplify that noise"*; hot-pixel stability test (exclude non-constant
-  pixels). (No local PDF — web notebooks; key quotes inline.)
-- **ccdproc `cosmicray_lacosmic` API docs** (web): default parameter table verified
-  (sigclip 4.5 / sigfrac 0.3 / objlim 5.0 / gain 1.0 / readnoise 6.5 / niter 4).
-- **PixInsight SuperBias** (web, via Blackwater Skies + search): multiscale decomposition
-  (default 7 layers) reconstructs structured row/column pattern, discards random noise →
-  *"absolutely no random noise."*
+- S is celestial photons expressed in the decoded linear scale;
+- R is relative optical/pixel response, including vignetting, dust, and PRNU;
+- A_L is repeatable additive light-frame structure;
+- I is flat-source illumination for flat exposure j;
+- A_F is repeatable additive structure during the flat;
+- n terms are random shot, read, digitization, and temporal noise.
 
-**Failed to fetch (pass 2):** Gilliland 1992 ASPC chapter (S3 AccessDenied); PixInsight
-master-frames tutorial and Light Vortex tutorial (403 / ECONNREFUSED — corroborated via search
-snippets and the Blackwater Skies superbias write-up instead); DSS theory.htm direct fetch
-(still refused — but its equation and the 16σ hot-pixel rule are now **primary-verified in the
-DSS C++ source**, superseding the pass-1 search snippet).
+Calibration estimates S up to an arbitrary normalization constant. It does not estimate
+or subtract sky background; sky is celestial signal for this stage.
 
-### Source code (cloned, under `$HOME/Projects/Scenarium/lumos/.tmp/refs/`)
+### 3.2 Matched-dark path
 
-- **ccdproc** (Astropy CCD reduction — most authoritative):
-  - `ccdproc/core.py:138` `ccd_process` (full order: overscan→trim→gain→bias→dark→flat).
-  - `ccdproc/core.py:702` `subtract_bias`; `:741` `subtract_dark` (scaling at lines 843–856,
-    `scale_factor = data_exposure/dark_exposure`).
-  - `ccdproc/core.py:874` `gain_correct`; `:927` `flat_correct` (mean normalization +
-    `min_value` floor, lines 970–1013).
-  - `ccdproc/core.py:1541` `cosmicray_lacosmic` (defaults sigclip 4.5 / objlim 5.0 / niter 4,
-    works in electrons); `:1949` `cosmicray_median`.
-  - `ccdproc/combiner.py:298–740` `clip_extrema` / `minmax_clipping` / `sigma_clipping` /
-    `median_combine` / `average_combine` / `sum_combine` + weights.
-  - `ccdproc/core.py:386` `create_deviation` (uncertainty/Poisson+read-noise model).
-- **Siril** (`src/`):
-  - `core/preprocess.c:124` `preprocess` (order: bias→dark→flat); `:161` `darkOptimization`
-    (golden-section noise min over k∈[0,2], or k=t_L/t_D); `:304` `prepro_prepare_hook`
-    (flat normalization via central-region mean, `equalize_cfa`, cosmetic-from-dark); `:409`
-    `prepro_image_hook` (dark-optim → calibrate → cosmetic → debayer).
-  - `core/siril.c:453` `compute_grey_flat` (per-CFA-channel means, coeff1=R̄/Ḡ, coeff2=B̄/Ḡ).
-  - `filters/cosmetic_correction.c:182` `find_deviant_pixels` (**median**±k·σ thresholds,
-    `median = stat->median` / `sigma = stat->sigma` at lines 200–213); `:43`
-    CFA-aware median (`step = is_cfa ? 2 : 1`).
-- **DeepSkyStacker** (`DeepSkyStackerKernel/`):
-  - `DarkFrame.cpp:127` `ComputeMinimumEntropyFactor` (dark factor k∈[0,5] minimizing entropy);
-    `:190` `ComputeMinimumRMSFactor`; `:574` `ComputeDarkFactor` (per-R/G/B for OSC);
-    hot-pixel removal lines 473–486.
-- **lumos** (grounding):
-  - `src/calibration_masters/mod.rs` (`calibrate` order, flat-dark priority, presets/fallback).
-  - `src/calibration_masters/prepared_flat.rs` (one-time Mono/per-CFA normalization and divisor
-    application).
-  - `src/calibration_masters/defect_map/mod.rs` (robust per-color thresholds, quantization floor,
-    CFA-color neighbor median, X-Trans handling).
-  - `src/astro_image/cfa.rs` `subtract` (preserves negatives).
-  - `src/stacking/config.rs:163` frame-type combine presets.
+Let D_L be a raw master dark made with the light's exposure and sensor settings, and
+D_F a flat-dark matched to the flat:
 
-### Online (cross-verified, ≥2 sources per major claim)
+~~~text
+X_p = L_p - D_L,p
+G_p = master_response(F_j,p - D_F,p)
+m_c = robust normalization of G over valid pixels of color c
+Q_p = G_p / m_c
+C_p = X_p / Q_p
+~~~
 
-- Astropy CCD Reduction & Photometry Guide — calibrating flats / bias-dark separation when scaling:
-  https://www.astropy.org/ccd-reduction-and-photometry-guide/v/dev/notebooks/05-03-Calibrating-the-flats.html
-- ccdproc `cosmicray_lacosmic` API & defaults:
-  https://ccdproc.readthedocs.io/en/latest/api/ccdproc.cosmicray_lacosmic.html
-- van Dokkum 2001, *Cosmic-Ray Rejection by Laplacian Edge Detection* (L.A.Cosmic):
-  https://iopscience.iop.org/article/10.1086/323894 ; arXiv: https://arxiv.org/pdf/astro-ph/0108003
-- Single- vs multi-frame CR rejection (the "run single-frame rejection before an interpolating
-  warp" ordering is grounded in van Dokkum 2001's non-integer-shift argument above, not in
-  these two — they are corroborating context on single-frame methods and rejection evaluation):
-  *Cosmic Ray Detection and Rejection for CSST* (single-image method, since CSST's survey
-  strategy invalidates multi-frame stacking) https://arxiv.org/abs/2511.01524 ;
-  PASA *Evaluation of cosmic-ray rejection algorithms on single-shot exposures*
-  https://www.cambridge.org/core/journals/publications-of-the-astronomical-society-of-australia/article/evaluation-of-cosmic-ray-rejection-algorithms-on-singleshot-exposures/F36D800232478BE7D3B5A29543B0D4CF
-- Calibration counts / combine methods / sigma κ≈3:
-  https://www.opticalmechanics.com/mastering-calibration-frames-for-deep-sky-astrophotography/ ;
-  https://practicalastrophotography.com/a-brief-guide-to-calibration-frames/ ;
-  https://www.celestron.com/blogs/knowledgebase/the-ultimate-guide-to-calibration-frames-for-astrophotography ;
-  https://starfieldview.com/imaging-and-processing/sigma-clipping-outlier-rejection-image-stacking/
-- Dark scaling fails on amp glow (non-linear); disable dark optimization:
-  https://telescope.live/blog/learning-about-amp-glow ;
-  https://www.cloudynights.com/topic/606815-darks-why-cant-i-correct-amp-glow/ ;
-  https://www.astropixelprocessor.com/community/main-forum/amp-glow-not-corrected-with-darks/ ;
-  https://www.cloudynights.com/topic/758187-darks-over-correcting-new-problem/
-- CMOS bias unreliable → use flat-darks; residual rings fix:
-  https://britastro.org/forums/topic/bias-frames-for-cmos ;
-  https://www.astroworldcreations.com/blog/understanding-flats-part3-conclusions ;
-  https://www.cloudynights.com/topic/801195-dark-scaling-with-latest-cmos-imx455imx571/
-- Per-CFA-channel flat scaling avoids OSC color shift (PixInsight 1.8.8-6):
-  https://www.pixinsight.com/tutorials/master-frames/ ;
-  https://www.cloudynights.com/topic/667524-preparing-color-balanced-osc-flats-in-pixinsight/ ;
-  https://sh-cosmiccanvas.s3.us-west-2.amazonaws.com/Resources/20200902_GuideToPIsImageCalibration.pdf
-- DSS dark optimization / hot-pixel & bad-column detection / entropy-weighted combine:
-  http://deepskystacker.free.fr/english/technical.htm ;
-  http://deepskystacker.free.fr/english/theory.htm (ECONNREFUSED at fetch time; corroborated via search + DSS source `DarkFrame.cpp`)
-- Pedestal / negative-pixel handling & linearity:
-  https://grokipedia.com/page/Dark-frame_subtraction ;
-  https://www.aavso.org/calibration-dslr-images-photometry
-- Dithering complements defect maps:
-  https://www.opticalmechanics.com/mastering-flats-darks-and-bias-for-clean-deep-sky-images/
+D_L contains every residual additive term left by Stage 1. Do not subtract B separately.
+The flat-dark likewise removes both residual bias and flat-exposure dark signal.
 
-### Notes on source disagreements / unverifiable items
+### 3.3 Bias-only path
 
-- **Defect threshold statistic differs by tool (corrected pass 2):** lumos uses the median plus a
-  robust MAD/upper-bulk/resolution scale (k=5); **Siril uses median + ordinary-σ**
-  (cosmetic_correction.c:200–213 — pass 1 said "mean", which was **wrong**); DSS uses
-  **median + 16·ordinary-σ** per RGB channel (DarkFrame.cpp:1738, now primary-verified). All three
-  center on the **median**; they differ in the σ estimator and multiplier.
-- **OSC flat neutral point differs:** lumos/PixInsight normalize each channel to its own mean;
-  Siril equalizes R/B to green (pattern inferred by minimum green variance). Both avoid the
-  global-mean color shift.
-- **DSS hot-pixel rule now primary-verified:** the `median + 16σ` figure (flagged pass 1 as
-  search-snippet) is hardcoded in `DarkFrame.cpp:1738–1745`. The DSS *theory.htm* page still
-  refused a direct fetch, but the equation and hot-pixel rule are confirmed from source.
-- **Still web-only (no primary PDF):** the Astropy guide's exact noise-equation derivation and
-  the PixInsight ADU-target / SuperBias-layer numbers come from rendered web pages and search
-  snippets, not a fetchable PDF; the *direction* of each claim is corroborated by ≥2 sources
-  and (for the algorithms) by source code, but a verbatim primary PDF was unavailable.
+If dark current/glow is negligible:
+
+~~~text
+X_p = L_p - B_p
+G_p = master_response(F_j,p - B_p)
+Q_p = G_p / m_c
+C_p = X_p / Q_p
+~~~
+
+The same bias master may occur in numerator and denominator. That shared dependency
+matters to uncertainty propagation in section 9.
+
+### 3.4 Scaled-dark path
+
+Let D_raw be a raw dark master, B a residual-bias master, and
+D_c = D_raw - B the bias-free dark-current template:
+
+~~~text
+X_p = L_p - B_p - k D_c,p
+    = L_p - k D_raw,p + (k - 1) B_p
+~~~
+
+Then prepare and apply the flat as above. The expanded form is useful both for detecting
+double subtraction and for propagating uncertainty. The scale k is not automatically
+valid merely because both exposure times exist; section 6 defines its preconditions.
+
+### 3.5 Why operation order is fixed
+
+Additive structure is not multiplied by the optical flat response. Dividing first gives
+
+~~~text
+(R S + A) / Q = S · normalization + A / Q
+~~~
+
+and turns a constant or structured additive residual into a vignetted artifact. The
+only valid order is additive subtraction followed by multiplicative division.
+
+Prepare a flat in the same order: subtract its additive calibration before estimating
+illumination normalization or using it as a divisor. Normalizing raw flats that still
+contain bias is wrong because the scale estimate becomes a function of the additive
+pedestal.
+
+### 3.6 Numeric policy
+
+All arithmetic uses at least f32 storage and f64 reductions for sums, variances, and
+normalization statistics. Preserve finite negative values. A negative calibrated
+background sample is an ordinary noise realization; clamping it to zero creates a
+positive bias in means, centroids, and photometry.
+
+Do not add an integer-storage pedestal internally. If an integer export requires a
+pedestal, export is a separate reversible encoding step and records the constant.
+
+Saturated samples remain saturated/masked. Subtracting a master cannot recover charge
+lost to clipping, and flat division must not turn a saturated code into an apparently
+valid sample.
+
+## 4. Building calibration masters
+
+### 4.1 Common construction pipeline
+
+For each role:
+
+~~~text
+validate acquisition/decode compatibility
+→ apply the same overscan and active-area policy
+→ reject frames with invalid global quality
+→ prepare each role-specific input
+→ combine corresponding sensor coordinates
+→ compute uncertainty and survivor diagnostics
+→ validate the master
+→ publish data + mask + variance + provenance atomically
+~~~
+
+Validation happens before loading the entire set when headers suffice, then again after
+decode. The master inherits no arbitrary “first frame wins” metadata. Instead, common
+metadata are checked for equality and master-specific values are derived:
+
+- exposure is the common exposure or an explicit normalized unit;
+- date/time becomes the covered interval;
+- temperature records median, range, and individual values;
+- NCOMBINE is the input count, with per-pixel survivor count stored separately;
+- filter/readout/decode fields must be common;
+- provenance contains source identities and hashes.
+
+Reject a set if any coordinate has no surviving valid sample. Do not silently write zero.
+
+### 4.2 Frame-level quality rejection
+
+Before pixel rejection, compute per-frame diagnostics on valid samples and per CFA color:
+
+- robust location and MAD scale;
+- saturated, invalid, and masked fractions;
+- row/column residual statistics;
+- exposure, gain/ISO, offset, temperature, and filter;
+- for flats, illumination level and large-scale gradient;
+- for darks, broad-pattern amplitude and hot-pixel population.
+
+Reject a frame, with a reason, when metadata mismatch, saturation, light leak, gross
+gradient, readout failure, or distributional discontinuity makes it a different
+acquisition. Pixel clipping cannot repair an entire bad frame.
+
+Automatic frame rejection MUST use documented thresholds from an instrument/profile,
+not a hidden generic percentage. Always preserve the measurements so a caller can audit
+the decision.
+
+### 4.3 Pixel combination defaults
+
+The statistically efficient estimator for independent Gaussian noise is a mean.
+A median is robust but has asymptotic variance:
+
+~~~text
+Var(median) ≈ π σ² / (2N)
+Var(mean)   = σ² / N
+~~~
+
+Thus the median has about 1.57 times the variance, or 1.253 times the standard error,
+of the mean in the clean Gaussian case. Prefer a robustly rejected mean when the sample
+count supports outlier identification. The
+[Astropy combination guide](https://www.astropy.org/ccd-reduction-and-photometry-guide/v/dev/notebooks/01-06-Image-combination.html)
+reaches the same practical result: average to reduce noise, but clip transient extremes.
+
+Lumos's current role presets are:
+
+| Role | Per-frame normalization | Combine |
+|---|---|---|
+| bias | none | Winsorized-estimate 3σ rejected mean |
+| raw dark | none | Winsorized-estimate 3σ rejected mean |
+| flat-dark | none | same as dark |
+| flat | multiplicative | 3σ iterative clipped mean at N ≥ 8; median below 8 |
+
+There is no dark/bias median fallback in the current code. At N ≤ 2, its Winsorized
+rejection retains all values and reduces to a mean. A quality report must say that no
+outlier can be identified at those counts.
+
+#### Winsorized-estimate rejected mean
+
+For values v_i at one sensor coordinate:
+
+1. Sort a working copy and initialize center to element floor(N/2).
+2. Compute sample standard deviation about that center.
+3. Multiply σ by 1.134.
+4. Clamp the working values to center ± 1.5σ.
+5. Recompute the middle-element center and corrected σ.
+6. Repeat steps 4–5 until |σ_new - σ_old| ≤ 0.0005 σ_old or 50 iterations.
+7. On the original values, retain
+   center - k_low σ ≤ v_i ≤ center + k_high σ.
+8. Return the f64-accumulated mean of survivors.
+
+The default has k_low = k_high = 3. This algorithm Winsorizes only to obtain a robust
+center/scale; its final output is the mean of original surviving samples, not the mean
+of clamped values.
+
+#### Iterative MAD sigma-clipped mean
+
+For the flat default:
+
+1. Start with every valid sample.
+2. Select the upper sample median center.
+3. Compute MAD = median(|v_i - center|) and σ = 1.4826022185 · MAD.
+4. Retain center - 3σ ≤ v_i ≤ center + 3σ.
+5. Repeat at most three times or until the survivor set is unchanged.
+6. Return the f64-accumulated mean of survivors.
+
+If σ is numerically zero, retain the current set. If fewer than eight flat frames are
+present, the current preset returns their coordinate-wise median instead. An
+implementation may expose other methods, but master metadata must record the exact
+algorithm, constants, and per-pixel survivor count.
+
+#### Master variance and survivor diagnostics
+
+For each coordinate, retain the original count, valid count, low/high rejection counts,
+final survivor count n, and estimator used. For a weighted surviving mean with values
+v_i, independent input variances V_i, nonnegative weights w_i, and W = Σw_i:
+
+~~~text
+M = Σ(w_i v_i) / W
+Var_pred(M) = Σ(w_i² V_i) / W²
+N_eff = W² / Σw_i²
+~~~
+
+Require W > 0. Weights derived from uncertainty use w_i = 1/V_i only when every V_i is
+finite and positive. With inverse-variance weights, test whether the observed scatter
+exceeds the model:
+
+~~~text
+χ²_red = Σ((v_i - M)² / V_i) / (n - 1)
+Var(M) = Var_pred(M) · max(1, χ²_red)      for n ≥ 2
+~~~
+
+The inflation is conservative evidence that the input noise model missed temporal or
+frame-to-frame variation; never shrink below Var_pred. With equal weights and no input
+variance model, use the ordinary survivor estimate:
+
+~~~text
+s² = Σ(v_i - M)² / (n - 1)
+Var(M) = s² / n                              for n ≥ 2
+~~~
+
+At n = 1 the variance is unknown, not zero; require an input variance or mark the
+uncertainty unavailable. Rejection makes an empirical survivor variance optimistic, so
+prefer propagated input variances and use split-half/held-out residuals to detect the
+missing component. For a median, use a whole-frame bootstrap when enough inputs exist;
+the Gaussian π/2 approximation in section 4.3 is only an explicitly labeled fallback.
+
+Include the Stage 1 quantization variance in every input V_i rather than allowing a
+zero-noise input; combination then reduces that independent contribution normally. Do
+not floor the combined master at one frame's quantization variance. For flats, per-frame
+normalization correlates all coordinates, so a scalar coordinate-wise variance is not
+the complete result; section 9.4 specifies the required rebuild bootstrap.
+
+### 4.4 Master bias
+
+A bias exposure uses the shortest supported exposure in the same readout mode. After
+Stage 1 black subtraction it may be centered near zero; fixed spatial residuals remain
+scientifically useful.
+
+Build it without frame normalization. Combining enough independent bias frames reduces
+random read noise while preserving repeatable row, column, amplifier, and pixel
+structure. Overscan correction, if selected, is applied to every bias before combination.
+
+A synthetic constant bias is valid only after measurements show the residual bias has
+no material spatial structure and its level can be predicted from metadata. Record that
+it is synthetic and its uncertainty; do not silently replace a structured master with
+its median.
+
+A “superbias” is a model of repeatable structure, not merely a smoothed bias. It is safe
+only when cross-validation proves that the model predicts held-out bias frames better
+than the ordinary master. A complete implementation:
+
+1. split bias frames into training and validation sets;
+2. form independent masters;
+3. fit the proposed low-rank/multiscale row-column model to training data;
+4. evaluate residual mean, row/column power, and RMS on validation data;
+5. accept only if fixed pattern decreases without attenuating reproducible structure;
+6. store model uncertainty and the training/validation identities.
+
+No fixed wavelet-layer count is universally correct. Lumos currently has no superbias
+model.
+
+### 4.5 Master dark and flat-dark
+
+Raw matched darks and flat-darks are combined without normalization: their absolute
+level is part of the calibration. Normalizing a dark erases the exposure/temperature
+signal it is supposed to measure.
+
+For a scalable dark:
+
+1. build raw D_raw without normalization;
+2. build B from independent bias frames;
+3. validate identical readout/decoder settings;
+4. compute D_c = D_raw - B in float;
+5. propagate mask and variance;
+6. store D_c explicitly as “bias-free dark current,” never as an ambiguous “dark.”
+
+Keep broad amplifier glow. It is signal, not an outlier. Pixel rejection operates across
+frames at a fixed coordinate and therefore does not reject a stable glow structure.
+A light leak or changing glow pattern is a frame/set mismatch and must be diagnosed at
+frame level.
+
+### 4.6 Master flat: required order
+
+The correct order for variable-illumination flats is:
+
+~~~text
+calibrate every flat's additive signal
+→ estimate every flat's illumination per CFA color
+→ normalize each calibrated flat
+→ reject/combine corresponding pixels
+→ normalize the combined response per CFA color
+~~~
+
+For flat j and color c:
+
+~~~text
+G_j,p = F_j,p - P_j,p
+a_j,c = robust_location({G_j,p | color(p)=c and valid(p)})
+H_j,p = G_j,p · target_c / a_j,c
+G_p = rejected_mean_j(H_j,p)
+m_c = robust_location({G_p | color(p)=c and valid(p)})
+Q_p = G_p / m_c
+~~~
+
+P is the matched flat-dark or residual bias. target_c may be the location of a chosen
+reference flat or one; its absolute value cancels in final normalization.
+
+Use a robust median or a sigma-clipped mean for a_j,c and m_c. Exclude:
+
+- source-invalid and saturated samples;
+- known defects and non-linear samples;
+- configurable border/overscan regions;
+- samples outside the instrument's valid flat range.
+
+Compute each CFA color independently. This cancels changes in the flat source's spectrum
+and prevents an LED/twilight color balance from becoming a white-balance operation.
+Color calibration belongs later. For Mono there is one color.
+
+Subtracting one master P after already normalizing raw F_j is not equivalent:
+
+~~~text
+normalize(F_j) - P ≠ normalize(F_j - P)
+~~~
+
+except in special degenerate cases. A flat builder must therefore have access to the
+flat subtractor before its per-frame multiplicative normalization.
+
+### 4.7 How many calibration frames
+
+There is no scientifically universal count such as “20 flats” or “50 biases.” Stop when
+the measured master uncertainty meets a declared budget.
+
+For a mean with survivor weights w_i:
+
+~~~text
+N_eff = (Σw_i)² / Σ(w_i²)
+Var(master) ≈ Σ[w_i² Var(v_i)] / (Σw_i)²
+~~~
+
+For equal independent samples this becomes Var(v)/N. For a Gaussian median, use the
+π/2 efficiency penalty above. Rejection makes N_eff coordinate-dependent.
+
+Let V_L,p be expected variance of one light before master subtraction and V_A,p the
+additive master variance. If calibration is allowed to increase standard deviation by
+at most fraction δ:
+
+~~~text
+sqrt(V_L,p + V_A,p) / sqrt(V_L,p) ≤ 1 + δ
+V_A,p / V_L,p ≤ (1 + δ)² - 1
+~~~
+
+Evaluate this over a declared percentile of ordinary pixels and separately over broad
+glow/amp regions. For the flat, require the relative divisor error sqrt(V_Q,p)/Q_p to
+meet the bright-signal budget derived in section 9. Report failing pixels instead of
+hiding them behind a frame-count rule.
+
+Practical minimums still exist for estimator behavior: one or two frames cannot identify
+an outlier, and the current flat sigma-clip preset requires eight. These are algorithmic
+floors, not evidence that the resulting master is quiet enough.
+
+### 4.8 Master validation
+
+Before publication, verify:
+
+- all output data/variance are finite and dimensions match;
+- expected additive masters have no unexplained light leak or clipped region;
+- the flat has a positive normalization for every CFA color;
+- flat response and relative uncertainty distributions meet policy;
+- survivor counts are nonzero and rejection rates are plausible;
+- row/column/amp residuals do not reveal a mismatched mode;
+- split-half masters agree within predicted uncertainty;
+- a held-out light/flat calibration reduces the target structure;
+- source identities, settings, algorithm parameters, and software version are stored.
+
+Split-half agreement is especially valuable: independently combine alternating frames
+into M_A and M_B, then inspect M_A - M_B for additive masters and M_A/M_B - 1 for flats.
+Coherent residual structure is a stability or modeling problem that adding more frames
+will not necessarily solve.
+
+## 5. Prepared flat construction and application
+
+### 5.1 Divisor validity
+
+For each p, Q_p must be finite and positive. Also define a maximum permitted correction
+gain g_max. A response is valid only if:
+
+~~~text
+Q_p ≥ 1 / g_max
+relative_uncertainty(Q_p) ≤ configured_limit
+sample was linear and had enough survivors
+~~~
+
+Do not silently replace a physically valid Q_p = 0.05 with 0.1 and call the result
+calibrated. Flooring changes the inferred response by a factor of two. The scientific
+policy is:
+
+1. set FLAT_INVALID;
+2. place a finite placeholder divisor, normally one, for safe arithmetic;
+3. exclude the sample from scientific weighting;
+4. synthesize a value only if demosaic requires one, retaining INTERPOLATED.
+
+A display-only policy MAY clamp the divisor, but must record the clamp and may not
+present the sample as scientifically valid.
+
+### 5.2 Application
+
+Given additive-corrected numerator X:
+
+~~~text
+if valid(Q_p) and valid(X_p):
+    C_p = X_p / Q_p
+else:
+    C_p = finite placeholder
+    mask_p |= relevant bits
+~~~
+
+Use one parallel pass, but keep validation separate and complete before mutation.
+Division must preserve negative X. A normalized divisor near one preserves the
+convenient overall numeric scale; normalization does not make the flat noiseless.
+
+### 5.3 Current Lumos prepared flat
+
+Current Lumos subtracts a master flat-dark, otherwise a bias, from the already-combined
+flat. It then computes an arithmetic mean per CFA color (or one global mean for Mono),
+divides each response by its color mean, and clamps every divisor to at least 0.1.
+Application divides every light sample by that stored divisor.
+
+That behavior is finite and CFA-aware, but it is not the full contract above:
+
+- raw flat subs are multiplicatively normalized before their additive master is
+  subtracted;
+- arithmetic normalization includes saturated/defective samples;
+- 0.1 is an unconditional hidden maximum gain of 10;
+- there is no flat-invalid mask or divisor uncertainty;
+- no acquisition compatibility beyond dimensions/CFA is established.
+
+These are implementation gaps, not recommended behavior.
+
+## 6. Dark scaling and optimization
+
+### 6.1 Default policy
+
+The safe default is k = 1 with a dark matched to exposure, gain/ISO, offset, readout
+mode, and temperature. Scaling is an exception that requires evidence about a particular
+sensor mode. A scalar can reproduce only a pattern whose amplitude changes uniformly;
+it cannot repair a changed spatial shape.
+
+Scaling MUST be disabled when any of these holds:
+
+- the dark includes residual bias;
+- the light and dark use different gain, offset, readout, crop, binning, or decoder domain;
+- the dark template has insufficient spatial variation to estimate k;
+- amplifier glow changes shape or scales differently from the pixel dark current;
+- a material population of pixels has RTS, fading, or other non-linear behavior;
+- the required scale extrapolates beyond a validated exposure/temperature interval;
+- residual diagnostics fail;
+- scaling a shorter dark upward would inject more master noise than policy allows.
+
+The Astropy guide explicitly separates bias whenever darks are scaled and warns against
+scaling short darks upward; see
+[calibration choices](https://www.astropy.org/ccd-reduction-and-photometry-guide/v/2.0.1/notebooks/01-09-Calibration-choices-you-need-to-make.html)
+and
+[handling darks](https://www.astropy.org/ccd-reduction-and-photometry-guide/notebooks/03-04-Handling-overscan-and-bias-for-dark-frames.html).
+
+### 6.2 Exposure-ratio scaling
+
+If measurements establish that the bias-free dark signal is linear in exposure at fixed
+temperature and sensor mode:
+
+~~~text
+k_t = t_light / t_dark
+X = L - B - k_t D_c
+~~~
+
+Validate t_light > 0 and t_dark > 0 in the same units. Prefer t_dark ≥ t_light so
+k_t ≤ 1. Multiplying D_c by k also multiplies its master uncertainty by |k|;
+scaling up a noisy short dark can be worse than omitting it.
+
+Linearity validation uses actual dark libraries:
+
+1. acquire dark sets at at least three exposures spanning the intended range;
+2. build a bias-free master rate R_t = D_c(t)/t for each exposure;
+3. mask unstable/hot/saturated pixels for the bulk comparison;
+4. compare rate maps, amplifier regions, row/column profiles, and glow regions;
+5. fit residual versus exposure at every diagnostic region;
+6. approve an interval only when systematic residuals and uncertainty meet policy;
+7. retain the test data and approved interval in the instrument profile.
+
+A high global correlation is insufficient if an amp-glow corner fails.
+
+### 6.3 Temperature libraries
+
+Do not encode a generic “dark current doubles every N degrees” rule. Devices and
+readout glow differ. Build measured, bias-free dark-rate masters at stable temperature
+set points.
+
+For a light temperature T bracketed by T0 and T1, an implementation MAY interpolate:
+
+~~~text
+α = (T - T0) / (T1 - T0)
+R(T) = (1 - α) R(T0) + α R(T1)
+D_c(T, t) = t R(T)
+~~~
+
+only after held-out darks demonstrate that this interpolation meets the residual budget.
+Interpolate amplifier/glow components separately if their measured law differs.
+Do not extrapolate beyond the library. For an uncooled camera whose temperature changes
+during exposure, header temperature may not represent the photosite history; empirical
+validation is mandatory.
+
+### 6.4 Empirical optimization
+
+Empirical “dark optimization” estimates k from pattern agreement rather than assuming
+time linearity. It is experimental because stars, sky structure, gradients, and flat
+errors can mimic or obscure a dark pattern.
+
+A robust implementation works on bias-subtracted, source-masked data:
+
+1. Form Y = L - B and use bias-free D_c.
+2. Build a fit mask excluding saturation, source-invalid samples, known unstable
+   defects, cosmic rays, and detected astronomical sources grown beyond their PSF.
+3. Partition by amplifier and CFA color. Require a minimum valid sample count and
+   nonzero robust variance in D_c.
+4. Remove only a low-order sky model from Y. Apply the identical linear high-pass
+   operator to D_c, so the fitted variables are y_i and d_i in the same spatial band.
+5. Fit y_i = a + k d_i with an intercept. The intercept absorbs residual sky level.
+6. Initialize from centered covariance:
+
+   ~~~text
+   k0 = Σ w_i(d_i - d̄)(y_i - ȳ) / Σ w_i(d_i - d̄)²
+   a0 = ȳ - k0 d̄
+   ~~~
+
+7. Iteratively reweight residuals r_i = y_i - a - k d_i with a Huber loss:
+
+   ~~~text
+   q_i = r_i - median(r)
+   s = max(1.4826022185 · median(|q_i|), s_floor)
+   u_i = 1                         if |q_i| ≤ 1.345s
+         1.345s / |q_i|            otherwise
+   ω_i = base_weight_i · u_i
+   ~~~
+
+   s_floor comes from propagated read/quantization noise and must be finite and positive.
+   A base weight is the inverse predicted variance of y_i - kd_i when a variance model
+   exists, otherwise one; recompute it when k changes. Given the current ω_i, form:
+
+   ~~~text
+   W  = Σω_i          D  = Σω_i d_i       Y  = Σω_i y_i
+   DD = Σω_i d_i²     DY = Σω_i d_i y_i     Δ = W·DD - D²
+
+   a = (Y·DD - D·DY) / Δ
+   k = (W·DY - D·Y) / Δ
+   ~~~
+
+   Require Δ to exceed a scale-aware positive floor; otherwise the dark pattern is
+   unidentifiable. Recompute residuals and stop when
+   |k_new - k_old| ≤ 10⁻⁴ max(1, |k_old|), or after 25 iterations.
+8. Enforce a configured physical interval, normally including k ≥ 0. Reject a solution
+   that lands on a bound.
+9. Estimate uncertainty from a spatial block bootstrap over the fit region. In ordinary
+   weighted least squares, the k diagonal of (XᵀΩX)⁻¹ is W/Δ; multiply it by an estimated
+   residual scale only when Ω contains relative rather than physical inverse-variance
+   weights. Huber reweighting and coherent dark/glow residuals require a robust or block
+   covariance, so the matrix result is a diagnostic, not the acceptance uncertainty.
+   Require k/σ_k and template explanatory power to exceed configured thresholds.
+10. Apply k only if residual spatial power, amp profiles, and held-out regions improve
+    without creating negative glow-shaped structure.
+
+Fit regions must be independent of the regions used for final validation. A single
+central box can miss edge glow.
+
+For comparison, current Siril source performs either exposure-ratio scaling or a
+golden-section search over k ∈ [0, 2], minimizing summed normalized σ in a central
+512 × 512 area. That is a useful open-source heuristic, not a general physical proof;
+see pinned
+[Siril preprocess.c](https://gitlab.com/free-astro/siril/-/blob/8ce9baa37215ae9783de16fa9e0d7a610303588d/src/core/preprocess.c).
+
+### 6.5 Residual acceptance test
+
+For candidate k, compute R = Y - kD_c. On source-free validation pixels report:
+
+- robust RMS before and after;
+- correlation of R with D_c;
+- row, column, amplifier, and radial/glow profiles;
+- fraction made implausibly negative;
+- spatial power spectrum in low/mid/high bands;
+- result for k ± σ_k;
+- predicted injected master variance k²V_D.
+
+Reject optimization if it merely minimizes random-looking variance while leaving a
+coherent dark-shaped residual. Record k per light, its uncertainty, method, fit mask,
+and diagnostics.
+
+Lumos currently implements only k = 1 and stores raw matched darks. This is safe but
+requires darks matched to the light exposure and sensor conditions.
+
+## 7. Persistent defects
+
+### 7.1 Defect taxonomy
+
+Persistent detector problems are not one class:
+
+- hot/warm: excess stable dark current;
+- cold/dead: abnormally low illuminated response;
+- unstable/RTS: switches between discrete dark-current levels;
+- fading/non-linear: response depends on exposure history or signal;
+- bad row/column/segment: coherent readout or response defect;
+- CFA-specific phase-detect/autofocus sites;
+- source-invalid or permanently saturated sites.
+
+A dark reveals high dark-current and instability. An illuminated flat reveals low
+response. Multiple exposure levels reveal non-linearity. A master value alone cannot
+classify temporal stability.
+
+Keep class bits even if repair is identical. Stable hot pixels can sometimes be
+dark-corrected with increased variance; unstable pixels must remain excluded. HST's
+open calibration documentation similarly distinguishes stable hot pixels from RTS and
+fading pixels and propagates data-quality flags; see
+[ACS pixel stability](https://hst-docs.stsci.edu/acsdhb/chapter-4-acs-data-processing-considerations/4-3-dark-current-hot-pixels-and-cosmic-rays#id-4.3DarkCurrent,HotPixels,andCosmicRays-4.3.3PixelStability).
+
+### 7.2 Lumos hot-pixel detector
+
+The current Lumos detector is substantially more robust than a global
+median-plus-standard-deviation threshold. Its exact algorithm is:
+
+1. Split the master dark into approximately 64 × 64 tiles:
+
+   ~~~text
+   tiles_x = ceil(width / 64)
+   x0 = tx · width / tiles_x
+   x1 = (tx + 1) · width / tiles_x
+   ~~~
+
+   and likewise for y. This distributes remainder pixels evenly.
+2. For each tile and CFA color, compute the sample median. Mono has one color, Bayer
+   and X-Trans have three.
+3. Place tile samples at their geometric centers and bilinearly interpolate/extrapolate
+   per color to obtain broad background H_p. A global per-color median fills a missing
+   tile color on very small images.
+4. Form residual r_p = D_p - H_p.
+5. Collect at most 100,000 residuals per color. Allocate the quota proportionally
+   across the color's CFA phases, stratify over rows and columns, then sort indices.
+   This avoids row-major stride aliases.
+6. Compute:
+
+   ~~~text
+   μ_c = median(r)
+   MAD_c = median(|r - μ_c|)
+   σ_MAD = 1.4826022185 · MAD_c
+   σ_tail = P99(|r - μ_c|) / Φ⁻¹(0.995)
+          = 0.38822448 · P99(|r - μ_c|)
+   σ_c = max(σ_MAD, σ_tail, σ_resolution)
+   ~~~
+
+   The two-sided absolute 99th percentile corresponds to normal quantile 0.995.
+   σ_tail is enabled only with at least 500 samples.
+7. σ_resolution is the master CFA quantization σ when available. Otherwise it is
+   max(|D|) times f32 epsilon.
+8. Clamp the requested threshold to k ≥ 1 and flag:
+
+   ~~~text
+   HOT_p iff r_p > μ_color(p) + k σ_color(p)
+   ~~~
+
+   The default is k = 5.
+
+Only the positive tail is a hot-pixel candidate. The broad tiled model prevents smooth
+amp glow from being labeled as millions of hot pixels; the upper-bulk scale protects
+against column/model residuals inflating the sparse-defect tail.
+
+Quality requirements missing from the current implementation are:
+
+- exclude known invalid/saturated samples from tile and residual statistics;
+- validate finite, positive k rather than turning NaN into surprising comparisons;
+- measure stability across individual dark frames, not only the master;
+- represent clusters/columns separately;
+- use a union count when one coordinate has more than one class.
+
+### 7.3 Cold/dead response detector
+
+Detect cold pixels from the additive-corrected flat response before normalization or
+flooring. A global lower threshold fails under vignetting, so use a local same-color
+reference.
+
+For valid response G_p:
+
+~~~text
+M_p = median({G_q | q is a valid same-color neighbor of p})
+ratio_p = G_p / M_p
+COLD_p iff M_p > 0 and ratio_p < f_dead
+~~~
+
+The current f_dead is 0.5. Neighborhoods are:
+
+- Mono: the valid 8-connected neighbors;
+- Bayer: offsets (±2, 0), (0, ±2), and (±2, ±2);
+- X-Trans: nearest 24 same-color sites within Chebyshev radius 6, ordered by Manhattan
+  distance.
+
+Skip already masked neighbors. Require a configured minimum neighbor count; do not
+classify when no positive local reference exists. Dust shadows and vignetting normally
+affect a neighborhood together, leaving the local ratio near one, while a dead
+photosite is isolated and near zero.
+
+The current Lumos code uses the same neighborhoods but does not explicitly require
+M_p > 0 or a minimum count.
+
+### 7.4 Unstable and RTS pixels
+
+Use the individual calibrated dark frames, not only their combined master. For each
+pixel p with N observations d_i and predicted random variance e_i²:
+
+~~~text
+observed = sample_variance(d_i)
+expected = mean(e_i²)
+excess = max(0, observed - expected)
+~~~
+
+Flag instability when excess is inconsistent with the instrument's validated random
+model and the time series shows state changes or exposure-dependent fading. A robust
+implementation combines:
+
+1. a χ² or variance-excess test with multiple-testing control;
+2. a two-state mixture fit compared with a one-state model;
+3. split-time and exposure-length consistency tests;
+4. a minimum amplitude relevant to science data.
+
+Thresholds must be trained on the camera mode. HST ACS, for example, uses a
+camera-specific variance/ERR stability ratio and time-dependent thresholds; its numbers
+must not be copied into a different detector.
+
+Update defect libraries over time and store their validity interval. A pixel can age,
+anneal, or change state.
+
+### 7.5 Rows, columns, and clusters
+
+After isolated detection, analyze the response residual and dark residual for coherent
+segments. An IRAF/ccdmask-derived procedure is:
+
+1. Compute local residual E = image - moving_median(image), per CFA color/phase.
+2. The median box must span more than twice the widest defect to be detected; 7 × 7
+   spans a single bad column in ordinary mono data.
+3. Estimate local σ from a window containing roughly 100 or more valid values:
+
+   ~~~text
+   σ_local = (P69.1(E) - P30.9(E)) / 2
+   ~~~
+
+4. Flag individual values outside [-k_low σ_local, k_high σ_local], normally with a
+   conservative k of at least six.
+5. For each candidate readout column and contiguous segment, sum unflagged residuals.
+   Compare the sum to k σ_local sqrt(n), so a weak but coherent column can be detected.
+6. Fill gaps shorter than configured ngood between flagged portions of one column.
+7. Repeat on rows only if the detector/readout model makes rows a meaningful special
+   direction.
+8. Merge connected components and classify isolated, compact cluster, column/row
+   segment, or large invalid region.
+
+ccdproc implements this open IRAF-derived method, including percentile σ, column sums,
+and gap filling; see
+[ccdmask](https://ccdproc.readthedocs.io/en/latest/api/ccdproc.ccdmask.html).
+For a flat, also compare independently built split-half response masters or two
+illumination levels; stable low response and non-linear response are different defects.
+
+Lumos currently has no explicit row/column/cluster detector.
+
+### 7.6 CFA-aware repair
+
+Create the union defect mask before repairing any pixel. A repaired value may never be
+used as if it were an original good neighbor during the same pass.
+
+For an isolated defect:
+
+1. gather valid, unmasked same-color neighbors using the layouts in section 7.3;
+2. require enough spatial directions, not merely enough samples on one side;
+3. take their median;
+4. write the finite fill value;
+5. retain defect and INTERPOLATED bits.
+
+Current Lumos uses exactly the Mono/Bayer neighborhoods above and the nearest 24
+X-Trans neighbors in radius 6. It masks all hot and cold positions first, so repair
+order does not contaminate the median.
+
+For a column or large cluster, a small local median can copy one side across an
+astronomical edge. Prefer leaving zero scientific weight and use a fill only for
+demosaicing. A fallback fill SHOULD fit a robust local plane to unmasked same-color
+samples surrounding the component, require samples on opposing sides, and reject the
+fit when geometry is underconstrained. Dithered multi-frame combination supplies the
+scientific value later.
+
+## 8. Cosmic rays and exposure-specific transients
+
+### 8.1 Prefer multi-frame rejection
+
+Persistent defects repeat at the same sensor coordinate; cosmic rays, satellites, and
+aircraft are exposure-specific. With multiple registered, preferably dithered lights,
+reject transients at stack time using masks and robust per-output-pixel statistics.
+That compares independent observations of the same sky and does not need to decide
+whether a sharp single-frame feature is a star.
+
+Calibration masters should remove cosmic rays by rejected-mean combination. Running
+single-image L.A.Cosmic on every bias/dark/flat is unnecessary and can alter valid
+calibration structure; the
+[Astropy cosmic-ray guide](https://www.astropy.org/ccd-reduction-and-photometry-guide/v/2.0.0/notebooks/08-03-Cosmic-ray-removal.html)
+recommends proper combination for calibration images.
+
+Use single-frame detection only when too few independent exposures exist, a transient
+mask is needed before interpolation, or the science case requires it.
+
+### 8.2 L.A.Cosmic prerequisites
+
+The original [van Dokkum 2001 algorithm](https://arxiv.org/abs/astro-ph/0108003)
+assumes a sampled image and an accurate noise model. Before detection:
+
+- subtract bias/dark and apply the flat;
+- retain a nonnegative pre-cosmic background estimate for Poisson noise estimation;
+- if a sky model is subtracted from the detection image, supply that model separately
+  to the noise calculation and restore the intended output background afterward;
+- express image and noise in the same units;
+- mask known defects, saturation, and invalid pixels;
+- do not demosaic, resample, sharpen, or permanently sky-subtract;
+- validate parameters and sensor sampling with injected-source tests.
+
+Astro-SCRAPPY, the current open implementation wrapped by ccdproc, documents the same
+requirements and defaults; see pinned
+[astroscrappy.pyx](https://github.com/astropy/astroscrappy/blob/023554aa49d17ecf8c32aff4ae7a77396ec462a6/astroscrappy/astroscrappy.pyx).
+
+### 8.3 Dense mono L.A.Cosmic
+
+Let I be a calibrated dense monochrome plane of width W and height H.
+
+#### Step L1 — subsampled positive Laplacian
+
+Replicate every source pixel to a 2 × 2 block, producing I². Convolve with:
+
+~~~text
+K = [ 0 -1  0
+     -1  4 -1
+      0 -1  0 ]
+~~~
+
+Clip negative convolution values to zero, then average each 2 × 2 block back to native
+resolution:
+
+~~~text
+L⁺ = block_mean_2x2(max(0, K * I²))
+~~~
+
+Use one explicitly tested border rule. Edge replication is acceptable. The subsampling
+prevents negative Laplacian crosses from adjacent cosmic pixels suppressing one another.
+
+#### Step L2 — noise map
+
+Obtain a cosmic-free signal estimate M by a 5 × 5 median of I. In normalized Lumos units,
+with gain g electrons/ADU, full_scale ADU per normalized unit, and read noise R_e:
+
+~~~text
+E_unit = g · full_scale
+signal_e = max(M, 0) · E_unit
+N = sqrt(signal_e + R_e²) / E_unit
+~~~
+
+If a propagated variance plane V exists, use N = sqrt(median_filter(V)) after adding
+any separately supplied background variance. Floor N at a positive numeric minimum.
+The variance must describe what the pixel noise would have been without a cosmic ray.
+
+Lumos also offers an empirical model. With robust background b and σ_b:
+
+~~~text
+slope = σ_b² / max(b, σ_b)
+N(M) = sqrt(σ_b² + max(M - b, 0) · slope)
+~~~
+
+This is a pragmatic sky-anchored approximation, not the canonical Poisson/read model.
+It can overestimate bright-region noise when the background is read-noise dominated.
+
+#### Step L3 — significance
+
+~~~text
+S = L⁺ / (2N)
+S' = S - median_5x5(S)
+~~~
+
+The factor two is the subsampling factor. Subtracting the local median removes smooth
+sampling structure.
+
+#### Step L4 — fine structure
+
+~~~text
+M3 = median_3x3(I)
+F = max(M3 - median_7x7(M3), ε_F)
+Fσ = max(F / N, 0.01)
+~~~
+
+F remains large in sampled stellar cores but approaches zero for a sharp cosmic spike
+erased by M3.
+
+#### Step L5 — primary and neighbor masks
+
+With defaults sigclip = 4.5, objlim = 5.0, sigfrac = 0.3:
+
+~~~text
+primary = good
+          and S' > sigclip
+          and S' / Fσ > objlim
+
+near1 = dilate_8(primary) and good and S' > sigclip
+near2 = dilate_8(near1) and good and S' > sigfrac · sigclip
+new_cosmic = near2
+~~~
+
+Astro-SCRAPPY deliberately relaxes the fine-structure condition for neighbors after a
+primary detection. A different growth rule is a different algorithm and needs its own
+tests.
+
+#### Step L6 — clean and iterate
+
+OR new_cosmic into the cumulative mask. For detection iterations, replace masked
+samples in a working copy with a statistic of unmasked 5 × 5 neighbors. A masked
+median is robust; Astro-SCRAPPY defaults to a masked mean and also offers inverse-distance
+weighting. Keep the original data and output mask separately when possible.
+
+Repeat detection and working-copy cleaning up to niter = 4, stopping when no new pixel
+is found. The cumulative mask, not the cleaned pixels, is the scientific result.
+
+### 8.4 Bayer mosaics
+
+L.A.Cosmic was defined for a dense sampled intensity image, not a color mosaic. Lumos
+deinterleaves the four (x mod 2, y mod 2) Bayer phases, runs the dense mono algorithm on
+each half-resolution phase plane, and writes the cleaned planes back.
+
+This preserves same-color comparisons but halves spatial sampling in both axes:
+
+~~~text
+FWHM_phase ≈ FWHM_mosaic / 2
+~~~
+
+A perfectly real 2.4-pixel-FWHM mosaic star becomes roughly 1.2 pixels wide in a phase
+plane and can resemble a cosmic ray. Therefore Bayer single-frame rejection MUST be
+off by default unless camera/optics-specific injection tests establish acceptable
+completeness and false-positive rates across:
+
+- stellar FWHM and subpixel phase;
+- brightness through saturation;
+- red, green, and blue source colors;
+- crowded fields and emission knots;
+- trails and multi-pixel cosmic events.
+
+For ordinary dithered OSC sets, prefer stack-time rejection.
+
+### 8.5 X-Trans Lumos extension
+
+X-Trans has no dense rectangular same-color sublattice, so current Lumos uses a
+median-stencil extension rather than the canonical Laplacian:
+
+1. Within Chebyshev radius 6, gather same-color, unmasked neighbors.
+2. Sort by Manhattan distance and keep at most 24.
+3. Let M_small be the median of the nearest up to 8 and M_large the median of all
+   gathered values.
+4. Compute:
+
+   ~~~text
+   L⁺ = max(I_p - M_small, 0)
+   F = max(M_small - M_large, 10⁻⁶)
+   signal = M_small
+   S = L⁺ / N
+   ~~~
+
+5. Estimate empirical background/MAD noise separately for R, G, and B, or use the
+   parametric noise model.
+6. Apply the section 8.3 contrast/growth test to S and F, without S' because L⁺ is
+   already a local high-pass.
+7. Replace flagged working samples with the median of the nearest 12 unmasked same-color
+   neighbors, and iterate.
+
+This is a Lumos-specific heuristic, not an implementation of van Dokkum's Laplacian
+derivation. It requires independent validation and must be named accordingly in
+provenance.
+
+### 8.6 Current Lumos differences
+
+Current defaults match Astro-SCRAPPY's 4.5/5.0/0.3/four-iteration parameters and place
+the operation after calibration and before demosaic. Current dense Mono fine structure
+uses full 3 × 3 and nested 7 × 7 medians, replacement uses an unmasked-neighbor 5 × 5
+median, and masks accumulate across iterations.
+
+The current growth step performs one 8-neighbor pass and requires both the lowered
+significance and the same object-contrast test for grown pixels. That is more
+conservative than Astro-SCRAPPY's two-stage growth and is not identical to the
+algorithm specified in section 8.3. Current code also lacks an input bad/saturation
+mask and uses destructive in-painting because the pipeline has no transient mask plane.
+
+## 9. Uncertainty propagation
+
+### 9.1 General ratio
+
+Let:
+
+~~~text
+X = additive-corrected light
+G = unnormalized calibrated flat response
+m = flat normalization
+C = mX/G
+~~~
+
+The first derivatives are:
+
+~~~text
+∂C/∂X = m/G
+∂C/∂G = -mX/G² = -C/G
+∂C/∂m = X/G = C/m
+~~~
+
+If X, G, and m are independent:
+
+~~~text
+Var(C) =
+    (m/G)² Var(X)
+  + (C/G)² Var(G)
+  + (C/m)² Var(m)
+~~~
+
+They are not always independent. The normalization m is estimated from G and creates
+Cov(G, m); a shared bias can occur in X and G. The general implementation uses the
+Jacobian J over primitive independent inputs and computes:
+
+~~~text
+Var(C) = J Σ Jᵀ
+~~~
+
+Do not add the same master's variance twice as though two uses were independent.
+
+### 9.2 Additive numerator paths
+
+For independent light and matched raw dark:
+
+~~~text
+X = L - D_L
+Var(X) = Var(L) + Var(D_L)
+~~~
+
+For independent L, D_raw, B and fixed k:
+
+~~~text
+X = L - kD_raw + (k - 1)B
+Var(X) = Var(L) + k²Var(D_raw) + (k - 1)²Var(B)
+~~~
+
+If k has uncertainty and is independent of the pixels, add:
+
+~~~text
+(D_raw - B)² Var(k)
+~~~
+
+plus covariance terms if k was fitted from the same light pixels. A fit-derived k is
+usually correlated with L, so either carry that covariance or conservatively validate
+with k ± σ_k.
+
+For bias only:
+
+~~~text
+X = L - B
+Var(X) = Var(L) + Var(B)
+~~~
+
+Subtracting the mean dark signal does not remove the light exposure's own dark-current
+shot noise. That stochastic term remains in Var(L), just as photon and read noise do.
+
+### 9.3 Shared bias in numerator and flat
+
+If the same B is used in C = m(L - B)/(F - B), treat B as one primitive variable:
+
+~~~text
+∂C/∂L = m/G
+∂C/∂F = -mX/G²
+∂C/∂B = m(X - G)/G²
+~~~
+
+where X = L - B and G = F - B.
+
+For the scalable-dark numerator with the same bias-subtracted flat:
+
+~~~text
+X = L - kD_raw + (k - 1)B
+G = F - B
+∂C/∂B = m((k - 1)G + X)/G²
+~~~
+
+These derivatives automatically account for the shared master. Expanding Var(X) and
+Var(G) independently and then adding them would overcount or mis-sign the bias
+contribution. They are conditional on a fixed normalization m. A full analytic
+derivative also includes (X/G)(∂m/∂B); equivalently, carry the covariance of m with G
+and B. The hierarchical whole-pipeline bootstrap below captures both dependencies and
+is safer for a robust normalization estimator.
+
+### 9.4 Prepared divisor uncertainty
+
+For Q = G/m:
+
+~~~text
+Var(Q) =
+    Var(G)/m²
+  + G² Var(m)/m⁴
+  - 2G Cov(G,m)/m³
+~~~
+
+With C = X/Q and independent X,Q:
+
+~~~text
+Var(C) = Var(X)/Q² + X² Var(Q)/Q⁴
+~~~
+
+Estimate Var(m) and Cov(G,m) by an analytic robust-estimator approximation or bootstrap
+whole flat frames, not individual pixels: resample input flat exposures, rebuild the
+complete normalized master, and measure the distribution of Q. Whole-frame bootstrap
+preserves the correlation introduced by shared illumination normalization and additive
+masters. To include master-bias or flat-dark uncertainty, use a hierarchical rebuild:
+independently resample the source additive-calibration exposures, rebuild that master,
+then calibrate the resampled flat exposures with it on every bootstrap replicate.
+
+### 9.5 Initial light variance
+
+When physical parameters are known, in normalized units:
+
+~~~text
+E_unit = electrons per normalized unit
+signal_e = max(expected pre-read signal, 0) · E_unit
+Var(L) = (signal_e + read_noise_e²) / E_unit² + Var(extra terms)
+~~~
+
+Use an expected signal estimate that is not itself inflated by a cosmic ray. Add
+quantization variance from Stage 1 and any validated readout/model terms. A negative
+sample does not imply negative Poisson variance; use the pre-subtraction expected
+electron components or a nonnegative robust signal estimate.
+
+The primary reference for the fact that calibration-frame noise propagates into the
+result is Newberry, 1991,
+[Signal-to-noise considerations for sky-subtracted CCD data](https://adsabs.harvard.edu/pdf/1991PASP..103..122N).
+ccdproc provides a practical open-source comparison: CCDData arithmetic propagates
+uncertainties through bias, dark, and flat operations.
+
+### 9.6 Weights and synthetic pixels
+
+The stack weight for an ordinary calibrated sample is proportional to 1/Var(C), modified
+by geometric coverage. A masked or interpolated sample has zero scientific weight.
+Do not assign interpolated pixels the variance of their neighbors; that would count
+correlated synthetic information as a new measurement.
+
+Store per-pixel survivor count and effective sample size for masters. A single global
+quantization σ is useful as a numerical floor but is not a replacement for a master
+variance plane.
+
+## 10. Required implementation sequence
+
+### 10.1 Build masters
+
+~~~text
+build_calibration_bundle(frame_groups, policy):
+    headers = inspect_all_headers(frame_groups)
+    keys = derive_typed_compatibility_keys(headers, policy.instrument_profile)
+    reject_missing_or_mismatched_keys(keys)
+
+    bias = build_additive_master(groups.bias, normalization=none)
+    raw_dark = build_additive_master(groups.dark, normalization=none)
+    flat_dark = build_additive_master(groups.flat_dark, normalization=none)
+
+    if policy.scaled_dark:
+        require(raw_dark and bias)
+        scalable_dark = subtract_with_variance(raw_dark, bias)
+    else:
+        scalable_dark = none
+
+    prepared_flats = []
+    for flat_group matching one light optical key:
+        subtractor = matching_flat_dark_or_bias(flat_group)
+        calibrated_subs = []
+        for flat in flat_group:
+            g = subtract_with_variance(flat, subtractor)
+            mask_invalid_saturated_and_nonlinear(g)
+            levels = robust_level_per_cfa_color(g)
+            require_positive_well_sampled(levels)
+            calibrated_subs.push(normalize_per_color(g, levels))
+
+        response = rejected_mean_or_small_n_median(calibrated_subs)
+        divisor = normalize_master_per_color(response)
+        classify_flat_invalid(divisor, policy)
+        prepared_flats.push(divisor)
+
+    defects = union(
+        detect_hot_and_broad_dark_defects(raw_dark, source_darks),
+        detect_cold_response_defects(prepared_flats),
+        detect_unstable_pixels(source_darks),
+        detect_rows_columns_clusters(raw_dark, prepared_flats)
+    )
+
+    validate_split_half_and_held_out_products(...)
+    publish_atomically(data, masks, variance, compatibility, provenance)
+~~~
+
+The current Lumos API stacks all four roles independently and only later subtracts the
+flat's master subtractor. Meeting this sequence requires restructuring that boundary so
+flat subs are calibrated before multiplicative normalization.
+
+### 10.2 Calibrate one light
+
+~~~text
+calibrate(light, bundle, policy):
+    validate_complete_contract_without_mutation(light, bundle, policy)
+    out = allocate_or_clone_transactional_output(light)
+
+    if matched_raw_dark:
+        X = subtract(out, matched_raw_dark)
+    else if scalable_dark:
+        k = validated_dark_scale(out, scalable_dark, policy)
+        X = out - bias - k * scalable_dark
+    else if bias:
+        X = subtract(out, bias)
+    else:
+        X = out
+
+    merge_source_and_master_masks()
+    propagate_additive_variance()
+
+    if flat:
+        divide_only_valid_samples(X, flat.divisor)
+        propagate_ratio_variance()
+
+    repair_values_needed_by_demosaic(defect_union, keep_masks=true)
+
+    if single_frame_cosmic_enabled:
+        require_validated_sensor_specific_config()
+        cosmic_mask = detect_on_working_copy(calibrated_cfa, variance, masks)
+        merge_mask(cosmic_mask)
+        fill_only_for_demosaic(keep_masks=true)
+
+    verify_all_published_samples_finite()
+    mark_calibrated_with_provenance()
+    return out
+~~~
+
+The operation either returns the complete output or the original remains untouched.
+
+### 10.3 Performance and memory
+
+- Decode calibration roles in bounded parallel batches.
+- Keep master roles concurrent only when their combined resident and transient memory
+  fits the declared budget; otherwise run roles sequentially with the full budget.
+- Combine in row-aligned chunks so resident and mmap tiers are bit-equivalent.
+- Use f64 accumulators for normalization, sums, covariance, and variance.
+- Precompute CFA phase/color lookup and X-Trans neighbor offsets.
+- Poll cancellation between decode, tile/statistic, chunk, and iteration boundaries.
+- Never publish a partial cache. Include cache schema, decoder-domain identity, and
+  algorithm version in the cache key/header.
+
+## 11. Current Lumos state and gap audit
+
+This section describes the source tree as inspected for this document. It is informative;
+sections 1–10 are the target contract.
+
+### 11.1 Implemented well
+
+- CfaImage uses unclipped f32 and preserves negative values during subtraction.
+- Calibration runs on CFA data before demosaic and prevents a normal second application.
+- A raw dark takes priority over bias, avoiding double subtraction in that path.
+- Flat-dark takes priority over bias for flat preparation.
+- Prepared flats normalize independently per R/G/B CFA color.
+- Role stack presets use no normalization for bias/dark, multiplicative normalization
+  for flat, robust rejection, memory tiering, finite-sample checks, and propagated
+  quantization floors.
+- Hot detection removes a robust per-color tiled broad-dark model and combines MAD,
+  upper-bulk, and source-resolution scale estimates.
+- Cold detection uses local same-color response ratios before the flat floor.
+- Defect repair masks the whole defect set and uses same-color neighbors for Mono,
+  Bayer, and X-Trans.
+- Optional cosmic rejection is correctly placed after calibration and before demosaic,
+  with explicit Mono/Bayer/X-Trans dispatch.
+- Calibration bundles are atomically saved through a versioned cache and contain the
+  prepared flat and coherent defect map.
+
+Relevant sources:
+
+- [calibration_masters/mod.rs](../calibration_masters/mod.rs)
+- [prepared_flat/mod.rs](../calibration_masters/prepared_flat/mod.rs)
+- [defect_map/mod.rs](../calibration_masters/defect_map/mod.rs)
+- [cosmic_ray.rs](../calibration_masters/cosmic_ray.rs)
+- [combine/config.rs](../combine/config.rs)
+- [pipeline/streaming.rs](../pipeline/streaming.rs)
+- [CfaImage](../../io/astro_image/cfa.rs)
+
+### 11.2 Priority correctness gaps
+
+| Priority | Gap | Consequence |
+|---|---|---|
+| P0 | Flat subs are globally multiplicatively normalized while still raw; master bias/flat-dark is subtracted only after combination | variable flat illumination is normalized with an additive pedestal in the statistic |
+| P0 | Within-role loading validates dimensions and finite samples, but not exposure/gain/offset/filter/temperature/readout/decode compatibility | unrelated frames can be silently combined |
+| P0 | Application validates CFA pattern only; dimensions fail later by assertion and other acquisition fields are ignored | a mismatch can panic after the calibrated flag is set or produce plausible corruption |
+| P0 | Stage 1 decoder black model/scale provenance is not represented in AstroImageMetadata | masters from incompatible numeric domains cannot be rejected |
+| P0 | No validity/saturation/defect/flat-invalid mask plane | invalid and synthesized samples receive ordinary downstream weight |
+| P0 | No per-pixel master/divisor variance | flat and shared-bias uncertainty cannot be propagated; stack weights omit calibration noise |
+| P0 | Prepared-flat arithmetic mean includes every sample and silently floors response at 0.1 | saturation/defects bias normalization; deep response is changed instead of masked |
+| P1 | No overscan correction in the calibration architecture | frame-to-frame bias drift cannot be removed when overscan exists |
+| P1 | No dark scaling or dark-rate library | every dark must be matched 1:1 |
+| P1 | No RTS/fading stability classification or validity interval | intermittent pixels can evade a master threshold |
+| P1 | No explicit bad row/column/cluster detection | coherent defects are treated as isolated pixels |
+| P1 | Defect summary adds hot and cold counts rather than reporting the coordinate union | overlap can overstate defective percentage |
+| P1 | Single-frame cosmic rejection has no input bad/saturation mask and destructively replaces pixels | false candidates and synthesized values cannot be downweighted later |
+| P1 | Bayer phase-plane L.A.Cosmic is exposed without a sampling gate | tight real stars can be removed |
+| P1 | Defect/cosmic thresholds and physical noise inputs are not uniformly checked for finite positive values | invalid configuration can silently disable detection or create non-finite arithmetic |
+| P2 | Convenience from_files uses non-cancellable role stacks | long master construction cannot be stopped through that API |
+| P2 | Cache provenance lacks full source list, compatibility key, quality report, and algorithm schema | a cache can be coherent internally but scientifically stale |
+
+### 11.3 Open-source comparison
+
+- ccdproc checks shape and physical units, supports overscan/trim, exposure dark
+  scaling, flat minimum policy, masks, and uncertainty propagation. Its Combiner
+  exposes mean/median, scaling, weights, masks, clipping, and master uncertainty.
+- Astro-SCRAPPY supplies the maintained L.A.Cosmic reference behavior, including
+  saturation/bad masks, Poisson/read noise, two-stage growth, multiple cleaning
+  strategies, and optional input variance/background.
+- Siril confirms the practical bias → dark → flat order, per-CFA flat equalization,
+  master-dark cosmetic correction, exposure or empirical dark optimization, and
+  calibration-before-demosaic workflow.
+- Rubin's ip_isr demonstrates the larger scientific contract: input validation,
+  amplifier overscan, bias/dark/flat, defects, and image+mask+variance products.
+
+Lumos's tiled CFA defect detection is more sensor-layout-aware than Siril's current
+global master-dark threshold, but the absence of masks/variance and full compatibility
+metadata is the larger architectural limitation.
+
+## 12. Verification specification
+
+All algorithms require analytic/synthetic fixtures and real instrument regression sets.
+Tests assert exact masks, values, and uncertainty—not merely that processing completes.
+
+### 12.1 Algebra and domains
+
+1. Matched raw dark removes residual bias+dark exactly and does not subtract bias twice.
+2. Bias-only path recovers the known signal.
+3. Scaled path verifies
+   L - B - k(D-B) = L - kD + (k-1)B exactly.
+4. A flat with known response removes vignetting up to the declared normalization.
+5. Flat calibration before normalization recovers variable-illumination inputs; the
+   intentionally wrong reverse order must fail the expected value.
+6. Negative background samples remain negative.
+7. Saturated and invalid inputs remain masked and never become valid after subtraction.
+8. Applying calibration twice fails before mutation.
+
+### 12.2 Compatibility
+
+Table-drive one mismatch at a time:
+
+- dimensions/crop/orientation/CFA origin;
+- Mono/Bayer/X-Trans pattern;
+- decoder black model and scale;
+- gain/ISO, offset, bit depth, readout mode, binning;
+- dark/flat-dark exposure;
+- dark temperature policy;
+- flat filter, optical key, and linearity/saturation state;
+- missing required metadata.
+
+For every failure, assert pixels, masks, variance, and calibrated marker are unchanged.
+Test mixed-role source groups before master combination, not only master versus light.
+
+### 12.3 Master estimators
+
+- Hand-compute mean, median, sigma-clip, and Winsorized-estimate survivors for small
+  vectors, including tied values, zero MAD, asymmetric outliers, and N = 1/2.
+- Assert f64 sums on adversarial f32 magnitudes.
+- Verify per-pixel survivor counts and N_eff.
+- Hand-compute predicted and empirical master variance, including n = 1 and excess-χ²
+  behavior.
+- Inject one cosmic ray into one calibration sub and recover the clean expected master.
+- Inject a whole bad exposure/light leak and verify frame-level rejection rather than
+  millions of independent pixel clips.
+- Force RAM and mmap tiers and assert bit-identical master, mask, variance, and metadata.
+
+### 12.4 Flats
+
+- Mono, all four Bayer patterns, and multiple valid X-Trans patterns.
+- Strongly unequal R/G/B flat-source spectra: output response shape must be unchanged
+  and no color gain introduced.
+- Frame-to-frame illumination and color drift with a nonzero bias/flat-dark.
+- Vignetting, dust shadows, saturated center, near-zero corners, and dead pixels.
+- Exact maximum-gain boundary: just above remains valid; just below is FLAT_INVALID,
+  not silently clamped.
+- Split-half flat ratio agrees with predicted uncertainty.
+- Per-filter and optical-key mismatch fails.
+
+### 12.5 Dark scaling
+
+- Exact linear exposure series recovers the known k.
+- A shorter dark scaled upward reports the predicted k² variance penalty.
+- Bias left in a scaled dark produces the analytically expected wrong pedestal and is
+  rejected by type/metadata.
+- Separate dark-current and amp-glow scaling laws cause scalar validation to fail.
+- Robust fit ignores masked stars and recovers k with injected outliers.
+- A featureless dark template is rejected as unidentifiable.
+- Bound-hitting, extrapolated temperature, RTS, and low-significance fits fail.
+
+### 12.6 Defects
+
+- Broad gradients and amp glow yield no false hot map.
+- Per-color noise differences do not hide red/blue defects.
+- Quantized zero-MAD masters use the resolution floor.
+- Sample cap covers sensor extent and every CFA phase.
+- Hot clusters remain detectable under the tiled, not local, background.
+- Cold detection catches exact sub-0.5 local response and preserves the boundary.
+- Smooth vignette/dust does not trigger cold detection.
+- RTS time series is unstable despite an ordinary-looking master mean.
+- Bad columns with short gaps become one classified segment.
+- Repair draws only from original good same-color neighbors; order cannot change output.
+- Underconstrained large clusters remain masked rather than receiving a false valid fill.
+
+### 12.7 Cosmic rays
+
+For Mono, Bayer, and X-Trans separately:
+
+- single and multi-pixel cosmic events at center, border, and near masks;
+- exact primary, first-growth, and lowered-growth masks on a small hand-computed array;
+- parametric noise in electrons versus normalized units;
+- supplied variance versus internal noise model;
+- saturated stars and known defects excluded;
+- well-sampled stars over brightness/subpixel sweeps survive;
+- undersampled Bayer stars demonstrate the safety gate;
+- emission knots, diffraction spikes, trails, and crowded fields;
+- iteration stops and cumulative masks are deterministic;
+- NaN, infinite, zero, and negative thresholds/noise parameters fail before mutation;
+- cleaned fill stays masked and has zero stack weight;
+- multi-frame rejection recovers the true sky without single-frame cleaning.
+
+### 12.8 Uncertainty
+
+- Compare analytic Jacobians with finite differences.
+- Verify matched-dark, bias-only, and expanded scalable-dark variance by Monte Carlo.
+- Reusing one bias in numerator/denominator matches the shared-variable derivative and
+  differs from the intentionally wrong independent treatment.
+- Whole-flat bootstrap matches the prepared-divisor variance within statistical error.
+- Calibrated residuals normalized by predicted σ have unit robust scale on synthetic
+  noise.
+- Interpolated/masked values never contribute effective sample size.
+
+### 12.9 Real-data acceptance
+
+Maintain versioned data sets for at least one Mono, Bayer, and X-Trans camera. For every
+set report:
+
+- master split-half residuals;
+- calibrated background row/column/radial profiles;
+- defect counts by class and stability;
+- flat over/under-correction versus field position;
+- noise before/after with predicted calibration contribution;
+- cosmic completeness/false-positive rate from injected events;
+- reproducibility across memory tiers and thread counts.
+
+Do not approve an algorithm from a visually stretched image alone.
+
+## 13. Primary and implementation references
+
+### Scientific and observatory references
+
+- Michael V. Newberry, 1991,
+  [Signal-to-noise considerations for sky-subtracted CCD data](https://adsabs.harvard.edu/pdf/1991PASP..103..122N).
+- Pieter G. van Dokkum, 2001,
+  [Cosmic-Ray Rejection by Laplacian Edge Detection](https://arxiv.org/abs/astro-ph/0108003).
+- Plazas Malagón et al., 2024,
+  [Instrument Signature Removal and Calibration Products for the Rubin LSST](https://arxiv.org/abs/2404.14516).
+- [Astropy CCD Data Reduction and Photometry Guide](https://www.astropy.org/ccd-reduction-and-photometry-guide/):
+  calibration overview, image combination, dark/bias choices, flat construction, and
+  cosmic-ray removal.
+- STScI,
+  [ACS dark current, hot pixels, RTS stability, sink pixels, and cosmic rays](https://hst-docs.stsci.edu/acsdhb/chapter-4-acs-data-processing-considerations/4-3-dark-current-hot-pixels-and-cosmic-rays).
+
+### Open-source implementations inspected
+
+The source links are commit-pinned so future upstream changes do not silently change
+the comparison:
+
+- ccdproc commit c80e1f00:
+  [core calibration operations](https://github.com/astropy/ccdproc/blob/c80e1f00b9326882c6b67011ea53b5bfc3be5d4f/ccdproc/core.py) and
+  [Combiner](https://github.com/astropy/ccdproc/blob/c80e1f00b9326882c6b67011ea53b5bfc3be5d4f/ccdproc/combiner.py).
+- Astro-SCRAPPY commit 023554aa:
+  [L.A.Cosmic implementation](https://github.com/astropy/astroscrappy/blob/023554aa49d17ecf8c32aff4ae7a77396ec462a6/astroscrappy/astroscrappy.pyx).
+- Siril commit 8ce9baa3:
+  [preprocessing/dark optimization](https://gitlab.com/free-astro/siril/-/blob/8ce9baa37215ae9783de16fa9e0d7a610303588d/src/core/preprocess.c),
+  [cosmetic correction](https://gitlab.com/free-astro/siril/-/blob/8ce9baa37215ae9783de16fa9e0d7a610303588d/src/filters/cosmetic_correction.c), and
+  [CFA flat equalization](https://gitlab.com/free-astro/siril/-/blob/8ce9baa37215ae9783de16fa9e0d7a610303588d/src/core/siril.c).
+- [Rubin ip_isr](https://github.com/lsst/ip_isr), open image+mask+variance instrument
+  signature removal.
+
+### Interpretation notes
+
+- ccdproc's dark scale multiplies the supplied master; the caller is responsible for
+  ensuring it is bias-free. This document makes that state a distinct type/product.
+- Siril's empirical optimizer and Lumos's X-Trans cosmic detector are valuable
+  implementation evidence but are heuristics beyond the cited physical derivations.
+- Instrument-specific HST/Rubin thresholds are evidence for carrying stability,
+  amplifier, mask, and variance information—not universal constants for consumer
+  cameras.
+- Acquisition folklore and proprietary-tool defaults were deliberately excluded where
+  a primary paper, observatory guide, or inspectable open-source implementation supplied
+  the claim.
