@@ -233,8 +233,7 @@ impl RunState {
     }
 
     /// Drop everything visible from a failed run: no glow, logs, or pinned
-    /// values. The pinned revision stays monotonic so surviving derived view
-    /// caches cannot mistake a later value for the cleared one.
+    /// values.
     pub(crate) fn clear(&mut self) {
         self.running = false;
         self.nodes.clear();

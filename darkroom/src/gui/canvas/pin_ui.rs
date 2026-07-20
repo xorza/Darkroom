@@ -339,17 +339,15 @@ impl PinUi {
         let is_selected = rcx.selected.contains(&ItemRef::Pin(g.out_port));
         let border = theme.card_border(g.broken, is_selected);
         let value = rcx.run_state.pinned_outputs.entries.get(&g.out_port);
-        let image = value.and_then(|value| match &value.content {
+        let image = value.and_then(|value| match value {
             StoredContent::Image(image) => Some(image),
             StoredContent::Text(_) | StoredContent::Error(_) => None,
         });
-        let text = image
-            .is_none()
-            .then(|| match value.map(|value| &value.content) {
-                Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
-                Some(StoredContent::Image(_)) => "image preview unavailable",
-                None => "not yet run",
-            });
+        let text = image.is_none().then_some(match value {
+            Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
+            Some(StoredContent::Image(_)) => "image preview unavailable",
+            None => "not yet run",
+        });
         let title = {
             let node_name = n.name.borrow_str();
             let output_name = output.name.borrow_str();

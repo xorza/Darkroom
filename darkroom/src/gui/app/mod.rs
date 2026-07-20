@@ -142,7 +142,7 @@ impl App {
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. A pinned output's live push lands in the
     /// centralized pinned-output store, which uploads its small image preview;
-    /// visible previews and viewers read the new revision during the frame
+    /// visible previews and viewers read the new value during the frame
     /// already scheduled by the worker's wake callback. Drained before the
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {

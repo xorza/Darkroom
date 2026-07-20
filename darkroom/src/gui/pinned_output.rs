@@ -20,14 +20,7 @@ const FULL_TEXTURE_DIM: u32 = 8192;
 
 #[derive(Default, Debug)]
 pub(crate) struct PinnedOutputStore {
-    pub(crate) entries: HashMap<OutputPort, StoredOutput>,
-    revision: u64,
-}
-
-#[derive(Debug)]
-pub(crate) struct StoredOutput {
-    pub(crate) revision: u64,
-    pub(crate) content: StoredContent,
+    pub(crate) entries: HashMap<OutputPort, StoredContent>,
 }
 
 #[derive(Debug)]
@@ -65,11 +58,6 @@ impl PinnedOutputStore {
         if pushed.values.is_empty() {
             return;
         }
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .expect("pinned-output revision overflow");
-        let revision = self.revision;
         for output in pushed.values {
             let port = OutputPort::new(pushed.node.node_id, output.port_idx);
             if !document.retains_output_resource(port) {
@@ -77,13 +65,7 @@ impl PinnedOutputStore {
             }
             // PortRef cannot identify a particular graph instance, so the
             // latest push is the only value the UI can consistently present.
-            self.entries.insert(
-                port,
-                StoredOutput {
-                    revision,
-                    content: prepare_content(ui, output.value),
-                },
-            );
+            self.entries.insert(port, prepare_content(ui, output.value));
         }
     }
 
@@ -97,14 +79,14 @@ impl PinnedOutputStore {
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
-        let Some(mut output) = self.entries.remove(&port) else {
+        let Some(content) = self.entries.remove(&port) else {
             return;
         };
-        output.content = match output.content {
+        let content = match content {
             StoredContent::Image(image) => StoredContent::Image(image.materialize_full(ui)),
             content => content,
         };
-        self.entries.insert(port, output);
+        self.entries.insert(port, content);
     }
 }
 
@@ -284,9 +266,7 @@ mod tests {
             &document,
         );
         assert_eq!(store.entries.len(), 1);
-        let first = &store.entries[&first_port];
-        assert!(matches!(&first.content, StoredContent::Text(text) if text == "7"));
-        let first_revision = first.revision;
+        assert!(matches!(&store.entries[&first_port], StoredContent::Text(text) if text == "7"));
 
         store.ingest(
             &ui,
@@ -303,27 +283,7 @@ mod tests {
             &document,
         );
         assert_eq!(store.entries.len(), 1);
-        let latest = &store.entries[&first_port];
-        assert!(latest.revision > first_revision);
-        assert!(matches!(&latest.content, StoredContent::Text(text) if text == "8"));
-        let latest_revision = latest.revision;
-
-        store.entries.clear();
-        store.ingest(
-            &ui,
-            push(
-                node,
-                vec![PinnedOutput {
-                    port_idx: 0,
-                    value: DynamicValue::Static(StaticValue::Int(9)),
-                }],
-            ),
-            &document,
-        );
-        assert!(
-            store.entries[&first_port].revision > latest_revision,
-            "clearing resources does not recycle a revision a view may remember"
-        );
+        assert!(matches!(&store.entries[&first_port], StoredContent::Text(text) if text == "8"));
     }
 
     #[test]
@@ -344,7 +304,7 @@ mod tests {
             ),
             &pinned,
         );
-        let StoredContent::Image(image) = &store.entries[&first_port].content else {
+        let StoredContent::Image(image) = &store.entries[&first_port] else {
             panic!("image output must create an image resource");
         };
         assert_eq!(image.preview.size(), UVec2::new(256, 128));
@@ -355,7 +315,7 @@ mod tests {
 
         let viewer = demanding_document(first_port, false, true);
         store.reconcile(&ui, &viewer);
-        let StoredContent::Image(image) = &store.entries[&first_port].content else {
+        let StoredContent::Image(image) = &store.entries[&first_port] else {
             panic!("viewer demand must retain the image resource");
         };
         assert!(

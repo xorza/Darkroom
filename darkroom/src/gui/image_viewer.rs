@@ -24,7 +24,7 @@ use scenarium::NodeSearch;
 use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
-use crate::gui::pinned_output::{FullImage, StoredContent, StoredOutput};
+use crate::gui::pinned_output::{FullImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
@@ -50,15 +50,13 @@ pub(crate) struct ImageViewer {
     /// The port this viewer shows — keys the pane's widget id so two
     /// viewer tabs never share gesture responses.
     port: PortRef,
-    /// Revision of the centralized source reflected by the current framing.
-    source_revision: Option<u64>,
     /// Texture dimensions used to decide whether a new revision needs a refit.
     source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
     /// (recomputed each frame, so it tracks pane resizes). The image's
-    /// top-left offset in pane-local px plus the zoom (pane px per
-    /// texture texel) — the same `local = pan + zoom * texel` mapping as
-    /// the canvas, so the shared viewport algebra applies unchanged.
+    /// top-left offset in pane-local logical px plus the zoom (physical
+    /// display px per texture texel). Texture dimensions are converted to
+    /// their 1:1 logical footprint before applying it.
     view: Option<Viewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
     pan_anchor: PanAnchor,
@@ -83,7 +81,6 @@ impl ImageViewer {
     pub(crate) fn new(port: PortRef) -> Self {
         Self {
             port,
-            source_revision: None,
             source_size: None,
             view: None,
             pan_anchor: PanAnchor::default(),
@@ -107,15 +104,11 @@ impl ImageViewer {
 
     /// Keep framing across same-size revisions and refit when the displayed
     /// texture dimensions change or the source disappears.
-    fn sync_source(&mut self, revision: Option<u64>, source_size: Option<UVec2>) {
-        if revision == self.source_revision {
-            return;
-        }
-        self.source_revision = revision;
-        if revision.is_none() || source_size != self.source_size {
+    fn sync_source(&mut self, source_size: Option<UVec2>) {
+        if source_size != self.source_size {
             self.reset_framing();
+            self.source_size = source_size;
         }
-        self.source_size = source_size;
     }
 
     /// Draw the viewer pane (the whole tab content). Borrows the centralized
@@ -128,9 +121,9 @@ impl ImageViewer {
         theme: &Theme,
         prefs: &mut ViewerPreferences,
         title: &str,
-        source: Option<&StoredOutput>,
+        source: Option<&StoredContent>,
     ) -> bool {
-        let (shown, message) = match source.map(|output| &output.content) {
+        let (shown, message) = match source {
             Some(StoredContent::Image(image)) => match &image.full {
                 FullImage::Resident(handle) => (
                     Some(ShownImage {
@@ -150,13 +143,11 @@ impl ImageViewer {
             Some(StoredContent::Text(_)) => (None, Some("pinned output has no image value")),
             None => (None, None),
         };
-        self.sync_source(
-            source.map(|output| output.revision),
-            shown.map(|image| image.handle.size()),
-        );
+        self.sync_source(shown.map(|image| image.handle.size()));
         self.apply_gestures(ui, shown);
 
         let pane = pane_size(ui, self.port);
+        let display_scale = ui.display().scale_factor;
         let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.colors.canvas_bg,
             ViewerBackground::Black => Color::BLACK,
@@ -177,7 +168,7 @@ impl ImageViewer {
                 }
                 match (shown, pane) {
                     (Some(shown), Some(pane)) => {
-                        let img = shown.handle.size().as_vec2();
+                        let img = logical_image_size(shown.handle.size(), display_scale);
                         let v = self.effective_view(img, pane);
                         ui.add_shape(
                             Shape::image(shown.handle.clone())
@@ -256,7 +247,7 @@ impl ImageViewer {
         if shown.handle.size() != shown.native_size {
             text.push_str(" · downscaled view");
         }
-        let img = shown.handle.size().as_vec2();
+        let img = logical_image_size(shown.handle.size(), ui.display().scale_factor);
         let zoom = match (self.view, pane) {
             (Some(v), _) => Some(v.zoom),
             (None, Some(pane)) => Some(self.effective_view(img, pane).zoom),
@@ -312,7 +303,8 @@ impl ImageViewer {
                     if Chip::new(control_wid(port, "100"), "Zoom to 100%").show(ui, theme, draw_100)
                         && let Some(pane) = pane
                     {
-                        let img = shown.handle.size().as_vec2();
+                        let img =
+                            logical_image_size(shown.handle.size(), ui.display().scale_factor);
                         let v = self.effective_view(img, pane);
                         self.view = Some(zoom_about_pane_center(v, 1.0, pane));
                     }
@@ -321,7 +313,9 @@ impl ImageViewer {
                 pill(ui, theme, appearance, |ui| {
                     for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
-                        if background_swatch(ui, theme, port, mode, selected, key, tip) && !selected
+                        if Chip::new(control_wid(port, key), tip).show(ui, theme, |ui, s, _| {
+                            draw_swatch(ui, s, theme, mode, selected)
+                        }) && !selected
                         {
                             prefs.background = mode;
                             changed = true;
@@ -346,7 +340,7 @@ impl ImageViewer {
         };
         // Registered images have non-zero dims by construction, so the
         // texel size is always a valid divisor.
-        let img = shown.handle.size().as_vec2();
+        let img = logical_image_size(shown.handle.size(), ui.display().scale_factor);
         let resp = ui.response_for(pane_wid(self.port));
         let Some(pane) = pane_size(ui, self.port) else {
             return;
@@ -422,23 +416,6 @@ const BACKDROPS: [(ViewerBackground, &str, &str); 4] = [
         "Checkerboard background",
     ),
 ];
-
-/// One backdrop-mode chip: its glyph is a swatch of the mode itself,
-/// ringed with the selection accent when `selected`. Returns whether it
-/// was clicked.
-fn background_swatch(
-    ui: &mut Ui,
-    theme: &Theme,
-    port: PortRef,
-    mode: ViewerBackground,
-    selected: bool,
-    key: &'static str,
-    tip: &'static str,
-) -> bool {
-    Chip::new(control_wid(port, key), tip).show(ui, theme, |ui, s, _| {
-        draw_swatch(ui, s, theme, mode, selected)
-    })
-}
 
 /// A frosted readout chip — the text sibling of the toolbar pills —
 /// dressing `panel` (caller-configured id + placement) in the shared
@@ -593,6 +570,11 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
     stroked_rect(ui, rect, 2.0, ring, width);
 }
 
+/// A texture's logical footprint when each texel occupies one physical pixel.
+fn logical_image_size(texels: UVec2, display_scale: f32) -> Vec2 {
+    texels.as_vec2() / display_scale
+}
+
 /// The pane-local rect a viewport paints the texture into.
 fn draw_rect(img: Vec2, v: Viewport) -> Rect {
     Rect {
@@ -601,7 +583,7 @@ fn draw_rect(img: Vec2, v: Viewport) -> Rect {
     }
 }
 
-/// Aspect-preserving fit of `img` (texture texels) centered in `pane`
+/// Aspect-preserving fit of `img` (its 1:1 logical footprint) in `pane`
 /// (`ImageFit::Contain` semantics, upscaling small images too), as an
 /// explicit viewport so the drawn fit and the gesture math can't drift.
 fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
@@ -647,6 +629,16 @@ mod tests {
         let r = draw_rect(Vec2::new(200.0, 400.0), v);
         assert_eq!(r.min, Vec2::new(300.0, 0.0));
         assert_eq!(r.size, Size::new(200.0, 400.0));
+
+        // The same 400x200 fit in an 800x800 logical pane on a 2x display
+        // occupies 1600x800 physical px, so its magnification is 4x while
+        // the logical draw rect remains exactly 800x400.
+        let img = logical_image_size(UVec2::new(400, 200), 2.0);
+        assert_eq!(img, Vec2::new(200.0, 100.0));
+        let v = fit_viewport(img, Vec2::new(800.0, 800.0));
+        assert_eq!(v.zoom, 4.0);
+        assert_eq!(v.pan, Vec2::new(0.0, 200.0));
+        assert_eq!(draw_rect(img, v).size, Size::new(800.0, 400.0));
     }
 
     #[test]
@@ -656,8 +648,7 @@ mod tests {
             pan: Vec2::ZERO,
             zoom: 3.0,
         });
-        viewer.sync_source(Some(1), Some(UVec2::new(2, 2)));
-        assert_eq!(viewer.source_revision, Some(1));
+        viewer.sync_source(Some(UVec2::new(2, 2)));
         assert!(
             viewer.view.is_none(),
             "first image establishes fresh framing"
@@ -667,7 +658,7 @@ mod tests {
             pan: Vec2::new(4.0, 5.0),
             zoom: 2.0,
         });
-        viewer.sync_source(Some(2), Some(UVec2::new(2, 2)));
+        viewer.sync_source(Some(UVec2::new(2, 2)));
         assert_eq!(
             viewer.view,
             Some(Viewport {
@@ -677,14 +668,13 @@ mod tests {
             "same-size revisions preserve inspection framing"
         );
 
-        viewer.sync_source(Some(3), Some(UVec2::new(3, 1)));
+        viewer.sync_source(Some(UVec2::new(3, 1)));
         assert!(viewer.view.is_none(), "dimension changes refit");
         viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 4.0,
         });
-        viewer.sync_source(None, None);
-        assert_eq!(viewer.source_revision, None);
+        viewer.sync_source(None);
         assert!(viewer.view.is_none(), "removing the source clears framing");
     }
 
@@ -707,6 +697,14 @@ mod tests {
         let v = zoom_about_pane_center(fit, 4.0, pane);
         assert_eq!(v.zoom, 4.0);
         assert_eq!(v.pan, Vec2::new(-400.0, 0.0));
+
+        // At 2x display scale, 1:1 physical magnification draws each texel
+        // into half a logical pixel, which composes back to one physical px.
+        let img_2x = logical_image_size(UVec2::new(400, 200), 2.0);
+        let fit_2x = fit_viewport(img_2x, Vec2::new(800.0, 800.0));
+        let v = zoom_about_pane_center(fit_2x, 1.0, pane);
+        assert_eq!(v.pan, Vec2::new(300.0, 350.0));
+        assert_eq!(draw_rect(img_2x, v).size, Size::new(200.0, 100.0));
     }
 
     #[test]
