@@ -348,7 +348,6 @@ impl GraphUI {
                             // active breaker scribble — fades the standing set.
                             let fading = connection_ui.dragging()
                                 || subscription_ui.dragging()
-                                || pin_ui.dragging()
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);

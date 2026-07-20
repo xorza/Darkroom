@@ -143,12 +143,6 @@ pub(crate) struct PinUi {
 }
 
 impl PinUi {
-    /// Whether a pin drag is in flight — feeds the shared wire-fade tier
-    /// alongside `ConnectionUI`/`SubscriptionUI`.
-    pub(crate) fn dragging(&self) -> bool {
-        self.drag.is_some()
-    }
-
     /// Continuous per-frame drag, exactly like a node body drag: latch on a
     /// Cmd+drag off an output port's circle (creates a fresh pin) or a
     /// plain drag off an existing preview widget (repositions it), then
