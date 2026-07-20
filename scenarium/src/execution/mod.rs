@@ -193,8 +193,8 @@ pub(crate) struct RunSeeds {
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
     pub events: Vec<EventRef>,
-    /// Run the cones of these specific nodes (authoring ids), retaining their outputs
-    /// in RAM for read-back — the on-demand "run to this node" / preview trigger. The
+    /// Run the cones of these specific nodes (authoring ids) and deliver every output —
+    /// the on-demand "run to this node" / preview trigger. The
     /// worker batches these with the graph they target, so an id that doesn't resolve
     /// against the compiled program (deleted, disabled, stale) fails the run with
     /// [`Error::NodeSeedNotFound`] — inconsistent caller state, never silently skipped.
@@ -326,15 +326,9 @@ impl ExecutionEngine {
             )
             .await;
 
-        // Phase 3b: reclaim RAM from values this run left off the active frontier and that the
-        // disk store (written per-node above) can serve again on demand. Reuses the resolver's
-        // disposition map (the active-frontier set) and the executor's retention policy
-        // (RAM modes + pinned preview roots) rather than recomputing either.
-        self.cache.evict_unused(
-            &self.compiled.program,
-            &self.resolver.run.disposition,
-            &self.executor.retain,
-        );
+        // Phase 3b: sweep values outside the active RAM-retention frontier.
+        self.cache
+            .evict_unused(&self.compiled.program, &self.resolver.run.disposition);
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.

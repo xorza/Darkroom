@@ -36,7 +36,7 @@ use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedRun};
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::{NodeMap, NodeSet, OutputColumn, RunError, reset_node_map};
+use crate::execution::{NodeMap, OutputColumn, RunError, reset_node_map};
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -124,7 +124,6 @@ struct ExecutionFrame<'a> {
     resource_stamps: &'a mut RunResourceStamps,
     flatten: &'a FlattenMap,
     remaining_reads: &'a mut RemainingOutputReads,
-    retain: &'a NodeSet,
     inputs: &'a mut Vec<InvokeInput>,
 }
 
@@ -196,8 +195,8 @@ impl ExecutionFrame<'_> {
                     let port_idx = addr.port_idx;
                     self.cache.hydrate_slot(self.program, target).await;
                     let output_idx = self.program.output_idx(target, port_idx);
-                    let take =
-                        self.remaining_reads.is_last(output_idx) && !self.retain.contains(&target);
+                    let take = self.remaining_reads.is_last(output_idx)
+                        && !self.program.e_nodes[&target].cache.caches_in_ram();
                     let Some(value) =
                         self.cache
                             .read_output_port(self.program, target, port_idx, take)
@@ -227,7 +226,7 @@ impl ExecutionFrame<'_> {
 
     fn finish_read(&mut self, target: NodeId, port_idx: usize, output_idx: OutputIdx) {
         if !self.remaining_reads.consume(output_idx)
-            || self.retain.contains(&target)
+            || self.program.e_nodes[&target].cache.caches_in_ram()
             || self.cache.slots[&target].output_values().is_none()
         {
             return;
@@ -248,13 +247,6 @@ pub(crate) struct Executor {
     /// The run's mutable copy of the resolver's live binding counts. Only real bound
     /// input reads decrement it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
-    /// The run's retention policy, per node: `true` when the outputs must stay resident —
-    /// the node's mode caches in RAM (`Ram`/`Both`) or it's a node-seeded preview root
-    /// (`plan.pinned`). The single predicate every free/keep decision consults: the
-    /// move-on-last-use take, the spent-output release, the post-invoke drain reclaim
-    /// (all in this module), and the engine's end-of-run
-    /// [`evict_unused`](RuntimeCache::evict_unused). Reused across runs, rebuilt each run.
-    pub(crate) retain: NodeSet,
     /// Per-run outcome per node (see [`NodeOutcome`]), keyed by node id. Reused
     /// across runs and rebuilt each run.
     outcomes: NodeMap<NodeOutcome>,
@@ -303,15 +295,6 @@ impl Executor {
             NodeOutcome::Pending,
         );
 
-        // Build the run's retention policy (see the field doc): RAM-caching mode or pinned.
-        self.retain.clear();
-        for node_id in program.e_nodes.keys().copied() {
-            if program.e_nodes[&node_id].cache.caches_in_ram() {
-                self.retain.insert(node_id);
-            }
-        }
-        self.retain.extend(plan.pinned.iter().copied());
-
         self.remaining_reads.seed(resolved);
 
         {
@@ -322,7 +305,6 @@ impl Executor {
                 resource_stamps,
                 flatten,
                 remaining_reads: &mut self.remaining_reads,
-                retain: &self.retain,
                 inputs: &mut self.inputs,
             };
 
@@ -543,7 +525,7 @@ impl Executor {
                     // spent the instant it's stored — reclaim its non-retained slot now rather
                     // than holding it to end-of-run eviction. A node that still owes reads is
                     // reclaimed later, in `collect_inputs`, when its last consumer lands.
-                    if !frame.retain.contains(&node_id)
+                    if !program.e_nodes[&node_id].cache.caches_in_ram()
                         && frame.remaining_reads.node_drained(program, node_id)
                     {
                         frame.cache.reclaim_slot(program, node_id);

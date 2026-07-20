@@ -124,10 +124,20 @@ mod cache_persistence {
     use super::*;
     use crate::execution::cache::ValueState;
     use crate::execution::disk_store::DiskStore;
-    use crate::execution::report::RunEvent;
+    use crate::execution::report::{PinnedOutputs, RunEvent};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use tokio::sync::mpsc::UnboundedReceiver;
+
+    fn receive_pinned(rx: &mut UnboundedReceiver<RunEvent>) -> PinnedOutputs {
+        loop {
+            match rx.try_recv().expect("run must deliver a pinned output") {
+                RunEvent::PinnedOutputs(outputs) => return outputs,
+                RunEvent::Progress(_) => {}
+            }
+        }
+    }
 
     /// A unique temp directory removed on drop, so tests don't collide or leak.
     struct TempDir(PathBuf);
@@ -245,16 +255,40 @@ mod cache_persistence {
             !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
             "mult did not recompute"
         );
-        let mut pinned = None;
-        while let Ok(event) = rx.try_recv() {
-            if let RunEvent::PinnedOutputs(outputs) = event {
-                pinned = Some(outputs);
-            }
-        }
-        let pinned = pinned.expect("the disk hit delivers its pinned output");
+        let pinned = receive_pinned(&mut rx);
         assert_eq!(pinned.node.node_id, mult_id);
         assert_eq!(pinned.values.len(), 1);
         assert_eq!(pinned.values[0].port_idx, 0);
+        assert_eq!(pinned.values[0].value.as_i64(), Some(49));
+        assert!(
+            !stats.node_ram.iter().any(|usage| usage.node_id == mult_id),
+            "a full run does not retain the Disk node after delivering its pin"
+        );
+
+        // Refreshing that preview targets `mult` directly. Delivery hydrates the disk hit,
+        // but targeting must not turn it into an implicit RAM cache.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let refreshed = engine
+            .execute(
+                RunSeeds {
+                    nodes: vec![NodeAddress::root(mult_id)],
+                    ..Default::default()
+                },
+                Some(&tx),
+                CancelToken::never(),
+            )
+            .await
+            .unwrap();
+        assert!(refreshed.cached_nodes.contains(&mult_id));
+        assert!(
+            !refreshed
+                .node_ram
+                .iter()
+                .any(|usage| usage.node_id == mult_id),
+            "targeted refresh releases the hydrated Disk value after delivery"
+        );
+        let pinned = receive_pinned(&mut rx);
+        assert_eq!(pinned.node.node_id, mult_id);
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
 
         // Changing one input to a const makes `mult` miss, while its other input
@@ -3047,13 +3081,14 @@ mod composite_behavior {
         );
     }
 
-    /// A node seed can target a *graph-interior* node by its authoring id: the seed
-    /// resolves through the flatten map (interior flat ids are hashed from the descent
-    /// path), runs just that node, and its value reads back under the same authoring id.
-    /// The sink `print` (panicking hook) never fires.
+    /// A node seed can target a *graph-interior* node by its scoped authoring address:
+    /// the seed resolves through the flatten map, runs just that node, and delivers the
+    /// value under the same address. The sink `print` (panicking hook) never fires.
     #[tokio::test]
     async fn seeding_a_graph_interior_node_runs_only_it() {
+        use crate::execution::report::RunEvent;
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::sync::mpsc::unbounded_channel;
 
         let get_b_calls = Arc::new(AtomicUsize::new(0));
         let library = test_func_lib(TestFuncHooks {
@@ -3084,19 +3119,38 @@ mod composite_behavior {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
+        let target = NodeAddress {
+            instances: vec![instance_id],
+            node_id: inner_id,
+        };
+        let (tx, mut rx) = unbounded_channel();
         let stats = eg
-            .execute_nodes([NodeAddress {
-                instances: vec![instance_id],
-                node_id: inner_id,
-            }])
+            .execute(
+                RunSeeds {
+                    nodes: vec![target.clone()],
+                    ..Default::default()
+                },
+                Some(&tx),
+                CancelToken::never(),
+            )
             .await
             .unwrap();
+        drop(tx);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
         assert_eq!(stats.executed_nodes.len(), 1);
-        assert_eq!(
-            eg.get_argument_values(&inner_id).unwrap().outputs[0].as_i64(),
-            Some(11),
-            "interior value reads back under its authoring id"
+        let pushed = loop {
+            match rx.try_recv().expect("targeted run delivers its output") {
+                RunEvent::PinnedOutputs(outputs) => break outputs,
+                RunEvent::Progress(_) => {}
+            }
+        };
+        assert_eq!(pushed.node, target);
+        assert_eq!(pushed.values[0].value.as_i64(), Some(11));
+        assert!(
+            eg.get_argument_values(&inner_id)
+                .unwrap()
+                .outputs
+                .is_empty()
         );
     }
 }
@@ -3400,8 +3454,7 @@ mod node_seeds {
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// `test_graph` with every node's cache mode forced to `None`, so any value that
-    /// survives a run does so through the node-seed pin, not a retention mode.
+    /// `test_graph` with every node's cache mode forced to `None`.
     fn uncached_test_graph() -> Graph {
         let mut graph = test_graph();
         for node in graph.nodes.values_mut() {
@@ -3410,12 +3463,10 @@ mod node_seeds {
         graph
     }
 
-    /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) — never the
-    /// downstream `mult`/`Print` (the panicking default `print` hook proves it) — and
-    /// retains `sum`'s output for read-back despite `CacheMode::None`, while its
-    /// equally-uncached upstream is drained as usual.
+    /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) without overriding
+    /// any node's `CacheMode::None` retention policy.
     #[tokio::test]
-    async fn seeded_run_executes_only_the_cone_and_retains_the_output() {
+    async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(1)),
             get_b: Arc::new(|| 11),
@@ -3432,9 +3483,12 @@ mod node_seeds {
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
         ran.sort();
         assert_eq!(ran, ["get_a", "get_b", "sum"], "only sum's cone runs");
-
-        let values = eg.get_argument_values(&sum_id).unwrap();
-        assert_eq!(values.outputs[0].as_i64(), Some(12), "1 + 11, retained");
+        assert!(stats.node_ram.is_empty());
+        assert_eq!(stats.cache_ram.total(), 0);
+        assert!(
+            eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
+            "the targeted output is produced but not retained"
+        );
 
         let get_a_id = graph
             .find_by_name("get_a", NodeSearch::TopLevel)
@@ -3449,11 +3503,9 @@ mod node_seeds {
         );
     }
 
-    /// A second seeded run of an unchanged graph recomputes nothing: the pinned value
-    /// survived eviction, its digest still matches, so the whole cone is a cache hit —
-    /// this is what makes repeated previews (and auto-preview) cheap.
+    /// A second seeded run obeys `CacheMode::None` and recomputes the cone.
     #[tokio::test]
-    async fn second_seeded_run_reuses_the_pinned_value() {
+    async fn second_seeded_run_obeys_none_cache_mode() {
         let get_a_calls = Arc::new(AtomicUsize::new(0));
         let get_b_calls = Arc::new(AtomicUsize::new(0));
         let library = test_func_lib(TestFuncHooks {
@@ -3483,23 +3535,16 @@ mod node_seeds {
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
 
         let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::Relaxed), 1, "cone not re-run");
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1, "cone not re-run");
-        assert!(stats.executed_nodes.is_empty());
-        assert!(stats.cached_nodes.contains(&sum_id), "sum served from RAM");
-        assert_eq!(
-            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
-            Some(12),
-            "still readable after the reuse run"
-        );
+        assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(stats.executed_nodes.len(), 3);
+        assert!(!stats.cached_nodes.contains(&sum_id));
+        assert!(stats.node_ram.is_empty());
     }
 
-    /// Node seeds combine with a sink run: one run drives the sinks (`Print`
-    /// fires with 132 = (1+11)*11) *and* pins `sum` — whose value survives its real
-    /// consumer's read via the extra virtual consumer — while the unpinned `mult` is
-    /// drained by `Print` as usual.
+    /// Node seeds combine with a sink run without retaining `CacheMode::None` values.
     #[tokio::test]
-    async fn node_seed_combines_with_a_sink_run_and_still_retains() {
+    async fn node_seed_combines_with_a_sink_run_without_retaining() {
         let printed: Arc<StdMutex<Vec<i64>>> = Arc::new(StdMutex::new(Vec::new()));
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(1)),
@@ -3514,29 +3559,30 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                nodes: vec![NodeAddress::root(sum_id)],
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-        )
-        .await
-        .unwrap();
+        let stats = eg
+            .execute(
+                RunSeeds {
+                    sinks: true,
+                    nodes: vec![NodeAddress::root(sum_id)],
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(*printed.lock().unwrap(), [132], "(1 + 11) * 11");
-        assert_eq!(
-            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
-            Some(12),
-            "pinned value survives its real consumer's read"
+        assert!(
+            eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
+            "the targeted value is released after its real consumer"
         );
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         assert!(
             eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
-            "unpinned None-cache node is drained by its consumer"
+            "the None-cache downstream is drained by its consumer"
         );
+        assert!(stats.node_ram.is_empty());
     }
 
     /// A seed that doesn't resolve against the compiled program (deleted or disabled

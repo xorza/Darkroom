@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 use crate::async_lambda;
+use crate::execution::NodeSet;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx};
@@ -463,11 +464,10 @@ async fn pinned_delivery_does_not_create_a_reader() {
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
 }
 
-/// A pinned (node-seeded preview) root's output survives even in `CacheMode::None`,
-/// unlike an unpinned `Skip` root on the same program. Demand controls production;
-/// `run.plan.pinned` independently controls retention.
+/// A pinned (node-seeded preview) root demands its output but does not override
+/// `CacheMode::None` retention.
 #[tokio::test]
-async fn pinned_root_sees_demand_and_survives_drain() {
+async fn pinned_root_demands_output_without_retaining_it() {
     use std::sync::Mutex;
 
     let seen: Arc<Mutex<Option<OutputDemand>>> = Arc::new(Mutex::new(None));
@@ -499,10 +499,10 @@ async fn pinned_root_sees_demand_and_survives_drain() {
     plan.plan.pinned.insert(a);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
-    assert_eq!(
-        cache.slots[&a].output_values().unwrap()[0].as_i64(),
-        Some(7),
-        "pinned root's value survives the run"
+    assert!(
+        matches!(cache.slots[&a].value, ValueState::Empty),
+        "targeting controls demand, not RAM retention: {:?}",
+        cache.slots[&a].value
     );
 }
 
@@ -565,10 +565,13 @@ async fn pinned_root_pushes_every_output() {
         Ok(())
     });
     let a = p.node(&[], 2, producer);
+    p.set_cache(a, CacheMode::None);
 
-    let mut plan = straight_run(&p.program);
+    let mut plan = run_with_readers(&p.program, vec![0, 0]);
+    demand_output(&p.program, &mut plan, a, 0);
+    demand_output(&p.program, &mut plan, a, 1);
     plan.plan.pinned.insert(a);
-    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
     assert_eq!(pushes[0].node.node_id, a);
@@ -577,6 +580,7 @@ async fn pinned_root_pushes_every_output() {
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));
     assert_eq!(pushes[0].values[1].port_idx, 1);
     assert_eq!(pushes[0].values[1].value.as_i64(), Some(2));
+    assert!(matches!(cache.slots[&a].value, ValueState::Empty));
 }
 
 /// Neither an individually-pinned port nor a pinned root: no push at all,

@@ -14,13 +14,13 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 
+use crate::execution::NodeMap;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::Disposition;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::stats::NodeRamUsage;
-use crate::execution::{NodeMap, NodeSet};
 use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
@@ -631,35 +631,22 @@ impl RuntimeCache {
         }
     }
 
-    /// After a run, reclaim RAM the run's retention policy doesn't call for holding. A
-    /// non-retained value whose consumers all ran was already released mid-run the moment its
-    /// last consumer read it (the executor's [`reclaim_slot`](Self::reclaim_slot) call); this
-    /// end-of-run sweep covers the rest — prior-run leftovers this run never touched (e.g. a
-    /// cached value that fell *behind* the frontier when a downstream node became a disk hit),
-    /// and a non-retained value some consumer didn't reach (so its outputs never all went
-    /// spent).
+    /// After a run, sweep resident values that are not both on the active frontier and in a
+    /// RAM-caching mode. Values whose consumers all ran were already handled after their last
+    /// read; this covers prior-run leftovers and values whose consumers did not run.
     ///
-    /// Both columns are per-run state reused here, not recomputed: `disposition` is the
-    /// resolver's — [`needed`](Disposition::needed) marks the active frontier, a node some
-    /// running node will read — and `retain` is the executor's retention policy (RAM-caching
-    /// mode, or a pinned preview root whose readable output was the point of its run). A
-    /// retained node on the frontier stays resident for the next run's RAM hit; every other
-    /// resident value goes through [`reclaim_slot`](Self::reclaim_slot), which demotes a
-    /// reloadable one to disk and drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover
-    /// is kept, its mode's promise).
+    /// [`reclaim_slot`](Self::reclaim_slot) demotes reloadable values, drops non-RAM values,
+    /// and preserves RAM-mode values that have no recoverable disk copy.
     pub(crate) fn evict_unused(
         &mut self,
         program: &ExecutionProgram,
         disposition: &NodeMap<Disposition>,
-        retain: &NodeSet,
     ) {
         for node_id in program.e_nodes.keys().copied() {
             if self.slots[&node_id].output_values().is_none() {
                 continue;
             }
-            // A retained node on the active frontier stays hot for the next run's RAM hit.
-            // (A pinned root is always on the frontier — roots seed the disposition walk.)
-            if retain.contains(&node_id) && disposition[&node_id].needed() {
+            if program.e_nodes[&node_id].cache.caches_in_ram() && disposition[&node_id].needed() {
                 continue;
             }
             self.reclaim_slot(program, node_id);

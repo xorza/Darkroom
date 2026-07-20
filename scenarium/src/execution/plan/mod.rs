@@ -69,11 +69,8 @@ pub(crate) struct ExecutionPlan {
     /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
     /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
     /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
-    /// no persisted counterpart. Drives two things: every output is demanded from the
-    /// lambda, and the executor's per-run retention policy (`Executor::retain`) keeps the node's
-    /// outputs resident through every release/eviction site whatever its cache mode.
-    /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
-    /// serves any resident digest-valid value.
+    /// no persisted counterpart. Every output is demanded from the lambda and delivered
+    /// to the host, while the node's cache mode remains the sole RAM-retention policy.
     pub(crate) pinned: NodeSet,
 }
 
@@ -237,8 +234,8 @@ fn collect_roots(
     let program = &compiled.program;
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
-    // Node seeds (on-demand preview): roots like any other, plus pinned so their outputs
-    // are computed and retained (see `ExecutionPlan::pinned`). Seeds are batched with the
+    // Node seeds (on-demand preview): roots like any other, plus pinned so every output is
+    // computed and delivered. Seeds are batched with the
     // program they target, so an id that doesn't resolve (deleted, disabled, or stale) is
     // inconsistent caller state — fail the run rather than silently skip the seed.
     for address in &seeds.nodes {

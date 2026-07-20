@@ -12,8 +12,7 @@ use crate::gui::app::App;
 pub(crate) enum RunCommand {
     /// Evaluate the graph once on the worker.
     Once,
-    /// Evaluate one node's upstream cone on the worker, keeping its
-    /// outputs resident ("run to this node").
+    /// Evaluate one node's upstream cone and deliver its outputs.
     Node(NodeId),
     /// Request cancellation of the in-flight run.
     Cancel,
@@ -48,7 +47,7 @@ impl App {
     }
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
-    /// upstream cone executes, and its outputs stay resident. Same run-state
+    /// upstream cone executes and its outputs are delivered. Same run-state
     /// and event-loop bookkeeping as a full run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
         if !self.engine.run_node(&self.editor.document.graph, node_id) {

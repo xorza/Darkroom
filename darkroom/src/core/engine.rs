@@ -170,8 +170,8 @@ impl Engine {
         true
     }
 
-    /// Compile `graph` and evaluate only `node_id`'s upstream cone, keeping
-    /// its outputs resident for the preview fetch ("run to this node").
+    /// Compile `graph` and evaluate only `node_id`'s upstream cone, delivering
+    /// its outputs for the preview fetch ("run to this node").
     /// Returns whether it was sent — a compile failure is reported to
     /// [`Self::status`] and nothing reaches the worker. Results arrive via
     /// [`Self::drain_worker`].

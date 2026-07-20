@@ -89,7 +89,7 @@ impl WorkerBridge {
     }
 
     /// Run one node's upstream cone: install the compiled program, then
-    /// execute with the node as seed, keeping its outputs resident. One
+    /// execute with the node as seed and deliver its outputs. One
     /// batched send so the seed always targets the program it was compiled
     /// against.
     pub(crate) fn run_node(&self, compiled: CompiledGraph, node: NodeAddress) {
