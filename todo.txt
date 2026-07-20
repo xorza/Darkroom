@@ -11,16 +11,11 @@ features = ["builtin-fs-watch", "builtin-random"] - move from scenarium
 [dev-dependencies]
 scenarium = { workspace = true, features = ["internals"] }
 
-diskcached pinned outputs arent shown
-
 stacking frames (outer, inner, reference)
 
-auto chosen reference  and manually specified
+auto chosen reference frame for stacking and manually specified
 
 visual node groups
-
-audit test_support and test exposed proxies
-move benches to the src to avoid overexposing api
 
 audit allocations overshoot , see where reserve_exxact would be better
 
@@ -29,8 +24,6 @@ pinned output makes node store outputs in ram
 invert removed retain logic to optimize
 
 mesh once registrations
-
-review testsuite
 
 grapuh public methods
 pub graph fields and node and func
@@ -43,4 +36,4 @@ build masters cache changes directory and invalidates digest
 
 node runtime is not refershed
 
-wrong 1-1 image view scale
+run button not shown for disabled nodes
