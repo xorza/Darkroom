@@ -173,9 +173,13 @@ pub fn stack_images(
         "Starting unified stack (in memory)"
     );
 
-    let mut cache =
-        LightCache::from_stack_frames(frames, &config.cache, config.normalization, progress)?;
-    cache.core.cancel = cancel;
+    let cache = LightCache::from_stack_frames(
+        frames,
+        &config.cache,
+        config.normalization,
+        progress,
+        cancel,
+    )?;
     // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
     let result = run_stacking_weighted(&cache, &config);
     if cache.core.cancel.is_cancelled() {
@@ -848,6 +852,7 @@ mod tests {
             &cache.frames,
             cache.core.dimensions,
             normalization,
+            &cache.core.cancel,
         )
         .unwrap()
     }
@@ -1156,9 +1161,9 @@ mod tests {
     #[test]
     fn cancelled_stack_returns_cancelled_error() {
         let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
-        let b = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![2.0; 16]);
-        // A pre-tripped token: the combine bails (one chunk here) and the entry
-        // reports `Cancelled` rather than a (discarded) partial result.
+        let mut invalid_pixels = vec![2.0; 16];
+        invalid_pixels[0] = f32::NAN;
+        let b = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), invalid_pixels);
         let cancel = CancelToken::new();
         cancel.cancel();
         let result = stack_images(
@@ -1236,6 +1241,7 @@ mod tests {
                 &CacheConfig::default(),
                 Normalization::Multiplicative,
                 ProgressCallback::default(),
+                CancelToken::never(),
             )
             .unwrap()
         };
@@ -1439,6 +1445,7 @@ mod tests {
             &CacheConfig::default(),
             Normalization::Global,
             ProgressCallback::default(),
+            CancelToken::never(),
         )
         .unwrap();
         let norms = cache.frame_norms.as_ref().unwrap();
@@ -1482,6 +1489,7 @@ mod tests {
             &CacheConfig::default(),
             Normalization::None,
             ProgressCallback::default(),
+            CancelToken::never(),
         )
         .unwrap();
         let base_weights = resolve_weights(&Weighting::Noise, source_stats(&cache), None).unwrap();

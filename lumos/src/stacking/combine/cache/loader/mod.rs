@@ -239,7 +239,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
                 actual: image.dimensions(),
             });
         }
-        validate_image_samples(&image, idx)?;
+        validate_image_samples(&image, idx, cancel)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = compute_frame_stats(&image);
         Ok(LoadedMemoryFrame {
@@ -253,7 +253,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     let mut all_stats = Vec::with_capacity(paths.len());
     let mut metadata = None;
     if let Some(first_image) = first {
-        validate_image_samples(&first_image, 0)?;
+        validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
         all_stats.push(compute_frame_stats(&first_image));
         frames.push(frame_from_memory(first_image));
@@ -293,7 +293,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let cache_dir = &spill_directory.path;
 
     // Cache first image and compute stats. Frame 0 carries the stack metadata.
-    validate_image_samples(&first_image, 0)?;
+    validate_image_samples(&first_image, 0, cancel)?;
     let metadata = first_image.metadata().clone();
     let first_stats = compute_frame_stats(&first_image);
     let first_path = paths[0].as_ref();
@@ -325,7 +325,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             }
             let path_ref = path.as_ref();
             let base_filename = cache_filename(path_ref);
-            load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
+            load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx, cancel)
         })?;
 
     // Build final vectors
@@ -470,6 +470,7 @@ fn load_and_cache_frame<I: StackableImage>(
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
+    cancel: &CancelToken,
 ) -> Result<LoadedStoredFrame, Error> {
     let channels = dimensions.channels();
     let identity_before = source_identity(source_path)?;
@@ -496,7 +497,12 @@ fn load_and_cache_frame<I: StackableImage>(
             "Reusing existing cache files"
         );
         let frame = StoredFrame { channels: planes };
-        validate_stored_samples(&frame.channels, dimensions.pixel_count(), frame_index)?;
+        validate_stored_samples(
+            &frame.channels,
+            dimensions.pixel_count(),
+            frame_index,
+            cancel,
+        )?;
         let stats = cached_stats.expect("valid cache has readable frame statistics");
         Ok(LoadedStoredFrame { frame, stats })
     } else {
@@ -510,7 +516,7 @@ fn load_and_cache_frame<I: StackableImage>(
                 actual: image.dimensions(),
             });
         }
-        validate_image_samples(&image, frame_index)?;
+        validate_image_samples(&image, frame_index, cancel)?;
         let identity_after = source_identity(source_path)?;
         if identity_after != identity_before {
             return Err(FrameStoreError::SourceChanged {

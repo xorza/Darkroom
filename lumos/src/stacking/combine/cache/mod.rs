@@ -117,9 +117,8 @@ pub(crate) struct CacheCore {
     pub(crate) config: CacheConfig,
     /// Progress callback.
     pub(crate) progress: ProgressCallback,
-    /// Cooperative cancel flag, polled by [`Self::process_chunks`] between
-    /// chunks. `None` (the construction default) = never cancel; a public
-    /// stacking entry sets it from the caller's flag before the combine.
+    /// Cooperative cancel flag, present during validation and normalization and polled by
+    /// [`Self::process_chunks`] during the combine.
     pub(crate) cancel: CancelToken,
 }
 
@@ -167,31 +166,47 @@ struct ChunkContext<'a> {
     pixel_offset: usize,
 }
 
+const VALIDATION_CHUNK_SIZE: usize = 16_384;
+
+fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(())
+}
+
 fn validate_sample_channels<'a>(
     index: usize,
     channels: impl IntoIterator<Item = &'a [f32]>,
+    cancel: &CancelToken,
 ) -> Result<(), Error> {
     for (channel, samples) in channels.into_iter().enumerate() {
-        if let Some((pixel, &value)) = samples
-            .iter()
-            .enumerate()
-            .find(|(_, value)| !value.is_finite())
-        {
-            return Err(Error::NonFiniteImageSample {
-                index,
-                channel,
-                pixel,
-                value,
-            });
+        for (pixel, value) in samples.iter().copied().enumerate() {
+            if pixel.is_multiple_of(VALIDATION_CHUNK_SIZE) {
+                check_cancel(cancel)?;
+            }
+            if !value.is_finite() {
+                return Err(Error::NonFiniteImageSample {
+                    index,
+                    channel,
+                    pixel,
+                    value,
+                });
+            }
         }
     }
     Ok(())
 }
 
-fn validate_image_samples(image: &impl StackableImage, index: usize) -> Result<(), Error> {
+fn validate_image_samples(
+    image: &impl StackableImage,
+    index: usize,
+    cancel: &CancelToken,
+) -> Result<(), Error> {
     validate_sample_channels(
         index,
         (0..image.dimensions().channels()).map(|channel| image.channel(channel)),
+        cancel,
     )
 }
 
@@ -199,11 +214,41 @@ fn validate_stored_samples(
     channels: &[StoredPlane],
     pixel_count: usize,
     index: usize,
+    cancel: &CancelToken,
 ) -> Result<(), Error> {
     validate_sample_channels(
         index,
         channels.iter().map(|plane| plane.chunk(0, pixel_count)),
+        cancel,
     )
+}
+
+fn validate_warp_plane_values(
+    index: usize,
+    plane_name: &'static str,
+    samples: &[f32],
+    cancel: &CancelToken,
+) -> Result<(), Error> {
+    for (pixel, value) in samples.iter().copied().enumerate() {
+        if pixel.is_multiple_of(VALIDATION_CHUNK_SIZE) {
+            check_cancel(cancel)?;
+        }
+        let invalid = !value.is_finite()
+            || if plane_name == "coverage" {
+                !(0.0..=1.0).contains(&value)
+            } else {
+                value < 0.0
+            };
+        if invalid {
+            return Err(Error::InvalidWarpPlaneValue {
+                index,
+                plane: plane_name,
+                pixel,
+                value,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl CacheCore {
@@ -406,10 +451,11 @@ impl LightCache {
             progress,
             cancel,
         } = params;
+        check_cancel(&cancel)?;
         for (index, frame) in frames.iter().enumerate() {
-            validate_stored_samples(&frame.channels, dimensions.pixel_count(), index)?;
+            validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
         }
-        let frame_norms = compute_light_frame_norms(&frames, dimensions, normalization)?;
+        let frame_norms = compute_light_frame_norms(&frames, dimensions, normalization, &cancel)?;
         Ok(Self {
             frames,
             frame_norms,
@@ -430,14 +476,17 @@ impl LightCache {
         config: &CacheConfig,
         normalization: Normalization,
         progress: ProgressCallback,
+        cancel: CancelToken,
     ) -> Result<Self, Error> {
         if frames.is_empty() {
             return Err(Error::NoFrames);
         }
+        check_cancel(&cancel)?;
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata.clone();
 
         for (index, frame) in frames.iter().enumerate() {
+            check_cancel(&cancel)?;
             if index > 0 && frame.image.dimensions() != dimensions {
                 return Err(Error::DimensionMismatch {
                     index,
@@ -445,7 +494,7 @@ impl LightCache {
                     actual: frame.image.dimensions(),
                 });
             }
-            validate_image_samples(&frame.image, index)?;
+            validate_image_samples(&frame.image, index, &cancel)?;
             for (plane_name, plane) in [
                 ("coverage", frame.coverage.as_ref()),
                 ("confidence", frame.confidence.as_ref()),
@@ -463,30 +512,11 @@ impl LightCache {
                     });
                 }
                 if let Some(plane) = plane {
-                    let invalid = plane
-                        .pixels()
-                        .iter()
-                        .copied()
-                        .enumerate()
-                        .find(|(_, value)| {
-                            !value.is_finite()
-                                || if plane_name == "coverage" {
-                                    !(0.0..=1.0).contains(value)
-                                } else {
-                                    *value < 0.0
-                                }
-                        });
-                    if let Some((pixel, value)) = invalid {
-                        return Err(Error::InvalidWarpPlaneValue {
-                            index,
-                            plane: plane_name,
-                            pixel,
-                            value,
-                        });
-                    }
+                    validate_warp_plane_values(index, plane_name, plane.pixels(), &cancel)?;
                 }
             }
         }
+        check_cancel(&cancel)?;
         let stored = frames
             .into_iter()
             .map(|frame| {
@@ -498,7 +528,7 @@ impl LightCache {
                 )
             })
             .collect::<Vec<_>>();
-        let frame_norms = compute_light_frame_norms(&stored, dimensions, normalization)?;
+        let frame_norms = compute_light_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
         Ok(Self {
             frames: stored,
@@ -509,8 +539,7 @@ impl LightCache {
                 metadata,
                 config: config.clone(),
                 progress,
-                // Set by the public stacking entry before the combine, if any.
-                cancel: CancelToken::never(),
+                cancel,
             },
         })
     }

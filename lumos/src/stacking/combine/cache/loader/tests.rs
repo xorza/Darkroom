@@ -1,11 +1,28 @@
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::io::astro_image::AstroImage;
 use crate::stacking::combine::cache::loader::*;
 use crate::testing::ScratchDirectory;
+
+fn load_test_frame(
+    cache_dir: &Path,
+    base_filename: &str,
+    source_path: &Path,
+    dimensions: ImageDimensions,
+    frame_index: usize,
+) -> Result<LoadedStoredFrame, Error> {
+    load_and_cache_frame::<AstroImage>(
+        cache_dir,
+        base_filename,
+        source_path,
+        dimensions,
+        frame_index,
+        &CancelToken::never(),
+    )
+}
 
 #[test]
 fn from_paths_reports_empty_and_missing_sources() {
@@ -45,9 +62,7 @@ fn test_load_and_cache_frame_fresh() {
     let base_filename = "cached_frame.bin";
 
     // First call should load and cache
-    let cached_frame =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap();
+    let cached_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
 
     assert_eq!(cached_frame.frame.channels.len(), 1);
 
@@ -74,14 +89,10 @@ fn test_load_and_cache_frame_reuse() {
     let base_filename = "cached_frame.bin";
 
     // First call - creates cache
-    let first_frame =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap();
+    let first_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
 
     // Second call - should reuse cache
-    let second_frame =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap();
+    let second_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
 
     // Both should have same data
     let n = dims.pixel_count();
@@ -107,9 +118,7 @@ fn test_load_and_cache_frame_reuse() {
         .unwrap()
         .set_modified(first_timestamp)
         .unwrap();
-    let collided =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
-            .unwrap();
+    let collided = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
         collided.frame.channels[0].chunk(0, dims.pixel_count()),
         collided_pixels
@@ -135,9 +144,7 @@ fn test_load_and_cache_frame_reuse() {
         .unwrap()
         .set_modified(second_timestamp)
         .unwrap();
-    let rewritten =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
-            .unwrap();
+    let rewritten = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
         rewritten.frame.channels[0].chunk(0, dims.pixel_count()),
         rewritten_pixels
@@ -152,9 +159,7 @@ fn test_load_and_cache_frame_reuse() {
     cache_file.write_all(&f32::INFINITY.to_le_bytes()).unwrap();
     drop(cache_file);
 
-    let error =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
-            .unwrap_err();
+    let error = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap_err();
     assert!(matches!(
         error,
         Error::NonFiniteImageSample {
@@ -180,8 +185,7 @@ fn test_load_and_cache_frame_dimension_mismatch() {
 
     // Try to load with wrong expected dimensions
     let expected_dims = ImageDimensions::new((8, 6), 1);
-    let result =
-        load_and_cache_frame::<AstroImage>(&temp_dir, "cached.bin", &source_path, expected_dims, 5);
+    let result = load_test_frame(&temp_dir, "cached.bin", &source_path, expected_dims, 5);
 
     assert!(matches!(
         result.unwrap_err(),
@@ -353,8 +357,7 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     let base_filename = "stats_test.bin";
 
     // First call — loads image, computes stats, writes sidecar
-    let first = load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-        .unwrap();
+    let first = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
     let first_stats = first.stats;
 
     assert_eq!(first_stats.channels.len(), 1);
@@ -362,10 +365,9 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     assert!((first_stats.channels[0].mad - 3.0).abs() < f32::EPSILON);
 
     // Second call — reuses cache, reads stats from sidecar
-    let reused_stats =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap()
-            .stats;
+    let reused_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+        .unwrap()
+        .stats;
 
     // Stats must be identical (exact f32 roundtrip via le_bytes)
     assert_eq!(reused_stats.channels.len(), first_stats.channels.len());
@@ -394,10 +396,9 @@ fn test_missing_stats_sidecar_forces_reload() {
     let base_filename = "missing_stats.bin";
 
     // First call — creates cache + sidecars
-    let first_stats =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap()
-            .stats;
+    let first_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+        .unwrap()
+        .stats;
 
     // Delete only the .stats sidecar
     let sp = stats_path(&temp_dir, base_filename);
@@ -405,10 +406,9 @@ fn test_missing_stats_sidecar_forces_reload() {
     std::fs::remove_file(&sp).unwrap();
 
     // Second call — should reload (not panic) and recompute stats
-    let reloaded_stats =
-        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-            .unwrap()
-            .stats;
+    let reloaded_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+        .unwrap()
+        .stats;
 
     // Stats should match (same source image)
     assert_eq!(

@@ -68,9 +68,10 @@ let config = StackConfig {
 let result = stack(&paths, config, none, never)?;
 ```
 
-`CancelToken` is cooperative: loading checks between frames, resident combines check between rows,
-and disk-backed combines check between chunks. Cancellation discards partial output and returns
-`StackError::Cancelled`.
+`CancelToken` is cooperative: loading and cache validation poll between frames or sample chunks,
+registered normalization polls its domain/statistics/fit passes, resident combines check between
+rows, and disk-backed combines check between chunks. Cancellation discards partial output and
+returns `StackError::Cancelled`.
 
 ## Rejection Algorithms
 
@@ -150,7 +151,8 @@ the end-to-end pipeline:
 
 1. **Load**: Decode images, cache to disk or memory (parallelized via rayon)
 2. **Measure**: Preserve source-domain median/MAD and, when normalization is enabled, compute
-   registered-frame location statistics on the common coverage-valid/confidence-positive domain
+   registered-frame location statistics in parallel across frame/channel pairs on the common
+   coverage-valid/confidence-positive domain
 3. **Normalize** (optional): Derive registered affine gains from paired common-sky samples
 4. **Process**: For each pixel and channel — apply normalization, reject outliers, combine, and
    accumulate `Σwᵢ`; linear means also retain `Σwᵢ²/(Σwᵢ)²` from the actual survivors

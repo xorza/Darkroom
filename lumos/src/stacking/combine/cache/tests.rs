@@ -14,6 +14,7 @@ pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
         &CacheConfig::default(),
         Normalization::None,
         ProgressCallback::default(),
+        CancelToken::never(),
     )
     .expect("test images must be non-empty and dimension-consistent")
 }
@@ -84,6 +85,7 @@ fn finish_product_partial_coverage() {
         &CacheConfig::default(),
         Normalization::None,
         ProgressCallback::default(),
+        CancelToken::never(),
     )
     .expect("frames are valid");
     let product = mean_product(&cache, None);
