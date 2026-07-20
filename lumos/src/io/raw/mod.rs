@@ -27,7 +27,7 @@ use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimens
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
-use demosaic::xtrans::process_xtrans;
+use demosaic::xtrans;
 use imaginarium::Buffer2;
 
 use normalize::{normalize_u16_to_f32_into, normalize_u16_to_f32_parallel};
@@ -338,11 +338,16 @@ fn xtrans_pattern_from_libraw(pattern: [[std::ffi::c_char; 6]; 6]) -> [[u8; 6]; 
     pattern.map(|row| row.map(|color| color as u8))
 }
 
-fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
+pub(crate) fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
     ImageError::Raw {
         path: path.to_path_buf(),
         reason: reason.into(),
     }
+}
+
+fn validate_xtrans_pattern(path: &Path, pattern: [[u8; 6]; 6]) -> Result<(), ImageError> {
+    xtrans::XTransPattern::new(pattern).map_err(|source| raw_err(path, source.to_string()))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -594,7 +599,7 @@ impl UnpackedRaw {
         self.guard.take();
         self.buf.take();
 
-        let pixels = process_xtrans(
+        let pixels = xtrans::process_xtrans(
             &raw_u16,
             self.raw_width,
             self.raw_height,
@@ -606,7 +611,8 @@ impl UnpackedRaw {
             channel_black,
             bl.inv_range,
             bl.repeat.as_ref(),
-        );
+        )
+        .map_err(|source| raw_err(&self.path, source.to_string()))?;
 
         Ok(pixels)
     }
@@ -809,6 +815,14 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let visible_filters = unsafe { (*inner).idata.filters };
     let colors = unsafe { (*inner).idata.colors };
     let sensor_type = detect_sensor_type(visible_filters, colors);
+    if matches!(sensor_type, SensorType::XTrans) {
+        // SAFETY: inner is valid and LibRaw populates both patterns for X-Trans sensors.
+        let visible_pattern = unsafe { (*inner).idata.xtrans };
+        validate_xtrans_pattern(path, xtrans_pattern_from_libraw(visible_pattern))?;
+        // SAFETY: same initialized LibRaw metadata as the visible-origin pattern above.
+        let raw_pattern = unsafe { (*inner).idata.xtrans_abs };
+        validate_xtrans_pattern(path, xtrans_pattern_from_libraw(raw_pattern))?;
+    }
 
     tracing::debug!(
         "libraw: filters=0x{:08x}, colors={}, sensor_type={:?}",

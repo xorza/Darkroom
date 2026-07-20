@@ -19,7 +19,7 @@ use common::CancelToken;
 use markesteijn::demosaic_xtrans_markesteijn;
 
 use crate::io::raw::BlackRepeat;
-use crate::io::raw::demosaic::Cancelled;
+use crate::io::raw::demosaic::DemosaicError;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -40,8 +40,8 @@ pub(crate) fn process_xtrans(
     channel_black: [f32; 3],
     inv_range: f32,
     black_repeat: Option<&BlackRepeat>,
-) -> [Vec<f32>; 3] {
-    let raw_pattern = XTransPattern::new(raw_pattern);
+) -> Result<[Vec<f32>; 3], XTransPatternError> {
+    let raw_pattern = XTransPattern::new(raw_pattern)?;
 
     let xtrans = XTransImage::with_margins(
         raw_data,
@@ -70,7 +70,7 @@ pub(crate) fn process_xtrans(
         demosaic_elapsed.as_secs_f64() * 1000.0
     );
 
-    rgb_pixels
+    Ok(rgb_pixels)
 }
 
 /// Process calibrated f32 X-Trans data and demosaic to RGB.
@@ -87,8 +87,8 @@ pub(crate) fn process_xtrans_f32(
     left_margin: usize,
     raw_pattern: [[u8; 6]; 6],
     cancel: &CancelToken,
-) -> Result<[Vec<f32>; 3], Cancelled> {
-    let raw_pattern = XTransPattern::new(raw_pattern);
+) -> Result<[Vec<f32>; 3], DemosaicError> {
+    let raw_pattern = XTransPattern::new(raw_pattern)?;
 
     let xtrans = XTransImage::with_margins_f32(
         data,
@@ -123,46 +123,62 @@ pub(crate) struct XTransPattern {
     pub(crate) pattern: [[u8; 6]; 6],
 }
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum XTransPatternError {
+    #[error(
+        "invalid X-Trans pattern value {value} at row {row}, column {column}; expected 0, 1, or 2"
+    )]
+    Value {
+        row: usize,
+        column: usize,
+        value: u8,
+    },
+    #[error("invalid X-Trans color counts: expected [8, 20, 8], got {actual:?}")]
+    ColorCounts { actual: [usize; 3] },
+    #[error("invalid X-Trans green neighborhood at row {row}, column {column}: {neighbors:?}")]
+    GreenNeighborhood {
+        row: usize,
+        column: usize,
+        neighbors: [usize; 3],
+    },
+}
+
 impl XTransPattern {
     /// Create a new X-Trans pattern from a 6x6 array.
-    ///
-    /// # Panics
-    /// Panics unless the values, color counts, and green neighborhoods form an X-Trans CFA.
-    pub(crate) fn new(pattern: [[u8; 6]; 6]) -> Self {
+    pub(crate) fn new(pattern: [[u8; 6]; 6]) -> Result<Self, XTransPatternError> {
         let mut counts = [0usize; 3];
-        for row in &pattern {
-            for &val in row {
-                assert!(
-                    val <= 2,
-                    "Invalid X-Trans pattern value: {} (must be 0, 1, or 2)",
-                    val
-                );
-                counts[val as usize] += 1;
+        for (row, values) in pattern.iter().enumerate() {
+            for (column, &value) in values.iter().enumerate() {
+                if value > 2 {
+                    return Err(XTransPatternError::Value { row, column, value });
+                }
+                counts[value as usize] += 1;
             }
         }
-        assert_eq!(
-            counts,
-            [8, 20, 8],
-            "Invalid X-Trans color counts: expected [8 red, 20 green, 8 blue], got {counts:?}"
-        );
+        if counts != [8, 20, 8] {
+            return Err(XTransPatternError::ColorCounts { actual: counts });
+        }
         for row in 0..6 {
-            for col in 0..6 {
-                if pattern[row][col] != 1 {
+            for column in 0..6 {
+                if pattern[row][column] != 1 {
                     continue;
                 }
                 let mut neighbors = [0usize; 3];
                 for (dy, dx) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
                     let y = (row as i32 + dy).rem_euclid(6) as usize;
-                    let x = (col as i32 + dx).rem_euclid(6) as usize;
+                    let x = (column as i32 + dx).rem_euclid(6) as usize;
                     neighbors[pattern[y][x] as usize] += 1;
                 }
-                assert_eq!(
-                    neighbors[0], neighbors[2],
-                    "Invalid X-Trans green neighborhood at ({row},{col}): {neighbors:?}"
-                );
+                if neighbors[0] != neighbors[2] {
+                    return Err(XTransPatternError::GreenNeighborhood {
+                        row,
+                        column,
+                        neighbors,
+                    });
+                }
             }
         }
-        Self { pattern }
+        Ok(Self { pattern })
     }
 
     /// Get the color at position (row, col).
@@ -384,37 +400,94 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Invalid X-Trans pattern value")]
-    fn test_xtrans_pattern_invalid_value() {
-        XTransPattern::new([
+    fn test_xtrans_pattern_invalid_metadata() {
+        let invalid_value_pattern = [
             [1, 0, 1, 1, 2, 1],
             [2, 1, 3, 0, 1, 0], // 3 is invalid
             [1, 2, 1, 1, 0, 1],
             [1, 2, 1, 1, 0, 1],
             [0, 1, 0, 2, 1, 2],
             [1, 0, 1, 1, 2, 1],
-        ]);
-    }
+        ];
+        let invalid_value = XTransPattern::new(invalid_value_pattern).unwrap_err();
+        assert_eq!(
+            invalid_value,
+            XTransPatternError::Value {
+                row: 1,
+                column: 2,
+                value: 3,
+            }
+        );
 
-    #[test]
-    #[should_panic(expected = "Invalid X-Trans color counts")]
-    fn test_xtrans_pattern_invalid_color_counts() {
         let mut pattern = test_pattern_array();
         pattern[0][2] = 1;
-        XTransPattern::new(pattern);
-    }
+        assert_eq!(
+            XTransPattern::new(pattern).unwrap_err(),
+            XTransPatternError::ColorCounts { actual: [7, 21, 8] }
+        );
 
-    #[test]
-    #[should_panic(expected = "Invalid X-Trans green neighborhood")]
-    fn test_xtrans_pattern_invalid_geometry() {
-        XTransPattern::new([
+        let invalid_geometry = XTransPattern::new([
             [1, 0, 1, 1, 2, 1],
             [2, 1, 2, 0, 1, 0],
             [1, 2, 1, 1, 0, 1],
             [1, 2, 1, 1, 0, 1],
             [0, 1, 0, 2, 1, 2],
             [1, 0, 1, 1, 2, 1],
-        ]);
+        ])
+        .unwrap_err();
+        assert_eq!(
+            invalid_geometry,
+            XTransPatternError::GreenNeighborhood {
+                row: 1,
+                column: 1,
+                neighbors: [1, 0, 3],
+            }
+        );
+
+        let raw_data = vec![0u16; 12 * 12];
+        assert_eq!(
+            process_xtrans(
+                &raw_data,
+                12,
+                12,
+                6,
+                6,
+                3,
+                3,
+                invalid_value_pattern,
+                [0.0; 3],
+                1.0,
+                None,
+            )
+            .unwrap_err(),
+            XTransPatternError::Value {
+                row: 1,
+                column: 2,
+                value: 3,
+            }
+        );
+
+        let calibrated = vec![0.0f32; 12 * 12];
+        assert!(matches!(
+            process_xtrans_f32(
+                &calibrated,
+                12,
+                12,
+                6,
+                6,
+                3,
+                3,
+                invalid_value_pattern,
+                &CancelToken::never(),
+            ),
+            Err(DemosaicError::InvalidXTransPattern(
+                XTransPatternError::Value {
+                    row: 1,
+                    column: 2,
+                    value: 3,
+                }
+            ))
+        ));
     }
 
     #[test]
@@ -495,7 +568,8 @@ mod tests {
             [0.0; 3],
             1.0 / 4096.0,
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
     }
@@ -523,7 +597,8 @@ mod tests {
             [black; 3],
             inv_range,
             None,
-        );
+        )
+        .unwrap();
 
         for &val in rgb.iter().flatten() {
             assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
@@ -551,7 +626,8 @@ mod tests {
             [black; 3],
             inv_range,
             None,
-        );
+        )
+        .unwrap();
 
         for &val in rgb.iter().flatten() {
             assert_eq!(val, 0.0, "Expected 0.0 for values below black level");
@@ -577,7 +653,8 @@ mod tests {
             [black; 3],
             inv_range,
             None,
-        );
+        )
+        .unwrap();
 
         for &val in rgb.iter().flatten() {
             assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
@@ -775,7 +852,8 @@ mod tests {
             [black; 3],
             inv_range,
             None,
-        );
+        )
+        .unwrap();
         let rgb_f32 = process_xtrans_f32(
             &raw_f32,
             raw_width,
@@ -835,7 +913,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn test_pattern() -> XTransPattern {
-        XTransPattern::new(TEST_PATTERN)
+        XTransPattern::new(TEST_PATTERN).unwrap()
     }
 
     pub(crate) fn to_u16(value: f32) -> u16 {

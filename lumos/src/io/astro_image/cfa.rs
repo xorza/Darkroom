@@ -12,7 +12,7 @@ use common::file_utils;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
-use crate::io::raw::demosaic::Cancelled;
+use crate::io::raw::demosaic::DemosaicError;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::frame_store::StackableImage;
@@ -124,7 +124,7 @@ impl CfaImage {
 
     /// Demosaic this CFA image into a 3-channel AstroImage.
     /// Consumes self.
-    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<AstroImage, Cancelled> {
+    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<AstroImage, DemosaicError> {
         let width = self.data.width();
         let height = self.data.height();
         let cfa_type =

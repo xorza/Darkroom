@@ -1,6 +1,7 @@
 use std::fs;
 
 use crate::io::astro_image::cfa::CfaType;
+use crate::io::astro_image::error::ImageError;
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
@@ -49,6 +50,26 @@ fn test_load_raw_rejects_invalid_files() {
         fs::write(&path, case.contents).unwrap();
         assert!(load_raw(&path).is_err(), "{case:?}");
     }
+}
+
+#[test]
+fn malformed_xtrans_metadata_returns_raw_image_error() {
+    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+
+    let path = Path::new("malformed-xtrans.raf");
+    let mut pattern = test_pattern_array();
+    pattern[1][2] = 3;
+    let error = validate_xtrans_pattern(path, pattern).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ImageError::Raw {
+            path: error_path,
+            reason,
+        } if error_path == path
+            && reason
+                == "invalid X-Trans pattern value 3 at row 1, column 2; expected 0, 1, or 2"
+    ));
 }
 
 #[test]
@@ -472,7 +493,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 area.height,
                 area.top_margin,
                 area.left_margin,
-                XTransPattern::new(raw_pattern),
+                XTransPattern::new(raw_pattern).unwrap(),
                 channel_black,
                 inv_range,
                 Some(&repeat),
@@ -551,7 +572,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
         raw.height,
         raw.top_margin,
         raw.left_margin,
-        XTransPattern::new(pattern),
+        XTransPattern::new(pattern).unwrap(),
         [
             raw.black_level.per_channel[0],
             raw.black_level.per_channel[1],

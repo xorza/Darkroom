@@ -13,6 +13,20 @@ pub(crate) mod xtrans;
 #[derive(Debug)]
 pub(crate) struct Cancelled;
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DemosaicError {
+    #[error("demosaicing cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    InvalidXTransPattern(#[from] xtrans::XTransPatternError),
+}
+
+impl From<Cancelled> for DemosaicError {
+    fn from(_: Cancelled) -> Self {
+        Self::Cancelled
+    }
+}
+
 /// Re-interleave planar `[R, G, B]` demosaic output to `[R0, G0, B0, R1, ...]`.
 ///
 /// Test-only bridge: the demosaic kernels return planar channels, but their

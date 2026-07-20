@@ -8,7 +8,8 @@ use rayon::prelude::*;
 
 use crate::concurrency;
 use crate::io::astro_image::AstroImage;
-use crate::io::raw::{load_raw_cfa, raw_dimensions};
+use crate::io::raw::demosaic::DemosaicError;
+use crate::io::raw::{self, load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
@@ -123,8 +124,13 @@ fn decode_calibrate_demosaic(
         }
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
-    cfa.demosaic(cancel)
-        .map_err(|_| Error::Stack(StackError::Cancelled))
+    cfa.demosaic(cancel).map_err(|source| match source {
+        DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
+        DemosaicError::InvalidXTransPattern(source) => Error::Load {
+            path: path.to_path_buf(),
+            source: raw::raw_err(path, source.to_string()),
+        },
+    })
 }
 
 /// Memory-bounded `calibrate → align → stack` for sets that don't fit ~75% RAM. Spills calibrated
