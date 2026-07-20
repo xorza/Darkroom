@@ -69,7 +69,6 @@ notify = { version = "8" }
 hashbrown = { version = "0.17", features = ["serde"] }
 indexmap = "2.14"
 rhai = { version = "1.25", features = ["sync", "serde"] }
-syn = { version = "3.0", features = ["full"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 memmap2 = { version = "0.9" }

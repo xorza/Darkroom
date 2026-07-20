@@ -14,9 +14,10 @@ state now uses `IndexMap` with its custom serialization beside the owning
 document module (`darkroom/src/core/document/mod.rs:180`,
 `darkroom/src/core/document/serde.rs:1-49`).
 
-The remaining implementation work is concentrated in the
-serialization/introspection layer: removing avoidable copies and unconditional
-proc-macro build cost.
+All findings from this review are now implemented. Slice decoding avoids
+reader staging, TOML normalization consumes its owned string, the introspection
+derive is opt-in with narrow parser features, and cancellation is one-shot per
+operation.
 
 The LZ4 size contract, authored-file publication, and persistent frame-cache
 identity findings are reflected in the current code and are no longer active.
@@ -62,12 +63,12 @@ test-support code were excluded from findings.
 
 ## Batch 5 — Low: remove avoidable copies and build dependencies
 
-- [ ] **Give slice deserialization a direct slice dispatch instead of routing through `Read`.** `deserialize(&[u8], ..)` wraps the slice in `Cursor`, after which TOML and Bitcode copy the entire payload into scratch with `read_to_end` (`common/src/serde.rs:118-143`). Darkroom's undo stack already holds a contiguous range but deliberately calls the reader path, adding the same O(payload) copy on every decode (`darkroom/src/core/edit/action_stack/mod.rs:260-278`). Dispatch slice inputs directly to each backend's slice decoder and reserve `deserialize_from` for real readers; update undo to use the slice entry point. Verify identical decoding and trailing-data behavior for every format and confirm repeated undo/redo does not grow or fill an O(payload) decode scratch buffer.
+- [x] **Give slice deserialization a direct slice dispatch instead of routing through `Read`.** JSON, TOML, and Bitcode now decode directly from the caller's slice; LZ4 parses the slice and allocates only its required decompression output. The reader API remains for actual streams such as calibration-master files. Darkroom undo decodes its packed range through the slice entry point and carries no scratch buffer. Tests compare slice and reader decoding plus trailing-data behavior for every format, and repeated undo/redo verifies the direct path.
 
-- [ ] **Replace the exported normalization trait with a private consuming helper.** `NormalizeString` is publicly re-exported (`common/src/lib.rs:48`) but its only production use is internal TOML serialization (`common/src/serde.rs:6-7`, `common/src/serde.rs:95-97`). That caller already owns the `String`, yet an already normalized value is cloned (`common/src/normalize_string.rs:32-40`). Replace the trait with a private `fn normalize(String) -> String`: append a missing newline in place and allocate only when removing CR/CRLF. Verify empty, LF, CRLF, lone-CR, and missing-final-newline cases, plus capacity reuse on the no-CR path.
+- [x] **Replace the exported normalization trait with a private consuming helper.** TOML serialization now passes its owned `String` to a crate-private helper. The no-CR path appends a missing newline in place and preserves the existing allocation; only CR/CRLF replacement allocates. Table-driven tests cover empty, LF, CRLF, lone-CR, mixed Unicode, and missing-final-newline inputs, with pointer and capacity checks for allocation reuse.
 
-- [ ] **Make the introspection derive opt-in and narrow its parser features.** `common-derive` is an unconditional dependency (`common/Cargo.toml:15-16`) and is always re-exported (`common/src/introspect/mod.rs:299`), although Lens is the only production derive consumer (`lens/src/astro/configs.rs:11-50`, `lens/src/astro/configs.rs:196-209`). The workspace also enables Syn's `full` parser (`Cargo.toml:72`) while this macro only parses derive inputs, fields, types, and attributes. Put the proc-macro dependency/re-export behind an `introspect-derive` feature enabled by Lens, and give `common-derive` only the Syn features it uses rather than inheriting `full`. Verify the introspection traits/value types remain usable without the feature, all Lens derives still expand, and `cargo tree` for a non-Lens consumer no longer contains `common-derive` through `common`.
+- [x] **Make the introspection derive opt-in and narrow its parser features.** Common's optional `introspect-derive` feature controls both the proc-macro dependency and re-export, and Lens enables it explicitly. `common-derive` requests only Syn's clone, derive-input, parsing, printing, and proc-macro support instead of `full`. Common builds without the feature, Lens's derives compile, and Scenarium's normal dependency tree no longer contains `common-derive`.
 
 ## Open questions
 
-- [ ] **Is `CancelToken::reset` guaranteed to run only after every clone from the previous operation has quiesced?** Live clones share one flag, and `reset` clears it for all of them (`common/src/cancel_token.rs:12-22`, `common/src/cancel_token.rs:46-64`). The worker awaits its run before reset (`scenarium/src/worker/mod.rs:179-195`), which is safe only if every spawned/blocking task has joined. If quiescence is a hard invariant, narrow reset ownership and document it at the worker boundary; if operations can overlap, create a fresh token per operation so an old clone remains cancelled permanently.
+- [x] **Make cancellation one-shot instead of relying on clone quiescence before reset.** `CancelToken::reset` is removed, so cancellation is permanent across every clone of a live token. Scenarium's worker publishes a fresh token only while a run is active and drops it afterward; cancelling an idle worker is a no-op and cannot bleed into the next run. Tests cover permanent cancellation across clones and the idle-to-next-run boundary.

@@ -21,7 +21,6 @@
 //! captured wiring on every entry).
 
 use std::collections::VecDeque;
-use std::io::Cursor;
 use std::ops::Range;
 
 use common::SerdeFormat;
@@ -66,7 +65,6 @@ pub(crate) struct ActionStack {
     /// `RemoveNode` carrying a whole `Node` + wiring) can dwarf many small
     /// ones. Physical `actions` peaks at ~2× this between compactions.
     max_bytes: usize,
-    temp_buffer: Vec<u8>,
 }
 
 impl ActionStack {
@@ -78,7 +76,6 @@ impl ActionStack {
             entries: VecDeque::new(),
             cursor: 0,
             max_bytes,
-            temp_buffer: Vec::new(),
         }
     }
 
@@ -109,7 +106,7 @@ impl ActionStack {
             return;
         }
 
-        let range = Self::append_steps(&mut self.actions, steps, &mut self.temp_buffer);
+        let range = Self::append_steps(&mut self.actions, steps);
         self.entries.push_back(Entry {
             range,
             gesture_key,
@@ -129,10 +126,7 @@ impl ActionStack {
         // buffer — it just moved into the redoable region.
         let entry = &self.entries[self.cursor];
         let target = entry.target;
-        let steps = Self::deserialize_steps(
-            Self::slice_bytes(&self.actions, &entry.range),
-            &mut self.temp_buffer,
-        );
+        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter().rev() {
             revert_step(step, doc, target);
             on_step(step);
@@ -146,10 +140,7 @@ impl ActionStack {
         }
         let entry = &self.entries[self.cursor];
         let target = entry.target;
-        let steps = Self::deserialize_steps(
-            Self::slice_bytes(&self.actions, &entry.range),
-            &mut self.temp_buffer,
-        );
+        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter() {
             apply_step(step, doc, target);
             on_step(step);
@@ -228,7 +219,7 @@ impl ActionStack {
         }
         let last_range = last.range.clone();
         let last_bytes = Self::slice_bytes(&self.actions, &last_range);
-        let last_steps = Self::deserialize_steps(last_bytes, &mut self.temp_buffer);
+        let last_steps = Self::deserialize_steps(last_bytes);
         assert_eq!(
             last_steps.len(),
             1,
@@ -247,7 +238,7 @@ impl ActionStack {
         // re-append the merged step in place.
         self.actions.truncate(last_range.start);
         self.entries.pop_back();
-        let range = Self::append_steps(&mut self.actions, &[merged], &mut self.temp_buffer);
+        let range = Self::append_steps(&mut self.actions, &[merged]);
         self.entries.push_back(Entry {
             range,
             gesture_key: Some(key),
@@ -257,25 +248,20 @@ impl ActionStack {
         true
     }
 
-    fn append_steps(
-        buffer: &mut Vec<u8>,
-        steps: &[UndoStep],
-        temp_buffer: &mut Vec<u8>,
-    ) -> Range<usize> {
+    fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
         assert!(
             !steps.is_empty(),
             "undo stack should not store empty step batches"
         );
         let start = buffer.len();
-        common::serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, temp_buffer)
+        common::serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, &mut Vec::new())
             .expect("bitcode serialize of in-memory undo steps is infallible");
         let end = buffer.len();
         start..end
     }
 
-    fn deserialize_steps(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<UndoStep> {
-        common::serde::deserialize_from(&mut Cursor::new(bytes), SerdeFormat::Bitcode, temp_buffer)
-            .unwrap()
+    fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
+        common::serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap()
     }
 
     fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {

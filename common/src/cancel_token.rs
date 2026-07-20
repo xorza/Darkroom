@@ -15,11 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// and bails — exactly what a `spawn_blocking` / rayon hot loop can afford. For
 /// an awaitable cancel, reach for `tokio_util`'s token instead.
 ///
-/// **Reusable across operations.** [`reset`](Self::reset) clears a live token so
-/// one long-lived token can gate a *sequence* of operations: the owner clears it
-/// at each operation's start, so a cancel only affects the operation in flight
-/// when it was requested. Ordering is `Relaxed`: the flag is standalone (it
-/// publishes no other data), so it needs no synchronization beyond the atomic.
+/// A live token is one-shot: once cancelled, it and all of its clones remain
+/// cancelled. Each operation that needs independent cancellation must create a
+/// fresh token. Ordering is `Relaxed`: the flag is standalone (it publishes no
+/// other data), so it needs no synchronization beyond the atomic.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(State);
 
@@ -55,14 +54,6 @@ impl CancelToken {
     pub fn is_cancelled(&self) -> bool {
         matches!(&self.0, State::Live(flag) if flag.load(Ordering::Relaxed))
     }
-
-    /// Clear the flag so the token can gate a fresh operation. A no-op on a
-    /// never-token.
-    pub fn reset(&self) {
-        if let State::Live(flag) = &self.0 {
-            flag.store(false, Ordering::Relaxed);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -70,21 +61,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cancel_is_observable_through_clones_and_resettable() {
+    fn cancellation_is_permanent_across_clones() {
         let token = CancelToken::new();
         let clone = token.clone();
         assert!(!token.is_cancelled());
         assert!(!clone.is_cancelled());
 
-        // A cancel on one handle is seen by the other (shared flag).
         token.cancel();
         assert!(token.is_cancelled());
         assert!(clone.is_cancelled());
 
-        // Reset clears it for reuse, again visible through clones.
-        token.reset();
-        assert!(!token.is_cancelled());
-        assert!(!clone.is_cancelled());
+        let fresh = CancelToken::new();
+        assert!(!fresh.is_cancelled());
+        assert!(token.is_cancelled());
+        assert!(clone.is_cancelled());
     }
 
     #[test]

@@ -20,7 +20,6 @@ pub(crate) mod debug;
 pub(crate) mod file_format;
 pub(crate) mod float_ext;
 pub(crate) mod introspect;
-pub(crate) mod normalize_string;
 pub(crate) mod span;
 
 pub use cancel_token::CancelToken;
@@ -32,6 +31,5 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
-pub use normalize_string::NormalizeString;
 pub use serde::{DeserializeError, Lz4SizeError, SerializeError, deserialize, serialize};
 pub use span::Span;

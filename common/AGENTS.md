@@ -9,15 +9,14 @@ nothing in-tree.
 
 | Module | Role |
 |--------|------|
-| `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. `cancel()`/`is_cancelled()`/`reset()`; live clones share one flag. For cooperative bail-out in hot loops (`spawn_blocking`/rayon); `reset()` makes a live token reusable across operations. No async wait — use `tokio_util`'s token for that. |
+| `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. Live tokens are one-shot: `cancel()` permanently trips every clone, and each independent operation creates a fresh token. For cooperative bail-out in hot loops (`spawn_blocking`/rayon). No async wait — use `tokio_util`'s token for that. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
-| `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures. |
+| `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures and private consuming TOML text normalization. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
 | `file_utils/` | Generic fallible, sorted directory scanning by file extension plus atomic same-directory file publication with durable and rebuildable-cache modes. |
 | `span.rs` | `Span`: compact serde `(start, len)` u32 range into a flat SoA pool; 8 bytes vs 16 for `Range<usize>`. Used by `scenarium`'s execution program. |
-| `introspect/` | Generic struct introspection: `#[derive(Introspect)]` (from the nested `common-derive` proc-macro crate) → `fields()` (`FieldDesc`: name/label/concrete numeric `FieldKind`/default/required) + checked `from_fields(&[FieldValue]) -> Result<_, IntrospectError>`. Signed and unsigned integer defaults remain lossless; out-of-range authored values error instead of casting. GUI/value-model agnostic — consumers map `FieldDesc` to their own widgets. Fieldless enum fields impl `IntrospectEnum` via `#[derive(IntrospectEnum)]` plus an explicit stable `#[config(type_id = "…")]` UUID (lists the variants + delegates the string round-trip to `Display`/`FromStr` — typically strum's, but the derive itself is strum-agnostic). (`darkroom`/`lens` build config editors on it.) |
+| `introspect/` | Generic struct introspection: the traits and value types are always available; the nested `common-derive` proc-macro and its `#[derive(Introspect)]` / `#[derive(IntrospectEnum)]` re-exports require the `introspect-derive` feature. `fields()` reports `FieldDesc` name/label/concrete numeric `FieldKind`/default/required, and checked `from_fields` rebuilds the value. Signed and unsigned integer defaults remain lossless; out-of-range authored values error instead of casting. Enum derives require an explicit stable `#[config(type_id = "…")]` UUID and delegate the string round-trip to `Display`/`FromStr`. |
 | `float_ext.rs` | `FloatExt::approximately_eq` for `f32`/`f64`/`Vec2` (within `EPSILON`). |
-| `normalize_string.rs` | `NormalizeString::normalize`: CRLF/CR → LF, guarantees trailing newline. |
 | `constants.rs` | `EPSILON: f32 = 1e-6`. |
 | `debug.rs` | `is_debug()`: reports `debug_assertions`. |
 | `test_utils.rs` | `workspace_root`, `test_output_path` for tests. |
@@ -30,9 +29,9 @@ nothing in-tree.
 
 ## Serialization
 
-`serialize()` returns `Result<Vec<u8>, SerializeError>`; `deserialize()` accepts bytes and returns `Result<T, DeserializeError>`; `serialize_into`/`deserialize_from` stream over `Write`/`Read`. JSON and TOML are UTF-8. `Bitcode` is binary. `Lz4` is compact JSON LZ4-compressed with a 4-byte length prefix.
+`serialize()` returns `Result<Vec<u8>, SerializeError>`; `deserialize()` dispatches directly from a byte slice; `serialize_into`/`deserialize_from` stream over `Write`/`Read`. JSON and TOML are UTF-8. `Bitcode` is binary. `Lz4` is compact JSON LZ4-compressed with a 4-byte length prefix.
 
 ## Dependencies
 
-common-derive, serde, serde_json, toml, bitcode, lz4_flex, glam, thiserror, and
-`windows-sys` on Windows.
+serde, serde_json, toml, bitcode, lz4_flex, glam, thiserror, optional
+common-derive, and `windows-sys` on Windows.

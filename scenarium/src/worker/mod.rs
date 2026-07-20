@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
@@ -22,7 +24,7 @@ pub(crate) mod protocol;
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<Vec<WorkerMessage>>,
-    cancel: CancelToken,
+    active_cancel: Arc<Mutex<Option<CancelToken>>>,
 }
 
 impl Worker {
@@ -31,23 +33,30 @@ impl Worker {
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
-        let cancel = CancelToken::new();
+        let active_cancel = Arc::new(Mutex::new(None));
         let thread_handle = tokio::spawn({
-            let cancel = cancel.clone();
+            let active_cancel = Arc::clone(&active_cancel);
             async move {
-                worker_loop(rx, callback, cancel).await;
+                worker_loop(rx, callback, active_cancel).await;
             }
         });
 
         Self {
             thread_handle: Some(thread_handle),
             tx,
-            cancel,
+            active_cancel,
         }
     }
 
     pub fn request_cancel(&self) {
-        self.cancel.cancel();
+        if let Some(cancel) = self
+            .active_cancel
+            .lock()
+            .expect("worker cancellation mutex poisoned")
+            .as_ref()
+        {
+            cancel.cancel();
+        }
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
@@ -96,7 +105,7 @@ where
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<Vec<WorkerMessage>>,
     execution_callback: ExecutionCallback,
-    cancel: CancelToken,
+    active_cancel: Arc<Mutex<Option<CancelToken>>>,
 ) where
     ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
 {
@@ -181,7 +190,10 @@ async fn worker_loop<ExecutionCallback>(
         if needs_execute && !execution_engine.is_empty() {
             let _pause_guard = event_loop_pause_gate.close();
             let in_loop = should_start_event_loop || event_loop.is_some();
-            cancel.reset();
+            let cancel = CancelToken::new();
+            *active_cancel
+                .lock()
+                .expect("worker cancellation mutex poisoned") = Some(cancel.clone());
             let seeds = RunSeeds {
                 sinks: intent.execute_sinks,
                 event_triggers: in_loop,
@@ -195,6 +207,10 @@ async fn worker_loop<ExecutionCallback>(
                 &execution_callback,
             )
             .await;
+            active_cancel
+                .lock()
+                .expect("worker cancellation mutex poisoned")
+                .take();
 
             if should_start_event_loop && let Ok(stats) = &result {
                 assert!(event_loop.is_none());

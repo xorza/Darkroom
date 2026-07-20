@@ -5,11 +5,12 @@
 //! toolkit or value model. A consumer (e.g. an editor) maps [`FieldDesc`] to its
 //! own widgets and reads edited values back as `FieldValue`s.
 //!
-//! Derive with `#[derive(Introspect)]` (re-exported here). Enum-typed fields
-//! implement [`IntrospectEnum`] (variant list + string round-trip) — derive it
-//! with `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]`
-//! UUID; the derive delegates to the enum's `Display`/`FromStr` (typically
-//! strum's `Display`/`EnumString`).
+//! With Common's `introspect-derive` feature, derive with
+//! `#[derive(Introspect)]`. Enum-typed fields implement [`IntrospectEnum`]
+//! (variant list + string round-trip) — derive it with
+//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID;
+//! the derive delegates to the enum's `Display`/`FromStr` (typically strum's
+//! `Display`/`EnumString`).
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
@@ -296,6 +297,7 @@ pub trait IntrospectEnum: Sized {
     fn from_variant(name: &str) -> Option<Self>;
 }
 
+#[cfg(feature = "introspect-derive")]
 pub use common_derive::{Introspect, IntrospectEnum};
 
 #[cfg(test)]

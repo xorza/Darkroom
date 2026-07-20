@@ -1,13 +1,53 @@
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::file_format::SerdeFormat;
-use crate::normalize_string::NormalizeString;
 
 const LZ4_HEADER_LEN: usize = size_of::<u32>();
 const LZ4_MAX_UNCOMPRESSED_SIZE: usize = 1 << 30;
+
+#[derive(Debug)]
+struct Lz4Payload<'a> {
+    compressed: &'a [u8],
+    uncompressed_size: usize,
+}
+
+fn normalize(mut input: String) -> String {
+    if !input.as_bytes().contains(&b'\r') {
+        if !input.ends_with('\n') {
+            input.push('\n');
+        }
+        return input;
+    }
+
+    let bytes = input.as_bytes();
+    let mut output = String::with_capacity(input.len());
+    let mut last = 0;
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'\r' {
+            index += 1;
+            continue;
+        }
+
+        output.push_str(&input[last..index]);
+        if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
+            index += 1;
+        }
+        output.push('\n');
+        index += 1;
+        last = index;
+    }
+
+    output.push_str(&input[last..]);
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SerializeError {
@@ -67,6 +107,29 @@ fn checked_lz4_uncompressed_size(uncompressed_size: usize) -> Result<u32, Lz4Siz
     Ok(header_size)
 }
 
+fn lz4_payload(serialized: &[u8]) -> Result<Lz4Payload<'_>, DeserializeError> {
+    if serialized.len() < LZ4_HEADER_LEN {
+        return Err(DeserializeError::Lz4PayloadTooShort {
+            len: serialized.len(),
+        });
+    }
+
+    let uncompressed_size =
+        u32::from_le_bytes(serialized[..LZ4_HEADER_LEN].try_into().unwrap()) as usize;
+    checked_lz4_uncompressed_size(uncompressed_size)?;
+    Ok(Lz4Payload {
+        compressed: &serialized[LZ4_HEADER_LEN..],
+        uncompressed_size,
+    })
+}
+
+fn check_lz4_decompressed_size(actual: usize, expected: usize) -> Result<(), DeserializeError> {
+    if actual != expected {
+        return Err(DeserializeError::Lz4DecompressedSizeMismatch { actual, expected });
+    }
+    Ok(())
+}
+
 pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>, SerializeError> {
     let mut buffer = Vec::new();
     let mut temp_buffer = Vec::new();
@@ -93,7 +156,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
             writer.write_all(&encoded)?;
         }
         SerdeFormat::Toml => {
-            let s = toml::to_string(&value)?.normalize();
+            let s = normalize(toml::to_string(&value)?);
             writer.write_all(s.as_bytes())?;
         }
         SerdeFormat::Lz4 => {
@@ -119,8 +182,19 @@ pub fn deserialize<T: DeserializeOwned>(
     serialized: &[u8],
     format: SerdeFormat,
 ) -> Result<T, DeserializeError> {
-    let mut temp_buffer = Vec::new();
-    deserialize_from(&mut Cursor::new(serialized), format, &mut temp_buffer)
+    match format {
+        SerdeFormat::Json => Ok(serde_json::from_slice(serialized)?),
+        SerdeFormat::Toml => Ok(toml::from_slice(serialized)?),
+        SerdeFormat::Bitcode => Ok(bitcode::deserialize(serialized)?),
+        SerdeFormat::Lz4 => {
+            let payload = lz4_payload(serialized)?;
+            let mut decompressed = vec![0; payload.uncompressed_size];
+            let decompressed_len =
+                lz4_flex::decompress_into(payload.compressed, &mut decompressed)?;
+            check_lz4_decompressed_size(decompressed_len, payload.uncompressed_size)?;
+            Ok(serde_json::from_slice(&decompressed)?)
+        }
+    }
 }
 
 /// `temp_buffer` is reusable scratch (read buffer / LZ4 work area) the caller
@@ -144,19 +218,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
         }
         SerdeFormat::Lz4 => {
             reader.read_to_end(temp_buffer)?;
-
-            // Trust-boundary parser: the header length is attacker-controlled, so
-            // every step is bounds-/range-checked and returns `Err` rather than panicking.
-            if temp_buffer.len() < LZ4_HEADER_LEN {
-                return Err(DeserializeError::Lz4PayloadTooShort {
-                    len: temp_buffer.len(),
-                });
-            }
-
-            let uncompressed_size =
-                u32::from_le_bytes(temp_buffer[0..LZ4_HEADER_LEN].try_into().unwrap()) as usize;
-            checked_lz4_uncompressed_size(uncompressed_size)?;
-
+            let uncompressed_size = lz4_payload(temp_buffer)?.uncompressed_size;
             let compressed_len = temp_buffer.len() - LZ4_HEADER_LEN;
             temp_buffer.resize(LZ4_HEADER_LEN + compressed_len + uncompressed_size, 0);
 
@@ -165,12 +227,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             let compressed = &compressed_part[LZ4_HEADER_LEN..];
 
             let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
-            if decompressed_len != uncompressed_size {
-                return Err(DeserializeError::Lz4DecompressedSizeMismatch {
-                    actual: decompressed_len,
-                    expected: uncompressed_size,
-                });
-            }
+            check_lz4_decompressed_size(decompressed_len, uncompressed_size)?;
 
             Ok(serde_json::from_slice(decompressed_part)?)
         }
@@ -179,6 +236,8 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[derive(Debug)]
@@ -231,6 +290,90 @@ mod tests {
         assert_eq!(payload, br#"[1,2,3,1000,-42]"#);
         let back: Vec<i64> = deserialize(&bytes, SerdeFormat::Lz4).unwrap();
         assert_eq!(back, value);
+    }
+
+    #[derive(Debug, PartialEq, Serialize, serde::Deserialize)]
+    struct TestValue {
+        label: String,
+        count: u32,
+    }
+
+    #[test]
+    fn slice_and_reader_dispatch_match_for_every_format() {
+        let value = TestValue {
+            label: "payload".to_string(),
+            count: 42,
+        };
+
+        for format in [
+            SerdeFormat::Json,
+            SerdeFormat::Toml,
+            SerdeFormat::Bitcode,
+            SerdeFormat::Lz4,
+        ] {
+            let bytes = serialize(&value, format).unwrap();
+            let direct: TestValue = deserialize(&bytes, format).unwrap();
+            let streamed: TestValue =
+                deserialize_from(&mut Cursor::new(&bytes), format, &mut Vec::new()).unwrap();
+            assert_eq!(direct, value, "direct {format:?}");
+            assert_eq!(streamed, value, "reader {format:?}");
+
+            let mut with_trailing_data = bytes;
+            with_trailing_data.extend_from_slice(match format {
+                SerdeFormat::Json => b"x",
+                SerdeFormat::Toml => b"\n=",
+                SerdeFormat::Bitcode | SerdeFormat::Lz4 => &[0xff],
+            });
+            let direct: Result<TestValue, _> = deserialize(&with_trailing_data, format);
+            let streamed: Result<TestValue, _> = deserialize_from(
+                &mut Cursor::new(&with_trailing_data),
+                format,
+                &mut Vec::new(),
+            );
+            match (direct, streamed) {
+                (Ok(direct), Ok(streamed)) => {
+                    assert_eq!(direct, streamed, "trailing data for {format:?}");
+                }
+                (Err(_), Err(_)) => {}
+                (direct, streamed) => panic!(
+                    "slice and reader trailing-data behavior differs for {format:?}: \
+                     direct={}, reader={}",
+                    direct.is_ok(),
+                    streamed.is_ok()
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn toml_line_endings_and_final_newline_are_normalized() {
+        for (input, expected) in [
+            ("", "\n"),
+            ("\n", "\n"),
+            ("hello", "hello\n"),
+            ("a\nb\n", "a\nb\n"),
+            ("a\r\nb", "a\nb\n"),
+            ("a\rb\r", "a\nb\n"),
+            ("a\nb\r\nc\rd", "a\nb\nc\nd\n"),
+            ("\r\n\r\r\n", "\n\n\n"),
+            ("héllo 🎉\r\n你好", "héllo 🎉\n你好\n"),
+        ] {
+            assert_eq!(normalize(input.to_string()), expected, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn toml_normalization_reuses_allocations_without_cr() {
+        for input in ["already normalized\n", "needs newline"] {
+            let mut value = String::with_capacity(64);
+            value.push_str(input);
+            let pointer = value.as_ptr();
+            let capacity = value.capacity();
+
+            let normalized = normalize(value);
+            assert_eq!(normalized.as_ptr(), pointer);
+            assert_eq!(normalized.capacity(), capacity);
+        }
     }
 
     #[test]

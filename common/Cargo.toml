@@ -11,9 +11,10 @@ workspace = true
 # Exposes test-only helpers (e.g. `SerdeFormat::all_formats_for_testing`) to
 # downstream crates' test targets without putting them in the released surface.
 test-support = []
+introspect-derive = ["dep:common-derive"]
 
 [dependencies]
-common-derive = { path = "common-derive" }
+common-derive = { path = "common-derive", optional = true }
 glam = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -24,3 +25,6 @@ lz4_flex = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+common-derive = { path = "common-derive" }

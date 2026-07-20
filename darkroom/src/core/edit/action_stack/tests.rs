@@ -89,15 +89,17 @@ fn redo_replays_the_merged_switch() {
 
     switch_to(&mut stack, &mut doc, 1);
     switch_to(&mut stack, &mut doc, 2);
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(primary_active(&doc), 0);
+    for _ in 0..8 {
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert_eq!(primary_active(&doc), 0);
 
-    assert!(stack.redo(&mut doc, &mut |_| {}));
-    assert_eq!(
-        primary_active(&doc),
-        2,
-        "redo restores the merged switch target"
-    );
+        assert!(stack.redo(&mut doc, &mut |_| {}));
+        assert_eq!(
+            primary_active(&doc),
+            2,
+            "redo restores the merged switch target"
+        );
+    }
 }
 
 #[test]

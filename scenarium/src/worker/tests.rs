@@ -495,14 +495,12 @@ async fn worker_streams_node_progress_before_finished() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn stale_cancel_is_cleared_at_run_start() {
+async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
     let library = system_library();
     let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
     let (worker, mut rx) = finished_worker(8);
 
-    // Cancel requested with nothing running: it must not bleed into the run
-    // kicked next (the worker clears the flag at each run's start).
     worker.request_cancel();
     worker
         .send_many([
@@ -518,7 +516,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
         .expect("worker timed out")
         .expect("worker channel closed")
         .expect("compute ok");
-    assert!(!stats.cancelled, "a stale cancel was cleared at run start");
+    assert!(!stats.cancelled, "an idle cancel affected the next run");
     assert_eq!(stats.executed_nodes.len(), 1, "the run completed in full");
 }
 

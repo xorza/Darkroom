@@ -8,7 +8,7 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 workspace = true
 
 [dependencies]
-common = { workspace = true }
+common = { workspace = true, features = ["introspect-derive"] }
 scenarium = { workspace = true }
 imaginarium = { workspace = true }
 lumos = { workspace = true, features = ["ml"] }
