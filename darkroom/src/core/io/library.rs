@@ -16,7 +16,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
-use common::{SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, file_utils, serialize};
 use scenarium::{Graph, GraphId};
 
 use crate::core::io::cwd_file;
@@ -115,7 +115,8 @@ fn save_library_to<'a>(
         graphs: graphs.map(|(id, graph)| (*id, graph.clone())).collect(),
     };
     let bytes = serialize(&lib, SerdeFormat::Json)?;
-    std::fs::write(path, &bytes).with_context(|| path.display().to_string())
+    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable)
+        .with_context(|| path.display().to_string())
 }
 
 #[cfg(test)]
@@ -228,6 +229,9 @@ mod tests {
     #[test]
     fn unwritable_path_reports_save_failure() {
         let path = test_output_path("darkroom_library/no-such-dir").join("lib.json");
+        if path.parent().unwrap().exists() {
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
         let graphs = graphs(["x"]);
         let err = format!("{:#}", save_library_to(&path, graphs.iter()).unwrap_err());
         assert!(

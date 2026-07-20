@@ -45,6 +45,8 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use common::file_utils;
+
 use crate::core::script::{CancellableTask, ScriptRequest, session};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
@@ -200,24 +202,16 @@ pub(crate) fn render_token_file(port: u16, token: Option<Uuid>) -> String {
 }
 
 fn write_token_file(path: &Path, port: u16, token: Option<Uuid>) -> std::io::Result<()> {
-    atomic_write(path, render_token_file(port, token).as_bytes())
-}
-
-/// Write `body` to `path` atomically via same-directory temp + rename.
-fn atomic_write(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let mut tmp = path.to_path_buf();
-    let mut name = tmp
-        .file_name()
-        .map(|n| n.to_os_string())
-        .unwrap_or_default();
-    name.push(".tmp");
-    tmp.set_file_name(name);
-
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    file_utils::publish_bytes(
+        path,
+        render_token_file(port, token).as_bytes(),
+        file_utils::PublicationMode::Cache,
+    )
 }
 
 impl TcpTransport {

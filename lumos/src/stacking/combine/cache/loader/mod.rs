@@ -1,10 +1,13 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
 use std::io::Error as IoError;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
+use common::file_utils;
 use common::parallel::try_par_map_limited;
 
 use crate::io::astro_image::cfa::CfaImage;
@@ -185,6 +188,13 @@ struct LoadedMemoryFrame {
     metadata: Option<AstroImageMetadata>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceIdentity {
+    canonical_path: Vec<u8>,
+    byte_len: u64,
+    modified_nanos: i128,
+}
+
 /// Load all images into memory and compute per-frame channel statistics.
 fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
@@ -339,54 +349,106 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-fn source_mtime(path: &Path) -> Result<u64, FrameStoreError> {
-    let metadata = std::fs::metadata(path).map_err(|source| FrameStoreError::ReadMetadata {
-        path: path.to_path_buf(),
-        source,
-    })?;
+fn source_identity(path: &Path) -> Result<SourceIdentity, FrameStoreError> {
+    let canonical =
+        std::fs::canonicalize(path).map_err(|source| FrameStoreError::ReadMetadata {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let metadata =
+        std::fs::metadata(&canonical).map_err(|source| FrameStoreError::ReadMetadata {
+            path: path.to_path_buf(),
+            source,
+        })?;
     let modified = metadata
         .modified()
         .map_err(|source| FrameStoreError::ReadMetadata {
             path: path.to_path_buf(),
             source,
         })?;
-    Ok(modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs())
+    let modified_nanos = match modified.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_nanos() as i128,
+        Err(error) => -(error.duration().as_nanos() as i128),
+    };
+    Ok(SourceIdentity {
+        canonical_path: canonical.as_os_str().as_encoded_bytes().to_vec(),
+        byte_len: metadata.len(),
+        modified_nanos,
+    })
 }
 
-/// Path for the sidecar metadata file that stores source mtime.
+const SOURCE_META_MAGIC: [u8; 8] = *b"LUMSRC01";
+
+fn encode_source_identity(identity: &SourceIdentity) -> Vec<u8> {
+    let path_len =
+        u32::try_from(identity.canonical_path.len()).expect("a filesystem path length fits in u32");
+    let mut bytes = Vec::with_capacity(
+        SOURCE_META_MAGIC.len()
+            + size_of::<u32>()
+            + identity.canonical_path.len()
+            + size_of::<u64>()
+            + size_of::<i128>(),
+    );
+    bytes.extend_from_slice(&SOURCE_META_MAGIC);
+    bytes.extend_from_slice(&path_len.to_le_bytes());
+    bytes.extend_from_slice(&identity.canonical_path);
+    bytes.extend_from_slice(&identity.byte_len.to_le_bytes());
+    bytes.extend_from_slice(&identity.modified_nanos.to_le_bytes());
+    bytes
+}
+
+fn decode_source_identity(bytes: &[u8]) -> Option<SourceIdentity> {
+    let path_len_offset = SOURCE_META_MAGIC.len();
+    let path_offset = path_len_offset + size_of::<u32>();
+    if bytes.get(..path_len_offset)? != SOURCE_META_MAGIC {
+        return None;
+    }
+    let path_len = u32::from_le_bytes(
+        bytes
+            .get(path_len_offset..path_offset)?
+            .try_into()
+            .expect("source path length is four bytes"),
+    ) as usize;
+    let byte_len_offset = path_offset.checked_add(path_len)?;
+    let modified_offset = byte_len_offset.checked_add(size_of::<u64>())?;
+    let expected_len = modified_offset.checked_add(size_of::<i128>())?;
+    if bytes.len() != expected_len {
+        return None;
+    }
+    Some(SourceIdentity {
+        canonical_path: bytes[path_offset..byte_len_offset].to_vec(),
+        byte_len: u64::from_le_bytes(
+            bytes[byte_len_offset..modified_offset]
+                .try_into()
+                .expect("source byte length is eight bytes"),
+        ),
+        modified_nanos: i128::from_le_bytes(
+            bytes[modified_offset..]
+                .try_into()
+                .expect("source timestamp is sixteen bytes"),
+        ),
+    })
+}
+
 fn meta_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
     cache_dir.join(format!("{}.meta", base_filename.trim_end_matches(".bin")))
 }
 
-/// Write source mtime to sidecar file.
 fn write_source_meta(
     cache_dir: &Path,
     base_filename: &str,
-    mtime: u64,
+    identity: &SourceIdentity,
 ) -> Result<(), FrameStoreError> {
     let path = meta_path(cache_dir, base_filename);
-    write_sidecar(path, &mtime.to_le_bytes())
+    write_sidecar(path, &encode_source_identity(identity))
 }
 
-/// Check if cached data is still valid by comparing source mtime.
-/// Returns true if the sidecar exists and its stored mtime matches the source.
-fn validate_source_meta(cache_dir: &Path, base_filename: &str, source: &Path) -> bool {
-    let current_mtime = match source_mtime(source) {
-        Ok(mtime) => mtime,
-        Err(_) => return false,
-    };
+fn validate_source_meta(cache_dir: &Path, base_filename: &str, identity: &SourceIdentity) -> bool {
     let path = meta_path(cache_dir, base_filename);
     let Ok(bytes) = std::fs::read(&path) else {
         return false;
     };
-    if bytes.len() != 8 {
-        return false;
-    }
-    let stored_mtime = u64::from_le_bytes(bytes.try_into().unwrap());
-    stored_mtime == current_mtime
+    decode_source_identity(&bytes).is_some_and(|stored| stored == *identity)
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.
@@ -404,9 +466,10 @@ fn load_and_cache_frame<I: StackableImage>(
     frame_index: usize,
 ) -> Result<LoadedStoredFrame, Error> {
     let channels = dimensions.channels();
+    let identity_before = source_identity(source_path)?;
 
     // Check if all channel files exist, have correct size, and source hasn't changed
-    let meta_valid = validate_source_meta(cache_dir, base_filename, source_path);
+    let meta_valid = validate_source_meta(cache_dir, base_filename, &identity_before);
     let has_stats = stats_path(cache_dir, base_filename).exists();
     let can_reuse = meta_valid
         && has_stats
@@ -441,14 +504,20 @@ fn load_and_cache_frame<I: StackableImage>(
                 actual: image.dimensions(),
             });
         }
+        let identity_after = source_identity(source_path)?;
+        if identity_after != identity_before {
+            return Err(FrameStoreError::SourceChanged {
+                path: source_path.to_path_buf(),
+            }
+            .into());
+        }
 
         let stats = compute_frame_stats(&image);
         let result = store_frame(cache_dir, base_filename, &image).map_err(Error::from)?;
 
-        // Record source mtime and stats so future runs skip recomputation
-        let mtime = source_mtime(source_path)?;
-        write_source_meta(cache_dir, base_filename, mtime)?;
+        // The identity sidecar is the commit record for the planes and stats.
         write_frame_stats(cache_dir, base_filename, &stats)?;
+        write_source_meta(cache_dir, base_filename, &identity_after)?;
 
         Ok(LoadedStoredFrame {
             frame: result,
@@ -481,7 +550,8 @@ fn write_frame_stats(
 }
 
 fn write_sidecar(path: PathBuf, bytes: &[u8]) -> Result<(), FrameStoreError> {
-    std::fs::write(&path, bytes).map_err(|source| FrameStoreError::WriteFile { path, source })
+    file_utils::publish_bytes(&path, bytes, file_utils::PublicationMode::Cache)
+        .map_err(|source| FrameStoreError::WriteFile { path, source })
 }
 
 /// Read frame stats from a sidecar file.

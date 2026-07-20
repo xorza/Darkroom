@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use aperture::ImageFilter;
-use common::{SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
 
 use crate::core::io::cwd_file;
@@ -181,7 +181,7 @@ impl Preferences {
     pub(crate) fn save(&self) -> Result<(), String> {
         let bytes = serialize(self, SerdeFormat::Toml)
             .map_err(|err| format!("preferences save failed: {err}"))?;
-        std::fs::write(Self::path(), &bytes)
+        file_utils::publish_bytes(&Self::path(), &bytes, file_utils::PublicationMode::Durable)
             .map_err(|err| format!("preferences save failed: {err}"))
     }
 }

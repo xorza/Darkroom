@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use common::file_utils;
+
 /// The cache directory for a document: `<stem>.darkroom-cache/` beside the
 /// document file (e.g. `proj/scene.json` → `proj/scene.darkroom-cache/`).
 /// Per-document-named so two projects in one folder keep separate stores.
@@ -36,7 +38,7 @@ fn ensure_gitignore(root: &Path) {
     }
     let gitignore = root.join(".gitignore");
     if !gitignore.exists() {
-        let _ = std::fs::write(&gitignore, "*\n");
+        let _ = file_utils::publish_bytes(&gitignore, b"*\n", file_utils::PublicationMode::Cache);
     }
 }
 

@@ -89,8 +89,58 @@ fn test_load_and_cache_frame_reuse() {
     assert_eq!(first_data, second_data);
     assert_eq!(first_data, &pixels[..]);
 
-    // Cleanup
     drop(first_frame);
+    drop(second_frame);
+
+    // Reusing a forced filename collision must still validate the source path.
+    let collided_path = temp_dir.join("collided.tiff");
+    let collided_pixels: Vec<f32> = (100..112).map(|i| i as f32).collect();
+    AstroImage::from_pixels(dims, collided_pixels.clone())
+        .save(&collided_path)
+        .unwrap();
+    let first_timestamp =
+        UNIX_EPOCH + Duration::from_secs(1_800_000_000) + Duration::from_nanos(100);
+    OpenOptions::new()
+        .write(true)
+        .open(&collided_path)
+        .unwrap()
+        .set_modified(first_timestamp)
+        .unwrap();
+    let collided =
+        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
+            .unwrap();
+    assert_eq!(
+        collided.frame.channels[0].chunk(0, dims.pixel_count()),
+        collided_pixels
+    );
+    drop(collided);
+
+    // A same-path, same-size rewrite within one second must invalidate at nanosecond precision.
+    let rewritten_pixels: Vec<f32> = (200..212).map(|i| i as f32).collect();
+    let original_len = std::fs::metadata(&collided_path).unwrap().len();
+    AstroImage::from_pixels(dims, rewritten_pixels.clone())
+        .save(&collided_path)
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&collided_path).unwrap().len(),
+        original_len,
+        "the timestamp, not file length, distinguishes this rewrite"
+    );
+    let second_timestamp =
+        UNIX_EPOCH + Duration::from_secs(1_800_000_000) + Duration::from_nanos(200);
+    OpenOptions::new()
+        .write(true)
+        .open(&collided_path)
+        .unwrap()
+        .set_modified(second_timestamp)
+        .unwrap();
+    let rewritten =
+        load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &collided_path, dims, 1)
+            .unwrap();
+    assert_eq!(
+        rewritten.frame.channels[0].chunk(0, dims.pixel_count()),
+        rewritten_pixels
+    );
 }
 
 #[test]
@@ -124,13 +174,13 @@ fn test_load_and_cache_frame_dimension_mismatch() {
 }
 
 #[test]
-fn test_source_meta_validates_mtime() {
+fn source_meta_validates_path_length_and_precise_mtime() {
     let temp_dir = ScratchDirectory::new("test_source_meta_validates");
 
     let source = temp_dir.join("source.fits");
-    std::fs::write(&source, b"original data").unwrap();
+    std::fs::write(&source, b"aaaaaaaa").unwrap();
     let missing = temp_dir.join("missing.fits");
-    let error = source_mtime(&missing).unwrap_err();
+    let error = source_identity(&missing).unwrap_err();
     assert!(matches!(
         error,
         FrameStoreError::ReadMetadata { path, .. } if path == missing
@@ -139,21 +189,48 @@ fn test_source_meta_validates_mtime() {
     let base = "abc123.bin";
 
     // No meta file yet — validation should fail
-    assert!(!validate_source_meta(&temp_dir, base, &source));
+    let initial_identity = source_identity(&source).unwrap();
+    assert!(!validate_source_meta(&temp_dir, base, &initial_identity));
 
     // Write meta for current source
-    let mtime = source_mtime(&source).unwrap();
-    write_source_meta(&temp_dir, base, mtime).unwrap();
+    let first_timestamp =
+        UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_nanos(100);
+    OpenOptions::new()
+        .write(true)
+        .open(&source)
+        .unwrap()
+        .set_modified(first_timestamp)
+        .unwrap();
+    let identity = source_identity(&source).unwrap();
+    write_source_meta(&temp_dir, base, &identity).unwrap();
 
     // Now validation should pass
-    assert!(validate_source_meta(&temp_dir, base, &source));
+    assert!(validate_source_meta(&temp_dir, base, &identity));
 
-    let file = OpenOptions::new().write(true).open(&source).unwrap();
-    file.set_modified(UNIX_EPOCH + Duration::from_secs(mtime + 2))
+    std::fs::write(&source, b"bbbbbbbb").unwrap();
+    OpenOptions::new()
+        .write(true)
+        .open(&source)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_nanos(200))
         .unwrap();
+    let precise_rewrite = source_identity(&source).unwrap();
+    assert_eq!(precise_rewrite.byte_len, identity.byte_len);
+    assert_ne!(precise_rewrite.modified_nanos, identity.modified_nanos);
+    assert!(!validate_source_meta(&temp_dir, base, &precise_rewrite));
 
-    // Validation should fail — source changed
-    assert!(!validate_source_meta(&temp_dir, base, &source));
+    write_source_meta(&temp_dir, base, &precise_rewrite).unwrap();
+    std::fs::write(&source, b"longer than eight bytes").unwrap();
+    OpenOptions::new()
+        .write(true)
+        .open(&source)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_nanos(200))
+        .unwrap();
+    let resized = source_identity(&source).unwrap();
+    assert_eq!(resized.modified_nanos, precise_rewrite.modified_nanos);
+    assert_ne!(resized.byte_len, precise_rewrite.byte_len);
+    assert!(!validate_source_meta(&temp_dir, base, &resized));
 
     // Cleanup
 }

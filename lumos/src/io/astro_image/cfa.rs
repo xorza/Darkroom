@@ -8,6 +8,8 @@ use std::io::Error;
 
 use rayon::prelude::*;
 
+use common::file_utils;
+
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::io::raw::demosaic::Cancelled;
@@ -113,7 +115,7 @@ impl CfaImage {
     /// Pairs with [`Self::load`] for a calibration-master cache.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
         let bytes = common::serialize(self, common::SerdeFormat::Bitcode).map_err(Error::other)?;
-        std::fs::write(path, bytes)
+        file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Cache)
     }
 
     /// Load a CFA image written by [`Self::save`].

@@ -64,11 +64,21 @@ fn plane_persistence_validates_dimensions_and_roundtrips_pixels() {
 #[test]
 fn cache_names_are_stable_and_path_specific() {
     let path = Path::new("/test/deterministic.fits");
-    let expected = "6f63e2eb959a4c65.bin";
-    assert_eq!(cache_filename(path), expected);
+    let expected = cache_filename(path);
+    assert_eq!(expected.len(), 64 + ".bin".len());
+    assert!(
+        expected
+            .strip_suffix(".bin")
+            .unwrap()
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
     assert_eq!(cache_filename(path), expected);
     assert_ne!(cache_filename(Path::new("/test/other.fits")), expected);
-    assert_eq!(channel_filename(expected, 0), "6f63e2eb959a4c65_c0.bin");
+    assert_eq!(
+        channel_filename(&expected, 0),
+        format!("{}_c0.bin", expected.trim_end_matches(".bin"))
+    );
     assert_eq!(channel_filename("frame", 2), "frame_c2.bin");
 }
 

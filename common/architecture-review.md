@@ -14,19 +14,15 @@ state now uses `IndexMap` with its custom serialization beside the owning
 document module (`darkroom/src/core/document/mod.rs:180`,
 `darkroom/src/core/document/serde.rs:1-49`).
 
-The remaining work is concentrated in three areas:
+The remaining work is concentrated in two areas:
 
-1. Make serialized output and authored-state publication safe at their
-   persistence boundaries.
-2. Return Scenarium- and Lumos-specific primitives to their sole production
+1. Return Scenarium- and Lumos-specific primitives to their sole production
    owners, reducing `common`'s dependency and API surface.
-3. Remove avoidable copies and unconditional proc-macro build cost from the
+2. Remove avoidable copies and unconditional proc-macro build cost from the
    serialization/introspection layer.
 
-The highest-priority correctness defect wholly inside `common` is the
-asymmetric LZ4 size contract. The most consequential downstream risks are
-direct overwrite of authored files and a persistent image cache keyed by a
-64-bit non-cryptographic path hash plus whole-second modification time.
+The LZ4 size contract, authored-file publication, and persistent frame-cache
+identity findings are reflected in the current code and are no longer active.
 
 ## Review scope
 
@@ -47,9 +43,9 @@ test-support code were excluded from findings.
 
 ## Batch 2 — High: make persisted state durable and collision-resistant
 
-- [ ] **Publish authored serialized state through one atomic replacement helper.** Document/graph export, library saves, preferences, and CFA masters still overwrite their final paths directly (`darkroom/src/core/io/persistence.rs:55-60`, `darkroom/src/core/io/library.rs:105-118`, `darkroom/src/core/io/preferences.rs:178-185`, `lumos/src/io/astro_image/cfa.rs:112-117`), so interruption or disk-full can destroy the last readable copy. Two private sibling-temp implementations already exist: the cache-oriented writer handles unique temp names and cleanup but deliberately skips durability (`scenarium/src/execution/disk_store/mod.rs:249-286`), while the token writer uses a fixed `.tmp` name (`darkroom/src/core/script/tcp/mod.rs:202-220`). Add a uniquely named, same-directory byte-publication helper to the shared file layer with explicit durable and cache modes; the durable path must flush the file and parent directory as required by the supported platforms before/after replacement. Route authored state through the durable mode and caches through the non-durable mode. Verify replacement, concurrent writers, cleanup after failure, and preservation of the prior file when writing or publication fails.
+- [x] **Publish authored serialized state through one atomic replacement helper.** `common::file_utils` now publishes through uniquely named, exclusively created sibling files with explicit durable and cache modes. Durable publication synchronizes the file before replacement and the containing directory afterward on Unix; Windows uses replace-existing, write-through `MoveFileExW`. Document/graph export, library saves, and preferences use durable publication. CFA/calibration masters, Scenarium blobs, Lumos planes/sidecars, the document-cache `.gitignore`, and the TCP discovery token use cache publication. Tests cover replacement, concurrent writers, cleanup after write and replacement failures, and preservation of the prior file across both failure stages.
 
-- [ ] **Replace `FnvHasher` as persistent frame-cache identity before relocating it.** `FnvHasher` is a fixed-seed 64-bit non-cryptographic hasher (`common/src/fnv.rs:1-34`), yet the frame cache uses only that path hash as its filename (`lumos/src/stacking/frame_store/mod.rs:325-329`). Reuse then checks plane length and a sidecar containing modification time truncated to whole seconds (`lumos/src/stacking/frame_store/mod.rs:336-341`, `lumos/src/stacking/combine/cache/loader/mod.rs:324-371`, `lumos/src/stacking/combine/cache/loader/mod.rs:390-398`). A hash collision between equal-shaped inputs can select another source's pixels, and rewriting one source twice in a second can reuse stale data. Use a collision-resistant full digest for persistent names and store/compare the source identity, byte length, and highest available modification-time resolution in the sidecar; keep FNV only for transient in-memory hashing if measurement still justifies it. Verify a forced key collision, a same-path rewrite within one second, and normal cache reuse.
+- [x] **Replace `FnvHasher` as persistent frame-cache identity before relocating it.** Persistent frame names now use the full BLAKE3 path digest. The source sidecar stores and compares the canonical path bytes, byte length, and signed nanoseconds since the Unix epoch; it is published last as the commit record after atomic plane and statistics publication. The loader also rejects a source whose identity changes during decode. FNV remains only in the transient star-filter spatial hash. Tests cover normal reuse, a forced cache-name collision between distinct sources, same-size rewrites within one second, and length changes with an unchanged timestamp.
 
 ## Batch 3 — Medium: put runtime synchronization in Scenarium
 

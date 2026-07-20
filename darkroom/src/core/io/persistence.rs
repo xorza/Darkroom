@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use common::{SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, file_utils, serialize};
 use scenarium::Graph;
 
 use crate::core::document::Document;
@@ -57,7 +57,8 @@ fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T
 fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) -> Result<()> {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Json);
     let bytes = encode(format)?;
-    std::fs::write(path, &bytes).with_context(|| path.display().to_string())
+    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable)
+        .with_context(|| path.display().to_string())
 }
 
 #[cfg(test)]

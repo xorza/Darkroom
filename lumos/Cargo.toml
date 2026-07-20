@@ -36,6 +36,7 @@ statrs = { workspace = true }
 arrayvec = { workspace = true }
 smallvec = { workspace = true }
 parking_lot = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 common = { workspace = true, features = ["test-support"] }

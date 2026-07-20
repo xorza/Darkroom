@@ -20,7 +20,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
-| `file_utils.rs` | Generic fallible, sorted directory scanning by file extension. |
+| `file_utils/` | Generic fallible, sorted directory scanning by file extension plus atomic same-directory file publication with durable and rebuildable-cache modes. |
 | `cpu_features.rs` | `X86Features`: cached runtime SSE/AVX2/FMA detection (x86_64; stubbed elsewhere). |
 | `parallel.rs` | `par_map_limited` / `try_par_map_limited`: concurrency-capped parallel map. |
 | `fnv.rs` | `FnvHasher`: deterministic FNV-1a 64-bit hasher (fixed seed). |

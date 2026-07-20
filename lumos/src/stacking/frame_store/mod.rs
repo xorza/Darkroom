@@ -1,8 +1,6 @@
 //! Memory planning and RAM/mmap storage shared by stacking stages.
 
 use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::{BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +9,7 @@ use imaginarium::Buffer2;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use common::FnvHasher;
+use common::file_utils;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
@@ -22,12 +20,6 @@ use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut
 pub enum FrameStoreError {
     #[error("failed to create frame-store directory '{path}': {source}")]
     CreateDirectory {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to create frame-store file '{path}': {source}")]
-    CreateFile {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -50,6 +42,8 @@ pub enum FrameStoreError {
         #[source]
         source: std::io::Error,
     },
+    #[error("frame-store source changed while it was being read: '{path}'")]
+    SourceChanged { path: PathBuf },
     #[error("failed to memory-map frame-store file '{path}': {source}")]
     MemoryMap {
         path: PathBuf,
@@ -340,9 +334,10 @@ pub(crate) fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
 }
 
 pub(crate) fn cache_filename(path: &Path) -> String {
-    let mut hasher = FnvHasher::new();
-    path.hash(&mut hasher);
-    format!("{:016x}.bin", hasher.finish())
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"lumos-frame-cache-path-v1\0");
+    hasher.update(path.as_os_str().as_encoded_bytes());
+    format!("{}.bin", hasher.finalize().to_hex())
 }
 
 pub(crate) fn channel_filename(name: &str, channel: usize) -> String {
@@ -359,19 +354,13 @@ pub(crate) fn reusable_plane(path: &Path, dimensions: ImageDimensions) -> bool {
 }
 
 pub(crate) fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
-    let file = File::create(path).map_err(|source| FrameStoreError::CreateFile {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut writer = BufWriter::new(file);
     let bytes = bytemuck::cast_slice(pixels);
-    writer
-        .write_all(bytes)
-        .and_then(|()| writer.flush())
-        .map_err(|source| FrameStoreError::WriteFile {
+    file_utils::publish_bytes(path, bytes, file_utils::PublicationMode::Cache).map_err(|source| {
+        FrameStoreError::WriteFile {
             path: path.to_path_buf(),
             source,
-        })
+        }
+    })
 }
 
 pub(crate) fn map_plane(path: PathBuf) -> Result<Mmap, FrameStoreError> {

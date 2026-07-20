@@ -17,6 +17,7 @@ use std::fs::File;
 use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::path::Path;
 
+use common::file_utils;
 use common::serde as common_serde;
 use common::{CancelToken, Vec2us};
 
@@ -302,16 +303,17 @@ impl CalibrationMasters {
     /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
     /// representation. Loading the cache does not repeat flat preparation or defect detection.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let mut file = File::create(path)?;
-        file.write_all(&CACHE_MAGIC)?;
-        file.write_all(&CACHE_VERSION.to_le_bytes())?;
-        common_serde::serialize_into(
-            CalibrationMastersCacheRef::from(self),
-            common::SerdeFormat::Bitcode,
-            &mut file,
-            &mut Vec::new(),
-        )
-        .map_err(IoError::other)
+        file_utils::publish(path, file_utils::PublicationMode::Cache, |file| {
+            file.write_all(&CACHE_MAGIC)?;
+            file.write_all(&CACHE_VERSION.to_le_bytes())?;
+            common_serde::serialize_into(
+                CalibrationMastersCacheRef::from(self),
+                common::SerdeFormat::Bitcode,
+                file,
+                &mut Vec::new(),
+            )
+            .map_err(IoError::other)
+        })
     }
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.

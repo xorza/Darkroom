@@ -15,7 +15,6 @@ use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::DataType;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
@@ -25,6 +24,7 @@ use crate::execution::program::ExecutionNode;
 use crate::graph::NodeId;
 use crate::library::Library;
 use crate::runtime::context::ContextManager;
+use common::file_utils;
 
 /// Reads and writes node-output blobs on disk. Holds a snapshot of the [`Library`] (its type
 /// table is the source of custom-value codecs) and the optional store root. Default is an
@@ -157,13 +157,13 @@ impl DiskStore {
                 return;
             }
         };
-        // `atomic_write` is blocking `std::fs`; run it off the async worker thread so a
+        // File publication is blocking filesystem I/O; run it off the async worker thread so a
         // large blob's write doesn't stall the runtime (progress events, cancel polling,
         // other event-loop tasks). `serialize_outputs` above already did the heavy encode.
         let path = target.path.clone();
         let digest = target.digest;
         let result =
-            tokio::task::spawn_blocking(move || atomic_write(&path, digest, &coverage, &bytes))
+            tokio::task::spawn_blocking(move || write_blob(&path, digest, &coverage, &bytes))
                 .await
                 .expect("cache write task panicked");
         if let Err(e) = result {
@@ -246,17 +246,7 @@ fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Outpu
     }
 }
 
-/// Write the digest header then `body` to `path` via a sibling temp file + `rename`
-/// (atomic on one filesystem), creating the parent dir — so a reader never sees a
-/// half-written blob and a crash mid-write can't corrupt an existing one. The two
-/// slices are written back-to-back rather than concatenated, sparing a copy of a
-/// possibly huge body. No `sync_all` before the rename: a power loss may leave garbage
-/// at the final path, but the digest/format checks turn that into a miss that
-/// self-heals on the next run — cheaper than fsyncing every large blob. A rename lost
-/// to a concurrent writer is tolerated only when the survivor carries **our** digest
-/// (same bytes); a survivor under any other digest means this store failed and the
-/// caller must hear about it.
-fn atomic_write(
+fn write_blob(
     path: &Path,
     digest: Digest,
     coverage: &CachedOutputCoverage,
@@ -265,25 +255,22 @@ fn atomic_write(
     let output_count = u32::try_from(coverage.ports.len())
         .expect("a node output count must fit in the cache header");
     let coverage_bytes = coverage.as_bytes();
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = temp_path(path);
-    let write_tmp = || -> io::Result<()> {
-        let mut file = File::create(&tmp)?;
+    let result = file_utils::publish(path, file_utils::PublicationMode::Cache, |file| {
         file.write_all(&digest.0)?;
         file.write_all(&BLOB_FORMAT_VERSION.to_le_bytes())?;
         file.write_all(&output_count.to_le_bytes())?;
         file.write_all(&coverage_bytes)?;
         file.write_all(body)
-    };
-    let result = write_tmp().and_then(|()| std::fs::rename(&tmp, path));
+    });
     match result {
         Ok(()) => Ok(()),
         Err(e) => {
-            // Don't leave the temp file behind — a disk-full store would otherwise
-            // leak a fresh uniquely-named leftover on every failed attempt.
-            let _ = std::fs::remove_file(&tmp);
             if stored_coverage(path, digest).is_some_and(|stored| {
                 stored.ports.len() == coverage.ports.len() && stored.covers(coverage)
             }) {
@@ -293,16 +280,6 @@ fn atomic_write(
             }
         }
     }
-}
-
-/// A temp sibling path unique across processes and concurrent writes, so two
-/// writers never share (and interleave into) one temp file.
-fn temp_path(path: &Path) -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}.{n}.tmp", std::process::id()));
-    path.with_file_name(name)
 }
 
 #[cfg(test)]
