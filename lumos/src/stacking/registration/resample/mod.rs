@@ -4,8 +4,17 @@ use imaginarium::Buffer2;
 
 use crate::AstroImage;
 use crate::io::astro_image::PixelData;
-use crate::stacking::registration::interpolation::{self, WarpParams};
+use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::transform::WarpTransform;
+
+#[cfg(test)]
+mod bench;
+mod kernel;
+mod plane;
+mod quality;
+mod row;
+#[cfg(test)]
+mod tests;
 
 /// Output of [`warp`]: the aligned image plus per-pixel support and confidence maps.
 ///
@@ -51,7 +60,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpPar
     };
 
     for c in 0..image.channels() {
-        interpolation::warp_image(
+        plane::warp(
             image.channel(c),
             output.channel_mut(c),
             warp_transform,
@@ -59,16 +68,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpPar
         );
     }
 
-    let quality =
-        interpolation::warp_quality_maps(image.dimensions().size(), warp_transform, config.method);
-
-    if config.border_value == 0.0
-        && let Some(normalization) = &quality.normalization
-    {
-        for c in 0..image.channels() {
-            renormalize_by_normalization(output.channel_mut(c), normalization);
-        }
-    }
+    let quality = quality::maps(image.dimensions().size(), warp_transform, config.method);
 
     WarpResult {
         image: output,
@@ -77,15 +77,19 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpPar
     }
 }
 
-/// Brighten partially-covered border pixels back to the in-bounds weighted
-/// average. Interior pixels (`coverage ≈ 1`) are left bit-exact and fully
-/// extrapolated pixels (`coverage ≈ 0`) keep their border value.
-fn renormalize_by_normalization(channel: &mut Buffer2<f32>, normalization: &Buffer2<f32>) {
-    const PARTIAL_LO: f32 = 1e-4;
-    const PARTIAL_HI: f32 = 1.0 - 1e-4;
-    for (value, &weight_sum) in channel.pixels_mut().iter_mut().zip(normalization.pixels()) {
-        if weight_sum > PARTIAL_LO && weight_sum < PARTIAL_HI {
-            *value /= weight_sum;
-        }
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::stacking::registration::config::WarpParams;
+    use crate::stacking::registration::resample::plane;
+    use crate::stacking::registration::transform::WarpTransform;
+    use imaginarium::Buffer2;
+
+    pub(crate) fn warp_plane(
+        input: &Buffer2<f32>,
+        output: &mut Buffer2<f32>,
+        transform: &WarpTransform,
+        params: &WarpParams,
+    ) {
+        plane::warp(input, output, transform, params);
     }
 }

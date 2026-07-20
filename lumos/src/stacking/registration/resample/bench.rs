@@ -4,10 +4,11 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use crate::stacking::registration::config::InterpolationMethod;
-use crate::stacking::registration::interpolation::*;
+use crate::stacking::registration::config::{self, InterpolationMethod};
+use crate::stacking::registration::resample::kernel::test_support as kernel_test_support;
+use crate::stacking::registration::resample::{kernel, plane, row};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
 /// Create a test image of specified size filled with gradient pattern.
@@ -36,11 +37,11 @@ fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3),
+            &config::test_support::warp_params(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -52,11 +53,11 @@ fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3),
+            &config::test_support::warp_params(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -68,11 +69,11 @@ fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3),
+            &config::test_support::warp_params(InterpolationMethod::Lanczos3),
         );
     });
 }
@@ -84,11 +85,11 @@ fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Bilinear),
+            &config::test_support::warp_params(InterpolationMethod::Bilinear),
         );
     });
 }
@@ -100,7 +101,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
     let wt = WarpTransform::new(transform);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3);
+    let params = config::test_support::warp_params(InterpolationMethod::Lanczos3);
 
     b.bench(|| {
         let width = input.width();
@@ -109,7 +110,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
             .chunks_mut(width)
             .enumerate()
         {
-            warp::warp_row_lanczos(black_box(&input), row, y, &wt, &params);
+            row::lanczos(black_box(&input), row, y, &wt, &params);
         }
     });
 }
@@ -121,11 +122,11 @@ fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Bicubic),
+            &config::test_support::warp_params(InterpolationMethod::Bicubic),
         );
     });
 }
@@ -137,11 +138,11 @@ fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos4),
+            &config::test_support::warp_params(InterpolationMethod::Lanczos4),
         );
     });
 }
@@ -153,18 +154,18 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        warp_image(
+        plane::warp(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos2),
+            &config::test_support::warp_params(InterpolationMethod::Lanczos2),
         );
     });
 }
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
 fn bench_lut_lookup(b: quickbench::Bencher) {
-    let lut = get_lanczos_lut(3);
+    let lut = kernel::get_lanczos_lut(3);
     let test_values: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) * 3.0 - 1.5).collect();
 
     b.bench(|| {
@@ -191,7 +192,7 @@ fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
     b.bench(|| {
         let mut sum = 0.0f32;
         for &(x, y) in black_box(&positions) {
-            sum += interpolate_lanczos(&input, Vec2::new(x, y), 3, 0.0);
+            sum += kernel_test_support::interpolate_lanczos(&input, Vec2::new(x, y), 3, 0.0);
         }
         black_box(sum)
     });

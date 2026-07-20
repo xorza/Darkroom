@@ -7,8 +7,8 @@
 use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
-use crate::stacking::registration::config::InterpolationMethod;
-use crate::stacking::registration::interpolation::{WarpParams, warp_image};
+use crate::stacking::registration::config::{self, InterpolationMethod};
+use crate::stacking::registration::resample::test_support;
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::{Config, TransformType, register};
@@ -31,7 +31,7 @@ fn detector() -> StarDetector {
 
 /// Apply a similarity transform to an image.
 /// Creates a target where stars are visually shifted/rotated/scaled by the given parameters.
-/// Passes the inverse to warp_image since it uses output→input coordinate mapping.
+/// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
 fn transform_image(
     src_pixels: &[f32],
     width: usize,
@@ -45,28 +45,28 @@ fn transform_image(
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new_default(width, height);
-    warp_image(
+    test_support::warp_plane(
         &src_buf,
         &mut output,
         &WarpTransform::new(inverse),
-        &WarpParams::new(InterpolationMethod::Bilinear),
+        &config::test_support::warp_params(InterpolationMethod::Bilinear),
     );
     output.into_vec()
 }
 
 /// Apply a translation to an image.
 /// Creates a target where stars are visually shifted by (dx, dy).
-/// Passes the inverse to warp_image since it uses output→input coordinate mapping.
+/// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let transform = Transform::translation(DVec2::new(dx, dy));
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new_default(width, height);
-    warp_image(
+    test_support::warp_plane(
         &src_buf,
         &mut output,
         &WarpTransform::new(inverse),
-        &WarpParams::new(InterpolationMethod::Bilinear),
+        &config::test_support::warp_params(InterpolationMethod::Bilinear),
     );
     output.into_vec()
 }

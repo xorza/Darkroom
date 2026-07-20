@@ -42,7 +42,6 @@
 
 pub(crate) mod config;
 pub(crate) mod distortion;
-pub(crate) mod interpolation;
 pub(crate) mod ransac;
 pub(crate) mod resample;
 pub(crate) mod result;

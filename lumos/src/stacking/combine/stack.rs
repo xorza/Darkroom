@@ -372,8 +372,7 @@ mod tests {
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::store_light_frame;
-    use crate::stacking::registration::config::InterpolationMethod;
-    use crate::stacking::registration::interpolation::WarpParams;
+    use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::ScratchDirectory;
@@ -993,7 +992,11 @@ mod tests {
             InterpolationMethod::Lanczos3,
             InterpolationMethod::Lanczos4,
         ] {
-            let warped = resample::warp(&source, &transform, &WarpParams::new(method));
+            let warped = resample::warp(
+                &source,
+                &transform,
+                &config::test_support::warp_params(method),
+            );
             let frames = vec![
                 StackFrame::from(source.clone()),
                 StackFrame::registered(&source, warped),
@@ -1021,7 +1024,7 @@ mod tests {
             .flat_map(|y| (0..dims.width()).map(move |x| 0.2 + x as f32 * 0.01 + y as f32 * 0.02))
             .collect();
         let source = AstroImage::from_pixels(dims, pixels);
-        let params = WarpParams::new(InterpolationMethod::Bilinear);
+        let params = config::test_support::warp_params(InterpolationMethod::Bilinear);
         let frames = vec![
             StackFrame::registered(
                 &source,
@@ -1064,7 +1067,7 @@ mod tests {
             })
             .collect();
         let source = AstroImage::from_pixels(dims, pixels);
-        let params = WarpParams::new(InterpolationMethod::Bilinear);
+        let params = config::test_support::warp_params(InterpolationMethod::Bilinear);
         let frames = vec![
             StackFrame::registered(
                 &source,

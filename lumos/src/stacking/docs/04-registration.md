@@ -789,7 +789,7 @@ interpolated from neighbors with a kernel:
   lobe; **`a=−0.5` is the unique value that makes the interpolant agree with the
   Taylor series to third order** (the "Catmull-Rom"/Keys-optimal choice), so it is the
   most accurate cubic — sharper than bilinear, mild overshoot. lumos's
-  `bicubic_kernel` hard-codes `A=−0.5` (`interpolation/mod.rs:115-125`), the standard
+  `bicubic_kernel` hard-codes `A=−0.5` (`resample/kernel/mod.rs`), the standard
   choice. A reasonable default when ringing must be avoided.
 - **Lanczos-a** (windowed sinc, kernel half-width `a`∈{2,3,4}; 2a×2a footprint): the
   ideal reconstruction filter is `sinc(x)=sin(πx)/(πx)`, but the sinc has infinite
@@ -799,7 +799,7 @@ interpolated from neighbors with a kernel:
   growth — and is the de-facto astrophotography default. Larger `a` → closer to the
   ideal sinc (sharper) but larger negative lobes (more ringing). lumos defaults to
   **Lanczos3** (`InterpolationMethod::default()`, `config.rs`),
-  with a 4096-sample LUT per kernel (`interpolation/mod.rs:39-111`, ~0.00024
+  with a 4096-sample LUT per kernel (`resample/kernel/mod.rs`, ~0.00024
   precision). The kernel is exactly `(sin(πx)/πx)·(sin(πx/a)/(πx/a))` for `|x|<a`
   (`lanczos_kernel_compute`, `mod.rs:45-55`). swarp implements the identical
   Lanczos2/3/4 windowed-sinc kernels
@@ -819,7 +819,11 @@ explicitly noted for Lanczos-3 in astrophotography). For `a=2` the ringing is
 - **Preserve linearity on calibrated data.** lumos uses normalized linear Lanczos
   only where the complete kernel is available. Partial kernels use edge-extended
   bilinear interpolation rather than division by a potentially near-zero truncated
-  signed weight sum. The former absolute-intensity soft clamp was removed because
+  signed weight sum, but only while the source coordinate remains inside the closed
+  source pixel footprint `[-0.5, width−0.5] × [-0.5, height−0.5]`. Every method
+  returns the configured fill and zero coverage/confidence outside that footprint.
+  Bilinear and bicubic likewise normalize partial support using only real source
+  pixels. The former absolute-intensity soft clamp was removed because
   calibrated samples can be negative; classifying taps by `sample × weight` was not
   translation invariant and could amplify ordinary negative values catastrophically.
 - **Lower `a`** (Lanczos2 instead of 3/4) or fall back to bicubic/bilinear in
@@ -937,7 +941,8 @@ lumos already implements 1–6 and 8 closely to this; see §9 for the gaps.
   outside the input have no real data (border fill); silently stacking them biases
   the result. *Fix:* emit a footprint/coverage mask (astroalign returns `footprint`,
   `astroalign.py:452-458`; drizzle emits a coverage map). lumos's `warp()` returns
-  magnitude-based geometric support plus independent coefficient-energy confidence.
+  magnitude-based geometric support plus independent coefficient-energy confidence,
+  both exactly zero outside the closed source pixel footprint.
 - **Mismatched transform direction.** Confusing `apply` vs `apply_inverse` flips the
   alignment. *Fix:* document the convention rigorously (lumos: `T.apply(ref)→target`,
   warp samples target at reference-mapped positions, `transform.rs:220-248`).
@@ -974,13 +979,13 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
   guard, MAD sigma-clipping, Cholesky→LU fallback (`distortion/sip/mod.rs`).
 - **Normalized linear Lanczos-3** default with a signed-safe partial-kernel fallback,
   plus a single-pass `WarpTransform` that applies SIP+linear together (no double
-  interpolation) (`interpolation/`, `transform.rs`).
+  interpolation) (`resample/`, `transform.rs`).
 
 **Gaps / opportunities.**
 1. **Resolved: warp quality is explicit.** `warp()` returns an in-bounds kernel-
    magnitude coverage map and a separate coefficient-energy confidence map. The
    stacker uses coverage only for inclusion and confidence only for inverse-variance
-   weighting (`registration/resample.rs`, `combine/cache/mod.rs`).
+   weighting (`registration/resample/`, `combine/cache/mod.rs`).
 2. **TPS is implemented, tested, but unwired** (`distortion/tps/`,
    `#![allow(dead_code)]`). For optical paths poorly modeled by low-order SIP it is
    the better distortion model; wiring it as an alternative post-RANSAC option (with
@@ -1138,8 +1143,7 @@ non-monotone*, with the analytic peak and its practical (small, fringe-only) con
 
 `src/registration/` — `mod.rs` (register, recover_matches, Auto upgrade, warp),
 `triangle/{geometry,matching,voting}.rs`, `ransac/{mod,magsac,transforms}.rs`,
-`transform.rs`, `distortion/sip/mod.rs`, `distortion/tps/`, `interpolation/{mod.rs,
-warp/}`, `config.rs`.
+`transform.rs`, `distortion/sip/mod.rs`, `distortion/tps/`, `resample/`, `config.rs`.
 
 ### Online sources (verified ≥2 where load-bearing)
 

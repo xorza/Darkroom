@@ -2,13 +2,16 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use common::Vec2us;
-use glam::{DVec2, IVec2, Vec2};
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::transform::Transform;
+
+#[cfg(test)]
+mod tests;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
 ///
@@ -18,15 +21,13 @@ use crate::stacking::registration::transform::Transform;
 /// - Caller must ensure AVX2 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn warp_row_bilinear_avx2(
+pub(crate) unsafe fn bilinear_avx2(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let dims = Vec2us::new(input.width(), input.height());
-
     unsafe {
         let output_width = output_row.len();
         let y = output_y as f64;
@@ -54,7 +55,12 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
         let ey_f_vec = _mm256_set1_ps(ey_f);
         let hy_1_vec = _mm256_set1_ps(hy_1);
 
-        let one = _mm256_set1_ps(1.0);
+        let center_min = _mm256_setzero_ps();
+        let center_max_x = _mm256_set1_ps(input.width() as f32 - 1.0);
+        let center_max_y = _mm256_set1_ps(input.height() as f32 - 1.0);
+        let footprint_min = _mm256_set1_ps(-0.5);
+        let footprint_max_x = _mm256_set1_ps(input.width() as f32 - 0.5);
+        let footprint_max_y = _mm256_set1_ps(input.height() as f32 - 0.5);
 
         let chunks = output_width / 8;
 
@@ -86,16 +92,15 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
 
             let src_x = _mm256_div_ps(num_x, denom);
             let src_y = _mm256_div_ps(num_y, denom);
+            let sample_x = _mm256_min_ps(_mm256_max_ps(src_x, center_min), center_max_x);
+            let sample_y = _mm256_min_ps(_mm256_max_ps(src_y, center_min), center_max_y);
 
             // Compute integer coordinates
-            let x0 = _mm256_floor_ps(src_x);
-            let y0 = _mm256_floor_ps(src_y);
-            let x1 = _mm256_add_ps(x0, one);
-            let y1 = _mm256_add_ps(y0, one);
-
+            let x0 = _mm256_floor_ps(sample_x);
+            let y0 = _mm256_floor_ps(sample_y);
             // Compute fractional parts
-            let fx = _mm256_sub_ps(src_x, x0);
-            let fy = _mm256_sub_ps(src_y, y0);
+            let fx = _mm256_sub_ps(sample_x, x0);
+            let fy = _mm256_sub_ps(sample_y, y0);
 
             // Sample the four corners (scalar fallback for gather since it's complex)
             let mut p00 = [0.0f32; 8];
@@ -105,24 +110,19 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
 
             let mut x0_arr = [0.0f32; 8];
             let mut y0_arr = [0.0f32; 8];
-            let mut x1_arr = [0.0f32; 8];
-            let mut y1_arr = [0.0f32; 8];
-
             _mm256_storeu_ps(x0_arr.as_mut_ptr(), x0);
             _mm256_storeu_ps(y0_arr.as_mut_ptr(), y0);
-            _mm256_storeu_ps(x1_arr.as_mut_ptr(), x1);
-            _mm256_storeu_ps(y1_arr.as_mut_ptr(), y1);
 
             for i in 0..8 {
-                let ix0 = x0_arr[i] as i32;
-                let iy0 = y0_arr[i] as i32;
-                let ix1 = x1_arr[i] as i32;
-                let iy1 = y1_arr[i] as i32;
+                let x0 = x0_arr[i] as usize;
+                let y0 = y0_arr[i] as usize;
+                let x1 = (x0 + 1).min(input.width() - 1);
+                let y1 = (y0 + 1).min(input.height() - 1);
 
-                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
-                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy0), 0.0);
-                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy1), 0.0);
-                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy1), 0.0);
+                p00[i] = pixels[y0 * input.width() + x0];
+                p10[i] = pixels[y0 * input.width() + x1];
+                p01[i] = pixels[y1 * input.width() + x0];
+                p11[i] = pixels[y1 * input.width() + x1];
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -137,6 +137,15 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
             let top = _mm256_add_ps(p00_vec, _mm256_mul_ps(fx, _mm256_sub_ps(p10_vec, p00_vec)));
             let bottom = _mm256_add_ps(p01_vec, _mm256_mul_ps(fx, _mm256_sub_ps(p11_vec, p01_vec)));
             let result = _mm256_add_ps(top, _mm256_mul_ps(fy, _mm256_sub_ps(bottom, top)));
+            let x_in = _mm256_and_ps(
+                _mm256_cmp_ps(src_x, footprint_min, _CMP_GE_OQ),
+                _mm256_cmp_ps(src_x, footprint_max_x, _CMP_LE_OQ),
+            );
+            let y_in = _mm256_and_ps(
+                _mm256_cmp_ps(src_y, footprint_min, _CMP_GE_OQ),
+                _mm256_cmp_ps(src_y, footprint_max_y, _CMP_LE_OQ),
+            );
+            let result = _mm256_and_ps(result, _mm256_and_ps(x_in, y_in));
 
             // Store result
             _mm256_storeu_ps(output_row.as_mut_ptr().add(base_x), result);
@@ -146,7 +155,8 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] =
+                kernel::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
@@ -159,15 +169,13 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
 /// - Caller must ensure SSE4.1 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn warp_row_bilinear_sse(
+pub(crate) unsafe fn bilinear_sse(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let dims = Vec2us::new(input.width(), input.height());
-
     unsafe {
         let output_width = output_row.len();
         let y = output_y as f64;
@@ -194,6 +202,12 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
         let by_c_vec = _mm_set1_ps(by_c);
         let ey_f_vec = _mm_set1_ps(ey_f);
         let hy_1_vec = _mm_set1_ps(hy_1);
+        let center_min = _mm_setzero_ps();
+        let center_max_x = _mm_set1_ps(input.width() as f32 - 1.0);
+        let center_max_y = _mm_set1_ps(input.height() as f32 - 1.0);
+        let footprint_min = _mm_set1_ps(-0.5);
+        let footprint_max_x = _mm_set1_ps(input.width() as f32 - 0.5);
+        let footprint_max_y = _mm_set1_ps(input.height() as f32 - 0.5);
 
         let chunks = output_width / 4;
 
@@ -219,14 +233,16 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
 
             let src_x = _mm_div_ps(num_x, denom);
             let src_y = _mm_div_ps(num_y, denom);
+            let sample_x = _mm_min_ps(_mm_max_ps(src_x, center_min), center_max_x);
+            let sample_y = _mm_min_ps(_mm_max_ps(src_y, center_min), center_max_y);
 
             // Compute integer coordinates
-            let x0 = _mm_floor_ps(src_x);
-            let y0 = _mm_floor_ps(src_y);
+            let x0 = _mm_floor_ps(sample_x);
+            let y0 = _mm_floor_ps(sample_y);
 
             // Compute fractional parts
-            let fx = _mm_sub_ps(src_x, x0);
-            let fy = _mm_sub_ps(src_y, y0);
+            let fx = _mm_sub_ps(sample_x, x0);
+            let fy = _mm_sub_ps(sample_y, y0);
 
             // Sample the four corners (scalar)
             let mut p00 = [0.0f32; 4];
@@ -241,15 +257,15 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
             _mm_storeu_ps(y0_arr.as_mut_ptr(), y0);
 
             for i in 0..4 {
-                let ix0 = x0_arr[i] as i32;
-                let iy0 = y0_arr[i] as i32;
-                let ix1 = ix0 + 1;
-                let iy1 = iy0 + 1;
+                let x0 = x0_arr[i] as usize;
+                let y0 = y0_arr[i] as usize;
+                let x1 = (x0 + 1).min(input.width() - 1);
+                let y1 = (y0 + 1).min(input.height() - 1);
 
-                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
-                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy0), 0.0);
-                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy1), 0.0);
-                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy1), 0.0);
+                p00[i] = pixels[y0 * input.width() + x0];
+                p10[i] = pixels[y0 * input.width() + x1];
+                p01[i] = pixels[y1 * input.width() + x0];
+                p11[i] = pixels[y1 * input.width() + x1];
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());
@@ -261,6 +277,15 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
             let top = _mm_add_ps(p00_vec, _mm_mul_ps(fx, _mm_sub_ps(p10_vec, p00_vec)));
             let bottom = _mm_add_ps(p01_vec, _mm_mul_ps(fx, _mm_sub_ps(p11_vec, p01_vec)));
             let result = _mm_add_ps(top, _mm_mul_ps(fy, _mm_sub_ps(bottom, top)));
+            let x_in = _mm_and_ps(
+                _mm_cmpge_ps(src_x, footprint_min),
+                _mm_cmple_ps(src_x, footprint_max_x),
+            );
+            let y_in = _mm_and_ps(
+                _mm_cmpge_ps(src_y, footprint_min),
+                _mm_cmple_ps(src_y, footprint_max_y),
+            );
+            let result = _mm_and_ps(result, _mm_and_ps(x_in, y_in));
 
             // Store result
             _mm_storeu_ps(output_row.as_mut_ptr().add(base_x), result);
@@ -270,12 +295,11 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] =
+                kernel::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
-
-use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel};
 
 /// Compute the Lanczos SIZE×SIZE weighted sum for a single pixel using SSE FMA.
 ///
@@ -399,218 +423,4 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
     let high = _mm_movehl_ps(sums, sums);
     let total = _mm_add_ss(sums, high);
     _mm_cvtss_f32(total)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::stacking::registration::interpolation::warp;
-    use crate::stacking::registration::transform::WarpTransform;
-    use crate::testing::synthetic::patterns;
-    #[cfg(target_arch = "x86_64")]
-    use common::cpu_features;
-    use imaginarium::Buffer2;
-
-    use crate::stacking::registration::interpolation::warp::sse::*;
-
-    /// Helper: compare SIMD output against scalar reference for a given transform.
-    #[cfg(target_arch = "x86_64")]
-    fn assert_avx2_matches_scalar(
-        input: &Buffer2<f32>,
-        transform: &Transform,
-        y: usize,
-        tol: f32,
-        label: &str,
-    ) {
-        if !cpu_features::has_avx2() {
-            return;
-        }
-        let width = input.width();
-        let inverse = transform.inverse();
-        let mut output_avx2 = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-
-        unsafe {
-            warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
-        }
-        let inverse_wt = WarpTransform::new(inverse);
-        warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
-
-        for x in 0..width {
-            assert!(
-                (output_avx2[x] - output_scalar[x]).abs() < tol,
-                "{label}: x={x}: AVX2 {} vs Scalar {}",
-                output_avx2[x],
-                output_scalar[x]
-            );
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn assert_sse_matches_scalar(
-        input: &Buffer2<f32>,
-        transform: &Transform,
-        y: usize,
-        tol: f32,
-        label: &str,
-    ) {
-        if !cpu_features::has_sse4_1() {
-            return;
-        }
-        let width = input.width();
-        let inverse = transform.inverse();
-        let mut output_sse = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-
-        unsafe {
-            warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
-        }
-        let inverse_wt = WarpTransform::new(inverse);
-        warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
-
-        for x in 0..width {
-            assert!(
-                (output_sse[x] - output_scalar[x]).abs() < tol,
-                "{label}: x={x}: SSE {} vs Scalar {}",
-                output_sse[x],
-                output_scalar[x]
-            );
-        }
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_avx2_warp_row_translation() {
-        let input = patterns::diagonal_gradient(128, 64);
-        let transform = Transform::translation(DVec2::new(2.5, 1.5));
-        assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 translation");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_avx2_warp_row_identity() {
-        let input = patterns::diagonal_gradient(128, 64);
-        let transform = Transform::identity();
-        assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 identity");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_avx2_warp_row_similarity() {
-        let input = patterns::diagonal_gradient(128, 64);
-        let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05);
-        assert_avx2_matches_scalar(&input, &transform, 30, 1e-4, "AVX2 similarity");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_avx2_warp_row_remainder_pixels() {
-        // Width not a multiple of 8: tests the scalar remainder path.
-        // Width=13: 1 chunk of 8 + 5 remainder pixels.
-        let input = patterns::diagonal_gradient(13, 32);
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        assert_avx2_matches_scalar(&input, &transform, 15, 1e-5, "AVX2 width=13");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_sse_warp_row_similarity() {
-        let input = patterns::diagonal_gradient(64, 64);
-        let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
-        assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE similarity");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_sse_warp_row_identity() {
-        let input = patterns::diagonal_gradient(64, 64);
-        let transform = Transform::identity();
-        assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE identity");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_sse_warp_row_remainder_pixels() {
-        // Width not a multiple of 4: tests the scalar remainder path.
-        // Width=11: 2 chunks of 4 + 3 remainder pixels.
-        let input = patterns::diagonal_gradient(11, 32);
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        assert_sse_matches_scalar(&input, &transform, 15, 1e-5, "SSE width=11");
-    }
-
-    /// Helper: compute scalar Lanczos weighted sum and compare against SIMD kernel.
-    #[cfg(target_arch = "x86_64")]
-    fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(label: &str) {
-        if !cpu_features::has_avx2_fma() {
-            return;
-        }
-
-        // 20x20 image: pixel(x, y) = x + y * 0.1
-        let width = 20;
-        let height = 20;
-        let data: Vec<f32> = (0..width * height)
-            .map(|i| {
-                let x = (i % width) as f32;
-                let y = (i / width) as f32;
-                x + y * 0.1
-            })
-            .collect();
-
-        let lut = warp::get_lanczos_lut(A);
-        let a_minus_1 = A as i32 - 1;
-
-        // Test at interior position: x0=6, y0=6, fx=0.3, fy=0.7
-        // kx0 = x0 - (A-1), ky0 = y0 - (A-1)
-        let kx = (6 - a_minus_1) as usize;
-        let ky = (6 - a_minus_1) as usize;
-        let fx = 0.3f32;
-        let fy = 0.7f32;
-
-        // Compute weights same as warp_row_lanczos_inner
-        let mut wx = [0.0f32; SIZE];
-        let mut wy = [0.0f32; SIZE];
-        for i in 0..SIZE {
-            wx[i] = if i < A {
-                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fx)
-            } else {
-                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fx)
-            };
-            wy[i] = if i < A {
-                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fy)
-            } else {
-                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fy)
-            };
-        }
-
-        let mut scalar_sum = 0.0f32;
-        for j in 0..SIZE {
-            for k in 0..SIZE {
-                let v = data[(ky + j) * width + kx + k];
-                scalar_sum += v * wx[k] * wy[j];
-            }
-        }
-
-        let simd_acc = unsafe { lanczos_kernel_fma::<SIZE>(&data, width, kx, ky, &wx, &wy) };
-        assert!(
-            (simd_acc - scalar_sum).abs() < 1e-4,
-            "{label}: SIMD {simd_acc} vs scalar {scalar_sum}",
-        );
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_lanczos2_kernel_fma_matches_scalar() {
-        assert_lanczos_kernel_fma_matches_scalar::<2, 4>("Lanczos2");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_lanczos3_kernel_fma_matches_scalar() {
-        assert_lanczos_kernel_fma_matches_scalar::<3, 6>("Lanczos3");
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_lanczos4_kernel_fma_matches_scalar() {
-        assert_lanczos_kernel_fma_matches_scalar::<4, 8>("Lanczos4");
-    }
 }

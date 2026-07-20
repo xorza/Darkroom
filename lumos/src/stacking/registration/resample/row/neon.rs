@@ -1,7 +1,7 @@
 //! ARM NEON implementations of the bilinear + Lanczos row-warp kernels.
 //!
 //! 128-bit (4-wide f32) counterparts of the x86 kernels in
-//! [`crate::stacking::registration::interpolation::warp::sse`]. For SIZE>4 the x86 Lanczos kernel is
+//! [`crate::stacking::registration::resample::row::sse`]. For SIZE>4 the x86 Lanczos kernel is
 //! 256-bit (one `__m256`/row); NEON has no 256-bit, so it processes the same window as a 128-bit
 //! lo+hi pair (`float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32`). NEON is mandatory on aarch64,
 //! so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
@@ -10,18 +10,17 @@
 
 use std::arch::aarch64::*;
 
-use common::Vec2us;
-use glam::{DVec2, IVec2, Vec2};
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
-use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel};
+use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::transform::Transform;
 
 /// Warp a row using NEON bilinear interpolation, 4 output pixels at a time.
 ///
 /// # Safety
 /// Caller must be on aarch64 (NEON is always available there).
-pub(crate) unsafe fn warp_row_bilinear_neon(
+pub(crate) unsafe fn bilinear_neon(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -29,7 +28,6 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
 ) {
     unsafe {
         let pixels = input.pixels();
-        let dims = Vec2us::new(input.width(), input.height());
         let output_width = output_row.len();
         let y = output_y as f32;
 
@@ -45,6 +43,12 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
         let a_vec = vdupq_n_f32(a);
         let d_vec = vdupq_n_f32(d);
         let g_vec = vdupq_n_f32(g);
+        let center_min = vdupq_n_f32(0.0);
+        let center_max_x = vdupq_n_f32(input.width() as f32 - 1.0);
+        let center_max_y = vdupq_n_f32(input.height() as f32 - 1.0);
+        let footprint_min = vdupq_n_f32(-0.5);
+        let footprint_max_x = vdupq_n_f32(input.width() as f32 - 0.5);
+        let footprint_max_y = vdupq_n_f32(input.height() as f32 - 0.5);
 
         let chunks = output_width / 4;
         for chunk in 0..chunks {
@@ -62,11 +66,13 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
             let denom = vfmaq_f32(hy_1, g_vec, x_coords);
             let src_x = vdivq_f32(num_x, denom);
             let src_y = vdivq_f32(num_y, denom);
+            let sample_x = vminq_f32(vmaxq_f32(src_x, center_min), center_max_x);
+            let sample_y = vminq_f32(vmaxq_f32(src_y, center_min), center_max_y);
 
-            let x0 = vrndmq_f32(src_x); // floor toward -inf
-            let y0 = vrndmq_f32(src_y);
-            let fx = vsubq_f32(src_x, x0);
-            let fy = vsubq_f32(src_y, y0);
+            let x0 = vrndmq_f32(sample_x); // floor toward -inf
+            let y0 = vrndmq_f32(sample_y);
+            let fx = vsubq_f32(sample_x, x0);
+            let fy = vsubq_f32(sample_y, y0);
 
             // Gather the four corners scalar-ly (mirrors the AVX2 path).
             let mut x0_arr = [0.0f32; 4];
@@ -79,12 +85,14 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
             let mut p01 = [0.0f32; 4];
             let mut p11 = [0.0f32; 4];
             for i in 0..4 {
-                let ix0 = x0_arr[i] as i32;
-                let iy0 = y0_arr[i] as i32;
-                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
-                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix0 + 1, iy0), 0.0);
-                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0 + 1), 0.0);
-                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix0 + 1, iy0 + 1), 0.0);
+                let x0 = x0_arr[i] as usize;
+                let y0 = y0_arr[i] as usize;
+                let x1 = (x0 + 1).min(input.width() - 1);
+                let y1 = (y0 + 1).min(input.height() - 1);
+                p00[i] = pixels[y0 * input.width() + x0];
+                p10[i] = pixels[y0 * input.width() + x1];
+                p01[i] = pixels[y1 * input.width() + x0];
+                p11[i] = pixels[y1 * input.width() + x1];
             }
             let p00v = vld1q_f32(p00.as_ptr());
             let p10v = vld1q_f32(p10.as_ptr());
@@ -95,6 +103,15 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
             let top = vfmaq_f32(p00v, fx, vsubq_f32(p10v, p00v));
             let bottom = vfmaq_f32(p01v, fx, vsubq_f32(p11v, p01v));
             let result = vfmaq_f32(top, fy, vsubq_f32(bottom, top));
+            let x_in = vandq_u32(
+                vcgeq_f32(src_x, footprint_min),
+                vcleq_f32(src_x, footprint_max_x),
+            );
+            let y_in = vandq_u32(
+                vcgeq_f32(src_y, footprint_min),
+                vcleq_f32(src_y, footprint_max_y),
+            );
+            let result = vbslq_f32(vandq_u32(x_in, y_in), result, vdupq_n_f32(0.0));
 
             vst1q_f32(output_row.as_mut_ptr().add(base_x), result);
         }
@@ -102,13 +119,14 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
         // Scalar remainder.
         for x in (chunks * 4)..output_width {
             let src = transform.apply(DVec2::new(x as f64, output_y as f64));
-            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] =
+                kernel::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
 
 /// NEON counterpart of
-/// [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`]: separable
+/// [`crate::stacking::registration::resample::row::sse::lanczos_kernel_fma`]: separable
 /// Lanczos over a `SIZE×SIZE` window. 128-bit lo+hi where the x86 kernel is 256-bit (SIZE>4).
 ///
 /// # Safety
@@ -164,8 +182,38 @@ pub(crate) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::registration::interpolation::get_lanczos_lut;
-    use crate::stacking::registration::interpolation::warp::neon::*;
+    use crate::stacking::registration::resample::kernel;
+    use crate::stacking::registration::resample::row;
+    use crate::stacking::registration::resample::row::neon;
+    use crate::stacking::registration::transform::{Transform, WarpTransform};
+    use glam::DVec2;
+
+    #[test]
+    fn bilinear_neon_matches_scalar_at_both_footprint_edges() {
+        const WIDTH: usize = 12;
+        const HEIGHT: usize = 8;
+        let input = Buffer2::new_filled(WIDTH, HEIGHT, 3.25);
+
+        for translation in [-0.75, 0.75] {
+            let transform = Transform::translation(DVec2::new(translation, 0.0));
+            let mut neon = vec![0.0; WIDTH];
+            let mut scalar = vec![0.0; WIDTH];
+            unsafe {
+                neon::bilinear_neon(&input, &mut neon, HEIGHT / 2, &transform);
+            }
+            row::bilinear_scalar(
+                &input,
+                &mut scalar,
+                HEIGHT / 2,
+                &WarpTransform::new(transform),
+                0.0,
+            );
+
+            assert_eq!(neon, scalar, "translation {translation}");
+            let outside_x = if translation < 0.0 { 0 } else { WIDTH - 1 };
+            assert_eq!(neon[outside_x], 0.0, "translation {translation}");
+        }
+    }
 
     /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86
     /// `lanczos_kernel_fma_matches_scalar` checks). Interior 20×20 window, no border.
@@ -175,7 +223,7 @@ mod tests {
             .map(|i| (i % width) as f32 + (i / width) as f32 * 0.1)
             .collect();
 
-        let lut = get_lanczos_lut(A);
+        let lut = kernel::get_lanczos_lut(A);
         let a_minus_1 = A as i32 - 1;
         let kx = (6 - a_minus_1) as usize;
         let ky = (6 - a_minus_1) as usize;
@@ -203,7 +251,7 @@ mod tests {
             }
         }
 
-        let simd = unsafe { lanczos_kernel_neon::<SIZE>(&data, width, kx, ky, &wx, &wy) };
+        let simd = unsafe { neon::lanczos_kernel_neon::<SIZE>(&data, width, kx, ky, &wx, &wy) };
         assert!(
             (simd - scalar_sum).abs() < 1e-4,
             "{label}: NEON {simd} vs scalar {scalar_sum}",

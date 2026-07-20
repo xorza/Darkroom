@@ -7,9 +7,8 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
-use crate::stacking::registration::config::InterpolationMethod;
-use crate::stacking::registration::interpolation::{WarpParams, warp_image};
-use crate::stacking::registration::resample::warp;
+use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
+use crate::stacking::registration::resample::{self, test_support};
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
@@ -20,7 +19,7 @@ use imaginarium::Buffer2;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
-/// Passes T⁻¹ to warp_image since it uses output→input coordinate mapping.
+/// Passes T⁻¹ to the plane warp since it uses output→input coordinate mapping.
 fn do_warp(
     input: &Buffer2<f32>,
     transform: &Transform,
@@ -28,11 +27,11 @@ fn do_warp(
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new_default(input.width(), input.height());
-    warp_image(
+    test_support::warp_plane(
         input,
         &mut output,
         &WarpTransform::new(inverse),
-        &WarpParams::new(method),
+        &config::test_support::warp_params(method),
     );
     output
 }
@@ -326,7 +325,7 @@ fn test_warp_with_detected_transform() {
         method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config).image;
+    let warped_astro = resample::warp(&target_astro, &result.warp_transform(), &warp_config).image;
 
     // Compare aligned image to reference
     let margin = 40;
@@ -427,7 +426,7 @@ fn test_warp_grayscale_translation() {
         method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
+    let warped = resample::warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -487,7 +486,7 @@ fn test_warp_rgb() {
         method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
+    let warped = resample::warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -539,7 +538,7 @@ fn test_warp_preserves_output_metadata() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = warp(&image, &WarpTransform::new(transform), &warp_config).image;
+    let warped = resample::warp(&image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
@@ -641,17 +640,17 @@ fn test_warp_with_sip_correction() {
     let mut output_no_sip = Buffer2::new_default(width, height);
     let mut output_with_sip = Buffer2::new_default(width, height);
 
-    warp_image(
+    test_support::warp_plane(
         &ref_buf,
         &mut output_no_sip,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3),
+        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
     );
-    warp_image(
+    test_support::warp_plane(
         &ref_buf,
         &mut output_with_sip,
         &WarpTransform::with_sip(transform, sip),
-        &WarpParams::new(InterpolationMethod::Lanczos3),
+        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
     );
 
     // The two outputs should differ — SIP applies nonlinear correction
@@ -738,10 +737,10 @@ fn test_warp_api_with_sip() {
     };
 
     // Warp without SIP
-    let warped_no_sip = warp(&image, &WarpTransform::new(transform), &warp_config).image;
+    let warped_no_sip = resample::warp(&image, &WarpTransform::new(transform), &warp_config).image;
 
     // Warp with SIP
-    let warped_with_sip = warp(
+    let warped_with_sip = resample::warp(
         &image,
         &WarpTransform::with_sip(transform, sip),
         &warp_config,
@@ -784,7 +783,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -859,7 +858,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();

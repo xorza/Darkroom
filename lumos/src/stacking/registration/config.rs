@@ -1,7 +1,6 @@
 //! Configuration for the registration module.
 
 use crate::stacking::registration::distortion::sip::SipConfig;
-use crate::stacking::registration::interpolation::WarpParams;
 use crate::stacking::registration::ransac::RansacConfig;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformType;
@@ -42,13 +41,46 @@ impl InterpolationMethod {
 
     /// Returns the Lanczos parameter `a` (kernel half-width), or `None` for non-Lanczos methods.
     #[inline]
-    pub fn lanczos_param(&self) -> Option<usize> {
+    pub(crate) fn lanczos_param(&self) -> Option<usize> {
         match self {
             InterpolationMethod::Lanczos2 => Some(2),
             InterpolationMethod::Lanczos3 => Some(3),
             InterpolationMethod::Lanczos4 => Some(4),
             _ => None,
         }
+    }
+}
+
+/// Configuration for inverse-mapped image resampling.
+#[derive(Debug, Clone, Copy)]
+pub struct WarpParams {
+    /// Resampling kernel.
+    pub method: InterpolationMethod,
+    /// Fill for source positions outside the closed source pixel footprint.
+    ///
+    /// Positions inside the footprint with partial kernel support are reconstructed from real
+    /// source pixels only.
+    pub border_value: f32,
+}
+
+impl Default for WarpParams {
+    fn default() -> Self {
+        Self {
+            method: InterpolationMethod::default(),
+            border_value: 0.0,
+        }
+    }
+}
+
+impl WarpParams {
+    fn validate(&self) -> Result<(), RegistrationError> {
+        if !self.border_value.is_finite() {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "warp border_value must be finite, got {}",
+                self.border_value
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -330,6 +362,18 @@ impl Config {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
+
+    pub(crate) fn warp_params(method: InterpolationMethod) -> WarpParams {
+        WarpParams {
+            method,
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::stacking::registration::config::*;
     use glam::DVec2;
@@ -463,6 +507,13 @@ mod tests {
     fn test_interpolation_method_default() {
         let method = InterpolationMethod::default();
         assert_eq!(method, InterpolationMethod::Lanczos3);
+    }
+
+    #[test]
+    fn test_warp_params_defaults() {
+        let default = WarpParams::default();
+        assert_eq!(default.method, InterpolationMethod::Lanczos3);
+        assert_eq!(default.border_value, 0.0);
     }
 
     #[test]

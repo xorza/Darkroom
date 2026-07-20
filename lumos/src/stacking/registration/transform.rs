@@ -253,7 +253,7 @@ impl Transform {
     /// mapped from reference coordinates. This means using `apply()` to find
     /// where each reference pixel maps to in the target, then sampling there.
     ///
-    /// The `warp_image` function handles this automatically.
+    /// The [`crate::stacking::registration::resample::warp`] function handles this automatically.
     ///
     /// # Example
     ///

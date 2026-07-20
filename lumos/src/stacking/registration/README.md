@@ -91,8 +91,7 @@ Homography uses normalized DLT with SVD.
 
 ## Resampling
 
-`resample.rs` owns the public image-level `warp` orchestration and `WarpResult`.
-`interpolation/` owns kernels and row execution:
+`resample/` owns the public image-level `warp` orchestration and the complete sampling stack:
 
 - nearest, bilinear, bicubic, and Lanczos-2/3/4;
 - a 4096-sample-per-unit Lanczos LUT;
@@ -100,10 +99,10 @@ Homography uses normalized DLT with SVD.
 - x86 AVX2/SSE4.1 and aarch64 NEON bilinear paths;
 - x86 FMA and NEON normalized linear Lanczos interior kernels.
 
-Zero-border partial bilinear pixels are divided by a separate signed-weight normalization map to
-recover the in-bounds average. Partial Lanczos kernels use edge-extended bilinear interpolation;
-coverage remains based on Lanczos kernel magnitude, while confidence follows the coefficients that
-actually produced the sample.
+All kernels return the configured fill with zero quality outside the closed source pixel
+footprint. Partial bilinear samples clamp to the nearest edge center directly in scalar/SIMD code;
+partial Lanczos kernels use the same edge-extended bilinear policy. Coverage remains based on
+Lanczos kernel magnitude, while confidence follows the coefficients that produced the sample.
 
 ## Module layout
 
@@ -113,13 +112,12 @@ actually produced the sample.
 | `config.rs` | Composed public configuration and validation |
 | `result/` | Public registration result and errors |
 | `transform.rs` | Linear transforms and `WarpTransform` |
-| `resample.rs` | Public image warp and quality-map orchestration |
+| `resample/` | Image warp, plane dispatch, kernels, row execution, and quality maps |
 | `triangle/` | Pattern formation, invariant matching, and voting |
 | `spatial/` | Flat implicit 2D k-d tree |
 | `ransac/` | Robust estimation and transform solvers |
 | `distortion/sip/` | Live polynomial residual correction |
 | `distortion/tps/` | Tested implementation reserved for later integration |
-| `interpolation/` | Sampling kernels and optimized row warps |
 
 TPS is not called by production registration. It remains intentionally parked for a future
 post-RANSAC distortion mode; SIP is the only nonlinear correction in the current pipeline.
