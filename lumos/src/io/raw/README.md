@@ -46,9 +46,11 @@ Both demosaic kernels emit unclipped linear RGB from one source-independent algo
 `load_raw` entry point applies its `[0,1]` contract once, after the finished image has been
 assembled; range policy never changes interpolation or homogeneity selection.
 
-RCD keeps its canonical low-pass ratio correction when both luminance terms are safely positive. A
-signed neighborhood instead uses the additive midpoint estimate `G₁ + (LPF₀−LPF₂)/8`, avoiding
-denominator cancellation while exactly reconstructing constant and linear signed fields.
+RCD keeps its canonical low-pass ratio correction for every nonnegative or well-conditioned signed
+neighborhood. When signed terms cancel enough to make the ratio ill-conditioned, a smoothstep
+transition reaches the additive midpoint estimate `G₁ + (LPF₀−LPF₂)/8` at exact cancellation.
+This keeps the estimator continuous and limits singular ratio amplification; exact canonical
+behavior takes precedence over global pedestal equivariance away from cancellation.
 
 ## SIMD Strategy
 
