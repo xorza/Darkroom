@@ -27,6 +27,38 @@ fn mean_product(cache: &LightCache, weights: Option<&[f32]>) -> StackProduct {
 }
 
 #[test]
+fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
+    let dimensions = ImageDimensions::new((2, 1), 3);
+    let image = || AstroImage::from_pixels(dimensions, vec![1.0; 6]);
+    let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
+    let mut frames = vec![
+        StackFrame::from(image()),
+        StackFrame::from(image()),
+        StackFrame::from(image()),
+    ];
+    frames[1].coverage = Some(plane());
+    frames[2].coverage = Some(plane());
+    frames[2].confidence = Some(plane());
+
+    let cache = LightCache::from_stack_frames(
+        frames,
+        &CacheConfig::default(),
+        Normalization::None,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("frames are valid");
+
+    assert_eq!(
+        weighted_chunk_memory_layout(&cache.frames, dimensions.channels()),
+        ChunkMemoryLayout {
+            input_planes: 6,
+            resident_planes: 9,
+        }
+    );
+}
+
+#[test]
 fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
     // weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 4/4 = 1.
@@ -36,6 +68,8 @@ fn finish_product_uniform_equal_weights() {
         .collect();
     let product = mean_product(&make_test_cache(images), None);
     let linear_variance = product.linear_variance.as_ref().unwrap();
+    assert!(matches!(&product.weight, QualityMap::Shared(_)));
+    assert!(matches!(linear_variance, QualityMap::Shared(_)));
     assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
     for p in 0..6 {
         assert_eq!(product.coverage[p], 1.0);
@@ -146,6 +180,7 @@ fn test_process_chunked_median() {
     ];
 
     let cache = make_test_cache(images);
+    assert_eq!(cache.core.chunk_available_memory(), None);
 
     // Median of [1, 3, 2] = 2
     let result = cache.process_chunked_weighted(None, None, |values, weights, _| {
@@ -153,6 +188,7 @@ fn test_process_chunked_median() {
         CombinedSample::from_all(values[values.len() / 2], weights)
     });
 
+    assert_eq!(result.chunk_available_memory, None);
     assert_eq!(result.pixels.channels(), 1);
     assert_eq!(result.pixels.channel(0).len(), 16);
     for &pixel in result.pixels.channel(0).pixels() {
@@ -352,7 +388,10 @@ fn test_read_channel_chunk_disk_backed() {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
+            config: CacheConfig {
+                available_memory: Some(123_456),
+                ..Default::default()
+            },
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
         },
@@ -362,6 +401,7 @@ fn test_read_channel_chunk_disk_backed() {
     let chunk = cache
         .core
         .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
+    assert_eq!(cache.core.chunk_available_memory(), Some(123_456));
     let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
     assert_eq!(chunk, &expected[..]);
 

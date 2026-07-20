@@ -11,14 +11,12 @@ use std::sync::{Arc, LazyLock, RwLock};
 use anyhow::Context;
 use common::CancelToken;
 use common::file_utils;
-use imaginarium::Buffer2;
 use imaginarium::Image as RawImage;
 use lumos::{
     ASTRO_IMAGE_EXTENSIONS, AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet,
-    CfaImage, DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions,
-    LocalContrast, MlError, NeutralizeBackground, OpError, RAW_EXTENSIONS, Reference, StackConfig,
-    TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only,
-    stack_cfa_master,
+    CfaImage, DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast, MlError,
+    NeutralizeBackground, OpError, RAW_EXTENSIONS, Reference, StackConfig, TiledOnnxConfig,
+    calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
 };
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
@@ -334,15 +332,13 @@ pub fn astro_library() -> Library {
                     })
                     .await?;
 
+                    let coverage = AstroImage::from(result.product.coverage);
+                    let weight = AstroImage::from(result.product.weight);
                     outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
                         &result.product.image,
                     )));
-                    outputs[1] = DynamicValue::from_custom(Image::from(RawImage::from(
-                        &plane_to_frame(result.product.coverage),
-                    )));
-                    outputs[2] = DynamicValue::from_custom(Image::from(RawImage::from(
-                        &result.product.weight,
-                    )));
+                    outputs[1] = DynamicValue::from_custom(Image::from(RawImage::from(&coverage)));
+                    outputs[2] = DynamicValue::from_custom(Image::from(RawImage::from(&weight)));
 
                     Ok(())
                 })
@@ -727,13 +723,6 @@ fn preset_config_input<T: NodeConfig>(name: &str, variants: Vec<ValueVariant>) -
 fn config_override_input<T: NodeConfig>() -> FuncInput {
     FuncInput::optional("Config", config_data_type::<T>())
         .description("Optional detailed config; overrides the inline knob when wired.")
-}
-
-/// Wrap a single-channel result plane (coverage / weight) as a grayscale
-/// `AstroImage` so it can ride an `Image` wire (it is converted to `Image` at the node).
-fn plane_to_frame(plane: Buffer2<f32>) -> AstroImage {
-    let dims = ImageDimensions::new((plane.width(), plane.height()), 1);
-    AstroImage::from_planar_channels(dims, [Vec::from(plane)])
 }
 
 /// An optional calibration-frame folder input (`Darks`/`Flats`/…): an

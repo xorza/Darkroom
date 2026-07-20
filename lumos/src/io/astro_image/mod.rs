@@ -512,6 +512,28 @@ impl SubAssign<&AstroImage> for AstroImage {
     }
 }
 
+impl From<Buffer2<f32>> for AstroImage {
+    fn from(plane: Buffer2<f32>) -> Self {
+        let dimensions = ImageDimensions::new((plane.width(), plane.height()), 1);
+        Self {
+            metadata: AstroImageMetadata::default(),
+            dimensions,
+            pixels: PixelData::L(DeinterleavedImageData::from_channels([plane])),
+        }
+    }
+}
+
+impl From<[Buffer2<f32>; 3]> for AstroImage {
+    fn from(planes: [Buffer2<f32>; 3]) -> Self {
+        let dimensions = ImageDimensions::new((planes[0].width(), planes[0].height()), 3);
+        Self {
+            metadata: AstroImageMetadata::default(),
+            dimensions,
+            pixels: PixelData::Rgb(DeinterleavedImageData::from_channels(planes)),
+        }
+    }
+}
+
 impl From<&AstroImage> for Image {
     fn from(astro: &AstroImage) -> Self {
         // imaginarium owns the planar→interleaved transpose; each `PixelData`

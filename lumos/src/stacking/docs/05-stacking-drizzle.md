@@ -514,9 +514,9 @@ weighted average, since `Var(Σw x) = Σw² Var(x)`. lumos's stacker does **not*
 accept a distinct input-variance image for every frame. Both statistical stacking and drizzle emit
 `StackProduct.weight`. Linear statistical combines and drizzle additionally emit
 `StackProduct.linear_variance = Some(Σw_i²/(Σw_i)²)` from the actual contributing samples; median
-output uses `None` because it has no linear coefficients. Statistical quality images are
-channel-shaped because rejection can select different survivors per channel; drizzle's channels
-are identical because its geometric weights are channel-independent.
+output uses `None` because it has no linear coefficients. RGB statistical quality maps use
+`QualityMap::PerChannel` because rejection can select different survivors per channel;
+monochrome statistical output and drizzle use `QualityMap::Shared`.
 
 ### 4.2 Weight maps and coverage maps
 

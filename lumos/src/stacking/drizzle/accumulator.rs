@@ -10,7 +10,7 @@ use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
-use crate::stacking::product::StackProduct;
+use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::registration::transform::Transform;
 
 const MAX_CHANNELS: usize = 3;
@@ -636,21 +636,11 @@ impl DrizzleAccumulator {
             ImageDimensions::new((width, height), n_channels),
             output_channels,
         );
-        let quality_dimensions = ImageDimensions::new((width, height), n_channels);
-        let weight = AstroImage::from_planar_channels(
-            quality_dimensions,
-            (0..n_channels).map(|_| self.weight.pixels().to_vec()),
-        );
-        let linear_variance = AstroImage::from_planar_channels(
-            quality_dimensions,
-            (0..n_channels).map(|_| linear_variance.pixels().to_vec()),
-        );
-
         StackProduct {
             image,
             coverage,
-            weight,
-            linear_variance: Some(linear_variance),
+            weight: QualityMap::Shared(self.weight),
+            linear_variance: Some(QualityMap::Shared(linear_variance)),
         }
     }
 }

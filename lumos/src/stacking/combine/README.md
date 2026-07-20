@@ -27,7 +27,8 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 stack(paths, config, progress, cancel)         -> Result<StackProduct, Error>
 stack_images(frames, config, progress, cancel) -> Result<StackProduct, Error>
 
-StackProduct       // { image, coverage, weight, linear_variance: Option<AstroImage> }
+StackProduct       // { image, coverage, weight: QualityMap, linear_variance: Option<QualityMap> }
+QualityMap         // Shared(Buffer2<f32>) | PerChannel([Buffer2<f32>; 3])
 StackConfig        // { method, weighting, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
@@ -161,5 +162,5 @@ the end-to-end pipeline:
 Processing is chunked by rows and parallelized per-row with rayon. Each channel is processed
 independently for efficient planar data access. `StackProduct.coverage` remains a channel-independent
 geometric-support fraction. `weight` is channel-shaped because rejection can retain a different
-frame set in R, G, and B. `linear_variance` has that same shape for means and drizzle, and is `None`
-for nonlinear median output.
+frame set in R, G, and B. `linear_variance` has that same per-channel shape for means and is `None`
+for nonlinear median output. Drizzle stores both quality maps as one shared plane.

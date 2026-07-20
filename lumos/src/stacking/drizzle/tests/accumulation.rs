@@ -134,7 +134,7 @@ fn test_drizzle_images_dimension_mismatch() {
 }
 
 #[test]
-fn test_drizzle_rgb_image() {
+fn drizzle_rgb_uses_shared_quality_planes() {
     // Create a simple RGB test image
     let mut pixels = vec![0.0f32; 50 * 50 * 3];
     for y in 0..50 {
@@ -158,19 +158,21 @@ fn test_drizzle_rgb_image() {
     assert_eq!(result.image.width(), 100);
     assert_eq!(result.image.height(), 100);
     assert_eq!(result.image.channels(), 3);
-    assert_eq!(result.weight.dimensions(), result.image.dimensions());
-    let linear_variance = result.linear_variance.as_ref().unwrap();
-    assert_eq!(linear_variance.dimensions(), result.image.dimensions());
-    for channel in 1..3 {
-        assert_eq!(
-            result.weight.channel(channel).pixels(),
-            result.weight.channel(0).pixels()
-        );
-        assert_eq!(
-            linear_variance.channel(channel).pixels(),
-            linear_variance.channel(0).pixels()
-        );
-    }
+    let QualityMap::Shared(weight) = &result.weight else {
+        panic!("drizzle weight must be channel-independent");
+    };
+    let QualityMap::Shared(linear_variance) = result.linear_variance.as_ref().unwrap() else {
+        panic!("drizzle linear variance must be channel-independent");
+    };
+    assert_eq!((weight.width(), weight.height()), (100, 100));
+    assert_eq!(
+        (linear_variance.width(), linear_variance.height()),
+        (100, 100)
+    );
+    assert!(std::ptr::eq(
+        result.weight.channel(0),
+        result.weight.channel(2)
+    ));
 }
 
 #[test]

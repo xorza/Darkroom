@@ -346,6 +346,13 @@ fn test_from_planar_channels_grayscale() {
 
     assert!(image.is_grayscale());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
+
+    let plane = Buffer2::new(2, 2, vec![5.0, 6.0, 7.0, 8.0]);
+    let pixels = plane.pixels().as_ptr();
+    let image = AstroImage::from(plane);
+    assert_eq!(image.dimensions(), ImageDimensions::new((2, 2), 1));
+    assert_eq!(image.channel(0).pixels(), &[5.0, 6.0, 7.0, 8.0]);
+    assert_eq!(image.channel(0).pixels().as_ptr(), pixels);
 }
 
 #[test]
@@ -359,6 +366,19 @@ fn test_from_planar_channels_rgb() {
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0]);
     assert_eq!(image.channel(1).pixels(), &[3.0, 4.0]);
     assert_eq!(image.channel(2).pixels(), &[5.0, 6.0]);
+
+    let planes = [
+        Buffer2::new(2, 1, vec![7.0, 8.0]),
+        Buffer2::new(2, 1, vec![9.0, 10.0]),
+        Buffer2::new(2, 1, vec![11.0, 12.0]),
+    ];
+    let green_pixels = planes[1].pixels().as_ptr();
+    let image = AstroImage::from(planes);
+    assert_eq!(image.dimensions(), ImageDimensions::new((2, 1), 3));
+    assert_eq!(image.channel(0).pixels(), &[7.0, 8.0]);
+    assert_eq!(image.channel(1).pixels(), &[9.0, 10.0]);
+    assert_eq!(image.channel(2).pixels(), &[11.0, 12.0]);
+    assert_eq!(image.channel(1).pixels().as_ptr(), green_pixels);
 }
 
 #[test]

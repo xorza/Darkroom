@@ -396,22 +396,36 @@ pub(crate) fn memory_budget(available_memory: u64) -> u64 {
     (available_memory as u128 * MEMORY_PERCENT as u128 / 100) as u64
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChunkMemoryLayout {
+    /// Planes read concurrently for the active row chunk.
+    pub(crate) input_planes: usize,
+    /// Full image-sized planes held throughout chunk processing.
+    pub(crate) resident_planes: usize,
+}
+
 pub(crate) fn optimal_chunk_rows(
     width: usize,
-    channels: usize,
-    frame_count: usize,
+    height: usize,
+    layout: ChunkMemoryLayout,
     available_memory: u64,
 ) -> usize {
     let bytes_per_row = width
-        .checked_mul(channels)
+        .checked_mul(layout.input_planes)
         .and_then(|value| value.checked_mul(size_of::<f32>()))
-        .and_then(|value| value.checked_mul(frame_count))
         .map(|value| value as u64)
         .unwrap_or(u64::MAX);
     if bytes_per_row == 0 {
         return MIN_CHUNK_ROWS;
     }
-    (memory_budget(available_memory) / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize
+    let resident_bytes = width
+        .checked_mul(height)
+        .and_then(|value| value.checked_mul(layout.resident_planes))
+        .and_then(|value| value.checked_mul(size_of::<f32>()))
+        .map(|value| value as u64)
+        .unwrap_or(u64::MAX);
+    (memory_budget(available_memory).saturating_sub(resident_bytes) / bytes_per_row)
+        .max(MIN_CHUNK_ROWS as u64) as usize
 }
 
 pub(crate) fn load_concurrency(

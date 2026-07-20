@@ -78,7 +78,7 @@ impl From<AstroImage> for StackFrame {
 /// # Returns
 ///
 /// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its channel-shaped weight image describes the surviving samples; `linear_variance` is
+/// pixel. Its per-channel weight map describes the surviving samples; `linear_variance` is
 /// available for mean output and absent for median output.
 ///
 /// # Errors
@@ -530,6 +530,7 @@ mod tests {
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::{compute_frame_stats, frame_from_memory, store_light_frame};
+    use crate::stacking::product::QualityMap;
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -1726,6 +1727,8 @@ mod tests {
         let expected_weights = [3.0 / 6.0, 5.0 / 6.0, 4.0 / 6.0];
         let expected_linear_variances = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
         let linear_variance = result.linear_variance.as_ref().unwrap();
+        assert!(matches!(&result.weight, QualityMap::PerChannel(_)));
+        assert!(matches!(linear_variance, QualityMap::PerChannel(_)));
         for channel in 0..3 {
             assert!(
                 (result.image.channel(channel)[0] - expected_values[channel]).abs() < 1e-6,

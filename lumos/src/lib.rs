@@ -84,7 +84,7 @@ pub use stacking::combine::rejection::{
 };
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
-pub use stacking::product::StackProduct;
+pub use stacking::product::{QualityMap, StackProduct};
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 
 pub use stacking::pipeline::align::align_and_stack;

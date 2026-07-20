@@ -139,15 +139,61 @@ fn optimal_chunk_rows_matches_budget_arithmetic() {
     ];
 
     for (width, channels, frames, available) in cases {
-        let bytes_per_row = (width * channels * size_of::<f32>() * frames) as u64;
+        let input_planes = channels * frames;
+        let bytes_per_row = (width * input_planes * size_of::<f32>()) as u64;
         let usable = (available as u128 * 75 / 100) as u64;
         let expected = (usable / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize;
         assert_eq!(
-            optimal_chunk_rows(width, channels, frames, available),
+            optimal_chunk_rows(
+                width,
+                100,
+                ChunkMemoryLayout {
+                    input_planes,
+                    resident_planes: 0,
+                },
+                available,
+            ),
             expected
         );
     }
 
-    assert_eq!(optimal_chunk_rows(0, 3, 20, 8 * GB), MIN_CHUNK_ROWS);
+    // 1 MiB available → 786,432 usable bytes. Six resident 100×200 f32 planes consume 480,000
+    // bytes; nine active input planes consume 3,600 bytes/row, leaving exactly 85 whole rows.
+    assert_eq!(
+        optimal_chunk_rows(
+            100,
+            200,
+            ChunkMemoryLayout {
+                input_planes: 9,
+                resident_planes: 6,
+            },
+            1024 * 1024,
+        ),
+        85
+    );
+    assert_eq!(
+        optimal_chunk_rows(
+            0,
+            100,
+            ChunkMemoryLayout {
+                input_planes: 60,
+                resident_planes: 3,
+            },
+            8 * GB,
+        ),
+        MIN_CHUNK_ROWS
+    );
+    assert_eq!(
+        optimal_chunk_rows(
+            100,
+            200,
+            ChunkMemoryLayout {
+                input_planes: 9,
+                resident_planes: 10,
+            },
+            1024 * 1024,
+        ),
+        MIN_CHUNK_ROWS
+    );
     assert_eq!(memory_budget(8 * GB), 6 * GB);
 }

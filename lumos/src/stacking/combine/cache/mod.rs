@@ -14,10 +14,10 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_light_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
-    optimal_chunk_rows,
+    ChunkMemoryLayout, FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame,
+    StoredPlane, optimal_chunk_rows,
 };
-use crate::stacking::product::StackProduct;
+use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 /// Per-thread scratch buffers for stacking combine closures.
@@ -95,12 +95,13 @@ impl CombinedSample {
     }
 }
 
-/// Channel-shaped result of one light-frame combine pass.
+/// Channel-shaped result of one light-frame combine pass and its pre-output memory snapshot.
 #[derive(Debug)]
 pub(crate) struct LightCombineOutput {
     pub(crate) pixels: PixelData,
     pub(crate) weight: PixelData,
     pub(crate) linear_variance: Option<PixelData>,
+    chunk_available_memory: Option<u64>,
 }
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
@@ -251,7 +252,28 @@ fn validate_warp_plane_values(
     Ok(())
 }
 
+fn weighted_chunk_memory_layout(
+    frames: &[StoredLightFrame],
+    output_channels: usize,
+) -> ChunkMemoryLayout {
+    ChunkMemoryLayout {
+        input_planes: frames
+            .iter()
+            .map(|frame| {
+                1 + usize::from(frame.coverage.is_some()) + usize::from(frame.confidence.is_some())
+            })
+            .sum(),
+        resident_planes: 3 * output_channels,
+    }
+}
+
 impl CacheCore {
+    fn chunk_available_memory(&self) -> Option<u64> {
+        self.spill_directory
+            .as_ref()
+            .map(|_| self.config.get_available_memory())
+    }
+
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
     /// chunk via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
@@ -260,6 +282,8 @@ impl CacheCore {
         &self,
         frames: &[F],
         frame_channels: Channels,
+        memory: ChunkMemoryLayout,
+        available_memory: Option<u64>,
         mut process: Process,
     ) -> PixelData
     where
@@ -271,14 +295,9 @@ impl CacheCore {
         let width = dims.width();
         let height = dims.height();
 
-        // Whole-plane chunks in RAM; for disk-backed stacks size chunks to the memory budget
-        // (queried only here, where it's used — an in-memory stack skips the sysinfo read).
-        let chunk_rows = if self.spill_directory.is_none() {
-            height
-        } else {
-            let available_memory = self.config.get_available_memory();
-            optimal_chunk_rows(width, 1, frame_count, available_memory)
-        };
+        let chunk_rows = available_memory.map_or(height, |available_memory| {
+            optimal_chunk_rows(width, height, memory, available_memory)
+        });
 
         let mut output = PixelData::new_default(width, height, dims.channels());
         let channel_count = output.channels();
@@ -383,9 +402,15 @@ impl CfaCache {
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
+        let chunk_available_memory = self.core.chunk_available_memory();
         self.core.process_chunks(
             &self.frames,
             |frame| &frame.channels,
+            ChunkMemoryLayout {
+                input_planes: self.frames.len(),
+                resident_planes: self.core.dimensions.channels(),
+            },
+            chunk_available_memory,
             |output_slice, ctx| {
                 let ChunkContext {
                     frames,
@@ -544,24 +569,22 @@ impl LightCache {
         })
     }
 
-    /// Assemble the combined image, geometric coverage, and channel-shaped survivor quality.
+    /// Assemble the combined image, geometric coverage, and per-channel survivor quality.
     pub(crate) fn finish_product(&self, combined: LightCombineOutput) -> StackProduct {
+        let LightCombineOutput {
+            pixels,
+            weight: weight_pixels,
+            linear_variance: linear_variance_pixels,
+            chunk_available_memory,
+        } = combined;
         let dimensions = self.core.dimensions;
         let image = AstroImage {
             metadata: self.core.metadata.clone(),
             dimensions,
-            pixels: combined.pixels,
-        };
-        let weight = AstroImage {
-            metadata: AstroImageMetadata::default(),
-            dimensions,
-            pixels: combined.weight,
-        };
-        let linear_variance = combined.linear_variance.map(|pixels| AstroImage {
-            metadata: AstroImageMetadata::default(),
-            dimensions,
             pixels,
-        });
+        };
+        let weight = QualityMap::from_pixels(weight_pixels);
+        let linear_variance = linear_variance_pixels.map(QualityMap::from_pixels);
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
@@ -580,16 +603,24 @@ impl LightCache {
 
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
         // same row-aligned chunks the combine uses.
-        let chunk_rows = if self.core.spill_directory.is_none() {
-            height
-        } else {
+        let chunk_rows = chunk_available_memory.map_or(height, |available_memory| {
+            let input_planes = self
+                .frames
+                .iter()
+                .filter(|frame| frame.coverage.is_some())
+                .count();
+            let resident_planes =
+                dimensions.channels() * (2 + usize::from(linear_variance.is_some())) + 1;
             optimal_chunk_rows(
                 width,
-                1,
-                frame_count,
-                self.core.config.get_available_memory(),
+                height,
+                ChunkMemoryLayout {
+                    input_planes,
+                    resident_planes,
+                },
+                available_memory,
             )
-        };
+        });
 
         let mut start_row = 0;
         while start_row < height {
@@ -655,6 +686,9 @@ impl LightCache {
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
         let dimensions = self.core.dimensions;
+        let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels());
+        // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
+        let chunk_available_memory = self.core.chunk_available_memory();
         let mut output_weight = PixelData::new_default(
             dimensions.width(),
             dimensions.height(),
@@ -669,6 +703,8 @@ impl LightCache {
             self.core.process_chunks(
                 &self.frames,
                 |frame| &frame.channels,
+                memory,
+                chunk_available_memory,
                 |output_slice, ctx| {
                     let ChunkContext {
                         frames,
@@ -774,6 +810,7 @@ impl LightCache {
             pixels,
             weight: output_weight,
             linear_variance: Some(output_linear_variance),
+            chunk_available_memory,
         }
     }
 }
