@@ -1,4 +1,4 @@
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -394,6 +394,7 @@ fn test_calibrate_flat_correction() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
 
     let masters = CalibrationMasters::from_images(
@@ -447,6 +448,7 @@ fn test_calibrate_full_pipeline() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
@@ -468,6 +470,7 @@ fn test_calibrate_full_pipeline() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -549,8 +552,7 @@ fn test_sigma_threshold_affects_detection() {
 
 #[test]
 fn test_defect_detection_zero_median_no_false_positives() {
-    // Bias frames can have median=0. Without the absolute sigma floor,
-    // every pixel > 0 would be flagged as hot.
+    // A quantized bias can have MAD=0 even though a few samples occupy adjacent ADC levels.
     let mut data = vec![0.0f32; 100];
     // Add a few pixels with tiny values (normal bias noise)
     data[10] = 0.0001;
@@ -565,6 +567,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
     };
 
     let defect_map = DefectMap::default()
@@ -602,6 +605,7 @@ fn test_calibrate_hot_pixel_correction() {
             cfa_type: Some(pattern.clone()),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
 
     let masters = CalibrationMasters::from_images(
@@ -633,6 +637,7 @@ fn test_calibrate_hot_pixel_correction() {
             cfa_type: Some(pattern),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -676,6 +681,7 @@ fn test_calibrate_flat_dark() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
 
@@ -697,6 +703,7 @@ fn test_calibrate_flat_dark() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -730,6 +737,7 @@ fn test_flat_dark_takes_priority_over_bias() {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     let bias = constant_cfa(2, 2, 0.05, CfaType::Mono);
     let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
@@ -784,6 +792,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
+        quantization_sigma: None,
     };
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -826,7 +835,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
     );
     cache_bytes[0] ^= 0xff;
     cache_bytes[CACHE_MAGIC.len()..CACHE_MAGIC.len() + size_of::<u32>()]
-        .copy_from_slice(&(CACHE_VERSION + 1).to_le_bytes());
+        .copy_from_slice(&(CACHE_VERSION - 1).to_le_bytes());
     std::fs::write(&path, cache_bytes).unwrap();
     assert_eq!(
         CalibrationMasters::load(&path).unwrap_err().kind(),

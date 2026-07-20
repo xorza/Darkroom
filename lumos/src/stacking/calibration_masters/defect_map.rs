@@ -1,13 +1,14 @@
 //! Defective-pixel detection and correction.
 //!
 //! **Hot** pixels (abnormally high dark current) come from the master dark after subtracting a
-//! robust per-color tiled background, then applying a MAD threshold to the residual; **cold/dead**
-//! pixels (abnormally low response) come from the master flat via a local-neighbourhood ratio test.
-//! Both are corrected by replacing the pixel with the median of its same-color CFA neighbours.
+//! robust per-color tiled background, then thresholding against a robust residual scale;
+//! **cold/dead** pixels (abnormally low response) come from the master flat via a
+//! local-neighbourhood ratio test. Both are corrected by replacing the pixel with the median of
+//! its same-color CFA neighbours.
 //!
 //! # Hot pixels (from the dark)
 //!
-//! Uses **Median Absolute Deviation (MAD)** for robust σ estimation:
+//! Uses robust per-color σ estimation led by **Median Absolute Deviation (MAD)**:
 //!
 //! 1. **Why MAD instead of standard deviation?**
 //!    Standard deviation is heavily influenced by outliers - the very pixels we're
@@ -33,6 +34,11 @@
 //!    For images >200K pixels, exact median computation is slow. We sample 100K
 //!    pixels uniformly, which gives <0.5% median error with >99% confidence
 //!    (by the central limit theorem for order statistics).
+//!
+//! 6. **Quantization-aware zero-MAD handling:**
+//!    A perfectly stable master can have zero MAD because its samples occupy one quantization
+//!    level. The σ floor follows the RAW ADC step propagated through master-frame stacking, with
+//!    floating-point resolution as the fallback when source quantization is unknown.
 //!
 //! # Cold/dead pixels (from the flat)
 //!
@@ -186,6 +192,11 @@ const MAX_MEDIAN_SAMPLES: usize = 100_000;
 /// median while remaining much smaller than normal sensor-scale gradients and amp glow.
 const DARK_BACKGROUND_TILE_SIZE: usize = 64;
 
+/// Convert the 99th percentile of `|N(0, σ)|` back to σ.
+const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
+// Five expected tail samples keep one sparse defect from defining the scale on tiny images.
+const MIN_TAIL_SCALE_SAMPLES: usize = 500;
+
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
     match cfa_type {
@@ -223,7 +234,8 @@ fn detect_hot_pixels(
     let total = width * data.height();
     let cfa_type = image.metadata.cfa_type.as_ref();
     let background = DarkBackground::fit(data, cfa_type, cancel)?;
-    let stats = compute_per_color_residual_stats(data, cfa_type, &background);
+    let sigma_floor = residual_sigma_floor(image);
+    let stats = compute_per_color_residual_stats(data, cfa_type, &background, sigma_floor);
 
     // Indexed collect keeps the result ascending, preserving the map's binary-search invariant.
     // The broad model uses tile medians rather than same-color neighbour medians so a compact
@@ -403,6 +415,21 @@ fn lerp(start: f32, end: f32, fraction: f32) -> f32 {
     start + fraction * (end - start)
 }
 
+fn residual_sigma_floor(image: &CfaImage) -> f32 {
+    if let Some(sigma) = image
+        .quantization_sigma
+        .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
+    {
+        return sigma;
+    }
+    image
+        .data
+        .par_iter()
+        .map(|value| value.abs())
+        .reduce(|| 0.0, f32::max)
+        * f32::EPSILON
+}
+
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of
 /// their same-color local neighbours. The local reference tracks vignetting (so a global cut's
 /// negative-threshold failure can't happen) and ignores dust shadows; only near-zero pixels pass.
@@ -443,21 +470,22 @@ fn detect_cold_pixels(
 struct ColorStats {
     /// Median residual for the color (the hot-detection center).
     median: f32,
-    /// Robust σ (`MAD · 1.4826`, floored). A color with no samples gets `∞` so it never flags.
+    /// Robust σ from MAD and the upper residual bulk, resolution-floored. No samples gives `∞`.
     sigma: f32,
 }
 
 /// Per-CFA-color robust background-subtracted stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
-/// `sigma` is `MAD · 1.4826` floored only at an absolute `5e-4` (~33 ADU/16-bit) so a clean
-/// near-uniform master can't flag its own noise tail. (A former relative floor `median · 0.1` was
-/// dropped: it capped sensitivity at ~1.5× the median, hiding warm pixels at 1.1–1.4× median, and
-/// has no precedent in PixInsight/Siril/APP/ccdmask. The absolute floor alone is the standard
-/// guard.) A color with no samples gets `sigma = ∞` so it never flags.
+/// `sigma` takes the larger of MAD and the Gaussian-calibrated 99th absolute residual percentile.
+/// The latter keeps broad model error and column structure out of the defect tail while remaining
+/// insensitive to a sparse (<1%) defect population. The result is floored at the master image's
+/// quantization/numeric resolution so a zero-MAD plateau does not turn every representable
+/// deviation into a defect. A color with no samples gets `sigma = ∞` so it never flags.
 fn compute_per_color_residual_stats(
     data: &Buffer2<f32>,
     cfa_type: Option<&CfaType>,
     background: &DarkBackground,
+    sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
     let num_colors = cfa_type.map_or(1, |c| c.num_colors());
     let mut stats = ArrayVec::new();
@@ -478,10 +506,18 @@ fn compute_per_color_residual_stats(
             *v = (*v - median).abs();
         }
         let mad = median_f32_mut(&mut samples);
-        let sigma = (mad * MAD_TO_SIGMA).max(5e-4);
+        let tail_sigma = if samples.len() >= MIN_TAIL_SCALE_SAMPLES {
+            let p99_index = (samples.len() - 1) * 99 / 100;
+            let (_, p99, _) = samples.select_nth_unstable_by(p99_index, f32::total_cmp);
+            *p99 * ABSOLUTE_RESIDUAL_P99_TO_SIGMA
+        } else {
+            0.0
+        };
+        let sigma = (mad * MAD_TO_SIGMA).max(tail_sigma).max(sigma_floor);
 
         tracing::debug!(
-            "Defect residual stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
+            "Defect residual stats color={color}: median={median:.6}, MAD={mad:.6}, \
+             tail_sigma={tail_sigma:.6}, floor={sigma_floor:.6}, sigma={sigma:.6}"
         );
         stats.push(ColorStats { median, sigma });
     }
@@ -792,7 +828,15 @@ mod bench {
 
 #[cfg(test)]
 mod tests {
+    use crate::io::astro_image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+    use crate::io::astro_image::{AstroImageMetadata, ImageDimensions};
     use crate::stacking::calibration_masters::defect_map::*;
+    use crate::stacking::combine::cache::{CacheCore, CfaCache};
+    use crate::stacking::combine::cache_config::CacheConfig;
+    use crate::stacking::combine::config::StackConfig;
+    use crate::stacking::combine::stack::run_stacking;
+    use crate::stacking::frame_store::{compute_frame_stats, frame_from_memory};
+    use crate::stacking::progress::ProgressCallback;
     use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
     fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
@@ -817,6 +861,100 @@ mod tests {
             DefectMap::default().detect_cold(&image, &cancel),
             Err(Error::Cancelled)
         ));
+    }
+
+    #[test]
+    fn quantization_floor_scales_with_bit_depth_and_master_count() {
+        let (width, height) = (128usize, 64usize);
+        let expected = [10 * width + 10, 20 * width + 80];
+        let below_threshold = [30 * width + 20, 40 * width + 90];
+
+        for bits in [12u32, 14, 16] {
+            let quantization_step = 1.0 / ((1u32 << bits) - 1) as f32;
+            for frame_count in [1usize, 16, 64] {
+                let sigma =
+                    quantization_step * QUANTIZATION_SIGMA_PER_STEP / (frame_count as f32).sqrt();
+                for gain in [0.5f64, 4.0] {
+                    let mut pixels = vec![0.05f32; width * height];
+                    for &index in &expected {
+                        pixels[index] += 6.0 * sigma;
+                    }
+                    for &index in &below_threshold {
+                        pixels[index] += 4.0 * sigma;
+                    }
+
+                    let mut dark = make_cfa(width, height, pixels, CfaType::Mono);
+                    dark.quantization_sigma = Some(sigma);
+                    dark.metadata.gain = Some(gain);
+                    let detected = DefectMap::default()
+                        .detect_hot(&dark, 5.0, &CancelToken::never())
+                        .unwrap()
+                        .hot_indices;
+
+                    assert_eq!(
+                        detected, expected,
+                        "{bits}-bit, {frame_count}-frame, gain {gain}: exactly the two 6σ pixels \
+                         must pass while both 4σ pixels remain below threshold"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
+        let (width, height, frame_count) = (128usize, 64usize, 8usize);
+        let dimensions = ImageDimensions::new((width, height), 1);
+        let source_sigma = QUANTIZATION_SIGMA_PER_STEP / 4095.0;
+        let master_sigma = source_sigma / (frame_count as f32).sqrt();
+        let expected = [10 * width + 10, 20 * width + 80];
+        let below_threshold = [30 * width + 20, 40 * width + 90];
+
+        let images: Vec<CfaImage> = (0..frame_count)
+            .map(|_| {
+                let mut pixels = vec![0.05f32; width * height];
+                for &index in &expected {
+                    pixels[index] += 6.0 * master_sigma;
+                }
+                for &index in &below_threshold {
+                    pixels[index] += 4.0 * master_sigma;
+                }
+                let mut image = make_cfa(width, height, pixels, CfaType::Mono);
+                image.quantization_sigma = Some(source_sigma);
+                image
+            })
+            .collect();
+        let frame_stats = images.iter().map(compute_frame_stats).collect();
+        let frames = images.into_iter().map(frame_from_memory).collect();
+        let cache = CfaCache {
+            frames,
+            frame_stats,
+            core: CacheCore {
+                spill_directory: None,
+                dimensions,
+                metadata: AstroImageMetadata {
+                    cfa_type: Some(CfaType::Mono),
+                    ..Default::default()
+                },
+                config: CacheConfig::default(),
+                progress: ProgressCallback::default(),
+                cancel: CancelToken::never(),
+            },
+        };
+
+        let master = run_stacking(&cache, &StackConfig::default());
+        assert!(
+            (master.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
+            "eight equal surviving frames must propagate σ/√8"
+        );
+        let detected = DefectMap::default()
+            .detect_hot(&master, 5.0, &CancelToken::never())
+            .unwrap()
+            .hot_indices;
+        assert_eq!(
+            detected, expected,
+            "the stacked CFA floor must retain both 6σ pixels and reject both 4σ pixels"
+        );
     }
 
     #[test]
@@ -1114,7 +1252,7 @@ mod tests {
     }
 
     #[test]
-    fn hot_detection_removes_per_color_gradient_and_amp_glow_but_keeps_clusters() {
+    fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters() {
         let (width, height) = (384usize, 256usize);
         let cfa = CfaType::Bayer(CfaPattern::Rggb);
         let isolated = [(17usize, 23usize), (201, 48), (312, 190)];
@@ -1135,8 +1273,9 @@ mod tests {
                 let baseline = [0.01, 0.02, 0.03][color];
                 let gradient = [0.012, 0.018, 0.024][color] * x_unit + 0.01 * y_unit;
                 let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
+                let column_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
                 let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
-                pixels[y * width + x] = baseline + gradient + amp_glow + noise;
+                pixels[y * width + x] = baseline + gradient + amp_glow + column_noise + noise;
             }
         }
 

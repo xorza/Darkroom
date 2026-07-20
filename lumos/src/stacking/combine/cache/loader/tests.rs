@@ -249,12 +249,14 @@ fn test_frame_stats_sidecar_roundtrip() {
         }]
         .into_iter()
         .collect(),
+        quantization_sigma: Some(0.000_02),
     };
     write_frame_stats(&temp_dir, base, &stats_1ch).unwrap();
     let read_1ch = read_frame_stats(&temp_dir, base).unwrap();
     assert_eq!(read_1ch.channels.len(), 1);
     assert_eq!(read_1ch.channels[0].median, 42.5);
     assert_eq!(read_1ch.channels[0].mad, 3.25);
+    assert_eq!(read_1ch.quantization_sigma, Some(0.000_02));
 
     // 3-channel stats (overwrites the file)
     let stats_3ch = FrameStats {
@@ -274,10 +276,12 @@ fn test_frame_stats_sidecar_roundtrip() {
         ]
         .into_iter()
         .collect(),
+        quantization_sigma: None,
     };
     write_frame_stats(&temp_dir, base, &stats_3ch).unwrap();
     let read_3ch = read_frame_stats(&temp_dir, base).unwrap();
     assert_eq!(read_3ch.channels.len(), 3);
+    assert_eq!(read_3ch.quantization_sigma, None);
     // Verify exact f32 roundtrip for each channel
     for (i, (got, expected)) in read_3ch
         .channels

@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use common::file_utils;
 
 use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -81,10 +81,12 @@ impl Drop for SpillDirectory {
 #[derive(Debug, Clone)]
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<ChannelStats, 3>,
+    pub(crate) quantization_sigma: Option<f32>,
 }
 
 pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
     let dimensions = image.dimensions();
+    let quantization_sigma = image.quantization_sigma();
     if dimensions.channels() == 1 {
         let data = image.channel(0);
         let mut scratch = data.to_vec();
@@ -92,7 +94,10 @@ pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         let mad = mad_f32_with_scratch(data, median, &mut scratch);
         let mut channels = ArrayVec::new();
         channels.push(ChannelStats { median, mad });
-        return FrameStats { channels };
+        return FrameStats {
+            channels,
+            quantization_sigma,
+        };
     }
 
     let channels = (0..dimensions.channels())
@@ -107,7 +112,10 @@ pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         .collect::<Vec<_>>()
         .into_iter()
         .collect();
-    FrameStats { channels }
+    FrameStats {
+        channels,
+        quantization_sigma,
+    }
 }
 
 /// Image operations needed by the shared frame store.
@@ -117,17 +125,15 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn metadata(&self) -> &AstroImageMetadata;
     fn load(path: &Path) -> Result<Self, ImageError>;
 
+    fn quantization_sigma(&self) -> Option<f32> {
+        None
+    }
+
     fn peek_dimensions(_path: &Path) -> Option<ImageDimensions> {
         None
     }
 
     fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
-
-    fn from_stacked(
-        pixels: PixelData,
-        metadata: AstroImageMetadata,
-        dimensions: ImageDimensions,
-    ) -> Self;
 }
 
 /// One planar f32 buffer, either resident or memory-mapped.

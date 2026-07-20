@@ -90,11 +90,15 @@ a flat reveals them as dark spots under uniform illumination):
 - Fit per-color medians in balanced 64×64 tiles and bilinearly interpolate them across the sensor;
   this follows smooth gradients and amp glow without letting adjacent same-color defects become
   one another's reference
-- Apply the robust per-color Median Absolute Deviation (MAD) threshold to the residual
-- MAD is robust to outliers (unlike standard deviation — the very pixels being hunted inflate σ)
+- Estimate per-color residual σ from the larger of MAD and the Gaussian-calibrated 99th absolute
+  residual percentile; the latter includes broad-model error and column structure without letting
+  the sparse defect tail dominate
 - Default 5-sigma threshold (conservative, avoids false positives); clamped to ≥ 1σ
-- Per-color `σ = max(1.4826·MAD, 5e-4)`: the absolute floor (`5e-4`, ~33 ADU at 16-bit)
-  stops a near-uniform stacked dark with MAD ≈ 0 from flagging its own noise tail
+- Floor σ at the RAW ADC quantization uncertainty (`q/√12`) propagated per frame through the
+  master combine's normalization, weights, and actual rejection survivors; order-statistic
+  combines retain a conservative bound when no exact scalar exists. f32 resolution is the
+  fallback when CFA provenance is unavailable. This prevents a zero-MAD plateau from flagging
+  every representable deviation without imposing an arbitrary ADU threshold
 - Adaptive sampling (100K px per color) above 200K pixels for fast median/MAD
 
 **Cold/dead pixels — from the master flat**, via a local same-color-neighbor ratio: a pixel reading

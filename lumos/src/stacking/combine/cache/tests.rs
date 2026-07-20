@@ -111,6 +111,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
                     cfa_type: Some(CfaType::Mono),
                     ..Default::default()
                 },
+                quantization_sigma: None,
             };
             frame_from_memory(image)
         })

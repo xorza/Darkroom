@@ -271,8 +271,9 @@ fn measure_registered_frames(
         .then(|| stratified_valid_indices(&common_domain, sample_count));
     let mut common_stats: Vec<FrameStats> = frames
         .iter()
-        .map(|_| FrameStats {
+        .map(|frame| FrameStats {
             channels: ArrayVec::new(),
+            quantization_sigma: frame.source_stats.quantization_sigma,
         })
         .collect();
     let mut global_norms_to_first = photometric_indices.as_ref().map(|_| {

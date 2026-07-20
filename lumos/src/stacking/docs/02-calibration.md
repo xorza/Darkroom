@@ -530,9 +530,14 @@ Lumos first separates sensor-scale dark structure from point defects:
    than being misclassified as point defects.
 4. Compute the **median** and **MAD** of each color's residual population:
    `MAD = median(|rᵢ − median(r)|)`.
-5. Convert to a robust sigma: `σ ≈ 1.4826 · MAD` (the constant is `1/Φ⁻¹(0.75)`; for a
-   normal distribution MAD ≈ 0.6745·σ).
-6. Flag **hot** if `r > median(r) + k·σ`.
+5. Convert MAD to `σ_MAD ≈ 1.4826 · MAD`, and independently convert the 99th percentile of
+   absolute residuals to `σ_tail = P99(|rᵢ − median(r)|) / 2.5758`. Use the larger scale so
+   column structure and broad-model error do not enter the point-defect tail.
+6. Floor the scale at the RAW ADC quantization uncertainty (`q/√12`) propagated per frame through
+   the master combine's normalization, weights, and actual rejection survivors. Exact linear-mean
+   and equal-source median results are retained; nonlinear/heterogeneous order statistics use a
+   conservative source bound. When CFA provenance is unavailable, use f32 numeric resolution.
+7. Flag **hot** if `r > median(r) + k·max(σ_MAD, σ_tail, σ_resolution)`.
 
 **Why MAD, not standard deviation:** std is itself inflated by the very outliers you are
 hunting (a few 60000-ADU hot pixels balloon σ and hide the merely-warm ones). MAD has a 50%
@@ -552,8 +557,8 @@ same-color clusters remain positive residuals.
 (`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/filters/cosmetic_correction.c:200–213`,
 re-verified pass 2). So Siril and lumos agree on the **median** as the central statistic; they
 differ only in the **σ estimator** — Siril uses the ordinary (outlier-inflated) standard
-deviation, lumos uses the robust MAD-derived σ. lumos's MAD estimator is therefore the more
-robust choice, but the central-statistic difference asserted in pass 1 was wrong.
+deviation, while lumos uses robust MAD and upper-bulk residual scales with a data-resolution
+floor. The central-statistic difference asserted in pass 1 was wrong.
 
 **Correction (pass 2):** the DSS *"median + 16·σ"* figure was flagged in pass 1 as
 search-snippet-sourced. It is now **primary-verified** in the DSS source: hot-pixel detection
@@ -561,9 +566,9 @@ computes, *per RGB channel*, `threshold = histogram.GetMedian() + 16.0 · histog
 and flags any pixel above its channel threshold
 (`$HOME/Projects/Scenarium/lumos/.tmp/refs/DeepSkyStacker/DeepSkyStackerKernel/DarkFrame.cpp:1738–1745`).
 The `16.0` is hardcoded — a deliberately loose multiplier so only genuine hot pixels are
-caught. Net: the *threshold statistic* varies by implementation (lumos median+MAD·σ at k=5,
-Siril median+stddev·σ, DSS median+16·stddev), all per-color; lumos's MAD-based estimator is
-the most robust; the σ-multiplier is a tuning knob, not a correctness issue.
+caught. Net: the *threshold statistic* varies by implementation (lumos median plus its robust
+residual σ at k=5, Siril median+stddev·σ, DSS median+16·stddev), all per-color; the
+σ-multiplier is a tuning knob, not a correctness issue.
 
 **Per-CFA-color modeling and statistics.** On raw CFA data, the green pixels (50% of a Bayer frame) sit at
 a different baseline than red/blue. Computing one global median/MAD lets green dominate and
@@ -572,11 +577,13 @@ masks defects in red/blue. Lumos fits the dark model and computes residual thres
 combines unequal color baselines, unequal gradients, unequal amp-glow strength, isolated R/G/B
 points, and a 25-member same-color cluster; the detected list is exactly the injected list.
 
-**Sigma-floor guard.** A pristine, near-uniform dark has MAD ≈ 0, which would make *any*
-slightly-warm pixel exceed `k·σ` and flag 3%+ of the sensor. lumos floors σ with
-`σ = max(1.4826·MAD, 5e-4)` — the absolute floor (`5e-4` ≈ 33 ADU in 16-bit space)
-prevents flagging the noise tail of clean CMOS darks. The former `median·0.1` floor was removed
-because it hid warm pixels at 1.1–1.4× a positive dark baseline.
+**Resolution guard.** A pristine, near-uniform dark can have MAD ≈ 0, which would make every
+representable deviation exceed `k·σ`. RAW decode stores `q/√12` on the CFA image from the camera's
+actual black-to-maximum ADC step. CFA frame statistics carry each value through RAM and disk
+tiers, and stacking propagates it through normalization, weights, and the rejection survivors at
+each pixel; the single master value is the conservative maximum. Defect detection uses it as the
+floor, with f32 resolution only when CFA provenance is absent. No fixed normalized/ADU threshold
+remains.
 
 **Adaptive sampling.** Exact median over a 60-megapixel channel is slow; lumos subsamples to
 at most 100K residuals per color. This is sound for detection thresholds: the model is evaluated
@@ -812,7 +819,8 @@ computed on fully-calibrated values; lumos matches this.
   (`cfa.rs:207–217, 263–289`) — correct.
 - Guard flat division: skip/floor pixels where the normalized flat ≤ ε (lumos: `> f32::EPSILON`).
 - Per-color means must use **exact pixel counts** per CFA color (lumos asserts `counts[c] > 0`).
-- Defect σ via **MAD** with a **floor** to avoid over-detection on clean darks.
+- Defect σ via robust MAD/upper-bulk residual scales with a propagated quantization-resolution
+  floor to avoid over-detection on clean darks.
 
 ### 5.5 CFA-aware defect correction
 
@@ -852,8 +860,8 @@ median for mono. (lumos already does all three.)
     exploding values / NaN. Floor the flat (`min_value`) or skip ε-small pixels. (§2.5)
 12. **Replacing a defect with a wrong-color or zero value.** Injects false color / dark holes.
     Use same-CFA-color neighbor median. (§3.2)
-13. **Standard deviation instead of MAD for defect thresholds.** σ is inflated by the very
-    outliers you're hunting; use MAD (50% breakdown). (§3.1)
+13. **Ordinary standard deviation for defect thresholds.** It is inflated by the outliers being
+    hunted; use robust residual scales such as MAD and a protected upper-bulk quantile. (§3.1)
 14. **Rejecting cosmic rays only after warping.** Interpolation smears CRs across pixels,
     defeating sigma clipping; run single-frame CR rejection *before* registration. (§4.3)
 15. **Treating defect maps as a substitute for dithering** (or vice-versa). They're
@@ -889,9 +897,9 @@ median for mono. (lumos already does all three.)
   1.8.8-6 "separate CFA flat scaling factors" and Siril's `compute_grey_flat`
   (`astro_image/cfa.rs:253–289`).
 - **Preserves negative pixels** through subtraction (`cfa.rs:142`) — correct for linearity.
-- **Robust MAD-based, per-color defect thresholds with a sigma floor and adaptive sampling**
-  (`defect_map.rs`) — same median center as Siril but with a **MAD σ** (vs Siril's ordinary
-  σ, vs DSS's `median+16·σ`), so more robust to the outliers being hunted; more capable than
+- **Robust per-color defect thresholds with a data-derived resolution floor and adaptive
+  sampling** (`defect_map.rs`) — the scale combines MAD, a protected upper residual quantile, and
+  propagated RAW quantization uncertainty rather than Siril/DSS's ordinary σ; more capable than
   Siril on X-Trans.
 - **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct,
   and repaired from a **defect mask** so clustered defects draw only on good (non-defect) neighbors.
@@ -1005,8 +1013,8 @@ DSS C++ source**, superseding the pass-1 search snippet).
   - `src/calibration_masters/mod.rs` (`calibrate` order, flat-dark priority, presets/fallback).
   - `src/calibration_masters/prepared_flat.rs` (one-time Mono/per-CFA normalization and divisor
     application).
-  - `src/calibration_masters/defect_map.rs` (MAD per-color thresholds, sigma floor, CFA-color
-    neighbor median, X-Trans handling).
+  - `src/calibration_masters/defect_map.rs` (robust per-color thresholds, quantization floor,
+    CFA-color neighbor median, X-Trans handling).
   - `src/astro_image/cfa.rs` `subtract` (preserves negatives).
   - `src/stacking/config.rs:163` frame-type combine presets.
 
@@ -1054,12 +1062,11 @@ DSS C++ source**, superseding the pass-1 search snippet).
 
 ### Notes on source disagreements / unverifiable items
 
-- **Defect threshold statistic differs by tool (corrected pass 2):** lumos uses **median+MAD·σ**
-  (robust, k=5); **Siril uses median + ordinary-σ** (cosmetic_correction.c:200–213 — pass 1
-  said "mean", which was **wrong**); DSS uses **median + 16·ordinary-σ** per RGB channel
-  (DarkFrame.cpp:1738, now primary-verified). All three center on the **median**; they differ
-  only in the σ estimator (MAD vs ordinary stddev) and multiplier. The σ-multiplier is a
-  tuning knob, not a correctness issue; lumos's MAD σ is the most robust.
+- **Defect threshold statistic differs by tool (corrected pass 2):** lumos uses the median plus a
+  robust MAD/upper-bulk/resolution scale (k=5); **Siril uses median + ordinary-σ**
+  (cosmetic_correction.c:200–213 — pass 1 said "mean", which was **wrong**); DSS uses
+  **median + 16·ordinary-σ** per RGB channel (DarkFrame.cpp:1738, now primary-verified). All three
+  center on the **median**; they differ in the σ estimator and multiplier.
 - **OSC flat neutral point differs:** lumos/PixInsight normalize each channel to its own mean;
   Siril equalizes R/B to green (pattern inferred by minimum green variance). Both avoid the
   global-mean color shift.

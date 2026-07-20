@@ -119,6 +119,7 @@ pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType
             cfa_type: Some(cfa_type),
             ..Default::default()
         },
+        quantization_sigma: None,
     }
 }
 
@@ -130,6 +131,7 @@ pub fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) 
             cfa_type: Some(cfa_type),
             ..Default::default()
         },
+        quantization_sigma: None,
     }
 }
 

@@ -4,6 +4,7 @@
 //! for image stacking operations; both take a [`ProgressCallback`].
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
@@ -18,8 +19,9 @@ use crate::stacking::combine::cache::{
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
+use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StackableImage, StoredLightFrame, compute_frame_stats,
+    FrameStats, SpillDirectory, StoredLightFrame, compute_frame_stats,
 };
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::ProgressCallback;
@@ -305,6 +307,85 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     }
 }
 
+fn source_quantization_sigmas(stats: &[FrameStats]) -> Option<Vec<f32>> {
+    stats
+        .iter()
+        .map(|stats| {
+            stats
+                .quantization_sigma
+                .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
+        })
+        .collect()
+}
+
+fn combined_mean_quantization_sigma(
+    source_sigmas: &[f32],
+    weights: Option<&[f32]>,
+    frame_norms: Option<&[FrameNorm]>,
+    survivor_indices: impl IntoIterator<Item = usize>,
+) -> Option<f32> {
+    let mut total_weight = 0.0f32;
+    let mut variance = 0.0f32;
+    for index in survivor_indices {
+        let weight = weights.map_or(1.0, |values| values[index]);
+        let gain = frame_norms.map_or(1.0, |norms| norms[index].channels[0].gain);
+        total_weight += weight;
+        variance += (weight * gain * source_sigmas[index]).powi(2);
+    }
+    (total_weight > 0.0).then(|| variance.sqrt() / total_weight)
+}
+
+fn conservative_quantization_sigma(
+    source_sigmas: &[f32],
+    frame_norms: Option<&[FrameNorm]>,
+) -> Option<f32> {
+    source_sigmas
+        .iter()
+        .enumerate()
+        .map(|(index, sigma)| {
+            frame_norms.map_or(*sigma, |norms| norms[index].channels[0].gain.abs() * sigma)
+        })
+        .reduce(f32::max)
+}
+
+fn combined_median_quantization_sigma(
+    source_sigmas: &[f32],
+    frame_norms: Option<&[FrameNorm]>,
+) -> Option<f32> {
+    let conservative = conservative_quantization_sigma(source_sigmas, frame_norms)?;
+    if frame_norms.is_some() {
+        return Some(conservative);
+    }
+    let (&source_sigma, rest) = source_sigmas.split_first()?;
+    if rest
+        .iter()
+        .any(|sigma| sigma.to_bits() != source_sigma.to_bits())
+    {
+        return Some(conservative);
+    }
+    let n = source_sigmas.len() as f32;
+    let factor = if source_sigmas.len().is_multiple_of(2) {
+        (3.0 * n / ((n + 1.0) * (n + 2.0))).sqrt()
+    } else {
+        (3.0 / (n + 2.0)).sqrt()
+    };
+    Some(source_sigma * factor)
+}
+
+fn record_max_sigma(max_sigma_bits: &AtomicU32, sigma: Option<f32>) {
+    if let Some(sigma) = sigma {
+        let bits = sigma.to_bits();
+        if bits > max_sigma_bits.load(Ordering::Relaxed) {
+            max_sigma_bits.fetch_max(bits, Ordering::Relaxed);
+        }
+    }
+}
+
+fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
+    let bits = max_sigma_bits.load(Ordering::Relaxed);
+    (bits != 0).then(|| f32::from_bits(bits))
+}
+
 pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
     let stats = &cache.frame_stats;
     let method = config.small_n.resolve(config.method, stats.len());
@@ -312,18 +393,86 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats, frame_norms.as_deref());
     let norms = frame_norms.as_deref();
+    let source_sigmas = source_quantization_sigmas(stats);
 
-    let pixels = match method {
-        CombineMethod::Median => cache.process_chunked(None, norms, |values, _, _| {
-            math::statistics::median_f32_mut(values)
-        }),
+    let (pixels, quantization_sigma) = match method {
+        CombineMethod::Median => {
+            let sigma = source_sigmas
+                .as_deref()
+                .and_then(|sigmas| combined_median_quantization_sigma(sigmas, norms));
+            let pixels = cache.process_chunked(None, norms, |values, _, _| {
+                math::statistics::median_f32_mut(values)
+            });
+            (pixels, sigma)
+        }
+        CombineMethod::Mean(Rejection::None) => {
+            let sigma = source_sigmas.as_deref().and_then(|sigmas| {
+                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..stats.len())
+            });
+            let pixels =
+                cache.process_chunked(weights.as_deref(), norms, |values, weights, scratch| {
+                    Rejection::None.combine_mean(values, weights, scratch)
+                });
+            (pixels, sigma)
+        }
+        // Winsorization replaces samples with order statistics, so it has no fixed linear
+        // coefficient set from which to propagate quantization variance.
+        CombineMethod::Mean(rejection @ Rejection::Winsorized(_)) => {
+            let sigma = source_sigmas
+                .as_deref()
+                .and_then(|sigmas| conservative_quantization_sigma(sigmas, norms));
+            let pixels = cache.process_chunked(
+                weights.as_deref(),
+                norms,
+                move |values, weights, scratch| rejection.combine_mean(values, weights, scratch),
+            );
+            (pixels, sigma)
+        }
         CombineMethod::Mean(rejection) => {
-            cache.process_chunked(weights.as_deref(), norms, move |values, w, scratch| {
-                rejection.combine_mean(values, w, scratch)
-            })
+            if let Some(source_sigmas) = source_sigmas.as_deref() {
+                let all_survivors_sigma = combined_mean_quantization_sigma(
+                    source_sigmas,
+                    weights.as_deref(),
+                    norms,
+                    0..stats.len(),
+                )
+                .expect("a validated CFA stack has positive total weight");
+                let max_sigma_bits = AtomicU32::new(all_survivors_sigma.to_bits());
+                let pixels =
+                    cache.process_chunked(weights.as_deref(), norms, |values, weights, scratch| {
+                        let sample =
+                            rejection.combine_mean_with_survivors(values, weights, scratch);
+                        if sample.survivor_count != source_sigmas.len() {
+                            record_max_sigma(
+                                &max_sigma_bits,
+                                combined_mean_quantization_sigma(
+                                    source_sigmas,
+                                    weights,
+                                    norms,
+                                    scratch.indices[..sample.survivor_count].iter().copied(),
+                                ),
+                            );
+                        }
+                        sample.value
+                    });
+                (pixels, tracked_sigma(&max_sigma_bits))
+            } else {
+                let pixels = cache.process_chunked(
+                    weights.as_deref(),
+                    norms,
+                    move |values, weights, scratch| {
+                        rejection.combine_mean(values, weights, scratch)
+                    },
+                );
+                (pixels, None)
+            }
         }
     };
-    CfaImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions)
+    CfaImage {
+        data: pixels.into_l(),
+        metadata: cache.core.metadata.clone(),
+        quantization_sigma,
+    }
 }
 
 /// Coverage-weighted counterpart to [`run_stacking`] for a [`LightCache`]: identical combine math,
@@ -364,14 +513,16 @@ mod tests {
     use arrayvec::ArrayVec;
 
     use crate::io::astro_image::PixelData;
+    use crate::io::astro_image::cfa::{CfaImage, CfaType};
     use crate::math::statistics::ChannelStats;
+    use crate::stacking::combine::cache::CacheCore;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::{Normalization, SmallN};
     use crate::stacking::combine::normalization;
     use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
-    use crate::stacking::frame_store::store_light_frame;
+    use crate::stacking::frame_store::{compute_frame_stats, frame_from_memory, store_light_frame};
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -391,6 +542,156 @@ mod tests {
         frame.coverage = coverage;
         frame.confidence = confidence;
         frame
+    }
+
+    fn make_cfa_stack_cache(
+        frame_pixels: Vec<Vec<f32>>,
+        source_sigmas: &[f32],
+        dimensions: ImageDimensions,
+    ) -> CfaCache {
+        assert_eq!(frame_pixels.len(), source_sigmas.len());
+        let images: Vec<CfaImage> = frame_pixels
+            .into_iter()
+            .zip(source_sigmas)
+            .map(|(pixels, &sigma)| {
+                let mut image = crate::testing::make_cfa(
+                    dimensions.width(),
+                    dimensions.height(),
+                    pixels,
+                    CfaType::Mono,
+                );
+                image.quantization_sigma = Some(sigma);
+                image
+            })
+            .collect();
+        let metadata = images[0].metadata.clone();
+        let frame_stats = images.iter().map(compute_frame_stats).collect();
+        let frames = images.into_iter().map(frame_from_memory).collect();
+        CfaCache {
+            frames,
+            frame_stats,
+            core: CacheCore {
+                spill_directory: None,
+                dimensions,
+                metadata,
+                config: CacheConfig::default(),
+                progress: ProgressCallback::default(),
+                cancel: CancelToken::never(),
+            },
+        }
+    }
+
+    #[test]
+    fn quantization_helpers_follow_per_frame_coefficients_and_median_order_statistics() {
+        let source_sigma = 0.01;
+        let equal_sigmas = [source_sigma; 4];
+        let equal_mean = combined_mean_quantization_sigma(&equal_sigmas, None, None, 0..4).unwrap();
+        assert!(
+            (equal_mean - 0.005).abs() < f32::EPSILON,
+            "four-frame equal mean: σ/√4 = 0.005, got {equal_mean}"
+        );
+
+        let source_sigmas = [0.01, 0.02];
+        let weighted =
+            combined_mean_quantization_sigma(&source_sigmas, Some(&[0.75, 0.25]), None, 0..2)
+                .unwrap();
+        let expected_weighted = ((0.75f32 * 0.01).powi(2) + (0.25f32 * 0.02).powi(2)).sqrt();
+        assert!(
+            (weighted - expected_weighted).abs() < f32::EPSILON,
+            "weighted unequal-source mean: expected {expected_weighted}, got {weighted}"
+        );
+
+        let median_two = combined_median_quantization_sigma(&[source_sigma; 2], None).unwrap();
+        let median_three = combined_median_quantization_sigma(&[source_sigma; 3], None).unwrap();
+        assert!(
+            (median_two - source_sigma / 2.0f32.sqrt()).abs() < f32::EPSILON,
+            "two-sample uniform median averages both samples: σ/√2, got {median_two}"
+        );
+        assert!(
+            (median_three - source_sigma * (3.0f32 / 5.0).sqrt()).abs() < f32::EPSILON,
+            "three-sample uniform median order statistic: σ·√(3/5), got {median_three}"
+        );
+        assert!(
+            (combined_median_quantization_sigma(&source_sigmas, None).unwrap() - 0.02).abs()
+                < f32::EPSILON,
+            "unequal uniform source widths must retain the conservative largest σ"
+        );
+    }
+
+    #[test]
+    fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
+        let dimensions = ImageDimensions::new((2, 1), 1);
+        let mut normalized_cache =
+            make_cfa_stack_cache(vec![vec![0.4; 2], vec![0.2; 2]], &[0.01, 0.02], dimensions);
+        normalized_cache.frame_stats[0].channels[0] = ChannelStats {
+            median: 0.4,
+            mad: 0.01,
+        };
+        normalized_cache.frame_stats[1].channels[0] = ChannelStats {
+            median: 0.2,
+            mad: 0.02,
+        };
+        let normalized = run_stacking(
+            &normalized_cache,
+            &StackConfig {
+                method: CombineMethod::Mean(Rejection::None),
+                weighting: Weighting::Manual(vec![0.25, 0.75]),
+                normalization: Normalization::Multiplicative,
+                small_n: SmallN::none(),
+                ..Default::default()
+            },
+        );
+        let expected_normalized_sigma =
+            ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
+        assert_eq!(normalized.data.to_vec(), vec![0.4; 2]);
+        assert!(
+            (normalized.quantization_sigma.unwrap() - expected_normalized_sigma).abs()
+                < f32::EPSILON,
+            "weighted normalized σ must use each frame's own source σ and gain"
+        );
+
+        let median_cache = make_cfa_stack_cache(
+            vec![vec![0.3; 2], vec![0.4; 2], vec![0.5; 2]],
+            &[0.01; 3],
+            dimensions,
+        );
+        let median = run_stacking(&median_cache, &StackConfig::median());
+        let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
+        assert_eq!(median.data.to_vec(), vec![0.4; 2]);
+        assert!(
+            (median.quantization_sigma.unwrap() - expected_median_sigma).abs() < f32::EPSILON,
+            "an equal-source three-frame median must use the exact uniform order statistic"
+        );
+
+        let winsorized_cache =
+            make_cfa_stack_cache(vec![vec![0.3; 2], vec![0.5; 2]], &[0.01, 0.02], dimensions);
+        let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5));
+        assert!(
+            (winsorized.quantization_sigma.unwrap() - 0.02).abs() < f32::EPSILON,
+            "nonlinear unequal-source combines must retain the conservative largest σ"
+        );
+
+        let rejection_cache = make_cfa_stack_cache(
+            (0..8)
+                .map(|frame| vec![[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0][frame], 1.0])
+                .collect(),
+            &[0.01; 8],
+            dimensions,
+        );
+        let rejected = run_stacking(
+            &rejection_cache,
+            &StackConfig {
+                method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+                small_n: SmallN::none(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(rejected.data.to_vec(), vec![4.0, 1.0]);
+        let expected_rejected_sigma = 0.01 / 7.0f32.sqrt();
+        assert!(
+            (rejected.quantization_sigma.unwrap() - expected_rejected_sigma).abs() < f32::EPSILON,
+            "the global CFA floor must use the least-reduced pixel's seven survivors"
+        );
     }
 
     /// The load-bearing guarantee for memory-aware stacking: spilling frames to disk (mmap) and
@@ -439,7 +740,7 @@ mod tests {
 
         let scratch = ScratchDirectory::new("lumos_tier_test");
         let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
-        let metadata = frames[0].image.metadata().clone();
+        let metadata = frames[0].image.metadata.clone();
         let stored = frames
             .into_iter()
             .enumerate()
@@ -833,6 +1134,7 @@ mod tests {
                 );
                 frame.source_stats = FrameStats {
                     channels: [ChannelStats { median, mad }].into_iter().collect(),
+                    quantization_sigma: None,
                 };
                 frame
             })
@@ -1778,7 +2080,10 @@ mod tests {
         let frame_stats = |mad: f32| {
             let mut channels = ArrayVec::new();
             channels.push(ChannelStats { median: 0.5, mad });
-            FrameStats { channels }
+            FrameStats {
+                channels,
+                quantization_sigma: None,
+            }
         };
         let frame_norm = |gain: f32| {
             let mut channels = ArrayVec::new();

@@ -34,8 +34,8 @@ use defect_map::DefectMap;
 
 /// Default sigma threshold for defect detection.
 ///
-/// A pixel is flagged as defective if it deviates from the per-color median
-/// by more than `sigma_threshold × σ` (where σ is estimated from MAD).
+/// A pixel is flagged as defective if it exceeds the per-color residual median by more than
+/// `sigma_threshold × σ`, where robust bulk statistics and source resolution determine σ.
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
 
@@ -128,7 +128,7 @@ pub struct CalibrationMasters {
 }
 
 const CACHE_MAGIC: [u8; 8] = *b"LUMOSCM\0";
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, serde::Serialize)]
 struct CalibrationMastersCacheRef<'a> {

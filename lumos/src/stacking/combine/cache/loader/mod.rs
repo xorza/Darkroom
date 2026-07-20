@@ -471,9 +471,9 @@ fn load_and_cache_frame<I: StackableImage>(
 
     // Check if all channel files exist, have correct size, and source hasn't changed
     let meta_valid = validate_source_meta(cache_dir, base_filename, &identity_before);
-    let has_stats = stats_path(cache_dir, base_filename).exists();
+    let cached_stats = read_frame_stats(cache_dir, base_filename);
     let can_reuse = meta_valid
-        && has_stats
+        && cached_stats.is_some()
         && (0..channels).all(|c| {
             let channel_path = cache_dir.join(channel_filename(base_filename, c));
             reusable_plane(&channel_path, dimensions)
@@ -491,8 +491,7 @@ fn load_and_cache_frame<I: StackableImage>(
             "Reusing existing cache files"
         );
         let frame = StoredFrame { channels: planes };
-        let stats = read_frame_stats(cache_dir, base_filename)
-            .expect("stats sidecar missing for valid cache");
+        let stats = cached_stats.expect("valid cache has readable frame statistics");
         Ok(LoadedStoredFrame { frame, stats })
     } else {
         // Load image and write to cache
@@ -533,7 +532,8 @@ fn stats_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
 }
 
 /// Write frame stats to a sidecar file.
-/// Format: [n_channels: u8] [median_0: f32] [mad_0: f32] [median_1: f32] ...
+/// Format: [n_channels: u8] [has_quantization: u8] [quantization_sigma: f32]
+/// [median_0: f32] [mad_0: f32] [median_1: f32] ...
 fn write_frame_stats(
     cache_dir: &Path,
     base_filename: &str,
@@ -541,8 +541,10 @@ fn write_frame_stats(
 ) -> Result<(), FrameStoreError> {
     let path = stats_path(cache_dir, base_filename);
     let n = stats.channels.len();
-    let mut buf = Vec::with_capacity(1 + n * 8);
+    let mut buf = Vec::with_capacity(6 + n * 8);
     buf.push(n as u8);
+    buf.push(u8::from(stats.quantization_sigma.is_some()));
+    buf.extend_from_slice(&stats.quantization_sigma.unwrap_or_default().to_le_bytes());
     for ch in &stats.channels {
         buf.extend_from_slice(&ch.median.to_le_bytes());
         buf.extend_from_slice(&ch.mad.to_le_bytes());
@@ -559,21 +561,35 @@ fn write_sidecar(path: PathBuf, bytes: &[u8]) -> Result<(), FrameStoreError> {
 fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats> {
     let path = stats_path(cache_dir, base_filename);
     let bytes = std::fs::read(&path).ok()?;
-    if bytes.is_empty() {
+    if bytes.len() < 6 {
         return None;
     }
     let n = bytes[0] as usize;
-    if bytes.len() != 1 + n * 8 {
+    if bytes.len() != 6 + n * 8 {
         return None;
     }
+    let quantization_sigma = match bytes[1] {
+        0 => None,
+        1 => {
+            let sigma = f32::from_le_bytes(bytes[2..6].try_into().unwrap());
+            if !sigma.is_finite() || sigma <= 0.0 {
+                return None;
+            }
+            Some(sigma)
+        }
+        _ => return None,
+    };
     let mut channels = ArrayVec::new();
     for i in 0..n {
-        let off = 1 + i * 8;
+        let off = 6 + i * 8;
         let median = f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
         let mad = f32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
         channels.push(ChannelStats { median, mad });
     }
-    Some(FrameStats { channels })
+    Some(FrameStats {
+        channels,
+        quantization_sigma,
+    })
 }
 
 #[cfg(test)]

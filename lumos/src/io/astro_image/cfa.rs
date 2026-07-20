@@ -11,13 +11,16 @@ use rayon::prelude::*;
 use common::file_utils;
 
 use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
+
+/// Standard deviation of uniform error spanning one ADC step: `1 / √12`.
+pub(crate) const QUANTIZATION_SIGMA_PER_STEP: f32 = 0.288_675_13;
 
 /// CFA pattern anchored at the origin of the image data it accompanies.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -59,6 +62,8 @@ pub struct CfaImage {
     /// Layout: row-major, width * height pixels.
     pub data: Buffer2<f32>,
     pub metadata: AstroImageMetadata,
+    /// Source-quantization uncertainty in the current CFA sample units.
+    pub(crate) quantization_sigma: Option<f32>,
 }
 
 impl StackableImage for CfaImage {
@@ -75,6 +80,10 @@ impl StackableImage for CfaImage {
         &self.metadata
     }
 
+    fn quantization_sigma(&self) -> Option<f32> {
+        self.quantization_sigma
+    }
+
     fn load(path: &std::path::Path) -> Result<Self, ImageError> {
         load_raw_cfa(path)
     }
@@ -84,17 +93,6 @@ impl StackableImage for CfaImage {
         raw_dimensions(path)
             .ok()
             .map(|size| ImageDimensions::new(size, 1))
-    }
-
-    fn from_stacked(
-        pixels: PixelData,
-        metadata: AstroImageMetadata,
-        _dimensions: ImageDimensions,
-    ) -> Self {
-        CfaImage {
-            data: pixels.into_l(),
-            metadata,
-        }
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {
@@ -213,6 +211,7 @@ mod tests {
                 camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
                 ..Default::default()
             },
+            quantization_sigma: Some(0.000_01),
         };
         let path = common::test_utils::test_output_path("cfa_master_roundtrip.lcm");
         cfa.save(&path).unwrap();
@@ -228,6 +227,7 @@ mod tests {
             loaded.metadata.camera_white_balance,
             Some([2.0, 1.0, 1.5, 1.0])
         );
+        assert_eq!(loaded.quantization_sigma, Some(0.000_01));
     }
 
     #[test]

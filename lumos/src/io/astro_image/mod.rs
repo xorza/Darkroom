@@ -481,18 +481,6 @@ impl StackableImage for AstroImage {
         AstroImage::from_file(path)
     }
 
-    fn from_stacked(
-        pixels: PixelData,
-        metadata: AstroImageMetadata,
-        dimensions: ImageDimensions,
-    ) -> Self {
-        AstroImage {
-            metadata,
-            dimensions,
-            pixels,
-        }
-    }
-
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         let mut planes = arrayvec::ArrayVec::new();
         match self.pixels {

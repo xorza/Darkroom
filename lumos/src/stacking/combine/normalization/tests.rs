@@ -9,6 +9,7 @@ fn channel_stats(median: f32, mad: f32) -> ChannelStats {
 fn frame_stats(median: f32, mad: f32) -> FrameStats {
     FrameStats {
         channels: [channel_stats(median, mad)].into_iter().collect(),
+        quantization_sigma: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             ]
             .into_iter()
             .collect(),
+            quantization_sigma: None,
         },
         FrameStats {
             channels: [
@@ -39,6 +41,7 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             ]
             .into_iter()
             .collect(),
+            quantization_sigma: None,
         },
     ];
     assert_eq!(select_reference_frame(rgb.iter()), 1);

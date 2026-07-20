@@ -21,7 +21,7 @@ use crate::io::astro_image::error::ImageError;
 
 use rayon::prelude::*;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use crate::math::vec2us::Vec2us;
@@ -1047,6 +1047,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     Ok(CfaImage {
         data: Buffer2::new(raw.width, raw.height, pixels),
         metadata,
+        quantization_sigma: Some(raw.black_level.inv_range * QUANTIZATION_SIGMA_PER_STEP),
     })
 }
 

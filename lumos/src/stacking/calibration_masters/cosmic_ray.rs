@@ -652,6 +652,7 @@ mod tests {
                 cfa_type: Some(CfaType::Mono),
                 ..Default::default()
             },
+            quantization_sigma: None,
         }
     }
 
@@ -794,6 +795,7 @@ mod tests {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
             },
+            quantization_sigma: None,
         };
         let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();
@@ -839,6 +841,7 @@ mod tests {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
             },
+            quantization_sigma: None,
         };
         reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();
@@ -894,6 +897,7 @@ mod tests {
                 cfa_type: Some(cfa.clone()),
                 ..Default::default()
             },
+            quantization_sigma: None,
         };
         let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();

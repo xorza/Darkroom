@@ -870,6 +870,13 @@ pub enum Rejection {
     Gesd(GesdConfig),
 }
 
+/// Mean reduction plus the number of source frames retained by rejection.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MeanSample {
+    pub(crate) value: f32,
+    pub(crate) survivor_count: usize,
+}
+
 impl Default for Rejection {
     fn default() -> Self {
         Self::SigmaClip(SigmaClipConfig::new(2.5, 3))
@@ -932,18 +939,32 @@ impl Rejection {
         weights: Option<&[f32]>,
         scratch: &mut ScratchBuffers,
     ) -> f32 {
+        self.combine_mean_with_survivors(values, weights, scratch)
+            .value
+    }
+
+    pub(crate) fn combine_mean_with_survivors(
+        &self,
+        values: &mut [f32],
+        weights: Option<&[f32]>,
+        scratch: &mut ScratchBuffers,
+    ) -> MeanSample {
         // None doesn't reorder values, so weights align directly
         if let Rejection::None = self {
-            return match weights {
+            let value = match weights {
                 Some(w) => weighted_mean_f32(values, w),
                 None => mean_f32(values),
+            };
+            return MeanSample {
+                value,
+                survivor_count: values.len(),
             };
         }
 
         // Rejection variants that reorder values: use index mapping for weights
         let remaining = self.reject(values, scratch);
 
-        match weights {
+        let value = match weights {
             Some(w) if remaining > 0 => weighted_mean_indexed(
                 &values[..remaining],
                 w,
@@ -951,6 +972,10 @@ impl Rejection {
                 &mut scratch.floats_a,
             ),
             _ => mean_f32(&values[..remaining]),
+        };
+        MeanSample {
+            value,
+            survivor_count: remaining,
         }
     }
 

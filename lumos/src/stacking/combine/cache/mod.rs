@@ -14,8 +14,7 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_light_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
-    optimal_chunk_rows,
+    FrameStats, SpillDirectory, StoredFrame, StoredLightFrame, StoredPlane, optimal_chunk_rows,
 };
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
@@ -475,12 +474,21 @@ impl LightCache {
     /// Assemble the combined image, geometric coverage, and channel-shaped survivor quality.
     pub(crate) fn finish_product(&self, combined: LightCombineOutput) -> StackProduct {
         let dimensions = self.core.dimensions;
-        let image =
-            AstroImage::from_stacked(combined.pixels, self.core.metadata.clone(), dimensions);
-        let weight =
-            AstroImage::from_stacked(combined.weight, AstroImageMetadata::default(), dimensions);
-        let variance =
-            AstroImage::from_stacked(combined.variance, AstroImageMetadata::default(), dimensions);
+        let image = AstroImage {
+            metadata: self.core.metadata.clone(),
+            dimensions,
+            pixels: combined.pixels,
+        };
+        let weight = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            dimensions,
+            pixels: combined.weight,
+        };
+        let variance = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            dimensions,
+            pixels: combined.variance,
+        };
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
