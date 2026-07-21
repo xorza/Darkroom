@@ -130,14 +130,14 @@ fn prepare_image(value: &DynamicValue, max_dim: u32) -> Result<PreparedImage, St
         .buffer
         .make_cpu(&ProcessingContext::cpu_only())
         .map_err(|e| format!("could not read image pixels: {e}"))?;
-    let native_size = UVec2::new(cpu.desc.width as u32, cpu.desc.height as u32);
+    let native_size = UVec2::new(cpu.desc().width as u32, cpu.desc().height as u32);
     if native_size.x == 0 || native_size.y == 0 {
         return Err("image is empty".to_owned());
     }
-    let native_format = cpu.desc.color_format;
+    let native_format = cpu.desc().color_format;
     let target = capped_target(native_size, max_dim);
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
-    let desc = rgba.desc;
+    let desc = rgba.desc();
     assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
     assert_eq!(pixels.len(), desc.row_bytes() * desc.height);

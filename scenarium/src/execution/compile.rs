@@ -130,7 +130,34 @@ mod tests {
     use crate::execution::cache::RuntimeCache;
     use crate::execution::identity::test_support::FlattenMapBuilder;
     use crate::execution::program::ExecutionNode;
+    use crate::graph::NodeSearch;
+    use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::FuncId;
+    use crate::testing::{TestFuncHooks, test_func_lib};
+
+    #[test]
+    fn compilation_retains_a_disabled_composite_interior_as_disabled() {
+        let library = test_func_lib(TestFuncHooks::default());
+        let mut nested = Graph::new("Nested");
+        let interior_id = nested.add(library.by_name("Print").unwrap().into());
+        let nested_id = GraphId::unique();
+
+        let mut graph = Graph::default();
+        let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        graph
+            .find_mut(&instance_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
+        graph.insert_graph(nested_id, nested);
+
+        let compilation = Compiler::default().compile(&graph, &library).unwrap();
+        let address = compilation.compiled.node_address(interior_id);
+        let flat_id = compilation.flatten_map.flat_node(&address).unwrap();
+        assert!(
+            compilation.compiled.program.e_nodes[&flat_id].disabled,
+            "the disabled instance marks its compiled interior effectively disabled"
+        );
+    }
 
     #[test]
     fn node_address_chooses_a_representative_and_preserves_unknown_ids() {

@@ -27,7 +27,7 @@ use crate::core::document::{BoundarySide, ItemRef, Viewport};
 /// the document, so they share one intent / step rather than a variant each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeProperty {
-    /// `Node::disabled` — excluded from execution, skipped at flatten time.
+    /// `Node::disabled` — excluded from execution unless explicitly seeded.
     Disabled(bool),
     /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
     RuntimeCache(CacheMode),
@@ -125,9 +125,9 @@ pub(crate) enum Intent {
     },
     /// Set one scalar property of a node — its `disabled` flag or its cache
     /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: `D`
-    /// flips `Disabled` (skips the node at flatten time); the `R`/`↓` chips each
-    /// flip one bit of `RuntimeCache` (the disk bit persists the output so a
-    /// reproducible node reloads instead of recomputing).
+    /// flips `Disabled` (ambient runs exclude it; an explicit node seed overrides
+    /// it once); the `R`/`↓` chips each flip one bit of `RuntimeCache` (the disk bit
+    /// persists the output so a reproducible node reloads instead of recomputing).
     SetNodeProperty {
         node_id: NodeId,
         to: NodeProperty,

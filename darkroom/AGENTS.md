@@ -266,8 +266,9 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
 - **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
   `ExecuteNodes` seeding one node's cone, its outputs pinned resident for the
-  preview fetch. Two triggers, both gated on `SceneNode::runnable` (disabled/
-  instance/boundary/missing nodes don't resolve as seeds): the header's play
+  preview fetch. Two triggers, both gated on `SceneNode::runnable` (instance/
+  boundary/missing nodes don't resolve as seeds; Scenarium's planner treats an
+  explicitly seeded disabled func as enabled for that run): the header's play
   chip left of the title (drawn in `gui/node/header.rs`, click scanned by
   `emit_play_clicks` and translated at canvas level) and the node context
   menu's "Run to this node".

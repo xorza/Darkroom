@@ -202,11 +202,12 @@ pub(crate) struct SceneNode {
 
 impl SceneNode {
     /// Whether this node can seed a "run to this node" — drives the header
-    /// play chip and the context-menu item. A disabled node is flattened
-    /// out of the program, an instance/boundary node has no flat identity,
-    /// and a `missing` stub resolves to nothing — none makes a valid seed.
+    /// play chip and the context-menu item. Disabled func nodes remain valid
+    /// because a targeted run overrides that flag temporarily. An instance/
+    /// boundary node has no flat identity, and a `missing` stub resolves to
+    /// nothing.
     pub(crate) fn runnable(&self) -> bool {
-        !self.boundary && !self.disabled && !self.missing && self.graph.is_none()
+        !self.boundary && !self.missing && self.graph.is_none()
     }
 }
 
@@ -781,7 +782,8 @@ mod tests {
         // saved against an older library): a func id and a shared graph id.
         let library = math_library();
         let mut graph = Graph::default();
-        let known: Node = library.by_name("Add").unwrap().into();
+        let mut known: Node = library.by_name("Add").unwrap().into();
+        known.disabled = true;
         let mut ghost_func = Node::new(NodeKind::Func(
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
         ));
@@ -830,7 +832,10 @@ mod tests {
 
         // Run seeding follows resolution: the resolved func can be run to,
         // the stubs (and any graph instance) can't.
-        assert!(known_node.runnable(), "a resolved func node is runnable");
+        assert!(
+            known_node.disabled && known_node.runnable(),
+            "a resolved disabled func can be targeted by a one-run override"
+        );
         assert!(
             !ghost_func_node.runnable() && !ghost_graph_node.runnable(),
             "stubs offer no run affordance — they resolve to nothing"

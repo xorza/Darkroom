@@ -114,7 +114,9 @@ backs up boundary-resolution walks.
 - func and special nodes emit flat execution nodes;
 - graph nodes push the instance id onto the path and recurse into the resolved
   `Graph`;
-- boundary and disabled nodes emit nothing.
+- boundary nodes emit nothing;
+- disabled function and special nodes remain in the program with an effective
+  disabled bit inherited through composite ancestors.
 
 Top-level nodes keep their authoring `NodeId`. Nested ids are deterministic hashes
 of the descent path and interior id, so stable instances retain cache identity.
@@ -124,7 +126,8 @@ Data bindings cross boundaries as follows:
 - a func or special producer resolves to its flat producer id;
 - a graph producer descends through the matching `GraphOutput` input;
 - a `GraphInput` producer ascends through the enclosing instance input;
-- a disabled producer resolves to no source.
+- a disabled producer remains connected, but planning treats it as unavailable
+  unless that node is explicitly seeded for the run.
 
 Event resolution similarly maps `GraphEvent` inward to a concrete emitter and
 expands composite subscribers through `GraphInput`. The resulting execution program

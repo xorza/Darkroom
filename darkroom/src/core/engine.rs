@@ -174,7 +174,8 @@ impl Engine {
     }
 
     /// Compile `graph` and evaluate only `node_id`'s upstream cone, delivering
-    /// its outputs for the preview fetch ("run to this node").
+    /// its outputs for the preview fetch ("run to this node"). The explicit
+    /// node seed overrides a compiled disabled target during planning.
     /// Returns whether it was sent — a compile failure is reported to
     /// [`Self::status`] and nothing reaches the worker. Results arrive via
     /// [`Self::drain_worker`].

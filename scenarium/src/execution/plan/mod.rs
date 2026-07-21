@@ -3,10 +3,10 @@
 //! event subscribers, event-trigger owners — plus every sink when a fired event
 //! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers) and each node's [`NodeVerdict`]
-//! (runnable vs blocked on inputs) — purely structural, no cache/digest state. The
-//! resolver and executor consume the plan; it is reused via a buffer on the engine and
-//! the `Planner` owns reusable DFS scratch, so a repeated plan on an unchanged graph
-//! allocates nothing.
+//! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
+//! state. The resolver and executor consume the plan; it is reused via a buffer on the
+//! engine and the `Planner` owns reusable DFS scratch, so a repeated plan on an
+//! unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
@@ -16,14 +16,18 @@ use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.
-/// The planner decides only *runnable vs blocked on inputs*; *cached vs recompute* is an
-/// resolver call after planning. The default (`MissingInputs`) is the conservative "not
-/// yet established as runnable" value for nodes outside `process_order`, whose verdict
-/// is never read.
+/// The planner decides whether it is runnable, disabled, or blocked on inputs;
+/// *cached vs recompute* is a resolver call after planning. The default
+/// (`MissingInputs`) is the conservative "not yet established as runnable" value;
+/// disabled dependencies outside `process_order` receive the explicit
+/// [`Disabled`](NodeVerdict::Disabled) verdict instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NodeVerdict {
     /// Runnable this round; the resolver then selects reuse or execution.
     Execute,
+    /// Disabled for this run. Consumers treat it like an unbound input:
+    /// required inputs fail while optional inputs remain runnable.
+    Disabled,
     /// A required input is unsatisfied (unbound, or fed by a non-runnable producer);
     /// can't run, and the "missing" verdict propagates to its consumers.
     #[default]
@@ -49,17 +53,22 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdi
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => verdicts[&addr.target].missing_required_inputs(),
+        ExecutionBinding::Bind(addr) => match verdicts[&addr.target] {
+            NodeVerdict::Execute => false,
+            NodeVerdict::Disabled => input.required,
+            NodeVerdict::MissingInputs => true,
+        },
     }
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionPlan {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
-    /// seeded from the sinks — every reachable node, producer-first. The resolver
-    /// refines it into the surviving run before execution.
+    /// seeded from the roots. Disabled dependencies stay outside the order unless they
+    /// are explicit node seeds. The resolver refines it into the surviving run before
+    /// execution.
     pub(crate) process_order: Vec<NodeId>,
-    /// Per-node verdict (execute / missing-inputs), keyed by node id.
+    /// Per-node verdict (execute / disabled / missing-inputs), keyed by node id.
     pub(crate) verdicts: NodeMap<NodeVerdict>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
@@ -181,8 +190,8 @@ impl Planner {
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
-                    let inputs = program.e_nodes[&node_id].inputs;
-                    let missing = program.inputs[inputs.range()]
+                    let missing = program
+                        .node_inputs(&program.e_nodes[&node_id])
                         .iter()
                         .any(|e_input| input_missing(e_input, &plan.verdicts));
                     *plan.verdicts.get_mut(&node_id).unwrap() = if missing {
@@ -202,11 +211,19 @@ impl Planner {
                 Color::White => {}
             }
 
+            let e_node = &program.e_nodes[&node_id];
+            // Disabled nodes block dependency traversal, but an explicit node
+            // seed is pinned before this walk and overrides disable for this run.
+            if e_node.disabled && !plan.pinned.contains(&node_id) {
+                *self.color.get_mut(&node_id).unwrap() = Color::Black;
+                *plan.verdicts.get_mut(&node_id).unwrap() = NodeVerdict::Disabled;
+                continue;
+            }
+
             *self.color.get_mut(&node_id).unwrap() = Color::Gray;
             self.stack.push(Visit::Done(node_id));
 
-            let span = program.e_nodes[&node_id].inputs;
-            for e_input in &program.inputs[span.range()] {
+            for e_input in program.node_inputs(e_node) {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     self.stack.push(Visit::Discover(addr.target));
                 }
@@ -220,8 +237,7 @@ impl Planner {
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
 /// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
 /// event subscriber, every sink node, and (for the event loop) every node owning a
-/// subscribed event. Not deduped: a node seeding via several categories appears more than
-/// once.
+/// subscribed event.
 ///
 /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
@@ -235,9 +251,9 @@ fn collect_roots(
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
     // Node seeds (on-demand preview): roots like any other, plus pinned so every output is
-    // computed and delivered. Seeds are batched with the
-    // program they target, so an id that doesn't resolve (deleted, disabled, or stale) is
-    // inconsistent caller state — fail the run rather than silently skip the seed.
+    // computed and delivered. Seeds are batched with the program they target, so an id
+    // that doesn't resolve is inconsistent caller state — fail the run rather than
+    // silently skip the seed. `pinned` also records the one-run disabled override.
     for address in &seeds.nodes {
         let node_id =
             resolve_node_id(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
@@ -270,11 +286,12 @@ fn collect_roots(
     // loop — nodes owning a subscribed event.
     for node_id in program.e_nodes.keys().copied() {
         let e_node = &program.e_nodes[&node_id];
-        if (run_sinks && e_node.sink)
-            || (seeds.event_triggers
-                && program.events[e_node.events.range()]
-                    .iter()
-                    .any(|ev| !ev.subscribers.is_empty()))
+        if !e_node.disabled
+            && ((run_sinks && e_node.sink)
+                || (seeds.event_triggers
+                    && program.events[e_node.events.range()]
+                        .iter()
+                        .any(|ev| !ev.subscribers.is_empty())))
         {
             plan.roots.insert(node_id);
         }

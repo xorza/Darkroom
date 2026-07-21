@@ -551,10 +551,10 @@ async fn start_stop_event_loop() {
     assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
 
-/// `ExecuteNodes` end-to-end: an `Update` + `ExecuteNodes` batch runs only the seeded
-/// node's cone (3 of the fixture's 5 nodes; the sink `Print` panics if reached).
+/// `ExecuteNodes` end-to-end: the run seed overrides a compiled disabled node and the
+/// worker runs only its cone (the sink `Print` panics if reached).
 #[tokio::test]
-async fn execute_nodes_runs_only_the_seeded_cone() {
+async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 
@@ -568,6 +568,18 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
         node.cache = CacheMode::None;
     }
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    graph
+        .find_mut(&sum_id, NodeSearch::TopLevel)
+        .unwrap()
+        .disabled = true;
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let get_b_id = graph
+        .find_by_name("get_b", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
 
     let (worker, mut rx) = finished_worker(8);
     worker
@@ -589,7 +601,58 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
         .expect("worker timed out")
         .expect("worker channel closed")
         .expect("run ok");
-    assert_eq!(stats.executed_nodes.len(), 3, "only sum's cone ran");
+    let mut executed = stats
+        .executed_nodes
+        .iter()
+        .map(|node| node.node_id)
+        .collect::<Vec<_>>();
+    executed.sort();
+    let mut expected = vec![get_a_id, get_b_id, sum_id];
+    expected.sort();
+    assert_eq!(executed, expected, "only the disabled sum's cone ran");
+    assert!(
+        graph.find(&sum_id, NodeSearch::TopLevel).unwrap().disabled,
+        "execution does not mutate the authoring graph"
+    );
+}
+
+/// A compiled disabled sink must not participate in an ordinary sink run. The default
+/// hooks panic if any node executes.
+#[tokio::test]
+async fn disabled_sink_stays_out_of_sink_runs() {
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+    let library = test_func_lib(TestFuncHooks::default());
+    let mut graph = test_graph();
+    let print_id = graph
+        .find_by_name("Print", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    graph
+        .find_mut(&print_id, NodeSearch::TopLevel)
+        .unwrap()
+        .disabled = true;
+
+    let (worker, mut rx) = finished_worker(8);
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
+            },
+            WorkerMessage::ExecuteSinks,
+        ])
+        .unwrap();
+
+    let stats = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("worker timed out")
+        .expect("worker channel closed")
+        .expect("run ok");
+    assert!(stats.executed_nodes.is_empty());
+    assert!(stats.missing_inputs.is_empty());
 }
 
 #[tokio::test]

@@ -105,6 +105,12 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         p.validate(&f.compiled.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}")
     );
+    *p.verdicts.get_mut(&a).unwrap() = NodeVerdict::Disabled;
+    assert_eq!(
+        p.validate(&f.compiled.program).unwrap_err().to_string(),
+        format!("execution node {b:?} appears before dependency {a:?}"),
+        "a disabled verdict cannot hide an enabled dependency"
+    );
 }
 
 #[test]
@@ -137,6 +143,55 @@ fn optional_unbound_input_does_not_block() {
     assert!(!p.verdicts[&a].missing_required_inputs());
     assert!(p.verdicts[&a].wants_execute());
     assert_eq!(p.process_order, vec![a]);
+}
+
+#[test]
+fn explicit_seed_overrides_disabled_dependency_for_this_run() {
+    let mut f = Fix::default();
+    let producer = f.node(false, &[], 1);
+    f.compiled
+        .program
+        .e_nodes
+        .get_mut(&producer)
+        .unwrap()
+        .disabled = true;
+    let required = f.node(true, &[(true, bind(producer, 0))], 1);
+    let optional = f.node(true, &[(false, bind(producer, 0))], 1);
+
+    let mut planner = Planner::default();
+    let mut plan = ExecutionPlan::default();
+    planner
+        .plan(
+            &f.compiled,
+            &RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            &mut plan,
+        )
+        .unwrap();
+    assert_eq!(plan.verdicts[&producer], NodeVerdict::Disabled);
+    assert_eq!(plan.verdicts[&required], NodeVerdict::MissingInputs);
+    assert_eq!(plan.verdicts[&optional], NodeVerdict::Execute);
+
+    planner
+        .plan(
+            &f.compiled,
+            &RunSeeds {
+                sinks: true,
+                nodes: vec![NodeAddress::root(producer)],
+                ..Default::default()
+            },
+            &mut plan,
+        )
+        .unwrap();
+    for node_id in [producer, required, optional] {
+        assert_eq!(
+            plan.verdicts[&node_id],
+            NodeVerdict::Execute,
+            "the explicit producer seed makes every consumer runnable"
+        );
+    }
 }
 
 #[test]

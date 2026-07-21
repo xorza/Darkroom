@@ -71,10 +71,10 @@ fn execution_node_ids(
 }
 
 /// Names of the nodes that actually recomputed in the last run, in schedule order.
-/// `process_order` now schedules every reachable node (the planner is structural), so
-/// this keeps only the *runnable* ones (`wants_execute` — never a `MissingInputs` node)
-/// that actually ran (not a reused cache). Before any run `node_ran` is `true` for all,
-/// so it reads as "the runnable schedule" for plan-only (`prepare_execution`) tests.
+/// `process_order` schedules every reachable runnable node while leaving unseeded
+/// disabled dependencies outside. This keeps only the `wants_execute` nodes that
+/// actually ran (not a reused cache). Before any run `node_ran` is `true` for all, so it
+/// reads as "the runnable schedule" for plan-only (`prepare_execution`) tests.
 fn execution_node_names_in_order(
     execution_graph: &ExecutionEngine,
     graph: &Graph,
@@ -2288,13 +2288,13 @@ mod missing_inputs {
 
 mod disabled_nodes {
     use super::*;
+    use crate::execution::plan::NodeVerdict;
 
-    /// Disabling `sum` drops it from the program entirely, and its
-    /// consumer `mult` (whose input[0] was bound to sum) sees that wire as
-    /// unbound — so the missing-required-input flag propagates downstream
-    /// exactly as if the binding had been cleared.
+    /// Disabling `sum` retains it in the compiled program but excludes it from
+    /// the plan. Its consumer `mult` sees the disabled producer as unavailable,
+    /// so the missing-required-input flag propagates downstream.
     #[test]
-    fn disabled_node_skipped_and_breaks_downstream() -> anyhow::Result<()> {
+    fn disabled_node_stays_compiled_but_breaks_downstream() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2308,10 +2308,15 @@ mod disabled_nodes {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        // The disabled node emits no execution node at all.
+        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_node_id(&execution_graph, &graph, &library, "sum").is_none(),
-            "disabled node must be absent from the program"
+            execution_graph.compiled.program.e_nodes[&sum].disabled,
+            "the compiled node retains its authored disabled state"
+        );
+        assert!(
+            !execution_graph.plan.process_order.contains(&sum)
+                && execution_graph.plan.verdicts[&sum] == NodeVerdict::Disabled,
+            "an unseeded disabled node stays structural but outside execution order"
         );
 
         // get_b has no inputs, so it's unaffected; mult/print lost their
@@ -2348,7 +2353,6 @@ mod disabled_nodes {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        assert!(execution_node_id(&execution_graph, &graph, &library, "sum").is_none());
         assert_eq!(
             execution_node_names_in_order(&execution_graph, &graph, &library),
             ["get_b", "mult", "Print"]
@@ -3102,11 +3106,12 @@ mod composite_behavior {
         );
     }
 
-    /// A node seed can target a *graph-interior* node by its scoped authoring address:
-    /// the seed resolves through the flatten map, runs just that node, and delivers the
-    /// value under the same address. The sink `print` (panicking hook) never fires.
+    /// A node seed can override a disabled *graph-interior* node by its scoped authoring
+    /// address: the seed resolves through the seed-agnostic compiled graph, and the run
+    /// delivers the value under the same address. The sink `print` (panicking hook) never
+    /// fires.
     #[tokio::test]
-    async fn seeding_a_graph_interior_node_runs_only_it() {
+    async fn seeding_a_disabled_graph_interior_node_runs_only_it() {
         use crate::execution::report::RunEvent;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::sync::mpsc::unbounded_channel;
@@ -3124,18 +3129,23 @@ mod composite_behavior {
         });
 
         // `impure_output_def`'s interior by hand, keeping the interior node's id.
-        let inner = func_node(&library, "get_b", "inner");
+        let mut inner = func_node(&library, "get_b", "inner");
+        inner.disabled = true;
         let so = Node::new(NodeKind::GraphOutput);
         let mut interior = Graph::new("S").output(int_output("Out"));
         let inner_id = interior.add(inner);
         let so_id = interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        let graph = main_with(&library, interior);
+        let mut graph = main_with(&library, interior);
         let instance_id = graph
             .iter()
             .find(|node| matches!(node.kind, NodeKind::Graph(_)))
             .unwrap()
             .id;
+        graph
+            .find_mut(&instance_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -3167,6 +3177,13 @@ mod composite_behavior {
         };
         assert_eq!(pushed.node, target);
         assert_eq!(pushed.values[0].value.as_i64(), Some(11));
+        assert!(
+            graph
+                .find(&inner_id, NodeSearch::Recursive)
+                .unwrap()
+                .disabled,
+            "execution leaves the nested authoring node disabled"
+        );
         assert!(
             eg.get_argument_values(&inner_id)
                 .unwrap()
@@ -3575,11 +3592,15 @@ mod node_seeds {
                 move |v| printed.lock().unwrap().push(v)
             }),
         });
-        let graph = uncached_test_graph();
+        let mut graph = uncached_test_graph();
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        graph
+            .find_mut(&sum_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let stats = eg
             .execute(
                 RunSeeds {
@@ -3594,6 +3615,13 @@ mod node_seeds {
             .unwrap();
 
         assert_eq!(*printed.lock().unwrap(), [132], "(1 + 11) * 11");
+        let mut ran = execution_node_names_in_order(&eg, &graph, &library);
+        ran.sort();
+        assert_eq!(
+            ran,
+            ["Print", "get_a", "get_b", "mult", "sum"],
+            "the explicit override feeds the ordinary sink during this run"
+        );
         assert!(
             eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
             "the targeted value is released after its real consumer"
@@ -3606,8 +3634,8 @@ mod node_seeds {
         assert!(stats.node_ram.is_empty());
     }
 
-    /// A seed that doesn't resolve against the compiled program (deleted or disabled
-    /// node, stale id) fails the run — seeds are batched with the graph they target,
+    /// A seed that doesn't resolve against the compiled program (deleted or stale node)
+    /// fails the run — seeds are batched with the graph they target,
     /// so a miss is inconsistent caller state, not something to silently skip. The
     /// panicking default hooks prove no lambda fires.
     #[tokio::test]

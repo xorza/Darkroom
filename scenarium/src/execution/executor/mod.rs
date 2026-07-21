@@ -308,8 +308,8 @@ impl Executor {
                 inputs: &mut self.inputs,
             };
 
-            // The schedule is `process_order` (all structurally reachable,
-            // producer-first); the resolved run cuts cache-hidden and blocked cones.
+            // The producer-first schedule excludes unseeded disabled nodes; the
+            // resolved run cuts cache-hidden and blocked cones.
             for &node_id in &plan.process_order {
                 // Coarse cancel: stop scheduling further nodes. A node already
                 // mid-invoke isn't interrupted (it finishes), but nothing after

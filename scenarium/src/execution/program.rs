@@ -85,6 +85,10 @@ pub(crate) struct ExecutionEvent {
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionNode {
     pub sink: bool,
+    /// The authoring node or one of its composite ancestors is disabled.
+    /// Ambient planning excludes it; an explicit node seed overrides it for
+    /// that run.
+    pub disabled: bool,
     /// Copied from the node's func at flatten. Only `Pure` is content-cacheable;
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
     pub behavior: FuncBehavior,

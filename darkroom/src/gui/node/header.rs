@@ -355,14 +355,12 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: &SceneNode) {
     } else {
         theme.colors.text_muted
     };
-    Badge::control_drawn(
-        draw_play_triangle,
-        color,
-        false,
-        wid,
-        "Run to this node — execute its upstream cone and keep the output for preview",
-    )
-    .show(ui);
+    let tooltip = if node.disabled {
+        "Run to this node once — temporarily override its disabled flag"
+    } else {
+        "Run to this node — execute its upstream cone and keep the output for preview"
+    };
+    Badge::control_drawn(draw_play_triangle, color, false, wid, tooltip).show(ui);
 }
 
 /// Play triangle about the chip center, nudged right — a play mark's

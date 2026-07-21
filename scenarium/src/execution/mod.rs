@@ -137,8 +137,9 @@ pub enum Error {
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
     /// A node seed didn't resolve against the compiled program. Seeds are batched with
-    /// the graph they target, so a miss means inconsistent caller state (or a disabled
-    /// target) — the run fails rather than silently skipping the seed.
+    /// the graph they target, so a miss means inconsistent caller state (a deleted,
+    /// stale, composite, or boundary target) — the run fails rather than silently
+    /// skipping the seed.
     #[error("node seed {address:?} not found in the compiled program")]
     NodeSeedNotFound { address: NodeAddress },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
@@ -195,9 +196,9 @@ pub(crate) struct RunSeeds {
     pub events: Vec<EventRef>,
     /// Run the cones of these specific nodes (authoring ids) and deliver every output —
     /// the on-demand "run to this node" / preview trigger. The
-    /// worker batches these with the graph they target, so an id that doesn't resolve
-    /// against the compiled program (deleted, disabled, stale) fails the run with
-    /// [`Error::NodeSeedNotFound`] — inconsistent caller state, never silently skipped.
+    /// worker batches these with the graph they target. An explicitly seeded disabled
+    /// node is enabled for this run; an id that doesn't resolve against the compiled
+    /// program fails with [`Error::NodeSeedNotFound`].
     pub nodes: Vec<NodeAddress>,
 }
 

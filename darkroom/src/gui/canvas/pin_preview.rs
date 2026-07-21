@@ -150,8 +150,8 @@ pub(crate) fn draw_widget<'ui>(
                     // play chip — the one control here that *does*
                     // something rather than describing the card. Hidden
                     // when the owning node can't resolve as a run seed
-                    // (disabled/instance/boundary/missing), matching the
-                    // node header's own `runnable()` gate.
+                    // (instance/boundary/missing), matching the node
+                    // header's own `runnable()` gate.
                     if runnable {
                         refresh_chip(ui, theme, port);
                     }

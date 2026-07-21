@@ -104,7 +104,7 @@ impl Flattener {
                 events: pools.events,
                 output_pinned: pools.output_pinned,
             };
-            run.emit();
+            run.emit(false);
             // One entry pushed per pooled output port, in lockstep with `n_outputs`
             // (see `emit`'s per-node loop) — this lets the planner index
             // `output_pinned` in the same output-pool space as demand and readers.
@@ -237,17 +237,11 @@ impl<'a> Run<'a> {
 
     /// Emit execution nodes for the current level's graph, recursing into
     /// composite instances.
-    fn emit(&mut self) {
+    fn emit(&mut self, ancestor_disabled: bool) {
         let graph = self.current();
 
         for node in graph.iter() {
-            // Disabled nodes are skipped entirely: no execution node, no
-            // recursion into a disabled composite. A consumer bound to a
-            // skipped node's output resolves to `Source::None` (see
-            // `resolve`), so the wire reads as unbound downstream.
-            if node.disabled {
-                continue;
-            }
+            let disabled = ancestor_disabled || node.disabled;
             // A graph recurses; boundary nodes emit nothing. A func or a
             // special node both resolve to a `&Func` spec and emit one leaf —
             // the spec is the only difference (`library` vs. the hardcoded
@@ -277,7 +271,7 @@ impl<'a> Run<'a> {
                     let parent = *self.scope_stack.last().unwrap();
                     let scope = self.flatten.push_scope(node.id, parent);
                     self.scope_stack.push(scope);
-                    self.emit();
+                    self.emit(disabled);
                     self.scope_stack.pop();
                     self.path.pop();
                     if let Some(id) = shared_id {
@@ -322,6 +316,7 @@ impl<'a> Run<'a> {
                 flat_id,
                 ExecutionNode {
                     sink: func.sink,
+                    disabled,
                     behavior: func.behavior,
                     cache: node.cache,
                     special,
@@ -348,7 +343,9 @@ impl<'a> Run<'a> {
             }
         }
 
-        self.collect_subscriptions(graph);
+        if !ancestor_disabled {
+            self.collect_subscriptions(graph);
+        }
     }
 
     /// Resolve this level's event subscriptions across composite boundaries
@@ -484,11 +481,6 @@ impl<'a> Run<'a> {
         let node = graph
             .find(&node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
-        // A disabled producer emits nothing, so its outputs have no source:
-        // treat the wire as unbound (matches `emit` skipping the node).
-        if node.disabled {
-            return Source::None;
-        }
         match &node.kind {
             NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(OutputPort::new(
                 flatten_id(self.path.as_slice(), node_id),

@@ -160,10 +160,9 @@ pub struct Node {
     /// `default_cache_mode`; the remaining func-less constructors seed `None`.
     pub cache: CacheMode,
 
-    /// Disabled nodes are skipped at flatten time: they emit no execution
-    /// node, and any binding resolving to one yields no producer, so a
-    /// downstream consumer sees the wire as unbound (→ `MissingInputs` if
-    /// the input is required).
+    /// Disabled nodes remain in the compiled program but ambient planning
+    /// excludes them. A binding from one behaves like an unbound input unless
+    /// the disabled producer is explicitly included in that run's node seeds.
     pub disabled: bool,
 }
 

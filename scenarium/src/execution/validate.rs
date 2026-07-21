@@ -9,7 +9,7 @@ use hashbrown::HashSet;
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::plan::ExecutionPlan;
+use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::library::Library;
 
@@ -129,14 +129,15 @@ impl CompiledGraph {
 }
 
 impl ExecutionPlan {
-    /// A planned schedule is a unique post-order DFS whose bindings name valid outputs.
+    /// A planned schedule is a unique post-order DFS whose bindings name valid outputs;
+    /// disabled dependencies may remain outside the order.
     pub(crate) fn validate(&self, program: &ExecutionProgram) -> Result<()> {
         ensure!(
             self.process_order.len() <= program.e_nodes.len(),
             "execution order contains more entries than the program"
         );
 
-        let mut seen_in_order = HashSet::with_capacity(program.e_nodes.len());
+        let mut seen_in_order = HashSet::with_capacity(self.process_order.len());
         for &node_id in &self.process_order {
             let e_node = program
                 .e_nodes
@@ -147,8 +148,16 @@ impl ExecutionPlan {
             })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
+                    let disabled_dependency = program
+                        .e_nodes
+                        .get(&addr.target)
+                        .is_some_and(|node| node.disabled)
+                        && self
+                            .verdicts
+                            .get(&addr.target)
+                            .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
                     ensure!(
-                        seen_in_order.contains(&addr.target),
+                        seen_in_order.contains(&addr.target) || disabled_dependency,
                         "execution node {node_id:?} appears before dependency {:?}",
                         addr.target
                     );
@@ -167,27 +176,6 @@ impl ExecutionPlan {
             );
         }
 
-        for (node_id, e_node) in &program.e_nodes {
-            let inputs = program.inputs.get(e_node.inputs.range()).with_context(|| {
-                format!("execution node {node_id:?} input span is out of range")
-            })?;
-            for e_input in inputs {
-                if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    let target = program.e_nodes.get(&addr.target).with_context(|| {
-                        format!(
-                            "execution node {node_id:?} binds to missing node {:?}",
-                            addr.target
-                        )
-                    })?;
-                    ensure!(
-                        addr.port_idx < target.outputs.len as usize,
-                        "execution node {node_id:?} binds to out-of-range output {} on {:?}",
-                        addr.port_idx,
-                        addr.target
-                    );
-                }
-            }
-        }
         Ok(())
     }
 

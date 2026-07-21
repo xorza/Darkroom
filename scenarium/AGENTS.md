@@ -66,11 +66,14 @@ Choosing a representative instance is an explicit host-side policy.
 ## Compile, plan, execute
 
 `Compiler::compile` runs synchronously on the host and returns a
-`CompiledGraph`; compile errors never enter the worker. Planning is structural:
-it selects roots, orders dependencies before consumers, and detects missing
-inputs. Resolution stamps content digests, then derives cache-aware liveness,
-exact `OutputDemand`, and binding-reader counts together. Execution invokes the
-surviving nodes in plan order.
+`CompiledGraph`; compilation is independent of run seeds. Disabled leaves stay
+in the program with an effective disabled bit inherited from composite
+ancestors. Compile errors never enter the worker. Planning is structural: it
+selects roots, treats explicit node seeds as one-run disable overrides, orders
+dependencies before consumers, and detects missing inputs. Resolution stamps
+content digests, then derives cache-aware liveness, exact `OutputDemand`, and
+binding-reader counts together. Execution invokes the surviving nodes in plan
+order.
 
 Before resolution, `RunResourceStamps` collects filesystem identities and custom
 resource stamps on Tokio's blocking pool. It memoizes each resource for one run
