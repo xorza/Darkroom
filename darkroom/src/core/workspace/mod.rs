@@ -32,7 +32,7 @@ impl Workspace {
     }
 
     pub(crate) fn replace_document(&mut self, document: Document, path: Option<PathBuf>) {
-        self.open.replace(document, path);
+        self.open = OpenDocument::new(document, path);
         self.runtime.set_document_cache(self.open.path.as_deref());
     }
 

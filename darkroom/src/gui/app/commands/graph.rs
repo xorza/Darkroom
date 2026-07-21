@@ -1,7 +1,7 @@
 //! Publishing graphs into the shared library: the thin orchestration
 //! (file dialogs, marking the document dirty) over the pure resolution +
 //! mutation in [`crate::core::edit::publish`], routed through
-//! [`Engine::edit_library`](crate::core::engine::Engine::edit_library) —
+//! [`RuntimeHost::edit_library`](crate::core::runtime_host::RuntimeHost::edit_library) —
 //! which owns persisting the library file and refreshing the worker's
 //! library snapshot.
 
@@ -44,18 +44,20 @@ impl App {
     /// wins; otherwise, when the active tab is itself a graph, that
     /// open graph is exported. No-op when neither resolves.
     fn export_active_graph(&mut self) {
-        let library = self.engine.library.current.clone();
-        let Some(graph) = publish::graph_to_export(&self.editor.document, &library) else {
-            self.engine
+        let library = self.workspace.runtime.library.current.clone();
+        let Some(graph) = publish::graph_to_export(&self.workspace.open.document, &library) else {
+            self.workspace
+                .runtime
                 .status
                 .error("graph export: no graph selected or open".into());
             return;
         };
-        if let Some(path) = dialogs::pick_graph_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_graph_save_path(self.workspace.open.path.as_deref()) {
             match persistence::export_graph(graph, &path) {
-                Ok(()) => self.engine.status.error = None,
+                Ok(()) => self.workspace.runtime.status.error = None,
                 Err(err) => self
-                    .engine
+                    .workspace
+                    .runtime
                     .status
                     .error(format!("graph export failed: {err:#}")),
             }
@@ -67,16 +69,17 @@ impl App {
     /// instantiated and the undo stack is untouched (existing history
     /// references no imported graph, so it stays valid).
     fn import_graph(&mut self) {
-        let Some(path) = dialogs::pick_graph_open_path(self.current_path.as_deref()) else {
+        let Some(path) = dialogs::pick_graph_open_path(self.workspace.open.path.as_deref()) else {
             return;
         };
         match persistence::import_graph(&path) {
             Ok(graph) => {
-                self.editor.import_graph(graph);
-                self.engine.status.error = None;
+                self.editor.import_graph(&mut self.workspace.open, graph);
+                self.workspace.runtime.status.error = None;
             }
             Err(err) => self
-                .engine
+                .workspace
+                .runtime
                 .status
                 .error(format!("graph import failed: {err:#}")),
         }
@@ -88,9 +91,10 @@ impl App {
     /// entry (see [`publish::promote_to_library`]). No-op when nothing
     /// resolves.
     fn promote_active_graph(&mut self) {
-        let document = &mut self.editor.document;
+        let document = &mut self.workspace.open.document;
         if self
-            .engine
+            .workspace
+            .runtime
             .edit_library(|lib| publish::promote_to_library(document, lib))
         {
             // Re-points the local graph's `origin` in the document — an
@@ -98,7 +102,8 @@ impl App {
             // The status outcome is owned by `edit_library`.
             self.editor.dirty = true;
         } else {
-            self.engine
+            self.workspace
+                .runtime
                 .status
                 .error("graph promote: no graph selected or open".into());
         }
@@ -111,12 +116,13 @@ impl App {
     fn publish_node_graph(&mut self, node_id: NodeId) {
         // The G-badge that raises this only exists on the canvas, so a
         // graph tab is always active here; bail otherwise.
-        let Some(target) = self.editor.document.active_target() else {
+        let Some(target) = self.workspace.open.document.active_target() else {
             return;
         };
-        let document = &mut self.editor.document;
+        let document = &mut self.workspace.open.document;
         if self
-            .engine
+            .workspace
+            .runtime
             .edit_library(|lib| publish::publish_local_graph(document, lib, target, node_id))
         {
             // Publishing a fresh entry re-points the local graph's `origin`
@@ -125,7 +131,8 @@ impl App {
             // The status outcome is owned by `edit_library`.
             self.editor.dirty = true;
         } else {
-            self.engine
+            self.workspace
+                .runtime
                 .status
                 .error("graph publish: node is not a local graph".into());
         }

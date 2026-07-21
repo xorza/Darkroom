@@ -1,8 +1,8 @@
 //! Document file lifecycle: new / load / save / save-as, plus the shared
-//! `set_document_path` sink that repoints the dialog anchor, the worker's
+//! document-path sink that repoints the dialog anchor, the worker's
 //! disk cache, and the persisted last-document.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::core::document::Document;
 use crate::core::io::project;
@@ -28,7 +28,9 @@ impl App {
         match command {
             FileCommand::New => self.new_document(),
             FileCommand::Load => {
-                if let Some(path) = dialogs::pick_project_open_path(self.current_path.as_deref()) {
+                if let Some(path) =
+                    dialogs::pick_project_open_path(self.workspace.open.path.as_deref())
+                {
                     self.load_document(&path);
                 }
             }
@@ -43,8 +45,9 @@ impl App {
     /// history that no longer matches the live tree), forced reconcile +
     /// scene rebuild, dropped gesture state, and cleared run results.
     fn new_document(&mut self) {
-        self.editor = Editor::new(Document::default());
-        self.set_document_path(None);
+        self.editor = Editor::new();
+        self.workspace.replace_document(Document::default(), None);
+        self.remember_document_path();
     }
 
     /// Load `path` into a fresh editor. Returns whether it loaded — `false`
@@ -55,22 +58,27 @@ impl App {
         let doc = match project::load(path) {
             Ok(doc) => doc,
             Err(err) => {
-                self.engine.status.error(format!("load failed: {err:#}"));
+                self.workspace
+                    .runtime
+                    .status
+                    .error(format!("load failed: {err:#}"));
                 return false;
             }
         };
         // Fresh editor around the loaded doc — see `new_document` for why
         // a wholesale reset (rather than poking individual fields) is right.
-        self.editor = Editor::new(doc);
-        self.set_document_path(Some(path.to_path_buf()));
-        self.engine.status.error = None;
+        self.editor = Editor::new();
+        self.workspace
+            .replace_document(doc, Some(path.to_path_buf()));
+        self.remember_document_path();
+        self.workspace.runtime.status.error = None;
         true
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
     pub(crate) fn save_current(&mut self) {
-        match self.current_path.clone() {
+        match self.workspace.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
         }
@@ -78,31 +86,30 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = dialogs::pick_project_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_project_save_path(self.workspace.open.path.as_deref()) {
             self.save_document(&path);
         }
     }
 
     fn save_document(&mut self, path: &Path) {
-        match project::save(&self.editor.document, path) {
+        match self.workspace.save_to(path) {
             Ok(()) => {
                 self.editor.dirty = false;
-                self.set_document_path(Some(path.to_path_buf()));
-                self.engine.status.error = None;
+                self.remember_document_path();
+                self.workspace.runtime.status.error = None;
             }
-            Err(err) => self.engine.status.error(format!("save failed: {err:#}")),
+            Err(err) => self
+                .workspace
+                .runtime
+                .status
+                .error(format!("save failed: {err:#}")),
         }
     }
 
-    /// Record `path` as both the dialog-anchor `current_path` and the
-    /// persisted `preferences.document_path`, then write the preferences so the
-    /// next launch reopens this document. Also repoints the worker's disk
-    /// cache at the document's project-local store (or memory-only when the
-    /// path is cleared / never saved).
-    fn set_document_path(&mut self, path: Option<PathBuf>) {
-        self.current_path = path.clone();
-        self.engine.set_document_cache(self.current_path.as_deref());
-        self.preferences.document_path = path;
+    /// Mirror the workspace's active path into persisted preferences after a
+    /// successful document lifecycle transition.
+    fn remember_document_path(&mut self) {
+        self.preferences.document_path = self.workspace.open.path.clone();
         self.save_preferences();
     }
 }
