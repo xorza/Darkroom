@@ -1,9 +1,9 @@
 use std::io::Error;
 use std::path::Path;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::LoadContext;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;
@@ -50,6 +50,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ///
 /// * `frames` - Paths bundled with their transform and optional quality weights
 /// * `config` - Drizzle configuration
+/// * `context` - Cancellation, resource limits, and image-load policy
 /// * `progress` - Progress callback
 ///
 /// # Returns
@@ -60,7 +61,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 /// # Errors
 ///
 /// Returns an error for invalid configuration, missing frames, image loading failures,
-/// inconsistent image dimensions, or invalid frame weights.
+/// inconsistent image dimensions, invalid frame weights, or cancellation.
 pub fn drizzle_stack<P: AsRef<Path>>(
     frames: Vec<DrizzleFrame<P>>,
     config: &DrizzleConfig,

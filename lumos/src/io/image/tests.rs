@@ -2,10 +2,10 @@ use crate::image_ops::rgb::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
+use crate::io::image::LoadContext;
 #[cfg(feature = "real-data")]
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::{LinearImage, test_support};
-use crate::io::image::LoadContext;
 use crate::io::image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;

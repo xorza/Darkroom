@@ -11,8 +11,8 @@ use std::time::Instant;
 use ::quickbench::quick_bench;
 use common::file_utils;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
@@ -237,8 +237,7 @@ fn load_all_calibrated_lights() -> Option<(Vec<LinearImage>, Vec<PathBuf>)> {
     let images: Vec<LinearImage> = files
         .iter()
         .map(|p| {
-            LinearImage::from_file(p, &LoadContext::default())
-                .expect("Failed to load light frame")
+            LinearImage::from_file(p, &LoadContext::default()).expect("Failed to load light frame")
         })
         .collect();
     Some((images, files))

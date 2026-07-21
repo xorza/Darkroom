@@ -1446,8 +1446,10 @@ preceding sections are the required behavior.
 
 - `lumos/src/io/image/mod.rs` — shared metadata, preview dispatch, and standard preview conversion.
 - `lumos/src/io/image/linear.rs` — linear image representation, scientific loading, and layout conversion.
-- `lumos/src/io/image/fits/mod.rs` — FITS selection, scaling, metadata, and Bayer
-  interpretation.
+- `lumos/src/io/image/fits/decode/` — HDU selection, checksum validation, memory
+  preflight, bounded physical-pixel decoding, and CFA/linear load orchestration.
+- `lumos/src/io/image/fits/metadata/` — FITS header translation and CFA interpretation.
+- `lumos/src/io/image/fits/cfa.rs` — Lumos sensor-domain FITS persistence.
 - `lumos/src/io/image/cfa.rs` — signed CFA representation and demosaic routing.
 - `lumos/src/io/raw/mod.rs` — LibRaw boundary, black consolidation, RAW products.
 - `lumos/src/io/raw/normalize.rs` — clipped and unclipped normalization.

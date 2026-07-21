@@ -10,13 +10,12 @@ use common::CancelToken;
 use common::file_utils;
 
 use crate::concurrency;
+use crate::io::image::LoadContext;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::LoadContext;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::ChannelStats;
-use crate::resources;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -63,10 +62,10 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     let first_path = paths[0].as_ref();
     let available_memory = config.get_available_memory();
-    let context = LoadContext::new(
-        cancel.clone(),
-        resources::memory_budget(available_memory),
-    );
+    let context = LoadContext {
+        cancel: cancel.clone(),
+        ..LoadContext::default()
+    };
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather

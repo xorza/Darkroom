@@ -8,10 +8,10 @@ use std::path::Path;
 
 use rayon::prelude::*;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::linear::LinearImage;
-use crate::io::image::LoadContext;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
     STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
@@ -150,10 +150,7 @@ impl CfaImage {
     }
 
     /// Load an un-demosaiced sensor image from camera RAW or mosaic FITS.
-    pub fn from_file<P: AsRef<Path>>(
-        path: P,
-        context: &LoadContext,
-    ) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
         let extension = file_extension(path);
@@ -275,8 +272,8 @@ impl CfaImage {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::image::cfa::*;
     use crate::io::image::LoadContext;
+    use crate::io::image::cfa::*;
     use crate::io::image::error::ImageError;
     use crate::io::raw::demosaic::DemosaicKind;
     use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
@@ -337,10 +334,15 @@ mod tests {
             .unwrap();
         corrupted[offset] ^= 0x01;
         std::fs::write(&path, corrupted).unwrap();
-        assert!(matches!(
-            CfaImage::from_file(&path, &LoadContext::default()),
-            Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("checksum")
-        ));
+        let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ImageError::FitsUnsupported { reason, .. }
+                    if reason.contains("requires valid DATASUM and CHECKSUM")
+            ),
+            "{error:?}"
+        );
         std::fs::write(path, original).unwrap();
     }
 

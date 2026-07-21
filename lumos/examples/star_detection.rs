@@ -28,8 +28,8 @@ fn main() {
 
     // Load the image
     println!("Loading image: {}", image_path.display());
-    let image = LinearImage::from_file(image_path, &LoadContext::default())
-        .expect("Failed to load image");
+    let image =
+        LinearImage::from_file(image_path, &LoadContext::default()).expect("Failed to load image");
     println!(
         "Image dimensions: {}x{} ({} channel{})",
         image.width(),

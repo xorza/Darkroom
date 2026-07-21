@@ -18,10 +18,9 @@ use std::path::Path;
 
 use common::CancelToken;
 
+use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
-use crate::io::image::LoadContext;
-use crate::resources;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -344,10 +343,10 @@ impl CalibrationMasters {
         ];
         let total_frames: usize = counts.iter().sum();
         let available = StackConfig::dark().cache.get_available_memory();
-        let context = LoadContext::new(
-            cancel.clone(),
-            resources::memory_budget(available),
-        );
+        let context = LoadContext {
+            cancel: cancel.clone(),
+            ..LoadContext::default()
+        };
 
         let (dark, flat, bias, flat_dark) =
             if frames_fit_in_memory(&frames, total_frames, available, &context)? {
@@ -383,11 +382,7 @@ impl CalibrationMasters {
                         rayon::join(
                             move || stack_cfa_master(frames.bias, bias_cfg, bias_cancel),
                             move || {
-                                stack_cfa_master(
-                                    frames.flat_dark,
-                                    flat_dark_cfg,
-                                    flat_dark_cancel,
-                                )
+                                stack_cfa_master(frames.flat_dark, flat_dark_cfg, flat_dark_cancel)
                             },
                         )
                     },

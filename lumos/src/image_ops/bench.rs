@@ -19,8 +19,8 @@ use std::hint::black_box;
 
 use imaginarium::Image;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
+use crate::io::image::linear::LinearImage;
 use crate::testing::calibration_dir;
 use crate::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch};
 
@@ -37,7 +37,7 @@ fn linear_master() -> Image {
             calibration_dir().join("stacked_light.tiff"),
             &LoadContext::default(),
         )
-            .expect("load stacked_light.tiff"),
+        .expect("load stacked_light.tiff"),
     )
 }
 

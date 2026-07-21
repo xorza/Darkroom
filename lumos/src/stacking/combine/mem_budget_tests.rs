@@ -18,8 +18,8 @@ use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
+use crate::io::image::linear::LinearImage;
 use crate::resources::memory_budget;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;

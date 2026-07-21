@@ -5,8 +5,8 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image_ops::intensity_plane;
-use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{
@@ -41,8 +41,7 @@ fn milky_way_best_pipeline() {
     init_tracing();
     let path = calibration_dir().join("stacked_light.tiff");
     let mut img = Image::from(
-        &LinearImage::from_file(&path, &LoadContext::default())
-            .expect("load stacked_light.tiff"),
+        &LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff"),
     );
 
     NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background

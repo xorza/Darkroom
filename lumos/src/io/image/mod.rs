@@ -306,10 +306,7 @@ fn standard_container(extension: &str) -> SourceContainer {
 
 impl PreviewImage {
     /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn from_file<P: AsRef<Path>>(
-        path: P,
-        context: &LoadContext,
-    ) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
         let extension = file_extension(path);

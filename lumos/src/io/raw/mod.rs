@@ -29,9 +29,9 @@ use crate::io::image::{
     ImageProvenance, SourceContainer, TransferProvenance,
 };
 use common::CancelToken;
-use demosaic::{DemosaicError, DemosaicKind};
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
+use demosaic::{DemosaicError, DemosaicKind};
 use imaginarium::Buffer2;
 
 use normalize::{normalize_u16_to_f32_into, normalize_u16_to_f32_parallel};
@@ -1124,10 +1124,7 @@ pub(crate) fn raw_cfa_frame_info(
     })
 }
 
-pub(crate) fn load_raw_cfa(
-    path: &Path,
-    cancel: &CancelToken,
-) -> Result<CfaImage, ImageError> {
+pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage, ImageError> {
     check_cancelled(path, cancel)?;
     let raw = open_raw(path)?;
     check_cancelled(path, cancel)?;

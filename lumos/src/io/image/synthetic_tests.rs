@@ -7,10 +7,10 @@
 
 use std::fs::File;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::load_linear_fits;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
 use crate::stacking::frame_store::StackableImage;
@@ -173,8 +173,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let mut loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.data.pixels(), pixels);
     assert_eq!(loaded.metadata.cfa_type, Some(pattern.clone()));
-    let cache_loaded =
-        <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
+    let cache_loaded = <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
     assert_eq!(cache_loaded.data, loaded.data);
     assert_eq!(cache_loaded.metadata.cfa_type, loaded.metadata.cfa_type);
     assert_eq!(
@@ -238,13 +237,11 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         demosaiced.metadata.provenance,
         Some(crate::ImageProvenance {
             container: crate::SourceContainer::Fits,
-            transfer: crate::TransferProvenance::FitsPhysical(
-                crate::FitsTransferProvenance {
-                    bscale: 1.0,
-                    bzero: 0.0,
-                    ..
-                },
-            ),
+            transfer: crate::TransferProvenance::FitsPhysical(crate::FitsTransferProvenance {
+                bscale: 1.0,
+                bzero: 0.0,
+                ..
+            },),
             color: crate::ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
             clipped: false,
@@ -272,7 +269,7 @@ fn fits_rejects_nan_and_inf_with_summary() {
     assert!(matches!(
         write_and_load("nan_inf", &image),
         Err(ImageError::FitsUnsupported { reason, .. })
-            if reason == "image contains 3 null/non-finite pixels; first at linear index 0"
+            if reason == "image contains 3 null/non-finite pixels in a decode chunk; first at linear index 0"
     ));
 }
 

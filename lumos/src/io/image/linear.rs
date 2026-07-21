@@ -4,10 +4,10 @@ use std::path::Path;
 use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
 use rayon::prelude::*;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::LoadContext;
 use crate::io::image::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
     ImageMetadata, ImageProvenance, STANDARD_IMAGE_EXTENSIONS, TransferProvenance,
@@ -33,10 +33,7 @@ impl LinearImage {
     ///
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
     /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
-    pub fn from_file<P: AsRef<Path>>(
-        path: P,
-        context: &LoadContext,
-    ) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
         let extension = file_extension(path);

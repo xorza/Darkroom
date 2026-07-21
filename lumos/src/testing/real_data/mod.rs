@@ -29,8 +29,8 @@ mod stretching;
 mod ml_support {
     use std::path::PathBuf;
 
-    use crate::io::image::linear::LinearImage;
     use crate::io::image::LoadContext;
+    use crate::io::image::linear::LinearImage;
     use crate::testing::calibration_dir;
     use crate::{NeutralizeBackground, Scnr, Stretch};
     use imaginarium::Image;
@@ -65,7 +65,7 @@ mod ml_support {
                 calibration_dir().join("stacked_light.tiff"),
                 &LoadContext::default(),
             )
-                .expect("load stacked_light.tiff"),
+            .expect("load stacked_light.tiff"),
         );
 
         NeutralizeBackground.apply(&mut img).unwrap();

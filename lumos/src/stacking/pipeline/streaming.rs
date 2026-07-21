@@ -7,10 +7,10 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency;
+use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::LoadContext;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::stacking::calibration_masters::CalibrationMasters;
@@ -28,7 +28,6 @@ use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
-use crate::resources;
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
@@ -52,18 +51,20 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config.detection.validate()?;
     let total = light_paths.len();
     let available = config.stack.cache.get_available_memory();
-    let load_context = LoadContext::new(
-        cancel.clone(),
-        resources::memory_budget(available),
-    );
+    let load_context = LoadContext {
+        cancel: cancel.clone(),
+        ..LoadContext::default()
+    };
 
     // Tier decision: peek the sensor dimensions (no decode) and plan the memory tier. If the warped
     // frames plus the RAM path's per-frame scratch won't fit ~75% RAM, stream through a disk cache so
     // peak RAM stays flat in the frame count.
     let frame_info =
-        CfaFrameInfo::from_file(light_paths[0].as_ref(), &load_context).map_err(|source| Error::Load {
-            path: light_paths[0].as_ref().to_path_buf(),
-            source,
+        CfaFrameInfo::from_file(light_paths[0].as_ref(), &load_context).map_err(|source| {
+            Error::Load {
+                path: light_paths[0].as_ref().to_path_buf(),
+                source,
+            }
         })?;
     let plane_bytes = frame_info.dimensions.pixel_count() * std::mem::size_of::<f32>();
     let demosaic_memory = frame_info.demosaic.memory(frame_info.dimensions);
@@ -143,13 +144,14 @@ fn decode_calibrate_demosaic(
         }
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
-    cfa.demosaic(&context.cancel).map_err(|source| match source {
-        DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
-        DemosaicError::InvalidXTransPattern(source) => Error::Load {
-            path: path.to_path_buf(),
-            source: raw::raw_err(path, source.to_string()),
-        },
-    })
+    cfa.demosaic(&context.cancel)
+        .map_err(|source| match source {
+            DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
+            DemosaicError::InvalidXTransPattern(source) => Error::Load {
+                path: path.to_path_buf(),
+                source: raw::raw_err(path, source.to_string()),
+            },
+        })
 }
 
 /// Memory-bounded `calibrate → align → stack` for sets that don't fit ~75% RAM. Spills calibrated
@@ -163,10 +165,10 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     plan: MemoryPlan,
 ) -> Result<AlignStackResult, Error> {
     let total = light_paths.len();
-    let load_context = LoadContext::new(
-        cancel.clone(),
-        resources::memory_budget(config.stack.cache.get_available_memory()),
-    );
+    let load_context = LoadContext {
+        cancel: cancel.clone(),
+        ..LoadContext::default()
+    };
     let spill_directory = SpillDirectory::create(
         config.stack.cache.cache_dir.clone(),
         config.stack.cache.keep_cache,

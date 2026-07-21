@@ -3,8 +3,8 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image_ops::test_support::channel_plane;
-use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};

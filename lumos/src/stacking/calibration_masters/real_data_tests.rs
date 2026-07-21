@@ -64,8 +64,7 @@ fn raw_frame_info_matches_full_decode() {
         panic!("calibration frames missing — run scripts/fetch-test-data.sh");
     };
     let path = &paths.darks[0];
-    let peeked =
-        raw::raw_cfa_frame_info(path, &CancelToken::never()).expect("peek frame info");
+    let peeked = raw::raw_cfa_frame_info(path, &CancelToken::never()).expect("peek frame info");
     let loaded = raw::load_raw_cfa(path, &CancelToken::never()).expect("full decode");
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
