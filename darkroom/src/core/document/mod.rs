@@ -8,14 +8,12 @@ use glam::Vec2;
 use indexmap::IndexMap;
 use scenarium::GraphId;
 use scenarium::GraphLink;
-use scenarium::Library;
 use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::{Node, NodeKind};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::DockLayout;
-use crate::core::edit::reconcile::reconcile_graph;
 
 /// Initial placement of a fresh graph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
@@ -323,11 +321,6 @@ impl Document {
         }
     }
 
-    /// Mutable graph for a target — the root graph or a local graph
-    /// interior. Unlike `scope_mut` this hands back only the graph (no
-    /// view), so callers that rewire bindings across *several* graphs in
-    /// one pass (e.g. boundary reconcile remapping instance bindings) can
-    /// borrow each in turn without dragging the view along.
     pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
         match target {
             GraphRef::Main => Some(&mut self.graph),
@@ -519,7 +512,7 @@ impl Document {
     /// `new`. `idx_hint` is tried first (exact when nothing moved, and it
     /// disambiguates duplicate names); otherwise the slot is found by its
     /// `expected` name. Resolving by name lets undo/redo survive
-    /// `reconcile_boundaries` compacting the interface — it renumbers
+    /// normalization compacting the interface — it renumbers
     /// indices but *preserves names*, so the renamed slot is still found
     /// at its new index. No-op if no matching slot exists (e.g. the port
     /// was disconnected away entirely).
@@ -549,25 +542,6 @@ impl Document {
         }
     }
 
-    /// Reconcile every local graph interface against its boundary wiring.
-    pub(crate) fn reconcile_boundaries(&mut self, library: &Library) {
-        if self.graph.graphs.is_empty() {
-            return;
-        }
-        let graph_ids: Vec<GraphId> = self.graph.graphs.keys().copied().collect();
-        for id in graph_ids {
-            reconcile_graph(self, id, library);
-        }
-    }
-
-    /// Drop wiring left dangling when a node's target changed its interface
-    /// (e.g. a document loaded against a newer library): data bindings whose
-    /// port is now out of range, and event subscriptions whose event is gone.
-    /// Derived-validity fixup run alongside [`Self::reconcile_boundaries`];
-    /// both recurse into local graphs.
-    pub(crate) fn prune_dangling_wiring(&mut self, library: &Library) {
-        self.graph.prune_dangling_wiring(library);
-    }
 }
 
 impl Eq for Document {}
