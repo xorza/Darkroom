@@ -3,6 +3,7 @@
 use scenarium::NodeId;
 
 use crate::core::edit::publish;
+use crate::core::edit::publish::GraphPublicationTarget;
 use crate::core::io::graph_template;
 use crate::gui::app::App;
 use crate::gui::dialogs;
@@ -98,7 +99,7 @@ impl App {
         match graph_template::load(&path) {
             Ok(graph) => {
                 let graph = graph.fresh_copy();
-                self.workspace.runtime.add_graph_template(graph);
+                self.workspace.runtime.import_graph_template(graph);
             }
             Err(error) => self
                 .workspace
@@ -115,7 +116,11 @@ impl App {
     /// resolves.
     fn promote_active_graph(&mut self) {
         let document = &mut self.workspace.open.document;
-        if self.workspace.runtime.promote_graph(document) {
+        if self
+            .workspace
+            .runtime
+            .publish_graph_to_library(document, GraphPublicationTarget::ActiveGraph)
+        {
             // Re-points the local graph's `origin` in the document — an
             // unsaved change (may over-flag when the link already existed).
             // The status outcome is owned by the runtime host.
@@ -139,11 +144,10 @@ impl App {
             return;
         };
         let document = &mut self.workspace.open.document;
-        if self
-            .workspace
-            .runtime
-            .publish_local_graph_to_library(document, target, node_id)
-        {
+        if self.workspace.runtime.publish_graph_to_library(
+            document,
+            GraphPublicationTarget::LocalNode { target, node_id },
+        ) {
             // Publishing a fresh entry re-points the local graph's `origin`
             // in the document — an unsaved change (an update-in-place
             // publish touches only the library, so this may over-flag).
