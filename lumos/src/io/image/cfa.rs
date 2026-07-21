@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
     STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
@@ -276,7 +276,7 @@ impl CfaImage {
 #[cfg(test)]
 mod tests {
     use crate::io::image::cfa::*;
-    use crate::io::image::load::LoadContext;
+    use crate::io::image::LoadContext;
     use crate::io::image::error::ImageError;
     use crate::io::raw::demosaic::DemosaicKind;
     use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;

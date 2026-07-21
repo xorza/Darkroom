@@ -13,7 +13,7 @@ use common::file_utils;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};

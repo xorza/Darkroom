@@ -30,7 +30,7 @@ mod ml_support {
     use std::path::PathBuf;
 
     use crate::io::image::linear::LinearImage;
-    use crate::io::image::load::LoadContext;
+    use crate::io::image::LoadContext;
     use crate::testing::calibration_dir;
     use crate::{NeutralizeBackground, Scnr, Stretch};
     use imaginarium::Image;

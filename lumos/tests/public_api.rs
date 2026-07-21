@@ -7,11 +7,12 @@ use lumos::{
     CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
-    FitsHduSelector, FitsLoadOptions, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
-    InterpolationMethod, LinearFitClipConfig, LinearImage, LoadContext, NoiseModel, Normalization,
-    PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog, RegistrationConfig,
-    RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct,
+    FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
+    ImageDimensions, ImageMetadata, InterpolationMethod, LinearFitClipConfig, LinearImage,
+    LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig,
+    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
+    Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError,
+    StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
     StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
     StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
@@ -36,7 +37,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
     assert_eq!(context.memory_limit_bytes, 64 * 1024 * 1024);
     assert_eq!(context.fits.cube, FitsCubeInterpretation::Rgb);
 
-    let provenance = TransferProvenance::FitsPhysical {
+    let provenance = TransferProvenance::FitsPhysical(FitsTransferProvenance {
         bscale: 1.0,
         bzero: 0.0,
         unit: Some("adu".to_owned()),
@@ -49,17 +50,17 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             datasum: FitsChecksumState::Valid,
             checksum: FitsChecksumState::Valid,
         },
-    };
+    });
     assert!(matches!(
         provenance,
-        TransferProvenance::FitsPhysical {
+        TransferProvenance::FitsPhysical(FitsTransferProvenance {
             hdu: FitsHduProvenance { index: 3, .. },
             checksum: FitsChecksumProvenance {
                 datasum: FitsChecksumState::Valid,
                 checksum: FitsChecksumState::Valid,
             },
             ..
-        }
+        })
     ));
 }
 

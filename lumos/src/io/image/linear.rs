@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::image::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
     ImageMetadata, ImageProvenance, STANDARD_IMAGE_EXTENSIONS, TransferProvenance,

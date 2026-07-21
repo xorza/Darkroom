@@ -20,7 +20,7 @@ use common::CancelToken;
 
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::resources;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;

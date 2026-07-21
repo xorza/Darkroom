@@ -8,10 +8,11 @@ use fits_well::image::{Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
 use crate::io::image::fits::*;
-use crate::io::image::load::{
+use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions, LoadContext,
 };
-use crate::io::image::{FitsChecksumState, TransferProvenance};
+use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
+use crate::io::image::{LoadContext, TransferProvenance};
 use crate::testing::ScratchDirectory;
 
 fn load_context() -> LoadContext {

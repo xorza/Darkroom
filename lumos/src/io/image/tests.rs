@@ -5,7 +5,7 @@ use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 #[cfg(feature = "real-data")]
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::{LinearImage, test_support};
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;

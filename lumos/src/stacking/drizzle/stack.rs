@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;

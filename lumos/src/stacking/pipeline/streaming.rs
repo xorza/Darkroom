@@ -10,7 +10,7 @@ use crate::concurrency;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::stacking::calibration_masters::CalibrationMasters;

@@ -36,14 +36,17 @@ pub mod testing;
 
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
+pub use io::image::fits::options::{
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
+};
+pub use io::image::fits::provenance::{
+    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
+};
 pub use io::image::linear::LinearImage;
 pub use io::image::{
-    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, FitsChecksumProvenance,
-    FitsChecksumState, FitsHduProvenance, ImageDimensions, ImageMetadata, ImageProvenance,
-    PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer, TransferProvenance,
-};
-pub use io::image::load::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions, LoadContext,
+    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
+    ImageProvenance, LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
+    TransferProvenance,
 };
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;

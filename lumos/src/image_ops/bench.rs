@@ -20,7 +20,7 @@ use std::hint::black_box;
 use imaginarium::Image;
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::testing::calibration_dir;
 use crate::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch};
 

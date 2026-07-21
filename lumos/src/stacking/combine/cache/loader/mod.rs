@@ -13,7 +13,7 @@ use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::ChannelStats;
 use crate::resources;

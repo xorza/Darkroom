@@ -5,7 +5,7 @@ use imaginarium::Buffer2;
 
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load::LoadContext;
+use crate::io::image::LoadContext;
 use crate::stacking::drizzle::accumulator::test_support::{
     accumulated_flux_sum, add_image as add_test_image,
 };
