@@ -17,9 +17,9 @@ use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
 
 fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
-    assert_eq!(image.desc.color_format, ColorFormat::L_F32);
+    assert_eq!(image.desc().color_format, ColorFormat::L_F32);
     LinearImage::from_pixels(
-        ImageDimensions::new((image.desc.width, image.desc.height), 1),
+        ImageDimensions::new((image.desc().width, image.desc().height), 1),
         bytemuck::cast_slice(image.bytes()).to_vec(),
     )
 }

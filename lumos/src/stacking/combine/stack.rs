@@ -522,7 +522,7 @@ mod tests {
     use crate::io::image::ImageDimensions;
     use crate::io::image::cfa::{CfaImage, CfaType};
     use crate::io::image::linear::LinearImage;
-    use crate::io::image::pixel_data::PixelData;
+    use crate::io::image::linear_pixels::LinearPixels;
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::CacheCore;
     use crate::stacking::combine::cache::tests::make_test_cache;
@@ -899,7 +899,7 @@ mod tests {
         }
     }
 
-    fn assert_channel_near(result: &PixelData, channel: usize, expected: f32, tol: f32) {
+    fn assert_channel_near(result: &LinearPixels, channel: usize, expected: f32, tol: f32) {
         for &pixel in result.channel(channel).pixels() {
             assert!(
                 (pixel - expected).abs() < tol,

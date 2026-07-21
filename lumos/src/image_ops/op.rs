@@ -25,7 +25,7 @@ pub enum OpError {
 /// The display ops are defined on a linear f32 master in L or RGB; reject anything else
 /// (integer formats, RGBA) at the op boundary, before the per-pixel helpers (which assume it).
 pub(crate) fn require_f32_master(image: &Image) -> Result<(), OpError> {
-    let format = image.desc.color_format;
+    let format = image.desc().color_format;
     if format == ColorFormat::L_F32 || format == ColorFormat::RGB_F32 {
         Ok(())
     } else {

@@ -15,7 +15,7 @@ use common::{CancelToken, file_utils};
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_data::PixelData;
+use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
     ImageProvenance, SourceContainer, TransferProvenance, scientific_rejection,
@@ -92,7 +92,7 @@ pub(crate) struct CfaFitsHdu {
 struct DecodedFitsImage {
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
-    pixels: PixelData,
+    pixels: LinearPixels,
 }
 
 impl DecodedFitsImage {
@@ -353,9 +353,9 @@ fn read_decoded_hdu(
             plane_size,
             &mut read_pixels,
         )?;
-        PixelData::from_planar_channels(plan.dimensions, [red, green, blue])
+        LinearPixels::from_planar_channels(plan.dimensions, [red, green, blue])
     } else {
-        PixelData::from_planar_channels(
+        LinearPixels::from_planar_channels(
             plan.dimensions,
             [read_fits_plane(
                 path,

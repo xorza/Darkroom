@@ -125,7 +125,7 @@ impl Denoise {
         if self.strength == 0.0 {
             return Ok(());
         }
-        let (width, height) = (image.desc.width, image.desc.height);
+        let (width, height) = (image.desc().width, image.desc().height);
         let scales = self.scales.min(max_scales(width, height));
         let mut scratch = DenoiseScratch::new(width, height);
         process_channels(image, |plane| {

@@ -235,7 +235,7 @@ fn ensure_target_background(t: f32) -> Result<(), OpError> {
 /// Channels are independent, so building channel `c`'s curve from its own samples and writing it back
 /// before moving on never reads a value another channel already changed.
 fn apply_per_channel_image(image: &mut Image, method: StretchMethod) {
-    let nchan = image.desc.color_format.channel_count.channel_count() as usize;
+    let nchan = image.desc().color_format.channel_count.channel_count() as usize;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     for c in 0..nchan {
         let curve = explicit_curve(method)
@@ -277,7 +277,7 @@ const MAX_STRETCH_SAMPLES: usize = 1_000_000;
 /// to throw all but every `stride`-th value away. Identical samples to subsampling [`intensity_plane`].
 fn subsample_intensity(image: &Image) -> Vec<f32> {
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
-    if image.desc.color_format.channel_count == ChannelCount::Rgb {
+    if image.desc().color_format.channel_count == ChannelCount::Rgb {
         let stride = (samples.len() / 3 / MAX_STRETCH_SAMPLES).max(1);
         samples
             .chunks_exact(3)
@@ -608,7 +608,8 @@ fn apply_color_preserving_image(image: &mut Image, curve: Curve) {
 /// (~1 ULP vs libm); everything else uses the scalar per-pixel map.
 fn apply_color_preserving_asinh(image: &mut Image, c: AsinhCurve) {
     #[cfg(target_arch = "x86_64")]
-    if image.desc.color_format.channel_count == ChannelCount::Rgb && cpu_features::has_avx2_fma() {
+    if image.desc().color_format.channel_count == ChannelCount::Rgb && cpu_features::has_avx2_fma()
+    {
         // ~8K pixels per task; each band stays whole-pixel (length a multiple of 3).
         let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
         samples.par_chunks_mut(8192 * 3).for_each(|blk| {
@@ -618,7 +619,7 @@ fn apply_color_preserving_asinh(image: &mut Image, c: AsinhCurve) {
         return;
     }
     #[cfg(target_arch = "aarch64")]
-    if image.desc.color_format.channel_count == ChannelCount::Rgb {
+    if image.desc().color_format.channel_count == ChannelCount::Rgb {
         // ~8K pixels per task; each band stays whole-pixel (length a multiple of 3).
         let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
         samples.par_chunks_mut(8192 * 3).for_each(|blk| {

@@ -41,7 +41,7 @@ impl NeutralizeBackground {
     /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32` (a no-op on grayscale).
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         require_f32_master(image)?;
-        if image.desc.color_format.channel_count != ChannelCount::Rgb {
+        if image.desc().color_format.channel_count != ChannelCount::Rgb {
             return Ok(()); // no-op on grayscale
         }
         let bg = channel_backgrounds(image);
@@ -131,7 +131,7 @@ impl Scnr {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
-        if image.desc.color_format.channel_count != ChannelCount::Rgb {
+        if image.desc().color_format.channel_count != ChannelCount::Rgb {
             return Ok(()); // no-op on grayscale
         }
         match self.method {

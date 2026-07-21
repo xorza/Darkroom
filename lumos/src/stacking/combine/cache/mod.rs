@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_data::PixelData;
+use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -100,9 +100,9 @@ impl CombinedSample {
 /// Channel-shaped result of one light-frame combine pass and its pre-output memory snapshot.
 #[derive(Debug)]
 pub(crate) struct LightCombineOutput {
-    pub(crate) pixels: PixelData,
-    pub(crate) weight: PixelData,
-    pub(crate) linear_variance: Option<PixelData>,
+    pub(crate) pixels: LinearPixels,
+    pub(crate) weight: LinearPixels,
+    pub(crate) linear_variance: Option<LinearPixels>,
     chunk_available_memory: Option<u64>,
 }
 
@@ -279,7 +279,7 @@ impl CacheCore {
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
     /// chunk via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
-    /// live in the owning cache, so they're passed in. Returns the combined `PixelData`.
+    /// live in the owning cache, so they're passed in. Returns the combined `LinearPixels`.
     fn process_chunks<F, Channels, Process>(
         &self,
         frames: &[F],
@@ -287,7 +287,7 @@ impl CacheCore {
         memory: ChunkMemoryLayout,
         available_memory: Option<u64>,
         mut process: Process,
-    ) -> PixelData
+    ) -> LinearPixels
     where
         Channels: for<'a> Fn(&'a F) -> &'a [StoredPlane] + Copy,
         Process: FnMut(&mut [f32], ChunkContext),
@@ -301,7 +301,7 @@ impl CacheCore {
             optimal_chunk_rows(width, height, memory, available_memory)
         });
 
-        let mut output = PixelData::new_zeroed(dims);
+        let mut output = LinearPixels::new_zeroed(dims);
         let channel_count = output.channel_count();
 
         let num_chunks = height.div_ceil(chunk_rows);
@@ -390,7 +390,7 @@ impl CfaCache {
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
         combine: Combine,
-    ) -> PixelData
+    ) -> LinearPixels
     where
         Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
     {
@@ -690,8 +690,8 @@ impl LightCache {
         let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels());
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
         let chunk_available_memory = self.core.chunk_available_memory();
-        let mut output_weight = PixelData::new_zeroed(dimensions);
-        let mut output_linear_variance = PixelData::new_zeroed(dimensions);
+        let mut output_weight = LinearPixels::new_zeroed(dimensions);
+        let mut output_linear_variance = LinearPixels::new_zeroed(dimensions);
         let pixels =
             self.core.process_chunks(
                 &self.frames,

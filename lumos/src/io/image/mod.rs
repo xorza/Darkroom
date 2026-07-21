@@ -2,7 +2,7 @@ pub(crate) mod cfa;
 pub(crate) mod error;
 pub(crate) mod fits;
 pub(crate) mod linear;
-pub(crate) mod pixel_data;
+pub(crate) mod linear_pixels;
 pub(crate) mod sensor;
 #[cfg(test)]
 mod synthetic_tests;
@@ -280,7 +280,7 @@ impl PreviewImage {
 
         if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
             let decoded = read_standard_image(path)?;
-            let alpha_dropped = decoded.desc.color_format.channel_count == ChannelCount::Rgba;
+            let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
             let target = f32_target_format(&decoded);
             let image = decoded
                 .convert(target)
@@ -322,7 +322,7 @@ impl From<PreviewImage> for Image {
 /// The `f32` target format a given image deinterleaves into: `L_F32` for
 /// grayscale, `RGB_F32` for color.
 fn f32_target_format(image: &Image) -> ColorFormat {
-    match image.desc.color_format.channel_count {
+    match image.desc().color_format.channel_count {
         ChannelCount::L => ColorFormat::L_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }

@@ -3,7 +3,7 @@
 use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_data::PixelData;
+use crate::io::image::linear_pixels::LinearPixels;
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::transform::WarpTransform;
 
@@ -60,7 +60,7 @@ pub fn warp(
     let dimensions = image.dimensions();
     let mut output = LinearImage {
         metadata: image.metadata.clone(),
-        pixels: PixelData::new_zeroed(dimensions),
+        pixels: LinearPixels::new_zeroed(dimensions),
     };
 
     for c in 0..image.channels() {

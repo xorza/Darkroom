@@ -14,7 +14,7 @@ use arrayvec::ArrayVec;
 use ort::session::Session;
 use ort::value::TensorRef;
 
-use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
+use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 const WINDOW: usize = 512;
@@ -55,14 +55,14 @@ fn model_err(e: ort::Error) -> MlError {
 }
 
 fn deinterleave_f32(image: &Image) -> ArrayVec<Buffer2<f32>, 3> {
-    match image.desc.color_format.channel_count {
+    match image.desc().color_format.channel_count {
         ChannelCount::L => {
-            let planar: DeinterleavedImageData<1, f32> = image.try_into().unwrap();
-            planar.channels.into_iter().collect()
+            let planar: PlanarPixels<1, f32> = image.try_into().unwrap();
+            planar.planes.into_iter().collect()
         }
         ChannelCount::Rgb => {
-            let planar: DeinterleavedImageData<3, f32> = image.try_into().unwrap();
-            planar.channels.into_iter().collect()
+            let planar: PlanarPixels<3, f32> = image.try_into().unwrap();
+            planar.planes.into_iter().collect()
         }
         ChannelCount::Rgba => unreachable!("ML operations reject RGBA inputs"),
     }
@@ -73,11 +73,11 @@ fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
         1 => {
             let mut planes = planes.into_iter();
             let channels = [planes.next().unwrap()];
-            Image::from(&DeinterleavedImageData::from_channels(channels))
+            Image::from(&PlanarPixels::from_planes(channels))
         }
         3 => {
             let channels = planes.into_inner().unwrap();
-            Image::from(&DeinterleavedImageData::from_channels(channels))
+            Image::from(&PlanarPixels::from_planes(channels))
         }
         n => panic!("interleave_f32 expects 1 (L) or 3 (RGB) planes, got {n}"),
     }
@@ -89,7 +89,7 @@ fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
 /// (`L_F32` or `RGB_F32`).
 pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
     let planes = deinterleave_f32(image);
-    let (w, h) = (image.desc.width, image.desc.height);
+    let (w, h) = (image.desc().width, image.desc().height);
     if w < WINDOW || h < WINDOW {
         return Err(MlError::TooSmall(w, h));
     }

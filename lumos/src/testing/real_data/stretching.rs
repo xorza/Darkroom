@@ -34,7 +34,7 @@ fn stretch_stacked_light() {
 
     let path = calibration_dir().join("stacked_light.tiff");
     let mut image = Image::from(&LinearImage::from_file(&path).expect("load stacked_light.tiff"));
-    let desc = image.desc;
+    let desc = image.desc();
     assert!(desc.width > 0 && desc.height > 0);
 
     NeutralizeBackground.apply(&mut image).unwrap();

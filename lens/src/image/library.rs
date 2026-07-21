@@ -127,7 +127,7 @@ pub fn image_library() -> Library {
                         .make_cpu(&vision_ctx.processing_ctx)
                         .map_err(anyhow::Error::from)?;
 
-                    match conversion_target(format_str, cpu_image.desc.color_format) {
+                    match conversion_target(format_str, cpu_image.desc().color_format) {
                         Some(format) => cpu_image
                             .convert_to(format)
                             .map_err(anyhow::Error::from)?

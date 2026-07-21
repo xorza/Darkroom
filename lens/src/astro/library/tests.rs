@@ -43,7 +43,7 @@ fn image_to_cpu_moves_unique_input_and_clones_shared() {
         pixels,
         "shared input: the pixels are deep-cloned"
     );
-    assert_eq!(out.desc, desc);
+    assert_eq!(out.desc(), desc);
     let original = second_holder.as_custom::<Image>().unwrap();
     assert_eq!(
         original.buffer.desc, desc,

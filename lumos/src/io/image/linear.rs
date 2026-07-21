@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits;
-use crate::io::image::pixel_data::PixelData;
+use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
     ImageMetadata, ImageProvenance, STANDARD_IMAGE_EXTENSIONS, TransferProvenance,
@@ -20,7 +20,7 @@ use crate::stacking::frame_store::StackableImage;
 #[derive(Debug, Clone)]
 pub struct LinearImage {
     pub metadata: ImageMetadata,
-    pub(crate) pixels: PixelData,
+    pub(crate) pixels: LinearPixels,
 }
 
 impl LinearImage {
@@ -56,20 +56,20 @@ impl LinearImage {
             }
 
             let decoded = read_standard_image(path)?;
-            if decoded.desc.color_format.channel_type != ChannelType::Float {
+            if decoded.desc().color_format.channel_type != ChannelType::Float {
                 return Err(scientific_rejection(
                     path,
                     "scientific raster input must be an explicitly declared floating-point TIFF",
                 ));
             }
-            if decoded.desc.color_format.channel_count == ChannelCount::Rgba {
+            if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
                 return Err(scientific_rejection(
                     path,
                     "scientific raster input must not contain an alpha channel",
                 ));
             }
 
-            let color = if decoded.desc.color_format.channel_count == ChannelCount::L {
+            let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
                 ColorProvenance::Monochrome
             } else {
                 ColorProvenance::Unspecified
@@ -93,7 +93,7 @@ impl LinearImage {
     pub fn from_pixels(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
         LinearImage {
             metadata: ImageMetadata::default(),
-            pixels: PixelData::from_interleaved(dimensions, pixels),
+            pixels: LinearPixels::from_interleaved(dimensions, pixels),
         }
     }
 
@@ -104,7 +104,7 @@ impl LinearImage {
     ) -> Self {
         LinearImage {
             metadata: ImageMetadata::default(),
-            pixels: PixelData::from_planar_channels(dimensions, channels),
+            pixels: LinearPixels::from_planar_channels(dimensions, channels),
         }
     }
 
@@ -133,11 +133,11 @@ impl LinearImage {
     }
 
     pub fn is_grayscale(&self) -> bool {
-        matches!(self.pixels, PixelData::L(_))
+        matches!(self.pixels, LinearPixels::L(_))
     }
 
     pub fn is_rgb(&self) -> bool {
-        matches!(self.pixels, PixelData::Rgb(_))
+        matches!(self.pixels, LinearPixels::Rgb(_))
     }
 
     /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).
@@ -244,13 +244,13 @@ impl From<LinearImage> for Image {
 fn linear_from_f32_image(image: &Image) -> LinearImage {
     LinearImage {
         metadata: ImageMetadata::default(),
-        pixels: PixelData::from_f32_image(image),
+        pixels: LinearPixels::from_f32_image(image),
     }
 }
 
 fn linear_from_image(image: &Image) -> LinearImage {
     let target = f32_target_format(image);
-    if image.desc.color_format == target {
+    if image.desc().color_format == target {
         linear_from_f32_image(image)
     } else {
         let converted = image
@@ -266,7 +266,7 @@ pub(crate) mod test_support {
 
     use crate::image_ops::rgb::Rgb;
     use crate::io::image::linear::{self, LinearImage};
-    use crate::io::image::pixel_data;
+    use crate::io::image::linear_pixels;
 
     pub(crate) fn from_image(image: &Image) -> LinearImage {
         linear::linear_from_image(image)
@@ -312,7 +312,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn into_interleaved_pixels(self) -> Vec<f32> {
-            pixel_data::test_support::into_interleaved_pixels(self.pixels)
+            linear_pixels::test_support::into_interleaved_pixels(self.pixels)
         }
     }
 }

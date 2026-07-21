@@ -64,7 +64,7 @@ pub(crate) fn image_type_entry() -> TypeEntry {
 }
 
 fn encode_image(image: &imaginarium::Image) -> Vec<u8> {
-    let desc = image.desc;
+    let desc = image.desc();
     let format = desc.color_format;
     let pixels = image.bytes();
 
@@ -161,7 +161,7 @@ mod tests {
             .buffer
             .make_cpu(&ctx)
             .expect("rebuilt image is CPU-resident");
-        assert_eq!(cpu.desc, desc);
+        assert_eq!(cpu.desc(), desc);
         assert_eq!(cpu.bytes(), pixels.as_slice());
     }
 

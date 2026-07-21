@@ -190,7 +190,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         })
     ));
     let preview: imaginarium::Image = preview.into();
-    assert_eq!(preview.desc.color_format, ColorFormat::RGB_F32);
+    assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
     for y in 6..height - 6 {
         for x in 6..width - 6 {

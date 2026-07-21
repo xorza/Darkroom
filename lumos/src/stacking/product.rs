@@ -1,7 +1,7 @@
 use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_data::PixelData;
+use crate::io::image::linear_pixels::LinearPixels;
 
 /// A quality map that is either common to every image channel or channel-specific.
 #[derive(Debug)]
@@ -21,10 +21,10 @@ impl QualityMap {
         }
     }
 
-    pub(crate) fn from_pixels(pixels: PixelData) -> Self {
+    pub(crate) fn from_pixels(pixels: LinearPixels) -> Self {
         match pixels {
-            PixelData::L(plane) => Self::Shared(plane),
-            PixelData::Rgb(planes) => Self::PerChannel(planes),
+            LinearPixels::L(plane) => Self::Shared(plane),
+            LinearPixels::Rgb(planes) => Self::PerChannel(planes),
         }
     }
 }

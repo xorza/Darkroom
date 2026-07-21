@@ -96,12 +96,12 @@ mod tests {
         // (1.0, 0.0)  -> 1 - 0.0/1.0  = 1.0
         // (0.5, 1.0)  -> denominator floors at 1e-4 -> huge negative -> clamps to 0.0
         let mut orig = l_f32(3, 1, vec![0.75, 1.0, 0.5]);
-        let orig_desc = orig.desc;
+        let orig_desc = orig.desc();
         let starless = l_f32(3, 1, vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         let out: &[f32] = bytemuck::cast_slice(orig.bytes());
         assert_eq!(out, &[0.5, 1.0, 0.0]);
-        assert_eq!(orig.desc, orig_desc);
+        assert_eq!(orig.desc(), orig_desc);
     }
 
     #[test]

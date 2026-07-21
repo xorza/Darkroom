@@ -40,7 +40,7 @@ fn test_convert_to_imaginarium_image_grayscale() {
     );
 
     let image: Image = astro.into();
-    let desc = image.desc;
+    let desc = image.desc();
 
     assert_eq!(desc.width, 3);
     assert_eq!(desc.height, 2);
@@ -66,7 +66,7 @@ fn test_convert_to_imaginarium_image_rgb() {
     );
 
     let image: Image = astro.into();
-    let desc = image.desc;
+    let desc = image.desc();
 
     assert_eq!(desc.width, 2);
     assert_eq!(desc.height, 2);
@@ -91,7 +91,7 @@ fn test_convert_fits_to_imaginarium_image() {
     let astro = LinearImage::from_file(path).unwrap();
     let image: Image = astro.into();
 
-    let desc = image.desc;
+    let desc = image.desc();
     assert_eq!(desc.width, 100);
     assert_eq!(desc.height, 100);
     assert_eq!(desc.color_format, ColorFormat::L_F32);
@@ -192,7 +192,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let scientific = LinearImage::from_file(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
     let preview: Image = PreviewImage::from_file(&float_path).unwrap().into();
-    assert_eq!(preview.desc.color_format, ColorFormat::L_F32);
+    assert_eq!(preview.desc().color_format, ColorFormat::L_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
         float_pixels

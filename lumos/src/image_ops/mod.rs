@@ -48,7 +48,7 @@ pub(crate) fn par_map_pixels(
     mono: impl Fn(f32) -> f32 + Sync,
     rgb: impl Fn(Rgb) -> Rgb + Sync,
 ) {
-    let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
+    let is_rgb = image.desc().color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     if is_rgb {
         samples
@@ -77,9 +77,9 @@ pub(crate) fn par_map_pixels(
 /// Per-pixel combined intensity as a plane: the channel itself for L, `(r+g+b)/3`
 /// for RGB.
 pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
-    let (width, height) = (image.desc.width, image.desc.height);
+    let (width, height) = (image.desc().width, image.desc().height);
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
-    if image.desc.color_format.channel_count == ChannelCount::Rgb {
+    if image.desc().color_format.channel_count == ChannelCount::Rgb {
         let intensity = samples
             .chunks_exact(3)
             .map(|px| {
@@ -111,7 +111,7 @@ pub(crate) fn remap_intensity(image: &mut Image, map: impl FnOnce(&Buffer2<f32>)
 /// `mapped` directly. Output clamped to `[0, 1]`. `intensity`/`mapped` must match the
 /// image's dimensions.
 fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &Buffer2<f32>) {
-    let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
+    let is_rgb = image.desc().color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     if is_rgb {
         samples
@@ -153,8 +153,8 @@ pub(crate) fn process_channels(
     image: &mut Image,
     mut process: impl FnMut(&mut Buffer2<f32>) -> Result<(), OpError>,
 ) -> Result<(), OpError> {
-    let channels = image.desc.color_format.channel_count.channel_count() as usize;
-    let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
+    let channels = image.desc().color_format.channel_count.channel_count() as usize;
+    let mut plane = Buffer2::new_default(image.desc().width, image.desc().height);
     for channel in 0..channels {
         gather_channel(image, channel, channels, &mut plane);
         process(&mut plane)?;
@@ -284,12 +284,12 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::image_ops::gather_channel;
-    use imaginarium::{Buffer2, DeinterleavedImageData, Image};
+    use imaginarium::{Buffer2, Image, PlanarPixels};
 
     pub(crate) fn channel_plane(image: &Image, channel: usize) -> Buffer2<f32> {
-        let channels = image.desc.color_format.channel_count.channel_count() as usize;
+        let channels = image.desc().color_format.channel_count.channel_count() as usize;
         assert!(channel < channels);
-        let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
+        let mut plane = Buffer2::new_default(image.desc().width, image.desc().height);
         gather_channel(image, channel, channels, &mut plane);
         plane
     }
@@ -299,7 +299,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn gray_image(width: usize, height: usize, pixels: Vec<f32>) -> Image {
-        Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        Image::from(&PlanarPixels::from_planes([Buffer2::new(
             width, height, pixels,
         )]))
     }
@@ -311,7 +311,7 @@ pub(crate) mod test_support {
         green: Vec<f32>,
         blue: Vec<f32>,
     ) -> Image {
-        Image::from(&DeinterleavedImageData::from_channels([
+        Image::from(&PlanarPixels::from_planes([
             Buffer2::new(width, height, red),
             Buffer2::new(width, height, green),
             Buffer2::new(width, height, blue),

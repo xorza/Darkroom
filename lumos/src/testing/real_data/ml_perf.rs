@@ -31,7 +31,7 @@ fn ml_full_image_timing() {
         return;
     };
     let img = stretched_master();
-    let (w, h, stride) = (img.desc.width, img.desc.height, 256usize);
+    let (w, h, stride) = (img.desc().width, img.desc().height, 256usize);
     let tiles = tiles_1d(w, stride) * tiles_1d(h, stride);
 
     let t = Instant::now();

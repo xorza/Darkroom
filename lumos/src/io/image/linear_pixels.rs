@@ -1,4 +1,4 @@
-use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
+use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
 use rayon::prelude::*;
 
 use crate::io::image::ImageDimensions;
@@ -6,12 +6,12 @@ use crate::math::sum::sum_f32;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
-pub(crate) enum PixelData {
+pub(crate) enum LinearPixels {
     L(Buffer2<f32>),
     Rgb([Buffer2<f32>; 3]),
 }
 
-impl PixelData {
+impl LinearPixels {
     pub(crate) fn from_interleaved(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
         assert_eq!(
             pixels.len(),
@@ -87,19 +87,19 @@ impl PixelData {
     }
 
     pub(crate) fn from_f32_image(image: &Image) -> Self {
-        match image.desc.color_format.channel_count {
+        match image.desc().color_format.channel_count {
             ChannelCount::L => {
-                let planar: DeinterleavedImageData<1, f32> = image
+                let planar: PlanarPixels<1, f32> = image
                     .try_into()
                     .expect("L_F32 image deinterleaves to one f32 plane");
-                let [plane] = planar.channels;
+                let [plane] = planar.planes;
                 plane.into()
             }
             ChannelCount::Rgb => {
-                let planar: DeinterleavedImageData<3, f32> = image
+                let planar: PlanarPixels<3, f32> = image
                     .try_into()
                     .expect("RGB_F32 image deinterleaves to three f32 planes");
-                planar.channels.into()
+                planar.planes.into()
             }
             ChannelCount::Rgba => panic!("RGBA image must be converted to RGB_F32 first"),
         }
@@ -107,14 +107,14 @@ impl PixelData {
 
     pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
         match self {
-            PixelData::L(plane) => {
+            LinearPixels::L(plane) => {
                 assert!(
                     channel == 0,
                     "Grayscale image only has channel 0, got {channel}"
                 );
                 plane
             }
-            PixelData::Rgb(planes) => {
+            LinearPixels::Rgb(planes) => {
                 assert!(channel < 3, "RGB image has channels 0-2, got {channel}");
                 &planes[channel]
             }
@@ -123,14 +123,14 @@ impl PixelData {
 
     pub(crate) fn channel_mut(&mut self, channel: usize) -> &mut Buffer2<f32> {
         match self {
-            PixelData::L(plane) => {
+            LinearPixels::L(plane) => {
                 assert!(
                     channel == 0,
                     "Grayscale image only has channel 0, got {channel}"
                 );
                 plane
             }
-            PixelData::Rgb(planes) => {
+            LinearPixels::Rgb(planes) => {
                 assert!(channel < 3, "RGB image has channels 0-2, got {channel}");
                 &mut planes[channel]
             }
@@ -139,8 +139,8 @@ impl PixelData {
 
     pub(crate) fn channel_count(&self) -> usize {
         match self {
-            PixelData::L(_) => 1,
-            PixelData::Rgb(_) => 3,
+            LinearPixels::L(_) => 1,
+            LinearPixels::Rgb(_) => 3,
         }
     }
 
@@ -155,11 +155,11 @@ impl PixelData {
         }
 
         match self {
-            PixelData::L(plane) => {
+            LinearPixels::L(plane) => {
                 debug_assert!(!plane.is_empty());
                 parallel_sum(plane) / plane.len() as f32
             }
-            PixelData::Rgb([r, g, b]) => {
+            LinearPixels::Rgb([r, g, b]) => {
                 let total = parallel_sum(r) + parallel_sum(g) + parallel_sum(b);
                 total / (r.len() + g.len() + b.len()) as f32
             }
@@ -168,27 +168,27 @@ impl PixelData {
 
     pub(crate) fn into_l(self) -> Buffer2<f32> {
         match self {
-            PixelData::L(plane) => plane,
-            PixelData::Rgb(_) => panic!("Expected L variant, got Rgb"),
+            LinearPixels::L(plane) => plane,
+            LinearPixels::Rgb(_) => panic!("Expected L variant, got Rgb"),
         }
     }
 
     pub(crate) fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         match self {
-            PixelData::L(plane) => arrayvec::ArrayVec::from_iter([plane]),
-            PixelData::Rgb(planes) => arrayvec::ArrayVec::from_iter(planes),
+            LinearPixels::L(plane) => arrayvec::ArrayVec::from_iter([plane]),
+            LinearPixels::Rgb(planes) => arrayvec::ArrayVec::from_iter(planes),
         }
     }
 }
 
-impl From<Buffer2<f32>> for PixelData {
+impl From<Buffer2<f32>> for LinearPixels {
     fn from(plane: Buffer2<f32>) -> Self {
         ImageDimensions::new((plane.width(), plane.height()), 1);
-        PixelData::L(plane)
+        LinearPixels::L(plane)
     }
 }
 
-impl From<[Buffer2<f32>; 3]> for PixelData {
+impl From<[Buffer2<f32>; 3]> for LinearPixels {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
         let width = planes[0].width();
         let height = planes[0].height();
@@ -197,15 +197,15 @@ impl From<[Buffer2<f32>; 3]> for PixelData {
             assert_eq!(plane.width(), width, "all RGB planes must share width");
             assert_eq!(plane.height(), height, "all RGB planes must share height");
         }
-        PixelData::Rgb(planes)
+        LinearPixels::Rgb(planes)
     }
 }
 
-impl From<&PixelData> for Image {
-    fn from(pixels: &PixelData) -> Self {
+impl From<&LinearPixels> for Image {
+    fn from(pixels: &LinearPixels) -> Self {
         match pixels {
-            PixelData::L(plane) => Image::from([plane]),
-            PixelData::Rgb(planes) => Image::from(planes.each_ref()),
+            LinearPixels::L(plane) => Image::from([plane]),
+            LinearPixels::Rgb(planes) => Image::from(planes.each_ref()),
         }
     }
 }
@@ -231,12 +231,12 @@ fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [
 pub(crate) mod test_support {
     use rayon::prelude::*;
 
-    use crate::io::image::pixel_data::PixelData;
+    use crate::io::image::linear_pixels::LinearPixels;
 
-    pub(crate) fn into_interleaved_pixels(pixels: PixelData) -> Vec<f32> {
+    pub(crate) fn into_interleaved_pixels(pixels: LinearPixels) -> Vec<f32> {
         match pixels {
-            PixelData::L(plane) => plane.into_vec(),
-            PixelData::Rgb([r, g, b]) => {
+            LinearPixels::L(plane) => plane.into_vec(),
+            LinearPixels::Rgb([r, g, b]) => {
                 let mut interleaved = vec![0.0; r.len() * 3];
                 interleaved
                     .par_chunks_mut(3)
