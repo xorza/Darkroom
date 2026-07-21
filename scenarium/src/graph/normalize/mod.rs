@@ -4,9 +4,7 @@ use std::collections::HashMap;
 
 use crate::data::type_system::DataType;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{
-    Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, Subscription,
-};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, Subscription};
 use crate::library::Library;
 use crate::node::definition::{FuncInput, FuncOutput};
 
@@ -33,27 +31,22 @@ impl Graph {
                 .get_mut(&graph_id)
                 .unwrap()
                 .normalize_interfaces(library);
-            reconcile_graph(self, graph_id, library);
+            normalize_local_graph(self, graph_id, library);
         }
     }
 
-    fn prune_dangling_wiring(&mut self, library: &Library) -> usize {
+    fn prune_dangling_wiring(&mut self, library: &Library) {
         let mut bindings = std::mem::take(&mut self.bindings);
-        let before = bindings.len();
         bindings.retain(|destination, binding| self.binding_live(*destination, binding, library));
         self.bindings = bindings;
-        let mut removed = before - self.bindings.len();
 
         let mut subscriptions = std::mem::take(&mut self.subscriptions);
-        let before = subscriptions.len();
         subscriptions.retain(|subscription| self.subscription_live(subscription, library));
         self.subscriptions = subscriptions;
-        removed += before - self.subscriptions.len();
 
         for graph in self.graphs.values_mut() {
-            removed += graph.prune_dangling_wiring(library);
+            graph.prune_dangling_wiring(library);
         }
-        removed
     }
 
     fn binding_live(&self, destination: InputPort, binding: &Binding, library: &Library) -> bool {
@@ -90,7 +83,7 @@ impl Graph {
     }
 }
 
-fn reconcile_graph(parent: &mut Graph, graph_id: GraphId, library: &Library) {
+fn normalize_local_graph(parent: &mut Graph, graph_id: GraphId, library: &Library) {
     let (inputs, outputs) = {
         let graph = parent.graphs.get(&graph_id).unwrap();
         (plan_inputs(graph, library), plan_outputs(graph, library))
@@ -170,9 +163,7 @@ fn plan_outputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncOutput>
         graph
             .bindings_touching(boundary)
             .into_iter()
-            .filter_map(|entry| {
-                (entry.port.node_id == boundary).then_some(entry.port.port_idx)
-            }),
+            .filter_map(|entry| (entry.port.node_id == boundary).then_some(entry.port.port_idx)),
     );
     let mut remap = HashMap::with_capacity(used.len());
     let mut interface = Vec::with_capacity(used.len());

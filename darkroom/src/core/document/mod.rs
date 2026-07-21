@@ -541,7 +541,6 @@ impl Document {
             *slot = new.to_owned();
         }
     }
-
 }
 
 impl Eq for Document {}
