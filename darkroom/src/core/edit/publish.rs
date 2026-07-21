@@ -4,8 +4,8 @@
 //! [`Library`] (no GUI, dialogs, or persistence), so it's unit-testable
 //! against bare types. The thin orchestration (file dialogs, marking the
 //! document dirty) stays in `gui::app::commands`, which runs the mutators
-//! through `Engine::edit_library` — the one place that persists the library
-//! file and propagates the grown library to its downstream copies.
+//! through `RuntimeHost::edit_library` — the one path that reports persistence
+//! outcomes and propagates the grown library to its downstream copies.
 
 use scenarium::Library;
 use scenarium::{Graph, GraphId, GraphLink};

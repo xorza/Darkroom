@@ -50,14 +50,22 @@ Root holds the entry point; implementation is grouped by responsibility:
   status/logs and the latest worker-pushed pinned-output values.
 - **`gui/image_viewer.rs`** — render-side full-image conversion, textures,
   and pan/zoom state; source values are borrowed from `RunState` each frame.
-- **`gui/app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
-  `AppContext`), `editor/` (the `Editor`: document + undo + scene + UI tree +
+- **`gui/app/`** — `mod.rs` (the `App`: GUI policy + per-frame entry +
+  `AppContext`), `editor/` (the `Editor`: undo + scene + UI tree +
   the edit pipeline; `shortcuts.rs` maps chords → intents/commands),
   `commands/`
   (`AppCommand` side effects, run *outside* the record — grouped into nested
   sub-enums with one handler submodule each: `file` / `graph` / `run` /
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
+- **`core/open_document/`** — `OpenDocument`: the serialized `Document`, its
+  active path, and pending-normalization state.
+- **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
+  `RuntimeHost` pairing and their run/save/cache coordination.
+- **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
+  scripting host, and status log; no document or frontend policy.
+- **`core/terminal_session/`** — terminal/headless event interpretation and
+  shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
   `EditScope`), `serde.rs` (custom ordered paint-stack wire format), and
   `validate.rs` (document/view structural validation).
@@ -66,7 +74,8 @@ Root holds the entry point; implementation is grouped by responsibility:
   interface reconciliation).
 - **`core/io/`** — `project.rs` (`.darkroom` ZIP containing `project.json`),
   `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
-  session state), `library.rs` (shared graph library file), `cache.rs`
+  session state), `initial_document/` (shared startup selection), `library.rs`
+  (shared graph library file), `cache.rs`
   (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
   with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
@@ -76,15 +85,15 @@ Root holds the entry point; implementation is grouped by responsibility:
   (reusable widgets like inline-rename), plus `main_window`, `menu_bar`
   chrome.
 
-## Architecture: App vs Editor split
+## Architecture: Workspace, App, and Editor
 
-`App` (`src/gui/app/mod.rs`) is the **runtime owner**; `Editor`
-(`src/gui/app/editor/mod.rs`) is the **document + editing pipeline**. `App` holds:
+`Workspace` is the shared document/runtime owner used by every frontend.
+`App` (`src/gui/app/mod.rs`) adds GUI lifecycle policy; `Editor`
+(`src/gui/app/editor/mod.rs`) borrows `Workspace.open` for GUI editing. `App` holds:
 
-- `editor: Editor` — everything document-related and the per-frame pipeline.
-- `engine: Engine` — shared runtime services: library, worker, script host,
-  status, and compilation state.
-- `theme: Theme`, `preferences: Preferences`, `current_path: Option<PathBuf>`.
+- `workspace: Workspace` — the open document plus runtime services.
+- `editor: Editor` — undo, scene/run projections, gestures, and the GUI tree.
+- `theme: Theme`, `preferences: Preferences`.
 - `host_handle: HostHandle` — winit integration for file dialogs + repaints.
 
 `App::update` runs once before recording and wires runtime effects to the
@@ -112,12 +121,14 @@ intent/undo layer rather than mutating the document inline. The frame splits
 into a **navigation phase** (settle *which* graph is active) and an **edit
 phase** (mutate that graph), because input that switches tabs/opens graphs
 comes from *last* frame's click responses and must resolve before anything
-edits or records. `Editor` owns the pipeline state:
+edits or records. `Editor` owns the GUI pipeline state while borrowing the
+workspace's `OpenDocument`:
 
-- `document: Document`, `action_stack: ActionStack`, `scene: Scene`,
+- `action_stack: ActionStack`, `scene: Scene`,
   `main_window: MainWindow`, `run_state: RunState`.
-- `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`,
-  `needs_reconcile`, `needs_relayout` flags.
+- `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`, and
+  `needs_relayout` flags. Structural edits set
+  `OpenDocument.normalization_pending`.
 - `intents: Vec<Intent>` and `actions: Vec<UiAction>` — reused scratch buffers,
   cleared each record pass (no cross-frame state).
 
@@ -139,9 +150,9 @@ One record pass:
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
    they apply *before* the record.
-6. **drain (pre-record)** + canvas shortcuts + file-op chords. The drain runs
-   reconcile when `needs_reconcile`, and sets `scene_dirty` if it applied
-   anything.
+6. **drain (pre-record)** + canvas shortcuts + file-op chords. The next scene
+   rebuild normalizes the open document when structural edits made it pending;
+   the drain sets `scene_dirty` if it applied anything.
 7. **rebuild #2 (pre-record)** — `rebuild_scene` again **only if `scene_dirty`**.
    An idle frame or bare tab switch skips it.
 8. **record** — draw the tree; widgets push more intents (clicks, edit commits,
@@ -179,8 +190,9 @@ Everything else is editor view-state, split per graph:
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
 
-`Library` is *not* here — it's runtime-owned on `App` (built from builtins +
-the library file at startup, shared across documents). Startup seeds an empty
+`Library` is *not* here — `RuntimeLibrary` owns its current and published
+snapshots plus shared-graph persistence, and `RuntimeHost` owns that entity.
+Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
 ### Intent / undo layer (`src/edit/intent.rs`, `src/edit/action_stack/`)
@@ -228,14 +240,14 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `core/edit/publish.rs` (unit-tested against bare types, `&mut Library` in /
   `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
   thin GUI orchestration (dialogs + dirty flag), running the mutators through
-  `Engine::edit_library` — the **single** library-mutation path, which
-  persists the library file and re-pushes the worker's `DiskStore` (its codec
-  table rides a library snapshot) on every change. `Engine.library` is
-  private; read via `Engine::library()`.
+  `RuntimeHost::edit_library`. `RuntimeLibrary` publishes and persists the
+  change; `RuntimeHost` reports the persistence outcome and re-pushes the
+  worker's `DiskStore` (its codec table rides a library snapshot).
 
 ### Reconciliation (`src/edit/reconcile/`)
-Derived state, like `Scene`. Runs in the pre-record drain when
-`needs_reconcile` is set (any structural edit). Synchronizes each local
+Derived state, like `Scene`. `OpenDocument::normalize` runs before scene
+rebuild, execution, cache save, or document save when a structural edit marks
+normalization pending. It synchronizes each local
 graph's interface against its interior wiring: compacts unused boundary
 slots, remaps indices in the interior graph and across all instance bindings.
 Idempotent — a no-op on an already-canonical document.
@@ -256,8 +268,9 @@ the active `GraphView` each rebuild; the gesture writes back via intents.
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
-- `App::run_graph` compiles the active graph against the library **on the UI
-  thread** (`Engine::run_once` → the engine-owned long-lived
+- `App::run_graph` asks `Workspace::run_once` to normalize and compile the
+  active graph against the library **on the UI thread**
+  (`RuntimeHost::run_once` → the host-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the
   `CompiledGraph` in an `[Update, ExecuteSinks]` batch to the worker. A
   compile error surfaces synchronously — no run starts, `begin_run` is skipped,
@@ -274,10 +287,10 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   disabled sink as enabled for that run): the header's play chip left of the
   title (drawn in `gui/node/header.rs`, click scanned by `emit_play_clicks` and
   translated at canvas level) and the node context menu's "Run to this node".
-- **Per-document disk cache.** The worker starts memory-only;
-  `Engine::set_document_cache` (called from `set_document_path` — i.e. on
-  open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing
-  it at `io::cache`'s `<stem>.darkroom-cache/` store. An unsaved doc stays
+- **Per-document disk cache.** `Workspace` binds `RuntimeHost` to the
+  `OpenDocument` path during construction, replacement, and save. The host
+  sends `WorkerMessage::SetDiskCache` pointing it at `io::cache`'s
+  `<stem>.darkroom-cache/` store. An unsaved doc stays
   memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
   reloads its output across sessions from a store beside the project file.
 - On-thread, `App::update` drains the channel (`worker.drain()`, non-blocking).
@@ -291,7 +304,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.
 - **Cancel** (coarse): **Run ▸ Cancel Run** shows while `run_state.is_running()`
   (a `running` flag, set by `begin_run`, cleared by `set_results`); it routes
-  `MenuCommand::CancelRun` → `Engine::cancel_run` → `WorkerBridge::cancel_run` →
+  `MenuCommand::CancelRun` → `RuntimeHost::cancel_run` → `WorkerBridge::cancel_run` →
   `Worker::request_cancel` (a shared `common::CancelToken` the executor polls
   between nodes). The
   in-flight node still finishes (its blocking work isn't interrupted — that's
@@ -393,14 +406,14 @@ linked library entry in place, else creates a new one.
 `Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. Failures degrade
 rather than crash and report through `core/status.rs`'s `StatusLog`, the
-user-facing outcome log owned by `Engine` and shared by every frontend (no
+user-facing outcome log owned by `RuntimeHost` and shared by every frontend (no
 bare `eprintln!` anywhere in darkroom; every entry also goes to `tracing`).
 It keeps a capped rolling history — the TUI `status` command renders it —
 plus a sticky `error` slot holding the last failure
 (`StatusLog::report_error`), shown error-colored in the GUI's bottom status
 bar until a subsequent success of the same family (a run kick, a finished
 run, a file op) assigns `None`. Compile failures report themselves from
-`Engine::compile`; frontends report their own outcomes (run results, file
+`RuntimeHost::compile`; frontends report their own outcomes (run results, file
 ops, graph ops).
 
 ### Theme (`src/theme.rs`)

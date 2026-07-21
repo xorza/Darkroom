@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 pub(crate) mod cache;
+pub(crate) mod initial_document;
 pub(crate) mod library;
 pub(crate) mod persistence;
 pub(crate) mod preferences;

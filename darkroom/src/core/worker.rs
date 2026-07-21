@@ -1,8 +1,8 @@
-//! The bridge between a frontend's `Engine` and the headless
+//! The bridge between a frontend's `RuntimeHost` and the headless
 //! graph-evaluation `Worker` (`scenarium::worker`). The worker runs on its
 //! own tokio runtime; this type owns that runtime, the worker handle, and a
 //! sync channel the worker's callback posts results onto. The host loop
-//! (`App::update` / `Session::tick`) drains the channel each frame and is
+//! (`App::update` / `TerminalSession::tick`) drains the channel each frame and is
 //! woken from off-thread via the [`Wake`] callback.
 //!
 //! Outbound is one batched send per request (the worker scans a batch

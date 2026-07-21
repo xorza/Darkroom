@@ -11,6 +11,7 @@ use aperture::{Key, Shortcut, Ui};
 use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, remove_selection_intents};
 use crate::core::edit::intent::types::{Intent, UndoStep};
+use crate::core::open_document::OpenDocument;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -44,7 +45,7 @@ impl Editor {
     /// (subscriptions clear each frame). Focus only gates the *action*:
     /// while a widget holds focus, Ctrl+Z must undo that widget's text,
     /// so the graph-level handling stands down.
-    pub(crate) fn apply_undo_redo(&mut self, ui: &mut Ui) {
+    pub(crate) fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         if ui.focused_id().is_some() {
@@ -59,12 +60,12 @@ impl Editor {
             dirtied |= step.dirties_document();
         };
         if undo {
-            self.action_stack.undo(&mut self.document, &mut on_step);
+            self.action_stack.undo(&mut open.document, &mut on_step);
         } else if redo {
-            self.action_stack.redo(&mut self.document, &mut on_step);
+            self.action_stack.redo(&mut open.document, &mut on_step);
         }
         self.needs_relayout |= relayout;
-        self.needs_reconcile |= reconcile;
+        open.normalization_pending |= reconcile;
         // A content edit undone/redone leaves the doc differing from the
         // last save (barring the exact round-trip back to it — we accept a
         // stale "dirty" there rather than tracking saved state precisely).
@@ -78,7 +79,12 @@ impl Editor {
     /// nothing. Chords are sampled unconditionally (see `apply_undo_redo`)
     /// and gated by focus. Pushes intents only — their relayout is decided
     /// by the post-record drain, so this returns nothing.
-    pub(crate) fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) {
+    pub(crate) fn apply_canvas_shortcuts(
+        &mut self,
+        ui: &mut Ui,
+        open: &OpenDocument,
+        target: GraphRef,
+    ) {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
@@ -89,7 +95,7 @@ impl Editor {
         if ui.focused_id().is_some() {
             return;
         }
-        let view = self.document.view(target).expect("active tab view exists");
+        let view = open.document.view(target).expect("active tab view exists");
         let has_selection = !view.selected.is_empty();
         let pan = view.viewport.pan;
         if escape && has_selection {
@@ -102,7 +108,7 @@ impl Editor {
                 to: Viewport { pan, zoom: 1.0 },
             });
         }
-        if duplicate && let Some(intent) = build_duplicate_intent(&self.document, target) {
+        if duplicate && let Some(intent) = build_duplicate_intent(&open.document, target) {
             self.intents.push(intent);
         }
         // Delete/Backspace removes the whole selection: a selected node

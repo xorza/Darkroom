@@ -27,7 +27,7 @@ impl App {
         match command {
             RunCommand::Once => self.run_graph(),
             RunCommand::Node(node_id) => self.run_node(node_id),
-            RunCommand::Cancel => self.engine.cancel_run(),
+            RunCommand::Cancel => self.workspace.runtime.cancel_run(),
             RunCommand::StartEvents => self.start_events(),
             RunCommand::StopEvents => self.stop_events(),
         }
@@ -39,7 +39,7 @@ impl App {
     /// untouched. On success, marks a fresh run in flight. The worker's `Update`
     /// tears down any running event loop, so the toggle drops in lockstep.
     pub(crate) fn run_graph(&mut self) {
-        if !self.engine.run_once(&self.editor.document.graph) {
+        if !self.workspace.run_once() {
             return;
         }
         self.editor.run_state.begin_run();
@@ -50,7 +50,7 @@ impl App {
     /// upstream cone executes and its outputs are delivered. Same run-state
     /// and event-loop bookkeeping as a full run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
-        if !self.engine.run_node(&self.editor.document.graph, node_id) {
+        if !self.workspace.run_node(node_id) {
             return;
         }
         self.editor.run_state.begin_run();
@@ -62,14 +62,14 @@ impl App {
     /// the engine's status log) leaves the loop's running state as it was —
     /// nothing reached the worker.
     fn start_events(&mut self) {
-        if self.engine.start_event_loop(&self.editor.document.graph) {
+        if self.workspace.start_event_loop() {
             self.events_running = true;
         }
     }
 
     /// Stop the worker's event loop.
     fn stop_events(&mut self) {
-        self.engine.stop_event_loop();
+        self.workspace.runtime.stop_event_loop();
         self.events_running = false;
     }
 }

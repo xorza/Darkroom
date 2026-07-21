@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::core::io::preferences::Preferences;
 use crate::core::script::tcp::TcpScriptConfig;
 use crate::core::script::{DEFAULT_BIND, ScriptConfig};
-use crate::core::session::Session;
+use crate::core::terminal_session::TerminalSession;
 use crate::core::wake;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::App;
@@ -182,9 +182,9 @@ enum Frontend {
     Headless,
 }
 
-/// Build the [`Session`] in this (sync) context, run the chosen frontend's
+/// Build the [`TerminalSession`] in this (sync) context, run the chosen frontend's
 /// async loop on a current-thread runtime, then drop everything here.
-/// `Session` owns the worker/script tokio runtimes, and dropping a runtime
+/// `TerminalSession` owns the worker/script tokio runtimes, and dropping a runtime
 /// is only allowed *outside* an async context — so it must outlive the
 /// `block_on` rather than be dropped inside the driver future.
 fn run_terminal(frontend: Frontend, script_cfg: ScriptConfig) {
@@ -195,7 +195,7 @@ fn run_terminal(frontend: Frontend, script_cfg: ScriptConfig) {
     }
 
     let notify = Arc::new(Notify::new());
-    let mut session = Session::new(&script_cfg, wake::from_notify(notify.clone()));
+    let mut session = TerminalSession::new(&script_cfg, wake::from_notify(notify.clone()));
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()

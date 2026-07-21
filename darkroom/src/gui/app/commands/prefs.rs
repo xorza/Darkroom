@@ -44,7 +44,7 @@ impl App {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
         ui.theme = self.theme.aperture_theme.clone();
         let paths = (&self.preferences.ml_models).into();
-        self.engine.configure_ml_model_defaults(&paths);
+        self.workspace.runtime.configure_ml_model_defaults(&paths);
         self.save_preferences();
     }
 
@@ -53,7 +53,7 @@ impl App {
     /// preferences file can't fail silently.
     pub(crate) fn save_preferences(&mut self) {
         if let Err(err) = self.preferences.save() {
-            self.engine.status.error(err);
+            self.workspace.runtime.status.error(err);
         }
     }
 
@@ -71,7 +71,7 @@ impl App {
             MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
         }
         let paths = (&self.preferences.ml_models).into();
-        self.engine.configure_ml_model_defaults(&paths);
+        self.workspace.runtime.configure_ml_model_defaults(&paths);
         self.save_preferences();
     }
 

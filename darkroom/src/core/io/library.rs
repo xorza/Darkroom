@@ -3,7 +3,7 @@
 //! any one document, so they're reusable across documents. Persisted in
 //! the working dir as JSON — loaded into
 //! `library.graphs` at startup, saved when "promote" grows it. Failures
-//! surface through the caller (`Engine`) into the status log.
+//! surface through `RuntimeLibrary` into the runtime host's status log.
 //!
 //! A file that fails to load still holds graphs a save would destroy (the
 //! session degraded to an empty library in its place), so [`load_library`]
@@ -93,8 +93,8 @@ fn load_library_from(path: &Path) -> Result<HashMap<GraphId, Graph>> {
 }
 
 /// Write the shared graphs to the working dir, refusing to overwrite
-/// a file whose graphs can't be re-read. The caller
-/// (`Engine::edit_library`) reports the error to the status log, which also
+/// a file whose graphs can't be re-read. The runtime host reports errors
+/// returned by `RuntimeLibrary::edit_shared_graphs` to the status log, which also
 /// traces it.
 pub(crate) fn save_library<'a>(
     graphs: impl Iterator<Item = (&'a GraphId, &'a Graph)>,
