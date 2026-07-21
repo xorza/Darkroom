@@ -15,8 +15,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
-use common::{SerdeFormat, deserialize, file_utils, serialize};
+use common::{DeserializeError, SerdeFormat, SerializeError, deserialize, file_utils, serialize};
 use scenarium::{Graph, GraphId};
 
 use crate::core::io::cwd_file;
@@ -27,9 +26,69 @@ const LIBRARY_FILE: &str = "darkroom.library.json";
 /// On-disk wrapper so the file is a named table rather than a bare
 /// collection (more robust to hand-edit and future fields). A plain
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct LibraryFile {
+pub(crate) struct PersistedLibrary {
     #[serde(default)]
-    graphs: HashMap<GraphId, Graph>,
+    pub(crate) graphs: HashMap<GraphId, Graph>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum LibraryReadError {
+    #[error("{path}: {source}", path = .path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{path}: {source}", path = .path.display())]
+    Deserialize {
+        path: PathBuf,
+        #[source]
+        source: DeserializeError,
+    },
+    #[error("{path}: nil graph id", path = .path.display())]
+    NilGraphId { path: PathBuf },
+    #[error("{path}: invalid graph {graph_name:?}: {reason}", path = .path.display())]
+    InvalidGraph {
+        path: PathBuf,
+        graph_name: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum LibraryLoadError {
+    #[error("{source} — file moved to {broken_path}", broken_path = .broken_path.display())]
+    Quarantined {
+        #[source]
+        source: Box<LibraryReadError>,
+        broken_path: PathBuf,
+    },
+    #[error("{source} — couldn't move the file aside ({quarantine_error}); fix or remove it")]
+    QuarantineFailed {
+        #[source]
+        source: Box<LibraryReadError>,
+        quarantine_error: std::io::Error,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum LibrarySaveError {
+    #[error("refusing to overwrite a library file that can't be re-read — {source}")]
+    Unreadable {
+        #[source]
+        source: Box<LibraryReadError>,
+    },
+    #[error("failed to serialize library: {source}")]
+    Serialize {
+        #[source]
+        source: SerializeError,
+    },
+    #[error("{path}: {source}", path = .path.display())]
+    Publish {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 fn path() -> PathBuf {
@@ -52,21 +111,38 @@ fn broken_path(path: &Path) -> PathBuf {
 /// A missing file is the normal first-launch case (`Ok(empty)`); any
 /// other failure is `Err` (render with `{:#}` for the full reason). No
 /// side effects — the recovery move is [`load_library`]'s.
-fn read_graphs(path: &Path) -> Result<HashMap<GraphId, Graph>> {
+fn read_library(path: &Path) -> Result<PersistedLibrary, LibraryReadError> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(err) => return Err(err).with_context(|| path.display().to_string()),
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(PersistedLibrary::default()),
+        Err(source) => {
+            return Err(LibraryReadError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
     };
-    let lib = deserialize::<LibraryFile>(&bytes, SerdeFormat::Json)
-        .with_context(|| path.display().to_string())?;
-    for (graph_id, graph) in &lib.graphs {
-        anyhow::ensure!(!graph_id.is_nil(), "{}: nil graph id", path.display());
+    let library = deserialize::<PersistedLibrary>(&bytes, SerdeFormat::Json).map_err(|source| {
+        LibraryReadError::Deserialize {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+    for (graph_id, graph) in &library.graphs {
+        if graph_id.is_nil() {
+            return Err(LibraryReadError::NilGraphId {
+                path: path.to_path_buf(),
+            });
+        }
         graph
             .validate()
-            .with_context(|| format!("{}: invalid graph {:?}", path.display(), graph.name))?;
+            .map_err(|error| LibraryReadError::InvalidGraph {
+                path: path.to_path_buf(),
+                graph_name: graph.name.clone(),
+                reason: format!("{error:#}"),
+            })?;
     }
-    Ok(lib.graphs)
+    Ok(library)
 }
 
 /// Load the shared graphs from the working dir. On a failed load the
@@ -74,20 +150,22 @@ fn read_graphs(path: &Path) -> Result<HashMap<GraphId, Graph>> {
 /// `<name>.broken` — recoverable by the user, and no longer in the way of
 /// the saves that would otherwise overwrite it with that empty set. The
 /// `Err` carries the reason plus where the file went.
-pub(crate) fn load_library() -> Result<HashMap<GraphId, Graph>> {
+pub(crate) fn load_library() -> Result<PersistedLibrary, LibraryLoadError> {
     load_library_from(&path())
 }
 
-fn load_library_from(path: &Path) -> Result<HashMap<GraphId, Graph>> {
-    read_graphs(path).map_err(|err| {
+fn load_library_from(path: &Path) -> Result<PersistedLibrary, LibraryLoadError> {
+    read_library(path).map_err(|err| {
         let broken = broken_path(path);
-        // Flatten the chain (`:#`) so the recovery note reads after the
-        // reason, not as an outer context in front of it.
         match std::fs::rename(path, &broken) {
-            Ok(()) => anyhow!("{err:#} — file moved to {}", broken.display()),
-            Err(rename_err) => {
-                anyhow!("{err:#} — couldn't move the file aside ({rename_err}); fix or remove it")
-            }
+            Ok(()) => LibraryLoadError::Quarantined {
+                source: Box::new(err),
+                broken_path: broken,
+            },
+            Err(quarantine_error) => LibraryLoadError::QuarantineFailed {
+                source: Box::new(err),
+                quarantine_error,
+            },
         }
     })
 }
@@ -98,25 +176,30 @@ fn load_library_from(path: &Path) -> Result<HashMap<GraphId, Graph>> {
 /// traces it.
 pub(crate) fn save_library<'a>(
     graphs: impl Iterator<Item = (&'a GraphId, &'a Graph)>,
-) -> Result<()> {
+) -> Result<(), LibrarySaveError> {
     save_library_to(&path(), graphs)
 }
 
 fn save_library_to<'a>(
     path: &Path,
     graphs: impl Iterator<Item = (&'a GraphId, &'a Graph)>,
-) -> Result<()> {
+) -> Result<(), LibrarySaveError> {
     // Normally a bad file was already moved aside at load; this closes the
     // gaps (a failed move, corruption after startup).
-    if let Err(err) = read_graphs(path) {
-        bail!("refusing to overwrite a library file that can't be re-read — {err:#}");
-    }
-    let lib = LibraryFile {
+    read_library(path).map_err(|source| LibrarySaveError::Unreadable {
+        source: Box::new(source),
+    })?;
+    let library = PersistedLibrary {
         graphs: graphs.map(|(id, graph)| (*id, graph.clone())).collect(),
     };
-    let bytes = serialize(&lib, SerdeFormat::Json)?;
-    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable)
-        .with_context(|| path.display().to_string())
+    let bytes = serialize(&library, SerdeFormat::Json)
+        .map_err(|source| LibrarySaveError::Serialize { source })?;
+    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable).map_err(
+        |source| LibrarySaveError::Publish {
+            path: path.to_path_buf(),
+            source,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -146,13 +229,13 @@ mod tests {
         let graphs = graphs(["blur", "sharpen"]);
         save_library_to(&path, graphs.iter()).unwrap();
 
-        assert_eq!(load_library_from(&path).unwrap(), graphs);
+        assert_eq!(load_library_from(&path).unwrap().graphs, graphs);
     }
 
     #[test]
     fn missing_file_is_empty_and_not_an_error() {
         let path = test_output_path("darkroom_library/never-written.json");
-        assert_eq!(load_library_from(&path).unwrap(), HashMap::new());
+        assert!(load_library_from(&path).unwrap().graphs.is_empty());
     }
 
     #[test]
@@ -162,7 +245,20 @@ mod tests {
         let garbage = r#"{"graphs": [ truncated"#;
         std::fs::write(&path, garbage).unwrap();
 
-        let err = format!("{:#}", load_library_from(&path).unwrap_err());
+        let error = load_library_from(&path).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                LibraryLoadError::Quarantined { source, broken_path }
+                    if matches!(
+                        source.as_ref(),
+                        LibraryReadError::Deserialize { path: error_path, .. }
+                            if error_path == &path
+                    ) && broken_path == &broken
+            ),
+            "parse failure is quarantined with both exact paths: {error}"
+        );
+        let err = error.to_string();
         assert!(
             err.contains(path.to_str().unwrap()) && err.contains(broken.to_str().unwrap()),
             "error names the file and the backup: {err}"
@@ -178,7 +274,7 @@ mod tests {
         // and the backup is untouched.
         let graphs = graphs(["recovered"]);
         save_library_to(&path, graphs.iter()).unwrap();
-        assert_eq!(load_library_from(&path).unwrap(), graphs);
+        assert_eq!(load_library_from(&path).unwrap().graphs, graphs);
         assert_eq!(std::fs::read_to_string(&broken).unwrap(), garbage);
     }
 
@@ -199,7 +295,23 @@ mod tests {
         let graphs = HashMap::from([(GraphId::unique(), bad)]);
         save_library_to(&path, graphs.iter()).unwrap();
 
-        let err = format!("{:#}", load_library_from(&path).unwrap_err());
+        let error = load_library_from(&path).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                LibraryLoadError::Quarantined { source, .. }
+                    if matches!(
+                        source.as_ref(),
+                        LibraryReadError::InvalidGraph {
+                            path: error_path,
+                            graph_name,
+                            ..
+                        } if error_path == &path && graph_name == "dangling"
+                    )
+            ),
+            "structural failure retains its typed context: {error}"
+        );
+        let err = error.to_string();
         assert!(
             err.contains("invalid graph") && err.contains("dangling"),
             "error names the bad graph: {err}"
