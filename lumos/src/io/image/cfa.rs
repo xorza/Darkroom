@@ -26,7 +26,7 @@ use imaginarium::Buffer2;
 pub(crate) const QUANTIZATION_SIGMA_PER_STEP: f32 = 0.288_675_13;
 
 /// CFA pattern anchored at the origin of the image data it accompanies.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfaType {
     /// No CFA pattern (monochrome sensor)
     Mono,
@@ -59,7 +59,7 @@ impl CfaType {
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CfaImage {
     /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
     /// Layout: row-major, width * height pixels.

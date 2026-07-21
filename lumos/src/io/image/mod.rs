@@ -23,7 +23,7 @@ pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &[
     "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceContainer {
     Fits,
     CameraRaw,
@@ -32,14 +32,14 @@ pub enum SourceContainer {
     Jpeg,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecoderProvenance {
     FitsWell,
     LibRaw,
     Imaginarium,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransferProvenance {
     FitsPhysical {
         bscale: f64,
@@ -51,7 +51,7 @@ pub enum TransferProvenance {
     UnspecifiedRaster,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorProvenance {
     SensorCfa,
     SensorRgb,
@@ -60,7 +60,7 @@ pub enum ColorProvenance {
     UnmanagedRaster { alpha_dropped: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemosaicProvenance {
     None,
     LumosRcd,
@@ -69,7 +69,7 @@ pub enum DemosaicProvenance {
 }
 
 /// Decoder decisions that affect the meaning of the returned samples.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImageProvenance {
     pub container: SourceContainer,
     pub decoder: DecoderProvenance,
@@ -86,9 +86,7 @@ pub struct ImageProvenance {
 /// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
 /// fits-well's `SampleType` resolves this and reports the effective type.
 /// The unsigned variants here preserve the distinction for correct normalization.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BitPix {
     #[default]
     UInt8,
@@ -172,7 +170,7 @@ impl ImageDimensions {
 }
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ImageMetadata {
     pub object: Option<String>,
     pub instrument: Option<String>,

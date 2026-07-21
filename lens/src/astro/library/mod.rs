@@ -140,11 +140,6 @@ pub fn astro_library() -> Library {
                  next run instead of re-stacking.",
             )
             .category("Astro")
-            // `Pure`: its digest is the structural fold of its inputs, so the directory-aware
-            // `FsPath` resolver keys it on each calibration folder's *contents* (sorted entry
-            // `(name, len, mtime)`). A stable folder caches; any add/remove/edit re-keys it and
-            // it recomputes. (Its `cache` toggle still reloads masters from the FITS files it
-            // writes next to the frames, keeping the recompute cheap.)
             .pure()
             .inputs([
                 dir_input("Darks", "dark frames"),
@@ -182,11 +177,6 @@ pub fn astro_library() -> Library {
                         .map(|v| v as f32)
                         .expect("sigma is required");
                     let cache = inputs[5].value.as_bool().expect("cache is required");
-
-                    // Stacking many full-resolution CFA frames is heavy CPU work
-                    // (polls `cancel` between decode frames + combine rows); a
-                    // cached master is loaded instead when present. A cancel
-                    // propagates out as `InvokeError::Cancelled` via `?`.
                     let masters = run_cancellable(cancel, move |c| {
                         build_masters_cached(dirs, sigma, cache, c)
                     })
@@ -826,11 +816,6 @@ fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
     }
 }
 
-/// Build (or load from cache) the four calibration masters for `dirs`
-/// (darks / flats / bias / flat_darks, in order). With `cache` on, a master is
-/// loaded from `master_<role>.fits` next to its frames when present, and a
-/// freshly-stacked one is written there for next time. An unreadable or stale
-/// cache is rebuilt from its source folder.
 /// Run a cancellable blocking lumos op off the worker. Centralizes the
 /// `spawn_blocking` + join handling and the "a cancelled op is a cancel, not a
 /// failure" rule the heavy astro nodes share: a lumos op reports cancellation as
@@ -864,8 +849,6 @@ fn build_masters_cached(
                 config: StackConfig,
                 file: &str|
      -> anyhow::Result<Option<CfaImage>> {
-        // Bail between roles (a cancel during the cached-master loads stops the
-        // next load); a real source scan/stack error propagates as itself.
         if cancel.is_cancelled() {
             anyhow::bail!("cancelled");
         }

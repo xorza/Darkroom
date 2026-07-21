@@ -177,6 +177,18 @@ pub(crate) fn load_cfa_fits(path: &Path) -> Result<CfaImage, ImageError> {
         source,
     })?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(|source| fits_err(path, source))?;
+    if let Some(primary) = reader.hdus().first()
+        && let Some(format) = primary
+            .header
+            .get_text("LUMOSFMT")
+            .map_err(|source| fits_err(path, source))?
+        && format != CFA_FITS_FORMAT
+    {
+        return Err(fits_unsupported(
+            path,
+            format!("Lumos {format} FITS is not a standalone {CFA_FITS_FORMAT} image"),
+        ));
+    }
     let index = *reader
         .image_indices()
         .first()
