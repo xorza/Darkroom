@@ -401,7 +401,7 @@ Key cross-cutting mechanisms:
 - **`BreakerProbe`** threads the active breaker state into node/connection
   draws so intersection tests run inline; hits drain into intents on release.
 
-### Persistence + libraries (`src/core/io/`, `src/core/graph_library/`)
+### Persistence + libraries (`src/core/io/`, `src/core/graph_library.rs`)
 `document.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
 `commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
 pretty-printed `document.json` entry. `io/graph_template/` separately handles
