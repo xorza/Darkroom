@@ -10,6 +10,7 @@ use crate::core::io::document;
 use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
+use crate::core::status::StatusLog;
 use crate::core::workspace::Workspace;
 
 #[test]
@@ -19,6 +20,7 @@ fn normalization_is_shared_across_run_and_replacement_boundaries() {
         &ScriptConfig::default(),
         Arc::new(|| {}),
         &Preferences::default(),
+        StatusLog::default(),
     );
 
     assert!(workspace.open.normalization_pending);
@@ -49,15 +51,22 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         },
         ..Preferences::default()
     };
-    let open = OpenDocument::load_preferred(&mut preferences).unwrap();
+    let mut status = StatusLog::default();
+    let open = OpenDocument::restore(&mut preferences, &mut status);
+    status.info("startup initialized".into());
     let mut workspace = Workspace::new(
         open,
         &ScriptConfig::default(),
         Arc::new(|| {}),
         &preferences,
+        status,
     );
 
     assert_eq!(workspace.open.path, Some(first_path.clone()));
+    assert_eq!(
+        workspace.runtime.status.lines().collect::<Vec<_>>(),
+        ["startup initialized"]
+    );
     assert_eq!(
         workspace
             .runtime
