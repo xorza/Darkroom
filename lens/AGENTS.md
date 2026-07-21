@@ -16,7 +16,7 @@ datatypes, the bridge — is crate-internal).
 src/
 ├── lib.rs              published surface
 ├── config_node.rs      shared Introspect → config-builder bridge
-├── fs_watch_library.rs filesystem watch + change-event node
+├── fs_watch_library/   filesystem watch + change-event node (mod.rs + tests.rs)
 ├── random_library.rs   random-number node
 ├── image/              imaginarium adapter
 │   ├── mod.rs          Image (CustomValue, async GPU thumbnail) + submodules
