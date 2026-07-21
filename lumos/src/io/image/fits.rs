@@ -1,19 +1,124 @@
 use std::fs::File;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
 
-use fits_well::FitsReader;
 use fits_well::header::Header;
+use fits_well::image::Image;
 use fits_well::image::SampleType;
 use fits_well::io::HduKind;
+use fits_well::io::{ChecksumStatus, SliceReader};
+use fits_well::{FitsReader, FitsWriter};
 use rayon::prelude::*;
 
-use crate::io::image::cfa::CfaType;
+use common::{CancelToken, file_utils};
+use imaginarium::Buffer2;
+
+use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, SourceContainer, TransferProvenance,
+    ImageProvenance, SourceContainer, TransferProvenance, scientific_rejection,
 };
+use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::xtrans::XTransPattern;
+
+pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
+pub(crate) const CFA_FITS_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CfaFitsHduMetadata<'a> {
+    pub(crate) extname: Option<&'a str>,
+    pub(crate) image_type: Option<&'a str>,
+    pub(crate) prepared: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct CfaFitsHdu {
+    pub(crate) image: Image,
+    pub(crate) header: Header,
+}
+
+#[derive(Debug)]
+struct DecodedFitsImage {
+    dimensions: ImageDimensions,
+    metadata: ImageMetadata,
+    pixels: Vec<f32>,
+}
+
+impl DecodedFitsImage {
+    fn into_linear(self, path: &Path) -> Result<LinearImage, ImageError> {
+        if self.metadata.cfa_type.is_some() {
+            return Err(scientific_rejection(
+                path,
+                "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+            ));
+        }
+
+        let plane_size = self.dimensions.pixel_count();
+        let mut image = if self.dimensions.is_rgb() {
+            let channels = self
+                .pixels
+                .chunks_exact(plane_size)
+                .map(|channel| channel.to_vec());
+            LinearImage::from_planar_channels(self.dimensions, channels)
+        } else {
+            LinearImage::from_pixels(self.dimensions, self.pixels)
+        };
+        image.metadata = self.metadata;
+        Ok(image)
+    }
+
+    fn into_cfa(
+        self,
+        path: &Path,
+        declared_quantization_sigma: Option<f32>,
+    ) -> Result<CfaImage, ImageError> {
+        if !self.dimensions.is_grayscale() {
+            return Err(fits_unsupported(
+                path,
+                "scientific CFA input must have exactly one image plane",
+            ));
+        }
+        if self.metadata.cfa_type.is_none() {
+            return Err(fits_unsupported(
+                path,
+                "scientific CFA FITS input is missing validated CFA pattern metadata",
+            ));
+        }
+
+        let quantization_sigma = declared_quantization_sigma.or_else(|| {
+            match (&self.metadata.bitpix, &self.metadata.provenance) {
+                (
+                    BitPix::UInt8
+                    | BitPix::Int16
+                    | BitPix::UInt16
+                    | BitPix::Int32
+                    | BitPix::UInt32
+                    | BitPix::Int64,
+                    Some(ImageProvenance {
+                        transfer: TransferProvenance::FitsPhysical { bscale, .. },
+                        ..
+                    }),
+                ) => Some(bscale.abs() as f32 * QUANTIZATION_SIGMA_PER_STEP),
+                _ => None,
+            }
+        });
+        let Self {
+            dimensions,
+            mut metadata,
+            pixels,
+        } = self;
+        if let Some(provenance) = &mut metadata.provenance {
+            provenance.color = ColorProvenance::SensorCfa;
+        }
+        Ok(CfaImage {
+            data: Buffer2::new(dimensions.width(), dimensions.height(), pixels),
+            metadata,
+            quantization_sigma,
+        })
+    }
+}
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
     ImageError::Fits {
@@ -29,8 +134,24 @@ fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
-/// Load an astronomical image from a FITS file.
-pub(crate) fn load_fits(path: &Path) -> Result<LinearImage, ImageError> {
+/// Load an already-linear astronomical image from a FITS file.
+pub(crate) fn load_linear_fits(path: &Path) -> Result<LinearImage, ImageError> {
+    read_first_image(path)?.into_linear(path)
+}
+
+pub(crate) fn load_preview_fits(path: &Path) -> Result<LinearImage, ImageError> {
+    let decoded = read_first_image(path)?;
+    if decoded.metadata.cfa_type.is_some() {
+        Ok(decoded
+            .into_cfa(path, None)?
+            .demosaic(&CancelToken::never())
+            .expect("validated CFA FITS preview demosaic cannot fail"))
+    } else {
+        decoded.into_linear(path)
+    }
+}
+
+fn read_first_image(path: &Path) -> Result<DecodedFitsImage, ImageError> {
     // Read the whole file once, then decode straight from the bytes: `from_bytes`
     // borrows the buffer in place, so `read_image` skips the per-data-unit staging
     // copy that the seeking `open` path pays.
@@ -47,6 +168,74 @@ pub(crate) fn load_fits(path: &Path) -> Result<LinearImage, ImageError> {
         .first()
         .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
 
+    read_decoded_hdu(&mut reader, index, path)
+}
+
+pub(crate) fn load_cfa_fits(path: &Path) -> Result<CfaImage, ImageError> {
+    let bytes = std::fs::read(path).map_err(|source| ImageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut reader = FitsReader::from_bytes(&bytes).map_err(|source| fits_err(path, source))?;
+    if let Some(primary) = reader.hdus().first()
+        && let Some(format) = primary
+            .header
+            .get_text("LUMOSFMT")
+            .map_err(|source| fits_err(path, source))?
+        && format != CFA_FITS_FORMAT
+    {
+        return Err(fits_unsupported(
+            path,
+            format!("Lumos {format} FITS is not a standalone {CFA_FITS_FORMAT} image"),
+        ));
+    }
+    let index = *reader
+        .image_indices()
+        .first()
+        .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
+    if reader.hdus()[index]
+        .header
+        .get_text("LUMOSFMT")
+        .map_err(|source| fits_err(path, source))?
+        .is_some_and(|format| format == CFA_FITS_FORMAT)
+    {
+        let version = reader.hdus()[index]
+            .header
+            .get_integer("LUMOSVER")
+            .map_err(|source| fits_err(path, source))?;
+        if version != Some(CFA_FITS_VERSION) {
+            return Err(fits_unsupported(
+                path,
+                format!(
+                    "unsupported Lumos CFA FITS version {version:?}; expected {CFA_FITS_VERSION}"
+                ),
+            ));
+        }
+        let report = reader
+            .verify_checksum(index)
+            .map_err(|source| fits_err(path, source))?;
+        if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
+            return Err(fits_unsupported(path, "Lumos CFA FITS checksum mismatch"));
+        }
+    }
+    read_cfa_hdu(&mut reader, index, path)
+}
+
+pub(crate) fn read_cfa_hdu(
+    reader: &mut SliceReader<'_>,
+    index: usize,
+    path: &Path,
+) -> Result<CfaImage, ImageError> {
+    let quantization_sigma = read_quantization_sigma(&reader.hdus()[index].header)
+        .map_err(|source| fits_err(path, source))?;
+    read_decoded_hdu(reader, index, path)?.into_cfa(path, quantization_sigma)
+}
+
+fn read_decoded_hdu(
+    reader: &mut SliceReader<'_>,
+    index: usize,
+    path: &Path,
+) -> Result<DecodedFitsImage, ImageError> {
     // Decode pixels and shape, then drop the data-unit borrow before reading headers.
     let (shape, bitpix, scaling, pixels) = {
         let raw = reader.read_image(index).map_err(|e| fits_err(path, e))?;
@@ -103,16 +292,63 @@ pub(crate) fn load_fits(path: &Path) -> Result<LinearImage, ImageError> {
         )
     })?;
 
-    // FITS stores 3D images in planar order (all R, then all G, then all B).
-    // Use from_planar_channels for RGB, from_pixels for grayscale.
-    let mut image = if img_dims.channels == 3 {
-        let channels = pixels.chunks_exact(plane_size).map(|c| c.to_vec());
-        LinearImage::from_planar_channels(img_dims, channels)
-    } else {
-        LinearImage::from_pixels(img_dims, pixels)
-    };
-    image.metadata = metadata;
-    Ok(image)
+    Ok(DecodedFitsImage {
+        dimensions: img_dims,
+        metadata,
+        pixels,
+    })
+}
+
+pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()> {
+    let encoded = encode_cfa_hdu(
+        image,
+        CfaFitsHduMetadata {
+            extname: None,
+            image_type: image.metadata.image_type.as_deref(),
+            prepared: false,
+        },
+    )?;
+    file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
+        FitsWriter::new(&mut *file)
+            .with_checksums()
+            .write_image_with_header(&encoded.image, &encoded.header)
+            .map_err(fits_to_io)
+    })
+}
+
+pub(crate) fn encode_cfa_hdu(
+    cfa: &CfaImage,
+    hdu_metadata: CfaFitsHduMetadata<'_>,
+) -> std::io::Result<CfaFitsHdu> {
+    let mut header = Header::new();
+    header
+        .set("LUMOSFMT", CFA_FITS_FORMAT)
+        .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))
+        .map_err(fits_to_io)?;
+    if let Some(extname) = hdu_metadata.extname {
+        header.set("EXTNAME", extname).map_err(fits_to_io)?;
+        header.set("LUMROLE", extname).map_err(fits_to_io)?;
+    }
+    if hdu_metadata.prepared {
+        header.set("LUMPREP", true).map_err(fits_to_io)?;
+    }
+    write_image_metadata(&mut header, &cfa.metadata, hdu_metadata.image_type)
+        .map_err(fits_to_io)?;
+    write_cfa_metadata(&mut header, cfa).map_err(fits_to_io)?;
+
+    let image = Image::new(
+        [cfa.data.width(), cfa.data.height()],
+        cfa.data.pixels().to_vec(),
+    )
+    .map_err(fits_to_io)?;
+    Ok(CfaFitsHdu { image, header })
+}
+
+pub(crate) fn fits_to_io(source: fits_well::FitsError) -> IoError {
+    match source {
+        fits_well::FitsError::Io(source) => source,
+        source => IoError::new(ErrorKind::InvalidData, source),
+    }
 }
 
 pub(crate) fn fits_dimensions(path: &Path) -> Result<ImageDimensions, ImageError> {
@@ -187,7 +423,7 @@ fn read_metadata(
         bitpix,
         header_dimensions,
         cfa_type: read_cfa_from_headers(header)?,
-        camera_white_balance: None,
+        camera_white_balance: read_camera_white_balance(header)?,
         filter: read_text(header, "FILTER")?,
         gain: header.get_real("GAIN")?,
         egain: header.get_real("EGAIN")?,
@@ -205,8 +441,145 @@ fn read_metadata(
         pixel_size_y: header.get_real("YPIXSZ")?,
         data_max: header.get_real("DATAMAX")?,
         provenance: None,
-        calibrated: false,
+        calibrated: header.get_logical("LUMCAL")?.unwrap_or(false),
     })
+}
+
+fn write_image_metadata(
+    header: &mut Header,
+    metadata: &ImageMetadata,
+    image_type: Option<&str>,
+) -> fits_well::Result<()> {
+    set_optional_text(header, "OBJECT", metadata.object.as_deref())?;
+    set_optional_text(header, "INSTRUME", metadata.instrument.as_deref())?;
+    set_optional_text(header, "TELESCOP", metadata.telescope.as_deref())?;
+    set_optional_text(header, "DATE-OBS", metadata.date_obs.as_deref())?;
+    set_optional_real(header, "EXPTIME", metadata.exposure_time)?;
+    set_optional_integer(header, "ISOSPEED", metadata.iso.map(i64::from))?;
+    set_optional_text(header, "FILTER", metadata.filter.as_deref())?;
+    set_optional_real(header, "GAIN", metadata.gain)?;
+    set_optional_real(header, "EGAIN", metadata.egain)?;
+    set_optional_real(header, "CCD-TEMP", metadata.ccd_temp)?;
+    set_optional_text(
+        header,
+        "IMAGETYP",
+        image_type.or(metadata.image_type.as_deref()),
+    )?;
+    set_optional_integer(header, "XBINNING", metadata.xbinning.map(i64::from))?;
+    set_optional_integer(header, "YBINNING", metadata.ybinning.map(i64::from))?;
+    set_optional_real(header, "SET-TEMP", metadata.set_temp)?;
+    set_optional_integer(header, "OFFSET", metadata.offset.map(i64::from))?;
+    set_optional_real(header, "FOCALLEN", metadata.focal_length)?;
+    set_optional_real(header, "AIRMASS", metadata.airmass)?;
+    set_optional_real(header, "RA", metadata.ra_deg)?;
+    set_optional_real(header, "DEC", metadata.dec_deg)?;
+    set_optional_real(header, "XPIXSZ", metadata.pixel_size_x)?;
+    set_optional_real(header, "YPIXSZ", metadata.pixel_size_y)?;
+    set_optional_real(header, "DATAMAX", metadata.data_max)?;
+    if metadata.calibrated {
+        header.set("LUMCAL", true)?;
+    }
+    if let Some(ImageProvenance {
+        transfer: TransferProvenance::FitsPhysical {
+            unit: Some(unit), ..
+        },
+        ..
+    }) = &metadata.provenance
+    {
+        header.set("BUNIT", unit.as_str())?;
+    }
+    Ok(())
+}
+
+fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
+    match cfa.metadata.cfa_type.as_ref() {
+        Some(CfaType::Mono) => {
+            header.set("CFATYPE", "MONO")?;
+        }
+        Some(CfaType::Bayer(pattern)) => {
+            header.set("CFATYPE", "BAYER")?;
+            header.set("BAYERPAT", bayerpat(*pattern))?;
+            header.set("ROWORDER", "TOP-DOWN")?;
+        }
+        Some(CfaType::XTrans(pattern)) => {
+            XTransPattern::new(*pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
+                name: "CFATYPE".to_string(),
+                expected: "valid X-Trans pattern",
+            })?;
+            header.set("CFATYPE", "XTRANS")?;
+            header.set("ROWORDER", "TOP-DOWN")?;
+            for (row, values) in pattern.iter().enumerate() {
+                let keyword = format!("XTRNROW{row}");
+                let value = values
+                    .iter()
+                    .map(|value| char::from(b'0' + *value))
+                    .collect::<String>();
+                header.set(&keyword, value)?;
+            }
+        }
+        None => {
+            return Err(fits_well::FitsError::TypeMismatch {
+                name: "CFATYPE".to_string(),
+                expected: "declared CFA sensor type",
+            });
+        }
+    }
+
+    if let Some([red, green_1, blue, green_2]) = cfa.metadata.camera_white_balance {
+        header.set("LUMWBR", f64::from(red))?;
+        header.set("LUMWBG1", f64::from(green_1))?;
+        header.set("LUMWBB", f64::from(blue))?;
+        header.set("LUMWBG2", f64::from(green_2))?;
+    }
+    if let Some(sigma) = cfa.quantization_sigma {
+        if !sigma.is_finite() || sigma < 0.0 {
+            return Err(fits_well::FitsError::KeywordOutOfRange { name: "QNTZSIG" });
+        }
+        header.set("QNTZSIG", f64::from(sigma))?;
+    }
+    Ok(())
+}
+
+fn set_optional_text(
+    header: &mut Header,
+    keyword: &str,
+    value: Option<&str>,
+) -> fits_well::Result<()> {
+    if let Some(value) = value {
+        header.set(keyword, value)?;
+    }
+    Ok(())
+}
+
+fn set_optional_real(
+    header: &mut Header,
+    keyword: &str,
+    value: Option<f64>,
+) -> fits_well::Result<()> {
+    if let Some(value) = value {
+        header.set(keyword, value)?;
+    }
+    Ok(())
+}
+
+fn set_optional_integer(
+    header: &mut Header,
+    keyword: &str,
+    value: Option<i64>,
+) -> fits_well::Result<()> {
+    if let Some(value) = value {
+        header.set(keyword, value)?;
+    }
+    Ok(())
+}
+
+fn bayerpat(pattern: CfaPattern) -> &'static str {
+    match pattern {
+        CfaPattern::Rggb => "RGGB",
+        CfaPattern::Bggr => "BGGR",
+        CfaPattern::Grbg => "GRBG",
+        CfaPattern::Gbrg => "GBRG",
+    }
 }
 
 /// Map fits-well's effective `SampleType` to lumos's `BitPix`.
@@ -262,13 +635,37 @@ fn validate_fits_pixels(pixels: Vec<f32>) -> Result<Vec<f32>, NullSummary> {
 /// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
 /// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
 fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> {
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    match header.get_text("CFATYPE")? {
+        Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
+        Some(value) if value.eq_ignore_ascii_case("BAYER") => {
+            return read_bayer_cfa(header, true);
+        }
+        Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
+            return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
+        }
+        Some(_) => {
+            return Err(fits_well::FitsError::TypeMismatch {
+                name: "CFATYPE".to_string(),
+                expected: "MONO, BAYER, or XTRANS",
+            });
+        }
+        None => {}
+    }
+    read_bayer_cfa(header, false)
+}
 
+fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<CfaType>> {
     let Some(bayerpat) = header.get_text("BAYERPAT")? else {
+        if required {
+            return Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" });
+        }
         return Ok(None);
     };
     let Some(mut pattern) = CfaPattern::from_bayerpat(bayerpat) else {
-        return Ok(None);
+        return Err(fits_well::FitsError::TypeMismatch {
+            name: "BAYERPAT".to_string(),
+            expected: "RGGB, BGGR, GRBG, or GBRG",
+        });
     };
 
     // ROWORDER: if BOTTOM-UP, the first row in memory is the bottom of the image,
@@ -291,6 +688,80 @@ fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> 
     }
 
     Ok(Some(CfaType::Bayer(pattern)))
+}
+
+fn read_xtrans_pattern(header: &Header) -> fits_well::Result<[[u8; 6]; 6]> {
+    let mut pattern = [[0u8; 6]; 6];
+    for (row, values) in pattern.iter_mut().enumerate() {
+        let keyword = format!("XTRNROW{row}");
+        let value =
+            header
+                .get_text(&keyword)?
+                .ok_or_else(|| fits_well::FitsError::TypeMismatch {
+                    name: keyword.clone(),
+                    expected: "six X-Trans color digits",
+                })?;
+        if value.len() != 6 {
+            return Err(fits_well::FitsError::TypeMismatch {
+                name: keyword,
+                expected: "six X-Trans color digits",
+            });
+        }
+        for (column, byte) in value.bytes().enumerate() {
+            values[column] = match byte {
+                b'0'..=b'2' => byte - b'0',
+                _ => {
+                    return Err(fits_well::FitsError::TypeMismatch {
+                        name: keyword,
+                        expected: "X-Trans digits in the range 0..=2",
+                    });
+                }
+            };
+        }
+    }
+    XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
+        name: "CFATYPE".to_string(),
+        expected: "valid X-Trans pattern",
+    })?;
+    Ok(pattern)
+}
+
+fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 4]>> {
+    let values = [
+        header.get_real("LUMWBR")?,
+        header.get_real("LUMWBG1")?,
+        header.get_real("LUMWBB")?,
+        header.get_real("LUMWBG2")?,
+    ];
+    match values {
+        [None, None, None, None] => Ok(None),
+        [Some(red), Some(green_1), Some(blue), Some(green_2)] => {
+            let values = [red as f32, green_1 as f32, blue as f32, green_2 as f32];
+            if values.iter().all(|value| value.is_finite() && *value > 0.0) {
+                Ok(Some(values))
+            } else {
+                Err(fits_well::FitsError::KeywordOutOfRange { name: "LUMWB*" })
+            }
+        }
+        _ => Err(fits_well::FitsError::TypeMismatch {
+            name: "LUMWB*".to_string(),
+            expected: "all four white-balance multipliers or none",
+        }),
+    }
+}
+
+fn read_quantization_sigma(header: &Header) -> fits_well::Result<Option<f32>> {
+    header
+        .get_real("QNTZSIG")?
+        .map(|value| {
+            let value = value as f32;
+            if value.is_finite() && value >= 0.0 {
+                Ok(value)
+            } else {
+                Err(fits_well::FitsError::KeywordOutOfRange { name: "QNTZSIG" })
+            }
+        })
+        .transpose()
 }
 
 /// Read RA in degrees from FITS headers.

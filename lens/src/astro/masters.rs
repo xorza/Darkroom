@@ -77,9 +77,9 @@ impl From<CalibrationMasters> for Masters {
 mod tests {
     use common::CancelToken;
     use imaginarium::Buffer2;
-    use lumos::{CalibrationSet, CfaImage, CfaType, ImageMetadata};
+    use lumos::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, ImageMetadata};
 
-    use super::*;
+    use crate::astro::masters::Masters;
 
     fn bundle(defects: bool) -> CalibrationMasters {
         if !defects {

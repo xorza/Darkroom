@@ -1,6 +1,6 @@
 pub(crate) mod cfa;
 pub(crate) mod error;
-mod fits;
+pub(crate) mod fits;
 pub(crate) mod linear;
 pub(crate) mod sensor;
 #[cfg(test)]
@@ -10,8 +10,6 @@ use error::ImageError;
 
 use imaginarium::{ChannelCount, ColorFormat, Image};
 use std::path::Path;
-
-use common::CancelToken;
 
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
@@ -25,7 +23,7 @@ pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &[
     "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceContainer {
     Fits,
     CameraRaw,
@@ -34,14 +32,14 @@ pub enum SourceContainer {
     Jpeg,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecoderProvenance {
     FitsWell,
     LibRaw,
     Imaginarium,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransferProvenance {
     FitsPhysical {
         bscale: f64,
@@ -53,7 +51,7 @@ pub enum TransferProvenance {
     UnspecifiedRaster,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorProvenance {
     SensorCfa,
     SensorRgb,
@@ -62,7 +60,7 @@ pub enum ColorProvenance {
     UnmanagedRaster { alpha_dropped: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemosaicProvenance {
     None,
     LumosRcd,
@@ -71,7 +69,7 @@ pub enum DemosaicProvenance {
 }
 
 /// Decoder decisions that affect the meaning of the returned samples.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImageProvenance {
     pub container: SourceContainer,
     pub decoder: DecoderProvenance,
@@ -88,9 +86,7 @@ pub struct ImageProvenance {
 /// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
 /// fits-well's `SampleType` resolves this and reports the effective type.
 /// The unsigned variants here preserve the distinction for correct normalization.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BitPix {
     #[default]
     UInt8,
@@ -174,7 +170,7 @@ impl ImageDimensions {
 }
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ImageMetadata {
     pub object: Option<String>,
     pub instrument: Option<String>,
@@ -251,50 +247,6 @@ fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
-fn fits_cfa(image: LinearImage, path: &Path) -> Result<cfa::CfaImage, ImageError> {
-    if !image.is_grayscale() {
-        return Err(scientific_rejection(
-            path,
-            "scientific CFA input must have exactly one image plane",
-        ));
-    }
-    if image.metadata.cfa_type.is_none() {
-        return Err(scientific_rejection(
-            path,
-            "scientific CFA FITS input is missing validated CFA pattern metadata",
-        ));
-    }
-
-    let quantization_sigma = match (&image.metadata.bitpix, &image.metadata.provenance) {
-        (
-            BitPix::UInt8
-            | BitPix::Int16
-            | BitPix::UInt16
-            | BitPix::Int32
-            | BitPix::UInt32
-            | BitPix::Int64,
-            Some(ImageProvenance {
-                transfer: TransferProvenance::FitsPhysical { bscale, .. },
-                ..
-            }),
-        ) => Some(bscale.abs() as f32 * cfa::QUANTIZATION_SIGMA_PER_STEP),
-        _ => None,
-    };
-    let LinearImage {
-        mut metadata,
-        pixels,
-        ..
-    } = image;
-    if let Some(provenance) = &mut metadata.provenance {
-        provenance.color = ColorProvenance::SensorCfa;
-    }
-    Ok(cfa::CfaImage {
-        data: pixels.into_l(),
-        metadata,
-        quantization_sigma,
-    })
-}
-
 fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
     Image::read_file(path).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),
@@ -318,15 +270,7 @@ impl PreviewImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            let image = fits::load_fits(path)?;
-            let image = if image.metadata.cfa_type.is_some() {
-                fits_cfa(image, path)?
-                    .demosaic(&CancelToken::never())
-                    .expect("validated Bayer FITS preview demosaic cannot fail")
-            } else {
-                image
-            };
-            return Ok(image.into());
+            return fits::load_preview_fits(path).map(Into::into);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {

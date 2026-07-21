@@ -27,8 +27,8 @@ failed validation leaves both pixels and the calibrated flag unchanged.
 - `CalibrationMasters::from_files(frames, sigma)` schedules independent role stacks concurrently
   when the whole set fits the memory budget, or sequentially with the full budget per role when it
   does not. This convenience constructor currently runs those role stacks to completion.
-- `CalibrationMasters::save(path)` / `load(path)` persist the prepared bundle in a versioned binary
-  cache. A loaded cache is immediately ready to calibrate lights.
+- `CalibrationMasters::save(path)` / `load(path)` persist the prepared bundle as a versioned,
+  checksummed multi-extension FITS file. A loaded bundle is immediately ready to calibrate lights.
 
 ## Calibration Formula
 

@@ -1,14 +1,14 @@
 //! Load/decode round-trip tests on synthetic frames.
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
-//! real `load_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention, the
+//! real `load_linear_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention, the
 //! physical integer/float preservation and null rejection. The demosaic path is
 //! exercised by building mosaics from known colours and demosaicing them back.
 
 use std::fs::File;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::load_fits;
+use crate::io::image::fits::load_linear_fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
@@ -21,13 +21,13 @@ use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
 
-/// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
+/// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_linear_fits`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
-    load_fits(&path)
+    load_linear_fits(&path)
 }
 
 fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::PathBuf {
@@ -43,7 +43,7 @@ fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, Ima
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
-    load_fits(&path)
+    load_linear_fits(&path)
 }
 
 fn one_pixel_header() -> Header {
@@ -140,8 +140,8 @@ fn fits_datamax_is_metadata_only() {
     let low_path = write_with_header("datamax_100", &image, &low_header);
     let high_path = write_with_header("datamax_65535", &image, &high_header);
 
-    let low = load_fits(&low_path).unwrap();
-    let high = load_fits(&high_path).unwrap();
+    let low = load_linear_fits(&low_path).unwrap();
+    let high = load_linear_fits(&high_path).unwrap();
     assert_eq!(low.channel(0).pixels(), &[-7.0, 0.0, 41.0, 300.0]);
     assert_eq!(high.channel(0).pixels(), low.channel(0).pixels());
     assert_eq!(low.metadata.data_max, Some(100.0));

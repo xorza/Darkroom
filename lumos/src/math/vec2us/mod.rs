@@ -6,9 +6,7 @@ use std::ops::{Add, Sub};
 ///
 /// Unlike glam's vector types (which use `i32`, `u32`, or `f32`),
 /// this uses `usize` for direct array indexing without casts.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Vec2us {
     pub x: usize,
     pub y: usize,

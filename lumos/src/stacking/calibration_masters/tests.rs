@@ -2,15 +2,17 @@ use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
-use crate::stacking::calibration_masters::{
-    CACHE_MAGIC, CACHE_VERSION, CalibrationError, DEFAULT_SIGMA_THRESHOLD,
-};
+use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
 use crate::stacking::combine::error::Error;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageMetadata,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
+    ImageMetadata,
 };
 use common::CancelToken;
+use fits_well::FitsReader;
+use fits_well::image::Bitpix;
+use fits_well::io::ChecksumStatus;
 use imaginarium::Buffer2;
 
 #[test]
@@ -196,7 +198,6 @@ fn test_new_constructor() {
         CancelToken::never(),
     )
     .unwrap();
-
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
         vec![
@@ -777,7 +778,7 @@ fn test_flat_dark_takes_priority_over_bias() {
 }
 
 #[test]
-fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
+fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let flat = CfaImage {
         data: Buffer2::new(
@@ -794,7 +795,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
         },
         quantization_sigma: None,
     };
-    let masters = CalibrationMasters::from_images(
+    let mut masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(constant_cfa(4, 4, 0.05, cfa_type.clone())),
             flat: Some(flat),
@@ -805,6 +806,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
         CancelToken::never(),
     )
     .unwrap();
+    masters.dark.as_mut().unwrap().quantization_sigma = Some(0.000_02);
     let prepared_bits = masters
         .flat
         .as_ref()
@@ -820,23 +822,71 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
     let cache_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
     std::fs::create_dir_all(&cache_dir).unwrap();
     let path = cache_dir.join(format!(
-        "calibration_masters_roundtrip_{}.lcm",
+        "calibration_masters_roundtrip_{}.fits",
         std::process::id()
     ));
     masters.save(&path).unwrap();
-    let mut cache_bytes = std::fs::read(&path).unwrap();
+    assert!(matches!(
+        CfaImage::from_file(&path),
+        Err(ImageError::FitsUnsupported { reason, .. })
+            if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
+    ));
+    let cache_bytes = std::fs::read(&path).unwrap();
+    let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
+    assert_eq!(reader.hdus().len(), 5);
+    assert_eq!(reader.hdus()[0].header.naxis().unwrap(), 0);
+    assert_eq!(
+        reader.hdus()[0].header.get_text("LUMOSFMT").unwrap(),
+        Some("CALMASTR")
+    );
+    let extension_names = reader
+        .hdus()
+        .iter()
+        .skip(1)
+        .map(|hdu| hdu.header.get_text("EXTNAME").unwrap().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        extension_names,
+        ["MASTER_DARK", "MASTER_FLAT", "MASTER_BIAS", "DEFECT_MAP"]
+    );
+    for image_index in [1, 2, 3] {
+        assert_eq!(
+            reader.hdus()[image_index].header.bitpix().unwrap(),
+            Bitpix::F32
+        );
+    }
+    for index in 0..reader.hdus().len() {
+        let report = reader.verify_checksum(index).unwrap();
+        assert_eq!(report.datasum, ChecksumStatus::Valid);
+        assert_eq!(report.checksum, ChecksumStatus::Valid);
+    }
     let loaded = CalibrationMasters::load(&path).unwrap();
 
-    cache_bytes[0] ^= 0xff;
-    std::fs::write(&path, &cache_bytes).unwrap();
+    let mut invalid_version = cache_bytes.clone();
+    let version_card = invalid_version
+        .windows(8)
+        .position(|window| window == b"LUMOSVER")
+        .unwrap();
+    let version_digit = invalid_version[version_card..version_card + 80]
+        .iter()
+        .rposition(u8::is_ascii_digit)
+        .unwrap();
+    invalid_version[version_card + version_digit] = b'0';
+    std::fs::write(&path, invalid_version).unwrap();
     assert_eq!(
         CalibrationMasters::load(&path).unwrap_err().kind(),
         std::io::ErrorKind::InvalidData
     );
-    cache_bytes[0] ^= 0xff;
-    cache_bytes[CACHE_MAGIC.len()..CACHE_MAGIC.len() + size_of::<u32>()]
-        .copy_from_slice(&(CACHE_VERSION - 1).to_le_bytes());
-    std::fs::write(&path, cache_bytes).unwrap();
+
+    let mut invalid_data = cache_bytes.clone();
+    let sample = 0.05f32.to_be_bytes();
+    let repeated_sample = sample.repeat(4);
+    let pixel_offset = invalid_data
+        .windows(repeated_sample.len())
+        .position(|window| window == repeated_sample)
+        .unwrap();
+    invalid_data[pixel_offset] ^= 0x01;
+    std::fs::write(&path, invalid_data).unwrap();
     assert_eq!(
         CalibrationMasters::load(&path).unwrap_err().kind(),
         std::io::ErrorKind::InvalidData
@@ -859,6 +909,10 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
+        loaded.dark.as_ref().unwrap().quantization_sigma,
+        Some(0.000_02)
+    );
+    assert_eq!(
         loaded.components().collect::<Vec<_>>(),
         masters.components().collect::<Vec<_>>()
     );
@@ -878,6 +932,22 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
             .map(|value| value.to_bits())
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
+    let path = common::test_utils::test_output_path("empty_calibration_masters.fits");
+    CalibrationMasters::default().save(&path).unwrap();
+
+    let bytes = std::fs::read(&path).unwrap();
+    let mut reader = FitsReader::from_bytes(&bytes).unwrap();
+    assert_eq!(reader.hdus().len(), 1);
+    let report = reader.verify_checksum(0).unwrap();
+    assert_eq!(report.datasum, ChecksumStatus::Valid);
+    assert_eq!(report.checksum, ChecksumStatus::Valid);
+
+    let loaded = CalibrationMasters::load(&path).unwrap();
+    assert_eq!(loaded.components().collect::<Vec<_>>(), []);
 }
 
 #[test]
