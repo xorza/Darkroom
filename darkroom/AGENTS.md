@@ -59,7 +59,7 @@ Root holds the entry point; implementation is grouped by responsibility:
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
-  `RuntimeHost` pairing, startup loading, and run/save/cache coordination.
+  `RuntimeHost` pairing and run/save/cache coordination.
 - **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
   scripting host, and status log; no document or frontend policy.
 - **`core/terminal_session/`** — terminal/headless event interpretation and

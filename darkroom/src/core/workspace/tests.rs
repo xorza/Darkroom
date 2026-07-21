@@ -15,6 +15,7 @@ use crate::core::workspace::Workspace;
 #[test]
 fn normalization_is_shared_across_run_and_replacement_boundaries() {
     let mut workspace = Workspace::new(
+        OpenDocument::default(),
         &ScriptConfig::default(),
         Arc::new(|| {}),
         &Preferences::default(),
@@ -48,7 +49,13 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         },
         ..Preferences::default()
     };
-    let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &preferences);
+    let open = OpenDocument::load_preferred(&mut preferences).unwrap();
+    let mut workspace = Workspace::new(
+        open,
+        &ScriptConfig::default(),
+        Arc::new(|| {}),
+        &preferences,
+    );
 
     assert_eq!(workspace.open.path, Some(first_path.clone()));
     assert_eq!(
@@ -112,41 +119,5 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
     assert_eq!(
         test_support::disk_root(&workspace.runtime),
         Some(document_cache_root(&second_path))
-    );
-}
-
-#[test]
-fn disabled_reopen_ignores_the_remembered_path() {
-    let preferences = Preferences {
-        document_path: Some("does-not-exist.darkroom".into()),
-        load_last_document: false,
-        ..Preferences::default()
-    };
-
-    let workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &preferences);
-
-    assert!(workspace.open.path.is_none());
-    assert!(workspace.open.document.graph.is_empty());
-}
-
-#[test]
-fn startup_load_failure_falls_back_to_empty_and_reports_the_error() {
-    let preferences = Preferences {
-        document_path: Some("not-a-document.json".into()),
-        ..Preferences::default()
-    };
-
-    let workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &preferences);
-
-    assert!(workspace.open.path.is_none());
-    assert!(workspace.open.document.graph.is_empty());
-    assert_eq!(test_support::disk_root(&workspace.runtime), None);
-    assert!(
-        workspace
-            .runtime
-            .status
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("load failed:"))
     );
 }

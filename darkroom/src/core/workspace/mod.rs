@@ -1,12 +1,11 @@
 //! Shared document/runtime coordination used by GUI and terminal frontends.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use scenarium::NodeId;
 
-use crate::core::document::Document;
+use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
-use crate::core::open_document::OpenDocument;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::script::ScriptConfig;
 use crate::core::wake::Wake;
@@ -21,18 +20,19 @@ pub(crate) struct Workspace {
 }
 
 impl Workspace {
-    pub(crate) fn new(script_config: &ScriptConfig, wake: Wake, preferences: &Preferences) -> Self {
+    pub(crate) fn new(
+        open: OpenDocument,
+        script_config: &ScriptConfig,
+        wake: Wake,
+        preferences: &Preferences,
+    ) -> Self {
         let mut runtime = RuntimeHost::new(script_config, wake, preferences);
-        let open = OpenDocument::load(preferences).unwrap_or_else(|error| {
-            runtime.status.error(format!("load failed: {error:#}"));
-            OpenDocument::empty()
-        });
         runtime.set_document_cache(open.path.as_deref());
         Self { open, runtime }
     }
 
-    pub(crate) fn replace_document(&mut self, document: Document, path: Option<PathBuf>) {
-        self.open = OpenDocument::new(document, path);
+    pub(crate) fn replace_document(&mut self, open: OpenDocument) {
+        self.open = open;
         self.runtime.set_document_cache(self.open.path.as_deref());
     }
 
