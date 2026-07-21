@@ -175,7 +175,7 @@ impl App {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    let library = self.workspace.runtime.library.current.clone();
+                    let library = self.workspace.runtime.library.published.load();
                     self.editor
                         .apply_external_intents(&mut self.workspace.open, intents, &library);
                 }
@@ -325,7 +325,7 @@ impl aperture::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.workspace.runtime.library.current.clone();
+        let library = self.workspace.runtime.library.published.load();
         let command = self.editor.frame(
             &mut self.workspace.open,
             ui,

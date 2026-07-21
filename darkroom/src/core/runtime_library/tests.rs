@@ -16,10 +16,11 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     let defaults = MlModelPaths::default();
     let mut library = RuntimeLibrary::with_graph_library(&defaults, graphs);
 
-    assert!(library.current.by_name("Watch Directory").is_some());
-    assert!(library.current.by_name("Random").is_some());
+    let current = library.published.load();
+    assert!(current.by_name("Watch Directory").is_some());
+    assert!(current.by_name("Random").is_some());
     assert_eq!(
-        library.current.graphs.get(&graph_id).unwrap().name,
+        current.graphs.get(&graph_id).unwrap().name,
         "shared"
     );
     assert!(!library.update_ml_model_paths(&defaults));
@@ -35,7 +36,13 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
         Some(StaticValue::FsPath(paths.denoise.display().to_string()))
     );
     assert_eq!(
-        library.current.by_name("ML Star Removal").unwrap().inputs[1].default_value,
+        library
+            .published
+            .load()
+            .by_name("ML Star Removal")
+            .unwrap()
+            .inputs[1]
+            .default_value,
         Some(StaticValue::FsPath(
             paths.star_removal.display().to_string()
         ))
@@ -53,11 +60,17 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     assert!(outcome.changed);
     assert!(outcome.persist_error.is_none());
     assert_eq!(
-        library.current.graphs.get(&second_id).unwrap().name,
+        library.published.load().graphs.get(&second_id).unwrap().name,
         "second"
     );
     assert_eq!(
-        library.current.by_name("ML Denoise").unwrap().inputs[1].default_value,
+        library
+            .published
+            .load()
+            .by_name("ML Denoise")
+            .unwrap()
+            .inputs[1]
+            .default_value,
         Some(StaticValue::FsPath(paths.denoise.display().to_string())),
         "graph synchronization retains the configured ML defaults"
     );
@@ -99,7 +112,7 @@ fn graph_library_edit_distinguishes_noop_and_failed_persistence() {
         "the exact persistence failure is retained"
     );
     assert_eq!(
-        library.current.graphs.get(&graph_id).unwrap().name,
+        library.published.load().graphs.get(&graph_id).unwrap().name,
         "memory only"
     );
     assert_eq!(

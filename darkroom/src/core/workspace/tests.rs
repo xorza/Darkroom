@@ -53,7 +53,8 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         workspace
             .runtime
             .library
-            .current
+            .published
+            .load()
             .by_name("ML Denoise")
             .unwrap()
             .inputs[1]
@@ -64,7 +65,8 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         workspace
             .runtime
             .library
-            .current
+            .published
+            .load()
             .by_name("ML Star Removal")
             .unwrap()
             .inputs[1]
@@ -81,7 +83,8 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         workspace
             .runtime
             .library
-            .current
+            .published
+            .load()
             .by_name("ML Denoise")
             .unwrap()
             .inputs[1]
@@ -92,7 +95,8 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         workspace
             .runtime
             .library
-            .current
+            .published
+            .load()
             .by_name("ML Star Removal")
             .unwrap()
             .inputs[1]

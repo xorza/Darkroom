@@ -45,7 +45,7 @@ impl TerminalSession {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    let library = self.workspace.runtime.library.current.clone();
+                    let library = self.workspace.runtime.library.published.load();
                     self.workspace.open.normalization_pending |=
                         apply_intents(&mut self.workspace.open.document, intents, &library);
                 }

@@ -88,13 +88,13 @@ impl Workspace {
     }
 
     pub(crate) fn save_to(&mut self, path: &Path) -> anyhow::Result<()> {
-        let library = self.runtime.library.current.clone();
+        let library = self.runtime.library.published.load();
         self.open.save_to(path, &library)?;
         self.runtime.set_document_cache(self.open.path.as_deref());
         Ok(())
     }
 
     pub(crate) fn normalize_document(&mut self) {
-        self.open.normalize(&self.runtime.library.current);
+        self.open.normalize(&self.runtime.library.published.load());
     }
 }
