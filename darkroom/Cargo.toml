@@ -21,6 +21,7 @@ glam = { workspace = true }
 indexmap = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 dark-light = { workspace = true }
 rfd = { workspace = true }
