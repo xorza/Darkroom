@@ -11,28 +11,36 @@ use crate::image::Image;
 
 /// Applies blending of two images using CPU.
 pub(super) fn apply(params: &Blend, src: &Image, dst: &Image, output: &mut Image) {
-    assert_eq!(src.desc.width, dst.desc.width, "src/dst width mismatch");
-    assert_eq!(src.desc.height, dst.desc.height, "src/dst height mismatch");
+    assert_eq!(src.desc().width, dst.desc().width, "src/dst width mismatch");
     assert_eq!(
-        src.desc.color_format, dst.desc.color_format,
+        src.desc().height,
+        dst.desc().height,
+        "src/dst height mismatch"
+    );
+    assert_eq!(
+        src.desc().color_format,
+        dst.desc().color_format,
         "src/dst format mismatch"
     );
     assert_eq!(
-        src.desc.width, output.desc.width,
+        src.desc().width,
+        output.desc().width,
         "src/output width mismatch"
     );
     assert_eq!(
-        src.desc.height, output.desc.height,
+        src.desc().height,
+        output.desc().height,
         "src/output height mismatch"
     );
     assert_eq!(
-        src.desc.color_format, output.desc.color_format,
+        src.desc().color_format,
+        output.desc().color_format,
         "src/output format mismatch"
     );
 
-    let channel_size = src.desc.color_format.channel_size;
-    let channel_type = src.desc.color_format.channel_type;
-    let channel_count = src.desc.color_format.channel_count;
+    let channel_size = src.desc().color_format.channel_size;
+    let channel_type = src.desc().color_format.channel_type;
+    let channel_count = src.desc().color_format.channel_count;
     let _ = channel_count; // Used in cfg-gated SIMD dispatch below
 
     // Use SIMD-optimized paths when available
@@ -146,11 +154,11 @@ fn apply_typed<T>(src: &Image, dst: &Image, output: &mut Image, params: Blend)
 where
     T: Pod + BlendApply,
 {
-    let width = src.desc.width;
-    let channels = src.desc.color_format.channel_count.channel_count() as usize;
-    let src_stride = src.desc.row_bytes();
-    let dst_stride = dst.desc.row_bytes();
-    let out_stride = output.desc.row_bytes();
+    let width = src.desc().width;
+    let channels = src.desc().color_format.channel_count.channel_count() as usize;
+    let src_stride = src.desc().row_bytes();
+    let dst_stride = dst.desc().row_bytes();
+    let out_stride = output.desc().row_bytes();
     let row_bytes = width * channels * size_of::<T>();
 
     let has_alpha = channels == 2 || channels == 4;
@@ -195,10 +203,10 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_u8_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc.width;
-    let src_stride = src.desc.row_bytes();
-    let dst_stride = dst.desc.row_bytes();
-    let out_stride = output.desc.row_bytes();
+    let width = src.desc().width;
+    let src_stride = src.desc().row_bytes();
+    let dst_stride = dst.desc().row_bytes();
+    let out_stride = output.desc().row_bytes();
 
     output
         .bytes_mut()
@@ -340,10 +348,10 @@ unsafe fn process_row_rgba_u8_sse41(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_f32_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc.width;
-    let src_stride = src.desc.row_bytes();
-    let dst_stride = dst.desc.row_bytes();
-    let out_stride = output.desc.row_bytes();
+    let width = src.desc().width;
+    let src_stride = src.desc().row_bytes();
+    let dst_stride = dst.desc().row_bytes();
+    let out_stride = output.desc().row_bytes();
 
     output
         .bytes_mut()
@@ -436,10 +444,10 @@ unsafe fn process_row_rgba_f32_sse41(
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_u8_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc.width;
-    let src_stride = src.desc.row_bytes();
-    let dst_stride = dst.desc.row_bytes();
-    let out_stride = output.desc.row_bytes();
+    let width = src.desc().width;
+    let src_stride = src.desc().row_bytes();
+    let dst_stride = dst.desc().row_bytes();
+    let out_stride = output.desc().row_bytes();
 
     output
         .bytes_mut()
@@ -588,10 +596,10 @@ unsafe fn process_row_rgba_u8_neon(
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_f32_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc.width;
-    let src_stride = src.desc.row_bytes();
-    let dst_stride = dst.desc.row_bytes();
-    let out_stride = output.desc.row_bytes();
+    let width = src.desc().width;
+    let src_stride = src.desc().row_bytes();
+    let dst_stride = dst.desc().row_bytes();
+    let out_stride = output.desc().row_bytes();
 
     output
         .bytes_mut()
@@ -722,7 +730,7 @@ mod tests {
         for format in ALL_FORMATS {
             let src = create_test_image(*format, 8, 4, 0);
             let dst = create_test_image(*format, 8, 4, 100);
-            let mut output = Image::new_black(dst.desc).unwrap();
+            let mut output = Image::new_black(dst.desc()).unwrap();
 
             Blend::new(BlendMode::Normal, 0.0).apply_cpu(&src, &dst, &mut output);
 
@@ -740,7 +748,7 @@ mod tests {
         for format in ALL_FORMATS {
             let src = create_test_image(*format, 8, 4, 0);
             let dst = create_test_image(*format, 8, 4, 100);
-            let mut output = Image::new_black(dst.desc).unwrap();
+            let mut output = Image::new_black(dst.desc()).unwrap();
 
             Blend::new(BlendMode::Normal, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -767,7 +775,7 @@ mod tests {
                 src.bytes_mut()[i] = 255; // White RGB
             }
         }
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Multiply, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -797,7 +805,7 @@ mod tests {
             }
         }
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Multiply, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -814,7 +822,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Add, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -828,7 +836,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Screen, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -840,7 +848,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Overlay, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -852,7 +860,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Subtract, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -874,7 +882,7 @@ mod tests {
             for mode in &modes {
                 let src = create_test_image(*format, 17, 5, 0);
                 let dst = create_test_image(*format, 17, 5, 100);
-                let mut output = Image::new_black(dst.desc).unwrap();
+                let mut output = Image::new_black(dst.desc()).unwrap();
 
                 Blend::new(*mode, 0.5).apply_cpu(&src, &dst, &mut output);
 
@@ -890,7 +898,7 @@ mod tests {
     fn test_large_image() {
         let src = load_lena_rgba_u8_61x38();
         let dst = load_lena_rgba_u8_61x38();
-        let mut output = Image::new_black(dst.desc).unwrap();
+        let mut output = Image::new_black(dst.desc()).unwrap();
 
         Blend::new(BlendMode::Normal, 0.5).apply_cpu(&src, &dst, &mut output);
 

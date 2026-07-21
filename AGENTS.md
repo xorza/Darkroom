@@ -15,7 +15,7 @@ An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compu
 
 Six layers, bottom-up. A caller drives everything through a `ProcessingContext` and `ImageBuffer`s; ops pick a backend and the buffer transparently moves pixels between CPU and GPU.
 
-1. **Image** — `Image` + `ImageDesc` hold tightly-packed interleaved pixel data (`AnyImageData`, a typed `Buffer2<[T; N]>` per format; `bytes()` views it as `&[u8]` zero-copy, element-aligned); `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
+1. **Image** — `Image` owns private `ImagePixels`, a nine-format enum over typed `InterleavedPixels<N, T>` buffers; `desc()` derives dimensions and format from that storage, and `bytes()` views it as `&[u8]` zero-copy and element-aligned. `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
 2. **Color/format** — `ColorFormat` (`ChannelCount` × `ChannelSize` × `ChannelType`) is the format vocabulary; `image/conversion/` converts between any two formats, `image/transpose.rs` flips interleaved ⟷ planar layout.
 3. **Processing context** — `ProcessingContext` owns the optional `GpuContext`; `ImageBuffer` abstracts CPU-vs-GPU residency via interior mutability.
 4. **GPU wrapper** — `Gpu` (device+queue), `GpuImage` (a wgpu storage buffer + desc), `Slot` (async callback handoff).
@@ -24,7 +24,7 @@ Six layers, bottom-up. A caller drives everything through a `ProcessingContext` 
 
 ### Image storage (`src/image/`)
 
-`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:35`) holds `data: AnyImageData` (a typed `Buffer2<[T; N]>` per format) plus the `desc`; `bytes()`/`bytes_mut()` view the pixels as packed `&[u8]` zero-copy. The GPU side is packed too (see the GPU wrapper section): there is no stride anywhere.
+`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }`. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` owns only `ImagePixels`; `desc()` derives an `ImageDesc` from the enum variant and typed buffer dimensions, so descriptor state cannot drift from storage. `bytes()`/`bytes_mut()` view the pixels as packed `&[u8]` zero-copy. The GPU side is packed too (see the GPU wrapper section): there is no stride anywhere.
 
 I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unlimited decoder for large astrophotography frames, U8/U16/U32/F32). `SUPPORTED_EXTENSIONS = ["png","jpg","jpeg","tiff","tif"]`. PNG save is U8/U16 only (no F32); JPG save needs `RGBA_U8` or `L_U8`.
 
@@ -77,8 +77,8 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 ## Project layout
 
 - `src/lib.rs` — crate root: `cfg_x86_64!`/`cfg_aarch64!` macros, module decls, and the published surface (`pub use`s). GPU items are re-exported only under `#[cfg(feature = "wgpu")]`.
-- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both image-data layouts and `lumos`'s `LinearImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
-- `src/image/` — `mod.rs` (`Image`/`ImageDesc`); `image_data/` (the typed layouts: `interleaved.rs` = `ImageData<N,T>`/`AnyImageData`, `deinterleaved.rs` = `DeinterleavedImageData<N,T>`/`AnyDeinterleavedImageData`); `transpose.rs` (interleave ⟷ deinterleave); `conversion/` (format conversion: `mod.rs` dispatch + `scalar.rs` + `simd/` + `bench.rs` + `tests.rs`); `io.rs`, `tiff.rs`, `tests.rs`.
+- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both pixel layouts and `lumos`'s `LinearImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
+- `src/image/` — `mod.rs` (`Image`/`ImageDesc`); `pixels/` (`interleaved.rs` = private `InterleavedPixels<N,T>`, `planar.rs` = public `PlanarPixels<N,T>`, `image_pixels.rs` = private runtime-format `ImagePixels`); `transpose.rs` (interleave ⟷ planar); `conversion/` (format conversion: `mod.rs` dispatch + `scalar.rs` + `simd/` + `bench.rs` + `tests.rs`); `io.rs`, `tiff.rs`, `tests.rs`.
 - `src/processing_context/` — `mod.rs` (`ProcessingContext`), `image_buffer.rs`, `gpu_context.rs`, `tests.rs`.
 - `src/gpu/` — `mod.rs` (`Gpu`), `gpu_image.rs`, `slot.rs` (all `wgpu`-gated).
 - `src/ops/` — `mod.rs`, `backend_selection.rs`, `gpu_format.rs`, and `blend/`, `contrast_brightness/`, `transform/` (each `mod.rs`/`cpu.rs`/`gpu.rs`/`pipeline.rs`/`.wgsl`; transform's `cpu.rs` is scalar-only), plus `preview/` (`mod.rs`/`cpu.rs`/`bench.rs`, CPU-only).

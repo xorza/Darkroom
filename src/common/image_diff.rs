@@ -14,20 +14,21 @@ use crate::image::Image;
 /// # Panics
 /// Panics if images have different dimensions or formats.
 pub(crate) fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
-    assert_eq!(img1.desc.width, img2.desc.width, "width mismatch");
-    assert_eq!(img1.desc.height, img2.desc.height, "height mismatch");
+    assert_eq!(img1.desc().width, img2.desc().width, "width mismatch");
+    assert_eq!(img1.desc().height, img2.desc().height, "height mismatch");
     assert_eq!(
-        img1.desc.color_format, img2.desc.color_format,
+        img1.desc().color_format,
+        img2.desc().color_format,
         "format mismatch"
     );
 
-    let width = img1.desc.width;
-    let height = img1.desc.height;
-    let format = img1.desc.color_format;
+    let width = img1.desc().width;
+    let height = img1.desc().height;
+    let format = img1.desc().color_format;
     let pixel_size = format.byte_count() as usize;
     let row_bytes = width * pixel_size;
-    let stride1 = img1.desc.row_bytes();
-    let stride2 = img2.desc.row_bytes();
+    let stride1 = img1.desc().row_bytes();
+    let stride2 = img2.desc().row_bytes();
 
     (0..height)
         .into_par_iter()
@@ -72,19 +73,20 @@ fn row_max_diff(row1: &[u8], row2: &[u8], size: ChannelSize, typ: ChannelType) -
 /// # Panics
 /// Panics if images have different dimensions or formats.
 pub(crate) fn pixels_equal(img1: &Image, img2: &Image) -> bool {
-    assert_eq!(img1.desc.width, img2.desc.width, "width mismatch");
-    assert_eq!(img1.desc.height, img2.desc.height, "height mismatch");
+    assert_eq!(img1.desc().width, img2.desc().width, "width mismatch");
+    assert_eq!(img1.desc().height, img2.desc().height, "height mismatch");
     assert_eq!(
-        img1.desc.color_format, img2.desc.color_format,
+        img1.desc().color_format,
+        img2.desc().color_format,
         "format mismatch"
     );
 
-    let width = img1.desc.width;
-    let height = img1.desc.height;
-    let pixel_size = img1.desc.color_format.byte_count() as usize;
+    let width = img1.desc().width;
+    let height = img1.desc().height;
+    let pixel_size = img1.desc().color_format.byte_count() as usize;
     let row_bytes = width * pixel_size;
-    let stride1 = img1.desc.row_bytes();
-    let stride2 = img2.desc.row_bytes();
+    let stride1 = img1.desc().row_bytes();
+    let stride2 = img2.desc().row_bytes();
 
     (0..height).into_par_iter().all(|y| {
         let row1 = &img1.bytes()[y * stride1..y * stride1 + row_bytes];

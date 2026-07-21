@@ -47,7 +47,7 @@ impl ImageBuffer {
     /// download), so it never leaks into the CPU representation.
     pub fn from_cpu(image: Image) -> Self {
         Self {
-            desc: image.desc,
+            desc: image.desc(),
             storage: AtomicRefCell::new(Some(Storage::Cpu(image))),
         }
     }

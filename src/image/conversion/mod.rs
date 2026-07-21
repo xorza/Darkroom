@@ -38,20 +38,20 @@ use simd::get_simd_row_converter;
 /// `from` and `to` must share dimensions; every format pair is handled (SIMD
 /// fast paths fall back to the scalar reference), so this is infallible.
 pub(crate) fn convert_image(from: &Image, to: &mut Image) {
-    assert_eq!(from.desc.width, to.desc.width);
-    assert_eq!(from.desc.height, to.desc.height);
+    assert_eq!(from.desc().width, to.desc().width);
+    assert_eq!(from.desc().height, to.desc().height);
 
-    let from_fmt = from.desc.color_format;
-    let to_fmt = to.desc.color_format;
+    let from_fmt = from.desc().color_format;
+    let to_fmt = to.desc().color_format;
 
     // Same format - nothing to do
     if from_fmt == to_fmt {
         return;
     }
 
-    let width = from.desc.width;
-    let from_stride = from.desc.row_bytes();
-    let to_stride = to.desc.row_bytes();
+    let width = from.desc().width;
+    let from_stride = from.desc().row_bytes();
+    let to_stride = to.desc().row_bytes();
 
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();

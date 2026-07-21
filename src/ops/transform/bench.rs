@@ -23,7 +23,7 @@ fn bench_transform_rotate(b: quickbench::Bencher) {
 
     for &format in ALL_FORMATS {
         let input = create_test_image(format, WIDTH, HEIGHT, 0);
-        let mut output = Image::new_black(input.desc).unwrap();
+        let mut output = Image::new_black(input.desc()).unwrap();
 
         for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
             let transform = Transform::new()

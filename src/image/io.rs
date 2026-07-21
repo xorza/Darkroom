@@ -89,22 +89,22 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    if image.desc.color_format.channel_type != ChannelType::UInt {
+    if image.desc().color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "JPEG channel type: {:?}",
-            image.desc.color_format.channel_type
+            image.desc().color_format.channel_type
         )));
     }
 
-    let color_format = match image.desc.color_format.channel_size {
-        ChannelSize::_8bit => match image.desc.color_format.channel_count {
+    let color_format = match image.desc().color_format.channel_size {
+        ChannelSize::_8bit => match image.desc().color_format.channel_count {
             ChannelCount::L => image_lib::ColorType::L8,
             ChannelCount::Rgb => image_lib::ColorType::Rgb8,
 
             _ => {
                 return Err(Error::UnsupportedFormat(format!(
                     "JPEG color format: {:?}",
-                    image.desc.color_format.channel_count
+                    image.desc().color_format.channel_count
                 )));
             }
         },
@@ -112,7 +112,7 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
         _ => {
             return Err(Error::UnsupportedFormat(format!(
                 "JPEG channel size: {:?}",
-                image.desc.color_format.channel_size
+                image.desc().color_format.channel_size
             )));
         }
     };
@@ -120,8 +120,8 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     image_lib::save_buffer_with_format(
         filename,
         image.bytes(),
-        image.desc.width as u32,
-        image.desc.height as u32,
+        image.desc().width as u32,
+        image.desc().height as u32,
         color_format,
         image_lib::ImageFormat::Jpeg,
     )?;
@@ -130,20 +130,20 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 }
 
 pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    if image.desc.color_format.channel_type != ChannelType::UInt {
+    if image.desc().color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "PNG channel type: {:?}",
-            image.desc.color_format.channel_type
+            image.desc().color_format.channel_type
         )));
     }
 
-    let color_format = match image.desc.color_format.channel_size {
-        ChannelSize::_8bit => match image.desc.color_format.channel_count {
+    let color_format = match image.desc().color_format.channel_size {
+        ChannelSize::_8bit => match image.desc().color_format.channel_count {
             ChannelCount::L => image_lib::ColorType::L8,
             ChannelCount::Rgb => image_lib::ColorType::Rgb8,
             ChannelCount::Rgba => image_lib::ColorType::Rgba8,
         },
-        ChannelSize::_16bit => match image.desc.color_format.channel_count {
+        ChannelSize::_16bit => match image.desc().color_format.channel_count {
             ChannelCount::L => image_lib::ColorType::L16,
             ChannelCount::Rgb => image_lib::ColorType::Rgb16,
             ChannelCount::Rgba => image_lib::ColorType::Rgba16,
@@ -152,7 +152,7 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
         _ => {
             return Err(Error::UnsupportedFormat(format!(
                 "PNG channel size: {:?}",
-                image.desc.color_format.channel_size
+                image.desc().color_format.channel_size
             )));
         }
     };
@@ -160,8 +160,8 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     image_lib::save_buffer_with_format(
         filename,
         image.bytes(),
-        image.desc.width as u32,
-        image.desc.height as u32,
+        image.desc().width as u32,
+        image.desc().height as u32,
         color_format,
         image_lib::ImageFormat::Png,
     )?;

@@ -9,12 +9,12 @@ use crate::image::{Image, ImageDesc};
 #[test]
 fn read_lena_rgba_8bit() {
     let img = load_lena_rgba_u8_895x551();
-    assert_eq!(img.desc.width, 895);
-    assert_eq!(img.desc.height, 551);
-    assert_eq!(img.desc.row_bytes(), 3580); // 895 * 4 = 3580
-    assert_eq!(img.desc.color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(img.desc.color_format.channel_count, ChannelCount::Rgba);
-    assert_eq!(img.desc.color_format.channel_type, ChannelType::UInt);
+    assert_eq!(img.desc().width, 895);
+    assert_eq!(img.desc().height, 551);
+    assert_eq!(img.desc().row_bytes(), 3580); // 895 * 4 = 3580
+    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
+    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgba);
+    assert_eq!(img.desc().color_format.channel_type, ChannelType::UInt);
 }
 
 #[test]
@@ -22,11 +22,11 @@ fn read_lena_rgb_converted() {
     let img = load_lena_rgba_u8_895x551()
         .convert(ColorFormat::RGB_U8)
         .unwrap();
-    assert_eq!(img.desc.width, 895);
-    assert_eq!(img.desc.height, 551);
-    assert_eq!(img.desc.row_bytes(), 2685); // 895 * 3, tightly packed
-    assert_eq!(img.desc.color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(img.desc.color_format.channel_count, ChannelCount::Rgb);
+    assert_eq!(img.desc().width, 895);
+    assert_eq!(img.desc().height, 551);
+    assert_eq!(img.desc().row_bytes(), 2685); // 895 * 3, tightly packed
+    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
+    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgb);
 }
 
 #[test]
@@ -63,9 +63,9 @@ fn save_and_reload_png() {
         .unwrap();
 
     let reloaded = Image::read_file(test_output_path("save_reload.png")).unwrap();
-    assert_eq!(original.desc.width, reloaded.desc.width);
-    assert_eq!(original.desc.height, reloaded.desc.height);
-    assert_eq!(original.desc.color_format, reloaded.desc.color_format);
+    assert_eq!(original.desc().width, reloaded.desc().width);
+    assert_eq!(original.desc().height, reloaded.desc().height);
+    assert_eq!(original.desc().color_format, reloaded.desc().color_format);
     // Compare packed bytes (ignore stride padding differences)
     assert_eq!(original.clone().bytes(), reloaded.bytes());
 }
@@ -80,9 +80,9 @@ fn save_and_reload_tiff() {
         .unwrap();
 
     let reloaded = Image::read_file(test_output_path("save_reload.tiff")).unwrap();
-    assert_eq!(original.desc.width, reloaded.desc.width);
-    assert_eq!(original.desc.height, reloaded.desc.height);
-    assert_eq!(original.desc.color_format, reloaded.desc.color_format);
+    assert_eq!(original.desc().width, reloaded.desc().width);
+    assert_eq!(original.desc().height, reloaded.desc().height);
+    assert_eq!(original.desc().color_format, reloaded.desc().color_format);
 }
 
 #[test]
@@ -99,7 +99,10 @@ fn new_empty_creates_zeroed_image() {
     let img = Image::new_black(desc).unwrap();
 
     assert!(img.bytes().iter().all(|&b| b == 0));
-    assert_eq!(img.bytes().len(), img.desc.row_bytes() * img.desc.height);
+    assert_eq!(
+        img.bytes().len(),
+        img.desc().row_bytes() * img.desc().height
+    );
 }
 
 #[test]
@@ -193,7 +196,7 @@ fn convert_to_borrows_and_matches_convert() {
 
     // ...and produces exactly what the consuming form does.
     let via_move = img.convert(ColorFormat::RGB_U16).unwrap();
-    assert_eq!(via_borrow.desc, via_move.desc);
+    assert_eq!(via_borrow.desc(), via_move.desc());
     assert_eq!(via_borrow.bytes(), via_move.bytes());
 }
 
@@ -203,7 +206,7 @@ fn convert_rgba_u8_to_rgba_u16() {
     let src = Image::new_with_data(desc, vec![0, 128, 255, 64]).unwrap();
     let result = src.convert(ColorFormat::RGBA_U16).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::RGBA_U16);
+    assert_eq!(result.desc().color_format, ColorFormat::RGBA_U16);
     let expected_vals: [u16; 4] = [
         0u8.convert(),
         128u8.convert(),
@@ -220,7 +223,7 @@ fn convert_rgb_u8_to_rgb_u16() {
     let src = Image::new_with_data(desc, vec![0, 128, 255]).unwrap();
     let result = src.convert(ColorFormat::RGB_U16).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::RGB_U16);
+    assert_eq!(result.desc().color_format, ColorFormat::RGB_U16);
     let expected_vals: [u16; 3] = [0u8.convert(), 128u8.convert(), 255u8.convert()];
     let expected_bytes: Vec<u8> = bytemuck::cast_slice(&expected_vals).to_vec();
     assert_eq!(result.bytes(), &expected_bytes[..]);
@@ -232,7 +235,7 @@ fn convert_gray_u8_to_gray_u16() {
     let src = Image::new_with_data(desc, vec![200]).unwrap();
     let result = src.convert(ColorFormat::L_U16).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::L_U16);
+    assert_eq!(result.desc().color_format, ColorFormat::L_U16);
     let expected_val: u16 = 200u8.convert();
     let expected_bytes: Vec<u8> = bytemuck::cast_slice(&[expected_val]).to_vec();
     assert_eq!(result.bytes(), &expected_bytes[..]);
@@ -244,7 +247,7 @@ fn convert_channel_count_gray_to_rgb() {
     let src = Image::new_with_data(desc, vec![128]).unwrap();
     let result = src.convert(ColorFormat::RGB_U8).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::RGB_U8);
+    assert_eq!(result.desc().color_format, ColorFormat::RGB_U8);
     // Gray value should be replicated to R, G, B
     assert_eq!(result.bytes()[0], 128); // R
     assert_eq!(result.bytes()[1], 128); // G
@@ -259,7 +262,7 @@ fn convert_channel_count_rgb_to_gray() {
     let src = Image::new_with_data(desc, vec![100, 150, 200]).unwrap();
     let result = src.convert(ColorFormat::L_U8).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::L_U8);
+    assert_eq!(result.desc().color_format, ColorFormat::L_U8);
     // Should be luminance-weighted grayscale
     assert_eq!(result.bytes()[0], 142);
 }
@@ -270,7 +273,7 @@ fn convert_rgba_to_rgb_drops_alpha() {
     let src = Image::new_with_data(desc, vec![100, 150, 200, 255]).unwrap();
     let result = src.convert(ColorFormat::RGB_U8).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::RGB_U8);
+    assert_eq!(result.desc().color_format, ColorFormat::RGB_U8);
     assert_eq!(result.bytes()[0], 100); // R
     assert_eq!(result.bytes()[1], 150); // G
     assert_eq!(result.bytes()[2], 200); // B
@@ -282,7 +285,7 @@ fn convert_rgb_to_rgba_adds_max_alpha() {
     let src = Image::new_with_data(desc, vec![100, 150, 200]).unwrap();
     let result = src.convert(ColorFormat::RGBA_U8).unwrap();
 
-    assert_eq!(result.desc.color_format, ColorFormat::RGBA_U8);
+    assert_eq!(result.desc().color_format, ColorFormat::RGBA_U8);
     assert_eq!(result.bytes()[0], 100); // R
     assert_eq!(result.bytes()[1], 150); // G
     assert_eq!(result.bytes()[2], 200); // B
@@ -345,8 +348,8 @@ fn convert_and_save_various_formats() {
 #[test]
 fn double_conversion_preserves_dimensions() {
     let original = load_lena_rgba_u8_895x551();
-    let width = original.desc.width;
-    let height = original.desc.height;
+    let width = original.desc().width;
+    let height = original.desc().height;
 
     let converted = original
         .convert(ColorFormat::RGBA_F32)
@@ -354,15 +357,15 @@ fn double_conversion_preserves_dimensions() {
         .convert(ColorFormat::RGBA_U16)
         .unwrap();
 
-    assert_eq!(converted.desc.width, width);
-    assert_eq!(converted.desc.height, height);
+    assert_eq!(converted.desc().width, width);
+    assert_eq!(converted.desc().height, height);
 }
 
 #[test]
 fn single_pixel_image() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
-    assert!(img.desc.row_bytes() >= 4);
+    assert!(img.desc().row_bytes() >= 4);
 }
 
 #[test]
@@ -379,7 +382,7 @@ fn clone_image() {
     let img = Image::new_with_data(desc, data.clone()).unwrap();
     let cloned = img.clone();
 
-    assert_eq!(img.desc, cloned.desc);
+    assert_eq!(img.desc(), cloned.desc());
     assert_eq!(img.bytes(), cloned.bytes());
 }
 

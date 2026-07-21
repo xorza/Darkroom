@@ -89,9 +89,9 @@ fn simd_kernel(format: ColorFormat, params: &ContrastBrightness) -> Option<(RowK
 /// full-image allocation anywhere.
 pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some((kernel, last)) = simd_kernel(image.desc.color_format, params) {
-        let width = image.desc.width;
-        let stride = image.desc.row_bytes();
+    if let Some((kernel, last)) = simd_kernel(image.desc().color_format, params) {
+        let width = image.desc().width;
+        let stride = image.desc().row_bytes();
         let contrast = params.contrast;
         image.bytes_mut().par_chunks_mut(stride).for_each_init(
             || vec![0u8; stride],
@@ -105,8 +105,8 @@ pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
     }
 
     match (
-        image.desc.color_format.channel_size,
-        image.desc.color_format.channel_type,
+        image.desc().color_format.channel_size,
+        image.desc().color_format.channel_type,
     ) {
         (ChannelSize::_8bit, ChannelType::UInt) => {
             apply_typed::<u8>(image, *params);
@@ -165,13 +165,13 @@ where
     T: Pod + ContrastBrightnessApply,
 {
     debug_assert_eq!(
-        image.desc.color_format.channel_size.byte_count() as usize,
+        image.desc().color_format.channel_size.byte_count() as usize,
         size_of::<T>()
     );
 
-    let width = image.desc.width;
-    let channels = image.desc.color_format.channel_count.channel_count() as usize;
-    let stride = image.desc.row_bytes();
+    let width = image.desc().width;
+    let channels = image.desc().color_format.channel_count.channel_count() as usize;
+    let stride = image.desc().row_bytes();
     let row_bytes = width * channels * size_of::<T>();
 
     let has_alpha = channels == 2 || channels == 4;
@@ -968,7 +968,7 @@ mod tests {
 
             // Check alpha bytes for each pixel
             for row in 0..4 {
-                let row_start = row * input.desc.row_bytes();
+                let row_start = row * input.desc().row_bytes();
                 for x in 0..16 {
                     let pixel_start = row_start + x * pixel_size;
                     let alpha_start = pixel_start + alpha_offset;

@@ -27,11 +27,12 @@ mod sse;
 /// Panics if `input` and `output` have different color formats.
 pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     assert_eq!(
-        input.desc.color_format, output.desc.color_format,
+        input.desc().color_format,
+        output.desc().color_format,
         "color format mismatch"
     );
 
-    let fmt = input.desc.color_format;
+    let fmt = input.desc().color_format;
     let channels = fmt.channel_count.channel_count() as usize;
 
     // RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
@@ -151,10 +152,10 @@ fn apply_typed<T, const N: usize>(transform: &Transform, input: &Image, output: 
 where
     T: TransformElem,
 {
-    let in_w = input.desc.width;
-    let in_h = input.desc.height;
-    let out_w = output.desc.width;
-    let out_stride = output.desc.row_bytes();
+    let in_w = input.desc().width;
+    let in_h = input.desc().height;
+    let out_w = output.desc().width;
+    let out_stride = output.desc().row_bytes();
 
     let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
 
@@ -291,7 +292,7 @@ mod tests {
             for &format in ALL_FORMATS {
                 // Non-power-of-two dimensions to exercise edge rows/columns.
                 let input = create_test_image(format, 13, 7, 0);
-                let mut output = Image::new_black(input.desc).unwrap();
+                let mut output = Image::new_black(input.desc()).unwrap();
 
                 Transform::new()
                     .filter(filter)
@@ -310,7 +311,7 @@ mod tests {
     #[test]
     fn test_integer_translate_shifts_pixels() {
         let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 20, 30, 40]);
-        let mut output = Image::new_black(input.desc).unwrap();
+        let mut output = Image::new_black(input.desc()).unwrap();
 
         Transform::new()
             .translate(Vec2::new(1.0, 0.0))
@@ -380,7 +381,7 @@ mod tests {
     fn test_fully_out_of_bounds_is_zero_all_formats() {
         for &format in ALL_FORMATS {
             let input = create_test_image(format, 3, 3, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = Image::new_black(input.desc()).unwrap();
 
             Transform::new()
                 .translate(Vec2::new(1000.0, 1000.0))
@@ -436,8 +437,8 @@ mod tests {
                 .rotate_around(0.7, center)
                 .filter(FilterMode::Bilinear);
 
-            let mut scalar = Image::new_black(input.desc).unwrap();
-            let mut simd = Image::new_black(input.desc).unwrap();
+            let mut scalar = Image::new_black(input.desc()).unwrap();
+            let mut simd = Image::new_black(input.desc()).unwrap();
 
             match (format.channel_size, format.channel_type, cc) {
                 (_8bit, UInt, 4) => {
@@ -496,8 +497,8 @@ mod tests {
                 .rotate_around(0.7, center)
                 .filter(FilterMode::Bilinear);
 
-            let mut scalar = Image::new_black(input.desc).unwrap();
-            let mut simd = Image::new_black(input.desc).unwrap();
+            let mut scalar = Image::new_black(input.desc()).unwrap();
+            let mut simd = Image::new_black(input.desc()).unwrap();
 
             match (format.channel_size, format.channel_type, cc) {
                 (_8bit, UInt, 4) => {
@@ -553,11 +554,11 @@ mod tests {
             let input = load_lena_rgba_u8_61x38();
             let transform = Transform::new().translate(Vec2::new(5.0, 3.0));
 
-            let mut out_cpu = Image::new_black(input.desc).unwrap();
+            let mut out_cpu = Image::new_black(input.desc()).unwrap();
             transform.apply_cpu(&input, &mut out_cpu);
 
             let gpu_in = GpuImage::from_image(&gpu, &input);
-            let mut gpu_out = GpuImage::new_empty(&gpu, input.desc);
+            let mut gpu_out = GpuImage::new_empty(&gpu, input.desc());
             transform.apply_gpu(&gpu, &pipeline, &gpu_in, &mut gpu_out);
             let out_gpu = gpu_out.to_image(&gpu).unwrap();
 

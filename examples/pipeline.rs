@@ -17,14 +17,14 @@ fn main() {
     let input_cpu = load_lena_rgba_u8();
     print_image_info("Input", &input_cpu);
 
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
     let mut main_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc);
+    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc());
     let mut overlay_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Step 1: Rotate main image
     println!("Step 1: Rotating main image...");

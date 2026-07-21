@@ -1,6 +1,6 @@
 mod conversion;
-pub(crate) mod image_data;
 mod io;
+pub(crate) mod pixels;
 mod tiff;
 mod transpose;
 
@@ -15,7 +15,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"]
 use crate::common::color_format::ColorFormat;
 use crate::common::error::{Error, Result};
 use crate::image::conversion::convert_image;
-use crate::image::image_data::interleaved::AnyImageData;
+use crate::image::pixels::image_pixels::ImagePixels;
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row
@@ -27,38 +27,39 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
-/// An image: interleaved pixel data ([`AnyImageData`], stored as a typed
-/// `Buffer2<[T; N]>` per the format) plus the [`ImageDesc`] that names its
-/// format and dimensions. `bytes()` reinterprets the typed buffer as `&[u8]`
-/// zero-copy for the conversion / GPU / io paths; `desc` is kept in sync with
-/// `data` by the constructors.
+/// A runtime-format image backed by tightly packed, typed interleaved pixels.
 #[derive(Clone, Debug)]
 pub struct Image {
-    pub desc: ImageDesc,
-    data: AnyImageData,
+    pixels: ImagePixels,
 }
 
 impl Image {
+    /// Dimensions and format derived from the owned typed storage.
+    #[inline]
+    pub fn desc(&self) -> ImageDesc {
+        self.pixels.desc()
+    }
+
     /// The interleaved pixel bytes — a zero-copy `&[u8]` view of the typed buffer.
     pub fn bytes(&self) -> &[u8] {
-        self.data.bytes()
+        self.pixels.bytes()
     }
 
     /// Copy the pixel bytes into an owned `Vec<u8>` (the typed buffer's allocation
     /// can't be reinterpreted as a `Vec<u8>`, so this copies).
     pub fn into_bytes(self) -> Vec<u8> {
-        self.data.bytes().to_vec()
+        self.pixels.bytes().to_vec()
     }
 
     /// The interleaved pixel bytes, mutable — zero-copy; writes hit the buffer.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
-        self.data.bytes_mut()
+        self.pixels.bytes_mut()
     }
 
     pub fn new_black(desc: ImageDesc) -> Result<Image> {
         desc.validate()?;
-        let data = AnyImageData::new_zeroed(desc.color_format, desc.width, desc.height);
-        Ok(Image { desc, data })
+        let pixels = ImagePixels::new_zeroed(desc.color_format, desc.width, desc.height);
+        Ok(Image { pixels })
     }
 
     pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> Result<Image> {
@@ -72,8 +73,8 @@ impl Image {
             )));
         }
 
-        let data = AnyImageData::from_bytes(desc.color_format, desc.width, desc.height, &bytes);
-        Ok(Image { desc, data })
+        let pixels = ImagePixels::from_bytes(desc.color_format, desc.width, desc.height, &bytes);
+        Ok(Image { pixels })
     }
 
     pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -114,7 +115,7 @@ impl Image {
     }
 
     pub fn convert(self, color_format: ColorFormat) -> Result<Image> {
-        if self.desc.color_format == color_format {
+        if self.desc().color_format == color_format {
             color_format.validate()?;
             return Ok(self);
         }
@@ -128,7 +129,8 @@ impl Image {
     pub fn convert_to(&self, color_format: ColorFormat) -> Result<Image> {
         color_format.validate()?;
 
-        let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
+        let source_desc = self.desc();
+        let desc = ImageDesc::new(source_desc.width, source_desc.height, color_format);
         let mut result = Image::new_black(desc)?;
 
         convert_image(self, &mut result);
@@ -137,7 +139,7 @@ impl Image {
     }
 
     pub fn bytes_per_pixel(&self) -> u8 {
-        self.desc.color_format.byte_count()
+        self.desc().color_format.byte_count()
     }
 }
 

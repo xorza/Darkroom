@@ -80,9 +80,9 @@ macro_rules! dispatch_tiff {
         $( ($count:ident, $size:ident, $type:ident) => $color_type:ty ),+ $(,)?
     }) => {
         match (
-            $image.desc.color_format.channel_count,
-            $image.desc.color_format.channel_size,
-            $image.desc.color_format.channel_type,
+            $image.desc().color_format.channel_count,
+            $image.desc().color_format.channel_size,
+            $image.desc().color_format.channel_type,
         ) {
             $(
                 (ChannelCount::$count, ChannelSize::$size, ChannelType::$type) => {
@@ -92,9 +92,9 @@ macro_rules! dispatch_tiff {
             (_, _, _) => {
                 return Err(Error::UnsupportedFormat(format!(
                     "TIFF format: {:?} {:?} {:?}",
-                    $image.desc.color_format.channel_count,
-                    $image.desc.color_format.channel_size,
-                    $image.desc.color_format.channel_type
+                    $image.desc().color_format.channel_count,
+                    $image.desc().color_format.channel_size,
+                    $image.desc().color_format.channel_type
                 )));
             }
         }
@@ -130,7 +130,7 @@ where
 
     let mut file = File::create(filename)?;
     let mut tiff = TiffEncoder::new(&mut file)?;
-    let img = tiff.new_image::<CT>(image.desc.width as u32, image.desc.height as u32)?;
+    let img = tiff.new_image::<CT>(image.desc().width as u32, image.desc().height as u32)?;
 
     img.write_data(buf)?;
 

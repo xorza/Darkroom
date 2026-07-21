@@ -1,8 +1,8 @@
 //! `Buffer2<T>` — a generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and
 //! range indexing plus `Deref` to `[T]`. Imaginarium owns the type and stores
-//! its size as plain `usize` fields. Both image-data layouts build on it — interleaved `ImageData`
-//! (`Buffer2<[T; N]>`) and planar `DeinterleavedImageData` (one `Buffer2<T>` per
-//! channel) — and `lumos` uses it as the channel-plane type for its `LinearImage`.
+//! its size as plain `usize` fields. Both pixel layouts build on it: interleaved
+//! `InterleavedPixels` stores `Buffer2<[T; N]>`, while `PlanarPixels` stores one
+//! `Buffer2<T>` per channel. Lumos uses it for `LinearImage` channel planes.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice;

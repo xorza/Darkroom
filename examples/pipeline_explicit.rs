@@ -17,13 +17,13 @@ fn main() {
     let input_cpu = load_lena_rgba_u8();
     print_image_info("Input", &input_cpu);
 
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
     // Create buffers
     let mut main_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc);
+    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc());
 
     // Step 1: Rotate 15 degrees (GPU)
     println!("Step 1: Rotating 15 degrees...");
@@ -85,7 +85,7 @@ fn main() {
     // Step 5: Create overlay effect - blend with rotated version
     println!("Step 5: Creating overlay blend...");
     let mut overlay_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut overlay_temp = ImageBuffer::new_empty(input_cpu.desc);
+    let mut overlay_temp = ImageBuffer::new_empty(input_cpu.desc());
 
     // Rotate overlay 30 degrees the other way
     let transform = Transform::default().rotate_around(-PI / 6.0, center);
@@ -95,7 +95,7 @@ fn main() {
     std::mem::swap(&mut overlay_buffer, &mut overlay_temp);
     overlay_buffer.make_cpu(&ctx).unwrap();
 
-    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc());
     let blend = Blend::default().mode(BlendMode::Screen).alpha(0.4);
     blend
         .execute_gpu(&mut ctx, &overlay_buffer, &main_buffer, &mut blend_output)
@@ -109,7 +109,7 @@ fn main() {
 
     // Step 6: Final rotation (GPU)
     println!("Step 6: Final rotation...");
-    let mut final_output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut final_output = ImageBuffer::new_empty(input_cpu.desc());
     let transform = Transform::default().rotate_around(PI / 24.0, center);
     transform
         .execute_gpu(&mut ctx, &blend_output, &mut final_output)

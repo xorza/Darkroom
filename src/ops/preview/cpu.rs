@@ -11,7 +11,7 @@ pub(super) fn generate(params: &Preview, input: &Image) -> Image {
     let dst_w = params.width.max(1);
     let dst_h = params.height.max(1);
 
-    let fmt = input.desc.color_format;
+    let fmt = input.desc().color_format;
     let channels = fmt.channel_count.channel_count();
 
     match (fmt.channel_size, fmt.channel_type, channels) {
@@ -64,8 +64,8 @@ fn typed<T, const N: usize>(input: &Image, dst_w: usize, dst_h: usize) -> Image
 where
     T: PreviewElem,
 {
-    let src_w = input.desc.width;
-    let src_h = input.desc.height;
+    let src_w = input.desc().width;
+    let src_h = input.desc().height;
     let src: &[T] = bytemuck::cast_slice(input.bytes());
 
     let mut out = Image::new_black(ImageDesc::new(dst_w, dst_h, ColorFormat::RGBA_U8))
@@ -144,7 +144,7 @@ mod tests {
             ],
         );
         let out = Preview::new(2, 2).to_rgba8(&src);
-        assert_eq!(out.desc, src.desc);
+        assert_eq!(out.desc(), src.desc());
         assert_eq!(out.bytes(), src.bytes());
     }
 
@@ -161,8 +161,8 @@ mod tests {
             ],
         );
         let out = Preview::new(1, 1).to_rgba8(&src);
-        assert_eq!(out.desc.width, 1);
-        assert_eq!(out.desc.height, 1);
+        assert_eq!(out.desc().width, 1);
+        assert_eq!(out.desc().height, 1);
         assert_eq!(out.bytes(), &[85, 85, 85, 255]);
     }
 
@@ -224,9 +224,9 @@ mod tests {
         for &format in ALL_FORMATS {
             let src = create_test_image(format, 17, 11, 3);
             let out = Preview::new(8, 5).to_rgba8(&src);
-            assert_eq!(out.desc.color_format, ColorFormat::RGBA_U8);
-            assert_eq!(out.desc.width, 8);
-            assert_eq!(out.desc.height, 5);
+            assert_eq!(out.desc().color_format, ColorFormat::RGBA_U8);
+            assert_eq!(out.desc().width, 8);
+            assert_eq!(out.desc().height, 5);
             assert_eq!(out.bytes().len(), 8 * 5 * 4);
         }
     }

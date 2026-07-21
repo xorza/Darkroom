@@ -58,7 +58,7 @@ pub struct GpuImage {
 impl GpuImage {
     /// Creates a new GPU image from (packed) CPU image data.
     pub fn from_image(ctx: &Gpu, image: &Image) -> Self {
-        let desc = image.desc;
+        let desc = image.desc();
         let packed = desc.size_in_bytes();
         let buf_size = align_to_u32(packed); // wgpu buffers: size multiple of 4
         let bytes: Cow<[u8]> = if packed == buf_size {
@@ -266,8 +266,8 @@ mod tests {
 
         let result = gpu_image.to_image(&ctx).unwrap();
 
-        assert_eq!(result.desc.width, 61);
-        assert_eq!(result.desc.height, 38);
+        assert_eq!(result.desc().width, 61);
+        assert_eq!(result.desc().height, 38);
     }
 
     #[tokio::test]
@@ -288,7 +288,7 @@ mod tests {
         let result = gpu_image.to_image_async(&ctx).await.unwrap();
         poll_handle.await.unwrap();
 
-        assert_eq!(result.desc.width, 61);
-        assert_eq!(result.desc.height, 38);
+        assert_eq!(result.desc().width, 61);
+        assert_eq!(result.desc().height, 38);
     }
 }

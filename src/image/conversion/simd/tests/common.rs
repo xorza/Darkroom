@@ -13,14 +13,14 @@ fn test_rgba_to_rgb_u8_various_widths() {
         let src = create_test_image(width, 2, ColorFormat::RGBA_U8);
         let dst = src.clone().convert(ColorFormat::RGB_U8).unwrap();
 
-        assert_eq!(dst.desc.width, width);
-        assert_eq!(dst.desc.height, 2);
+        assert_eq!(dst.desc().width, width);
+        assert_eq!(dst.desc().height, 2);
 
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let src_r = src_bytes[src_row + x * 4];
                 let src_g = src_bytes[src_row + x * 4 + 1];
@@ -44,14 +44,14 @@ fn test_rgb_to_rgba_u8_various_widths() {
         let src = create_test_image(width, 2, ColorFormat::RGB_U8);
         let dst = src.clone().convert(ColorFormat::RGBA_U8).unwrap();
 
-        assert_eq!(dst.desc.width, width);
-        assert_eq!(dst.desc.height, 2);
+        assert_eq!(dst.desc().width, width);
+        assert_eq!(dst.desc().height, 2);
 
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let src_r = src_bytes[src_row + x * 3];
                 let src_g = src_bytes[src_row + x * 3 + 1];
@@ -78,7 +78,7 @@ fn test_rgba_rgb_round_trip() {
 
         // Set alpha to 255 so round-trip is lossless
         let mut src_opaque = src.clone();
-        let stride = src_opaque.desc.row_bytes();
+        let stride = src_opaque.desc().row_bytes();
         let bytes = src_opaque.bytes_mut();
         for y in 0..2 {
             let row = y * stride;
@@ -93,8 +93,8 @@ fn test_rgba_rgb_round_trip() {
         let src_bytes = src_opaque.bytes();
         let back_bytes = back.bytes();
         for y in 0..2 {
-            let src_row = y * src_opaque.desc.row_bytes();
-            let back_row = y * back.desc.row_bytes();
+            let src_row = y * src_opaque.desc().row_bytes();
+            let back_row = y * back.desc().row_bytes();
             for x in 0..width {
                 for c in 0..4 {
                     assert_eq!(
@@ -167,14 +167,14 @@ fn test_rgba_to_l_u8_various_widths() {
         let src = create_test_image(width, 2, ColorFormat::RGBA_U8);
         let dst = src.clone().convert(ColorFormat::L_U8).unwrap();
 
-        assert_eq!(dst.desc.width, width);
-        assert_eq!(dst.desc.height, 2);
+        assert_eq!(dst.desc().width, width);
+        assert_eq!(dst.desc().height, 2);
 
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let r = src_bytes[src_row + x * 4] as f32;
                 let g = src_bytes[src_row + x * 4 + 1] as f32;
@@ -198,14 +198,14 @@ fn test_rgb_to_l_u8_various_widths() {
         let src = create_test_image(width, 2, ColorFormat::RGB_U8);
         let dst = src.clone().convert(ColorFormat::L_U8).unwrap();
 
-        assert_eq!(dst.desc.width, width);
-        assert_eq!(dst.desc.height, 2);
+        assert_eq!(dst.desc().width, width);
+        assert_eq!(dst.desc().height, 2);
 
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let r = src_bytes[src_row + x * 3] as f32;
                 let g = src_bytes[src_row + x * 3 + 1] as f32;
@@ -275,8 +275,8 @@ fn test_u8_u16_round_trip() {
         let src_bytes = src.bytes();
         let back_bytes = back.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let back_row = y * back.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let back_row = y * back.desc().row_bytes();
             for x in 0..width {
                 for c in 0..4 {
                     assert_eq!(
@@ -346,16 +346,16 @@ fn test_f32_to_u8_various_widths() {
         let src = create_test_image_f32(width, 2, ColorFormat::RGBA_F32);
         let dst = src.clone().convert(ColorFormat::RGBA_U8).unwrap();
 
-        assert_eq!(dst.desc.width, width);
-        assert_eq!(dst.desc.height, 2);
+        assert_eq!(dst.desc().width, width);
+        assert_eq!(dst.desc().height, 2);
 
         let floats: &[f32] = bytemuck::cast_slice(src.bytes());
         let bytes = dst.bytes();
-        let float_stride = src.desc.row_bytes() / 4;
+        let float_stride = src.desc().row_bytes() / 4;
 
         for y in 0..2 {
             let src_row = y * float_stride;
-            let dst_row = y * dst.desc.row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 for c in 0..4 {
                     let f = floats[src_row + x * 4 + c];
@@ -378,12 +378,12 @@ fn test_l_u16_to_f32_various_widths() {
         let src = create_test_image_u16(width, 2, ColorFormat::L_U16);
         let dst = src.clone().convert(ColorFormat::L_F32).unwrap();
 
-        assert_eq!(dst.desc.width, width);
+        assert_eq!(dst.desc().width, width);
 
         let words: &[u16] = bytemuck::cast_slice(src.bytes());
         let floats: &[f32] = bytemuck::cast_slice(dst.bytes());
-        let word_stride = src.desc.row_bytes() / 2;
-        let float_stride = dst.desc.row_bytes() / 4;
+        let word_stride = src.desc().row_bytes() / 2;
+        let float_stride = dst.desc().row_bytes() / 4;
 
         for y in 0..2 {
             for x in 0..width {
@@ -406,12 +406,12 @@ fn test_l_f32_to_u16_various_widths() {
         let src = create_test_image_f32(width, 2, ColorFormat::L_F32);
         let dst = src.clone().convert(ColorFormat::L_U16).unwrap();
 
-        assert_eq!(dst.desc.width, width);
+        assert_eq!(dst.desc().width, width);
 
         let floats: &[f32] = bytemuck::cast_slice(src.bytes());
         let words: &[u16] = bytemuck::cast_slice(dst.bytes());
-        let float_stride = src.desc.row_bytes() / 4;
-        let word_stride = dst.desc.row_bytes() / 2;
+        let float_stride = src.desc().row_bytes() / 4;
+        let word_stride = dst.desc().row_bytes() / 2;
 
         for y in 0..2 {
             for x in 0..width {
@@ -497,7 +497,7 @@ fn test_l_u8_to_rgba_u8_various_widths() {
         let desc = ImageDesc::new(width, 2, ColorFormat::L_U8);
         let mut src = Image::new_black(desc).unwrap();
 
-        let stride = src.desc.row_bytes();
+        let stride = src.desc().row_bytes();
         let bytes = src.bytes_mut();
         for y in 0..2 {
             for x in 0..width {
@@ -510,8 +510,8 @@ fn test_l_u8_to_rgba_u8_various_widths() {
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let l = src_bytes[src_row + x];
                 assert_eq!(
@@ -545,7 +545,7 @@ fn test_l_u8_to_rgb_u8_various_widths() {
         let desc = ImageDesc::new(width, 2, ColorFormat::L_U8);
         let mut src = Image::new_black(desc).unwrap();
 
-        let stride = src.desc.row_bytes();
+        let stride = src.desc().row_bytes();
         let bytes = src.bytes_mut();
         for y in 0..2 {
             for x in 0..width {
@@ -558,8 +558,8 @@ fn test_l_u8_to_rgb_u8_various_widths() {
         let src_bytes = src.bytes();
         let dst_bytes = dst.bytes();
         for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
+            let src_row = y * src.desc().row_bytes();
+            let dst_row = y * dst.desc().row_bytes();
             for x in 0..width {
                 let l = src_bytes[src_row + x];
                 assert_eq!(

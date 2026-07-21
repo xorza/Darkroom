@@ -179,7 +179,7 @@ mod tests {
 
         let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
-        let mut output = GpuImage::new_empty(&ctx, input_cpu.desc);
+        let mut output = GpuImage::new_empty(&ctx, input_cpu.desc());
 
         let transform = Transform::new();
         transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
@@ -231,7 +231,7 @@ mod tests {
 
         let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
-        let mut output = GpuImage::new_empty(&ctx, input_cpu.desc);
+        let mut output = GpuImage::new_empty(&ctx, input_cpu.desc());
 
         // Rotate 90 degrees around center
         let center = Vec2::new(30.5, 19.0);
@@ -301,7 +301,7 @@ mod tests {
         let lena_rgb = lena_rgba.convert(ColorFormat::RGB_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_rgb);
-        let mut output = GpuImage::new_empty(&ctx, lena_rgb.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_rgb.desc());
 
         // Apply identity transform
         let transform = Transform::new();
@@ -325,12 +325,12 @@ mod tests {
         let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_rgb = lena_rgba.convert(ColorFormat::RGB_U8).unwrap();
 
-        let width = lena_rgb.desc.width;
-        let height = lena_rgb.desc.height;
+        let width = lena_rgb.desc().width;
+        let height = lena_rgb.desc().height;
         let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
         let input = GpuImage::from_image(&ctx, &lena_rgb);
-        let mut output = GpuImage::new_empty(&ctx, lena_rgb.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_rgb.desc());
 
         // Apply rotation
         let transform = Transform::new().rotate_around(PI / 4.0, center);
@@ -358,7 +358,7 @@ mod tests {
         let lena_f32 = lena_rgba.convert(ColorFormat::RGBA_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc());
 
         // Apply identity transform
         let transform = Transform::new();
@@ -388,12 +388,12 @@ mod tests {
         let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGBA_F32).unwrap();
 
-        let width = lena_f32.desc.width;
-        let height = lena_f32.desc.height;
+        let width = lena_f32.desc().width;
+        let height = lena_f32.desc().height;
         let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc());
 
         // Apply rotation
         let transform = Transform::new().rotate_around(PI / 4.0, center);
@@ -419,7 +419,7 @@ mod tests {
         let lena_f32 = lena_rgba.convert(ColorFormat::RGB_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc());
 
         // Apply identity transform
         let transform = Transform::new();
@@ -448,12 +448,12 @@ mod tests {
         let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGB_F32).unwrap();
 
-        let width = lena_f32.desc.width;
-        let height = lena_f32.desc.height;
+        let width = lena_f32.desc().width;
+        let height = lena_f32.desc().height;
         let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_f32.desc());
 
         // Apply rotation
         let transform = Transform::new().rotate_around(PI / 4.0, center);
@@ -490,8 +490,8 @@ mod tests {
 
         for format in formats {
             let input_cpu = lena_rgba.clone().convert(format).unwrap();
-            let width = input_cpu.desc.width;
-            let height = input_cpu.desc.height;
+            let width = input_cpu.desc().width;
+            let height = input_cpu.desc().height;
 
             // Create output with same dimensions
             let output_desc = ImageDesc::new(width / 2, height / 2, format);
@@ -526,7 +526,7 @@ mod tests {
         let lena_gray = lena_rgba.convert(ColorFormat::L_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray);
-        let mut output = GpuImage::new_empty(&ctx, lena_gray.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_gray.desc());
 
         let transform = Transform::new();
         transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
@@ -549,7 +549,7 @@ mod tests {
         let lena_gray_f32 = lena_rgba.convert(ColorFormat::L_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_gray_f32.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_gray_f32.desc());
 
         let transform = Transform::new();
         transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
@@ -576,12 +576,12 @@ mod tests {
         let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray = lena_rgba.convert(ColorFormat::L_U8).unwrap();
 
-        let width = lena_gray.desc.width;
-        let height = lena_gray.desc.height;
+        let width = lena_gray.desc().width;
+        let height = lena_gray.desc().height;
         let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
         let input = GpuImage::from_image(&ctx, &lena_gray);
-        let mut output = GpuImage::new_empty(&ctx, lena_gray.desc);
+        let mut output = GpuImage::new_empty(&ctx, lena_gray.desc());
 
         let transform = Transform::new().rotate_around(PI / 4.0, center);
         transform.apply_gpu(&ctx, &pipeline, &input, &mut output);

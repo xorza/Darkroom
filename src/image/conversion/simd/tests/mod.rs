@@ -41,7 +41,7 @@ pub(crate) fn create_test_image(width: usize, height: usize, format: ColorFormat
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bpp = format.byte_count() as usize;
-    let stride = img.desc.row_bytes();
+    let stride = img.desc().row_bytes();
 
     // Fill with a recognizable pattern: pixel index mod 256 for each channel
     let bytes = img.bytes_mut();
@@ -63,7 +63,7 @@ pub(crate) fn create_test_image_f32(width: usize, height: usize, format: ColorFo
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
-    let float_stride = img.desc.row_bytes() / 4;
+    let float_stride = img.desc().row_bytes() / 4;
 
     // Fill with normalized values
     let bytes = img.bytes_mut();
@@ -87,7 +87,7 @@ pub(crate) fn create_test_image_u16(width: usize, height: usize, format: ColorFo
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
-    let word_stride = img.desc.row_bytes() / 2;
+    let word_stride = img.desc().row_bytes() / 2;
 
     // Fill with pattern
     let bytes = img.bytes_mut();

@@ -19,10 +19,10 @@ fn test_chained_operations() {
 
     // Create test images
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let mut input = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Chain 1: Transform (rotate 45 degrees)
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
@@ -45,8 +45,8 @@ fn test_chained_operations() {
     // Download result to verify it worked
     let result_cpu = output.make_cpu(&ctx).unwrap();
 
-    assert_eq!(result_cpu.desc.width, width);
-    assert_eq!(result_cpu.desc.height, height);
+    assert_eq!(result_cpu.desc().width, width);
+    assert_eq!(result_cpu.desc().height, height);
 }
 
 #[test]
@@ -58,11 +58,11 @@ fn test_mixed_gpu_cpu_operations() {
 
     // Create test images
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
     let mut buffer_a = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc);
+    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc());
 
     // GPU operation: Transform
     let transform = Transform::default().rotate_around(PI / 6.0, center);
@@ -80,8 +80,8 @@ fn test_mixed_gpu_cpu_operations() {
     assert!(buffer_a.is_cpu());
 
     let result = buffer_a.make_cpu(&ctx).unwrap();
-    assert_eq!(result.desc.width, width);
-    assert_eq!(result.desc.height, height);
+    assert_eq!(result.desc().width, width);
+    assert_eq!(result.desc().height, height);
 }
 
 #[test]
@@ -94,9 +94,9 @@ fn test_blend_chain() {
     // Create test images
     let img1 = load_lena_rgba_u8_895x551();
     let img2 = img1.clone();
-    let width = img1.desc.width;
-    let height = img1.desc.height;
-    let output_img = Image::new_black(img1.desc).unwrap();
+    let width = img1.desc().width;
+    let height = img1.desc().height;
+    let output_img = Image::new_black(img1.desc()).unwrap();
 
     let src = ImageBuffer::from_cpu(img1);
     let dst = ImageBuffer::from_cpu(img2);
@@ -110,8 +110,8 @@ fn test_blend_chain() {
 
     // Verify result is on GPU, download to check
     let result_cpu = output.make_cpu(&ctx).unwrap();
-    assert_eq!(result_cpu.desc.width, width);
-    assert_eq!(result_cpu.desc.height, height);
+    assert_eq!(result_cpu.desc().width, width);
+    assert_eq!(result_cpu.desc().height, height);
 }
 
 #[test]
@@ -122,11 +122,11 @@ fn test_multiple_transforms_ping_pong() {
     }
 
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
     let mut buffer_a = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc);
+    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc());
 
     // Apply multiple transforms ping-ponging between buffers
     for i in 0..4 {
@@ -142,8 +142,8 @@ fn test_multiple_transforms_ping_pong() {
     // Final result is in buffer_a after swaps
     let result_cpu = buffer_a.make_cpu(&ctx).unwrap();
 
-    assert_eq!(result_cpu.desc.width, width);
-    assert_eq!(result_cpu.desc.height, height);
+    assert_eq!(result_cpu.desc().width, width);
+    assert_eq!(result_cpu.desc().height, height);
 }
 
 #[test]
@@ -156,11 +156,11 @@ fn test_full_pipeline() {
     // Create test images
     let input_cpu = load_lena_rgba_u8_895x551();
     let overlay_cpu = input_cpu.clone();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
 
     let mut main_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc);
+    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc());
     let overlay_buffer = ImageBuffer::from_cpu(overlay_cpu);
 
     // Step 1: Transform the main image (GPU)
@@ -185,8 +185,8 @@ fn test_full_pipeline() {
 
     // Verify final result - download from GPU to check
     let result_cpu = temp_buffer.make_cpu(&ctx).unwrap();
-    assert_eq!(result_cpu.desc.width, width);
-    assert_eq!(result_cpu.desc.height, height);
+    assert_eq!(result_cpu.desc().width, width);
+    assert_eq!(result_cpu.desc().height, height);
 }
 
 #[test]
@@ -197,11 +197,11 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
     }
 
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
 
     let input = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Upload to GPU first
     input.make_gpu(&ctx).unwrap();
@@ -215,8 +215,8 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
     assert!(output.is_gpu());
 
     let result = output.make_cpu(&ctx).unwrap();
-    assert_eq!(result.desc.width, width);
-    assert_eq!(result.desc.height, height);
+    assert_eq!(result.desc().width, width);
+    assert_eq!(result.desc().height, height);
 }
 
 #[test]
@@ -224,11 +224,11 @@ fn test_apply_uses_cpu_when_data_on_cpu() {
     let mut ctx = test_processing_context();
 
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
 
     let input = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Data starts on CPU
     assert!(input.is_cpu());
@@ -241,8 +241,8 @@ fn test_apply_uses_cpu_when_data_on_cpu() {
     assert!(output.is_cpu());
 
     let result_cpu = output.make_cpu(&ctx).unwrap();
-    assert_eq!(result_cpu.desc.width, width);
-    assert_eq!(result_cpu.desc.height, height);
+    assert_eq!(result_cpu.desc().width, width);
+    assert_eq!(result_cpu.desc().height, height);
 }
 
 #[test]
@@ -253,12 +253,12 @@ fn test_apply_chained_operations() {
     }
 
     let input_cpu = load_lena_rgba_u8_895x551();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
     let mut buffer_a = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc);
+    let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc());
 
     // Chain multiple operations using apply()
     // Step 1: Transform (will use GPU)
@@ -284,8 +284,8 @@ fn test_apply_chained_operations() {
         .unwrap();
 
     let result = buffer_b.make_cpu(&ctx).unwrap();
-    assert_eq!(result.desc.width, width);
-    assert_eq!(result.desc.height, height);
+    assert_eq!(result.desc().width, width);
+    assert_eq!(result.desc().height, height);
 }
 
 #[test]
@@ -297,8 +297,8 @@ fn test_apply_blend_chain() {
 
     let img1 = load_lena_rgba_u8_895x551();
     let img2 = img1.clone();
-    let width = img1.desc.width;
-    let height = img1.desc.height;
+    let width = img1.desc().width;
+    let height = img1.desc().height;
 
     let src = ImageBuffer::from_cpu(img1);
     let dst = ImageBuffer::from_cpu(img2);
@@ -312,8 +312,8 @@ fn test_apply_blend_chain() {
         .unwrap();
 
     let result = output.make_cpu(&ctx).unwrap();
-    assert_eq!(result.desc.width, width);
-    assert_eq!(result.desc.height, height);
+    assert_eq!(result.desc().width, width);
+    assert_eq!(result.desc().height, height);
 }
 
 #[test]
@@ -325,14 +325,14 @@ fn test_apply_full_pipeline_with_blend() {
 
     let input_cpu = load_lena_rgba_u8_895x551();
     let overlay_cpu = input_cpu.clone();
-    let width = input_cpu.desc.width;
-    let height = input_cpu.desc.height;
+    let width = input_cpu.desc().width;
+    let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
 
     let mut main_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc);
+    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc());
     let mut overlay_buffer = ImageBuffer::from_cpu(overlay_cpu);
-    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc);
+    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Step 1: Rotate main image
     Transform::default()
@@ -369,8 +369,8 @@ fn test_apply_full_pipeline_with_blend() {
         .unwrap();
 
     let result = temp_buffer.make_cpu(&ctx).unwrap();
-    assert_eq!(result.desc.width, width);
-    assert_eq!(result.desc.height, height);
+    assert_eq!(result.desc().width, width);
+    assert_eq!(result.desc().height, height);
 }
 
 #[test]

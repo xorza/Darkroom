@@ -194,10 +194,10 @@ pub(super) fn apply_packed<T: SsePacked, const N: usize>(
     input: &Image,
     output: &mut Image,
 ) {
-    let in_w = input.desc.width;
-    let in_h = input.desc.height;
-    let out_w = output.desc.width;
-    let out_stride = output.desc.row_bytes();
+    let in_w = input.desc().width;
+    let in_h = input.desc().height;
+    let out_w = output.desc().width;
+    let out_stride = output.desc().row_bytes();
 
     let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
     let inv = transform.transform.inverse();

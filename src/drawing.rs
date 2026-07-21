@@ -9,7 +9,7 @@ use glam::Vec2;
 
 /// Validates that the image uses an f32 format suitable for drawing.
 fn assert_f32_image(image: &Image) {
-    let fmt = image.desc.color_format;
+    let fmt = image.desc().color_format;
     assert_eq!(
         fmt.channel_size,
         ChannelSize::_32bit,
@@ -34,7 +34,7 @@ pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, t
     assert_f32_image(image);
     let cx = center.x;
     let cy = center.y;
-    let desc = image.desc;
+    let desc = image.desc();
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;
@@ -79,7 +79,7 @@ pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
     assert_f32_image(image);
     let cx = center.x;
     let cy = center.y;
-    let desc = image.desc;
+    let desc = image.desc();
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;
@@ -153,7 +153,7 @@ pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickn
     let y1 = start.y;
     let x2 = end.x;
     let y2 = end.y;
-    let desc = image.desc;
+    let desc = image.desc();
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;

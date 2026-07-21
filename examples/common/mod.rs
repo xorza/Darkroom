@@ -44,6 +44,9 @@ pub(crate) fn save_image(image: &Image, filename: &str) {
 pub(crate) fn print_image_info(name: &str, image: &Image) {
     println!(
         "{}: {}x{} {}",
-        name, image.desc.width, image.desc.height, image.desc.color_format
+        name,
+        image.desc().width,
+        image.desc().height,
+        image.desc().color_format
     );
 }
