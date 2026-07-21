@@ -8,6 +8,7 @@ use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::script::ScriptConfig;
+use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 
 #[cfg(test)]
@@ -25,8 +26,9 @@ impl Workspace {
         script_config: &ScriptConfig,
         wake: Wake,
         preferences: &Preferences,
+        status: StatusLog,
     ) -> Self {
-        let mut runtime = RuntimeHost::new(script_config, wake, preferences);
+        let mut runtime = RuntimeHost::new(script_config, wake, preferences, status);
         runtime.set_document_cache(open.path.as_deref());
         Self { open, runtime }
     }
