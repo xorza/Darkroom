@@ -99,13 +99,15 @@ impl RuntimeHost {
         self.apply_library_change(change)
     }
 
-    pub(crate) fn publish_local_graph(
+    pub(crate) fn publish_local_graph_to_library(
         &mut self,
         document: &mut Document,
         target: GraphRef,
         node_id: NodeId,
     ) -> bool {
-        let change = self.library.publish_local_graph(document, target, node_id);
+        let change = self
+            .library
+            .publish_local_graph_to_library(document, target, node_id);
         self.apply_library_change(change)
     }
 

@@ -131,7 +131,7 @@ impl App {
     /// Publish a node's local graph to the shared library (the
     /// G-badge "Publish" action): update in place when linked to a library
     /// graph, else create a fresh entry and link it (see
-    /// [`publish::publish_local_graph`]). Non-undoable (library + disk only).
+    /// [`publish::publish_local_graph_to_library`]). Non-undoable (library + disk only).
     fn publish_node_graph(&mut self, node_id: NodeId) {
         // The G-badge that raises this only exists on the canvas, so a
         // graph tab is always active here; bail otherwise.
@@ -142,7 +142,7 @@ impl App {
         if self
             .workspace
             .runtime
-            .publish_local_graph(document, target, node_id)
+            .publish_local_graph_to_library(document, target, node_id)
         {
             // Publishing a fresh entry re-points the local graph's `origin`
             // in the document — an unsaved change (an update-in-place
