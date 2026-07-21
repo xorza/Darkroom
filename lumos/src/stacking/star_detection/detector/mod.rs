@@ -10,7 +10,7 @@ mod bench;
 
 use serde::{Deserialize, Serialize};
 
-use crate::io::astro_image::LinearImage;
+use crate::io::image::LinearImage;
 
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};

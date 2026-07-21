@@ -7,8 +7,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::LinearImage;
-use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions};
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -193,7 +193,7 @@ pub(crate) fn stack_stored_frames(
     frames: Vec<StoredLightFrame>,
     spill_directory: Option<SpillDirectory>,
     dimensions: ImageDimensions,
-    metadata: AstroImageMetadata,
+    metadata: ImageMetadata,
     config: StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
@@ -519,8 +519,8 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 mod tests {
     use arrayvec::ArrayVec;
 
-    use crate::io::astro_image::PixelData;
-    use crate::io::astro_image::cfa::{CfaImage, CfaType};
+    use crate::io::image::PixelData;
+    use crate::io::image::cfa::{CfaImage, CfaType};
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::CacheCore;
     use crate::stacking::combine::cache_config::CacheConfig;
@@ -536,7 +536,7 @@ mod tests {
     use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::ScratchDirectory;
     use crate::{
-        io::astro_image::{ImageDimensions, LinearImage},
+        io::image::{ImageDimensions, LinearImage},
         stacking::combine::cache::tests::make_test_cache,
     };
     use std::path::PathBuf;
@@ -830,7 +830,7 @@ mod tests {
             vec![frame],
             Some(spill_directory),
             dimensions,
-            AstroImageMetadata::default(),
+            ImageMetadata::default(),
             StackConfig::mean(),
             ProgressCallback::default(),
             CancelToken::never(),

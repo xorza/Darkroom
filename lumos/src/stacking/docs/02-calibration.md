@@ -1535,7 +1535,7 @@ Relevant sources:
 - [cosmic_ray.rs](../calibration_masters/cosmic_ray.rs)
 - [combine/config.rs](../combine/config.rs)
 - [pipeline/streaming.rs](../pipeline/streaming.rs)
-- [CfaImage](../../io/astro_image/cfa.rs)
+- [CfaImage](../../io/image/cfa.rs)
 
 ### 11.2 Priority correctness gaps
 
@@ -1544,7 +1544,7 @@ Relevant sources:
 | P0 | Flat subs are globally multiplicatively normalized while still raw; master bias/flat-dark is subtracted only after combination | variable flat illumination is normalized with an additive pedestal in the statistic |
 | P0 | Within-role loading validates dimensions and finite samples, but not exposure/gain/offset/filter/temperature/readout/decode compatibility | unrelated frames can be silently combined |
 | P0 | Application validates CFA pattern only; dimensions fail later by assertion and other acquisition fields are ignored | a mismatch can panic after the calibrated flag is set or produce plausible corruption |
-| P0 | Stage 1 decoder black model/scale provenance is not represented in AstroImageMetadata | masters from incompatible numeric domains cannot be rejected |
+| P0 | Stage 1 decoder black model/scale provenance is not represented in ImageMetadata | masters from incompatible numeric domains cannot be rejected |
 | P0 | No validity/saturation/defect/flat-invalid mask plane | invalid and synthesized samples receive ordinary downstream weight |
 | P0 | No per-pixel master/divisor variance | flat and shared-bias uncertainty cannot be propagated; stack weights omit calibration noise |
 | P0 | Prepared-flat arithmetic mean includes every sample and silently floors response at 0.1 | saturation/defects bias normalization; deep response is changed instead of masked |

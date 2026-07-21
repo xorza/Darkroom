@@ -10,7 +10,7 @@ use imaginarium::Image;
 use crate::Stretch;
 use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
-use crate::io::astro_image::{ImageDimensions, LinearImage};
+use crate::io::image::{ImageDimensions, LinearImage};
 
 const W: usize = 3000;
 const H: usize = 2000;

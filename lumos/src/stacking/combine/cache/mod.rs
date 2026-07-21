@@ -6,7 +6,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions, LinearImage, PixelData};
+use crate::io::image::{ImageDimensions, ImageMetadata, LinearImage, PixelData};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -113,7 +113,7 @@ pub(crate) struct CacheCore {
     /// Image dimensions (same for all frames).
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
-    pub(crate) metadata: AstroImageMetadata,
+    pub(crate) metadata: ImageMetadata,
     /// Configuration for cache operations.
     pub(crate) config: CacheConfig,
     /// Progress callback.
@@ -145,7 +145,7 @@ pub(crate) struct LightCache {
 pub(crate) struct StoredLightCacheParams {
     pub(crate) spill_directory: Option<SpillDirectory>,
     pub(crate) dimensions: ImageDimensions,
-    pub(crate) metadata: AstroImageMetadata,
+    pub(crate) metadata: ImageMetadata,
     pub(crate) config: CacheConfig,
     pub(crate) normalization: Normalization,
     pub(crate) progress: ProgressCallback,

@@ -115,7 +115,7 @@ map reaches the measurement stage.
   `../star_detection/detector/stages/prepare.rs:20` and
   `../star_detection/detector/stages/prepare.rs:36`. That metadata intentionally
   travels through RAW demosaic: the new planar image receives the source metadata at
-  `../../io/astro_image/cfa.rs:160`. `StarDetector::detect` passes the resulting
+  `../../io/image/cfa.rs:160`. `StarDetector::detect` passes the resulting
   `grayscale_image` to background, detection, FWHM bootstrap, and measurement at
   `../star_detection/detector/mod.rs:125`, `../star_detection/detector/mod.rs:155`,
   and `../star_detection/detector/mod.rs:176`. The preparation comment also calls

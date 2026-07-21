@@ -11,8 +11,8 @@ use rayon::prelude::*;
 
 use common::file_utils;
 
-use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions, LinearImage};
+use crate::io::image::error::ImageError;
+use crate::io::image::{ImageDimensions, ImageMetadata, LinearImage};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -122,7 +122,7 @@ pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
 pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
-    fn metadata(&self) -> &AstroImageMetadata;
+    fn metadata(&self) -> &ImageMetadata;
     fn load(path: &Path) -> Result<Self, ImageError>;
 
     fn quantization_sigma(&self) -> Option<f32> {
@@ -222,7 +222,7 @@ impl Drop for SpillFiles {
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
 pub(crate) struct StoredImage {
-    pub(crate) metadata: AstroImageMetadata,
+    pub(crate) metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
     _spill_files: SpillFiles,

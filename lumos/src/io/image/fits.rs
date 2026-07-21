@@ -7,11 +7,11 @@ use fits_well::image::SampleType;
 use fits_well::io::HduKind;
 use rayon::prelude::*;
 
-use crate::io::astro_image::cfa::CfaType;
-use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{
-    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
+use crate::io::image::cfa::CfaType;
+use crate::io::image::error::ImageError;
+use crate::io::image::{
+    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
+    ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
 };
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
@@ -175,8 +175,8 @@ fn read_metadata(
     header: &Header,
     header_dimensions: Vec<usize>,
     bitpix: BitPix,
-) -> fits_well::Result<AstroImageMetadata> {
-    Ok(AstroImageMetadata {
+) -> fits_well::Result<ImageMetadata> {
+    Ok(ImageMetadata {
         object: read_text(header, "OBJECT")?,
         instrument: read_text(header, "INSTRUME")?,
         telescope: read_text(header, "TELESCOP")?,
@@ -382,7 +382,7 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
 
 #[cfg(test)]
 mod tests {
-    use crate::io::astro_image::fits::*;
+    use crate::io::image::fits::*;
 
     #[test]
     fn finite_validation_preserves_every_physical_value() {

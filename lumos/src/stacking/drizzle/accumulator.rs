@@ -5,7 +5,7 @@ use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::{ImageDimensions, LinearImage};
+use crate::io::image::{ImageDimensions, LinearImage};
 use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;

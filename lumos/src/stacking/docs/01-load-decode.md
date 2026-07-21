@@ -1439,11 +1439,11 @@ preceding sections are the required behavior.
 
 ### 10.3 Relevant source locations
 
-- `lumos/src/io/astro_image/mod.rs` — dispatch, public image representation, standard
+- `lumos/src/io/image/mod.rs` — dispatch, public image representation, standard
   image conversion.
-- `lumos/src/io/astro_image/fits.rs` — FITS selection, scaling, metadata, and Bayer
+- `lumos/src/io/image/fits.rs` — FITS selection, scaling, metadata, and Bayer
   interpretation.
-- `lumos/src/io/astro_image/cfa.rs` — signed CFA representation and demosaic routing.
+- `lumos/src/io/image/cfa.rs` — signed CFA representation and demosaic routing.
 - `lumos/src/io/raw/mod.rs` — LibRaw boundary, black consolidation, RAW products.
 - `lumos/src/io/raw/normalize.rs` — clipped and unclipped normalization.
 - `lumos/src/io/raw/demosaic/bayer/rcd.rs` — signed RCD.

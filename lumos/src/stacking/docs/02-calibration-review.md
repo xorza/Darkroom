@@ -134,7 +134,7 @@ shape and divisor assumptions are asserted after mutation begins.
   validates only CFA, sets `metadata.calibrated = true`, and then performs subtraction,
   division, and repair at `../calibration_masters/mod.rs:505-543`. Both
   `CfaImage::subtract` and prepared-flat application assert dimensions at
-  `../../io/astro_image/cfa.rs:178-197` and
+  `../../io/image/cfa.rs:178-197` and
   `../calibration_masters/prepared_flat/mod.rs:40-55`.
 
   **Impact.** A light matching CFA but not dimensions is marked calibrated before the
@@ -169,9 +169,9 @@ shape and divisor assumptions are asserted after mutation begins.
   metadata at `../combine/cache/loader/mod.rs:283-355`. `run_stacking` copies that value
   into the master at `../combine/stack.rs:394-480`. `from_images` does not validate role
   metadata before flat arithmetic or defect detection at
-  `../calibration_masters/mod.rs:353-409`. Although `AstroImageMetadata` has fields such
+  `../calibration_masters/mod.rs:353-409`. Although `ImageMetadata` has fields such
   as exposure, ISO, filter, gain, temperature, binning, and offset
-  (`../../io/astro_image/mod.rs:138-191`), `load_raw_cfa` currently populates chiefly ISO,
+  (`../../io/image/mod.rs:138-191`), `load_raw_cfa` currently populates chiefly ISO,
   sample type, dimensions, CFA, and white balance
   (`../../io/raw/mod.rs:1034-1065`).
 
@@ -208,7 +208,7 @@ shape and divisor assumptions are asserted after mutation begins.
   scratch copy to estimate center/scale (`../combine/rejection.rs:263-317`), compacts
   original survivors (`../combine/rejection.rs:318-342`), and averages those survivors
   (`../combine/rejection.rs:921-983`). `CfaImage::subtract` changes pixels without
-  updating `quantization_sigma` at `../../io/astro_image/cfa.rs:178-197`; prepared-flat
+  updating `quantization_sigma` at `../../io/image/cfa.rs:178-197`; prepared-flat
   subtraction, normalization, and division likewise leave their input scalar untouched
   at `../calibration_masters/prepared_flat/mod.rs:9-55`. Hot detection then uses the
   master scalar directly as its resolution floor at
@@ -271,7 +271,7 @@ shape and divisor assumptions are asserted after mutation begins.
   zero scientific weight (`02-calibration.md:68-145`).
 
   **Evidence.** `CfaImage` contains only `Buffer2<f32>`, metadata, and one scalar
-  quantization sigma at `../../io/astro_image/cfa.rs:57-66`. Defect repair overwrites the
+  quantization sigma at `../../io/image/cfa.rs:57-66`. Defect repair overwrites the
   pixel buffer at `../calibration_masters/defect_map/mod.rs:144-184`, and cosmic rejection
   returns only a count after overwriting the same buffer at
   `../calibration_masters/cosmic_ray.rs:95-105`. The pipeline immediately demosaics that

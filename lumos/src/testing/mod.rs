@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use common::file_utils;
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::AstroImageMetadata;
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::ImageMetadata;
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
 use crate::stacking::star_detection::config::BackgroundConfig;
@@ -115,7 +115,7 @@ pub(crate) fn estimate_background(
 pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new(width, height, pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()
         },
@@ -127,7 +127,7 @@ pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType
 pub fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new_filled(width, height, value),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()
         },

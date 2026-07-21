@@ -33,12 +33,12 @@ pub(crate) mod stacking;
 #[cfg(test)]
 pub mod testing;
 
-pub use io::astro_image::cfa::{CfaImage, CfaType};
-pub use io::astro_image::error::ImageError;
-pub use io::astro_image::{
-    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, LinearImage, PREVIEW_IMAGE_EXTENSIONS, PreviewImage,
-    SourceContainer, TransferProvenance,
+pub use io::image::cfa::{CfaImage, CfaType};
+pub use io::image::error::ImageError;
+pub use io::image::{
+    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
+    ImageProvenance, LinearImage, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
+    TransferProvenance,
 };
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;

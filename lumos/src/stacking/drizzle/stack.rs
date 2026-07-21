@@ -1,7 +1,7 @@
 use std::io::Error;
 use std::path::Path;
 
-use crate::io::astro_image::LinearImage;
+use crate::io::image::LinearImage;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;

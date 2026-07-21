@@ -7,8 +7,8 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency;
-use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{LinearImage, cfa_dimensions};
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::{LinearImage, cfa_dimensions};
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::stacking::calibration_masters::CalibrationMasters;

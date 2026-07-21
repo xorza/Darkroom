@@ -1,7 +1,7 @@
 use std::fs;
 
-use crate::io::astro_image::cfa::CfaType;
-use crate::io::astro_image::error::ImageError;
+use crate::io::image::cfa::CfaType;
+use crate::io::image::error::ImageError;
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;

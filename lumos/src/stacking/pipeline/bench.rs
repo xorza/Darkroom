@@ -5,7 +5,7 @@ use quickbench::quick_bench;
 use rayon::prelude::*;
 
 use crate::LinearImage;
-use crate::io::astro_image::ImageDimensions;
+use crate::io::image::ImageDimensions;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;

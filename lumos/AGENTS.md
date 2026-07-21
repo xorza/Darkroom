@@ -14,7 +14,7 @@ The core deliverable is still that stacked master — load → calibrate → det
 
 A stack of telescope exposures → one calibrated, aligned, combined deep-sky image. The modules below are stages in that flow:
 
-1. **Load / decode** (`io::astro_image`, `io::raw`) — FITS (pure-Rust `fits-well`), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `LinearImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
+1. **Load / decode** (`io::image`, `io::raw`) — FITS (pure-Rust `fits-well`), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `LinearImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
 2. **Calibrate** (`stacking::calibration_masters`) — stack calibration frames into master dark/flat/bias/flat-dark + defect map; hot detection thresholds per-color residuals after a robust 64×64-tile dark-background fit, while cold detection reads the subtracted unfloored flat. Per light frame: dark-subtract → flat-divide → defect-correct, plus optional single-frame cosmic-ray rejection (L.A.Cosmic) on the calibrated `CfaImage` before demosaic.
 3. **Detect stars** (`stacking::star_detection`) — six-stage detector → flux-sorted `Star`s with sub-pixel centroids and shape/quality metrics.
 4. **Register** (`stacking::registration`) — triangle matching → RANSAC/MAGSAC++ transform fit → match recovery → optional SIP distortion → image warp into a common frame.
@@ -36,7 +36,7 @@ src/
 │   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   rgb/   op.rs (OpError contract)   wavelet/
 │   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
 │   └── color_calibration/ (Scnr, NeutralizeBackground)   background_extraction/   ml/ (feature-gated)
-├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
+├── io/         image (container + FITS/standard load) · raw (libraw decode + demosaic)
 ├── math/       robust stats, SIMD sum, DMat3, bbox, Vec2us
 ├── background_mesh/  shared SExtractor-style TileGrid (used by star_detection + background_extraction)
 ├── bit_buffer2/  packed boolean masks with 128-bit row padding
@@ -61,7 +61,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `image_ops::stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
 | `image_ops::{denoise, hdr, local_contrast, color_calibration, background_extraction}` | `pub(crate)` (types re-exported) | Wavelet denoise, HDR tone-compression, local contrast, SCNR/background neutralization, gradient background extraction. |
 | `image_ops::ml` | `pub(crate)`, `#[cfg(feature = "ml")]` | ONNX-backed ML denoise + star removal (tiled inference). |
-| `io::astro_image` | `pub(crate)` (types re-exported) | `LinearImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
+| `io::image` | `pub(crate)` (types re-exported) | `LinearImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing; owns the authoritative `RAW_EXTENSIONS` policy. |
 | `math` | `pub(crate)` | `Vec2us`, `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. `Vec2us` is re-exported as part of Lumos's public image-dimension API. |
 | `bit_buffer2` | `pub(crate)` | Packed boolean masks with checked layout arithmetic and 128-bit row padding for word kernels. |
@@ -70,11 +70,11 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 `imaginarium::Buffer2` underpins planar pixel storage, its shared `cpu_features` detector gates SIMD dispatch, and Lumos owns its packed `BitBuffer2` masks. The workspace `common` crate supplies cross-crate contracts such as serialization and cancellation. This file is the crate-level map; read the code in each module for algorithm specifics.
 
-## io/astro_image — image container & loading
+## io/image — image container & loading
 
-- `LinearImage` (`io/astro_image/mod.rs:248`): `metadata: AstroImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
+- `LinearImage` (`io/image/mod.rs:248`): `metadata: ImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
 - `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
-- `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), opaque `ImageDimensions` (`mod.rs`, non-zero size + channels ∈ {1,3}, exposed through immutable accessors), `AstroImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
+- `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), opaque `ImageDimensions` (`mod.rs`, non-zero size + channels ∈ {1,3}, exposed through immutable accessors), `ImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
 - Entry points: `LinearImage::from_file` admits linear non-mosaic FITS and float TIFF, `CfaImage::from_file` admits camera RAW and mosaic FITS, and `PreviewImage::from_file` owns the public `PREVIEW_IMAGE_EXTENSIONS` display policy; `LinearImage::from_pixels` and `from_planar_channels` build explicit in-memory scientific products. `mean()` uses parallel Kahan summation.
 - The crate-private `image_ops::rgb::Rgb` value struct (`image_ops/rgb/mod.rs`, `.intensity()` / `.scale()`) supports display transforms over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract` and `demosaic()` → `LinearImage`). Calibration-master construction prepares the reusable flat divisor with **per-color-channel means** so non-white flats don't shift color.

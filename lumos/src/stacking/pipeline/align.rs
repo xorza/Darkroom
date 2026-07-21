@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::astro_image::LinearImage;
+use crate::io::image::LinearImage;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;

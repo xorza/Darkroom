@@ -1595,4 +1595,4 @@ Stage 5 is complete only when:
 - `stacking/drizzle/{accumulator,config,geometry,stack}.rs`
 - `stacking/registration/{transform,resample}/`
 - `stacking/product.rs`
-- `io/astro_image/mod.rs`
+- `io/image/mod.rs`

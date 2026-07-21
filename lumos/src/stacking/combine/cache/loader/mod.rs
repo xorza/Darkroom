@@ -10,8 +10,8 @@ use common::CancelToken;
 use common::file_utils;
 
 use crate::concurrency;
-use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions, LinearImage};
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::{ImageDimensions, ImageMetadata, LinearImage};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -34,7 +34,7 @@ struct LoadedTier {
     frames: Vec<StoredFrame>,
     spill_directory: Option<SpillDirectory>,
     frame_stats: Vec<FrameStats>,
-    metadata: AstroImageMetadata,
+    metadata: ImageMetadata,
 }
 
 /// [`load_tiered`] output: the loaded plain frames plus the assembled [`CacheCore`].
@@ -187,7 +187,7 @@ impl LightCache {
 struct LoadedMemoryFrame {
     frame: StoredFrame,
     stats: FrameStats,
-    metadata: Option<AstroImageMetadata>,
+    metadata: Option<ImageMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

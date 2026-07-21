@@ -3,8 +3,8 @@ use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
 #[cfg(feature = "real-data")]
-use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::*;
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
 #[cfg(feature = "real-data")]
@@ -24,7 +24,7 @@ fn loadable_extensions_match_decoder_policies() {
 
 #[test]
 fn test_metadata_default() {
-    let meta = AstroImageMetadata::default();
+    let meta = ImageMetadata::default();
     assert!(meta.object.is_none());
     assert!(meta.header_dimensions.is_empty());
     assert!(meta.camera_white_balance.is_none());

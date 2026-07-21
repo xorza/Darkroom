@@ -108,7 +108,7 @@ noise std `σ`, read offset mean `μ`:
 ```
 forward:   y = (2/α)·√(α·x + 3α²/8 + σ² − α·μ)     // ≈ unit-variance Gaussian
 ```
-(`α`, `σ`, `μ` come from the sensor / calibration — lumos has gain/`egain` in `AstroImageMetadata`.)
+(`α`, `σ`, `μ` come from the sensor / calibration — lumos has gain/`egain` in `ImageMetadata`.)
 
 **Inverse — use the exact unbiased inverse (✅ verified, load-bearing):**
 > The *choice of inverse* is the critical step — the naive **algebraic** inverse
@@ -264,7 +264,7 @@ src/denoise/
 - planar `Buffer2<f32>` channels + `channel`/`channel_mut`, `par_map_pixels` — per-channel work.
 - `stacking::star_detection::convolution` (separable Gaussian/elliptical conv, SIMD) — the template for
   the à trous separable B3-spline convolution.
-- `AstroImageMetadata` `gain`/`egain` — the generalized-Anscombe `α` / read-noise parameters.
+- `ImageMetadata` `gain`/`egain` — the generalized-Anscombe `α` / read-noise parameters.
 
 **Value-range note:** operates on **linear** data (any range ≥ 0, not `[0,1]`). The starlet detail
 planes are signed; the residual + reconstruction stay in the original linear range.

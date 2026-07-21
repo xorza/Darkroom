@@ -178,9 +178,9 @@ impl ImageDimensions {
     }
 }
 
-/// Metadata extracted from FITS file headers or RAW EXIF.
+/// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct AstroImageMetadata {
+pub struct ImageMetadata {
     pub object: Option<String>,
     pub instrument: Option<String>,
     pub telescope: Option<String>,
@@ -298,7 +298,7 @@ impl PixelData {
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
 pub struct LinearImage {
-    pub metadata: AstroImageMetadata,
+    pub metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     pub(crate) pixels: PixelData,
 }
@@ -306,7 +306,7 @@ pub struct LinearImage {
 /// A decoded display or inspection product that cannot enter the scientific pipeline directly.
 #[derive(Debug)]
 pub struct PreviewImage {
-    pub metadata: AstroImageMetadata,
+    pub metadata: ImageMetadata,
     image: Image,
 }
 
@@ -413,7 +413,7 @@ impl PreviewImage {
             let image = decoded
                 .convert(target)
                 .expect("standard image converts to its f32 channel format");
-            let metadata = AstroImageMetadata {
+            let metadata = ImageMetadata {
                 provenance: Some(ImageProvenance {
                     container: standard_container(&extension),
                     decoder: DecoderProvenance::Imaginarium,
@@ -551,7 +551,7 @@ impl LinearImage {
         };
 
         LinearImage {
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             dimensions,
             pixels: pixel_data,
         }
@@ -606,7 +606,7 @@ impl LinearImage {
         };
 
         LinearImage {
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             dimensions,
             pixels: pixel_data,
         }
@@ -693,7 +693,7 @@ impl StackableImage for LinearImage {
         LinearImage::channel(self, c)
     }
 
-    fn metadata(&self) -> &AstroImageMetadata {
+    fn metadata(&self) -> &ImageMetadata {
         &self.metadata
     }
 
@@ -736,7 +736,7 @@ impl From<Buffer2<f32>> for LinearImage {
     fn from(plane: Buffer2<f32>) -> Self {
         let dimensions = ImageDimensions::new((plane.width(), plane.height()), 1);
         Self {
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             dimensions,
             pixels: PixelData::L(DeinterleavedImageData::from_channels([plane])),
         }
@@ -747,7 +747,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
         let dimensions = ImageDimensions::new((planes[0].width(), planes[0].height()), 3);
         Self {
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             dimensions,
             pixels: PixelData::Rgb(DeinterleavedImageData::from_channels(planes)),
         }
@@ -819,7 +819,7 @@ fn linear_from_f32_image(image: &Image) -> LinearImage {
 
     let dimensions = ImageDimensions::new((width, height), pixels.channels());
     LinearImage {
-        metadata: AstroImageMetadata::default(),
+        metadata: ImageMetadata::default(),
         dimensions,
         pixels,
     }
@@ -877,7 +877,7 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
 #[cfg(test)]
 mod test_support {
     use crate::image_ops::rgb::Rgb;
-    use crate::io::astro_image::{self, LinearImage, PixelData};
+    use crate::io::image::{self, LinearImage, PixelData};
 
     impl LinearImage {
         pub(crate) fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
@@ -939,7 +939,7 @@ mod test_support {
                 PixelData::Rgb(img) => {
                     let [r, g, b] = img.channels;
                     let mut interleaved = vec![0.0f32; r.len() * 3];
-                    astro_image::interleave_rgb(&r, &g, &b, &mut interleaved);
+                    image::interleave_rgb(&r, &g, &b, &mut interleaved);
                     interleaved
                 }
             }

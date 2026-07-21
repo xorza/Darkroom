@@ -2,11 +2,11 @@ use std::io::{Error, ErrorKind};
 
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, AstroImageMetadata, CacheConfig,
-    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod,
-    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError,
-    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, LinearImage, NoiseModel,
-    Normalization, PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog,
+    AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
+    CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
+    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig,
+    ImageDimensions, ImageMetadata, InterpolationMethod, LinearFitClipConfig, LinearImage,
+    NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog,
     RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
     SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -139,7 +139,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
 
 #[test]
 fn invariant_types_expose_validated_state_from_the_crate_root() {
-    let metadata = AstroImageMetadata {
+    let metadata = ImageMetadata {
         camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
         ..Default::default()
     };

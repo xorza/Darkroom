@@ -8,7 +8,7 @@ use glam::DVec2;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::astro_image::LinearImage;
+use crate::io::image::LinearImage;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::stack::drizzle_images;

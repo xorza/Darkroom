@@ -21,8 +21,8 @@ use common::CancelToken;
 use common::file_utils;
 use common::serde as common_serde;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::io::astro_image::cfa_dimensions;
+use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa_dimensions;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;

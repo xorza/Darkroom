@@ -520,14 +520,14 @@ fn test_warp_rgb() {
 
 #[test]
 fn test_warp_preserves_output_metadata() {
-    use crate::io::astro_image::AstroImageMetadata;
+    use crate::io::image::ImageMetadata;
 
     let pixels = star_field(256, 256, 30, 11111).image.channel(0).clone();
     let width = pixels.width();
     let height = pixels.height();
     let mut image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
-    image.metadata = AstroImageMetadata {
+    image.metadata = ImageMetadata {
         object: Some("M42".to_string()),
         exposure_time: Some(120.0),
         ..Default::default()

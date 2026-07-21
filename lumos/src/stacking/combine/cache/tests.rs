@@ -1,5 +1,5 @@
-use crate::io::astro_image::LinearImage;
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::LinearImage;
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
@@ -146,7 +146,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         .map(|pixels| {
             let image = CfaImage {
                 data: Buffer2::new(dims.width(), dims.height(), pixels),
-                metadata: AstroImageMetadata {
+                metadata: ImageMetadata {
                     cfa_type: Some(CfaType::Mono),
                     ..Default::default()
                 },
@@ -161,7 +161,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         core: CacheCore {
             spill_directory: None,
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -329,7 +329,7 @@ fn test_cleanup_removes_files() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config,
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -387,7 +387,7 @@ fn test_read_channel_chunk_disk_backed() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig {
                 available_memory: Some(123_456),
                 ..Default::default()
@@ -439,7 +439,7 @@ fn test_frame_count_disk_backed() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),

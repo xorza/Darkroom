@@ -7,8 +7,8 @@
 
 use std::fs::File;
 
-use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::fits::load_fits;
+use crate::io::image::error::ImageError;
+use crate::io::image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
 use crate::stacking::frame_store::StackableImage;

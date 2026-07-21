@@ -39,7 +39,7 @@ raw/
 Every path keeps camera white balance at unity. RAW channel values therefore remain proportional
 to sensor signal; color scaling belongs to a later explicit color-calibration or display step.
 The camera-recorded multipliers are retained canonically as `[R, G1, B, G2]` in
-`AstroImageMetadata` for optional downstream use, but are never applied during RAW decoding.
+`ImageMetadata` for optional downstream use, but are never applied during RAW decoding.
 
 Both demosaic kernels emit unclipped linear RGB from one source-independent algorithm. Calibrated
 `CfaImage` data therefore retains negative samples and interpolation overshoot. The direct

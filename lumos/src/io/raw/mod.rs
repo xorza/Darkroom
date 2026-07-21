@@ -17,15 +17,15 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
 
-use crate::io::astro_image::error::ImageError;
+use crate::io::image::error::ImageError;
 
 use rayon::prelude::*;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
-use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
-use crate::io::astro_image::{
-    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
+use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::sensor::{SensorType, detect_sensor_type};
+use crate::io::image::{
+    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
+    ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
 };
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
@@ -1012,7 +1012,7 @@ pub(crate) fn load_raw(path: &Path) -> Result<LinearImage, ImageError> {
         demosaic,
     } = decoded;
 
-    let metadata = AstroImageMetadata {
+    let metadata = ImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
         header_dimensions: vec![height, width, channels],
@@ -1093,7 +1093,7 @@ pub(crate) fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     // Calibration path: keep signed, un-clamped values so stacked master
     // dark/bias means aren't biased upward by clipping the sub-pedestal tail.
     let pixels = raw.extract_cfa_pixels::<false>()?;
-    let metadata = AstroImageMetadata {
+    let metadata = ImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
         header_dimensions: vec![raw.height, raw.width, 1],

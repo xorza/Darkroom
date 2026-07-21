@@ -3,7 +3,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::io::astro_image::LinearImage;
+use crate::io::image::LinearImage;
 use crate::stacking::combine::cache::loader::*;
 use crate::testing::ScratchDirectory;
 

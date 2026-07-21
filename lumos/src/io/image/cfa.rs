@@ -11,10 +11,10 @@ use rayon::prelude::*;
 
 use common::file_utils;
 
-use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::fits;
-use crate::io::astro_image::{
-    AstroImageMetadata, ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
+use crate::io::image::error::ImageError;
+use crate::io::image::fits;
+use crate::io::image::{
+    ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
     LinearImage, STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa,
     scientific_rejection,
 };
@@ -67,7 +67,7 @@ pub struct CfaImage {
     /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
     /// Layout: row-major, width * height pixels.
     pub data: Buffer2<f32>,
-    pub metadata: AstroImageMetadata,
+    pub metadata: ImageMetadata,
     /// Source-quantization uncertainty in the current CFA sample units.
     pub(crate) quantization_sigma: Option<f32>,
 }
@@ -82,7 +82,7 @@ impl StackableImage for CfaImage {
         &self.data
     }
 
-    fn metadata(&self) -> &AstroImageMetadata {
+    fn metadata(&self) -> &ImageMetadata {
         &self.metadata
     }
 
@@ -107,7 +107,7 @@ impl StackableImage for CfaImage {
 
 impl CfaImage {
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
-    pub fn from_plane(data: Buffer2<f32>, metadata: AstroImageMetadata) -> Self {
+    pub fn from_plane(data: Buffer2<f32>, metadata: ImageMetadata) -> Self {
         assert!(
             metadata.cfa_type.is_some(),
             "CfaImage metadata must identify a monochrome or CFA sensor"
@@ -249,14 +249,14 @@ impl CfaImage {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::astro_image::cfa::*;
+    use crate::io::image::cfa::*;
     use crate::testing::make_cfa;
 
     #[test]
     fn master_cfa_save_load_round_trips_data_and_pattern() {
         let cfa = CfaImage {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Bggr)),
                 camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
                 ..Default::default()
@@ -360,9 +360,9 @@ mod tests {
     fn test_data_len() {
         let img = CfaImage::from_plane(
             Buffer2::new(10, 20, vec![0.0; 200]),
-            AstroImageMetadata {
+            ImageMetadata {
                 cfa_type: Some(CfaType::Mono),
-                ..AstroImageMetadata::default()
+                ..ImageMetadata::default()
             },
         );
         assert_eq!(img.data.len(), 200);

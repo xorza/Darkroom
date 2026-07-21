@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::io::astro_image::ImageDimensions;
+use crate::io::image::ImageDimensions;
 use crate::stacking::frame_store::FrameStoreError;
 
 /// Invalid [`crate::StackConfig`] parameters.
