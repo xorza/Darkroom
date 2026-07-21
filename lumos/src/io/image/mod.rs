@@ -1,6 +1,6 @@
 pub(crate) mod cfa;
 pub(crate) mod error;
-mod fits;
+pub(crate) mod fits;
 pub(crate) mod linear;
 pub(crate) mod sensor;
 #[cfg(test)]
@@ -10,8 +10,6 @@ use error::ImageError;
 
 use imaginarium::{ChannelCount, ColorFormat, Image};
 use std::path::Path;
-
-use common::CancelToken;
 
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
@@ -251,50 +249,6 @@ fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
-fn fits_cfa(image: LinearImage, path: &Path) -> Result<cfa::CfaImage, ImageError> {
-    if !image.is_grayscale() {
-        return Err(scientific_rejection(
-            path,
-            "scientific CFA input must have exactly one image plane",
-        ));
-    }
-    if image.metadata.cfa_type.is_none() {
-        return Err(scientific_rejection(
-            path,
-            "scientific CFA FITS input is missing validated CFA pattern metadata",
-        ));
-    }
-
-    let quantization_sigma = match (&image.metadata.bitpix, &image.metadata.provenance) {
-        (
-            BitPix::UInt8
-            | BitPix::Int16
-            | BitPix::UInt16
-            | BitPix::Int32
-            | BitPix::UInt32
-            | BitPix::Int64,
-            Some(ImageProvenance {
-                transfer: TransferProvenance::FitsPhysical { bscale, .. },
-                ..
-            }),
-        ) => Some(bscale.abs() as f32 * cfa::QUANTIZATION_SIGMA_PER_STEP),
-        _ => None,
-    };
-    let LinearImage {
-        mut metadata,
-        pixels,
-        ..
-    } = image;
-    if let Some(provenance) = &mut metadata.provenance {
-        provenance.color = ColorProvenance::SensorCfa;
-    }
-    Ok(cfa::CfaImage {
-        data: pixels.into_l(),
-        metadata,
-        quantization_sigma,
-    })
-}
-
 fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
     Image::read_file(path).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),
@@ -318,15 +272,7 @@ impl PreviewImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            let image = fits::load_fits(path)?;
-            let image = if image.metadata.cfa_type.is_some() {
-                fits_cfa(image, path)?
-                    .demosaic(&CancelToken::never())
-                    .expect("validated Bayer FITS preview demosaic cannot fail")
-            } else {
-                image
-            };
-            return Ok(image.into());
+            return fits::load_preview_fits(path).map(Into::into);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {

@@ -143,7 +143,7 @@ pub fn astro_library() -> Library {
             // `Pure`: its digest is the structural fold of its inputs, so the directory-aware
             // `FsPath` resolver keys it on each calibration folder's *contents* (sorted entry
             // `(name, len, mtime)`). A stable folder caches; any add/remove/edit re-keys it and
-            // it recomputes. (Its `cache` toggle still reloads masters from the `.lcm` files it
+            // it recomputes. (Its `cache` toggle still reloads masters from the FITS files it
             // writes next to the frames, keeping the recompute cheap.)
             .pure()
             .inputs([
@@ -828,7 +828,7 @@ fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
 
 /// Build (or load from cache) the four calibration masters for `dirs`
 /// (darks / flats / bias / flat_darks, in order). With `cache` on, a master is
-/// loaded from `master_<role>.lcm` next to its frames when present, and a
+/// loaded from `master_<role>.fits` next to its frames when present, and a
 /// freshly-stacked one is written there for next time. An unreadable or stale
 /// cache is rebuilt from its source folder.
 /// Run a cancellable blocking lumos op off the worker. Centralizes the
@@ -874,7 +874,7 @@ fn build_masters_cached(
         };
         let cache_path = dir.join(file);
         if cache && cache_path.exists() {
-            match CfaImage::load_cache(&cache_path) {
+            match CfaImage::from_file(&cache_path) {
                 Ok(master) => return Ok(Some(master)),
                 Err(error) => tracing::warn!(
                     path = %cache_path.display(),
@@ -887,17 +887,17 @@ fn build_masters_cached(
         let master =
             stack_cfa_master(&frames, config, cancel.clone()).map_err(anyhow::Error::from)?;
         if cache && let Some(master) = &master {
-            master.save_cache(&cache_path)?;
+            master.save_fits(&cache_path)?;
         }
         Ok(master)
     };
 
     CalibrationMasters::from_images(
         CalibrationSet {
-            dark: role(darks, StackConfig::dark(), "master_dark.lcm")?,
-            flat: role(flats, StackConfig::flat(), "master_flat.lcm")?,
-            bias: role(bias, StackConfig::bias(), "master_bias.lcm")?,
-            flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.lcm")?,
+            dark: role(darks, StackConfig::dark(), "master_dark.fits")?,
+            flat: role(flats, StackConfig::flat(), "master_flat.fits")?,
+            bias: role(bias, StackConfig::bias(), "master_bias.fits")?,
+            flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.fits")?,
         },
         sigma,
         cancel,

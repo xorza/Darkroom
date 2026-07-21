@@ -4,19 +4,16 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
-use std::io::Error;
 use std::path::Path;
 
 use rayon::prelude::*;
-
-use common::file_utils;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
-    STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa, scientific_rejection,
+    STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, scientific_rejection,
 };
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
@@ -125,7 +122,7 @@ impl CfaImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits_cfa(fits::load_fits(path)?, path);
+            return fits::load_cfa_fits(path);
         }
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
             return raw::load_raw_cfa(path);
@@ -146,17 +143,9 @@ impl CfaImage {
         self.data.width() * self.data.height() * std::mem::size_of::<f32>()
     }
 
-    /// Serialize this CFA image to `path` (bitcode: the CFA plane + metadata).
-    /// Pairs with [`Self::load_cache`] for a calibration-master cache.
-    pub fn save_cache(&self, path: &Path) -> std::io::Result<()> {
-        let bytes = common::serialize(self, common::SerdeFormat::Bitcode).map_err(Error::other)?;
-        file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Cache)
-    }
-
-    /// Load a CFA image written by [`Self::save_cache`].
-    pub fn load_cache(path: &Path) -> std::io::Result<Self> {
-        let bytes = std::fs::read(path)?;
-        common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(Error::other)
+    /// Save this sensor-domain image as a checksummed floating-point FITS file.
+    pub fn save_fits(&self, path: &Path) -> std::io::Result<()> {
+        fits::save_cfa_fits(path, self)
     }
 
     /// Demosaic this CFA image into a 3-channel LinearImage.
@@ -250,6 +239,8 @@ impl CfaImage {
 #[cfg(test)]
 mod tests {
     use crate::io::image::cfa::*;
+    use crate::io::image::error::ImageError;
+    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
     use crate::testing::make_cfa;
 
     #[test]
@@ -263,9 +254,9 @@ mod tests {
             },
             quantization_sigma: Some(0.000_01),
         };
-        let path = common::test_utils::test_output_path("cfa_master_roundtrip.lcm");
-        cfa.save_cache(&path).unwrap();
-        let loaded = CfaImage::load_cache(&path).unwrap();
+        let path = common::test_utils::test_output_path("cfa_master_roundtrip.fits");
+        cfa.save_fits(&path).unwrap();
+        let loaded = CfaImage::from_file(&path).unwrap();
 
         assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));
         assert_eq!(loaded.data.to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
@@ -278,6 +269,61 @@ mod tests {
             Some([2.0, 1.0, 1.5, 1.0])
         );
         assert_eq!(loaded.quantization_sigma, Some(0.000_01));
+
+        let original = std::fs::read(&path).unwrap();
+        let mut invalid_version = original.clone();
+        let version_card = invalid_version
+            .windows(8)
+            .position(|window| window == b"LUMOSVER")
+            .unwrap();
+        let version_digit = invalid_version[version_card..version_card + 80]
+            .iter()
+            .rposition(u8::is_ascii_digit)
+            .unwrap();
+        invalid_version[version_card + version_digit] = b'0';
+        std::fs::write(&path, invalid_version).unwrap();
+        assert!(matches!(
+            CfaImage::from_file(&path),
+            Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("version")
+        ));
+
+        let mut corrupted = original.clone();
+        let sample = 0.1f32.to_be_bytes();
+        let offset = corrupted
+            .windows(sample.len())
+            .position(|window| window == sample)
+            .unwrap();
+        corrupted[offset] ^= 0x01;
+        std::fs::write(&path, corrupted).unwrap();
+        assert!(matches!(
+            CfaImage::from_file(&path),
+            Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("checksum")
+        ));
+        std::fs::write(path, original).unwrap();
+    }
+
+    #[test]
+    fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
+        for (name, cfa_type) in [
+            ("mono", CfaType::Mono),
+            ("xtrans", CfaType::XTrans(test_pattern_array())),
+        ] {
+            let image = CfaImage {
+                data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+                metadata: ImageMetadata {
+                    cfa_type: Some(cfa_type.clone()),
+                    ..Default::default()
+                },
+                quantization_sigma: None,
+            };
+            let path = common::test_utils::test_output_path(&format!("cfa_master_{name}.fits"));
+
+            image.save_fits(&path).unwrap();
+            let loaded = CfaImage::from_file(path).unwrap();
+
+            assert_eq!(loaded.metadata.cfa_type, Some(cfa_type), "{name}");
+            assert_eq!(loaded.data.pixels(), image.data.pixels(), "{name}");
+        }
     }
 
     #[test]

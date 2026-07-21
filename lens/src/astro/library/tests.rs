@@ -104,7 +104,7 @@ fn build_masters_rebuilds_when_cache_load_fails() {
         fs::remove_dir_all(&dir).unwrap();
     }
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("master_dark.lcm"), b"obsolete cache format").unwrap();
+    fs::write(dir.join("master_dark.fits"), b"obsolete cache format").unwrap();
 
     let masters = build_masters_cached(
         [Some(dir.clone()), None, None, None],

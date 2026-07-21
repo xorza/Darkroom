@@ -2,6 +2,7 @@
 
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
+mod fits;
 mod prepared_flat;
 
 #[cfg(test)]
@@ -13,17 +14,12 @@ mod synthetic_tests;
 #[cfg(test)]
 mod tests;
 
-use std::fs::File;
-use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::path::Path;
 
 use common::CancelToken;
-use common::file_utils;
-use common::serde as common_serde;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::cfa_dimensions;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -127,73 +123,6 @@ pub struct CalibrationMasters {
     defect_map: Option<DefectMap>,
 }
 
-const CACHE_MAGIC: [u8; 8] = *b"LUMOSCM\0";
-const CACHE_VERSION: u32 = 3;
-
-#[derive(Debug, serde::Serialize)]
-struct CalibrationMastersCacheRef<'a> {
-    dark: Option<&'a CfaImage>,
-    flat: Option<&'a CfaImage>,
-    bias: Option<&'a CfaImage>,
-    flat_dark: Option<&'a CfaImage>,
-    defect_map: Option<DefectMapCacheRef<'a>>,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct DefectMapCacheRef<'a> {
-    hot_indices: &'a [usize],
-    cold_indices: &'a [usize],
-    dimensions: Option<Vec2us>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct CalibrationMastersCache {
-    dark: Option<CfaImage>,
-    flat: Option<CfaImage>,
-    bias: Option<CfaImage>,
-    flat_dark: Option<CfaImage>,
-    defect_map: Option<DefectMapCache>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct DefectMapCache {
-    hot_indices: Vec<usize>,
-    cold_indices: Vec<usize>,
-    dimensions: Option<Vec2us>,
-}
-
-impl<'a> From<&'a CalibrationMasters> for CalibrationMastersCacheRef<'a> {
-    fn from(masters: &'a CalibrationMasters) -> Self {
-        Self {
-            dark: masters.dark.as_ref(),
-            flat: masters.flat.as_ref(),
-            bias: masters.bias.as_ref(),
-            flat_dark: masters.flat_dark.as_ref(),
-            defect_map: masters.defect_map.as_ref().map(|map| DefectMapCacheRef {
-                hot_indices: &map.hot_indices,
-                cold_indices: &map.cold_indices,
-                dimensions: map.dimensions,
-            }),
-        }
-    }
-}
-
-impl From<CalibrationMastersCache> for CalibrationMasters {
-    fn from(cache: CalibrationMastersCache) -> Self {
-        Self {
-            dark: cache.dark,
-            flat: cache.flat,
-            bias: cache.bias,
-            flat_dark: cache.flat_dark,
-            defect_map: cache.defect_map.map(|map| DefectMap {
-                hot_indices: map.hot_indices,
-                cold_indices: map.cold_indices,
-                dimensions: map.dimensions,
-            }),
-        }
-    }
-}
-
 /// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
 /// loads the roles concurrently: proportional to the role's frame count. Two properties matter — the
 /// shares sum to at most `available` (flooring, so concurrent loads can't overcommit RAM), and a
@@ -226,7 +155,7 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     };
     match cfa_dimensions(first.as_ref()) {
         Ok(dims) => fits_in_memory(
-            dims.pixel_count() * size_of::<f32>(),
+            dims.pixel_count() * std::mem::size_of::<f32>(),
             total_frames,
             available,
         ),
@@ -303,55 +232,17 @@ impl CalibrationMasters {
         frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
     }
 
-    /// Save this coherent master bundle to a versioned binary cache.
+    /// Save this coherent master bundle as a versioned, checksummed multi-extension FITS file.
     ///
     /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
-    /// representation. Loading the cache does not repeat flat preparation or defect detection.
+    /// representation. Loading the bundle does not repeat flat preparation or defect detection.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        file_utils::publish(path, file_utils::PublicationMode::Cache, |file| {
-            file.write_all(&CACHE_MAGIC)?;
-            file.write_all(&CACHE_VERSION.to_le_bytes())?;
-            common_serde::serialize_into(
-                CalibrationMastersCacheRef::from(self),
-                common::SerdeFormat::Bitcode,
-                file,
-                &mut Vec::new(),
-            )
-            .map_err(IoError::other)
-        })
+        fits::save(path, self)
     }
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.
     pub fn load(path: &Path) -> std::io::Result<Self> {
-        let mut file = File::open(path)?;
-        let mut magic = [0u8; CACHE_MAGIC.len()];
-        file.read_exact(&mut magic)?;
-        if magic != CACHE_MAGIC {
-            return Err(IoError::new(
-                ErrorKind::InvalidData,
-                "not a Lumos calibration-master cache",
-            ));
-        }
-
-        let mut version = [0u8; size_of::<u32>()];
-        file.read_exact(&mut version)?;
-        let version = u32::from_le_bytes(version);
-        if version != CACHE_VERSION {
-            return Err(IoError::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "unsupported calibration-master cache version {version}; expected {CACHE_VERSION}"
-                ),
-            ));
-        }
-
-        let cache: CalibrationMastersCache = common_serde::deserialize_from(
-            &mut file,
-            common::SerdeFormat::Bitcode,
-            &mut Vec::new(),
-        )
-        .map_err(IoError::other)?;
-        Ok(cache.into())
+        fits::load(path)
     }
 
     /// Create CalibrationMasters from pre-built CFA images.

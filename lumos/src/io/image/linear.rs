@@ -98,14 +98,7 @@ impl LinearImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            let image = fits::load_fits(path)?;
-            if image.metadata.cfa_type.is_some() {
-                return Err(scientific_rejection(
-                    path,
-                    "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
-                ));
-            }
-            return Ok(image);
+            return fits::load_linear_fits(path);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
