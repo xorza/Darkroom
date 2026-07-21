@@ -5,6 +5,7 @@ use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 #[cfg(feature = "real-data")]
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::{LinearImage, test_support};
+use crate::io::image::load::LoadContext;
 use crate::io::image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
@@ -88,7 +89,7 @@ fn test_convert_fits_to_imaginarium_image() {
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
     );
-    let astro = LinearImage::from_file(path).unwrap();
+    let astro = LinearImage::from_file(path, &LoadContext::default()).unwrap();
     let image: Image = astro.into();
 
     let desc = image.desc();
@@ -103,7 +104,7 @@ fn test_load_full_example_fits() {
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
     );
-    let image = LinearImage::from_file(path).unwrap();
+    let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
 
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
@@ -155,7 +156,7 @@ fn test_save_grayscale_tiff() {
     image.save(&output_path).unwrap();
     assert!(output_path.exists());
 
-    let loaded = LinearImage::from_file(&output_path).unwrap();
+    let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.width(), 2);
     assert_eq!(loaded.height(), 2);
     assert_eq!(loaded.channels(), 1);
@@ -172,7 +173,7 @@ fn test_save_rgb_tiff() {
     image.save(&output_path).unwrap();
     assert!(output_path.exists());
 
-    let loaded = LinearImage::from_file(&output_path).unwrap();
+    let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.width(), 2);
     assert_eq!(loaded.height(), 2);
     assert_eq!(loaded.channels(), 3);
@@ -189,9 +190,11 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .unwrap();
     float_image.save_file(&float_path).unwrap();
 
-    let scientific = LinearImage::from_file(&float_path).unwrap();
+    let scientific = LinearImage::from_file(&float_path, &LoadContext::default()).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
-    let preview: Image = PreviewImage::from_file(&float_path).unwrap().into();
+    let preview: Image = PreviewImage::from_file(&float_path, &LoadContext::default())
+        .unwrap()
+        .into();
     assert_eq!(preview.desc().color_format, ColorFormat::L_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
@@ -209,14 +212,14 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     for path in [&integer_tiff, &png, &jpeg] {
         integer_image.save_file(path).unwrap();
         assert!(matches!(
-            LinearImage::from_file(path),
+            LinearImage::from_file(path, &LoadContext::default()),
             Err(ImageError::ScientificInputRejected { .. })
         ));
         assert!(matches!(
-            <LinearImage as StackableImage>::load(path),
+            <LinearImage as StackableImage>::load(path, &LoadContext::default()),
             Err(ImageError::ScientificInputRejected { .. })
         ));
-        PreviewImage::from_file(path).unwrap();
+        PreviewImage::from_file(path, &LoadContext::default()).unwrap();
     }
 
     let alpha_path = test_output_path("product_constructors/alpha.tiff");
@@ -229,10 +232,10 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .save_file(&alpha_path)
     .unwrap();
     assert!(matches!(
-        LinearImage::from_file(&alpha_path),
+        LinearImage::from_file(&alpha_path, &LoadContext::default()),
         Err(ImageError::ScientificInputRejected { .. })
     ));
-    let alpha_preview = PreviewImage::from_file(&alpha_path).unwrap();
+    let alpha_preview = PreviewImage::from_file(&alpha_path, &LoadContext::default()).unwrap();
     assert!(matches!(
         alpha_preview.metadata.provenance,
         Some(ImageProvenance {
@@ -245,7 +248,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let nonexistent_raw = test_output_path("product_constructors/nonexistent.dng");
     assert!(matches!(
-        LinearImage::from_file(nonexistent_raw),
+        LinearImage::from_file(nonexistent_raw, &LoadContext::default()),
         Err(ImageError::ScientificInputRejected { .. })
     ));
 }
@@ -333,7 +336,7 @@ fn test_load_single_raw_from_env() {
 
     println!("Loading file: {:?}", first_file);
 
-    let image = CfaImage::from_file(first_file)
+    let image = CfaImage::from_file(first_file, &LoadContext::default())
         .expect("Failed to load CFA image")
         .demosaic(&CancelToken::never())
         .expect("Failed to demosaic CFA image");

@@ -1,7 +1,9 @@
 use std::io::Error;
 use std::path::Path;
 
+use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;
@@ -10,6 +12,7 @@ use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
+    context: &LoadContext,
 ) -> Result<DrizzleFrame<LinearImage>, DrizzleError> {
     let DrizzleFrame {
         source,
@@ -18,10 +21,18 @@ fn load_drizzle_frame<P: AsRef<Path>>(
         pixel_weight_map,
     } = frame;
     let path = source.as_ref();
-    let image = LinearImage::from_file(path).map_err(|error| DrizzleError::ImageLoad {
-        path: path.to_path_buf(),
-        source: Error::other(error),
-    })?;
+    let image = match LinearImage::from_file(path, context) {
+        Ok(image) => image,
+        Err(ImageError::Cancelled { .. }) => {
+            return Err(DrizzleError::Cancelled);
+        }
+        Err(error) => {
+            return Err(DrizzleError::ImageLoad {
+                path: path.to_path_buf(),
+                source: Error::other(error),
+            });
+        }
+    };
     Ok(DrizzleFrame {
         source: image,
         transform,
@@ -53,6 +64,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 pub fn drizzle_stack<P: AsRef<Path>>(
     frames: Vec<DrizzleFrame<P>>,
     config: &DrizzleConfig,
+    context: &LoadContext,
     progress: ProgressCallback,
 ) -> Result<StackProduct, DrizzleError> {
     if frames.is_empty() {
@@ -62,7 +74,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
 
     let frame_count = frames.len();
     let mut frames = frames.into_iter();
-    let first = load_drizzle_frame(frames.next().unwrap())?;
+    let first = load_drizzle_frame(frames.next().unwrap(), context)?;
     let input_dims = first.source.dimensions();
 
     tracing::info!(
@@ -81,7 +93,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     report_progress(&progress, 1, frame_count, StackingStage::Processing);
 
     for (index, frame) in frames.enumerate() {
-        accumulator.add_frame(load_drizzle_frame(frame)?)?;
+        accumulator.add_frame(load_drizzle_frame(frame, context)?)?;
         report_progress(&progress, index + 2, frame_count, StackingStage::Processing);
     }
 
