@@ -87,13 +87,13 @@ mod tests {
         }
         CalibrationMasters::from_images(
             CalibrationSet {
-                dark: Some(CfaImage {
-                    data: Buffer2::new_filled(4, 4, 0.1),
-                    metadata: AstroImageMetadata {
+                dark: Some(CfaImage::from_plane(
+                    Buffer2::new_filled(4, 4, 0.1),
+                    AstroImageMetadata {
                         cfa_type: Some(CfaType::Mono),
                         ..AstroImageMetadata::default()
                     },
-                }),
+                )),
                 ..CalibrationSet::default()
             },
             5.0,
