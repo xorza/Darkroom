@@ -2,7 +2,7 @@
 //! range indexing plus `Deref` to `[T]`. Imaginarium owns the type and stores
 //! its size as plain `usize` fields. Both image-data layouts build on it — interleaved `ImageData`
 //! (`Buffer2<[T; N]>`) and planar `DeinterleavedImageData` (one `Buffer2<T>` per
-//! channel) — and `lumos` uses it as the channel-plane type for its `AstroImage`.
+//! channel) — and `lumos` uses it as the channel-plane type for its `LinearImage`.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice;

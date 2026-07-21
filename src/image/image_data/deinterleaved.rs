@@ -2,7 +2,7 @@
 //! channel (`RRR…GGG…BBB…`) — plus the runtime-erased [`AnyDeinterleavedImageData`].
 //! The planar twin of the interleaved
 //! [`ImageData`](super::interleaved::ImageData); nicer for per-channel CPU work,
-//! and the storage behind lumos's `AstroImage` pixel data.
+//! and the storage behind lumos's `LinearImage` pixel data.
 
 // dead_code: the erased `AnyDeinterleavedImageData` isn't wired into the pipeline
 // yet (it lands with the interleave/deinterleave conversions); lumos uses the

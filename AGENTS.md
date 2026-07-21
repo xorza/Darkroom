@@ -77,7 +77,7 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 ## Project layout
 
 - `src/lib.rs` — crate root: `cfg_x86_64!`/`cfg_aarch64!` macros, module decls, and the published surface (`pub use`s). GPU items are re-exported only under `#[cfg(feature = "wgpu")]`.
-- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both image-data layouts and `lumos`'s `AstroImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
+- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both image-data layouts and `lumos`'s `LinearImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
 - `src/image/` — `mod.rs` (`Image`/`ImageDesc`); `image_data/` (the typed layouts: `interleaved.rs` = `ImageData<N,T>`/`AnyImageData`, `deinterleaved.rs` = `DeinterleavedImageData<N,T>`/`AnyDeinterleavedImageData`); `transpose.rs` (interleave ⟷ deinterleave); `conversion/` (format conversion: `mod.rs` dispatch + `scalar.rs` + `simd/` + `bench.rs` + `tests.rs`); `io.rs`, `tiff.rs`, `tests.rs`.
 - `src/processing_context/` — `mod.rs` (`ProcessingContext`), `image_buffer.rs`, `gpu_context.rs`, `tests.rs`.
 - `src/gpu/` — `mod.rs` (`Gpu`), `gpu_image.rs`, `slot.rs` (all `wgpu`-gated).
