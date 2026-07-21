@@ -356,7 +356,7 @@ pub(crate) enum DocStep {
     ///
     /// `idx` is only a *hint*: apply/revert resolve the slot by name
     /// (`from`/`to`) via [`Document::rename_boundary_port`], so undo/redo
-    /// survive `reconcile_boundaries` compacting the interface — it
+    /// survive document normalization compacting the interface — it
     /// renumbers indices but preserves names. If the slot was
     /// disconnected away entirely the name is gone and the step no-ops
     /// (can't restore a name on a port that no longer exists). Residual

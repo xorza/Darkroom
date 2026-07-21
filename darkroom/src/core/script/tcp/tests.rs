@@ -1,4 +1,4 @@
-use crate::core::library::PublishedLibrary;
+use crate::core::runtime_library::test_support;
 use crate::core::script::{ScriptExecutor, ScriptMessage, ScriptResult};
 use std::io::ErrorKind;
 use std::net::Ipv4Addr;
@@ -25,7 +25,7 @@ async fn spawn_executor_with_transport(
     let executor = ScriptExecutor::new(
         transport,
         action_tx,
-        PublishedLibrary::new(Arc::new(scenarium::Library::default())),
+        test_support::published_library(scenarium::Library::default()),
         Arc::new(|| {}),
     );
     (addr, executor, action_rx)

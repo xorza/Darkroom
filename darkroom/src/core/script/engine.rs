@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
-use crate::core::library::PublishedLibrary;
+use crate::core::runtime_library::PublishedLibrary;
 
 use super::{InboundSender, ScriptMessage, StdoutBuffer};
 

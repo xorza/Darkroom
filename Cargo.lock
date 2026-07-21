@@ -1250,6 +1250,7 @@ dependencies = [
  "serde",
  "serde_json",
  "static_assertions",
+ "thiserror 2.0.19",
  "tokio",
  "tokio-util",
  "tracing",

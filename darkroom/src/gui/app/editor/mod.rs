@@ -1,13 +1,9 @@
-//! The per-frame edit pipeline over a [`Document`].
+//! The per-frame GUI edit pipeline over a borrowed [`OpenDocument`].
 //!
-//! `Editor` owns the document being edited, its undo history, the derived
-//! [`Scene`] projection (plus the per-run status/log projections), the GUI
-//! tree state, and the transient frame-coordination scratch. [`App`] is a
-//! thin shell around it: it owns the runtime/IO (func lib, theme, preferences,
-//! file path, worker, host handle), drains the worker into the editor's
-//! projections, runs one `Editor::frame`, and handles the [`AppCommand`]
-//! that frame surfaces. Everything the GUI tree reads or mutates lives
-//! here; nothing in `Editor` knows about file dialogs or the worker.
+//! `Editor` owns undo history, the derived [`Scene`] and run projections,
+//! the GUI tree, and transient gesture state. [`App`] lends it the workspace's
+//! document for each operation, keeping document/runtime ownership shared with
+//! terminal frontends without giving terminal sessions GUI responsibilities.
 //!
 //! [`App`]: crate::gui::app::App
 
@@ -16,7 +12,8 @@ use scenarium::Graph;
 use scenarium::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
-use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
+use crate::core::document::open_document::OpenDocument;
+use crate::core::document::{GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent_cascading;
 use crate::core::edit::intent::duplicate::{
@@ -46,7 +43,6 @@ const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
 #[derive(Debug)]
 pub(crate) struct Editor {
-    pub(crate) document: Document,
     /// Unsaved-changes flag: set whenever a content-changing step is
     /// applied (via [`Document`]'s edit paths — new edits, undo/redo
     /// replay, and the direct graph mutations), cleared on save. Only
@@ -71,19 +67,11 @@ pub(crate) struct Editor {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
-    /// Set when an applied/undone step can change a graph's derived
-    /// interface (see `requires_reconcile`); consumed by `rebuild_scene`,
-    /// which reruns `reconcile_boundaries` only then. Derived state is
-    /// recomputed on structural edits, not on every frame's projection
-    /// rebuild — idle/selection/viewport frames skip the per-graph edge
-    /// scan. Starts `true` so the first rebuild canonicalizes a freshly
-    /// loaded (or hand-edited) document.
-    needs_reconcile: bool,
     /// Per-frame accumulator: set by any step/transition that changes
     /// something the layout engine reads (see `requires_relayout`), and
     /// consumed once at the end of `frame` as a single
     /// `ui.request_relayout()`. Reset at the top of every frame. A plain
-    /// side-effect field like `scene_dirty` / `needs_reconcile`, rather
+    /// side-effect field like `scene_dirty`, rather
     /// than a `bool` threaded back through every helper's return.
     needs_relayout: bool,
     /// Set when a cache-mode toggle (`Intent::SetNodeProperty` with a
@@ -111,19 +99,15 @@ pub(crate) struct Editor {
 }
 
 impl Editor {
-    /// Build the editor around a starting `document`. Derived state
-    /// (scene, status/log projections) starts empty and `needs_reconcile`
-    /// starts `true` so the first frame canonicalizes the document.
-    pub(crate) fn new(document: Document) -> Self {
+    /// Build fresh GUI editing state for an open document.
+    pub(crate) fn new() -> Self {
         Self {
-            document,
             dirty: false,
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             scene: Scene::default(),
             main_window: MainWindow::default(),
             scene_target: None,
             scene_dirty: false,
-            needs_reconcile: true,
             needs_relayout: false,
             caches_dirty: false,
             intents: Vec::new(),
@@ -137,9 +121,14 @@ impl Editor {
     /// drain — e.g. a file-picker result `App` handles after the record.
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
-    pub(crate) fn apply_edit(&mut self, intent: Intent, library: &Library) {
-        let target = self.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(target, library, [intent]);
+    pub(crate) fn apply_edit(
+        &mut self,
+        open: &mut OpenDocument,
+        intent: Intent,
+        library: &Library,
+    ) {
+        let target = open.document.active_target().unwrap_or(GraphRef::Main);
+        self.commit_batch(open, target, library, [intent]);
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -147,9 +136,14 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, library: &Library) {
-        let target = self.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(target, library, intents);
+    pub(crate) fn apply_external_intents(
+        &mut self,
+        open: &mut OpenDocument,
+        intents: Vec<Intent>,
+        library: &Library,
+    ) {
+        let target = open.document.active_target().unwrap_or(GraphRef::Main);
+        self.commit_batch(open, target, library, intents);
     }
 
     /// Build, apply, and record `intents` against `target` as one undo
@@ -160,6 +154,7 @@ impl Editor {
     /// and an empty batch records nothing.
     fn commit_batch(
         &mut self,
+        open: &mut OpenDocument,
         target: GraphRef,
         library: &Library,
         intents: impl IntoIterator<Item = Intent>,
@@ -168,9 +163,9 @@ impl Editor {
         for intent in intents {
             // A `SetInput` that retypes a wildcard output cascades into dropping
             // the now-incompatible downstream wires — all one undo entry.
-            for step in commit_intent_cascading(intent, &mut self.document, target, library) {
+            for step in commit_intent_cascading(intent, &mut open.document, target, library) {
                 self.needs_relayout |= step.requires_relayout();
-                self.needs_reconcile |= step.requires_reconcile();
+                open.normalization_pending |= step.requires_reconcile();
                 self.dirty |= step.dirties_document();
                 batch.push(step);
             }
@@ -187,9 +182,9 @@ impl Editor {
     /// its interior wiring (hand-edited / older file), so it's re-derived
     /// on the next rebuild. Keeps the "import ⇒ reconcile" invariant here
     /// rather than on the caller.
-    pub(crate) fn import_graph(&mut self, graph: Graph) {
-        self.document.import_graph(graph);
-        self.needs_reconcile = true;
+    pub(crate) fn import_graph(&mut self, open: &mut OpenDocument, graph: Graph) {
+        open.document.import_graph(graph);
+        open.normalization_pending = true;
         self.dirty = true;
     }
 
@@ -205,6 +200,7 @@ impl Editor {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn frame(
         &mut self,
+        open: &mut OpenDocument,
         ui: &mut Ui,
         library: &Library,
         theme: &Theme,
@@ -220,15 +216,15 @@ impl Editor {
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, library);
+        self.navigate(ui, open, library);
 
         // Tabs are settled: drop viewer state for closed tabs.
-        self.sync_image_viewers();
-        self.run_state.pinned_outputs.reconcile(ui, &self.document);
+        self.sync_image_viewers(open);
+        self.run_state.pinned_outputs.reconcile(ui, &open.document);
         // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
         // tab is active.
-        let graph_target = self.document.active_target();
+        let graph_target = open.document.active_target();
 
         if let Some(target) = graph_target {
             self.sync_target(target);
@@ -238,15 +234,15 @@ impl Editor {
             // `CanvasGeometry` never read a stale graph. Unconditional for a
             // graph tab: `Scene` re-interns port names into the active
             // record-pass text arena.
-            self.rebuild_scene(ui, target, library);
+            self.rebuild_scene(ui, open, target, library);
             self.scene_dirty = false;
 
             // Prepass emits input-derived graph mutations (drag, pan/zoom,
             // connection commit) drained *before* the record so Pass A sees
             // the settled doc. It reads everything off `Scene`.
             self.main_window.prepass(ui, &self.scene, &mut self.intents);
-            self.drain_intents(target, library);
-            self.apply_canvas_shortcuts(ui, target);
+            self.drain_intents(open, target, library);
+            self.apply_canvas_shortcuts(ui, open, target);
         }
 
         let command_from_shortcut = self.menu_shortcut(ui);
@@ -256,7 +252,7 @@ impl Editor {
         // bare tab switch leaves `scene_dirty` false and skips it.
         if self.scene_dirty {
             if let Some(target) = graph_target {
-                self.rebuild_scene(ui, target, library);
+                self.rebuild_scene(ui, open, target, library);
             }
             self.scene_dirty = false;
         }
@@ -274,7 +270,7 @@ impl Editor {
                 &ctx,
                 &self.scene,
                 preferences,
-                &self.document,
+                &open.document,
                 &mut self.intents,
             )
             .or(command_from_shortcut);
@@ -286,14 +282,14 @@ impl Editor {
         if let Some(target) = graph_target
             && let Some(action) = self.main_window.graph_ui.take_node_menu_action()
         {
-            self.apply_node_menu_action(action, target);
+            self.apply_node_menu_action(open, action, target);
         }
 
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit) plus tab-strip renames. Those and the
         // navigation steps are graph-agnostic, so a non-graph active tab
         // drains against `Main` (the target is unused for them).
-        self.drain_intents(graph_target.unwrap_or(GraphRef::Main), library);
+        self.drain_intents(open, graph_target.unwrap_or(GraphRef::Main), library);
 
         // Single consumption point for the frame's accumulated relayout
         // signal (edits, tab switch, undo/redo). A menu side effect adds
@@ -310,8 +306,13 @@ impl Editor {
     /// identity to clone, so they're filtered out); Remove mirrors the
     /// Delete-key path — one intent per selected member, batched into a
     /// single undo entry by the post-record drain.
-    fn apply_node_menu_action(&mut self, action: NodeMenuAction, target: GraphRef) {
-        let Some(view) = self.document.view(target) else {
+    fn apply_node_menu_action(
+        &mut self,
+        open: &OpenDocument,
+        action: NodeMenuAction,
+        target: GraphRef,
+    ) {
+        let Some(view) = open.document.view(target) else {
             return;
         };
         match action {
@@ -319,7 +320,7 @@ impl Editor {
                 let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
                 let node_ids = selected_node_ids(view);
                 if let Some(intent) =
-                    build_duplicate_intent_for(&self.document, target, &node_ids, incoming)
+                    build_duplicate_intent_for(&open.document, target, &node_ids, incoming)
                 {
                     self.intents.push(intent);
                 }
@@ -338,25 +339,26 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, library: &Library) {
-        self.apply_undo_redo(ui);
+    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, library: &Library) {
+        self.apply_undo_redo(ui, open);
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
         // whose chips were clicked.
         self.main_window
-            .scan_navigation(ui, &self.document, &self.scene, &mut self.actions);
+            .scan_navigation(ui, &open.document, &self.scene, &mut self.actions);
         // Open mutates the layout directly; activate/close queue
         // undoable `Intent::Dock` ops — drain them (dock steps are
         // graph-agnostic, so the target passed here doesn't matter).
-        self.apply_view_actions();
+        self.apply_view_actions(open);
         // The queued intents (switch/close/rename) are graph-agnostic, so
         // a non-graph active tab drains against `Main` harmlessly.
         self.drain_intents(
-            self.document.active_target().unwrap_or(GraphRef::Main),
+            open,
+            open.document.active_target().unwrap_or(GraphRef::Main),
             library,
         );
         // A closed/deleted target can't be active; fall back to Main.
-        self.document.ensure_valid_layout();
+        open.document.ensure_valid_layout();
     }
 
     /// Note a possible active-graph change: when `target` differs from
@@ -382,25 +384,23 @@ impl Editor {
     /// Reconciles every graph's interface against its interior wiring
     /// first (derived state, like the scene itself) so boundary nodes
     /// render the right ports + placeholder and the doc is consistent
-    /// before any save — but only when `needs_reconcile` is set (a
+    /// before any save — but only when normalization is pending (a
     /// structural edit, undo/redo, or document replacement since the last
     /// reconcile). Idle/selection/viewport frames skip it: the interface
     /// can't have changed, and reconcile is idempotent there anyway.
-    pub(crate) fn rebuild_scene(&mut self, ui: &mut Ui, target: GraphRef, library: &Library) {
-        if self.needs_reconcile {
-            self.document.reconcile_boundaries(library);
-            // Same pass: drop bindings/subscriptions left dangling by a library
-            // skew on load (an input/output/event the node no longer exposes),
-            // or by a removed endpoint. Runs before the rebuild below, so the
-            // stale wire never projects.
-            self.document.prune_dangling_wiring(library);
-            self.needs_reconcile = false;
-        }
-        let graph = self
+    pub(crate) fn rebuild_scene(
+        &mut self,
+        ui: &mut Ui,
+        open: &mut OpenDocument,
+        target: GraphRef,
+        library: &Library,
+    ) {
+        open.normalize(library);
+        let graph = open
             .document
             .graph_for(target)
             .expect("active tab graph exists");
-        let view = self.document.view(target).expect("active tab view exists");
+        let view = open.document.view(target).expect("active tab view exists");
         self.scene
             .rebuild(ui, graph, view, library, &self.run_state);
     }
@@ -412,7 +412,7 @@ impl Editor {
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
-    fn drain_intents(&mut self, target: GraphRef, library: &Library) {
+    fn drain_intents(&mut self, open: &mut OpenDocument, target: GraphRef, library: &Library) {
         // Move the scratch buffer out so it can drive `commit_batch` (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
@@ -431,7 +431,7 @@ impl Editor {
         }) {
             self.caches_dirty = true;
         }
-        if self.commit_batch(target, library, scratch.drain(..)) {
+        if self.commit_batch(open, target, library, scratch.drain(..)) {
             self.scene_dirty = true;
         }
         self.intents = scratch;
@@ -448,21 +448,22 @@ impl Editor {
     /// implies, plus activate and close, are queued as `Intent::Dock` ops
     /// so they join the undo history (their relayout is decided later,
     /// when they drain).
-    fn apply_view_actions(&mut self) {
+    fn apply_view_actions(&mut self, open: &mut OpenDocument) {
         for action in std::mem::take(&mut self.actions) {
             match action {
-                UiAction::OpenGraph(target) => self.open_graph(target),
+                UiAction::OpenGraph(target) => self.open_graph(open, target),
                 UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
                 UiAction::NewGraph => {
                     // Creating the graph + instance isn't undoable (no undo
                     // history references the fresh graph, so the stack stays
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
-                    let id = self.document.create_graph();
+                    let id = open.document.create_graph();
+                    open.normalization_pending = true;
                     self.dirty = true;
-                    self.open_graph(GraphRef::Local(id));
+                    self.open_graph(open, GraphRef::Local(id));
                 }
-                UiAction::OpenImageViewer(port) => self.open_image_viewer(port),
+                UiAction::OpenImageViewer(port) => self.open_image_viewer(open, port),
             }
         }
     }
@@ -470,10 +471,10 @@ impl Editor {
     /// Open `port`'s image-viewer tab and focus it — one tab per port,
     /// deduped. Mirrors [`Self::open_preferences`]: adding the tab is the
     /// non-undoable part, focus routes through a recorded activation.
-    fn open_image_viewer(&mut self, port: PortRef) {
+    fn open_image_viewer(&mut self, open: &mut OpenDocument, port: PortRef) {
         assert_eq!(port.kind, PortKind::Output);
-        let group = self.document.layout.focused;
-        let addr = self
+        let group = open.document.layout.focused;
+        let addr = open
             .document
             .layout
             .find_or_insert(TabRef::ImageViewer(port), group);
@@ -482,8 +483,8 @@ impl Editor {
 
     /// Keep the viewer tabs in step with the document by dropping navigation
     /// state whose tab closed.
-    fn sync_image_viewers(&mut self) {
-        let layout = &self.document.layout;
+    fn sync_image_viewers(&mut self, open: &OpenDocument) {
+        let layout = &open.document.layout;
         self.main_window
             .image_viewers
             .retain(|port, _| layout.all_tabs().any(|t| t == TabRef::ImageViewer(*port)));
@@ -502,16 +503,16 @@ impl Editor {
     /// reverses focus (the opened tab stays open) and a fresh open
     /// discards the redo tail, instead of mutating focus outside the
     /// record.
-    fn open_graph(&mut self, target: GraphRef) {
+    fn open_graph(&mut self, open: &mut OpenDocument, target: GraphRef) {
         // Idempotent view seeding, so it can run before the open-or-focus
         // dedupe rather than only inside the "new tab" arm.
         if let GraphRef::Local(id) = target
-            && !self.document.ensure_sub_view(id)
+            && !open.document.ensure_sub_view(id)
         {
             return; // graph vanished — nothing to open
         }
-        let group = self.document.layout.primary().id;
-        let addr = self
+        let group = open.document.layout.primary().id;
+        let addr = open
             .document
             .layout
             .find_or_insert(TabRef::Graph(target), group);
@@ -524,13 +525,13 @@ impl Editor {
     /// routes through a recorded activation. Called from the File ▸
     /// Preferences menu via `App`, so it records the switch and drains it
     /// immediately like every external edit.
-    pub(crate) fn open_preferences(&mut self, library: &Library) {
-        let group = self.document.layout.focused;
-        let addr = self
+    pub(crate) fn open_preferences(&mut self, open: &mut OpenDocument, library: &Library) {
+        let group = open.document.layout.focused;
+        let addr = open
             .document
             .layout
             .find_or_insert(TabRef::Preferences, group);
-        self.apply_edit(activate_intent(addr), library);
+        self.apply_edit(open, activate_intent(addr), library);
     }
 }
 
@@ -544,94 +545,115 @@ fn activate_intent(addr: TabAddress) -> Intent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::core::document::ItemRef;
+    use std::collections::BTreeSet;
 
-    /// Run an `OpenGraph` exactly as `navigate` does: queue the focus
-    /// switch, then drain it onto the undo stack.
-    fn open(editor: &mut Editor, target: GraphRef) {
-        editor.open_graph(target);
-        // `SwitchTab` is graph-agnostic, so the drain target is irrelevant.
-        editor.drain_intents(GraphRef::Main, &Library::default());
+    use glam::Vec2;
+    use scenarium::DataType;
+    use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
+    use scenarium::{Graph, InputPort, Library, Node, NodeKind};
+
+    use crate::core::document::open_document::OpenDocument;
+    use crate::core::document::{Document, GraphRef, ItemRef, PortKind, PortRef, TabRef};
+    use crate::core::edit::intent::types::Intent;
+    use crate::gui::UiAction;
+    use crate::gui::app::editor::Editor;
+    use crate::gui::image_viewer::ImageViewer;
+
+    #[derive(Debug)]
+    struct TestEditor {
+        editor: Editor,
+        open: OpenDocument,
     }
 
-    fn undo(editor: &mut Editor) -> bool {
-        editor.action_stack.undo(&mut editor.document, &mut |_| {})
-    }
+    impl TestEditor {
+        fn new(document: Document) -> Self {
+            Self {
+                editor: Editor::new(),
+                open: OpenDocument {
+                    document,
+                    path: None,
+                    normalization_pending: true,
+                },
+            }
+        }
 
-    fn redo(editor: &mut Editor) -> bool {
-        editor.action_stack.redo(&mut editor.document, &mut |_| {})
+        fn open_graph(&mut self, target: GraphRef) {
+            self.editor.open_graph(&mut self.open, target);
+            self.editor
+                .drain_intents(&mut self.open, GraphRef::Main, &Library::default());
+        }
+
+        fn undo(&mut self) -> bool {
+            self.editor
+                .action_stack
+                .undo(&mut self.open.document, &mut |_| {})
+        }
+
+        fn redo(&mut self) -> bool {
+            self.editor
+                .action_stack
+                .redo(&mut self.open.document, &mut |_| {})
+        }
     }
 
     #[test]
     fn dirty_flag_tracks_content_edits_not_navigation() {
-        use std::collections::BTreeSet;
-
-        use glam::Vec2;
-        use scenarium::FuncId;
-        use scenarium::{Node, NodeKind};
-
         let lib = Library::default();
-        let mut editor = Editor::new(Document::default());
-        assert!(!editor.dirty, "a freshly opened document is clean");
+        let mut test = TestEditor::new(Document::default());
+        assert!(!test.editor.dirty, "a freshly opened document is clean");
 
         // Seed a node, then rename it — a content edit must dirty.
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = editor.document.graph.add(node);
-        editor
+        let id = test.open.document.graph.add(node);
+        test.open
             .document
             .main_view
             .item_placements
             .insert(ItemRef::Node(id), Vec2::ZERO);
-        editor.apply_edit(
+        test.editor.apply_edit(
+            &mut test.open,
             Intent::RenameNode {
                 node_id: id,
                 to: "renamed".into(),
             },
             &lib,
         );
-        assert!(editor.dirty, "renaming a node is unsaved work");
+        assert!(test.editor.dirty, "renaming a node is unsaved work");
 
         // Clear (as a save would), then a pure selection change: applied,
         // but navigation — it must not mark the document dirty again.
-        editor.dirty = false;
-        editor.apply_edit(
+        test.editor.dirty = false;
+        test.editor.apply_edit(
+            &mut test.open,
             Intent::SetSelection {
                 to: BTreeSet::from([ItemRef::Node(id)]),
             },
             &lib,
         );
         assert_eq!(
-            editor.document.main_view.selected,
+            test.open.document.main_view.selected,
             BTreeSet::from([ItemRef::Node(id)]),
             "the selection edit did apply",
         );
         assert!(
-            !editor.dirty,
+            !test.editor.dirty,
             "selecting a node must not dirty the document"
         );
 
         // Creating a graph takes the direct (non-undoable) path, which
         // must still flag the edit.
-        editor.actions.push(UiAction::NewGraph);
-        editor.apply_view_actions();
-        assert!(editor.dirty, "creating a graph is unsaved work");
+        test.editor.actions.push(UiAction::NewGraph);
+        test.editor.apply_view_actions(&mut test.open);
+        assert!(test.editor.dirty, "creating a graph is unsaved work");
     }
 
     #[test]
     fn image_viewer_tabs_dedupe_per_port_and_prune_state_on_close() {
-        use glam::Vec2;
-        use scenarium::FuncId;
-        use scenarium::{Node, NodeKind};
-
-        use crate::core::document::PortKind;
-        use crate::gui::image_viewer::ImageViewer;
-
         let lib = Library::default();
-        let mut editor = Editor::new(Document::default());
+        let mut test = TestEditor::new(Document::default());
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = editor.document.graph.add(node);
-        editor
+        let id = test.open.document.graph.add(node);
+        test.open
             .document
             .main_view
             .item_placements
@@ -641,117 +663,113 @@ mod tests {
             kind: PortKind::Output,
             port_idx,
         };
-        let open = |editor: &mut Editor, p| {
-            editor.actions.push(UiAction::OpenImageViewer(p));
-            editor.apply_view_actions();
-            editor.drain_intents(GraphRef::Main, &lib);
+        let open = |test: &mut TestEditor, p| {
+            test.editor.actions.push(UiAction::OpenImageViewer(p));
+            test.editor.apply_view_actions(&mut test.open);
+            test.editor
+                .drain_intents(&mut test.open, GraphRef::Main, &lib);
         };
-        let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
-        let active = |editor: &Editor| editor.document.layout.primary().active;
+        let tabs = |test: &TestEditor| test.open.document.layout.all_tabs().collect::<Vec<_>>();
+        let active = |test: &TestEditor| test.open.document.layout.primary().active;
 
         // Opening only changes the layout. Viewer state is created by the
         // renderer when it draws the tab and pulls from `RunState`.
-        open(&mut editor, port(0));
+        open(&mut test, port(0));
         assert_eq!(
-            tabs(&editor),
+            tabs(&test),
             vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
         );
-        assert_eq!(active(&editor), 1);
+        assert_eq!(active(&test), 1);
         assert!(
-            editor.main_window.image_viewers.is_empty(),
+            test.editor.main_window.image_viewers.is_empty(),
             "the editor does not create or populate view state"
         );
-        editor
+        test.editor
             .main_window
             .image_viewers
             .insert(port(0), ImageViewer::new(port(0)));
 
         // Re-clicking the same port reuses its tab; a different port gets
         // its own renderer-owned state.
-        open(&mut editor, port(0));
-        assert_eq!(tabs(&editor).len(), 2, "same port dedupes");
-        open(&mut editor, port(1));
-        assert_eq!(tabs(&editor).len(), 3, "distinct port adds a tab");
-        assert_eq!(active(&editor), 2);
-        editor
+        open(&mut test, port(0));
+        assert_eq!(tabs(&test).len(), 2, "same port dedupes");
+        open(&mut test, port(1));
+        assert_eq!(tabs(&test).len(), 3, "distinct port adds a tab");
+        assert_eq!(active(&test), 2);
+        test.editor
             .main_window
             .image_viewers
             .insert(port(1), ImageViewer::new(port(1)));
-        assert!(editor.main_window.image_viewers.contains_key(&port(0)));
-        assert!(editor.main_window.image_viewers.contains_key(&port(1)));
+        assert!(test.editor.main_window.image_viewers.contains_key(&port(0)));
+        assert!(test.editor.main_window.image_viewers.contains_key(&port(1)));
 
-        editor.sync_image_viewers();
+        test.editor.sync_image_viewers(&test.open);
 
         // Closing a tab drops its viewer state on the next sync (the
         // remaining port's state survives).
-        editor
+        test.open
             .document
             .layout
             .retain_tabs(|t| t != TabRef::ImageViewer(port(1)));
-        editor.document.ensure_valid_layout();
-        editor.sync_image_viewers();
-        assert!(editor.main_window.image_viewers.contains_key(&port(0)));
+        test.open.document.ensure_valid_layout();
+        test.editor.sync_image_viewers(&test.open);
+        assert!(test.editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(
-            !editor.main_window.image_viewers.contains_key(&port(1)),
+            !test.editor.main_window.image_viewers.contains_key(&port(1)),
             "closed tab's viewer state is pruned"
         );
     }
 
     #[test]
     fn opening_a_graph_records_an_undoable_focus_switch() {
-        let mut editor = Editor::new(Document::default());
-        let a = editor.document.create_graph();
-        let b = editor.document.create_graph();
-        let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
-        let active = |editor: &Editor| editor.document.layout.primary().active;
+        let mut test = TestEditor::new(Document::default());
+        let a = test.open.document.create_graph();
+        let b = test.open.document.create_graph();
+        let tabs = |test: &TestEditor| test.open.document.layout.all_tabs().collect::<Vec<_>>();
+        let active = |test: &TestEditor| test.open.document.layout.primary().active;
 
         // Opening appends the tab and focuses it through a recorded
         // activation.
-        open(&mut editor, GraphRef::Local(a));
+        test.open_graph(GraphRef::Local(a));
         assert_eq!(
-            tabs(&editor),
+            tabs(&test),
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Graph(GraphRef::Local(a))
             ]
         );
-        assert_eq!(active(&editor), 1);
+        assert_eq!(active(&test), 1);
 
         // Undo reverses the focus only — the opened tab stays in the strip
         // (adding it isn't undoable), and `active` returns to its real prior
         // value rather than a stale stored index.
-        assert!(undo(&mut editor));
-        assert_eq!(active(&editor), 0, "undo restores the prior focus");
+        assert!(test.undo());
+        assert_eq!(active(&test), 0, "undo restores the prior focus");
         assert_eq!(
-            tabs(&editor).len(),
+            tabs(&test).len(),
             2,
             "undo reverses focus, not the tab open"
         );
 
         // A fresh open after that undo is a new action: it discards the
         // redoable tail instead of leaving it replayable on a stale `active`.
-        open(&mut editor, GraphRef::Local(b));
-        assert_eq!(active(&editor), 2);
+        test.open_graph(GraphRef::Local(b));
+        assert_eq!(active(&test), 2);
         assert!(
-            !redo(&mut editor),
+            !test.redo(),
             "the undone switch is unreachable after a fresh open"
         );
-        assert_eq!(active(&editor), 2);
+        assert_eq!(active(&test), 2);
 
         // Re-focusing an already-open tab also routes through a recorded
         // activation: `active` follows and no second tab is added.
-        open(&mut editor, GraphRef::Local(a));
-        assert_eq!(active(&editor), 1, "re-focus moves active");
-        assert_eq!(tabs(&editor).len(), 3, "re-focusing an open tab adds none");
+        test.open_graph(GraphRef::Local(a));
+        assert_eq!(active(&test), 1, "re-focus moves active");
+        assert_eq!(tabs(&test).len(), 3, "re-focusing an open tab adds none");
     }
 
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
-        use scenarium::DataType;
-        use scenarium::Library;
-        use scenarium::{Binding, Graph, InputPort};
-        use scenarium::{Func, FuncId, FuncInput, FuncOutput};
-
         let float_src =
             Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
         let string_src =
@@ -777,11 +795,12 @@ mod tests {
         graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
         graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(pass, 0));
 
-        let mut editor = Editor::new(graph.into());
+        let mut test = TestEditor::new(graph.into());
 
         // Rewire the passthrough input to the String producer: the cascade
         // severs the now-incompatible Float sink edge, in one undo batch.
-        editor.apply_edit(
+        test.editor.apply_edit(
+            &mut test.open,
             Intent::SetInput {
                 input: InputPort::new(pass, 0),
                 to: Some(Binding::bind(sp, 0)),
@@ -789,7 +808,11 @@ mod tests {
             &library,
         );
         assert_eq!(
-            editor.document.graph.bindings.get(&InputPort::new(sink, 0)),
+            test.open
+                .document
+                .graph
+                .bindings
+                .get(&InputPort::new(sink, 0)),
             None,
             "the incompatible sink edge is severed"
         );
@@ -797,14 +820,22 @@ mod tests {
         // Undo reverts the whole batch — the rewire *and* the sever — so the
         // graph returns to the original valid Float → passthrough → Float-sink
         // rather than leaving the severed edge dropped.
-        assert!(undo(&mut editor));
+        assert!(test.undo());
         assert_eq!(
-            editor.document.graph.bindings.get(&InputPort::new(pass, 0)),
+            test.open
+                .document
+                .graph
+                .bindings
+                .get(&InputPort::new(pass, 0)),
             Some(&Binding::bind(fp, 0)),
             "the input rewire is undone"
         );
         assert_eq!(
-            editor.document.graph.bindings.get(&InputPort::new(sink, 0)),
+            test.open
+                .document
+                .graph
+                .bindings
+                .get(&InputPort::new(sink, 0)),
             Some(&Binding::bind(pass, 0)),
             "the severed edge is restored, not left dangling"
         );

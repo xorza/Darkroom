@@ -37,8 +37,9 @@ impl App {
             return;
         };
         let value = StaticValue::FsPath(path.to_string_lossy().into_owned());
-        let library = self.engine.library.current.clone();
+        let library = self.workspace.runtime.library.published.load();
         self.editor.apply_edit(
+            &mut self.workspace.open,
             Intent::SetInput {
                 input: req.port,
                 to: Some(Binding::Const(value)),

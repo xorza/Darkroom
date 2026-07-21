@@ -1,10 +1,19 @@
 use glam::Vec2;
 use scenarium::FuncId;
+use scenarium::Library;
 use scenarium::StaticValue;
 use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
-use super::*;
+use crate::core::document::Document;
+use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::intent::types::Intent;
+use crate::core::terminal_session::apply_intents;
+
 use crate::core::document::ItemRef;
+
+fn empty_document() -> Document {
+    OpenDocument::default().document
+}
 
 #[test]
 fn apply_intents_adds_node_and_flags_reconcile() {

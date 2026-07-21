@@ -318,7 +318,7 @@ impl Scene {
                 // Inbound boundary: no inputs; one output per graph input,
                 // plus a trailing placeholder output. Dragging from the
                 // placeholder commits a normal `SetInput` binding to its
-                // index; `reconcile_boundaries` then grows `graph.inputs` to
+                // index; document normalization then grows `graph.inputs` to
                 // match and a fresh placeholder appears next frame.
                 NodeKind::GraphInput => {
                     let mut outputs: Vec<FuncOutput> =

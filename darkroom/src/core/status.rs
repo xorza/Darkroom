@@ -1,5 +1,5 @@
 //! The user-facing outcome log shared by every frontend, owned by the
-//! [`Engine`](crate::core::engine::Engine): a bounded rolling history (the
+//! [`RuntimeHost`](crate::core::runtime_host::RuntimeHost): a bounded rolling history (the
 //! TUI's `status` command renders it) plus the last failure as a sticky slot
 //! (the GUI's status bar renders it, until a subsequent success clears it).
 //! Every entry is also emitted through `tracing`, so the structured log stays

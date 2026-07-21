@@ -89,7 +89,7 @@ impl UndoStep {
     }
 
     /// Whether applying this step can change a graph's *derived interface*
-    /// (`graph.inputs`/`graph.outputs`), so `reconcile_boundaries` must rerun
+    /// (`graph.inputs`/`graph.outputs`), so document normalization must rerun
     /// before the next scene rebuild. Only interior boundary wiring and
     /// instance bindings feed that derivation, so any edit that touches a
     /// binding or the node set qualifies; pure view/selection/cache/tab edits

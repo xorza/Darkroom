@@ -1,10 +1,11 @@
-use super::*;
-use scenarium::Graph;
-use scenarium::GraphLink;
-use scenarium::Node;
-use scenarium::StaticValue;
-use scenarium::testing::{TestFuncHooks, test_func_lib};
-use scenarium::{Func, FuncId};
+use crate::data::static_value::StaticValue;
+use crate::data::type_system::DataType;
+use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind};
+use crate::library::Library;
+use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+use crate::node::event::EventLambda;
+use crate::testing::{TestFuncHooks, test_func_lib};
 
 fn lib() -> Library {
     test_func_lib(TestFuncHooks::default())
@@ -64,11 +65,10 @@ fn connecting_placeholder_grows_input_with_inferred_type() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, fixture.graph);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let graph = doc.graph.graphs.get(&graph_id).unwrap();
+    let graph = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.inputs.len(), 1, "placeholder use materialized a slot");
     assert_eq!(graph.inputs[0].name, "input0");
     assert_eq!(
@@ -87,11 +87,10 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, fixture.graph);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let graph = doc.graph.graphs.get(&graph_id).unwrap();
+    let graph = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.outputs.len(), 1);
     assert_eq!(graph.outputs[0].name, "output0");
     assert_eq!(graph.outputs[0].ty.declared(), want_ty);
@@ -108,11 +107,9 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, fixture.graph);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
-    let names: Vec<String> = doc
-        .graph
+    graph.normalize(&library);
+    let names: Vec<String> = graph
         .graphs
         .get(&graph_id)
         .unwrap()
@@ -123,9 +120,9 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     assert_eq!(names, ["A", "B"], "authored names survive");
 
     // Idempotent: a second pass changes nothing.
-    let before = doc.graph.graphs.get(&graph_id).unwrap().inputs.clone();
-    doc.reconcile_boundaries(&library);
-    let after = doc.graph.graphs.get(&graph_id).unwrap().inputs.clone();
+    let before = graph.graphs.get(&graph_id).unwrap().inputs.clone();
+    graph.normalize(&library);
+    let after = graph.graphs.get(&graph_id).unwrap().inputs.clone();
     assert_eq!(before, after);
 }
 
@@ -160,13 +157,10 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
         InputPort::new(inst, 2),
         Binding::Const(StaticValue::Int(12)),
     );
-    let mut doc: Document = graph.into();
-
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
     // Interface compacted to [A, C].
-    let names: Vec<String> = doc
-        .graph
+    let names: Vec<String> = graph
         .graphs
         .get(&graph_id)
         .unwrap()
@@ -178,7 +172,7 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
 
     // Interior: sum.in0 still from slot 0, sum.in1 now from slot 1
     // (was 2).
-    let interior = doc.graph.graphs.get(&graph_id).unwrap();
+    let interior = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(
         interior.bindings.get(&InputPort::new(fixture.sum, 0)),
         Some(&Binding::bind(fixture.input, 0)),
@@ -191,14 +185,95 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     // Instance: old slot 0 stays (10), old slot 2 -> new slot 1 (12),
     // dropped slot 1 (11) is cleared.
     assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(inst, 0)),
+        graph.bindings.get(&InputPort::new(inst, 0)),
         Some(&Binding::Const(StaticValue::Int(10))),
     );
     assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(inst, 1)),
+        graph.bindings.get(&InputPort::new(inst, 1)),
         Some(&Binding::Const(StaticValue::Int(12))),
     );
-    assert_eq!(doc.graph.bindings.get(&InputPort::new(inst, 2)), None,);
+    assert_eq!(graph.bindings.get(&InputPort::new(inst, 2)), None,);
+}
+
+#[test]
+fn nested_local_graphs_normalize_within_their_owning_scope() {
+    let library = lib();
+    let repeated_id = GraphId::unique();
+
+    let mut direct = build_graph(
+        &library,
+        vec![int_input("Direct A"), int_input("Direct B")],
+        vec![],
+    );
+    bind(&mut direct.graph, direct.sum, 0, direct.input, 1);
+
+    let mut nested = build_graph(
+        &library,
+        vec![
+            int_input("Nested A"),
+            int_input("Nested B"),
+            int_input("Nested C"),
+        ],
+        vec![],
+    );
+    bind(&mut nested.graph, nested.sum, 0, nested.input, 0);
+    bind(&mut nested.graph, nested.sum, 1, nested.input, 2);
+
+    let mut outer = Graph::new("Outer");
+    outer.insert_graph(repeated_id, nested.graph.clone());
+    let nested_instance = outer.add_graph_node(&nested.graph, GraphLink::Local(repeated_id));
+    for (port_idx, value) in [20, 21, 22].into_iter().enumerate() {
+        outer.set_input_binding(
+            InputPort::new(nested_instance, port_idx),
+            Binding::Const(StaticValue::Int(value)),
+        );
+    }
+
+    let outer_id = GraphId::unique();
+    let mut root = Graph::default();
+    root.insert_graph(repeated_id, direct.graph.clone());
+    let direct_instance = root.add_graph_node(&direct.graph, GraphLink::Local(repeated_id));
+    root.set_input_binding(
+        InputPort::new(direct_instance, 0),
+        Binding::Const(StaticValue::Int(10)),
+    );
+    root.set_input_binding(
+        InputPort::new(direct_instance, 1),
+        Binding::Const(StaticValue::Int(11)),
+    );
+    root.insert_graph(outer_id, outer);
+
+    root.normalize(&library);
+
+    let direct = root.graphs.get(&repeated_id).unwrap();
+    assert_eq!(direct.inputs[0].name, "Direct B");
+    assert_eq!(direct.inputs.len(), 1);
+    assert_eq!(
+        root.bindings.get(&InputPort::new(direct_instance, 0)),
+        Some(&Binding::Const(StaticValue::Int(11))),
+    );
+    assert_eq!(root.bindings.get(&InputPort::new(direct_instance, 1)), None,);
+
+    let outer = root.graphs.get(&outer_id).unwrap();
+    let nested = outer.graphs.get(&repeated_id).unwrap();
+    let nested_names: Vec<&str> = nested
+        .inputs
+        .iter()
+        .map(|input| input.name.as_str())
+        .collect();
+    assert_eq!(nested_names, ["Nested A", "Nested C"]);
+    assert_eq!(
+        outer.bindings.get(&InputPort::new(nested_instance, 0)),
+        Some(&Binding::Const(StaticValue::Int(20))),
+    );
+    assert_eq!(
+        outer.bindings.get(&InputPort::new(nested_instance, 1)),
+        Some(&Binding::Const(StaticValue::Int(22))),
+    );
+    assert_eq!(
+        outer.bindings.get(&InputPort::new(nested_instance, 2)),
+        None,
+    );
 }
 
 #[test]
@@ -210,11 +285,10 @@ fn unused_graph_input_shrinks_interface() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, fixture.graph);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let inputs = &doc.graph.graphs.get(&graph_id).unwrap().inputs;
+    let inputs = &graph.graphs.get(&graph_id).unwrap().inputs;
     assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].name, "A");
 }
@@ -231,11 +305,10 @@ fn existing_port_type_is_rederived_from_wiring() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, fixture.graph);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let input = &doc.graph.graphs.get(&graph_id).unwrap().inputs[0];
+    let input = &graph.graphs.get(&graph_id).unwrap().inputs[0];
     assert_eq!(input.name, "A", "authored name preserved");
     assert_eq!(
         input.data_type,
@@ -262,11 +335,10 @@ fn passthrough_ports_are_null_typed() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, interior);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let graph = doc.graph.graphs.get(&graph_id).unwrap();
+    let graph = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.inputs.len(), 1);
     assert_eq!(graph.outputs.len(), 1);
     assert_eq!(
@@ -318,15 +390,122 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, interior);
-    let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    graph.normalize(&library);
 
-    let graph = doc.graph.graphs.get(&graph_id).unwrap();
+    let graph = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.outputs.len(), 1);
     assert_eq!(
         graph.outputs[0].ty.declared(),
         want_ty,
         "the exposed output must keep the type resolved through the passthrough"
+    );
+}
+
+#[test]
+fn normalize_drops_out_of_range_and_missing_emitter_subscriptions() {
+    let func_id = FuncId::from_u128(0xe0e0);
+    let mut library = Library::default();
+    library.add(Func::new(func_id, "emitter").event("tick", EventLambda::default()));
+
+    let mut graph = Graph::default();
+    let emitter_id = graph.add(Node::new(NodeKind::Func(func_id)));
+    let subscriber_id = graph.add(Node::new(NodeKind::Func(func_id)));
+    let missing_emitter = NodeId::unique();
+    graph.subscribe(emitter_id, 0, subscriber_id);
+    graph.subscribe(emitter_id, 1, subscriber_id);
+    graph.subscribe(missing_emitter, 0, subscriber_id);
+
+    graph.normalize(&library);
+
+    assert!(graph.is_subscribed(emitter_id, 0, subscriber_id));
+    assert!(!graph.is_subscribed(emitter_id, 1, subscriber_id));
+    assert!(!graph.is_subscribed(missing_emitter, 0, subscriber_id));
+
+    graph.normalize(&library);
+    assert_eq!(graph.subscriptions().count(), 1);
+
+    let unresolved_id = graph.add(Node::new(NodeKind::Func(FuncId::from_u128(0xdead))));
+    graph.subscribe(unresolved_id, 4, subscriber_id);
+    graph.normalize(&library);
+    assert!(graph.is_subscribed(unresolved_id, 4, subscriber_id));
+}
+
+#[test]
+fn normalize_drops_out_of_range_and_missing_binding_endpoints() {
+    let func_id = FuncId::from_u128(0xb12d);
+    let mut library = Library::default();
+    library.add(
+        Func::new(func_id, "op")
+            .input(FuncInput::optional("in", DataType::Int))
+            .output(FuncOutput::new("out", DataType::Int)),
+    );
+
+    let mut graph = Graph::default();
+    let ids: Vec<NodeId> = (0..5)
+        .map(|_| graph.add(Node::new(NodeKind::Func(func_id))))
+        .collect();
+    let (a, b, c, d, e) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
+    let missing_node = NodeId::unique();
+    graph.inputs.push(FuncInput::optional("in", DataType::Int));
+    graph.outputs.push(FuncOutput::new("out", DataType::Int));
+    let graph_input = graph.add(Node::new(NodeKind::GraphInput));
+    let graph_output = graph.add(Node::new(NodeKind::GraphOutput));
+
+    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
+    graph.set_input_binding(InputPort::new(c, 5), Binding::bind(a, 0));
+    graph.set_input_binding(InputPort::new(d, 0), Binding::bind(a, 9));
+    graph.set_input_binding(InputPort::new(e, 0), Binding::bind(missing_node, 0));
+    graph.set_input_binding(InputPort::new(missing_node, 0), Binding::bind(a, 0));
+    graph.set_input_binding(
+        InputPort::new(graph_output, 0),
+        Binding::bind(graph_input, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(graph_output, 1),
+        Binding::bind(graph_input, 0),
+    );
+
+    graph.normalize(&library);
+
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(b, 0)),
+        Some(&Binding::bind(a, 0)),
+    );
+    for dead in [
+        InputPort::new(c, 5),
+        InputPort::new(d, 0),
+        InputPort::new(e, 0),
+        InputPort::new(missing_node, 0),
+        InputPort::new(graph_output, 1),
+    ] {
+        assert!(!graph.bindings.contains_key(&dead));
+    }
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(graph_output, 0)),
+        Some(&Binding::bind(graph_input, 0)),
+    );
+
+    graph.set_input_binding(
+        InputPort::new(b, 0),
+        Binding::Const(StaticValue::from(1i64)),
+    );
+    graph.normalize(&library);
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(b, 0)),
+        Some(&Binding::Const(StaticValue::from(1i64))),
+    );
+
+    let unresolved_id = graph.add(Node::new(NodeKind::Func(FuncId::from_u128(0xdead))));
+    graph.set_input_binding(InputPort::new(unresolved_id, 3), Binding::bind(a, 0));
+    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(unresolved_id, 7));
+    graph.normalize(&library);
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(unresolved_id, 3)),
+        Some(&Binding::bind(a, 0)),
+    );
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(b, 0)),
+        Some(&Binding::bind(unresolved_id, 7)),
     );
 }

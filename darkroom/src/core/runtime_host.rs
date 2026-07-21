@@ -1,7 +1,7 @@
 //! The runtime services shared by every frontend: the function library,
 //! the evaluation worker, and the scripting-over-TCP host. `App` (GUI) and
-//! `Session` (tui/headless) each own one and add their own document +
-//! orchestration on top — so the worker/script construction and the
+//! `TerminalSession` (tui/headless) share one through a `Workspace` and add
+//! frontend orchestration on top, so worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
 use std::path::{Path, PathBuf};
@@ -9,25 +9,25 @@ use std::sync::Arc;
 
 use scenarium::DiskStore;
 use scenarium::FlattenMap;
-use scenarium::Library;
 use scenarium::{Compilation, CompiledGraph, Compiler};
 use scenarium::{Graph, NodeId};
 
+use crate::core::document::Document;
+use crate::core::edit::publish::GraphPublicationTarget;
 use crate::core::io::cache::prepare_document_cache_root;
-use crate::core::io::library::{load_library, save_library};
-use crate::core::library::RuntimeLibrary;
+use crate::core::io::preferences::Preferences;
+use crate::core::runtime_library::{RuntimeLibrary, RuntimeLibraryChange};
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 use crate::core::worker::{WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
-pub(crate) struct Engine {
-    /// Darkroom-owned runtime library state and its published snapshots.
+pub(crate) struct RuntimeHost {
     pub(crate) library: RuntimeLibrary,
     worker: WorkerBridge,
     /// The active disk-store root (`None` = memory-only),
-    /// remembered so [`Self::edit_library`] can re-push the worker's
+    /// remembered so graph-library operations can re-push the worker's
     /// [`DiskStore`] — which carries a library snapshot — without the caller
     /// re-supplying the document path.
     disk_root: Option<PathBuf>,
@@ -47,7 +47,7 @@ pub(crate) struct Engine {
     script: Option<ScriptHost>,
 }
 
-impl Engine {
+impl RuntimeHost {
     /// Assemble the func lib (builtins + the on-disk graph library), spin
     /// up the evaluation worker, and start the script host (a no-op `None`
     /// unless `script_cfg` enabled a listener). The worker + script host are
@@ -55,67 +55,65 @@ impl Engine {
     pub(crate) fn new(
         script_cfg: &ScriptConfig,
         wake: Wake,
-        model_paths: &lens::MlModelPaths,
+        preferences: &Preferences,
+        mut status: StatusLog,
     ) -> Self {
-        let mut library = RuntimeLibrary::new(model_paths);
-        // A failed load degrades to an empty library instead of blocking
-        // startup; `load_library` moved the file aside so nothing here can
-        // overwrite it (reported below, once the status log exists).
-        let load_error = match load_library() {
-            Ok(graphs) => {
-                if !graphs.is_empty() {
-                    library.edit(|current| {
-                        for (id, graph) in graphs {
-                            current.insert_graph(id, graph);
-                        }
-                        true
-                    });
-                }
-                None
+        let model_paths = (&preferences.ml_models).into();
+        let library = match RuntimeLibrary::load(&model_paths) {
+            Ok(library) => library,
+            Err(error) => {
+                status.error(format!("graph library load failed: {error}"));
+                RuntimeLibrary::new(&model_paths)
             }
-            Err(err) => Some(err),
         };
         let worker = WorkerBridge::new(wake.clone());
         let script = ScriptHost::start(script_cfg, library.published.clone(), wake);
-        let mut engine = Self {
+        let host = Self {
             library,
             worker,
             disk_root: None,
             compiler: Compiler::default(),
             flatten_map: Arc::default(),
-            status: StatusLog::default(),
+            status,
             script,
         };
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
-        engine.refresh_disk_store();
-        if let Some(err) = load_error {
-            engine.status.error(format!("library load failed: {err:#}"));
-        }
-        engine
+        host.sync_worker_disk_store();
+        host
     }
 
-    pub(crate) fn configure_ml_model_defaults(&mut self, paths: &lens::MlModelPaths) {
-        if self.library.update_ml_model_paths(paths) {
-            self.refresh_disk_store();
+    pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
+        let model_paths = (&preferences.ml_models).into();
+        if self.library.update_ml_model_paths(&model_paths) {
+            self.sync_worker_disk_store();
         }
     }
 
-    /// Applies a graph-library edit, publishes the new runtime snapshot to
-    /// scripting, persists shared graphs, and refreshes the worker's
-    /// [`DiskStore`].
-    ///
-    /// Owns the persist outcome in [`Self::status`]: a saved change clears
-    /// the sticky error, a failed save reports — callers must not overwrite
-    /// it with their own success signal.
-    pub(crate) fn edit_library(&mut self, edit: impl FnOnce(&mut Library) -> bool) -> bool {
-        let changed = self.library.edit(edit);
+    pub(crate) fn import_graph_template(&mut self, graph: Graph) -> bool {
+        let change = self.library.import_graph_template(graph);
+        self.apply_library_change(change)
+    }
+
+    pub(crate) fn publish_graph_to_library(
+        &mut self,
+        document: &mut Document,
+        target: GraphPublicationTarget,
+    ) -> bool {
+        let change = self.library.publish_graph_to_library(document, target);
+        self.apply_library_change(change)
+    }
+
+    fn apply_library_change(&mut self, change: RuntimeLibraryChange) -> bool {
+        let changed = change.changed;
         if changed {
-            match save_library(self.library.current.graphs.iter()) {
-                Ok(()) => self.status.error = None,
-                Err(err) => self.status.error(format!("library save failed: {err:#}")),
+            match change.persist_error {
+                None => self.status.error = None,
+                Some(error) => self
+                    .status
+                    .error(format!("graph library save failed: {error:#}")),
             }
-            self.refresh_disk_store();
+            self.sync_worker_disk_store();
         }
         changed
     }
@@ -123,21 +121,21 @@ impl Engine {
     /// Push a fresh [`DiskStore`] (current library snapshot + current root)
     /// to the worker. The one constructor of worker-side disk stores, so a
     /// library edit or a root change can't leave the other half stale.
-    fn refresh_disk_store(&self) {
+    fn sync_worker_disk_store(&self) {
         self.worker.set_disk_store(DiskStore::new(
-            self.library.current.clone(),
+            self.library.published.load(),
             self.disk_root.clone(),
         ));
     }
 
     /// Compile `graph` against the current library and record the artifact's
-    /// flatten map as the engine's current one — every send below installs its
+    /// flatten map as the host's current one — every send below installs its
     /// artifact on the worker, so the map here always mirrors the program the
     /// worker's next stats come from. A failure is reported to [`Self::status`]
     /// and returns `None` (nothing sent, worker untouched); a success clears
     /// the sticky error.
     fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
-        match self.compiler.compile(graph, &self.library.current) {
+        match self.compiler.compile(graph, &self.library.published.load()) {
             Ok(Compilation {
                 compiled,
                 flatten_map,
@@ -159,7 +157,7 @@ impl Engine {
     /// nodes are unaffected — they always use their own path.
     pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
         self.disk_root = doc_path.map(prepare_document_cache_root);
-        self.refresh_disk_store();
+        self.sync_worker_disk_store();
     }
 
     /// Compile `graph` against the current library and send it to the worker
@@ -234,5 +232,16 @@ impl Engine {
             Some(script) => script.drain(),
             None => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::PathBuf;
+
+    use crate::core::runtime_host::RuntimeHost;
+
+    pub(crate) fn disk_root(host: &RuntimeHost) -> Option<PathBuf> {
+        host.disk_root.clone()
     }
 }

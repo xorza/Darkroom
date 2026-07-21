@@ -607,7 +607,7 @@ fn rename_undo_survives_interface_compaction() {
         "beta"
     );
 
-    // Simulate `reconcile_boundaries` compacting after input 0 ("A")
+    // Simulate normalization compacting after input 0 ("A")
     // was disconnected: the survivor "beta" shifts from index 1 to 0.
     doc.graph.graphs.get_mut(&def_id).unwrap().inputs.remove(0);
     assert_eq!(
