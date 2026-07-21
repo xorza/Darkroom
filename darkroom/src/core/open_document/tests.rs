@@ -4,33 +4,22 @@ use scenarium::Graph;
 use scenarium::{Binding, Func, FuncId, FuncInput, InputPort, Library, StaticValue};
 
 use crate::core::document::Document;
-use crate::core::io::preferences::Preferences;
 use crate::core::io::project::ProjectLoadError;
 use crate::core::open_document::OpenDocument;
 
-#[test]
-fn disabled_reopen_ignores_the_remembered_path() {
-    let preferences = Preferences {
-        document_path: Some(PathBuf::from("does-not-exist.darkroom")),
-        load_last_document: false,
-        ..Preferences::default()
-    };
-
-    let open = OpenDocument::load(&preferences).unwrap();
-
-    assert!(open.path.is_none());
-    assert!(open.document.graph.is_empty());
+fn from_document(document: Document) -> OpenDocument {
+    OpenDocument {
+        document,
+        path: None,
+        normalization_pending: true,
+    }
 }
 
 #[test]
-fn failed_reopen_returns_the_load_error() {
+fn load_returns_the_project_error() {
     let path = PathBuf::from("not-a-project.json");
-    let preferences = Preferences {
-        document_path: Some(path.clone()),
-        ..Preferences::default()
-    };
 
-    let error = OpenDocument::load(&preferences).unwrap_err();
+    let error = OpenDocument::load(path.clone()).unwrap_err();
 
     assert!(matches!(
         error,
@@ -51,7 +40,7 @@ fn normalization_prunes_stale_wiring_once_for_each_open_document() {
         graph.set_input_binding(input, Binding::Const(StaticValue::Float(3.0)));
         Document::from(graph)
     };
-    let mut open = OpenDocument::new(document(), None);
+    let mut open = from_document(document());
 
     assert!(open.normalization_pending);
     assert_eq!(open.document.graph.bindings.len(), 1);
@@ -59,7 +48,7 @@ fn normalization_prunes_stale_wiring_once_for_each_open_document() {
     assert!(!open.normalization_pending);
     assert!(open.document.graph.bindings.is_empty());
 
-    open = OpenDocument::new(document(), None);
+    open = from_document(document());
     assert!(open.normalization_pending);
     assert_eq!(open.document.graph.bindings.len(), 1);
     open.normalize(&library);
@@ -69,7 +58,7 @@ fn normalization_prunes_stale_wiring_once_for_each_open_document() {
 
 #[test]
 fn empty_document_has_the_main_graph_tab() {
-    let open = OpenDocument::empty();
+    let open = OpenDocument::default();
 
     assert!(open.path.is_none());
     assert_eq!(open.document.layout.all_tabs().count(), 1);

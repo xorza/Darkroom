@@ -4,8 +4,7 @@
 
 use std::path::Path;
 
-use crate::core::document::Document;
-use crate::core::io::project;
+use crate::core::open_document::OpenDocument;
 use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
 use crate::gui::dialogs;
@@ -46,17 +45,16 @@ impl App {
     /// scene rebuild, dropped gesture state, and cleared run results.
     fn new_document(&mut self) {
         self.editor = Editor::new();
-        self.workspace.replace_document(Document::default(), None);
+        self.workspace.replace_document(OpenDocument::default());
         self.remember_document_path();
     }
 
     /// Load `path` into a fresh editor. Returns whether it loaded — `false`
-    /// when the file is missing/corrupt (startup uses this to drop a stale
-    /// `document_path`; the menu-load path ignores it, leaving the open doc).
+    /// when the file is missing or corrupt, leaving the open document intact.
     /// The failure surfaces in the status bar with its reason.
     pub(crate) fn load_document(&mut self, path: &Path) -> bool {
-        let doc = match project::load(path) {
-            Ok(doc) => doc,
+        let open = match OpenDocument::load(path.to_path_buf()) {
+            Ok(open) => open,
             Err(err) => {
                 self.workspace
                     .runtime
@@ -68,8 +66,7 @@ impl App {
         // Fresh editor around the loaded doc — see `new_document` for why
         // a wholesale reset (rather than poking individual fields) is right.
         self.editor = Editor::new();
-        self.workspace
-            .replace_document(doc, Some(path.to_path_buf()));
+        self.workspace.replace_document(open);
         self.remember_document_path();
         self.workspace.runtime.status.error = None;
         true

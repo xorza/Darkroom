@@ -7,6 +7,7 @@ use crate::core::document::Document;
 use crate::core::io::cache::document_cache_root;
 use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::io::project;
+use crate::core::open_document::OpenDocument;
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
 use crate::core::workspace::Workspace;
@@ -26,7 +27,7 @@ fn normalization_is_shared_across_run_and_replacement_boundaries() {
     );
     assert!(!workspace.open.normalization_pending);
 
-    workspace.replace_document(Document::default(), None);
+    workspace.replace_document(OpenDocument::default());
     assert!(workspace.open.normalization_pending);
     workspace.normalize_document();
     assert!(!workspace.open.normalization_pending);
@@ -105,12 +106,27 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         Some(document_cache_root(&first_path))
     );
 
-    workspace.replace_document(Document::default(), Some(second_path.clone()));
+    project::save(&Document::default(), &second_path).unwrap();
+    workspace.replace_document(OpenDocument::load(second_path.clone()).unwrap());
     assert_eq!(workspace.open.path, Some(second_path.clone()));
     assert_eq!(
         test_support::disk_root(&workspace.runtime),
         Some(document_cache_root(&second_path))
     );
+}
+
+#[test]
+fn disabled_reopen_ignores_the_remembered_path() {
+    let preferences = Preferences {
+        document_path: Some("does-not-exist.darkroom".into()),
+        load_last_document: false,
+        ..Preferences::default()
+    };
+
+    let workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &preferences);
+
+    assert!(workspace.open.path.is_none());
+    assert!(workspace.open.document.graph.is_empty());
 }
 
 #[test]
