@@ -6,7 +6,8 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::image::linear::{LinearImage, PixelData};
+use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_data::PixelData;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -300,8 +301,8 @@ impl CacheCore {
             optimal_chunk_rows(width, height, memory, available_memory)
         });
 
-        let mut output = PixelData::new_default(width, height, dims.channels());
-        let channel_count = output.channels();
+        let mut output = PixelData::new_zeroed(dims);
+        let channel_count = output.channel_count();
 
         let num_chunks = height.div_ceil(chunk_rows);
         let total_work = num_chunks * channel_count;
@@ -581,7 +582,6 @@ impl LightCache {
         let dimensions = self.core.dimensions;
         let image = LinearImage {
             metadata: self.core.metadata.clone(),
-            dimensions,
             pixels,
         };
         let weight = QualityMap::from_pixels(weight_pixels);
@@ -690,16 +690,8 @@ impl LightCache {
         let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels());
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
         let chunk_available_memory = self.core.chunk_available_memory();
-        let mut output_weight = PixelData::new_default(
-            dimensions.width(),
-            dimensions.height(),
-            dimensions.channels(),
-        );
-        let mut output_linear_variance = PixelData::new_default(
-            dimensions.width(),
-            dimensions.height(),
-            dimensions.channels(),
-        );
+        let mut output_weight = PixelData::new_zeroed(dimensions);
+        let mut output_linear_variance = PixelData::new_zeroed(dimensions);
         let pixels =
             self.core.process_chunks(
                 &self.frames,

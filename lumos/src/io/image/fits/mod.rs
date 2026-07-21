@@ -1,30 +1,79 @@
 use std::fs::File;
 use std::io::{Error as IoError, ErrorKind};
+use std::mem::size_of;
+use std::ops::Range;
 use std::path::Path;
 
 use fits_well::header::Header;
-use fits_well::image::Image;
-use fits_well::image::SampleType;
-use fits_well::io::HduKind;
-use fits_well::io::{ChecksumStatus, SliceReader};
+use fits_well::image::{Bitpix as FitsBitpix, Image, SampleType};
+use fits_well::io::{BLOCK_SIZE, ChecksumStatus, Hdu, HduKind, SliceReader, StreamReader};
 use fits_well::{FitsReader, FitsWriter};
 use rayon::prelude::*;
 
 use common::{CancelToken, file_utils};
-use imaginarium::Buffer2;
 
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_data::PixelData;
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
     ImageProvenance, SourceContainer, TransferProvenance, scientific_rejection,
 };
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
+use crate::resources;
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
 pub(crate) const CFA_FITS_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, Copy)]
+struct FitsLoadBudget {
+    bytes: u64,
+}
+
+impl FitsLoadBudget {
+    fn from_system() -> Self {
+        Self {
+            bytes: resources::memory_budget(resources::available_memory()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FitsHduDescription<'a> {
+    header: &'a Header,
+    kind: HduKind,
+    source_bytes: u64,
+}
+
+impl<'a> FitsHduDescription<'a> {
+    fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
+        let source_bytes = padded_data_bytes(path, hdu.data_bytes)?;
+        Ok(Self {
+            header: &hdu.header,
+            kind: hdu.kind,
+            source_bytes,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct FitsDecodePlan {
+    shape: Vec<usize>,
+    dimensions: ImageDimensions,
+    bitpix: BitPix,
+    scaling: fits_well::image::Scaling,
+    source_bytes: u64,
+    decoded_bytes: u64,
+    peak_bytes: u64,
+}
+
+#[derive(Debug)]
+enum FitsReadSelection {
+    Whole,
+    Section(Vec<Range<usize>>),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {
@@ -43,7 +92,7 @@ pub(crate) struct CfaFitsHdu {
 struct DecodedFitsImage {
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
-    pixels: Vec<f32>,
+    pixels: PixelData,
 }
 
 impl DecodedFitsImage {
@@ -55,18 +104,10 @@ impl DecodedFitsImage {
             ));
         }
 
-        let plane_size = self.dimensions.pixel_count();
-        let mut image = if self.dimensions.is_rgb() {
-            let channels = self
-                .pixels
-                .chunks_exact(plane_size)
-                .map(|channel| channel.to_vec());
-            LinearImage::from_planar_channels(self.dimensions, channels)
-        } else {
-            LinearImage::from_pixels(self.dimensions, self.pixels)
-        };
-        image.metadata = self.metadata;
-        Ok(image)
+        Ok(LinearImage {
+            metadata: self.metadata,
+            pixels: self.pixels,
+        })
     }
 
     fn into_cfa(
@@ -105,15 +146,15 @@ impl DecodedFitsImage {
             }
         });
         let Self {
-            dimensions,
             mut metadata,
             pixels,
+            ..
         } = self;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = ColorProvenance::SensorCfa;
         }
         Ok(CfaImage {
-            data: Buffer2::new(dimensions.width(), dimensions.height(), pixels),
+            data: pixels.into_l(),
             metadata,
             quantization_sigma,
         })
@@ -173,11 +214,11 @@ fn validate_cfa_container_headers(
 
 /// Load an already-linear astronomical image from a FITS file.
 pub(crate) fn load_linear_fits(path: &Path) -> Result<LinearImage, ImageError> {
-    read_first_image(path)?.into_linear(path)
+    read_first_image(path, FitsLoadBudget::from_system())?.into_linear(path)
 }
 
 pub(crate) fn load_preview_fits(path: &Path) -> Result<LinearImage, ImageError> {
-    let decoded = read_first_image(path)?;
+    let decoded = read_first_image(path, FitsLoadBudget::from_system())?;
     if decoded.metadata.cfa_type.is_some() {
         Ok(decoded
             .into_cfa(path, None)?
@@ -188,36 +229,39 @@ pub(crate) fn load_preview_fits(path: &Path) -> Result<LinearImage, ImageError> 
     }
 }
 
-fn read_first_image(path: &Path) -> Result<DecodedFitsImage, ImageError> {
-    // Read the whole file once, then decode straight from the bytes: `from_bytes`
-    // borrows the buffer in place, so `read_image` skips the per-data-unit staging
-    // copy that the seeking `open` path pays.
-    let bytes = std::fs::read(path).map_err(|source| ImageError::Io {
+fn read_first_image(path: &Path, budget: FitsLoadBudget) -> Result<DecodedFitsImage, ImageError> {
+    let file = File::open(path).map_err(|source| ImageError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut reader = FitsReader::from_bytes(&bytes).map_err(|e| fits_err(path, e))?;
+    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
 
-    // The first image-bearing HDU: skips an empty (NAXIS=0) primary and reads a
-    // tile-compressed image transparently, which `primary_hdu` could not do.
     let index = *reader
         .image_indices()
         .first()
         .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
+    let hdu = &reader.hdus()[index];
+    let plan = preflight_fits_image(path, FitsHduDescription::from_hdu(path, hdu)?, budget)?;
 
-    read_decoded_hdu(&mut reader, index, path)
+    read_stream_hdu(&mut reader, index, path, plan)
 }
 
 pub(crate) fn load_cfa_fits(path: &Path) -> Result<CfaImage, ImageError> {
-    let bytes = std::fs::read(path).map_err(|source| ImageError::Io {
+    let file = File::open(path).map_err(|source| ImageError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut reader = FitsReader::from_bytes(&bytes).map_err(|source| fits_err(path, source))?;
+    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
     let index = *reader
         .image_indices()
         .first()
         .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
+    let hdu = &reader.hdus()[index];
+    let plan = preflight_fits_image(
+        path,
+        FitsHduDescription::from_hdu(path, hdu)?,
+        FitsLoadBudget::from_system(),
+    )?;
     let is_lumos_cfa = validate_cfa_container_headers(
         path,
         reader.hdus().first().map(|hdu| &hdu.header),
@@ -231,7 +275,9 @@ pub(crate) fn load_cfa_fits(path: &Path) -> Result<CfaImage, ImageError> {
             return Err(fits_unsupported(path, "Lumos CFA FITS checksum mismatch"));
         }
     }
-    read_cfa_hdu(&mut reader, index, path)
+    let quantization_sigma = read_quantization_sigma(&reader.hdus()[index].header)
+        .map_err(|source| fits_err(path, source))?;
+    read_stream_hdu(&mut reader, index, path, plan)?.into_cfa(path, quantization_sigma)
 }
 
 pub(crate) fn read_cfa_hdu(
@@ -239,55 +285,101 @@ pub(crate) fn read_cfa_hdu(
     index: usize,
     path: &Path,
 ) -> Result<CfaImage, ImageError> {
+    let hdu = &reader.hdus()[index];
+    let plan = preflight_fits_image(
+        path,
+        FitsHduDescription::from_hdu(path, hdu)?,
+        FitsLoadBudget::from_system(),
+    )?;
     let quantization_sigma = read_quantization_sigma(&reader.hdus()[index].header)
         .map_err(|source| fits_err(path, source))?;
-    read_decoded_hdu(reader, index, path)?.into_cfa(path, quantization_sigma)
+    let header = reader.hdus()[index].header.clone();
+    read_decoded_hdu(&header, plan, path, |selection| match selection {
+        FitsReadSelection::Whole => reader.read_image(index).map(|image| image.physical_f32()),
+        FitsReadSelection::Section(ranges) => reader
+            .read_image_section(index, &ranges)
+            .map(|image| image.physical_f32()),
+    })?
+    .into_cfa(path, quantization_sigma)
+}
+
+fn read_stream_hdu(
+    reader: &mut StreamReader<File>,
+    index: usize,
+    path: &Path,
+    plan: FitsDecodePlan,
+) -> Result<DecodedFitsImage, ImageError> {
+    let header = reader.hdus()[index].header.clone();
+    read_decoded_hdu(&header, plan, path, |selection| match selection {
+        FitsReadSelection::Whole => reader.read_image(index).map(|image| image.physical_f32()),
+        FitsReadSelection::Section(ranges) => reader
+            .read_image_section(index, &ranges)
+            .map(|image| image.physical_f32()),
+    })
 }
 
 fn read_decoded_hdu(
-    reader: &mut SliceReader<'_>,
-    index: usize,
+    header: &Header,
+    plan: FitsDecodePlan,
     path: &Path,
+    mut read_pixels: impl FnMut(FitsReadSelection) -> fits_well::Result<Vec<f32>>,
 ) -> Result<DecodedFitsImage, ImageError> {
-    // Decode pixels and shape, then drop the data-unit borrow before reading headers.
-    let (shape, bitpix, scaling, pixels) = {
-        let raw = reader.read_image(index).map_err(|e| fits_err(path, e))?;
-        let bitpix = map_bitpix(raw.sample_type());
-        let scaling = raw.metadata().scaling;
-        // `physical_f32` applies BSCALE/BZERO and maps the integer BLANK to NaN (the
-        // effective values cfitsio's f32 read produced), narrowing in a single pass.
-        let pixels: Vec<f32> = raw.physical_f32();
-        (raw.metadata().shape.to_vec(), bitpix, scaling, pixels)
+    tracing::debug!(
+        source_bytes = plan.source_bytes,
+        decoded_bytes = plan.decoded_bytes,
+        peak_bytes = plan.peak_bytes,
+        "FITS image passed header-first memory preflight"
+    );
+    let plane_size = plan.dimensions.pixel_count();
+    let pixels = if plan.dimensions.is_rgb() {
+        let red = read_fits_plane(
+            path,
+            FitsReadSelection::Section(channel_ranges(&plan, 0)),
+            0,
+            plane_size,
+            &mut read_pixels,
+        )?;
+        let green = read_fits_plane(
+            path,
+            FitsReadSelection::Section(channel_ranges(&plan, 1)),
+            1,
+            plane_size,
+            &mut read_pixels,
+        )?;
+        let blue = read_fits_plane(
+            path,
+            FitsReadSelection::Section(channel_ranges(&plan, 2)),
+            2,
+            plane_size,
+            &mut read_pixels,
+        )?;
+        PixelData::from_planar_channels(plan.dimensions, [red, green, blue])
+    } else {
+        PixelData::from_planar_channels(
+            plan.dimensions,
+            [read_fits_plane(
+                path,
+                FitsReadSelection::Whole,
+                0,
+                plane_size,
+                &mut read_pixels,
+            )?],
+        )
     };
 
-    // fits-well reports shape NAXIS1-first: [width, height, (channels)]. All shapes other than
-    // 2D or 3D-with-NAXIS3∈{1,3} are rejected as `Err` — never asserted — because `shape` comes
-    // from untrusted file input (the `n` arm also covers the 0/1-dimension cases).
-    let img_dims = dimensions_from_shape(path, &shape)?;
-
-    // Shape↔buffer mismatch means a corrupt/unsupported file, not a logic error — return `Err`.
-    let plane_size = img_dims.size.x * img_dims.size.y;
-    if pixels.len() != plane_size * img_dims.channels {
-        return Err(fits_unsupported(
-            path,
-            format!("pixel count {} doesn't match shape {shape:?}", pixels.len()),
-        ));
-    }
-
-    let header = &reader.hdus()[index].header;
     let mut metadata =
-        read_metadata(header, shape, bitpix).map_err(|source| fits_err(path, source))?;
+        read_metadata(header, plan.shape, plan.bitpix).map_err(|source| fits_err(path, source))?;
     metadata.provenance = Some(ImageProvenance {
         container: SourceContainer::Fits,
         decoder: DecoderProvenance::FitsWell,
         transfer: TransferProvenance::FitsPhysical {
-            bscale: scaling.bscale,
-            bzero: scaling.bzero,
+            bscale: plan.scaling.bscale,
+            bzero: plan.scaling.bzero,
             unit: read_text(header, "BUNIT").map_err(|source| fits_err(path, source))?,
         },
         color: if metadata.cfa_type.is_some() {
             ColorProvenance::SensorCfa
-        } else if img_dims.is_grayscale() {
+        } else if plan.dimensions.is_grayscale() {
             ColorProvenance::Monochrome
         } else {
             ColorProvenance::Unspecified
@@ -295,20 +387,48 @@ fn read_decoded_hdu(
         clipped: false,
         demosaic: DemosaicProvenance::None,
     });
-    let pixels = validate_fits_pixels(pixels).map_err(|summary| {
+
+    Ok(DecodedFitsImage {
+        dimensions: plan.dimensions,
+        metadata,
+        pixels,
+    })
+}
+
+fn channel_ranges(plan: &FitsDecodePlan, channel: usize) -> Vec<Range<usize>> {
+    let mut ranges = vec![0..plan.dimensions.width(), 0..plan.dimensions.height()];
+    if plan.shape.len() == 3 {
+        ranges.push(channel..channel + 1);
+    }
+    ranges
+}
+
+fn read_fits_plane(
+    path: &Path,
+    selection: FitsReadSelection,
+    channel: usize,
+    expected_pixels: usize,
+    read_pixels: &mut impl FnMut(FitsReadSelection) -> fits_well::Result<Vec<f32>>,
+) -> Result<Vec<f32>, ImageError> {
+    let pixels = read_pixels(selection).map_err(|source| fits_err(path, source))?;
+    if pixels.len() != expected_pixels {
+        return Err(fits_unsupported(
+            path,
+            format!(
+                "channel {channel} has {} pixels; expected {expected_pixels}",
+                pixels.len()
+            ),
+        ));
+    }
+    validate_fits_pixels(pixels).map_err(|summary| {
         fits_unsupported(
             path,
             format!(
                 "image contains {} null/non-finite pixels; first at linear index {}",
-                summary.count, summary.first_index
+                summary.count,
+                channel * expected_pixels + summary.first_index
             ),
         )
-    })?;
-
-    Ok(DecodedFitsImage {
-        dimensions: img_dims,
-        metadata,
-        pixels,
     })
 }
 
@@ -362,6 +482,121 @@ pub(crate) fn fits_to_io(source: fits_well::FitsError) -> IoError {
         fits_well::FitsError::Io(source) => source,
         source => IoError::new(ErrorKind::InvalidData, source),
     }
+}
+
+fn preflight_fits_image(
+    path: &Path,
+    hdu: FitsHduDescription<'_>,
+    budget: FitsLoadBudget,
+) -> Result<FitsDecodePlan, ImageError> {
+    if !matches!(
+        hdu.kind,
+        HduKind::Primary | HduKind::Image | HduKind::CompressedImage
+    ) {
+        return Err(fits_unsupported(path, "selected HDU is not an image"));
+    }
+
+    let shape = if hdu.kind == HduKind::CompressedImage {
+        compressed_shape(hdu.header).map_err(|source| fits_err(path, source))?
+    } else {
+        hdu.header.axes().map_err(|source| fits_err(path, source))?
+    };
+    let dimensions = dimensions_from_shape(path, &shape)?;
+    let stored_bitpix = if hdu.kind == HduKind::CompressedImage {
+        let code = hdu
+            .header
+            .get_integer("ZBITPIX")
+            .map_err(|source| fits_err(path, source))?
+            .ok_or_else(|| fits_unsupported(path, "compressed image is missing ZBITPIX"))?;
+        FitsBitpix::from_code(code).map_err(|source| fits_err(path, source))?
+    } else {
+        hdu.header
+            .bitpix()
+            .map_err(|source| fits_err(path, source))?
+    };
+    let scaling = hdu
+        .header
+        .scaling()
+        .map_err(|source| fits_err(path, source))?;
+    let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
+    let decoded_bytes = checked_size_bytes(
+        path,
+        dimensions.sample_count(),
+        size_of::<f32>(),
+        "decoded FITS output",
+    )?;
+    let native_plane_bytes = checked_size_bytes(
+        path,
+        dimensions.pixel_count(),
+        stored_bitpix.elem_size(),
+        "FITS decode plane",
+    )?;
+    let peak_bytes = if hdu.kind == HduKind::CompressedImage {
+        decoded_bytes
+            .checked_add(native_plane_bytes)
+            .and_then(|bytes| bytes.checked_add(hdu.source_bytes.checked_mul(2)?))
+    } else if dimensions.is_rgb() {
+        native_plane_bytes
+            .checked_mul(3)
+            .and_then(|native_bytes| decoded_bytes.checked_add(native_bytes))
+    } else {
+        decoded_bytes.checked_add(hdu.source_bytes)
+    }
+    .ok_or_else(|| fits_unsupported(path, "FITS peak memory size overflows u64"))?;
+
+    enforce_fits_budget(path, "stored data unit", hdu.source_bytes, budget)?;
+    enforce_fits_budget(path, "decoded output", decoded_bytes, budget)?;
+    enforce_fits_budget(path, "estimated peak memory", peak_bytes, budget)?;
+
+    Ok(FitsDecodePlan {
+        shape,
+        dimensions,
+        bitpix,
+        scaling,
+        source_bytes: hdu.source_bytes,
+        decoded_bytes,
+        peak_bytes,
+    })
+}
+
+fn checked_size_bytes(
+    path: &Path,
+    elements: usize,
+    element_bytes: usize,
+    name: &str,
+) -> Result<u64, ImageError> {
+    elements
+        .checked_mul(element_bytes)
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .ok_or_else(|| fits_unsupported(path, format!("{name} size overflows usize")))
+}
+
+fn enforce_fits_budget(
+    path: &Path,
+    name: &str,
+    required: u64,
+    budget: FitsLoadBudget,
+) -> Result<(), ImageError> {
+    if required > budget.bytes {
+        return Err(fits_unsupported(
+            path,
+            format!(
+                "{name} requires {required} bytes, exceeding the FITS load budget of {} bytes",
+                budget.bytes
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn padded_data_bytes(path: &Path, bytes: u64) -> Result<u64, ImageError> {
+    if bytes == 0 {
+        return Ok(0);
+    }
+    bytes
+        .checked_add(BLOCK_SIZE as u64 - 1)
+        .map(|padded| padded / BLOCK_SIZE as u64 * BLOCK_SIZE as u64)
+        .ok_or_else(|| fits_unsupported(path, "FITS padded data-unit size overflows u64"))
 }
 
 pub(crate) fn fits_cfa_frame_info(path: &Path) -> Result<CfaFrameInfo, ImageError> {
@@ -428,20 +663,35 @@ fn compressed_shape(header: &Header) -> fits_well::Result<Vec<usize>> {
 }
 
 fn dimensions_from_shape(path: &Path, shape: &[usize]) -> Result<ImageDimensions, ImageError> {
-    match shape {
-        [width, height] => Ok(ImageDimensions::new((*width, *height), 1)),
+    if shape.contains(&0) {
+        return Err(fits_unsupported(
+            path,
+            format!("FITS image axes must be nonzero, got {shape:?}"),
+        ));
+    }
+    let (width, height, channels) = match shape {
+        [width, height] => (*width, *height, 1),
         [width, height, channels] if *channels == 1 || *channels == 3 => {
-            Ok(ImageDimensions::new((*width, *height), *channels))
+            (*width, *height, *channels)
         }
         [_, _, channels] => Err(fits_unsupported(
             path,
             format!("Unsupported channel count (NAXIS3): {channels}"),
-        )),
-        _ => Err(fits_unsupported(
-            path,
-            format!("Unsupported number of dimensions: {}", shape.len()),
-        )),
-    }
+        ))?,
+        _ => {
+            return Err(fits_unsupported(
+                path,
+                format!("Unsupported number of dimensions: {}", shape.len()),
+            ));
+        }
+    };
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}")))?;
+    pixel_count
+        .checked_mul(channels)
+        .ok_or_else(|| fits_unsupported(path, format!("FITS sample count overflows: {shape:?}")))?;
+    Ok(ImageDimensions::new((width, height), channels))
 }
 
 fn read_metadata(
@@ -889,62 +1139,4 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::io::image::fits::*;
-
-    #[test]
-    fn finite_validation_preserves_every_physical_value() {
-        let pixels = vec![-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
-        assert_eq!(validate_fits_pixels(pixels.clone()).unwrap(), pixels);
-    }
-
-    #[test]
-    fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
-        let pixels = vec![0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
-
-        assert_eq!(
-            validate_fits_pixels(pixels).unwrap_err(),
-            NullSummary {
-                count: 3,
-                first_index: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_sexagesimal_hms_to_ra_deg() {
-        // RA is in hours; the call site scales the triple by 15 to get degrees.
-        // M42: 05h 35m 17.3s = (5 + 35/60 + 17.3/3600) * 15 = 83.82208333... deg
-        let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0;
-        // Space- and colon-delimited forms parse identically.
-        for s in ["05 35 17.3", "05:35:17.3"] {
-            let deg = parse_sexagesimal(s).unwrap() * 15.0;
-            assert!(
-                (deg - expected).abs() < 1e-10,
-                "{s}: got {deg}, expected {expected}"
-            );
-        }
-        // Zero triple → 0.
-        assert!((parse_sexagesimal("00 00 00.0").unwrap() * 15.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_parse_sexagesimal_dms_to_dec_deg() {
-        // DEC uses the triple directly (degrees).
-        // M42: -05° 23' 28.0" = -(5 + 23/60 + 28/3600) = -5.39111...
-        let neg = parse_sexagesimal("-05 23 28.0").unwrap();
-        assert!((neg - -(5.0 + 23.0 / 60.0 + 28.0 / 3600.0)).abs() < 1e-10);
-        // Colon-delimited positive.
-        let pos = parse_sexagesimal("+45:30:15.5").unwrap();
-        assert!((pos - (45.0 + 30.0 / 60.0 + 15.5 / 3600.0)).abs() < 1e-10);
-        // Sign must survive a zero-degree field: -00° 30' = -0.5, not +0.5.
-        assert!((parse_sexagesimal("-00 30 00.0").unwrap() - -0.5).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_parse_sexagesimal_invalid() {
-        assert!(parse_sexagesimal("05 35").is_none()); // only 2 fields
-        assert!(parse_sexagesimal("").is_none());
-        assert!(parse_sexagesimal("abc def ghi").is_none());
-    }
-}
+mod tests;

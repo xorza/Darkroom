@@ -16,6 +16,7 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
+use crate::resources::memory_budget;
 
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]
@@ -391,13 +392,6 @@ pub(crate) fn map_plane(path: PathBuf) -> Result<Mmap, FrameStoreError> {
 }
 
 pub(crate) const MIN_CHUNK_ROWS: usize = 64;
-/// Leaves operating-system and measurement-fluctuation headroom.
-const MEMORY_PERCENT: u64 = 75;
-
-pub(crate) fn memory_budget(available_memory: u64) -> u64 {
-    (available_memory as u128 * MEMORY_PERCENT as u128 / 100) as u64
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChunkMemoryLayout {
     /// Planes read concurrently for the active row chunk.

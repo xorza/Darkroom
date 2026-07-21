@@ -52,7 +52,7 @@ fn constant_mono_image(width: usize, height: usize, value: f32) -> LinearImage {
 }
 
 fn assert_product_finite(product: &StackProduct) {
-    for channel in 0..product.image.dimensions.channels() {
+    for channel in 0..product.image.channels() {
         assert!(
             product
                 .image
@@ -68,7 +68,7 @@ fn assert_product_finite(product: &StackProduct) {
             .iter()
             .all(|value| value.is_finite())
     );
-    for channel in 0..product.image.dimensions.channels() {
+    for channel in 0..product.image.channels() {
         assert!(
             product
                 .weight

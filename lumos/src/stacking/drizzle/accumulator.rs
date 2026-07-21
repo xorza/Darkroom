@@ -112,11 +112,12 @@ impl DrizzleAccumulator {
     /// weights are negative or non-finite. The accumulator is unchanged on error.
     pub fn add_frame(&mut self, frame: DrizzleFrame<LinearImage>) -> Result<(), DrizzleError> {
         let index = self.frames_added;
-        if frame.source.dimensions != self.input_dims {
+        let dimensions = frame.source.dimensions();
+        if dimensions != self.input_dims {
             return Err(DrizzleError::DimensionMismatch {
                 index,
                 expected: self.input_dims,
-                actual: frame.source.dimensions,
+                actual: dimensions,
             });
         }
         if !frame.weight.is_finite() || frame.weight < 0.0 {

@@ -63,7 +63,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     let frame_count = frames.len();
     let mut frames = frames.into_iter();
     let first = load_drizzle_frame(frames.next().unwrap())?;
-    let input_dims = first.source.dimensions;
+    let input_dims = first.source.dimensions();
 
     tracing::info!(
         input_width = input_dims.width(),
@@ -108,7 +108,7 @@ pub fn drizzle_images(
     config.validate()?;
 
     let frame_count = frames.len();
-    let input_dims = frames[0].source.dimensions;
+    let input_dims = frames[0].source.dimensions();
 
     tracing::info!(
         input_width = input_dims.width(),

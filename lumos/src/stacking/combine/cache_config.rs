@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::resources;
+
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CacheConfig {
@@ -43,22 +45,8 @@ impl CacheConfig {
 
     /// Get available memory, using the override when configured.
     pub(crate) fn get_available_memory(&self) -> u64 {
-        self.available_memory.unwrap_or_else(get_available_memory)
-    }
-}
-
-fn get_available_memory() -> u64 {
-    use sysinfo::System;
-
-    let mut sys = System::new();
-    sys.refresh_memory();
-    let available = sys.available_memory();
-
-    // macOS can report zero when compressed pages exceed free, inactive, and purgeable pages.
-    if available == 0 {
-        sys.total_memory().saturating_sub(sys.used_memory())
-    } else {
-        available
+        self.available_memory
+            .unwrap_or_else(resources::available_memory)
     }
 }
 

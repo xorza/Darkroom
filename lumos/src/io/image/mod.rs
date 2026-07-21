@@ -2,6 +2,7 @@ pub(crate) mod cfa;
 pub(crate) mod error;
 pub(crate) mod fits;
 pub(crate) mod linear;
+pub(crate) mod pixel_data;
 pub(crate) mod sensor;
 #[cfg(test)]
 mod synthetic_tests;

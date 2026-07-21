@@ -83,10 +83,10 @@ loses full-raw geometry before demosaic.
   `lumos/src/stacking/docs/01-load-decode.md:319`.
 
   **Evidence.** `fits-well` already evaluates physical values before returning them:
-  `lumos/src/io/image/fits.rs:44-51`. Lumos then calls
-  `prepare_fits_pixels` at `lumos/src/io/image/fits.rs:83-93`, which divides every
+  `lumos/src/io/image/fits/mod.rs:44-51`. Lumos then calls
+  `prepare_fits_pixels` at `lumos/src/io/image/fits/mod.rs:83-93`, which divides every
   integer sample by a positive `DATAMAX`, or otherwise by a logical-type maximum, at
-  `lumos/src/io/image/fits.rs:201-210`. The fallback divisors are defined by
+  `lumos/src/io/image/fits/mod.rs:201-210`. The fallback divisors are defined by
   `BitPix::normalization_max` at `lumos/src/io/image/mod.rs:52-65`.
 
   **Impact.** This changes physical units and gives sibling lights, darks, flats, and
@@ -143,7 +143,7 @@ loses full-raw geometry before demosaic.
   calibrate before demosaic (`lumos/src/stacking/docs/01-load-decode.md:73-89`).
 
   **Evidence.** FITS CFA parsing only assigns `metadata.cfa_type` while returning an
-  `LinearImage` at `lumos/src/io/image/fits.rs:83-104`. `CfaImage`'s frame-store
+  `LinearImage` at `lumos/src/io/image/fits/mod.rs:83-104`. `CfaImage`'s frame-store
   loader accepts camera RAW only at `lumos/src/io/image/cfa.rs:87-95`, and the
   end-to-end calibration pipeline hard-codes `load_raw_cfa` at
   `lumos/src/stacking/pipeline/streaming.rs:101-113`.
@@ -164,7 +164,7 @@ loses full-raw geometry before demosaic.
 
 ## Batch 2 — make FITS a bounded, explicit trust boundary
 
-- [ ] **P0 — Validate FITS shape and budget before data read/decompression; return errors instead of assertions.**
+- [x] **P0 — Validate FITS shape and budget before data read/decompression; return errors instead of assertions.**
 
   **Contract.** Section 3.3 requires zero-axis, overflow, unsupported-shape, and budget
   rejection before allocation (`lumos/src/stacking/docs/01-load-decode.md:230-255`).
@@ -172,14 +172,14 @@ loses full-raw geometry before demosaic.
   `lumos/src/stacking/docs/01-load-decode.md:1340-1354`.
 
   **Evidence.** Lumos first allocates the entire file at
-  `lumos/src/io/image/fits.rs:27-35`, then calls `read_image` and allocates the
-  physical `Vec<f32>` at `lumos/src/io/image/fits.rs:44-52`; compressed images are
+  `lumos/src/io/image/fits/mod.rs:27-35`, then calls `read_image` and allocates the
+  physical `Vec<f32>` at `lumos/src/io/image/fits/mod.rs:44-52`; compressed images are
   decompressed inside that call. Only afterward does it inspect supported shape at
-  `lumos/src/io/image/fits.rs:54-81`. `fits-well` legitimately permits an axis of
+  `lumos/src/io/image/fits/mod.rs:54-81`. `fits-well` legitimately permits an axis of
   zero and gives it a zero product at `fits-well/src/data/mod.rs:51-61`, but Lumos passes
   a two-axis zero shape to `ImageDimensions::new`, whose external-input assertions are at
   `lumos/src/io/image/mod.rs:75-92`. Three-plane FITS also duplicates the complete
-  physical array via `to_vec` at `lumos/src/io/image/fits.rs:95-100`.
+  physical array via `to_vec` at `lumos/src/io/image/fits/mod.rs:95-100`.
 
   **Impact.** A malformed zero-axis image-bearing HDU can panic. A huge unsupported cube
   or compressed image can consume the file size plus decompressed pixels before it is
@@ -203,10 +203,10 @@ loses full-raw geometry before demosaic.
   `lumos/src/stacking/docs/01-load-decode.md:257-281`.
 
   **Evidence.** `map_bitpix` folds `I8` into `UInt8` and `U64` into `Int64` at
-  `lumos/src/io/image/fits.rs:143-158`. The public `BitPix` enum has no variants
+  `lumos/src/io/image/fits/mod.rs:143-158`. The public `BitPix` enum has no variants
   for those logical types at `lumos/src/io/image/mod.rs:40-50`. Every image is
   unconditionally narrowed via `physical_f32` at
-  `lumos/src/io/image/fits.rs:46-51`, although the dependency explicitly documents
+  `lumos/src/io/image/fits/mod.rs:46-51`, although the dependency explicitly documents
   `physical()` for large integers/fine scaling at `fits-well/src/data/mod.rs:486-505` and
   already exposes all logical variants at `fits-well/src/data/mod.rs:541-586`.
 
@@ -229,8 +229,8 @@ loses full-raw geometry before demosaic.
   `lumos/src/stacking/docs/01-load-decode.md:346-356`).
 
   **Evidence.** Lumos always picks the first image-bearing HDU at
-  `lumos/src/io/image/fits.rs:37-42`, and shape alone makes every `NAXIS3=3` image
-  RGB at `lumos/src/io/image/fits.rs:57-60`. It never calls checksum verification.
+  `lumos/src/io/image/fits/mod.rs:37-42`, and shape alone makes every `NAXIS3=3` image
+  RGB at `lumos/src/io/image/fits/mod.rs:57-60`. It never calls checksum verification.
   The current dependency already supplies `hdu_index`/`image_indices` at
   `fits-well/src/reader/mod.rs:312-361` and `verify_checksum` at
   `fits-well/src/reader/mod.rs:947-999`.
@@ -256,9 +256,9 @@ loses full-raw geometry before demosaic.
 
   **Evidence.** `read_cfa_from_headers` has no image height or orientation-policy input.
   It unconditionally flips the 2x2 pattern for `BOTTOM-UP`, then applies offsets, at
-  `lumos/src/io/image/fits.rs:214-249`; pixel rows and WCS are not transformed.
+  `lumos/src/io/image/fits/mod.rs:214-249`; pixel rows and WCS are not transformed.
   Metadata retains only a few pointing scalars at
-  `lumos/src/io/image/fits.rs:107-140`, not the selected header/WCS or the applied
+  `lumos/src/io/image/fits/mod.rs:107-140`, not the selected header/WCS or the applied
   coordinate transform.
 
   **Impact.** The phase is wrong for one parity when rows are interpreted/reversed, and
@@ -540,8 +540,8 @@ loses full-raw geometry before demosaic.
   **Evidence.** `ImageMetadata` exposes a defaulted `BitPix`, untyped
   `Vec<usize> header_dimensions`, and `data_max` described as a saturation level at
   `lumos/src/io/image/mod.rs:138-192`. FITS stores its NAXIS-first shape
-  `[width,height,...]` at `lumos/src/io/image/fits.rs:44-51` and
-  `lumos/src/io/image/fits.rs:107-120`, while RAW writes
+  `[width,height,...]` at `lumos/src/io/image/fits/mod.rs:44-51` and
+  `lumos/src/io/image/fits/mod.rs:107-120`, while RAW writes
   `[height,width,channels]` at `lumos/src/io/raw/mod.rs:977-984` and
   `lumos/src/io/raw/mod.rs:1052-1059`. Inside production Lumos, these fields are assigned
   but `header_dimensions` is not consumed; `BitPix::normalization_max` chiefly enables

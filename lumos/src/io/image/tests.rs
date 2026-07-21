@@ -459,6 +459,16 @@ fn test_from_planar_channels_rgb() {
 }
 
 #[test]
+#[should_panic(expected = "all RGB planes must share width")]
+fn rgb_planes_reject_mismatched_dimensions() {
+    let _ = LinearImage::from([
+        Buffer2::new(2, 1, vec![1.0, 2.0]),
+        Buffer2::new(1, 1, vec![3.0]),
+        Buffer2::new(2, 1, vec![4.0, 5.0]),
+    ]);
+}
+
+#[test]
 fn test_channel_mut() {
     let mut image =
         LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);

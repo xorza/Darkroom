@@ -1,8 +1,9 @@
 //! Deterministic tests for the raw-light pipeline's memory tier and concurrency arithmetic.
 
 use crate::io::raw::demosaic::DemosaicMemory;
+use crate::resources::memory_budget;
 use crate::stacking::frame_store::{
-    MemoryPlan, PER_FRAME_WORKING_PLANES, fits_in_memory, memory_budget, plan_memory,
+    MemoryPlan, PER_FRAME_WORKING_PLANES, fits_in_memory, plan_memory,
 };
 
 const MIB: u64 = 1024 * 1024;

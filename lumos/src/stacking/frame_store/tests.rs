@@ -1,3 +1,4 @@
+use crate::resources::memory_budget;
 use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
 

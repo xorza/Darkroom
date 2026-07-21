@@ -522,7 +522,7 @@ mod tests {
     use crate::io::image::ImageDimensions;
     use crate::io::image::cfa::{CfaImage, CfaType};
     use crate::io::image::linear::LinearImage;
-    use crate::io::image::linear::PixelData;
+    use crate::io::image::pixel_data::PixelData;
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::CacheCore;
     use crate::stacking::combine::cache::tests::make_test_cache;

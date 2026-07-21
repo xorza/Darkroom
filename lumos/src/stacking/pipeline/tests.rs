@@ -83,7 +83,7 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         image: base,
         registration: reg,
     } = base_field();
-    let dims = base.dimensions;
+    let dims = base.dimensions();
     // A flat frame has no stars → registration fails → it is dropped, not fatal.
     let blank = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![base.clone(), shifted(&base, &reg, 5.0, 3.0), blank];
@@ -147,7 +147,7 @@ fn all_non_reference_frames_dropped_errors() {
     // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
     let BaseField { image: base, .. } = base_field();
-    let dims = base.dimensions;
+    let dims = base.dimensions();
     let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
     let frames = vec![base, blank(), blank()];
@@ -171,7 +171,7 @@ fn auto_reference_picks_the_richest_frame() {
     } = base_field();
     // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
     // anchor on frame 1.
-    let dims = base.dimensions;
+    let dims = base.dimensions();
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 

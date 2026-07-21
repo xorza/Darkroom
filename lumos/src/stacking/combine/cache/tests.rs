@@ -189,7 +189,7 @@ fn test_process_chunked_median() {
     });
 
     assert_eq!(result.chunk_available_memory, None);
-    assert_eq!(result.pixels.channels(), 1);
+    assert_eq!(result.pixels.channel_count(), 1);
     assert_eq!(result.pixels.channel(0).len(), 16);
     for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 2.0).abs() < f32::EPSILON);
@@ -217,7 +217,7 @@ fn test_process_chunked_rgb() {
         CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     });
 
-    assert_eq!(result.pixels.channels(), 3);
+    assert_eq!(result.pixels.channel_count(), 3);
     for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
     }
@@ -264,7 +264,7 @@ fn test_cfa_cache_plain_combine() {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         values[values.len() / 2]
     });
-    assert_eq!(median.channels(), 1);
+    assert_eq!(median.channel_count(), 1);
     for &pixel in median.channel(0).pixels() {
         assert!(
             (pixel - 2.0).abs() < f32::EPSILON,

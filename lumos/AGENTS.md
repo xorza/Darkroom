@@ -72,8 +72,8 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## io/image — image container & loading
 
-- `LinearImage` (`io/image/linear.rs`): `metadata: ImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
-- `PixelData` (`io/image/linear.rs`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
+- `LinearImage` (`io/image/linear.rs`): `metadata: ImageMetadata` + `pixels: PixelData`; dimensions are derived from the owned planes.
+- `PixelData` (`io/image/pixel_data.rs`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (FITS pixel type), opaque `ImageDimensions` (non-zero size + channels ∈ {1,3}, exposed through immutable accessors), and `ImageMetadata` (full FITS/EXIF header set + CFA/filter/gain/exposure/coords) live in `io/image/mod.rs`.
 - Entry points: `LinearImage::from_file` admits linear non-mosaic FITS and float TIFF, `CfaImage::from_file` admits camera RAW and mosaic FITS, `CfaImage::save_fits` writes an exact checksummed sensor-domain master, and `PreviewImage::from_file` owns the public `PREVIEW_IMAGE_EXTENSIONS` display policy; `LinearImage::from_pixels` and `from_planar_channels` build explicit in-memory scientific products. `mean()` uses parallel Kahan summation.
 - The crate-private `image_ops::rgb::Rgb` value struct (`image_ops/rgb/mod.rs`, `.intensity()` / `.scale()`) supports display transforms over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
