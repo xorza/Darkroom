@@ -4,9 +4,10 @@
 //! before/after. Gated behind the `real-data` feature.
 
 use crate::image_ops::intensity_plane;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, ExtractBackground, NeutralizeBackground, Scnr, Stretch};
+use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
@@ -46,7 +47,7 @@ fn extract_flattens_background_on_stretched_master() {
 
     // The display-domain master, as the other real-data tests build it.
     let mut img = Image::from(
-        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+        &LinearImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
     );
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();

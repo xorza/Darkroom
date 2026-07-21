@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use common::file_utils;
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata};
+use crate::io::image::ImageMetadata;
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
 use crate::stacking::star_detection::config::BackgroundConfig;
@@ -115,7 +115,7 @@ pub(crate) fn estimate_background(
 pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new(width, height, pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()
         },
@@ -127,7 +127,7 @@ pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType
 pub fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new_filled(width, height, value),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()
         },
@@ -192,25 +192,6 @@ pub(crate) fn save_png(image: &imaginarium::Image, name: &str) {
         .save_file(&path)
         .expect("save png");
     eprintln!("wrote {}", path.display());
-}
-
-/// Loads all images from a subdirectory of the calibration directory.
-/// Returns None if the subdirectory does not exist.
-pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
-    let cal_dir = calibration_dir();
-    let dir = cal_dir.join(subdir);
-
-    if !dir.exists() {
-        return None;
-    }
-
-    let paths = file_utils::files_with_extensions(&dir, ASTRO_IMAGE_EXTENSIONS)
-        .expect("scan calibration image directory");
-    let images = paths
-        .iter()
-        .map(|path| AstroImage::from_file(path).expect("Failed to load image"))
-        .collect();
-    Some(images)
 }
 
 /// Returns the first RAW file from the Lights subdirectory.

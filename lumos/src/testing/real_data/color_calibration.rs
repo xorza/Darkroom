@@ -5,8 +5,9 @@
 use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::color_calibration::channel_backgrounds;
+use crate::io::image::linear::LinearImage;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, NeutralizeBackground, Scnr, Stretch};
+use crate::{NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;
 
 fn spread(bg: Rgb) -> f32 {
@@ -19,7 +20,7 @@ fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
     let image = Image::from(
-        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+        &LinearImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
     );
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds differ.

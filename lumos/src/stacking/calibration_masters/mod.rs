@@ -21,8 +21,8 @@ use common::CancelToken;
 use common::file_utils;
 use common::serde as common_serde;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::io::raw::raw_dimensions;
+use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa_dimensions;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
@@ -224,8 +224,12 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     else {
         return true;
     };
-    match raw_dimensions(first.as_ref()) {
-        Ok(dims) => fits_in_memory(dims.x * dims.y * size_of::<f32>(), total_frames, available),
+    match cfa_dimensions(first.as_ref()) {
+        Ok(dims) => fits_in_memory(
+            dims.pixel_count() * size_of::<f32>(),
+            total_frames,
+            available,
+        ),
         Err(_) => true,
     }
 }

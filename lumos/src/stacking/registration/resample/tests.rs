@@ -1,5 +1,5 @@
-use crate::AstroImage;
-use crate::io::astro_image::ImageDimensions;
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -33,7 +33,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
     ];
 
     for (fixture_name, pixels) in fixtures {
-        let image = AstroImage::from_pixels(dimensions, pixels);
+        let image = LinearImage::from_pixels(dimensions, pixels);
         for (translation, outside_x, inside_x) in [(-0.75, 0, 1), (0.75, WIDTH - 1, WIDTH - 2)] {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));

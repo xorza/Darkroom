@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::io::astro_image::ImageDimensions;
+use crate::io::image::ImageDimensions;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
 #[derive(Debug, Error, Clone, PartialEq)]

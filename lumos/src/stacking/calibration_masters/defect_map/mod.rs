@@ -48,7 +48,7 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
 use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::error::Error;

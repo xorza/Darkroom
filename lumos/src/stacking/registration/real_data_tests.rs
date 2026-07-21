@@ -11,7 +11,7 @@ use std::time::Instant;
 use ::quickbench::quick_bench;
 use common::file_utils;
 
-use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage};
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
@@ -23,7 +23,7 @@ use crate::testing::calibration_dir;
 
 /// Load the first and last calibrated light frames from the sample data directory.
 /// Returns None if there are fewer than 2 lights.
-fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
+fn load_two_calibrated_lights() -> Option<(LinearImage, LinearImage)> {
     let cal_dir = calibration_dir();
     let lights_dir = cal_dir.join("calibrated_lights");
     if !lights_dir.exists() {
@@ -31,7 +31,7 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
         return None;
     }
 
-    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
         .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(
@@ -45,9 +45,9 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
     let last = &files[files.len() - 1];
 
     println!("Loading first: {:?}", first.file_name().unwrap());
-    let img1 = AstroImage::from_file(first).expect("Failed to load first light frame");
+    let img1 = LinearImage::from_file(first).expect("Failed to load first light frame");
     println!("Loading last:  {:?}", last.file_name().unwrap());
-    let img2 = AstroImage::from_file(last).expect("Failed to load last light frame");
+    let img2 = LinearImage::from_file(last).expect("Failed to load last light frame");
     Some((img1, img2))
 }
 
@@ -213,7 +213,7 @@ fn test_register_two_calibrated_lights() {
 
 /// Load all calibrated light frames and their file paths.
 /// Returns None if there are fewer than 2 lights.
-fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
+fn load_all_calibrated_lights() -> Option<(Vec<LinearImage>, Vec<PathBuf>)> {
     let cal_dir = calibration_dir();
     let lights_dir = cal_dir.join("calibrated_lights");
     if !lights_dir.exists() {
@@ -221,7 +221,7 @@ fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
         return None;
     }
 
-    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
         .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(
@@ -231,9 +231,9 @@ fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
         return None;
     }
 
-    let images: Vec<AstroImage> = files
+    let images: Vec<LinearImage> = files
         .iter()
-        .map(|p| AstroImage::from_file(p).expect("Failed to load light frame"))
+        .map(|p| LinearImage::from_file(p).expect("Failed to load light frame"))
         .collect();
     Some((images, files))
 }

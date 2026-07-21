@@ -1,5 +1,5 @@
-use crate::io::astro_image::AstroImage;
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
@@ -7,7 +7,7 @@ use crate::stacking::frame_store::{frame_from_memory, store_frame};
 use crate::testing::ScratchDirectory;
 
 /// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
-pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
+pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> LightCache {
     let frames = images.into_iter().map(StackFrame::from).collect();
     LightCache::from_stack_frames(
         frames,
@@ -29,7 +29,7 @@ fn mean_product(cache: &LightCache, weights: Option<&[f32]>) -> StackProduct {
 #[test]
 fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     let dimensions = ImageDimensions::new((2, 1), 3);
-    let image = || AstroImage::from_pixels(dimensions, vec![1.0; 6]);
+    let image = || LinearImage::from_pixels(dimensions, vec![1.0; 6]);
     let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
     let mut frames = vec![
         StackFrame::from(image()),
@@ -63,8 +63,8 @@ fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
     // weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 4/4 = 1.
     let dims = ImageDimensions::new((3, 2), 1);
-    let images: Vec<AstroImage> = (0..4)
-        .map(|i| AstroImage::from_pixels(dims, vec![i as f32; 6]))
+    let images: Vec<LinearImage> = (0..4)
+        .map(|i| LinearImage::from_pixels(dims, vec![i as f32; 6]))
         .collect();
     let product = mean_product(&make_test_cache(images), None);
     let linear_variance = product.linear_variance.as_ref().unwrap();
@@ -82,8 +82,8 @@ fn finish_product_uniform_equal_weights() {
 fn finish_product_uniform_manual_weights() {
     // weights [1,2,3,4], full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance = 30/100 = 0.30.
     let dims = ImageDimensions::new((2, 1), 1);
-    let images: Vec<AstroImage> = (0..4)
-        .map(|_| AstroImage::from_pixels(dims, vec![0.5; 2]))
+    let images: Vec<LinearImage> = (0..4)
+        .map(|_| LinearImage::from_pixels(dims, vec![0.5; 2]))
         .collect();
     let product = mean_product(&make_test_cache(images), Some(&[1.0, 2.0, 3.0, 4.0]));
     let linear_variance = product.linear_variance.as_ref().unwrap();
@@ -109,7 +109,7 @@ fn finish_product_partial_coverage() {
     let frames: Vec<StackFrame> = cov
         .iter()
         .map(|c| {
-            let mut frame = StackFrame::from(AstroImage::from_pixels(dims, vec![0.5, 0.5]));
+            let mut frame = StackFrame::from(LinearImage::from_pixels(dims, vec![0.5, 0.5]));
             frame.coverage = Some(Buffer2::new(2, 1, c.to_vec()));
             frame
         })
@@ -146,7 +146,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         .map(|pixels| {
             let image = CfaImage {
                 data: Buffer2::new(dims.width(), dims.height(), pixels),
-                metadata: AstroImageMetadata {
+                metadata: ImageMetadata {
                     cfa_type: Some(CfaType::Mono),
                     ..Default::default()
                 },
@@ -161,7 +161,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         core: CacheCore {
             spill_directory: None,
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -174,9 +174,9 @@ fn test_process_chunked_median() {
     // Create in-memory cache with 3 grayscale frames
     let dims = ImageDimensions::new((4, 4), 1);
     let images = vec![
-        AstroImage::from_pixels(dims, vec![1.0; 16]),
-        AstroImage::from_pixels(dims, vec![3.0; 16]),
-        AstroImage::from_pixels(dims, vec![2.0; 16]),
+        LinearImage::from_pixels(dims, vec![1.0; 16]),
+        LinearImage::from_pixels(dims, vec![3.0; 16]),
+        LinearImage::from_pixels(dims, vec![2.0; 16]),
     ];
 
     let cache = make_test_cache(images);
@@ -206,8 +206,8 @@ fn test_process_chunked_rgb() {
     let pixels2: Vec<f32> = (0..4).flat_map(|_| vec![5.0, 6.0, 7.0]).collect();
 
     let images = vec![
-        AstroImage::from_pixels(dims, pixels1),
-        AstroImage::from_pixels(dims, pixels2),
+        LinearImage::from_pixels(dims, pixels1),
+        LinearImage::from_pixels(dims, pixels2),
     ];
 
     let cache = make_test_cache(images);
@@ -233,8 +233,8 @@ fn test_process_chunked_rgb() {
 fn test_process_chunked_with_weights() {
     let dims = ImageDimensions::new((2, 2), 1);
     let images = vec![
-        AstroImage::from_pixels(dims, vec![10.0; 4]),
-        AstroImage::from_pixels(dims, vec![20.0; 4]),
+        LinearImage::from_pixels(dims, vec![10.0; 4]),
+        LinearImage::from_pixels(dims, vec![20.0; 4]),
     ];
 
     let cache = make_test_cache(images);
@@ -293,9 +293,9 @@ fn test_cfa_cache_plain_combine() {
 fn test_frame_count() {
     let dims = ImageDimensions::new((2, 2), 1);
     let images = vec![
-        AstroImage::from_pixels(dims, vec![1.0; 4]),
-        AstroImage::from_pixels(dims, vec![2.0; 4]),
-        AstroImage::from_pixels(dims, vec![3.0; 4]),
+        LinearImage::from_pixels(dims, vec![1.0; 4]),
+        LinearImage::from_pixels(dims, vec![2.0; 4]),
+        LinearImage::from_pixels(dims, vec![3.0; 4]),
     ];
 
     let cache = make_test_cache(images);
@@ -309,7 +309,7 @@ fn test_cleanup_removes_files() {
 
     let dims = ImageDimensions::new((2, 2), 3);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels);
+    let image = LinearImage::from_pixels(dims, pixels);
 
     let cached_frame = store_frame(&temp_dir, "cleanup_test.bin", &image).unwrap();
 
@@ -329,7 +329,7 @@ fn test_cleanup_removes_files() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config,
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -351,7 +351,7 @@ fn test_read_channel_chunk_in_memory() {
     let dims = ImageDimensions::new((4, 3), 1);
     // Pixels 0-11 in row-major order
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let images = vec![AstroImage::from_pixels(dims, pixels)];
+    let images = vec![LinearImage::from_pixels(dims, pixels)];
 
     let cache = make_test_cache(images);
 
@@ -375,7 +375,7 @@ fn test_read_channel_chunk_disk_backed() {
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels);
+    let image = LinearImage::from_pixels(dims, pixels);
 
     // Cache the image to disk
     let base_filename = "test_chunk.bin";
@@ -387,7 +387,7 @@ fn test_read_channel_chunk_disk_backed() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig {
                 available_memory: Some(123_456),
                 ..Default::default()
@@ -427,7 +427,7 @@ fn test_frame_count_disk_backed() {
     let mut frames = Vec::new();
     for i in 0..3 {
         let pixels: Vec<f32> = vec![i as f32; 4];
-        let image = AstroImage::from_pixels(dims, pixels);
+        let image = LinearImage::from_pixels(dims, pixels);
         let base_filename = format!("frame{}.bin", i);
         let cached_frame = store_frame(&temp_dir, &base_filename, &image).unwrap();
         frames.push(cached_frame);
@@ -439,7 +439,7 @@ fn test_frame_count_disk_backed() {
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
-            metadata: AstroImageMetadata::default(),
+            metadata: ImageMetadata::default(),
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
@@ -457,13 +457,13 @@ fn test_compute_channel_stats_grayscale() {
     let dims = ImageDimensions::new((3, 3), 1);
 
     // Frame 0: all 5.0 → median=5.0, MAD=0.0
-    let frame0 = AstroImage::from_pixels(dims, vec![5.0; 9]);
+    let frame0 = LinearImage::from_pixels(dims, vec![5.0; 9]);
 
     // Frame 1: [1,2,3,4,5,6,7,8,9] → median=5.0, deviations=[4,3,2,1,0,1,2,3,4] → MAD=2.0
-    let frame1 = AstroImage::from_pixels(dims, (1..=9).map(|i| i as f32).collect());
+    let frame1 = LinearImage::from_pixels(dims, (1..=9).map(|i| i as f32).collect());
 
     // Frame 2: [10,10,10,20,20,20,30,30,30] → median=20.0, deviations=[10,10,10,0,0,0,10,10,10] → MAD=10.0
-    let frame2 = AstroImage::from_pixels(
+    let frame2 = LinearImage::from_pixels(
         dims,
         vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
     );
@@ -491,7 +491,7 @@ fn test_compute_channel_stats_rgb() {
     let dims = ImageDimensions::new((2, 2), 3);
 
     // Frame 0: R=[1,3,5,7] G=[10,10,10,10] B=[0,0,100,100]
-    let frame0 = AstroImage::from_planar_channels(
+    let frame0 = LinearImage::from_planar_channels(
         dims,
         vec![
             vec![1.0, 3.0, 5.0, 7.0],
@@ -505,7 +505,7 @@ fn test_compute_channel_stats_rgb() {
     //   B: median=50.0 (avg of 0,100), deviations=[50,50,50,50] → MAD=50.0
 
     // Frame 1: R=[2,2,2,2] G=[1,2,3,4] B=[10,20,30,40]
-    let frame1 = AstroImage::from_planar_channels(
+    let frame1 = LinearImage::from_planar_channels(
         dims,
         vec![
             vec![2.0, 2.0, 2.0, 2.0],

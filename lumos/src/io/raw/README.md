@@ -4,7 +4,7 @@
 
 ```
 raw/
-├── mod.rs              # Entry point: load_raw(), RAII guards, sensor dispatch
+├── mod.rs              # Internal RAW decoders, RAII guards, sensor dispatch
 ├── normalize.rs        # SIMD u16-to-f32 normalization (SSE2/SSE4.1/NEON)
 ├── tests.rs            # Unit tests for load_raw and normalization
 ├── benches.rs          # Benchmarks and quality comparison vs libraw
@@ -22,7 +22,7 @@ raw/
 
 ## Pipeline Flow
 
-`AstroImage::from_file()` dispatches RAW extensions to `raw::load_raw(path)`, which:
+`PreviewImage::from_file(path)` dispatches RAW extensions to the private preview decoder, which:
 
 1. Reads file into memory, opens via libraw FFI (`libraw_open_buffer`, `libraw_unpack`)
 2. Extracts dimensions, margins, black/maximum levels
@@ -39,11 +39,11 @@ raw/
 Every path keeps camera white balance at unity. RAW channel values therefore remain proportional
 to sensor signal; color scaling belongs to a later explicit color-calibration or display step.
 The camera-recorded multipliers are retained canonically as `[R, G1, B, G2]` in
-`AstroImageMetadata` for optional downstream use, but are never applied during RAW decoding.
+`ImageMetadata` for optional downstream use, but are never applied during RAW decoding.
 
 Both demosaic kernels emit unclipped linear RGB from one source-independent algorithm. Calibrated
 `CfaImage` data therefore retains negative samples and interpolation overshoot. The direct
-`load_raw` entry point applies its `[0,1]` contract once, after the finished image has been
+preview path applies its `[0,1]` contract once, after the finished image has been
 assembled; range policy never changes interpolation or homogeneity selection.
 
 RCD keeps its canonical low-pass ratio correction for every nonnegative or well-conditioned signed

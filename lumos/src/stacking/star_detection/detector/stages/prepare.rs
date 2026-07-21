@@ -2,7 +2,7 @@
 
 use rayon::prelude::*;
 
-use crate::AstroImage;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
 use crate::stacking::star_detection::resources::DetectionResources;
@@ -17,7 +17,7 @@ use imaginarium::Buffer2;
 ///   2. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
-pub(crate) fn prepare(image: &AstroImage, pool: &mut DetectionResources) -> Buffer2<f32> {
+pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buffer2<f32> {
     let mut pixels = pool.acquire_f32();
 
     if image.is_grayscale() {
@@ -61,7 +61,7 @@ pub(crate) fn prepare(image: &AstroImage, pool: &mut DetectionResources) -> Buff
 /// The three per-channel median+MAD passes are independent and run concurrently,
 /// each reusing one caller-supplied scratch buffer (so there is no per-call
 /// allocation). Each scratch buffer must be one channel long; they are clobbered.
-fn detection_channel_weights(image: &AstroImage, scratch: &mut [Buffer2<f32>; 3]) -> [f32; 3] {
+fn detection_channel_weights(image: &LinearImage, scratch: &mut [Buffer2<f32>; 3]) -> [f32; 3] {
     let mut inv_var = [0.0f32; 3];
     inv_var
         .as_mut_slice()
@@ -90,7 +90,7 @@ fn detection_channel_weights(image: &AstroImage, scratch: &mut [Buffer2<f32>; 3]
 }
 
 /// Write `Σ wₖ·channelₖ` into `output` (RGB only).
-fn combine_channels(image: &AstroImage, weights: [f32; 3], output: &mut Buffer2<f32>) {
+fn combine_channels(image: &LinearImage, weights: [f32; 3], output: &mut Buffer2<f32>) {
     let r = image.channel(0).pixels();
     let g = image.channel(1).pixels();
     let b = image.channel(2).pixels();
@@ -105,8 +105,9 @@ fn combine_channels(image: &AstroImage, weights: [f32; 3], output: &mut Buffer2<
 
 #[cfg(test)]
 mod tests {
+    use crate::io::image::ImageDimensions;
+    use crate::io::image::linear::LinearImage;
     use crate::stacking::star_detection::detector::stages::prepare::*;
-    use crate::{AstroImage, ImageDimensions};
 
     /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`
     /// (8 pixels at `center - mad`, 8 at `center + mad`).
@@ -120,7 +121,7 @@ mod tests {
     fn test_prepare_uniform() {
         let dim = ImageDimensions::new((64, 64), 1);
         let data = vec![0.5f32; 64 * 64];
-        let image = AstroImage::from_pixels(dim, data);
+        let image = LinearImage::from_pixels(dim, data);
 
         let mut pool = DetectionResources::new(64, 64);
         let result = prepare(&image, &mut pool);
@@ -141,7 +142,7 @@ mod tests {
         data[32 * width + 32] = 0.9;
 
         let dim = ImageDimensions::new((width, height), 1);
-        let image = AstroImage::from_pixels(dim, data);
+        let image = LinearImage::from_pixels(dim, data);
 
         let mut pool = DetectionResources::new(width, height);
         let result = prepare(&image, &mut pool);
@@ -155,7 +156,7 @@ mod tests {
         // Identical per-channel MAD → equal inverse-variance weights (≈ 1/3 each).
         let dims = ImageDimensions::new((4, 4), 3);
         let ch = channel_with_mad(0.5, 0.02);
-        let image = AstroImage::from_planar_channels(dims, vec![ch.clone(), ch.clone(), ch]);
+        let image = LinearImage::from_planar_channels(dims, vec![ch.clone(), ch.clone(), ch]);
 
         let mut scratch = [
             Buffer2::new_default(4, 4),
@@ -177,7 +178,7 @@ mod tests {
         let dims = ImageDimensions::new((4, 4), 3);
         let clean = channel_with_mad(0.5, 0.02);
         let noisy = channel_with_mad(0.5, 0.08);
-        let image = AstroImage::from_planar_channels(dims, vec![clean.clone(), clean, noisy]);
+        let image = LinearImage::from_planar_channels(dims, vec![clean.clone(), clean, noisy]);
 
         let mut scratch = [
             Buffer2::new_default(4, 4),
@@ -200,7 +201,7 @@ mod tests {
         // Uniform channels have MAD 0 → degenerate; weights fall back to 1/3 each.
         let dims = ImageDimensions::new((4, 4), 3);
         let flat = vec![0.5f32; 16];
-        let image = AstroImage::from_planar_channels(dims, vec![flat.clone(), flat.clone(), flat]);
+        let image = LinearImage::from_planar_channels(dims, vec![flat.clone(), flat.clone(), flat]);
 
         let mut scratch = [
             Buffer2::new_default(4, 4),
@@ -220,7 +221,7 @@ mod tests {
         let r = channel_with_mad(0.30, 0.02);
         let g = channel_with_mad(0.50, 0.02);
         let b = channel_with_mad(0.70, 0.02);
-        let image = AstroImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
+        let image = LinearImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
 
         let mut pool = DetectionResources::new(4, 4);
         let out = prepare(&image, &mut pool);
@@ -244,7 +245,7 @@ mod tests {
         r[5] = 0.90; // bright red star, off the symmetric background
         let g = channel_with_mad(0.10, 0.01);
         let b = channel_with_mad(0.10, 0.01);
-        let image = AstroImage::from_planar_channels(dims, vec![r, g, b]);
+        let image = LinearImage::from_planar_channels(dims, vec![r, g, b]);
 
         let mut pool = DetectionResources::new(4, 4);
         let out = prepare(&image, &mut pool);

@@ -8,13 +8,14 @@ mod pipeline_tests;
 mod stage_tests;
 mod subpixel_accuracy;
 
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::camera::{Camera, PsfModel};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
@@ -141,7 +142,7 @@ impl Scenario {
             for p in &mut px {
                 *p = p.clamp(0.0, 1.0);
             }
-            frame.image = AstroImage::from_planar_channels(
+            frame.image = LinearImage::from_planar_channels(
                 ImageDimensions::new((self.width, self.height), 1),
                 [px],
             );

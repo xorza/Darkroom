@@ -1,6 +1,6 @@
 # Star Detection
 
-The detector turns an `AstroImage` into flux-sorted `Star` values plus diagnostics for every
+The detector turns a `LinearImage` into flux-sorted `Star` values plus diagnostics for every
 pipeline stage. `StarDetector` validates its composed configuration once at construction and reuses
 its buffer pool across images.
 

@@ -5,7 +5,9 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::astro_image::ImageDimensions;
+use crate::StarDetector;
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::{
     BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
     FilterConfig, FwhmConfig, LocalBackgroundMethod, MeasurementConfig,
@@ -15,7 +17,6 @@ use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use crate::{AstroImage, StarDetector};
 use imaginarium::Buffer2;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
@@ -27,7 +28,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );
@@ -83,7 +84,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
 fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     // 4K image with 2000 stars
     let pixels = star_field(4096, 4096, 2000, 42).image.channel(0).clone();
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );
@@ -96,7 +97,7 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
 fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     // 1K image with 100 stars (sparse field)
     let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );

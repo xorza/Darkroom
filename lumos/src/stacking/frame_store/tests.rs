@@ -8,7 +8,7 @@ const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
 fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
     let directory = ScratchDirectory::new("frame_store_image");
     let dimensions = ImageDimensions::new((2, 2), 1);
-    let mut image = AstroImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
+    let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
     image.metadata.exposure_time = Some(30.0);
     let path = directory.join("calibrated_c0.bin");
     write_plane(&path, &[9.0; 4]).unwrap();
@@ -25,7 +25,7 @@ fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
 #[test]
 fn light_frame_keeps_quality_with_its_planes() {
     let dimensions = ImageDimensions::new((2, 2), 1);
-    let image = AstroImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
     let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
     let source_stats = compute_frame_stats(&image);

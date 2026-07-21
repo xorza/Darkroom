@@ -10,14 +10,15 @@ use imaginarium::Image;
 use crate::Stretch;
 use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 
 const W: usize = 3000;
 const H: usize = 2000;
 
 /// A synthetic *linear* RGB master: sky gradient + read noise + a few hundred bright stars whose
 /// cores exceed 1.0 (as a real linear stack's do — every stretch curve must clamp them).
-fn linear_master() -> AstroImage {
+fn linear_master() -> LinearImage {
     let dims = ImageDimensions::new((W, H), 3);
     let n = W * H;
     let mut r = vec![0.0f32; n];
@@ -43,7 +44,7 @@ fn linear_master() -> AstroImage {
         g[idx] += bright;
         bch[idx] += bright;
     }
-    AstroImage::from_planar_channels(dims, vec![r, g, bch])
+    LinearImage::from_planar_channels(dims, vec![r, g, bch])
 }
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
@@ -51,8 +52,8 @@ fn bench_stretch_auto_stf_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
     let stretch = Stretch::auto_stf();
     // A fresh linear image per call: `apply` stretches in place, so re-stretching the same image
-    // would feed an already-stretched master back in. The convert-from-`AstroImage` is the
-    // realistic input cost (the master is handed to the display stage as a linear `AstroImage`).
+    // would feed an already-stretched master back in. The convert-from-`LinearImage` is the
+    // realistic input cost (the master is handed to the display stage as a linear `LinearImage`).
     b.bench(|| {
         let mut img: Image = master.clone().into();
         stretch

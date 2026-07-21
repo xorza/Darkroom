@@ -44,7 +44,7 @@ clamped merely to make them fit `[0, 1]`.
 Use this for already-monochrome data, already-demosaiced linear RGB, or a deliberately
 developed preview.
 
-`AstroImage` contains one or three planar `Buffer2<f32>` channels. Its numeric domain
+`LinearImage` contains one or three planar `Buffer2<f32>` channels. Its numeric domain
 depends on provenance:
 
 | Provenance | Required domain |
@@ -148,26 +148,13 @@ garbage and enforce both compressed-input and decompressed-output limits.
 ### 2.2 Dispatch policy
 
 ```text
-load(path, intent, selector):
-    kind = detect_container(path)
-
-    switch kind:
-        FITS:
-            return load_fits(path, intent, selector.fits_hdu)
-        camera RAW or DNG:
-            if intent == ScientificCfa:
-                return load_raw_cfa(path)
-            return load_raw_preview(path)
-        PNG, TIFF, JPEG:
-            if intent == ScientificCfa:
-                reject unless a dedicated linear-CFA decoder proves that contract
-            return load_standard_linear(path, selector.color_policy)
-        otherwise:
-            error UnsupportedFormat(path, observed_signature, extension)
+CfaImage::from_file(path): camera RAW or validated sensor-plane FITS
+LinearImage::from_file(path): physical non-mosaic FITS or declared-linear float TIFF
+PreviewImage::from_file(path): preview-decoded FITS, RAW, TIFF, PNG, or JPEG
 ```
 
-`intent` MUST be explicit. A generic `from_file` entry point that sometimes produces
-clipped RGB and sometimes unbounded physical data is too easy to misuse in calibration.
+The product type MUST be explicit. A generic entry point that sometimes produces clipped RGB and
+sometimes unbounded physical data is too easy to misuse in calibration.
 
 ## 3. FITS
 
@@ -1362,7 +1349,7 @@ should expose a conservative peak-memory estimator before launching work.
 
 The preferred order for completing Stage 1 is:
 
-1. Split the public API into `ScientificCfa` and `LinearImage/Preview` intents.
+1. Split the public API into `CfaImage`, `LinearImage`, and `PreviewImage` constructors.
 2. Replace extension-only dispatch with content-confirmed detection.
 3. Correct FITS numeric provenance and remove `DATAMAX` normalization.
 4. Add explicit FITS HDU selection, checksum policy, and metadata inheritance policy.
@@ -1387,6 +1374,7 @@ preceding sections are the required behavior.
   images.
 - `physical_f32()` applies `BSCALE`/`BZERO` in `f64`, turns `BLANK` into NaN, and
   narrows to `f32` with defined rounding.
+- Lumos preserves those FITS physical values unchanged; `DATAMAX` is metadata only.
 - Lumos selects the first image-bearing HDU rather than assuming HDU zero.
 - Two-dimensional mono and one-/three-plane FITS shapes are validated and converted
   to planar storage.
@@ -1394,8 +1382,13 @@ preceding sections are the required behavior.
 - The LibRaw black model is consolidated into common, per-channel, and repeating
   residual components.
 - `load_raw_cfa` preserves signed normalized samples for calibration.
-- The stacking stream follows load-CFA -> calibrate -> optional cosmic-ray handling ->
-  demosaic.
+- `PreviewImage::from_file`, `LinearImage::from_file`, and `CfaImage::from_file` establish
+  separate preview, linear-scientific, and sensor-CFA products with decoder, transfer,
+  color, clipping, and demosaic provenance.
+- Path stacking admits only non-mosaic physical FITS and explicitly declared float
+  TIFF; PNG, JPEG, integer/alpha TIFF, direct RAW preview, and mosaic FITS are rejected.
+- Camera RAW and eligible one-plane FITS loaded through `CfaImage::from_file` share the
+  same calibration, optional cosmic-ray, and demosaic path.
 - Bayer RCD has a signed-denominator fallback instead of forcing calibrated values
   positive.
 - X-Trans uses a native one-pass Markesteijn implementation and validates its pattern.
@@ -1404,41 +1397,35 @@ preceding sections are the required behavior.
 
 ### 10.2 Correctness gaps
 
-1. **FITS integer gain is frame-dependent.** `prepare_fits_pixels` divides positive
-   integer images by `DATAMAX` when present. This must be removed; preserve physical
-   values or use an explicit stable acquisition scale.
-2. **Logical FITS types are folded incorrectly.** `I8` is reported as `UInt8` and
-   `U64` as `Int64`, selecting incorrect normalization provenance. Large integer and
-   `F64` physical samples also narrow to `f32` without a caller-visible precision
-   policy or provenance flag.
-3. **Dispatch is extension-only.** Common `.fts`, `.fits.fz`, and outer-gzip
+1. **Logical FITS types are folded incorrectly.** `I8` is reported as `UInt8` and
+   `U64` as `Int64` in descriptive metadata. Large integer and `F64` physical samples
+   also narrow to `f32` without a caller-visible precision policy or provenance flag.
+2. **Dispatch is extension-only.** Common `.fts`, `.fits.fz`, and outer-gzip
    `.fits.gz` names are rejected (the compound names are examined only by their final
    extension), and the hard-coded RAW list exposes only
    RAF/CR2/CR3/NEF/ARW/DNG despite broader LibRaw support.
-4. **HDU and cube semantics cannot be requested.** The first image is always selected
+3. **HDU and cube semantics cannot be requested.** The first image is always selected
    and every `NAXIS3=3` image is assumed to be RGB. Lumos does not expose
    `EXTNAME`/`EXTVER` selection, checksum verification, `INHERIT` policy, declared
    channel semantics, compressed-float quantization provenance, or complete WCS
    retention.
-5. **FITS CFA support is incomplete.** `BOTTOM-UP` unconditionally calls
+4. **FITS CFA support is incomplete.** `BOTTOM-UP` unconditionally calls
    `flip_vertical()`; it should shift vertical phase by `(height-1) mod 2` if rows are
    reversed. `COLORTYP` conflicts and 36-character X-Trans FITS patterns are not
    handled.
-6. **Mosaic FITS is not a calibration CFA input.** The loader records CFA metadata on
-   `AstroImage`, but the streaming scientific CFA path calls `load_raw_cfa` for camera
-   RAW. OSC FITS therefore lacks the required calibrate-then-demosaic route.
-7. **RAW compatibility metadata is sparse.** The current output does not retain enough
+5. **RAW compatibility metadata is sparse.** The current output does not retain enough
    exposure, temperature, gain/offset, white-level, camera identity, linearization,
    or mask information for robust calibration-set validation.
-8. **No saturation/validity masks.** FITS nulls currently reject the complete image,
+6. **No saturation/validity masks.** FITS nulls currently reject the complete image,
    while RAW saturation and bad-pixel states are not propagated.
-9. **Unknown-CFA fallback is mislabeled.** A developed RGB LibRaw fallback can carry
+7. **Unknown-CFA fallback is mislabeled.** A developed RGB LibRaw fallback can carry
    `CfaType::Mono` metadata. Scientific loading correctly errors instead; preview
    metadata still needs correction.
-10. **Generic raster values are not color-managed.** PNG/JPEG/TIFF samples are
-    converted to `f32` without interpreting transfer or ICC metadata. A warning is
-    insufficient if the result can enter scientific processing. RGBA alpha is dropped.
-11. **DNG conformance is unproven and incomplete.** LibRaw parses
+8. **Preview rasters are not color-managed.** PNG/JPEG/TIFF preview samples are
+   converted to `f32` without interpreting transfer or ICC metadata. RGBA alpha is
+   dropped, although that decision is now recorded. Scientific loading rejects these
+   inputs except for explicitly declared non-alpha float TIFF.
+9. **DNG conformance is unproven and incomplete.** LibRaw parses
     `LinearizationTable` and its DNG unpackers apply the curve, but Lumos has no
     fixtures demonstrating exactly-once behavior for its pinned version and supported
     compression variants. LibRaw 0.20.1 also reduces `BlackLevelDeltaH` and
@@ -1447,16 +1434,16 @@ preceding sections are the required behavior.
     only LibRaw's one-component `u16 raw_image`, so floating-point and multi-component
     DNG raw buffers are unsupported rather than handled through `float_image`,
     `color3_image`, or `color4_image`.
-12. **No CFA drizzle or super-pixel path.** These are useful optional integration and
+10. **No CFA drizzle or super-pixel path.** These are useful optional integration and
     preview modes, but lower priority than the domain and FITS-CFA fixes above.
 
 ### 10.3 Relevant source locations
 
-- `lumos/src/io/astro_image/mod.rs` — dispatch, public image representation, standard
-  image conversion.
-- `lumos/src/io/astro_image/fits.rs` — FITS selection, scaling, metadata, and Bayer
+- `lumos/src/io/image/mod.rs` — shared metadata, preview dispatch, and standard preview conversion.
+- `lumos/src/io/image/linear.rs` — linear image representation, scientific loading, and layout conversion.
+- `lumos/src/io/image/fits.rs` — FITS selection, scaling, metadata, and Bayer
   interpretation.
-- `lumos/src/io/astro_image/cfa.rs` — signed CFA representation and demosaic routing.
+- `lumos/src/io/image/cfa.rs` — signed CFA representation and demosaic routing.
 - `lumos/src/io/raw/mod.rs` — LibRaw boundary, black consolidation, RAW products.
 - `lumos/src/io/raw/normalize.rs` — clipped and unclipped normalization.
 - `lumos/src/io/raw/demosaic/bayer/rcd.rs` — signed RCD.

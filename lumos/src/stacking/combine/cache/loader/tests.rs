@@ -3,7 +3,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::io::astro_image::AstroImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::cache::loader::*;
 use crate::testing::ScratchDirectory;
 
@@ -14,7 +14,7 @@ fn load_test_frame(
     dimensions: ImageDimensions,
     frame_index: usize,
 ) -> Result<LoadedStoredFrame, Error> {
-    load_and_cache_frame::<AstroImage>(
+    load_and_cache_frame::<LinearImage>(
         cache_dir,
         base_filename,
         source_path,
@@ -53,7 +53,7 @@ fn test_load_and_cache_frame_fresh() {
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels.clone());
+    let image = LinearImage::from_pixels(dims, pixels.clone());
 
     // Write a temp TIFF file to load from
     let source_path = temp_dir.join("source.tiff");
@@ -80,7 +80,7 @@ fn test_load_and_cache_frame_reuse() {
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels.clone());
+    let image = LinearImage::from_pixels(dims, pixels.clone());
 
     // Write a temp TIFF file
     let source_path = temp_dir.join("source.tiff");
@@ -107,7 +107,7 @@ fn test_load_and_cache_frame_reuse() {
     // Reusing a forced filename collision must still validate the source path.
     let collided_path = temp_dir.join("collided.tiff");
     let collided_pixels: Vec<f32> = (100..112).map(|i| i as f32).collect();
-    AstroImage::from_pixels(dims, collided_pixels.clone())
+    LinearImage::from_pixels(dims, collided_pixels.clone())
         .save(&collided_path)
         .unwrap();
     let first_timestamp =
@@ -128,7 +128,7 @@ fn test_load_and_cache_frame_reuse() {
     // A same-path, same-size rewrite within one second must invalidate at nanosecond precision.
     let rewritten_pixels: Vec<f32> = (200..212).map(|i| i as f32).collect();
     let original_len = std::fs::metadata(&collided_path).unwrap().len();
-    AstroImage::from_pixels(dims, rewritten_pixels.clone())
+    LinearImage::from_pixels(dims, rewritten_pixels.clone())
         .save(&collided_path)
         .unwrap();
     assert_eq!(
@@ -178,7 +178,7 @@ fn test_load_and_cache_frame_dimension_mismatch() {
     // Create image with different dimensions than expected
     let actual_dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(actual_dims, pixels);
+    let image = LinearImage::from_pixels(actual_dims, pixels);
 
     let source_path = temp_dir.join("source.tiff");
     image.save(&source_path).unwrap();
@@ -349,7 +349,7 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     let dims = ImageDimensions::new((4, 3), 1);
     // [0,1,2,3,4,5,6,7,8,9,10,11] → median=5.5, deviations=[5.5,4.5,3.5,2.5,1.5,0.5,0.5,1.5,2.5,3.5,4.5,5.5] → MAD=3.0
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels);
+    let image = LinearImage::from_pixels(dims, pixels);
 
     let source_path = temp_dir.join("source.tiff");
     image.save(&source_path).unwrap();
@@ -388,7 +388,7 @@ fn test_missing_stats_sidecar_forces_reload() {
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(dims, pixels);
+    let image = LinearImage::from_pixels(dims, pixels);
 
     let source_path = temp_dir.join("source.tiff");
     image.save(&source_path).unwrap();

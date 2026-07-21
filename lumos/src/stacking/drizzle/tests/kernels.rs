@@ -275,7 +275,7 @@ fn test_rgb_channels_independent() {
     pixels[idx] = 1.0;
     pixels[idx + 1] = 2.0;
     pixels[idx + 2] = 3.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 3), pixels);
+    let image = LinearImage::from_pixels(ImageDimensions::new((4, 4), 3), pixels);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 3), config);

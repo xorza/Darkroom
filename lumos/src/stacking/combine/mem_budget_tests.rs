@@ -18,7 +18,7 @@ use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::AstroImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::frame_store::{fits_in_memory, load_concurrency, memory_budget};
@@ -129,7 +129,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
     // check is independent of how FITS maps u16 → f32). Mean(None) must reproduce it exactly.
     let per_frame: Vec<f32> = paths
         .iter()
-        .map(|p| AstroImage::from_file(p).unwrap().channel(0).pixels()[0])
+        .map(|p| LinearImage::from_file(p).unwrap().channel(0).pixels()[0])
         .collect();
     let expected = per_frame.iter().sum::<f32>() / n as f32;
     assert!(

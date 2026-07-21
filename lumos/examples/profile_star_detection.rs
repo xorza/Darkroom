@@ -10,9 +10,9 @@
 use std::thread;
 use std::time::Duration;
 
-use lumos::{AstroImage, ImageDimensions, StarDetector};
+use lumos::{ImageDimensions, LinearImage, StarDetector};
 
-fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> AstroImage {
+fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> LinearImage {
     let background = 0.1f32;
     let mut pixels = vec![background; width * height];
 
@@ -51,7 +51,7 @@ fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> As
         *p = p.clamp(0.0, 1.0);
     }
 
-    AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
+    LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
 }
 
 fn main() {

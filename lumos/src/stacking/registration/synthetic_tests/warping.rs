@@ -7,13 +7,14 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, test_support};
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
-use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -265,7 +266,7 @@ fn test_warp_homography_roundtrip() {
 
 #[test]
 fn test_warp_with_detected_transform() {
-    use crate::AstroImage;
+    use crate::io::image::linear::LinearImage;
 
     use crate::stacking::registration::{Config as RegConfig, register};
     use crate::stacking::star_detection::config::Config as StarConfig;
@@ -294,11 +295,11 @@ fn test_warp_with_detected_transform() {
     detection_config.detection.sigma_threshold = 3.0;
     let mut det = StarDetector::from_config(detection_config).unwrap();
 
-    let ref_image = AstroImage::from_pixels(
+    let ref_image = LinearImage::from_pixels(
         ImageDimensions::new((width, height), 1),
         ref_pixels.to_vec(),
     );
-    let target_image = AstroImage::from_pixels(
+    let target_image = LinearImage::from_pixels(
         ImageDimensions::new((width, height), 1),
         target_pixels.to_vec(),
     );
@@ -317,7 +318,7 @@ fn test_warp_with_detected_transform() {
         .expect("Registration should succeed");
 
     // Use warp to align target back to reference frame
-    let target_astro = AstroImage::from_pixels(
+    let target_astro = LinearImage::from_pixels(
         ImageDimensions::new((width, height), 1),
         target_pixels.into_vec(),
     );
@@ -417,7 +418,7 @@ fn test_warp_grayscale_translation() {
     let height = ref_buf.height();
     let ref_pixels = ref_buf.into_vec();
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels.clone());
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels.clone());
 
     // Apply a translation of (5, -3) pixels
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
@@ -476,7 +477,7 @@ fn test_warp_rgb() {
         }
     }
 
-    let rgb_image = AstroImage::from_pixels(ImageDimensions::new((width, height), 3), rgb_pixels);
+    let rgb_image = LinearImage::from_pixels(ImageDimensions::new((width, height), 3), rgb_pixels);
 
     // Apply a transform
     let transform = Transform::euclidean(DVec2::new(3.0, -2.0), 1.0_f64.to_radians());
@@ -520,14 +521,14 @@ fn test_warp_rgb() {
 
 #[test]
 fn test_warp_preserves_output_metadata() {
-    use crate::io::astro_image::AstroImageMetadata;
+    use crate::io::image::ImageMetadata;
 
     let pixels = star_field(256, 256, 30, 11111).image.channel(0).clone();
     let width = pixels.width();
     let height = pixels.height();
     let mut image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
-    image.metadata = AstroImageMetadata {
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
+    image.metadata = ImageMetadata {
         object: Some("M42".to_string()),
         exposure_time: Some(120.0),
         ..Default::default()
@@ -729,7 +730,7 @@ fn test_warp_api_with_sip() {
         .channel(0)
         .clone();
     let image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
 
     let warp_config = WarpParams {
         method: InterpolationMethod::Bilinear,
@@ -771,7 +772,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // must read back exactly V.
     const V: f32 = 0.5;
     let (w, h) = (16usize, 8usize);
-    let image = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
 
     // output(x,y) samples source (x + 2.5, y): columns 0..=12 are fully in
     // bounds, column 13 is half-covered (its right bilinear tap is off the
@@ -848,7 +849,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
     let (w, h) = (32usize, 8usize);
-    let image = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
 
     // src = (x + 3.5, y): a Lanczos3 (6-tap) kernel reaches off the right edge
     // for x ≳ 26 and lands entirely outside by x = 31.

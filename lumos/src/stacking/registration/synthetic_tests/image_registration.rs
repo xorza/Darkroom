@@ -4,7 +4,8 @@
 //! run star detection on both images, and verify that registration
 //! correctly recovers the applied transformation.
 
-use crate::{AstroImage, ImageDimensions};
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use glam::DVec2;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
@@ -88,9 +89,9 @@ fn test_image_registration_translation() {
 
     // Create AstroImages
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     // Detect stars in both images
     let mut det = detector();
@@ -168,9 +169,9 @@ fn test_image_registration_rotation() {
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -224,9 +225,9 @@ fn test_image_registration_similarity() {
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, scale);
 
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -301,9 +302,9 @@ fn test_image_registration_with_noise() {
     let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     let mut detection_config = DetConfig::default();
     detection_config.fwhm.expected = 0.0;
@@ -363,9 +364,9 @@ fn test_image_registration_dense_field() {
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -416,9 +417,9 @@ fn test_image_registration_large_image() {
     let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
     let target_image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);

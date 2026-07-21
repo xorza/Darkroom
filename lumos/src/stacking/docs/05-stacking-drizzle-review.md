@@ -53,7 +53,7 @@ invariants.
 
 ```text
 ordinary registered stack
-  calibrated AstroImage
+  calibrated LinearImage
     -> detect/register
     -> inverse-warp once into source-sized reference grid
     -> StackFrame { warped image, coverage, confidence, pre-warp MAD stats }
@@ -76,7 +76,7 @@ standalone drizzle
     -> accumulate shared signed/statistical weight and coefficient squares
     -> coverage = signed weight / global maximum
     -> fill below min_coverage*global_max; clamp Lanczos science to >= 0
-    -> construct AstroImage with default metadata
+    -> construct LinearImage with default metadata
 ```
 
 `align_and_stack` always follows the first flow. No production pipeline constructs a
@@ -176,8 +176,8 @@ standalone drizzle
   center to `scale * transformed_center` at `../drizzle/accumulator.rs:283`; Square uses
   the same multiplication for corners at `../drizzle/accumulator.rs:369`. No grid origin
   or output mode exists in `DrizzleConfig` at `../drizzle/config.rs:30`. Finalization uses
-  `AstroImage::from_planar_channels` at `../drizzle/accumulator.rs:635`, whose constructor
-  installs default metadata at `../../io/astro_image/mod.rs:389`.
+  `LinearImage::from_planar_channels` at `../drizzle/accumulator.rs:635`, whose constructor
+  installs default metadata in `../../io/image/linear.rs`.
 
   **Impact.** At `scale=2`, identity maps source center zero to output center zero instead
   of `0.5`; half of the first scaled source footprint lies outside the output. Rotated or

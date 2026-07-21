@@ -3,7 +3,8 @@ use std::f64::consts::{FRAC_PI_4, PI};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::drizzle::accumulator::test_support::{
     accumulated_flux_sum, add_image as add_test_image,
 };
@@ -19,7 +20,7 @@ use crate::stacking::registration::transform::Transform;
 trait DrizzleAccumulatorTestExt {
     fn add_image(
         &mut self,
-        image: AstroImage,
+        image: LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -29,7 +30,7 @@ trait DrizzleAccumulatorTestExt {
 impl DrizzleAccumulatorTestExt for DrizzleAccumulator {
     fn add_image(
         &mut self,
-        image: AstroImage,
+        image: LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -42,11 +43,11 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
-fn mono_image(width: usize, height: usize, pixels: Vec<f32>) -> AstroImage {
-    AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
+fn mono_image(width: usize, height: usize, pixels: Vec<f32>) -> LinearImage {
+    LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
 }
 
-fn constant_mono_image(width: usize, height: usize, value: f32) -> AstroImage {
+fn constant_mono_image(width: usize, height: usize, value: f32) -> LinearImage {
     mono_image(width, height, vec![value; width * height])
 }
 
@@ -90,9 +91,9 @@ fn assert_product_finite(product: &StackProduct) {
 }
 
 fn drizzle_frames(
-    images: Vec<AstroImage>,
+    images: Vec<LinearImage>,
     transforms: &[Transform],
-) -> Vec<DrizzleFrame<AstroImage>> {
+) -> Vec<DrizzleFrame<LinearImage>> {
     assert_eq!(images.len(), transforms.len());
     images
         .into_iter()

@@ -14,21 +14,21 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, StarDetectionConfig, StarDetector};
+use lumos::{LinearImage, StarDetectionConfig, StarDetector};
 
 fn main() {
     // Get image path from command line
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
-        eprintln!("Supported formats: FITS, TIFF, PNG, RAW (RAF, CR2, CR3, NEF, ARW, DNG)");
+        eprintln!("Supported formats: linear FITS and floating-point TIFF");
         std::process::exit(1);
     }
     let image_path = Path::new(&args[1]);
 
     // Load the image
     println!("Loading image: {}", image_path.display());
-    let image = AstroImage::from_file(image_path).expect("Failed to load image");
+    let image = LinearImage::from_file(image_path).expect("Failed to load image");
     println!(
         "Image dimensions: {}x{} ({} channel{})",
         image.width(),

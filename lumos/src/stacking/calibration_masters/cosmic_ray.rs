@@ -26,7 +26,7 @@ use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 
 /// `F` is floored to this (in normalized pixel units) so it stays non-negative where the object fine
@@ -622,8 +622,8 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::astro_image::AstroImageMetadata;
-    use crate::io::astro_image::cfa::CfaType;
+    use crate::io::image::ImageMetadata;
+    use crate::io::image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::stacking::calibration_masters::cosmic_ray::*;
     use crate::testing::TestRng;
@@ -648,7 +648,7 @@ mod tests {
     fn mono(data: Vec<f32>, w: usize, h: usize) -> CfaImage {
         CfaImage {
             data: Buffer2::new(w, h, data),
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Mono),
                 ..Default::default()
             },
@@ -791,7 +791,7 @@ mod tests {
         }
         let mut img = CfaImage {
             data: Buffer2::new(w, h, data),
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
             },
@@ -837,7 +837,7 @@ mod tests {
         }
         let mut img = CfaImage {
             data: Buffer2::new(w, h, data),
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
             },
@@ -893,7 +893,7 @@ mod tests {
 
         let mut img = CfaImage {
             data: Buffer2::new(w, h, data),
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(cfa.clone()),
                 ..Default::default()
             },

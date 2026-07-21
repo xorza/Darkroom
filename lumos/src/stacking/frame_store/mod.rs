@@ -11,8 +11,9 @@ use rayon::prelude::*;
 
 use common::file_utils;
 
-use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
+use crate::io::image::error::ImageError;
+use crate::io::image::linear::LinearImage;
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -122,7 +123,7 @@ pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
 pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
-    fn metadata(&self) -> &AstroImageMetadata;
+    fn metadata(&self) -> &ImageMetadata;
     fn load(path: &Path) -> Result<Self, ImageError>;
 
     fn quantization_sigma(&self) -> Option<f32> {
@@ -172,7 +173,7 @@ pub(crate) struct StoredLightFrame {
 
 impl StoredLightFrame {
     pub(crate) fn from_memory(
-        image: AstroImage,
+        image: LinearImage,
         coverage: Option<Buffer2<f32>>,
         confidence: Option<Buffer2<f32>>,
         source_stats: FrameStats,
@@ -222,20 +223,20 @@ impl Drop for SpillFiles {
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
 pub(crate) struct StoredImage {
-    pub(crate) metadata: AstroImageMetadata,
+    pub(crate) metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
     _spill_files: SpillFiles,
 }
 
 impl StoredImage {
-    pub(crate) fn load(&self) -> AstroImage {
+    pub(crate) fn load(&self) -> LinearImage {
         let sample_count = self.dimensions.pixel_count();
         let planes = self
             .channels
             .iter()
             .map(|plane| plane.chunk(0, sample_count).to_vec());
-        let mut image = AstroImage::from_planar_channels(self.dimensions, planes);
+        let mut image = LinearImage::from_planar_channels(self.dimensions, planes);
         image.metadata = self.metadata.clone();
         image
     }
@@ -244,7 +245,7 @@ impl StoredImage {
 pub(crate) fn store_image(
     directory: &Path,
     name: &str,
-    image: &AstroImage,
+    image: &LinearImage,
 ) -> Result<StoredImage, FrameStoreError> {
     let dimensions = image.dimensions();
     let spilled = spill_channels(directory, name, image)?;
@@ -261,7 +262,7 @@ pub(crate) fn store_image(
 pub(crate) fn store_light_frame(
     directory: &Path,
     name: &str,
-    image: AstroImage,
+    image: LinearImage,
     coverage: Option<Buffer2<f32>>,
     confidence: Option<Buffer2<f32>>,
     source_stats: FrameStats,

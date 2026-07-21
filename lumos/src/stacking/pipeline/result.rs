@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::io::astro_image::error::ImageError;
+use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::product::StackProduct;

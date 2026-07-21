@@ -145,7 +145,7 @@ fn drizzle_rgb_uses_shared_quality_planes() {
             pixels[idx + 2] = 0.7; // B
         }
     }
-    let image = AstroImage::from_pixels(ImageDimensions::new((50, 50), 3), pixels);
+    let image = LinearImage::from_pixels(ImageDimensions::new((50, 50), 3), pixels);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((50, 50), 3), config);
@@ -269,7 +269,7 @@ fn test_weight_and_linear_variance_maps() {
     let mut acc = accumulator(dims, config.clone());
     for _ in 0..3 {
         acc.add_image(
-            AstroImage::from_pixels(dims, vec![5.0; 16]),
+            LinearImage::from_pixels(dims, vec![5.0; 16]),
             &Transform::identity(),
             1.0,
             None,
@@ -292,13 +292,13 @@ fn test_weight_and_linear_variance_maps() {
     // (b) 2 frames with frame weights [1, 3] → Σw = 4, Σw² = 1 + 9 = 10, variance = 10/16 = 0.625.
     let mut acc = accumulator(dims, config);
     acc.add_image(
-        AstroImage::from_pixels(dims, vec![10.0; 16]),
+        LinearImage::from_pixels(dims, vec![10.0; 16]),
         &Transform::identity(),
         1.0,
         None,
     );
     acc.add_image(
-        AstroImage::from_pixels(dims, vec![10.0; 16]),
+        LinearImage::from_pixels(dims, vec![10.0; 16]),
         &Transform::identity(),
         3.0,
         None,

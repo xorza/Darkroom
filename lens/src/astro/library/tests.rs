@@ -52,12 +52,12 @@ fn image_to_cpu_moves_unique_input_and_clones_shared() {
 }
 
 #[test]
-fn astro_image_path_filter_matches_from_file_extensions() {
+fn astro_image_path_filter_matches_preview_extensions() {
     let DataType::FsPath(cfg) = &*ASTRO_IMAGE_PATH_DATA_TYPE else {
         panic!("expected an FsPath data type");
     };
     assert_eq!(cfg.mode, FsPathMode::ExistingFile);
-    assert_eq!(cfg.extensions, ASTRO_IMAGE_EXTENSIONS);
+    assert_eq!(cfg.extensions, PREVIEW_IMAGE_EXTENSIONS);
 }
 
 #[test]

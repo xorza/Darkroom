@@ -8,6 +8,8 @@
 
 use common::CancelToken;
 
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::{StackConfig, Weighting};
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;
@@ -15,7 +17,6 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::rms_diff;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use crate::{AstroImage, ImageDimensions};
 use imaginarium::Buffer2;
 
 const W: usize = 128;
@@ -54,7 +55,7 @@ fn frame_set(
     (sims, clean)
 }
 
-fn stack_frames(sims: &[SimFrame], config: StackConfig) -> AstroImage {
+fn stack_frames(sims: &[SimFrame], config: StackConfig) -> LinearImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
     stack_images(
         frames,
@@ -70,7 +71,7 @@ fn stack_frames(sims: &[SimFrame], config: StackConfig) -> AstroImage {
 fn inject_spike(sim: &mut SimFrame, x: usize, y: usize, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
     px[y * W + x] = value;
-    sim.image = AstroImage::from_planar_channels(ImageDimensions::new((W, H), 1), [px]);
+    sim.image = LinearImage::from_planar_channels(ImageDimensions::new((W, H), 1), [px]);
 }
 
 /// Background pixels (clear of the margin-16 star field), one per injected frame.

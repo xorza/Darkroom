@@ -5,7 +5,8 @@ use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
@@ -109,7 +110,7 @@ impl DrizzleAccumulator {
     ///
     /// Returns an error when image dimensions differ from the accumulator, or when frame or pixel
     /// weights are negative or non-finite. The accumulator is unchanged on error.
-    pub fn add_frame(&mut self, frame: DrizzleFrame<AstroImage>) -> Result<(), DrizzleError> {
+    pub fn add_frame(&mut self, frame: DrizzleFrame<LinearImage>) -> Result<(), DrizzleError> {
         let index = self.frames_added;
         if frame.source.dimensions != self.input_dims {
             return Err(DrizzleError::DimensionMismatch {
@@ -162,7 +163,7 @@ impl DrizzleAccumulator {
 
     fn accumulate_image(
         &mut self,
-        image: AstroImage,
+        image: LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -255,7 +256,7 @@ impl DrizzleAccumulator {
     /// Add image using turbo kernel (axis-aligned rectangular drop).
     fn add_image_turbo(
         &mut self,
-        image: &AstroImage,
+        image: &LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -327,7 +328,7 @@ impl DrizzleAccumulator {
     /// Reference: STScI cdrizzlebox.c `do_kernel_square`.
     fn add_image_square(
         &mut self,
-        image: &AstroImage,
+        image: &LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -411,7 +412,7 @@ impl DrizzleAccumulator {
     /// Add image using point kernel (fastest, needs good dithering).
     fn add_image_point(
         &mut self,
-        image: &AstroImage,
+        image: &LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -453,7 +454,7 @@ impl DrizzleAccumulator {
     #[allow(clippy::too_many_arguments)]
     fn add_image_radial(
         &mut self,
-        image: &AstroImage,
+        image: &LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
@@ -538,7 +539,7 @@ impl DrizzleAccumulator {
     #[inline]
     fn accumulate(
         &mut self,
-        image: &AstroImage,
+        image: &LinearImage,
         ix: usize,
         iy: usize,
         ox: usize,
@@ -632,7 +633,7 @@ impl DrizzleAccumulator {
                 .for_each(|(c, &w)| *c = w * inv_max);
         }
 
-        let image = AstroImage::from_planar_channels(
+        let image = LinearImage::from_planar_channels(
             ImageDimensions::new((width, height), n_channels),
             output_channels,
         );
@@ -651,7 +652,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn add_image(
         accumulator: &mut DrizzleAccumulator,
-        image: AstroImage,
+        image: LinearImage,
         transform: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,

@@ -1,4 +1,4 @@
-use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -8,7 +8,7 @@ use crate::stacking::calibration_masters::{
 use crate::stacking::combine::error::Error;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
-    AstroImageMetadata, CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageMetadata,
 };
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -390,7 +390,7 @@ fn test_calibrate_flat_correction() {
     // result = light / normalized
     let flat = CfaImage {
         data: Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -444,7 +444,7 @@ fn test_calibrate_full_pipeline() {
     let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -466,7 +466,7 @@ fn test_calibrate_full_pipeline() {
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -563,7 +563,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
 
     let dark = CfaImage {
         data: Buffer2::new(10, 10, data),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -601,7 +601,7 @@ fn test_calibrate_hot_pixel_correction() {
 
     let dark = CfaImage {
         data: Buffer2::new(w, h, dark_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(pattern.clone()),
             ..Default::default()
         },
@@ -633,7 +633,7 @@ fn test_calibrate_hot_pixel_correction() {
 
     let mut light = CfaImage {
         data: Buffer2::new(w, h, light_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(pattern),
             ..Default::default()
         },
@@ -677,7 +677,7 @@ fn test_calibrate_flat_dark() {
     let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -699,7 +699,7 @@ fn test_calibrate_flat_dark() {
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -733,7 +733,7 @@ fn test_flat_dark_takes_priority_over_bias() {
     let flat_pixels = vec![0.8_f32, 0.6, 0.6, 0.8];
     let flat = CfaImage {
         data: Buffer2::new(2, 2, flat_pixels),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(CfaType::Mono),
             ..Default::default()
         },
@@ -787,7 +787,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
                 0.5, 0.7, 0.9, 0.7, 0.7, 0.4, 0.7, 0.4, 0.9, 0.7, 0.5, 0.7, 0.7, 0.4, 0.7, 0.4,
             ],
         ),
-        metadata: AstroImageMetadata {
+        metadata: ImageMetadata {
             cfa_type: Some(cfa_type.clone()),
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()

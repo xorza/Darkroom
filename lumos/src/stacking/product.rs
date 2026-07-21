@@ -1,6 +1,6 @@
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::{AstroImage, PixelData};
+use crate::io::image::linear::{LinearImage, PixelData};
 
 /// A quality map that is either common to every image channel or channel-specific.
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl QualityMap {
     }
 }
 
-impl From<QualityMap> for AstroImage {
+impl From<QualityMap> for LinearImage {
     fn from(map: QualityMap) -> Self {
         match map {
             QualityMap::Shared(plane) => plane.into(),
@@ -49,7 +49,7 @@ impl From<QualityMap> for AstroImage {
 #[derive(Debug)]
 pub struct StackProduct {
     /// The combined linear image.
-    pub image: AstroImage,
+    pub image: LinearImage,
     /// Normalized per-pixel coverage in `[0, 1]`, for masking and fill gating.
     pub coverage: Buffer2<f32>,
     /// WHT map. Statistical combines store per-channel sums of surviving frame weights multiplied

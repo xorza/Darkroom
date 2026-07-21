@@ -39,7 +39,7 @@ use std::time::Instant;
 use common::CancelToken;
 use glam::DVec2;
 
-use crate::AstroImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::pipeline::align::align_and_stack;
@@ -211,7 +211,7 @@ fn align_stack_memory_probe() {
     let base = star_field(width, height, stars, seed).image;
     let channels = base.channels();
     let gen_start = Instant::now();
-    let mut frames: Vec<AstroImage> = Vec::with_capacity(n);
+    let mut frames: Vec<LinearImage> = Vec::with_capacity(n);
     frames.push(base.clone());
     for i in 1..n {
         // Deterministic dithers in ~±8 px — small enough that the shifted field still overlaps.

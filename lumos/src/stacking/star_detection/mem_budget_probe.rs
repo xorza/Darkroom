@@ -40,7 +40,7 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use crate::io::astro_image::AstroImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured, two_x_ceiling_mb};
@@ -103,7 +103,7 @@ fn detect_memory_probe() {
     // Render the resident ring once. These are the only frames held in RAM for the whole run, so the
     // resident-set contribution to peak heap is `ring` frames — independent of `n`.
     let gen_start = Instant::now();
-    let frames: Vec<AstroImage> = (0..ring)
+    let frames: Vec<LinearImage> = (0..ring)
         .map(|i| star_field(width, height, stars, seed ^ i as u64).image)
         .collect();
     let channels = frames[0].channels() as u64;

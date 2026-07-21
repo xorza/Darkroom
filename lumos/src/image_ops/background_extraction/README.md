@@ -226,7 +226,7 @@ the obvious later add (ONNX backend) once the classical path exists, mirroring t
 > − 1.5·mean`, grid median filter **off** here so it can't bias a real gradient's boundary tiles) →
 > tile-centre samples → **low-order 2D polynomial** surface fit by least squares with **iterative
 > residual sigma-clipping** (§5) → **subtract or divide**, **per channel**. Public API:
-> `extract_background(&mut AstroImage, &BackgroundConfig)` with `BackgroundMode::{Subtract, Divide}`
+> `extract_background(&mut LinearImage, &BackgroundConfig)` with `BackgroundMode::{Subtract, Divide}`
 > (defaults: `tile_size 128`, `degree 2`, 3 reject passes, `divide_floor 0.1`). Verified by tests:
 > a pure linear gradient → ≈0; a pedestal+stars → background ≈0 while stars survive; a quadratic
 > vignette → flat under `Divide`; degree-3 fits a cubic where degree-1 can't; independent per-channel
@@ -246,7 +246,7 @@ So the pragmatic core is mostly **wiring, not new math**:
 
 ```
 src/image_ops/background_extraction/
-├── mod.rs        // extract_background(&mut AstroImage, BackgroundConfig) + Mode{Subtract,Divide}
+├── mod.rs        // extract_background(&mut LinearImage, BackgroundConfig) + Mode{Subtract,Divide}
 └── tests.rs
 ```
 
@@ -285,7 +285,7 @@ pub struct BackgroundConfig {
     // optional: surface model (TileMesh | Polynomial{degree} | Tps{lambda})
 }
 
-pub fn extract_background(image: &mut AstroImage, cfg: BackgroundConfig) {
+pub fn extract_background(image: &mut LinearImage, cfg: BackgroundConfig) {
     for c in 0..image.channels() {
         let model = estimate_tiled_background(image.channel(c), cfg.tile_size, cfg.mask_objects);
         let plane = image.channel_mut(c);

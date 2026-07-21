@@ -6,9 +6,9 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::AstroImage;
-use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions};
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::linear::LinearImage;
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -31,11 +31,11 @@ use crate::stacking::registration::resample::WarpResult;
 ///
 /// `coverage` gates whether a warped sample has meaningful source support. `confidence` is an
 /// independent inverse-variance multiplier. `None` means full support or unit confidence,
-/// respectively. Plain `AstroImage`s convert with `.into()`; registered frames must use
+/// respectively. Plain `LinearImage`s convert with `.into()`; registered frames must use
 /// [`StackFrame::registered`] so source-domain noise is captured before interpolation.
 #[derive(Debug)]
 pub struct StackFrame {
-    pub(crate) image: AstroImage,
+    pub(crate) image: LinearImage,
     pub(crate) coverage: Option<Buffer2<f32>>,
     pub(crate) confidence: Option<Buffer2<f32>>,
     pub(crate) source_stats: FrameStats,
@@ -43,7 +43,7 @@ pub struct StackFrame {
 
 impl StackFrame {
     /// Build a registered stack frame while preserving statistics from before interpolation.
-    pub fn registered(source: &AstroImage, warped: WarpResult) -> Self {
+    pub fn registered(source: &LinearImage, warped: WarpResult) -> Self {
         Self {
             source_stats: compute_frame_stats(source),
             image: warped.image,
@@ -53,8 +53,8 @@ impl StackFrame {
     }
 }
 
-impl From<AstroImage> for StackFrame {
-    fn from(image: AstroImage) -> Self {
+impl From<LinearImage> for StackFrame {
+    fn from(image: LinearImage) -> Self {
         let source_stats = compute_frame_stats(&image);
         Self {
             image,
@@ -143,7 +143,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
 ///
 /// Each [`StackFrame`] may carry per-pixel `coverage` and `confidence`. Coverage gates inclusion;
 /// confidence scales inverse-variance weight. Frames without either plane use full support and unit
-/// confidence. Plain `AstroImage`s convert via `.into()` and [`StackFrame::registered`] converts a
+/// confidence. Plain `LinearImage`s convert via `.into()` and [`StackFrame::registered`] converts a
 /// source image plus its [`WarpResult`] without remeasuring noise after interpolation.
 ///
 /// Returns an error when the configuration is invalid, manual-weight count doesn't match the frame
@@ -193,7 +193,7 @@ pub(crate) fn stack_stored_frames(
     frames: Vec<StoredLightFrame>,
     spill_directory: Option<SpillDirectory>,
     dimensions: ImageDimensions,
-    metadata: AstroImageMetadata,
+    metadata: ImageMetadata,
     config: StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
@@ -519,10 +519,13 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 mod tests {
     use arrayvec::ArrayVec;
 
-    use crate::io::astro_image::PixelData;
-    use crate::io::astro_image::cfa::{CfaImage, CfaType};
+    use crate::io::image::ImageDimensions;
+    use crate::io::image::cfa::{CfaImage, CfaType};
+    use crate::io::image::linear::LinearImage;
+    use crate::io::image::linear::PixelData;
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::CacheCore;
+    use crate::stacking::combine::cache::tests::make_test_cache;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::{Normalization, SmallN};
     use crate::stacking::combine::normalization;
@@ -535,14 +538,10 @@ mod tests {
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::ScratchDirectory;
-    use crate::{
-        io::astro_image::{AstroImage, ImageDimensions},
-        stacking::combine::cache::tests::make_test_cache,
-    };
     use std::path::PathBuf;
 
     fn stack_frame(
-        image: AstroImage,
+        image: LinearImage,
         coverage: Option<Buffer2<f32>>,
         confidence: Option<Buffer2<f32>>,
     ) -> StackFrame {
@@ -717,7 +716,7 @@ mod tests {
                 *p = 0.2 + (f as f32) * 0.01 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
             }
             px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires
-            let image = AstroImage::from_planar_channels(dims, [px]);
+            let image = LinearImage::from_planar_channels(dims, [px]);
             // Every other frame gets a partial coverage map (warped-border emulation).
             let coverage = f.is_multiple_of(2).then(|| {
                 let mut c = vec![1.0f32; w * h];
@@ -805,12 +804,12 @@ mod tests {
     #[test]
     fn mapped_frames_reject_nonfinite_samples_before_combining() {
         let dimensions = ImageDimensions::new((2, 1), 3);
-        let finite = AstroImage::from_planar_channels(
+        let finite = LinearImage::from_planar_channels(
             dimensions,
             [vec![1.0; 2], vec![1.0; 2], vec![1.0; 2]],
         );
         let source_stats = compute_frame_stats(&finite);
-        let invalid = AstroImage::from_planar_channels(
+        let invalid = LinearImage::from_planar_channels(
             dimensions,
             [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
         );
@@ -830,7 +829,7 @@ mod tests {
             vec![frame],
             Some(spill_directory),
             dimensions,
-            AstroImageMetadata::default(),
+            ImageMetadata::default(),
             StackConfig::mean(),
             ProgressCallback::default(),
             CancelToken::never(),
@@ -866,7 +865,7 @@ mod tests {
         let dims = ImageDimensions::new((pixel_counts, 1), 1);
         let images = values
             .iter()
-            .map(|&v| AstroImage::from_pixels(dims, vec![v; pixel_counts]))
+            .map(|&v| LinearImage::from_pixels(dims, vec![v; pixel_counts]))
             .collect();
         make_test_cache(images)
     }
@@ -877,7 +876,7 @@ mod tests {
             .iter()
             .map(|rgb| {
                 let data: Vec<f32> = (0..pixels).flat_map(|_| rgb.iter().copied()).collect();
-                AstroImage::from_pixels(dims, data)
+                LinearImage::from_pixels(dims, data)
             })
             .collect();
         make_test_cache(images)
@@ -991,9 +990,9 @@ mod tests {
         // In-memory stacking must match the documented mean: (10 + 20 + 30)/3 = 20.
         let dims = ImageDimensions::new((4, 4), 1);
         let images = vec![
-            AstroImage::from_pixels(dims, vec![10.0; 16]),
-            AstroImage::from_pixels(dims, vec![20.0; 16]),
-            AstroImage::from_pixels(dims, vec![30.0; 16]),
+            LinearImage::from_pixels(dims, vec![10.0; 16]),
+            LinearImage::from_pixels(dims, vec![20.0; 16]),
+            LinearImage::from_pixels(dims, vec![30.0; 16]),
         ];
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
@@ -1016,8 +1015,8 @@ mod tests {
 
     #[test]
     fn test_stack_images_dimension_errors() {
-        let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
-        let b = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
+        let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+        let b = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
         let result = stack_images(
             vec![a.into(), b.into()],
             StackConfig::default(),
@@ -1030,7 +1029,7 @@ mod tests {
         ));
 
         let frame = stack_frame(
-            AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
             Some(Buffer2::new_filled(2, 2, 1.0)),
             None,
         );
@@ -1054,7 +1053,7 @@ mod tests {
         ));
 
         let frame = stack_frame(
-            AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
             None,
             Some(Buffer2::new_filled(2, 2, 1.0)),
         );
@@ -1097,7 +1096,7 @@ mod tests {
         ] {
             let error = stack_images(
                 vec![stack_frame(
-                    AstroImage::from_pixels(dims, vec![1.0; 2]),
+                    LinearImage::from_pixels(dims, vec![1.0; 2]),
                     coverage,
                     confidence,
                 )],
@@ -1121,13 +1120,13 @@ mod tests {
     #[test]
     fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         let dimensions = ImageDimensions::new((2, 2), 3);
-        let finite = AstroImage::from_planar_channels(
+        let finite = LinearImage::from_planar_channels(
             dimensions,
             [vec![1.0; 4], vec![1.0; 4], vec![1.0; 4]],
         );
 
         for invalid_value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let invalid = AstroImage::from_planar_channels(
+            let invalid = LinearImage::from_planar_channels(
                 dimensions,
                 [
                     vec![1.0; 4],
@@ -1161,10 +1160,10 @@ mod tests {
 
     #[test]
     fn cancelled_stack_returns_cancelled_error() {
-        let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+        let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
         let mut invalid_pixels = vec![2.0; 16];
         invalid_pixels[0] = f32::NAN;
-        let b = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), invalid_pixels);
+        let b = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), invalid_pixels);
         let cancel = CancelToken::new();
         cancel.cancel();
         let result = stack_images(
@@ -1180,8 +1179,8 @@ mod tests {
     fn coverage_excludes_uncovered_frames() {
         // 2 frames, 2 px. Frame B does not cover pixel 1 (coverage 0) → pixel 1 is A alone.
         let dims = ImageDimensions::new((2, 1), 1);
-        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
-        let b = AstroImage::from_pixels(dims, vec![20.0, 20.0]);
+        let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
+        let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::None,
@@ -1226,7 +1225,7 @@ mod tests {
             .zip([(12.0, 2.0), (24.0, 4.0), (31.0, 1.0)])
             .map(|(pixels, (median, mad))| {
                 let mut frame = stack_frame(
-                    AstroImage::from_pixels(dims, pixels.to_vec()),
+                    LinearImage::from_pixels(dims, pixels.to_vec()),
                     Some(coverage.clone()),
                     None,
                 );
@@ -1289,12 +1288,12 @@ mod tests {
         let frames = || {
             vec![
                 stack_frame(
-                    AstroImage::from_pixels(dims, vec![1.0, 2.0]),
+                    LinearImage::from_pixels(dims, vec![1.0, 2.0]),
                     Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
                     None,
                 ),
                 stack_frame(
-                    AstroImage::from_pixels(dims, vec![3.0, 4.0]),
+                    LinearImage::from_pixels(dims, vec![3.0, 4.0]),
                     Some(Buffer2::new(2, 1, vec![0.0, 1.0])),
                     None,
                 ),
@@ -1331,8 +1330,8 @@ mod tests {
         // confidence, so only A contributes statistically while both frames retain geometric
         // coverage.
         let dims = ImageDimensions::new((2, 1), 1);
-        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
-        let b = AstroImage::from_pixels(dims, vec![20.0, 20.0]);
+        let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
+        let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::None,
@@ -1378,7 +1377,7 @@ mod tests {
     fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
         let dims = ImageDimensions::new((24, 20), 1);
         let expected = -0.7;
-        let source = AstroImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
+        let source = LinearImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
         let transform = WarpTransform::new(Transform::translation(glam::DVec2::new(-2.37, 1.43)));
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
@@ -1425,7 +1424,7 @@ mod tests {
         let pixels = (0..dims.height())
             .flat_map(|y| (0..dims.width()).map(move |x| 0.2 + x as f32 * 0.01 + y as f32 * 0.02))
             .collect();
-        let source = AstroImage::from_pixels(dims, pixels);
+        let source = LinearImage::from_pixels(dims, pixels);
         let params = config::test_support::warp_params(InterpolationMethod::Bilinear);
         let frames = vec![
             StackFrame::registered(
@@ -1469,7 +1468,7 @@ mod tests {
                 state as f32 / u32::MAX as f32 - 0.5
             })
             .collect();
-        let source = AstroImage::from_pixels(dims, pixels);
+        let source = LinearImage::from_pixels(dims, pixels);
         let params = config::test_support::warp_params(InterpolationMethod::Bilinear);
         let frames = vec![
             StackFrame::registered(
@@ -1530,9 +1529,9 @@ mod tests {
         // An unwarped reference with no quality planes must have full support and unit confidence.
         let dims = ImageDimensions::new((1, 1), 1);
         let frames = vec![
-            StackFrame::from(AstroImage::from_pixels(dims, vec![10.0])),
+            StackFrame::from(LinearImage::from_pixels(dims, vec![10.0])),
             stack_frame(
-                AstroImage::from_pixels(dims, vec![20.0]),
+                LinearImage::from_pixels(dims, vec![20.0]),
                 Some(Buffer2::new(1, 1, vec![1.0])),
                 None,
             ),
@@ -1562,7 +1561,7 @@ mod tests {
     fn coverage_zero_in_all_frames_fills_zero() {
         // 1 frame, 2 px; pixel 1 uncovered → no contributor → 0 fill (matches the warp border).
         let dims = ImageDimensions::new((2, 1), 1);
-        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
+        let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::None,
@@ -1601,7 +1600,7 @@ mod tests {
             .zip([1.0, 1.0, 0.0, 0.0, 0.0])
             .map(|(&v, c)| {
                 stack_frame(
-                    AstroImage::from_pixels(dims, vec![v]),
+                    LinearImage::from_pixels(dims, vec![v]),
                     Some(Buffer2::new(1, 1, vec![c])),
                     None,
                 )
@@ -1630,7 +1629,7 @@ mod tests {
         // Cross-check: the same frames with no coverage maps drag the pixel toward 0.
         let frames2: Vec<StackFrame> = [0.1, 0.1, 0.0, 0.0, 0.0]
             .iter()
-            .map(|&v| AstroImage::from_pixels(dims, vec![v]).into())
+            .map(|&v| LinearImage::from_pixels(dims, vec![v]).into())
             .collect();
         let cfg2 = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
@@ -1662,12 +1661,12 @@ mod tests {
         let dims = ImageDimensions::new((2, 1), 1);
         let frames = vec![
             stack_frame(
-                AstroImage::from_pixels(dims, vec![10.0, 10.0]),
+                LinearImage::from_pixels(dims, vec![10.0, 10.0]),
                 Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
                 None,
             ),
             stack_frame(
-                AstroImage::from_pixels(dims, vec![20.0, 20.0]),
+                LinearImage::from_pixels(dims, vec![20.0, 20.0]),
                 Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
                 None,
             ),
@@ -1700,9 +1699,9 @@ mod tests {
         // [1/6,2/6,3/6].
         let dims = ImageDimensions::new((1, 1), 3);
         let frames = vec![
-            AstroImage::from_pixels(dims, vec![1.0, 100.0, 1.0]).into(),
-            AstroImage::from_pixels(dims, vec![2.0, 2.0, 100.0]).into(),
-            AstroImage::from_pixels(dims, vec![100.0, 3.0, 3.0]).into(),
+            LinearImage::from_pixels(dims, vec![1.0, 100.0, 1.0]).into(),
+            LinearImage::from_pixels(dims, vec![2.0, 2.0, 100.0]).into(),
+            LinearImage::from_pixels(dims, vec![100.0, 3.0, 3.0]).into(),
         ];
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
@@ -1756,9 +1755,9 @@ mod tests {
         };
         let frames = || -> Vec<StackFrame> {
             vec![
-                AstroImage::from_pixels(dims, mk(100.0, 1.0)).into(),
-                AstroImage::from_pixels(dims, mk(100.0, 20.0)).into(),
-                AstroImage::from_pixels(dims, mk(100.0, 2.0)).into(),
+                LinearImage::from_pixels(dims, mk(100.0, 1.0)).into(),
+                LinearImage::from_pixels(dims, mk(100.0, 20.0)).into(),
+                LinearImage::from_pixels(dims, mk(100.0, 2.0)).into(),
             ]
         };
         let stack = |config| {
@@ -1846,8 +1845,8 @@ mod tests {
         let frame0: Vec<f32> = (0..16).map(|i| 100.0 + i as f32).collect();
         let frame1: Vec<f32> = (0..16).map(|i| 200.0 + i as f32).collect();
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, frame0),
-            AstroImage::from_pixels(dims, frame1),
+            LinearImage::from_pixels(dims, frame0),
+            LinearImage::from_pixels(dims, frame1),
         ]);
         let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
@@ -1871,8 +1870,8 @@ mod tests {
         let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 20.0 / 99.0).collect();
         let frame1: Vec<f32> = (0..100).map(|i| 80.0 + (i as f32) * 40.0 / 99.0).collect();
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, frame0),
-            AstroImage::from_pixels(dims, frame1),
+            LinearImage::from_pixels(dims, frame0),
+            LinearImage::from_pixels(dims, frame1),
         ]);
         let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
@@ -1920,8 +1919,8 @@ mod tests {
         let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 0.2).collect();
         let frame1: Vec<f32> = (0..100).map(|i| 180.0 + (i as f32) * 0.4).collect();
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, frame0),
-            AstroImage::from_pixels(dims, frame1),
+            LinearImage::from_pixels(dims, frame0),
+            LinearImage::from_pixels(dims, frame1),
         ]);
         let params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
@@ -2008,7 +2007,7 @@ mod tests {
         let dims = ImageDimensions::new((4, 4), 1);
         let mut paths = Vec::new();
         for (i, &v) in [10.0f32, 20.0, 30.0].iter().enumerate() {
-            let image = AstroImage::from_pixels(dims, vec![v; 16]);
+            let image = LinearImage::from_pixels(dims, vec![v; 16]);
             let path = temp_dir.join(format!("frame{i}.tiff"));
             image.save(&path).unwrap();
             paths.push(path);
@@ -2056,9 +2055,9 @@ mod tests {
         let f2: Vec<f32> = (0..100).map(|i| 140.0 + (i as f32) * 20.0 / 99.0).collect();
 
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, f0),
-            AstroImage::from_pixels(dims, f1),
-            AstroImage::from_pixels(dims, f2),
+            LinearImage::from_pixels(dims, f0),
+            LinearImage::from_pixels(dims, f1),
+            LinearImage::from_pixels(dims, f2),
         ]);
 
         let params = norm_params_for(&cache, Normalization::Global).unwrap();
@@ -2105,8 +2104,8 @@ mod tests {
         let f1: Vec<f32> = (0..16).map(|i| 199.0 + (i as f32) * 2.0 / 15.0).collect();
 
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, f0),
-            AstroImage::from_pixels(dims, f1),
+            LinearImage::from_pixels(dims, f0),
+            LinearImage::from_pixels(dims, f1),
         ]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
@@ -2127,8 +2126,8 @@ mod tests {
         let f0: Vec<f32> = (0..100).map(|i| 99.75 + (i as f32) * 0.5 / 99.0).collect();
         let f1: Vec<f32> = (0..100).map(|i| 190.0 + (i as f32) * 20.0 / 99.0).collect();
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, f0),
-            AstroImage::from_pixels(dims, f1),
+            LinearImage::from_pixels(dims, f0),
+            LinearImage::from_pixels(dims, f1),
         ]);
 
         // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
@@ -2170,9 +2169,9 @@ mod tests {
         let make_frame =
             |base: f32| -> Vec<f32> { (0..100).map(|i| base + (i as f32) * 10.0 / 99.0).collect() };
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, make_frame(100.0)),
-            AstroImage::from_pixels(dims, make_frame(200.0)),
-            AstroImage::from_pixels(dims, make_frame(300.0)),
+            LinearImage::from_pixels(dims, make_frame(100.0)),
+            LinearImage::from_pixels(dims, make_frame(200.0)),
+            LinearImage::from_pixels(dims, make_frame(300.0)),
         ]);
         let weights = resolve_weights(&Weighting::Noise, source_stats(&cache), None).unwrap();
         // All should be ≈ 1/3
@@ -2198,9 +2197,9 @@ mod tests {
         f2[0] = 999.0; // outlier
 
         let cache = make_test_cache(vec![
-            AstroImage::from_pixels(dims, f0),
-            AstroImage::from_pixels(dims, f1),
-            AstroImage::from_pixels(dims, f2),
+            LinearImage::from_pixels(dims, f0),
+            LinearImage::from_pixels(dims, f1),
+            LinearImage::from_pixels(dims, f2),
         ]);
 
         let config = StackConfig {

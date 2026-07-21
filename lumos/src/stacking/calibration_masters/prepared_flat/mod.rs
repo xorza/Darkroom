@@ -1,7 +1,7 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::{CfaImage, CfaType};
 
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;

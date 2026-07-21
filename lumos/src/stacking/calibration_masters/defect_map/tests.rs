@@ -1,5 +1,5 @@
-use crate::io::astro_image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::io::astro_image::{AstroImageMetadata, ImageDimensions};
+use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::stacking::calibration_masters::defect_map::*;
 use crate::stacking::combine::cache::{CacheCore, CfaCache};
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -234,7 +234,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         core: CacheCore {
             spill_directory: None,
             dimensions,
-            metadata: AstroImageMetadata {
+            metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Mono),
                 ..Default::default()
             },

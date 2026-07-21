@@ -13,10 +13,11 @@ use common::CancelToken;
 use common::file_utils;
 use imaginarium::Image as RawImage;
 use lumos::{
-    ASTRO_IMAGE_EXTENSIONS, AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet,
-    CfaImage, DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast, MlError,
-    NeutralizeBackground, OpError, RAW_EXTENSIONS, Reference, StackConfig, TiledOnnxConfig,
-    calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
+    Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast, MlError, NeutralizeBackground,
+    OpError, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS, Reference, StackConfig,
+    TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only,
+    stack_cfa_master,
 };
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
@@ -75,12 +76,12 @@ pub fn ml_model_paths() -> MlModelPaths {
 }
 
 /// Reusable data type for an astro image file-path input: an existing-file
-/// picker filtered to [`ASTRO_IMAGE_EXTENSIONS`]. Shared so every astro
+/// picker filtered to [`PREVIEW_IMAGE_EXTENSIONS`]. Shared so every astro
 /// loader presents the same filter.
 pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFile,
-        ASTRO_IMAGE_EXTENSIONS
+        PREVIEW_IMAGE_EXTENSIONS
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -118,7 +119,7 @@ pub fn astro_library() -> Library {
                     // Decoding (FITS parse / libraw / demosaic) is heavy
                     // synchronous CPU work — keep it off the worker thread.
                     let image = tokio::task::spawn_blocking(move || {
-                        AstroImage::from_file(&path).map(|astro| RawImage::from(&astro))
+                        PreviewImage::from_file(&path).map(RawImage::from)
                     })
                     .await
                     .map_err(anyhow::Error::from)?
@@ -332,8 +333,8 @@ pub fn astro_library() -> Library {
                     })
                     .await?;
 
-                    let coverage = AstroImage::from(result.product.coverage);
-                    let weight = AstroImage::from(result.product.weight);
+                    let coverage = LinearImage::from(result.product.coverage);
+                    let weight = LinearImage::from(result.product.weight);
                     outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
                         &result.product.image,
                     )));
@@ -873,7 +874,7 @@ fn build_masters_cached(
         };
         let cache_path = dir.join(file);
         if cache && cache_path.exists() {
-            match CfaImage::load(&cache_path) {
+            match CfaImage::load_cache(&cache_path) {
                 Ok(master) => return Ok(Some(master)),
                 Err(error) => tracing::warn!(
                     path = %cache_path.display(),
@@ -886,7 +887,7 @@ fn build_masters_cached(
         let master =
             stack_cfa_master(&frames, config, cancel.clone()).map_err(anyhow::Error::from)?;
         if cache && let Some(master) = &master {
-            master.save(&cache_path)?;
+            master.save_cache(&cache_path)?;
         }
         Ok(master)
     };

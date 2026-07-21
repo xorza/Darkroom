@@ -7,9 +7,11 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency;
-use crate::io::astro_image::AstroImage;
+use crate::io::image::cfa::CfaImage;
+use crate::io::image::cfa_dimensions;
+use crate::io::image::linear::LinearImage;
+use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
-use crate::io::raw::{self, load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
@@ -32,10 +34,10 @@ use crate::stacking::registration::resample::warp;
 /// within a batch, so the cap costs little throughput.
 const MAX_CONCURRENT_LIGHTS: usize = 4;
 
-/// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
+/// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
-/// (dark/flat/defect) in place, demosaic to an `AstroImage`, then hand the calibrated frames
+/// (dark/flat/defect) in place, demosaic to a `LinearImage`, then hand the calibrated frames
 /// to [`align_and_stack`]. A frame that fails to **load** is a hard error (bad input); a frame
 /// that fails to **register** is dropped and reported in
 /// [`AlignmentSummary::dropped`](crate::stacking::pipeline::result::AlignmentSummary::dropped).
@@ -57,11 +59,11 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // Tier decision: peek the sensor dimensions (no decode) and plan the memory tier. If the warped
     // frames plus the RAM path's per-frame scratch won't fit ~75% RAM, stream through a disk cache so
     // peak RAM stays flat in the frame count.
-    let sensor = raw_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
+    let dimensions = cfa_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
         path: light_paths[0].as_ref().to_path_buf(),
         source,
     })?;
-    let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let plane_bytes = dimensions.pixel_count() * std::mem::size_of::<f32>();
     let available = config.stack.cache.get_available_memory();
     let plan = plan_memory(plane_bytes, total, rayon::current_num_threads(), available);
     if !plan.fits_in_ram {
@@ -83,7 +85,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // peak demosaic memory. The demosaic itself polls `cancel` between stages
     // (see `CfaImage::demosaic`), so the heavy phase stays interruptible at full
     // core utilization within a batch.
-    let calibrated: Vec<AstroImage> =
+    let calibrated: Vec<LinearImage> =
         concurrency::try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
@@ -99,14 +101,14 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and demosaic to
-/// an `AstroImage`. The per-frame core shared by the RAM and streaming calibrate paths.
+/// a `LinearImage`. The per-frame core shared by the RAM and streaming calibrate paths.
 fn decode_calibrate_demosaic(
     path: &Path,
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
     cancel: &CancelToken,
-) -> Result<AstroImage, Error> {
-    let mut cfa = load_raw_cfa(path).map_err(|source| Error::Load {
+) -> Result<LinearImage, Error> {
+    let mut cfa = CfaImage::from_file(path).map_err(|source| Error::Load {
         path: path.to_path_buf(),
         source,
     })?;
