@@ -6,7 +6,8 @@ use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRES
 use crate::stacking::combine::error::Error;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageMetadata,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
+    ImageMetadata,
 };
 use common::CancelToken;
 use fits_well::FitsReader;
@@ -825,6 +826,11 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         std::process::id()
     ));
     masters.save(&path).unwrap();
+    assert!(matches!(
+        CfaImage::from_file(&path),
+        Err(ImageError::FitsUnsupported { reason, .. })
+            if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
+    ));
     let cache_bytes = std::fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 5);

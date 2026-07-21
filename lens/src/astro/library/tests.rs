@@ -144,7 +144,7 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].ty.declared(), *MASTERS_DATA_TYPE);
 
-    // Four optional calibration-frame folders, then sigma, then cache.
+    // Four optional calibration-frame folders, then sigma and cache.
     assert_eq!(f.inputs.len(), 6);
     let dir_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
     assert_eq!(dir_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
@@ -158,7 +158,6 @@ fn build_masters_node_is_registered() {
         f.inputs[4].default_value,
         Some(StaticValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
     );
-    // Cache toggle defaults on, so masters persist + reload by default.
     assert_eq!(f.inputs[5].name, "Cache");
     assert_eq!(f.inputs[5].data_type, DataType::Bool);
     assert_eq!(f.inputs[5].default_value, Some(StaticValue::Bool(true)));
