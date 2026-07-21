@@ -4,7 +4,9 @@
 //! and each direction is one rayon-parallel copy. (Changing the *format* is a
 //! different operation — see [`conversion`](crate::image::conversion).)
 //!
-//! Two granularities, the runtime one built on the typed one:
+//! Three granularities, the runtime one built on the typed one:
+//! - borrowed `[&Buffer2<T>; N]` planes ⟶ `ImageData<N, T>` — the storage-neutral
+//!   interleave boundary.
 //! - typed `ImageData<N, T>` ⟷ `DeinterleavedImageData<N, T>` — the gather /
 //!   scatter that knows the interleaving.
 //! - runtime [`Image`] ⟷ `DeinterleavedImageData<N, T>` — borrowing, so a caller
@@ -20,14 +22,24 @@ use crate::image::image_data::deinterleaved::DeinterleavedImageData;
 use crate::image::image_data::interleaved::{AnyImageData, ImageData};
 use crate::image::{Image, ImageDesc};
 
-/// Interleave `N` channel planes into one `[T; N]`-per-pixel buffer.
-impl<const N: usize, T: bytemuck::Pod + Send + Sync> From<&DeinterleavedImageData<N, T>>
-    for ImageData<N, T>
-{
-    fn from(planar: &DeinterleavedImageData<N, T>) -> Self {
-        let width = planar.width();
-        let height = planar.height();
-        let planes: [&[T]; N] = std::array::from_fn(|c| planar.channels[c].pixels());
+impl<const N: usize, T: bytemuck::Pod + Send + Sync> From<[&Buffer2<T>; N]> for ImageData<N, T> {
+    fn from(planes: [&Buffer2<T>; N]) -> Self {
+        const {
+            assert!(
+                N == 1 || N == 3 || N == 4,
+                "planar image data supports 1, 3, or 4 channels"
+            )
+        };
+        let width = planes[0].width();
+        let height = planes[0].height();
+        for plane in planes {
+            assert_eq!(plane.width(), width, "all channel planes must share width");
+            assert_eq!(
+                plane.height(),
+                height,
+                "all channel planes must share height"
+            );
+        }
 
         let mut pixels = vec![[T::zeroed(); N]; width * height];
         pixels.par_iter_mut().enumerate().for_each(|(i, pixel)| {
@@ -37,6 +49,15 @@ impl<const N: usize, T: bytemuck::Pod + Send + Sync> From<&DeinterleavedImageDat
         });
 
         ImageData::from_buffer(Buffer2::new(width, height, pixels))
+    }
+}
+
+/// Interleave `N` channel planes into one `[T; N]`-per-pixel buffer.
+impl<const N: usize, T: bytemuck::Pod + Send + Sync> From<&DeinterleavedImageData<N, T>>
+    for ImageData<N, T>
+{
+    fn from(planar: &DeinterleavedImageData<N, T>) -> Self {
+        std::array::from_fn(|channel| &planar.channels[channel]).into()
     }
 }
 
@@ -67,14 +88,22 @@ impl<const N: usize, T: bytemuck::Pod + Send + Sync> From<&ImageData<N, T>>
 /// `ImageData<N, T>` maps to exactly one `AnyImageData` arm.
 macro_rules! impl_image_planar_conv {
     ($n:literal, $t:ty, $variant:ident, $format:expr) => {
-        impl From<&DeinterleavedImageData<$n, $t>> for Image {
-            fn from(planar: &DeinterleavedImageData<$n, $t>) -> Self {
-                let interleaved: ImageData<$n, $t> = planar.into();
+        impl From<[&Buffer2<$t>; $n]> for Image {
+            fn from(planes: [&Buffer2<$t>; $n]) -> Self {
+                let interleaved: ImageData<$n, $t> = planes.into();
                 let desc = ImageDesc::new(interleaved.width(), interleaved.height(), $format);
                 Image {
                     desc,
                     data: AnyImageData::$variant(interleaved),
                 }
+            }
+        }
+
+        impl From<&DeinterleavedImageData<$n, $t>> for Image {
+            fn from(planar: &DeinterleavedImageData<$n, $t>) -> Self {
+                let planes: [&Buffer2<$t>; $n] =
+                    std::array::from_fn(|channel| &planar.channels[channel]);
+                Image::from(planes)
             }
         }
 
@@ -157,20 +186,38 @@ mod tests {
         assert_eq!(planar.channels[0].pixels(), &[10, 20, 30]);
         let back: ImageData<1, u16> = (&planar).into();
         assert_eq!(back.buffer.pixels(), &[[10], [20], [30]]);
+
+        let image = Image::from([&planar.channels[0]]);
+        assert_eq!(image.desc.color_format, ColorFormat::L_U16);
+        assert_eq!(image.bytes(), bytemuck::cast_slice(&[10u16, 20, 30]));
     }
 
     #[test]
     fn image_from_planar_interleaves_and_tags_format() {
-        let planar = DeinterleavedImageData::from_channels([
+        let planes = [
             Buffer2::new(2, 1, vec![1.0f32, 4.0]),
             Buffer2::new(2, 1, vec![2.0f32, 5.0]),
             Buffer2::new(2, 1, vec![3.0f32, 6.0]),
-        ]);
-        let image = Image::from(&planar);
+        ];
+        let image = Image::from(planes.each_ref());
         assert_eq!(image.desc.color_format, ColorFormat::RGB_F32);
         assert_eq!((image.desc.width, image.desc.height), (2, 1));
         let samples: &[f32] = bytemuck::cast_slice(image.bytes());
         assert_eq!(samples, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]); // RGBRGB
+
+        let planar = DeinterleavedImageData::from_channels(planes);
+        assert_eq!(Image::from(&planar).bytes(), image.bytes());
+    }
+
+    #[test]
+    #[should_panic(expected = "all channel planes must share width")]
+    fn image_from_borrowed_planes_rejects_mismatched_dimensions() {
+        let planes = [
+            Buffer2::new(2, 1, vec![1.0f32, 2.0]),
+            Buffer2::new(1, 1, vec![3.0f32]),
+            Buffer2::new(2, 1, vec![4.0f32, 5.0]),
+        ];
+        let _ = Image::from(planes.each_ref());
     }
 
     #[test]

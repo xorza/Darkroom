@@ -5,8 +5,8 @@
 //! - [`interleaved`] — `ImageData<N, T>` = `Buffer2<[T; N]>` (`RGBRGB…`), the
 //!   GPU/file-compatible layout that backs [`Image`](super::Image).
 //! - [`deinterleaved`] — `DeinterleavedImageData<N, T>` = one `Buffer2<T>` per
-//!   channel (`RRR…GGG…BBB…`), nicer for per-channel CPU work; the storage
-//!   behind lumos's `LinearImage`.
+//!   channel (`RRR…GGG…BBB…`), useful for per-channel CPU work and image-layout
+//!   conversion.
 //!
 //! The erased forms (`AnyImageData` / `AnyDeinterleavedImageData`) are meant to
 //! convert by transpose (interleave / deinterleave).
