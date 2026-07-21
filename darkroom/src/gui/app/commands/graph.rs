@@ -44,7 +44,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a graph, that
     /// open graph is exported. No-op when neither resolves.
     fn export_active_graph(&mut self) {
-        let library = self.engine.library().clone();
+        let library = self.engine.library.current.clone();
         let Some(graph) = publish::graph_to_export(&self.editor.document, &library) else {
             self.engine
                 .status

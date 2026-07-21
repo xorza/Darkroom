@@ -2,14 +2,12 @@
 //! also the home of [`Image`] (a [`imaginarium::ImageBuffer`] wrapped as a
 //! scenarium [`CustomValue`]).
 
-mod blend_mode;
 pub(crate) mod codec;
-mod conversion_format;
-pub(crate) mod library;
-pub(crate) mod vision_ctx;
+pub(crate) mod context;
+pub(crate) mod format;
+pub(crate) mod nodes;
 
 use std::any::Any;
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, LazyLock};
 
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
@@ -30,12 +28,6 @@ impl std::fmt::Debug for Image {
         f.debug_struct("Image")
             .field("buffer", &self.buffer)
             .finish_non_exhaustive()
-    }
-}
-
-impl Image {
-    pub fn new(buffer: imaginarium::ImageBuffer) -> Self {
-        Self { buffer }
     }
 }
 
@@ -69,26 +61,14 @@ impl std::fmt::Display for Image {
 
 impl From<imaginarium::ImageBuffer> for Image {
     fn from(buffer: imaginarium::ImageBuffer) -> Self {
-        Image::new(buffer)
+        Self { buffer }
     }
 }
 
 impl From<imaginarium::Image> for Image {
     fn from(image: imaginarium::Image) -> Self {
-        Image::new(imaginarium::ImageBuffer::from(image))
-    }
-}
-
-impl Deref for Image {
-    type Target = imaginarium::ImageBuffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.buffer
-    }
-}
-
-impl DerefMut for Image {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.buffer
+        Self {
+            buffer: imaginarium::ImageBuffer::from(image),
+        }
     }
 }

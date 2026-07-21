@@ -28,3 +28,5 @@ project - json file in zip file
 blobs and serialization directly to file to avoid memallocs
 
 build masters chose array of files instead of directory
+
+session and engine - one entity?

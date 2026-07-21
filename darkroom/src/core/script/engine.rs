@@ -3,17 +3,15 @@
 //! `prelude.rhai` install. [`build_engine`] assembles all of it into the
 //! single `Engine` the executor pins for its whole lifetime.
 
-use std::sync::Arc;
-
 use glam::Vec2;
 use rhai::{Array, Dynamic, Engine};
 use scenarium::FuncId;
-use scenarium::Library;
 use scenarium::{Func, Node, NodeId};
 use serde::Serialize;
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
+use crate::core::library::PublishedLibrary;
 
 use super::{InboundSender, ScriptMessage, StdoutBuffer};
 
@@ -52,7 +50,7 @@ const MAX_FN_EXPR_DEPTH: usize = 32;
 pub(crate) fn build_engine(
     stdout: StdoutBuffer,
     inbound: InboundSender,
-    library: Arc<Library>,
+    library: PublishedLibrary,
 ) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
@@ -203,8 +201,9 @@ impl<'a> From<&'a Func> for ScriptFunc<'a> {
 }
 
 /// `list_funcs()` → array of script-facing function descriptors.
-fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
+fn register_introspection(engine: &mut Engine, library: PublishedLibrary) {
     engine.register_fn("list_funcs", move || -> Array {
+        let library = library.load();
         let mut funcs: Vec<&Func> = library.funcs().collect();
         funcs.sort_by(|left, right| left.name.cmp(&right.name));
         funcs
@@ -223,7 +222,8 @@ fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
 /// hand-building nested maps for the variants that carry a [`Vec2`]
 /// (whose serde shape the prelude shouldn't have to know):
 ///
-/// - `make_add_node(func_id, x, y)` — looks the func up in `Library` and
+/// - `make_add_node(func_id, x, y)` — looks the func up in the published
+///   [`scenarium::Library`] and
 ///   shapes a node from it (`From<&Func> for Node`), positioned at
 ///   `(x, y)`. Wrapped by `create_node` in `prelude.rhai`. Func nodes
 ///   only (`graph: None`); graph instancing isn't scriptable yet.
@@ -235,7 +235,7 @@ fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
 /// bare-name surface. Keep this module small: prefer script-side helpers
 /// in `prelude.rhai` when a thing can be expressed via `apply` + the
 /// already-shaped maps.
-fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
+fn register_host_helpers(engine: &mut Engine, library: PublishedLibrary) {
     let mut module = rhai::Module::new();
     module.set_native_fn(
         "make_add_node",
@@ -243,11 +243,10 @@ fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
               x: rhai::FLOAT,
               y: rhai::FLOAT|
               -> Result<Dynamic, Box<rhai::EvalAltResult>> {
+            let library = library.load();
             let func_id: FuncId = id
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
-            // The startup snapshot suffices: the func table never changes
-            // after assembly.
             let func = library
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;

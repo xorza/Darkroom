@@ -1,5 +1,5 @@
-//! Preferences edits: the single `Changed` synchronization sink plus the ML
-//! model picker. `set_confirm_exit` is the one preference `App` also writes
+//! Preferences edits through the `Changed` synchronization sink and model picker.
+//! `set_confirm_exit` is the one preference `App` also writes
 //! from outside the tab (the exit dialog's "Don't ask again").
 
 use std::path::PathBuf;
@@ -20,18 +20,12 @@ pub(crate) enum PrefsCommand {
     /// derived state and persists it — one command for every field, so adding
     /// a preference needs no new command.
     Changed,
-    /// Open an ONNX file dialog for one of the ML model paths (the "Browse…"
-    /// buttons). The handler opens the blocking dialog after UI authoring has
-    /// released its application borrows.
     PickMlModel(MlModelKind),
 }
 
-/// Which ML model path a [`PrefsCommand::PickMlModel`] targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MlModelKind {
-    /// The `ml_denoise` node's model (DeepSNR).
     Denoise,
-    /// The `remove_stars` node's model (StarNet).
     StarRemoval,
 }
 
@@ -49,7 +43,8 @@ impl App {
     fn apply_preferences(&mut self, ui: &mut Ui) {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
         ui.theme = self.theme.aperture_theme.clone();
-        self.preferences.apply_ml_model_paths();
+        let paths = (&self.preferences.ml_models).into();
+        self.engine.configure_ml_model_defaults(&paths);
         self.save_preferences();
     }
 
@@ -62,8 +57,6 @@ impl App {
         }
     }
 
-    /// Open an ONNX file dialog for one of the ML model paths and, on a
-    /// pick, record it (persist + republish to lens).
     fn pick_ml_model(&mut self, kind: MlModelKind) {
         let filter =
             FsPathConfig::with_extensions(FsPathMode::ExistingFile, vec!["onnx".to_string()]);
@@ -72,15 +65,14 @@ impl App {
         }
     }
 
-    /// Record `path` for `kind`, persist the preferences, and republish the
-    /// paths to lens so the next node run uses it.
     fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
         match kind {
             MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
             MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
         }
+        let paths = (&self.preferences.ml_models).into();
+        self.engine.configure_ml_model_defaults(&paths);
         self.save_preferences();
-        self.preferences.apply_ml_model_paths();
     }
 
     /// Persist whether quitting with unsaved changes prompts to save.

@@ -17,7 +17,7 @@ impl App {
     pub(crate) fn handle_shell(&mut self, command: ShellCommand) {
         match command {
             ShellCommand::OpenPreferences => {
-                let library = self.engine.library().clone();
+                let library = self.engine.library.current.clone();
                 self.editor.open_preferences(&library);
             }
             ShellCommand::Quit => self.request_quit(),

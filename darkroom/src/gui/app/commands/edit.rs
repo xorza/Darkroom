@@ -37,7 +37,7 @@ impl App {
             return;
         };
         let value = StaticValue::FsPath(path.to_string_lossy().into_owned());
-        let library = self.engine.library().clone();
+        let library = self.engine.library.current.clone();
         self.editor.apply_edit(
             Intent::SetInput {
                 input: req.port,

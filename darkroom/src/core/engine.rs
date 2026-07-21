@@ -15,7 +15,7 @@ use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::io::library::{load_library, save_library};
-use crate::core::library::runtime_func_lib;
+use crate::core::library::RuntimeLibrary;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
@@ -23,11 +23,8 @@ use crate::core::worker::{WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
 pub(crate) struct Engine {
-    /// The runtime library (builtins + the on-disk graph library),
-    /// assembled once at startup. Private so every edit goes through
-    /// [`Self::edit_library`] — the one place that propagates a change to
-    /// every copy that could otherwise go stale. Read via [`Self::library`].
-    library: Arc<Library>,
+    /// Darkroom-owned runtime library state and its published snapshots.
+    pub(crate) library: RuntimeLibrary,
     worker: WorkerBridge,
     /// The active disk-store root (`None` = memory-only),
     /// remembered so [`Self::edit_library`] can re-push the worker's
@@ -55,23 +52,31 @@ impl Engine {
     /// up the evaluation worker, and start the script host (a no-op `None`
     /// unless `script_cfg` enabled a listener). The worker + script host are
     /// both woken through `wake`.
-    pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
-        let mut library = runtime_func_lib();
+    pub(crate) fn new(
+        script_cfg: &ScriptConfig,
+        wake: Wake,
+        model_paths: &lens::MlModelPaths,
+    ) -> Self {
+        let mut library = RuntimeLibrary::new(model_paths);
         // A failed load degrades to an empty library instead of blocking
         // startup; `load_library` moved the file aside so nothing here can
         // overwrite it (reported below, once the status log exists).
         let load_error = match load_library() {
             Ok(graphs) => {
-                for (id, graph) in graphs {
-                    library.insert_graph(id, graph);
+                if !graphs.is_empty() {
+                    library.edit(|current| {
+                        for (id, graph) in graphs {
+                            current.insert_graph(id, graph);
+                        }
+                        true
+                    });
                 }
                 None
             }
             Err(err) => Some(err),
         };
-        let library = Arc::new(library);
         let worker = WorkerBridge::new(wake.clone());
-        let script = ScriptHost::start(script_cfg, library.clone(), wake);
+        let script = ScriptHost::start(script_cfg, library.published.clone(), wake);
         let mut engine = Self {
             library,
             worker,
@@ -90,29 +95,23 @@ impl Engine {
         engine
     }
 
-    /// Read access to the runtime library. There is deliberately no mutable
-    /// counterpart — edits go through [`Self::edit_library`], which owns the
-    /// propagation a bare `&mut` would let callers forget.
-    pub(crate) fn library(&self) -> &Arc<Library> {
-        &self.library
+    pub(crate) fn configure_ml_model_defaults(&mut self, paths: &lens::MlModelPaths) {
+        if self.library.update_ml_model_paths(paths) {
+            self.refresh_disk_store();
+        }
     }
 
-    /// The single mutation path for the runtime library. Applies `edit`
-    /// (copy-on-write when the script host still holds the startup `Arc`)
-    /// and, when it reports a change, propagates to every copy that could
-    /// otherwise go stale: the graph library file on disk and the
-    /// worker's [`DiskStore`] (which carries a library snapshot for its
-    /// codec table). The script host's frozen startup snapshot is exempt by
-    /// design — scripts only read the func table, which no edit touches
-    /// (edits grow graphs).
+    /// Applies a graph-library edit, publishes the new runtime snapshot to
+    /// scripting, persists shared graphs, and refreshes the worker's
+    /// [`DiskStore`].
     ///
     /// Owns the persist outcome in [`Self::status`]: a saved change clears
     /// the sticky error, a failed save reports — callers must not overwrite
     /// it with their own success signal.
     pub(crate) fn edit_library(&mut self, edit: impl FnOnce(&mut Library) -> bool) -> bool {
-        let changed = edit(Arc::make_mut(&mut self.library));
+        let changed = self.library.edit(edit);
         if changed {
-            match save_library(self.library.graphs.iter()) {
+            match save_library(self.library.current.graphs.iter()) {
                 Ok(()) => self.status.error = None,
                 Err(err) => self.status.error(format!("library save failed: {err:#}")),
             }
@@ -125,8 +124,10 @@ impl Engine {
     /// to the worker. The one constructor of worker-side disk stores, so a
     /// library edit or a root change can't leave the other half stale.
     fn refresh_disk_store(&self) {
-        self.worker
-            .set_disk_store(DiskStore::new(self.library.clone(), self.disk_root.clone()));
+        self.worker.set_disk_store(DiskStore::new(
+            self.library.current.clone(),
+            self.disk_root.clone(),
+        ));
     }
 
     /// Compile `graph` against the current library and record the artifact's
@@ -136,7 +137,7 @@ impl Engine {
     /// and returns `None` (nothing sent, worker untouched); a success clears
     /// the sticky error.
     fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
-        match self.compiler.compile(graph, &self.library) {
+        match self.compiler.compile(graph, &self.library.current) {
             Ok(Compilation {
                 compiled,
                 flatten_map,

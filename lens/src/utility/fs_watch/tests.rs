@@ -1,4 +1,4 @@
-use crate::fs_watch_library::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
+use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
 use scenarium::StaticValue;
 use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
 use scenarium::{DynamicValue, InvokeError, InvokeInput, OutputDemand, SharedAnyState};
@@ -85,7 +85,7 @@ fn registers_watch_directory_func() {
 
 #[test]
 fn classifies_filesystem_event_kinds() {
-    use crate::fs_watch_library::is_content_change;
+    use crate::utility::fs_watch::is_content_change;
     use notify::EventKind;
     use notify::event::{
         AccessKind, CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode,

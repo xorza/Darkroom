@@ -10,7 +10,7 @@
 //! The introspection itself (field reflection, labels, typed rebuild) lives in
 //! `common` and is GUI-agnostic; this module only maps it to node ports +
 //! `DynamicValue`s. A config type is a [`NodeConfig`]: `Introspect` plus a
-//! stable wire `TYPE_ID`/`NAME`. See [`crate::astro::configs`] for the mirror
+//! stable wire `TYPE_ID`/`NAME`. See [`crate::astro::config`] for the mirror
 //! types.
 
 use std::any::Any;
@@ -104,7 +104,11 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
         func = func.input(input.default(static_value(&field.default)));
     }
     // The lambda needs each field's kind to read its input value back.
-    let kinds: Vec<FieldKind> = fields.iter().map(|f| f.kind.clone()).collect();
+    let kinds: Arc<[FieldKind]> = fields
+        .iter()
+        .map(|field| field.kind.clone())
+        .collect::<Vec<_>>()
+        .into();
     let func = func
         .output(FuncOutput::new("Config", config_data_type::<T>()))
         .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -180,39 +184,51 @@ fn static_value(value: &FieldValue) -> StaticValue {
     }
 }
 
-/// Read an input's runtime value back into a neutral field value (per the
-/// field's kind). An unset/incompatible value reads as `Null`: required fields
-/// fall back to their default while optional fields clear to `None`.
+/// Read an input's runtime value back into a neutral field value.
 fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     match kind {
-        FieldKind::Int(_) => value
-            .as_i64()
-            .map(|value| FieldValue::Int(value.into()))
-            .unwrap_or(FieldValue::Null),
-        FieldKind::Float(_) => value
-            .as_f64()
-            .map(FieldValue::Float)
-            .unwrap_or(FieldValue::Null),
-        FieldKind::Bool => value
-            .as_bool()
-            .map(FieldValue::Bool)
-            .unwrap_or(FieldValue::Null),
-        FieldKind::Str => value
-            .as_string()
-            .map(|s| FieldValue::Str(s.to_string()))
-            .unwrap_or(FieldValue::Null),
-        FieldKind::Enum { .. } => value
-            .as_enum()
-            .map(|s| FieldValue::Enum(s.to_string()))
-            .unwrap_or(FieldValue::Null),
+        FieldKind::Int(_) => FieldValue::Int(
+            value
+                .as_i64()
+                .expect("integer config input type is validated at the compile boundary")
+                .into(),
+        ),
+        FieldKind::Float(_) => FieldValue::Float(
+            value
+                .as_f64()
+                .expect("float config input type is validated at the compile boundary"),
+        ),
+        FieldKind::Bool => FieldValue::Bool(
+            value
+                .as_bool()
+                .expect("boolean config input type is validated at the compile boundary"),
+        ),
+        FieldKind::Str => FieldValue::Str(
+            value
+                .as_string()
+                .expect("string config input type is validated at the compile boundary")
+                .to_string(),
+        ),
+        FieldKind::Enum { .. } => FieldValue::Enum(
+            value
+                .as_enum()
+                .expect("enum config input type is validated at the compile boundary")
+                .to_string(),
+        ),
+        FieldKind::Option(_) if matches!(value, DynamicValue::Unbound) => FieldValue::Null,
+        FieldKind::Option(_) if matches!(value.as_static(), Some(StaticValue::Null)) => {
+            FieldValue::Null
+        }
         FieldKind::Option(inner) => field_value(inner, value),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use common::{FloatKind, IntegerKind, IntegerValue};
+    use common::{FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue};
+    use scenarium::{DataType, DynamicValue, Library, StaticValue, TypeId};
+
+    use crate::config_node::{data_type, field_value, register_field_enum};
 
     #[test]
     fn maps_field_kinds_to_port_types() {
@@ -290,8 +306,17 @@ mod tests {
             FieldValue::Int(IntegerValue::Signed(7))
         );
         assert_eq!(
-            field_value(&FieldKind::Float(FloatKind::F64), &DynamicValue::Unbound),
+            field_value(
+                &FieldKind::Option(Box::new(FieldKind::Float(FloatKind::F64))),
+                &DynamicValue::Unbound
+            ),
             FieldValue::Null
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "float config input type is validated")]
+    fn rejects_incompatible_required_values() {
+        field_value(&FieldKind::Float(FloatKind::F64), &DynamicValue::Unbound);
     }
 }

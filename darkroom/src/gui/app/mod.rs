@@ -103,13 +103,12 @@ impl App {
             let handle = handle.clone();
             Arc::new(move || handle.request_repaint(MAIN_WINDOW))
         };
-        // `preferences` is loaded in `run_gui` (before the window exists, so
-        // its saved geometry can size the window at creation) and handed in
-        // here — the `Preferences::load()` there already published the ML
-        // model paths into lens.
+        // `preferences` is loaded in `run_gui` before the window exists, so
+        // its saved geometry can size the window at creation.
+        let model_paths = (&preferences.ml_models).into();
         let mut app = Self {
             editor: Editor::new(document),
-            engine: Engine::new(&script_cfg, wake),
+            engine: Engine::new(&script_cfg, wake, &model_paths),
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,
@@ -197,7 +196,7 @@ impl App {
             match event {
                 ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    let library = self.engine.library().clone();
+                    let library = self.engine.library.current.clone();
                     self.editor.apply_external_intents(intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
@@ -344,7 +343,7 @@ impl aperture::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.engine.library().clone();
+        let library = self.engine.library.current.clone();
         let command = self.editor.frame(
             ui,
             &library,

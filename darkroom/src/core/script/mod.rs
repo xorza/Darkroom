@@ -31,8 +31,8 @@ use rhai::{Dynamic, Engine};
 
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::edit::intent::types::Intent;
+use crate::core::library::PublishedLibrary;
 use crate::core::wake::Wake;
-use scenarium::Library;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -129,7 +129,7 @@ pub(crate) enum ScriptMessage {
     /// peer addr at the tracing layer).
     Print { msg: String },
     /// A batch of graph mutations issued by a script. Built on the
-    /// executor side (which has its `Library` snapshot and any other
+    /// executor side (which has its [`scenarium::Library`] snapshot and any other
     /// inputs the actions need) and applied verbatim by the editor through the same
     /// intent/undo path the GUI uses — one batch is one undo entry. Keeps
     /// the script→graph boundary symmetric with the GUI→graph boundary,
@@ -225,7 +225,7 @@ impl ScriptExecutor {
     pub(crate) fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
-        library: Arc<Library>,
+        library: PublishedLibrary,
         notify: Wake,
     ) -> Self {
         let inbound = InboundSender {
@@ -252,7 +252,7 @@ async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
     inbound: InboundSender,
-    library: Arc<Library>,
+    library: PublishedLibrary,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
     let engine = engine::build_engine(state.clone(), inbound, library);
@@ -367,10 +367,8 @@ impl ScriptHost {
     /// Bind the TCP listener (when `cfg.tcp` is set), spin up a runtime,
     /// and start the executor on it. Returns `None` when scripting is off
     /// or the bind failed (logged here) — the normal case, not an error.
-    /// `library` is the shared swappable library cell; the executor `load`s
-    /// it per call, so promote/publish growth from the GUI is reflected in
-    /// running scripts on their next access.
-    pub(crate) fn start(cfg: &ScriptConfig, library: Arc<Library>, wake: Wake) -> Option<Self> {
+    /// Script functions load the published library snapshot on every access.
+    pub(crate) fn start(cfg: &ScriptConfig, library: PublishedLibrary, wake: Wake) -> Option<Self> {
         let tcp_cfg = cfg.tcp.as_ref()?;
         let (transport, report) = match tcp::start(tcp_cfg) {
             Ok(pair) => pair,

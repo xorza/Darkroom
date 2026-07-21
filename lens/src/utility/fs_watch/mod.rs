@@ -168,8 +168,8 @@ pub fn fs_watch_library() -> Library {
             .lambda(FuncLambda::new(
                 move |_ctx, _state, event_state, inputs, _demand, outputs| {
                     Box::pin(async move {
-                        assert_eq!(inputs.len(), 3);
-                        assert_eq!(outputs.len(), 1);
+                        debug_assert_eq!(inputs.len(), 3);
+                        debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
                             .value
                             .as_fs_path()

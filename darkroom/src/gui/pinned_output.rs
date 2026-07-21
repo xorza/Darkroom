@@ -169,7 +169,7 @@ mod tests {
         let desc = ImageDesc::new(width, height, format);
         let bytes = vec![128; desc.row_bytes() * height];
         let raw = RawImage::new_with_data(desc, bytes).unwrap();
-        DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)))
+        DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
     }
 
     fn push(node: NodeId, values: Vec<PinnedOutput>) -> PinnedOutputs {
@@ -221,7 +221,7 @@ mod tests {
         let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
         let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
         let raw = RawImage::new_with_data(desc, bytes.clone()).unwrap();
-        let value = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
+        let value = DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)));
         let prepared = prepare_image(&value, FULL_TEXTURE_DIM).unwrap();
         assert_eq!(prepared.native_size, UVec2::new(2, 1));
         assert_eq!(prepared.native_format, ColorFormat::RGBA_U8);
@@ -229,7 +229,7 @@ mod tests {
 
         let desc = ImageDesc::new(1, 1, ColorFormat::RGB_F32);
         let raw = RawImage::new_with_data(desc, vec![0; 12]).unwrap();
-        let value = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
+        let value = DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)));
         let prepared = prepare_image(&value, FULL_TEXTURE_DIM).unwrap();
         assert_eq!(prepared.native_format, ColorFormat::RGB_F32);
         assert_eq!(

@@ -13,7 +13,7 @@ use crate::core::theme_pref::ThemeChoice;
 const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 
 /// Persisted session state: the theme preference to restore, the
-/// document open when the app last closed, and the ML model paths.
+/// document open when the app last closed, and editor behavior.
 /// Reloaded on startup so darkroom reopens where the user left off.
 /// Missing / unreadable preferences fall back to `default()`.
 /// `#[serde(default)]` so a partial preferences file (TOML omits absent keys)
@@ -45,9 +45,7 @@ pub(crate) struct Preferences {
     /// shared by all viewer tabs: a toolbar click in any viewer edits this
     /// in place and persists. A TOML `[viewer]` table.
     pub viewer: ViewerPreferences,
-    /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
-    /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
-    /// tables follow all scalar keys at the same level.
+    /// Default ONNX model paths copied into newly-authored ML node inputs.
     pub ml_models: MlModelPreferences,
 }
 
@@ -116,16 +114,10 @@ impl Default for Preferences {
     }
 }
 
-/// ONNX model paths for lens's ML nodes, persisted so the caller-supplied models survive restarts.
-/// Mirrors [`lens::MlModelPaths`] (which is not serde) and is pushed into lens's runtime global at
-/// startup via [`Preferences::apply_ml_model_paths`]. The defaults track [`lens::MlModelPaths::default`]
-/// so the bare filenames have a single source of truth.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct MlModelPreferences {
-    /// ONNX denoiser model (DeepSNR), used by the `ml_denoise` node.
+pub(crate) struct MlModelPreferences {
     pub denoise: PathBuf,
-    /// StarNet-style star-removal ONNX model, used by the `remove_stars` node.
     pub star_removal: PathBuf,
 }
 
@@ -141,7 +133,7 @@ impl Default for MlModelPreferences {
 
 impl From<&MlModelPreferences> for lens::MlModelPaths {
     fn from(preferences: &MlModelPreferences) -> Self {
-        lens::MlModelPaths {
+        Self {
             denoise: preferences.denoise.clone(),
             star_removal: preferences.star_removal.clone(),
         }
@@ -153,26 +145,14 @@ impl Preferences {
         cwd_file(PREFERENCES_FILE)
     }
 
-    /// Publish the ML model paths into lens's runtime global so the `ml_denoise` / `remove_stars`
-    /// nodes resolve the caller-supplied models. Called from [`load`] at startup and again whenever
-    /// the Preferences tab edits a path, so a change takes effect on the next node run.
-    ///
-    /// [`load`]: Preferences::load
-    pub(crate) fn apply_ml_model_paths(&self) {
-        lens::set_ml_model_paths((&self.ml_models).into());
-    }
-
     /// Read the preferences from the working dir. Any failure (missing
     /// file, parse error) degrades to the default rather than
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
-    /// Also publishes the loaded ML model paths into lens's runtime global.
     pub(crate) fn load() -> Self {
-        let preferences = match std::fs::read(Self::path()) {
+        match std::fs::read(Self::path()) {
             Ok(bytes) => deserialize(&bytes, SerdeFormat::Toml).unwrap_or_default(),
             Err(_) => Self::default(),
-        };
-        preferences.apply_ml_model_paths();
-        preferences
+        }
     }
 
     /// Write the preferences to the working dir. `Err` carries the
@@ -188,7 +168,16 @@ impl Preferences {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
+
+    use aperture::ImageFilter;
+    use common::{SerdeFormat, deserialize, serialize};
+    use glam::{IVec2, UVec2};
+
+    use crate::core::io::preferences::{
+        MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
+    };
+    use crate::core::theme_pref::ThemeChoice;
 
     fn roundtrip(cfg: &Preferences) -> Preferences {
         let bytes = serialize(cfg, SerdeFormat::Toml).expect("preferences TOML serializes");
@@ -227,6 +216,8 @@ mod tests {
             back.document_path,
             Some(PathBuf::from("/tmp/graph.darkroom"))
         );
+        assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
+        assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
         assert!(!back.load_last_document);
         assert!(!back.confirm_unsaved_on_exit);
         assert_eq!(
@@ -244,8 +235,6 @@ mod tests {
                 mag_filter: ImageFilter::Linear,
             }
         );
-        assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
-        assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
     }
 
     #[test]
@@ -267,7 +256,6 @@ mod tests {
         assert_eq!(back.viewer, ViewerPreferences::default());
         assert_eq!(back.viewer.background, ViewerBackground::Theme);
         assert_eq!(back.viewer.mag_filter, ImageFilter::Nearest);
-        // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,
             lens::MlModelPaths::default().denoise
@@ -279,10 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_preferences_fills_ml_models_from_default() {
-        // A pre-existing preferences file written before ml_models existed (only `theme`)
-        // must still load — `#[serde(default)]` fills the missing table from
-        // `Preferences::default()`, i.e. lens's canonical model filenames.
+    fn partial_preferences_fill_defaults() {
         let toml = b"theme = \"dark\"\n";
         let cfg: Preferences =
             deserialize(toml, SerdeFormat::Toml).expect("partial preferences deserializes");

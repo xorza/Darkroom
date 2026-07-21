@@ -52,9 +52,9 @@ impl Session {
     /// the saved preferences (or seed an empty graph). The script host is `None`
     /// unless `script_cfg` enabled a listener.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
-        let mut engine = Engine::new(script_cfg, wake);
-
         let preferences = Preferences::load();
+        let model_paths = (&preferences.ml_models).into();
+        let mut engine = Engine::new(script_cfg, wake, &model_paths);
         let (document, current_path) = match preferences.document_path.as_deref() {
             Some(path) => match project::load(path) {
                 Ok(doc) => (doc, Some(path.to_path_buf())),
@@ -106,7 +106,7 @@ impl Session {
             match event {
                 ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    let library = self.engine.library().clone();
+                    let library = self.engine.library.current.clone();
                     self.needs_reconcile |= apply_intents(&mut self.document, intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
@@ -146,7 +146,8 @@ impl Session {
 
     fn reconcile_if_needed(&mut self) {
         if self.needs_reconcile {
-            self.document.reconcile_boundaries(self.engine.library());
+            self.document
+                .reconcile_boundaries(&self.engine.library.current);
             self.needs_reconcile = false;
         }
     }

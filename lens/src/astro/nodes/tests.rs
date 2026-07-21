@@ -3,12 +3,26 @@
 use std::fs;
 use std::path::PathBuf;
 
+use common::CancelToken;
+use imaginarium::Image as RawImage;
+use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS};
 use scenarium::{
-    AnyState, ContextManager, DynamicValue, FuncBehavior, InvokeInput, OutputDemand,
-    SharedAnyState, StaticValue,
+    AnyState, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior, InvokeInput,
+    Library, OutputDemand, SharedAnyState, StaticValue,
 };
 
-use crate::astro::library::*;
+use crate::astro::config::processing::{
+    BackgroundConfigDef, DenoiseConfigDef, HdrConfigDef, LocalContrastConfigDef, ScnrConfigDef,
+    StretchConfigDef,
+};
+use crate::astro::config::stacking::{CombineConfigDef, DetectionConfigDef, RegistrationConfigDef};
+use crate::astro::masters::MASTERS_DATA_TYPE;
+use crate::astro::nodes::calibration::{build_masters_cached, cache_marker_path, frame_set_key};
+use crate::astro::nodes::io::{ASTRO_DIR_DATA_TYPE, ASTRO_IMAGE_PATH_DATA_TYPE, raw_frame_files};
+use crate::astro::nodes::runtime::image_to_cpu;
+use crate::astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
+use crate::config_node::config_data_type;
+use crate::image::{IMAGE_DATA_TYPE, Image};
 
 fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
     lib.funcs()
@@ -119,12 +133,49 @@ fn build_masters_rebuilds_when_cache_load_fails() {
         [],
         "the empty source folder rebuilds to an absent dark master"
     );
+    let cache_path = dir.join("master_dark.fits");
+    let key = frame_set_key(&[]).unwrap();
+    assert_eq!(
+        fs::read_to_string(cache_marker_path(&cache_path)).unwrap(),
+        format!("absent:{key}")
+    );
+    assert!(!cache_path.exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn master_source_key_changes_with_the_frame_set() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_output/lens/master_source_key");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("a.raf");
+    let second = dir.join("b.raf");
+    fs::write(&first, b"a").unwrap();
+    let one_frame = frame_set_key(std::slice::from_ref(&first)).unwrap();
+    assert_eq!(
+        frame_set_key(std::slice::from_ref(&first)).unwrap(),
+        one_frame
+    );
+
+    fs::write(&second, b"bb").unwrap();
+    let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();
+    assert_ne!(two_frames, one_frame);
+    fs::write(&first, b"aaa").unwrap();
+    let edited = frame_set_key(&[first.clone(), second]).unwrap();
+    assert_ne!(edited, two_frames);
+    fs::remove_file(&first).unwrap();
+    assert_ne!(frame_set_key(&[]).unwrap(), edited);
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn load_astro_image_node_is_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Load Astro Image");
     assert_eq!(f.category, "Astro");
     assert_eq!(f.inputs.len(), 1);
@@ -135,7 +186,7 @@ fn load_astro_image_node_is_registered() {
 
 #[test]
 fn build_masters_node_is_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Build Masters");
     assert_eq!(f.category, "Astro");
     // Pure: the digest folds each calibration folder's contents (directory-aware
@@ -165,7 +216,7 @@ fn build_masters_node_is_registered() {
 
 #[test]
 fn stack_lights_node_is_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Stack Lights");
     assert_eq!(f.category, "Astro");
     // Pure: the digest folds the `lights` folder's contents (directory-aware
@@ -254,7 +305,7 @@ fn stack_lights_node_is_registered() {
 
 #[test]
 fn auto_stretch_node_is_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Auto Stretch");
     assert_eq!(f.category, "Astro");
     assert_eq!(f.inputs.len(), 2);
@@ -284,7 +335,7 @@ fn auto_stretch_node_is_registered() {
 
 #[test]
 fn processing_nodes_are_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     // Each in-place op: a required `image` Image in, an Image out.
     for name in [
         "Extract Background",
@@ -310,7 +361,7 @@ fn processing_nodes_are_registered() {
 
 #[test]
 fn scalar_per_frame_nodes_take_optional_config_overrides() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     // denoise / hdr_compress / local_contrast keep their inline scalar and
     // gain an optional `config` override fed by the matching build node.
     let cases: [(&str, &str, DataType); 3] = [
@@ -350,7 +401,7 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
 
 #[test]
 fn preset_nodes_use_value_variant_picks_with_build_overrides() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     // Every preset node is consistent: a config-typed input whose `value_variants`
     // are the preset names (seeded to the first), overridable by a build node.
     // (node, input name, input index, config type, build node, first preset)
@@ -398,7 +449,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
 
 #[tokio::test]
 async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
     let builder = func(&lib, "Build Background Config");
@@ -469,12 +520,21 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
 
 #[test]
 fn ml_denoise_node_is_registered() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "ML Denoise");
     assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["Image"]);
+    assert_eq!(names, ["Image", "Model"]);
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    let DataType::FsPath(model) = &f.inputs[1].data_type else {
+        panic!("model is a file path");
+    };
+    assert_eq!(model.mode, FsPathMode::ExistingFile);
+    assert_eq!(model.extensions, ["onnx"]);
+    assert_eq!(
+        f.inputs[1].default_value,
+        Some(StaticValue::FsPath("DeepSNR_weights_v2.onnx".to_string()))
+    );
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].name, "Image");
     assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
@@ -482,12 +542,16 @@ fn ml_denoise_node_is_registered() {
 
 #[test]
 fn remove_stars_node_has_starless_and_stars_outputs() {
-    let lib = astro_library();
+    let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "ML Star Removal");
     assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["Image"]);
+    assert_eq!(names, ["Image", "Model"]);
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(
+        f.inputs[1].default_value,
+        Some(StaticValue::FsPath("StarNet2_weights.onnx".to_string()))
+    );
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Starless", "Stars"]);
     for o in &f.outputs {
@@ -496,24 +560,23 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
 }
 
 #[test]
-fn ml_model_paths_default_and_round_trip() {
-    use std::path::Path;
+fn configured_model_defaults_replace_both_node_definitions() {
+    let mut library = astro_library(&MlModelPaths::default());
+    let paths = MlModelPaths {
+        denoise: PathBuf::from("/models/denoise.onnx"),
+        star_removal: PathBuf::from("/models/stars.onnx"),
+    };
+    let function_count = library.funcs().len();
+    configure_ml_model_defaults(&mut library, &paths);
+    assert_eq!(library.funcs().len(), function_count);
     assert_eq!(
-        MlModelPaths::default().denoise,
-        Path::new("DeepSNR_weights_v2.onnx")
+        func(&library, "ML Denoise").inputs[1].default_value,
+        Some(StaticValue::FsPath(paths.denoise.display().to_string()))
     );
     assert_eq!(
-        MlModelPaths::default().star_removal,
-        Path::new("StarNet2_weights.onnx")
+        func(&library, "ML Star Removal").inputs[1].default_value,
+        Some(StaticValue::FsPath(
+            paths.star_removal.display().to_string()
+        ))
     );
-
-    let original = ml_model_paths();
-    set_ml_model_paths(MlModelPaths {
-        denoise: "/models/d.onnx".into(),
-        star_removal: "/models/s.onnx".into(),
-    });
-    let got = ml_model_paths();
-    assert_eq!(got.denoise, Path::new("/models/d.onnx"));
-    assert_eq!(got.star_removal, Path::new("/models/s.onnx"));
-    set_ml_model_paths(original); // restore for any other test reading the global
 }

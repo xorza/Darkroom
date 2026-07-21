@@ -12,8 +12,8 @@ use scenarium::CustomValue;
 use scenarium::CustomValueCodec;
 use scenarium::TypeEntry;
 
-use super::Image;
-use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
+use crate::image::Image;
+use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
 
 /// On-disk layout version for an image blob. Bump on any layout change.
 const VERSION: u8 = 1;
@@ -112,80 +112,4 @@ fn decode_image(mut blob: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use imaginarium::{ColorFormat, Image as CpuImage, ProcessingContext};
-
-    fn sample() -> (ImageDesc, Vec<u8>) {
-        // 2×1 RGB_U8 → 6 packed bytes, easy to hand-verify.
-        (
-            ImageDesc::new(2, 1, ColorFormat::RGB_U8),
-            vec![10, 20, 30, 40, 50, 60],
-        )
-    }
-
-    /// A `ContextManager` whose `VisionCtx` is CPU-only, so encode never probes
-    /// the GPU (the lazy default ctor would call `ProcessingContext::new`).
-    fn cpu_ctx() -> ContextManager {
-        let mut ctx = ContextManager::default();
-        scenarium::insert_context(
-            &mut ctx,
-            &VISION_CTX_TYPE,
-            VisionCtx {
-                processing_ctx: ProcessingContext::cpu_only(),
-            },
-        );
-        ctx
-    }
-
-    #[tokio::test]
-    async fn cpu_image_round_trips_pixel_exact() {
-        let (desc, pixels) = sample();
-        let value = Image::from(CpuImage::new_with_data(desc, pixels.clone()).unwrap());
-
-        let blob = ImageCodec
-            .encode(&value, &mut cpu_ctx())
-            .await
-            .expect("a CPU-resident image encodes");
-        // pixels (6) + trailer (20), nothing more.
-        assert_eq!(blob.len(), pixels.len() + TRAILER_LEN);
-
-        let decoded = ImageCodec.decode(blob).expect("decodes");
-        let decoded = decoded
-            .as_any()
-            .downcast_ref::<Image>()
-            .expect("decoded back into a lens Image");
-
-        let ctx = ProcessingContext::cpu_only();
-        let cpu = decoded
-            .buffer
-            .make_cpu(&ctx)
-            .expect("rebuilt image is CPU-resident");
-        assert_eq!(cpu.desc(), desc);
-        assert_eq!(cpu.bytes(), pixels.as_slice());
-    }
-
-    #[test]
-    fn decode_rejects_short_blob() {
-        assert!(decode_image(vec![0u8; TRAILER_LEN - 1]).is_err());
-    }
-
-    #[test]
-    fn decode_rejects_future_version() {
-        let (desc, pixels) = sample();
-        let cpu = CpuImage::new_with_data(desc, pixels).unwrap();
-        let mut blob = encode_image(&cpu);
-        let version_pos = blob.len() - TRAILER_LEN;
-        blob[version_pos] = VERSION + 1;
-        assert!(decode_image(blob).is_err());
-    }
-
-    #[test]
-    fn register_image_type_wires_the_codec() {
-        use scenarium::Library;
-        let id = *crate::image::IMAGE_TYPE_ID;
-        let mut library = Library::default();
-        library.register_type(id, image_type_entry());
-        assert!(library.type_decl(&id).is_some());
-    }
-}
+mod tests;

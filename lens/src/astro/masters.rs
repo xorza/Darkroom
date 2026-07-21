@@ -21,12 +21,6 @@ pub(crate) struct Masters {
     pub masters: CalibrationMasters,
 }
 
-impl Masters {
-    pub(crate) fn new(masters: CalibrationMasters) -> Self {
-        Self { masters }
-    }
-}
-
 impl CustomValue for Masters {
     fn type_id(&self) -> TypeId {
         *MASTERS_TYPE_ID
@@ -69,7 +63,7 @@ impl std::fmt::Display for Masters {
 
 impl From<CalibrationMasters> for Masters {
     fn from(masters: CalibrationMasters) -> Self {
-        Masters::new(masters)
+        Self { masters }
     }
 }
 
@@ -104,13 +98,13 @@ mod tests {
 
     #[test]
     fn display_empty_bundle() {
-        assert_eq!(Masters::new(bundle(false)).to_string(), "no masters");
+        assert_eq!(Masters::from(bundle(false)).to_string(), "no masters");
     }
 
     #[test]
     fn display_lists_present_masters() {
         assert_eq!(
-            Masters::new(bundle(true)).to_string(),
+            Masters::from(bundle(true)).to_string(),
             "masters: dark, defects"
         );
     }

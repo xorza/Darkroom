@@ -79,9 +79,21 @@ pub(crate) static CONVERSION_FORMAT_TYPE_ID: LazyLock<TypeId> =
 pub(crate) static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::Enum(*CONVERSION_FORMAT_TYPE_ID));
 
+pub(crate) fn conversion_target(format: &str, current: ColorFormat) -> Option<ColorFormat> {
+    let target = ConversionFormat::from_str(format)
+        .expect("enum input is validated at the compile boundary")
+        .to_color_format()?;
+    (target != current).then_some(target)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::str::FromStr;
+
+    use scenarium::EnumVariants;
+    use strum::IntoEnumIterator;
+
+    use crate::image::format::ConversionFormat;
 
     #[test]
     fn as_is_is_a_pass_through() {
