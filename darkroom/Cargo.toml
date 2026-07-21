@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 aperture = { workspace = true }
-scenarium = { workspace = true, features = ["builtin-fs-watch", "builtin-random"] }
+scenarium = { workspace = true }
 common = { workspace = true }
 lens = { workspace = true }
 imaginarium = { workspace = true }

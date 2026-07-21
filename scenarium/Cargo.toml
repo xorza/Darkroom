@@ -15,17 +15,13 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 strum = { workspace = true }
-rand = { workspace = true, optional = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
-notify = { workspace = true, optional = true }
 
 [features]
-builtin-fs-watch = ["dep:notify"]
-builtin-random = ["dep:rand"]
 internals = []
 
 [dev-dependencies]

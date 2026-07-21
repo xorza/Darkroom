@@ -7,12 +7,8 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
-use crate::library::Library;
-use crate::node::definition::FuncId;
-use crate::node::definition::{Func, FuncInput, FuncOutput};
-use crate::node::event::EventLambda;
-use crate::node::lambda::FuncLambda;
-use crate::{DataType, FsPathConfig, FsPathMode, StaticValue};
+use scenarium::{DataType, FsPathConfig, FsPathMode, StaticValue};
+use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
 
 pub(crate) const WATCH_DIRECTORY_FUNC_ID: FuncId =
     FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
@@ -34,8 +30,7 @@ struct WatchState {
     signal: Arc<Notify>,
     /// RAII guard: held only to keep the OS watch open — dropping it removes the
     /// watch. Never read.
-    #[allow(dead_code)]
-    watcher: RecommendedWatcher,
+    _watcher: RecommendedWatcher,
 }
 
 impl WatchState {
@@ -61,7 +56,7 @@ impl WatchState {
             recursive,
             debounce,
             signal,
-            watcher,
+            _watcher: watcher,
         })
     }
 }
@@ -204,13 +199,9 @@ pub fn fs_watch_library() -> Library {
 
 #[cfg(test)]
 mod tests {
-    use super::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
-    use crate::node::definition::FuncBehavior;
-    use crate::node::lambda::{FuncLambda, InvokeInput, OutputDemand};
-    use crate::runtime::any_state::AnyState;
-    use crate::runtime::context::ContextManager;
-    use crate::runtime::shared_any_state::SharedAnyState;
-    use crate::{DynamicValue, StaticValue};
+    use crate::fs_watch_library::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
+    use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
+    use scenarium::{DynamicValue, InvokeInput, OutputDemand, SharedAnyState, StaticValue};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;
@@ -220,7 +211,7 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("scenarium-watch-test-{}-{}", std::process::id(), n));
+            std::env::temp_dir().join(format!("lens-watch-test-{}-{}", std::process::id(), n));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -283,7 +274,7 @@ mod tests {
 
     #[test]
     fn classifies_filesystem_event_kinds() {
-        use super::is_content_change;
+        use crate::fs_watch_library::is_content_change;
         use notify::EventKind;
         use notify::event::{
             AccessKind, CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode,

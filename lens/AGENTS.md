@@ -1,7 +1,8 @@
 # lens
 
-Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
-(astronomical processing) into the `scenarium` node-based workflow.
+Node-function library: owns application-level node functions, including
+filesystem watching and random generation, and adapts `imaginarium` (GPU image
+ops) **and** `lumos` (astronomical processing) into the `scenarium` workflow.
 
 ## Layout
 
@@ -15,6 +16,8 @@ datatypes, the bridge — is crate-internal).
 src/
 ├── lib.rs              published surface
 ├── config_node.rs      shared Introspect → config-builder bridge
+├── fs_watch_library.rs filesystem watch + change-event node
+├── random_library.rs   random-number node
 ├── image/              imaginarium adapter
 │   ├── mod.rs          Image (CustomValue, async GPU thumbnail) + submodules
 │   ├── library.rs      image_library() — category `image`
@@ -43,6 +46,8 @@ src/
 
 - `image_library()` — builds a `Library` of the imaginarium image nodes.
 - `astro_library()` — builds a `Library` of the lumos astro nodes.
+- `fs_watch_library()` — builds the directory watcher node library.
+- `random_library()` — builds the random-number node library.
 - `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`; `gen_preview` reads a CPU view (`make_cpu` — no-op on CPU, download on GPU) and builds the thumbnail with the fused `imaginarium::Preview` op (area-average downscale + RGBA8 convert in one pass).
 - `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
@@ -68,4 +73,5 @@ src/
 
 ## Dependencies
 
-common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tracing, tokio, async-trait.
+common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tracing,
+tokio, async-trait, notify, rand.

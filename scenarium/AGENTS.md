@@ -104,11 +104,9 @@ pause gate uses Tokio `watch` so overlapping close guards reopen it only after
 the last guard drops. Worker reports stream progress and exact scoped pinned
 outputs before the matching finished result.
 
-## Built-ins and tests
+## Tests
 
-The filesystem watcher and random node are optional features
-(`builtin-fs-watch`, `builtin-random`). Darkroom enables them explicitly. Test
-fixtures and private-state builders are available only under tests or the
+Test fixtures and private-state builders are available only under tests or the
 `internals` feature; downstream crates enable `internals` only as a dev
 dependency. Test helpers stay in gated `test_support` modules beside the
 private state they access.

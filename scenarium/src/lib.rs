@@ -14,8 +14,6 @@ pub use data::dynamic_value::{CustomValue, DynamicValue, RamUsage};
 pub use data::resource::{ResourceStamp, ResourceStamper};
 pub use data::static_value::StaticValue;
 pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
-#[cfg(feature = "builtin-fs-watch")]
-pub use elements::fs_watch_library::fs_watch_library;
 pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};

@@ -1,8 +1,3 @@
-#[cfg(feature = "builtin-random")]
-use rand::rngs::StdRng;
-#[cfg(feature = "builtin-random")]
-use rand::{RngExt, SeedableRng};
-
 use crate::DataType;
 use crate::async_lambda;
 use crate::library::Library;
@@ -89,9 +84,6 @@ fn binary_float_func(
 
 pub fn math_library() -> Library {
     let mut library = Library::default();
-
-    #[cfg(feature = "builtin-random")]
-    library.add(random_func());
 
     library.add(binary_float_func(
         "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee",
@@ -353,35 +345,6 @@ fn divide_func() -> Func {
             let divisor = float_input(inputs, 1)?;
             outputs[0] = (dividend / divisor).into();
             outputs[1] = (dividend % divisor).into();
-            Ok(())
-        }))
-}
-
-#[cfg(feature = "builtin-random")]
-fn random_func() -> Func {
-    Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "Random")
-        .description("Generates a random float between min and max values.")
-        .category("Math")
-        .input(
-            FuncInput::required("Min", DataType::Float)
-                .description("Lower bound (inclusive).")
-                .default(0.0),
-        )
-        .input(
-            FuncInput::required("Max", DataType::Float)
-                .description("Upper bound (exclusive).")
-                .default(1.0),
-        )
-        .output(
-            FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."),
-        )
-        .lambda(async_lambda!(move |_, cache, _, inputs, _, outputs| {
-            assert_eq!(inputs.len(), 2);
-            assert_eq!(outputs.len(), 1);
-            let rng = cache.get_or_default_with(|| StdRng::from_rng(&mut rand::rng()));
-            let min = float_input(inputs, 0)?;
-            let max = float_input(inputs, 1)?;
-            outputs[0] = (min + (max - min) * rng.random::<f64>()).into();
             Ok(())
         }))
 }

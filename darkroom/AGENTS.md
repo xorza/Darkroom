@@ -34,7 +34,8 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
   upload come from here. Pre-1.0, breaks freely — coordinate changes with
   aperture.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, and shared utilities.
-- **`lens`** — `image_library()` / `astro_library()` (image + astro node libraries).
+- **`lens`** — application node libraries: filesystem watching, random values,
+  image operations, and astro processing.
 - **`tokio`** — multi-thread runtime backing the execution worker (graph runs
   off the UI thread; results drain back on-frame).
 
