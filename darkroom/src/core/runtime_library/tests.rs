@@ -12,18 +12,21 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     let mut graphs = GraphLibrary::default();
     graphs.graphs.insert(graph_id, Graph::new("shared"));
     let defaults = MlModelPaths::default();
-    let mut library = RuntimeLibrary::new(&defaults, &graphs);
+    let mut library = RuntimeLibrary::with_graph_library(&defaults, graphs);
 
     assert!(library.current.by_name("Watch Directory").is_some());
     assert!(library.current.by_name("Random").is_some());
-    assert_eq!(library.current.graphs.get(&graph_id).unwrap().name, "shared");
-    assert!(!library.update_ml_model_paths(&defaults, &graphs));
+    assert_eq!(
+        library.current.graphs.get(&graph_id).unwrap().name,
+        "shared"
+    );
+    assert!(!library.update_ml_model_paths(&defaults));
 
     let paths = MlModelPaths {
         denoise: PathBuf::from("/models/denoise.onnx"),
         star_removal: PathBuf::from("/models/stars.onnx"),
     };
-    assert!(library.update_ml_model_paths(&paths, &graphs));
+    assert!(library.update_ml_model_paths(&paths));
     let published = library.published.load();
     assert_eq!(
         published.by_name("ML Denoise").unwrap().inputs[1].default_value,
@@ -38,9 +41,17 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     assert_eq!(published.graphs.get(&graph_id).unwrap().name, "shared");
 
     let second_id = GraphId::unique();
-    graphs.graphs.insert(second_id, Graph::new("second"));
-    library.sync_graph_library(&graphs);
-    assert_eq!(library.current.graphs.get(&second_id).unwrap().name, "second");
+    let outcome = library.edit_graph_library(|graphs| {
+        graphs.graphs.insert(second_id, Graph::new("second"));
+        false
+    });
+    assert!(!outcome.changed);
+    assert!(outcome.persist_error.is_none());
+    library.recompose();
+    assert_eq!(
+        library.current.graphs.get(&second_id).unwrap().name,
+        "second"
+    );
     assert_eq!(
         library.current.by_name("ML Denoise").unwrap().inputs[1].default_value,
         Some(StaticValue::FsPath(paths.denoise.display().to_string())),

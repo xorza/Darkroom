@@ -1,5 +1,5 @@
-use common::{SerdeFormat, deserialize};
 use common::test_utils::test_output_path;
+use common::{SerdeFormat, deserialize};
 use scenarium::{Graph, GraphEvent, GraphId, NodeId};
 
 use crate::core::io::graph_template::{GraphTemplateLoadError, load, save};
@@ -21,7 +21,7 @@ fn graph_template_roundtrips_and_validates_input() {
     std::fs::write(&unsupported, b"{}").unwrap();
     assert!(matches!(
         load(&unsupported),
-        Err(GraphTemplateLoadError::UnsupportedFormat { path }) if path == unsupported
+        Err(GraphTemplateLoadError::Format { path, .. }) if path == unsupported
     ));
 
     let bad_path = test_output_path("darkroom_graph_template/bad-graph.json");

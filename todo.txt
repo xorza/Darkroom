@@ -34,3 +34,5 @@ session and engine - one entity?
 remove anyhow
 
 current Import adds a graph to the document, not the persistent library
+
+refactor publish.rs

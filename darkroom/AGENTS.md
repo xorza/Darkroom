@@ -60,8 +60,14 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
   `RuntimeHost` pairing and run/save/cache coordination.
-- **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
-  scripting host, and status log; no document or frontend policy.
+- **`core/runtime_host.rs`** — `RuntimeHost`: graph library, runtime library,
+  compiler, worker, scripting host, and status log; no document or frontend
+  policy.
+- **`core/graph_library/`** — `GraphLibrary`: user-owned reusable graph
+  definitions and their edit/persistence lifecycle.
+- **`core/runtime_library/`** — `RuntimeLibrary`: the ephemeral merged
+  Scenarium registry (built-ins, configured ML defaults, and graph-library
+  definitions) plus published snapshots for scripts and workers.
 - **`core/terminal_session/`** — terminal/headless event interpretation and
   shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
@@ -72,8 +78,9 @@ Root holds the entry point; implementation is grouped by responsibility:
   `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
   publication).
 - **`core/io/`** — `document.rs` (`.darkroom` ZIP containing `document.json`),
-  `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
-  session state), `library.rs` (shared graph library file), `cache.rs`
+  `graph_template/` (reusable graph-template serde I/O), `graph_library/`
+  (`darkroom.graph-library.json` loading, quarantine, and durable writes),
+  `preferences.rs` (`Preferences` session state), and `cache.rs`
   (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
   with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
@@ -188,8 +195,9 @@ Everything else is editor view-state, split per graph:
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
 
-`Library` is *not* here — `RuntimeLibrary` owns its current and published
-snapshots plus shared-graph persistence, and `RuntimeHost` owns that entity.
+`Library` is *not* here — `GraphLibrary` owns persistent reusable graphs,
+`RuntimeLibrary` owns current and published merged snapshots, and
+`RuntimeHost` coordinates both entities.
 Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
@@ -233,14 +241,15 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   variants so a new one won't compile until it declares its behavior.
 - Every variant is emitted by some UI (node-title rename →
   `RenameNode`, tab-strip rename → `RenameGraph`, etc.). Promote/publish/
-  export resolution (`graph_to_export` / `promote_to_library` /
+  export resolution (`graph_template_to_export` / `promote_to_graph_library` /
   `publish_local_graph`) is pure document↔library logic in
-  `core/edit/publish.rs` (unit-tested against bare types, `&mut Library` in /
-  `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
+  `core/edit/publish.rs` (unit-tested against bare types, `&mut GraphLibrary`
+  in / `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
   thin GUI orchestration (dialogs + dirty flag), running the mutators through
-  `RuntimeHost::edit_library`. `RuntimeLibrary` publishes and persists the
-  change; `RuntimeHost` reports the persistence outcome and re-pushes the
-  worker's `DiskStore` (its codec table rides a library snapshot).
+  `RuntimeHost::edit_graph_library`. `GraphLibrary` persists the edit;
+  `RuntimeLibrary` recomposes and publishes the merged registry; `RuntimeHost`
+  reports the persistence outcome and re-pushes the worker's `DiskStore` (its
+  codec table rides a library snapshot).
 
 ### Graph normalization (`scenarium::Graph::normalize`)
 Derived graph state lives in Scenarium. `OpenDocument::normalize` gates the
@@ -392,15 +401,17 @@ Key cross-cutting mechanisms:
 - **`BreakerProbe`** threads the active breaker state into node/connection
   draws so intersection tests run inline; hits drain into intents on release.
 
-### Persistence + library (`src/io/`, `src/theme.rs`)
+### Persistence + libraries (`src/core/io/`, `src/core/graph_library/`)
 `document.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
 `commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
-pretty-printed `document.json` entry. `persistence.rs` separately keeps
-the multi-format reusable-graph import/export path. `library.rs` reads/writes the shared
-graph library (`darkroom.library.json`): a set of `Graph`s loaded into
-`Library` at startup and grown by the **promote/publish** menu commands. Local
-graphs track lineage via an `origin` field — "Publish" updates the
-linked library entry in place, else creates a new one.
+pretty-printed `document.json` entry. `io/graph_template/` separately handles
+multi-format graph-template import/export. `GraphLibrary` owns the reusable
+definitions persisted by `io/graph_library/` in
+`darkroom.graph-library.json`; promote, publish, and explicit template import
+edit only this entity. `RuntimeLibrary` is rebuilt from built-ins, ML model
+defaults, and those definitions after every change. Local graphs track lineage
+via an `origin` field — "Publish" updates the linked graph-library entry in
+place, else creates a new one.
 
 `Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. Failures degrade
