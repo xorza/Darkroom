@@ -178,7 +178,7 @@ fn remap_source_edges(graph: &mut Graph, node: NodeId, remap: &HashMap<usize, us
         match remap.get(&old) {
             Some(&new) if new != old => graph.set_input_binding(tgt, Binding::bind(node, new)),
             Some(_) => {}
-            None => graph.set_input_binding(tgt, Binding::None),
+            None => graph.set_input_binding(tgt, None),
         }
     }
 }
@@ -198,7 +198,7 @@ fn remap_target_bindings(graph: &mut Graph, node: NodeId, remap: &HashMap<usize,
         return;
     }
     for (old, _) in &current {
-        graph.set_input_binding(InputPort::new(node, *old), Binding::None);
+        graph.set_input_binding(InputPort::new(node, *old), None);
     }
     for (old, b) in current {
         if let Some(&new) = remap.get(&old) {

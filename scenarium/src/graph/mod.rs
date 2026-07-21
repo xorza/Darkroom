@@ -62,12 +62,9 @@ impl InputPort {
 }
 
 /// What a consumer input port is wired to. Stored sparsely: `Graph.bindings`
-/// only holds `Const`/`Bind` entries, and an absent port reads back as `None`
-/// — so unbound inputs cost nothing.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// only holds these values, and an absent port is unbound.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
-    #[default]
-    None,
     Const(StaticValue),
     Bind(OutputPort),
 }
@@ -244,13 +241,13 @@ pub struct Graph {
 
     pub(crate) nodes: HashMap<NodeId, Node>,
 
-    /// Data wiring, keyed by consumer input port. Sparse: only `Const`/`Bind`
-    /// ports appear; absent = `Binding::None`. A `BTreeMap` keeps
+    /// Data wiring, keyed by consumer input port. Sparse: only bound ports
+    /// appear; absence means unbound. A `BTreeMap` keeps
     /// serialization deterministic and lets a node's ports range contiguously.
     /// Serialized as a sequence of `(port, binding)` pairs — struct keys aren't
     /// valid map keys in string-keyed formats (JSON/TOML).
     #[serde(default, with = "crate::graph::serde")]
-    pub(crate) bindings: BTreeMap<InputPort, Binding>,
+    pub bindings: BTreeMap<InputPort, Binding>,
 
     /// Event wiring: every (emitter event → subscriber) edge, flat. A
     /// `BTreeSet` dedups, keeps serialization deterministic, and ranges over
@@ -511,14 +508,6 @@ impl Binding {
             Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
         }
-    }
-
-    pub fn is_some(&self) -> bool {
-        !self.is_none()
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, Binding::None)
     }
 }
 

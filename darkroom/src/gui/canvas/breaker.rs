@@ -1,7 +1,7 @@
 use aperture::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use glam::Vec2;
 use scenarium::NodeId;
-use scenarium::{Binding, InputPort, OutputPort, Subscription};
+use scenarium::{InputPort, OutputPort, Subscription};
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
@@ -123,7 +123,7 @@ pub(crate) struct BreakerState {
     /// breaker must keep reading the Left button, not Right.
     pub(crate) button: PointerButton,
     /// Target input ports whose data binding the breaker intersects this
-    /// frame, drained on release into `Intent::SetInput { to: Binding::None }`.
+    /// frame, drained on release into an unbound `Intent::SetInput`.
     pub(crate) broken: Vec<InputPort>,
     /// Nodes whose body rect the breaker crosses this frame, drained on
     /// release into `Intent::RemoveNode`.
@@ -322,7 +322,7 @@ impl BreakerUI {
                     }
                     out.push(Intent::SetInput {
                         input: addr,
-                        to: Binding::None,
+                        to: None,
                     });
                 }
                 // A removed node already drops its subscriptions (RemoveNode's

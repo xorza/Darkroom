@@ -217,7 +217,7 @@ fn apply_all_batches_actions_into_one_inbound() {
 #[test]
 fn prelude_connect_decodes_to_setinput_bind() {
     // Pins the rewritten `connect` map shape against the new `Intent`:
-    // `SetInput { to: Binding::Bind(OutputPort { node_id, port_idx }) }`.
+    // `SetInput { to: Some(Binding::Bind(OutputPort { node_id, port_idx })) }`.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, Arc::new(Library::default()));
@@ -234,7 +234,7 @@ fn prelude_connect_decodes_to_setinput_bind() {
         Intent::SetInput { input, to } => {
             assert_eq!(*input, InputPort::new(inp, 1));
             match to {
-                Binding::Bind(OutputPort { node_id, port_idx }) => {
+                Some(Binding::Bind(OutputPort { node_id, port_idx })) => {
                     assert_eq!(*node_id, out);
                     assert_eq!(*port_idx, 2);
                 }
@@ -258,7 +258,7 @@ fn prelude_disconnect_decodes_to_setinput_none() {
 
     let actions = expect_apply(&mut rx);
     match &actions[0] {
-        Intent::SetInput { to, .. } => assert!(matches!(to, Binding::None)),
+        Intent::SetInput { to, .. } => assert!(to.is_none()),
         other => panic!("expected SetInput, got {other:?}"),
     }
 }

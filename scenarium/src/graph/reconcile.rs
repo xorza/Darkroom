@@ -32,7 +32,7 @@ impl Graph {
                     .is_some_and(|producer| {
                         self.port_in_range(producer, source.port_idx, false, library)
                     }),
-                Binding::None | Binding::Const(_) => true,
+                Binding::Const(_) => true,
             }
     }
 

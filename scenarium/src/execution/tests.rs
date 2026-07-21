@@ -112,7 +112,7 @@ fn node(library: &Library, func_name: &str) -> Node {
 }
 
 /// Set input `idx` of the named node's binding in the source graph.
-fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
+fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Option<Binding>>) {
     let id = graph
         .find_by_name(node_name, NodeSearch::TopLevel)
         .unwrap()
@@ -2154,7 +2154,7 @@ mod missing_inputs {
         let library = test_func_lib(TestFuncHooks::default());
 
         // Remove sum's first input binding (required by default)
-        bind(&mut graph, "sum", 0, Binding::None);
+        bind(&mut graph, "sum", 0, None);
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2189,7 +2189,7 @@ mod missing_inputs {
         let mut execution_graph = ExecutionEngine::default();
 
         // sum missing-required; mult[0] stays bound to sum but is made optional.
-        bind(&mut graph, "sum", 0, Binding::None);
+        bind(&mut graph, "sum", 0, None);
         mutate_func(&mut library, "mult", |func| {
             func.inputs[0].required = false;
         });
@@ -2221,7 +2221,7 @@ mod missing_inputs {
         let mut execution_graph = ExecutionEngine::default();
 
         // mult[0] unbound + optional (not wired to anything).
-        bind(&mut graph, "mult", 0, Binding::None);
+        bind(&mut graph, "mult", 0, None);
         mutate_func(&mut library, "mult", |func| {
             func.inputs[0].required = false;
         });
@@ -2258,7 +2258,7 @@ mod missing_inputs {
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
         // sum's required input[0] unbound → sum missing-required → gated.
-        bind(&mut graph, "sum", 0, Binding::None);
+        bind(&mut graph, "sum", 0, None);
         // mult[0] (required) gets a real value; mult[1] is the only bind to the
         // gated sum and is *optional* — so this exercises optional-bind
         // propagation specifically. mult and print end up gated.
@@ -2475,7 +2475,7 @@ mod const_bindings {
         );
 
         // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
-        bind(&mut graph, "sum", 1, Binding::None);
+        bind(&mut graph, "sum", 1, None);
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -2535,7 +2535,7 @@ mod const_bindings {
 
         // Switch mult inputs to const/none
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
-        bind(&mut graph, "mult", 1, Binding::None);
+        bind(&mut graph, "mult", 1, None);
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -3276,7 +3276,7 @@ mod execution {
         let mut execution_graph = ExecutionEngine::default();
 
         // Make sum's first input None (required) — sum and downstream shouldn't execute
-        bind(&mut graph, "sum", 0, Binding::None);
+        bind(&mut graph, "sum", 0, None);
 
         execution_graph.update(&graph, &library).unwrap();
 
@@ -3738,7 +3738,7 @@ mod argument_values {
         mutate_func(&mut library, "mult", |func| {
             func.inputs[1].required = false;
         });
-        bind(&mut graph, "mult", 1, Binding::None);
+        bind(&mut graph, "mult", 1, None);
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
@@ -3853,7 +3853,7 @@ mod stats {
         let library = test_func_lib(default_hooks());
 
         // Remove sum's first input (required)
-        bind(&mut graph, "sum", 0, Binding::None);
+        bind(&mut graph, "sum", 0, None);
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -5078,10 +5078,16 @@ mod graph {
         let c2_id = graph.add(c2);
         let p1_id = graph.add(p1);
         let p2_id = graph.add(p2);
-        graph.set_input_binding(InputPort::new(c1_id, 0), StaticValue::Int(1).into());
-        graph.set_input_binding(InputPort::new(c1_id, 1), StaticValue::Int(2).into());
-        graph.set_input_binding(InputPort::new(c2_id, 0), StaticValue::Int(10).into());
-        graph.set_input_binding(InputPort::new(c2_id, 1), StaticValue::Int(20).into());
+        graph.set_input_binding(InputPort::new(c1_id, 0), Binding::from(StaticValue::Int(1)));
+        graph.set_input_binding(InputPort::new(c1_id, 1), Binding::from(StaticValue::Int(2)));
+        graph.set_input_binding(
+            InputPort::new(c2_id, 0),
+            Binding::from(StaticValue::Int(10)),
+        );
+        graph.set_input_binding(
+            InputPort::new(c2_id, 1),
+            Binding::from(StaticValue::Int(20)),
+        );
         graph.set_input_binding(InputPort::new(p1_id, 0), Binding::bind(c1_id, 0));
         graph.set_input_binding(InputPort::new(p2_id, 0), Binding::bind(c2_id, 0));
 

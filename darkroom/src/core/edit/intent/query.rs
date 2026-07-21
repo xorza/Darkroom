@@ -70,7 +70,8 @@ impl UndoStep {
             // keeps the editor present at its `Fixed` size, so the
             // value-only edit (Const → Const) doesn't need a relayout.
             GraphStep::SetInput { from, to, .. } => {
-                matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
+                matches!(from, Some(Binding::Const(_)))
+                    != matches!(to, Some(Binding::Const(_)))
             }
             GraphStep::SetSelection { .. }
             // Raising only reorders the paint stack — no node remeasures.

@@ -125,7 +125,7 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
                     }
                 }
                 // Already bound → clear it.
-                _ => out.push(set_input(port, Binding::None)),
+                _ => out.push(set_input(port, None)),
             }
         }
         for port in node_ports(node, PortKind::Output) {
@@ -139,7 +139,7 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
                                 kind: PortKind::Input,
                                 port_idx: c.tgt.port_idx,
                             },
-                            Binding::None,
+                            None,
                         ));
                     }
                 }

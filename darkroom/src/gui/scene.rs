@@ -73,12 +73,12 @@ pub(crate) enum InputBindingView {
     Bind,
 }
 
-impl From<&Binding> for InputBindingView {
-    fn from(b: &Binding) -> Self {
-        match b {
-            Binding::None => Self::None,
-            Binding::Const(v) => Self::Const(v.clone()),
-            Binding::Bind(_) => Self::Bind,
+impl From<Option<&Binding>> for InputBindingView {
+    fn from(binding: Option<&Binding>) -> Self {
+        match binding {
+            None => Self::None,
+            Some(Binding::Const(value)) => Self::Const(value.clone()),
+            Some(Binding::Bind(_)) => Self::Bind,
         }
     }
 }
@@ -382,24 +382,20 @@ impl Scene {
                 }
             };
             // One `SceneInput` per input port, sliced by the node's `inputs`
-            // span. The bindings come from a parallel graph iterator; each
-            // input's value_variants are flattened into one pool, the input
-            // recording its span (empty for the common no-options case).
+            // span. Each input's value_variants are flattened into one pool,
+            // the input recording its span (empty for the common no-options case).
             let inputs_start = self.inputs.len();
-            for (input, node_binding) in interface
-                .inputs
-                .iter()
-                .zip(graph.node_bindings(id, interface.inputs.len()))
-            {
+            for (port_idx, input) in interface.inputs.iter().enumerate() {
                 let value_variants = extend_pool(
                     &mut self.value_variants_pool,
                     input.value_variants.iter().cloned(),
                 );
+                let port = InputPort::new(id, port_idx);
                 self.inputs.push(SceneInput {
                     name: ui.intern(&input.name),
                     description: ui.intern(input.description.as_deref().unwrap_or_default()),
                     ty: input.data_type.clone(),
-                    binding: InputBindingView::from(&node_binding.binding),
+                    binding: InputBindingView::from(graph.bindings.get(&port)),
                     default: default_static_value(library, input),
                     required: input.required,
                     const_only: input.const_only,

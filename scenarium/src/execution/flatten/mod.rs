@@ -341,13 +341,10 @@ impl<'a> Run<'a> {
 
             self.cur_id = flat_id;
 
-            for binding_entry in graph.node_bindings(node.id, input_count) {
-                let source = match binding_entry.binding {
-                    Binding::None => Source::None,
-                    Binding::Const(v) => Source::Const(v),
-                    Binding::Bind(op) => self.resolve(op),
-                };
-                self.set_input(binding_entry.port.port_idx, source);
+            for port_idx in 0..input_count {
+                let port = InputPort::new(node.id, port_idx);
+                let source = self.resolve_binding(graph.bindings.get(&port));
+                self.set_input(port_idx, source);
             }
         }
 
@@ -509,9 +506,10 @@ impl<'a> Run<'a> {
                 else {
                     return Source::None;
                 };
-                let binding = nested.input_binding(InputPort::new(output.id, port_idx));
+                let port = InputPort::new(output.id, port_idx);
+                let binding = nested.bindings.get(&port).cloned();
                 self.push_level(node_id);
-                let source = self.resolve_binding(&binding);
+                let source = self.resolve_binding(binding.as_ref());
                 self.path.pop();
                 source
             }
@@ -519,10 +517,9 @@ impl<'a> Run<'a> {
             // instance's exposed input `port_idx`; resolve it one level up.
             NodeKind::GraphInput => {
                 let instance_id = self.path.pop().expect("GraphInput at the root level");
-                let binding = self
-                    .current()
-                    .input_binding(InputPort::new(instance_id, port_idx));
-                let source = self.resolve_binding(&binding);
+                let port = InputPort::new(instance_id, port_idx);
+                let binding = self.current().bindings.get(&port).cloned();
+                let source = self.resolve_binding(binding.as_ref());
                 self.path.push(instance_id);
                 source
             }
@@ -530,11 +527,11 @@ impl<'a> Run<'a> {
         }
     }
 
-    fn resolve_binding(&mut self, binding: &Binding) -> Source {
+    fn resolve_binding(&mut self, binding: Option<&Binding>) -> Source {
         match binding {
-            Binding::None => Source::None,
-            Binding::Const(v) => Source::Const(v.clone()),
-            Binding::Bind(op) => self.resolve(*op),
+            None => Source::None,
+            Some(Binding::Const(value)) => Source::Const(value.clone()),
+            Some(Binding::Bind(output)) => self.resolve(*output),
         }
     }
 }

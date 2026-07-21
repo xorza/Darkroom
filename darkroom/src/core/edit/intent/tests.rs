@@ -896,7 +896,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
         commit_intent(
             Intent::SetInput {
                 input: InputPort::new(a, 0),
-                to: Binding::bind(b, 0),
+                to: Some(Binding::bind(b, 0)),
             },
             &mut doc,
             GraphRef::Main,
@@ -905,13 +905,13 @@ fn commit_intent_rejects_cycle_forming_bind() {
         "a bind that closes a cycle is rejected"
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(a, 0)),
-        Binding::None,
+        doc.graph.bindings.get(&InputPort::new(a, 0)),
+        None,
         "the rejected bind left a's input unbound"
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(b, 0)),
-        Binding::bind(a, 0),
+        doc.graph.bindings.get(&InputPort::new(b, 0)),
+        Some(&Binding::bind(a, 0)),
         "the existing a → b edge is untouched"
     );
 
@@ -921,7 +921,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
         commit_intent(
             Intent::SetInput {
                 input: InputPort::new(c, 0),
-                to: Binding::bind(b, 0),
+                to: Some(Binding::bind(b, 0)),
             },
             &mut doc,
             GraphRef::Main,
@@ -930,7 +930,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
         "an acyclic bind commits"
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(c, 0)),
-        Binding::bind(b, 0),
+        doc.graph.bindings.get(&InputPort::new(c, 0)),
+        Some(&Binding::bind(b, 0)),
     );
 }

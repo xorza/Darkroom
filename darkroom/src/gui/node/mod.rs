@@ -394,10 +394,10 @@ pub(crate) fn node_rename_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
-pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
+pub(crate) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent {
     Intent::SetInput {
         input: InputPort::new(port.node_id, port.port_idx),
-        to,
+        to: to.into(),
     }
 }
 

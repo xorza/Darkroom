@@ -139,7 +139,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         Intent::SetInput { input, to } => {
             graph.find(&input.node_id, NodeSearch::TopLevel)?;
             GraphStep::SetInput {
-                from: graph.input_binding(input),
+                from: graph.bindings.get(&input).cloned(),
                 input,
                 to,
             }

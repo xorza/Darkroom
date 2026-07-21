@@ -105,7 +105,7 @@ pub(crate) enum Intent {
     },
     SetInput {
         input: InputPort,
-        to: Binding,
+        to: Option<Binding>,
     },
     /// Replace the whole selection set. The rubber band, node/pin clicks,
     /// and Esc-deselect all funnel through this — the caller computes
@@ -263,8 +263,8 @@ pub(crate) enum GraphStep {
     },
     SetInput {
         input: InputPort,
-        from: Binding,
-        to: Binding,
+        from: Option<Binding>,
+        to: Option<Binding>,
     },
     SetSelection {
         from: BTreeSet<ItemRef>,

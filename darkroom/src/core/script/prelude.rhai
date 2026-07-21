@@ -43,7 +43,7 @@ fn connect(output_node, output_port, input_node, input_port) {
 fn disconnect(input_node, input_port) {
     apply(#{ SetInput: #{
         input: #{ node_id: input_node, port_idx: input_port },
-        to: "None",
+        to: (),
     }});
 }
 

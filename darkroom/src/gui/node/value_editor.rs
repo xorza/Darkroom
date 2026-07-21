@@ -2,7 +2,7 @@
 //!
 //! Renders next to the port label in the node body and returns a new
 //! `StaticValue` when the user changes it. The host (`node_ui`)
-//! converts that into an `Intent::SetInput { to: Binding::Const(..) }`.
+//! converts that into an `Intent::SetInput` carrying a constant binding.
 //!
 //! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick
 //! button showing the chosen file's name — `emit_path_picks` polls the click,

@@ -5,7 +5,7 @@ use crate::graph::{
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
-use crate::{BindingEntry, DataType, DetachedNode, closes_data_cycle};
+use crate::{DataType, DetachedNode, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
@@ -308,7 +308,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
         "Int through a passthrough into Int is compatible"
     );
 
-    g.set_input_binding(InputPort::new(i, 0), Binding::None);
+    g.set_input_binding(InputPort::new(i, 0), None);
     let f = g.add_func_node(&str_sink);
     g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
     assert!(
@@ -398,7 +398,7 @@ fn resolve_output_type_follows_passthrough_chain() {
 
     // An unbound value input leaves the passthrough polymorphic (`Any`),
     // so its output accepts any consumer again.
-    graph.set_input_binding(InputPort::new(p1, 0), Binding::None);
+    graph.set_input_binding(InputPort::new(p1, 0), None);
     assert_eq!(
         graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
         DataType::Any
@@ -646,6 +646,18 @@ fn deserialize_rejects_corrupt_graph() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("graph has a nil origin"), "{error}");
+
+    let mut duplicate_bindings = serde_json::to_value(test_graph()).unwrap();
+    let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
+    bindings.push(bindings[0].clone());
+    let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
+    let error = Graph::deserialize(&bytes, SerdeFormat::Json)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("duplicate binding for input port"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -729,18 +741,9 @@ fn binding_accessors() {
     let out = OutputPort::new(NodeId::unique(), 2);
     let bind = Binding::Bind(out);
     assert_eq!(bind.as_output_binding(), Some(&out));
-    assert!(bind.is_some());
-    assert!(!bind.is_none());
 
     let konst = Binding::from(5i64);
     assert_eq!(konst.as_output_binding(), None);
-    assert!(konst.is_some()); // a Const is a real binding
-    assert!(!konst.is_none());
-
-    let none = Binding::None;
-    assert_eq!(none.as_output_binding(), None);
-    assert!(!none.is_some());
-    assert!(none.is_none());
 }
 
 #[test]
@@ -754,8 +757,8 @@ fn binding_conversions() {
 }
 
 #[test]
-fn node_bindings_yields_ports_in_order_with_none_gaps() {
-    let graph = test_graph();
+fn input_bindings_are_sparse_and_none_removes_an_entry() {
+    let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     let get_a_id = graph
         .find_by_name("get_a", NodeSearch::TopLevel)
@@ -766,25 +769,23 @@ fn node_bindings_yields_ports_in_order_with_none_gaps() {
         .unwrap()
         .id;
 
-    // sum has two bound inputs; ask for arity 3 to exercise the unbound gap.
-    let bindings: Vec<_> = graph.node_bindings(sum_id, 3).collect();
+    let first = InputPort::new(sum_id, 0);
+    let second = InputPort::new(sum_id, 1);
+    let absent = InputPort::new(sum_id, 2);
     assert_eq!(
-        bindings,
-        vec![
-            BindingEntry {
-                port: InputPort::new(sum_id, 0),
-                binding: Binding::bind(get_a_id, 0),
-            },
-            BindingEntry {
-                port: InputPort::new(sum_id, 1),
-                binding: Binding::bind(get_b_id, 0),
-            },
-            BindingEntry {
-                port: InputPort::new(sum_id, 2),
-                binding: Binding::None,
-            },
-        ]
+        graph.bindings.get(&first),
+        Some(&Binding::bind(get_a_id, 0))
     );
+    assert_eq!(
+        graph.bindings.get(&second),
+        Some(&Binding::bind(get_b_id, 0))
+    );
+    assert!(!graph.bindings.contains_key(&absent));
+
+    let binding_count = graph.bindings.len();
+    graph.set_input_binding(first, None);
+    assert!(!graph.bindings.contains_key(&first));
+    assert_eq!(graph.bindings.len(), binding_count - 1);
 }
 
 #[test]
@@ -944,8 +945,8 @@ fn add_func_node_seeds_default_const_binding() {
         Some(func.id)
     );
     assert_eq!(
-        graph.input_binding(InputPort::new(id, 0)),
-        Binding::Const(7i64.into())
+        graph.bindings.get(&InputPort::new(id, 0)),
+        Some(&Binding::Const(7i64.into()))
     );
 }
 
@@ -956,8 +957,8 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
     let mut graph = Graph::default();
     let id = graph.add_func_node(sum);
 
-    assert_eq!(graph.input_binding(InputPort::new(id, 0)), Binding::None);
-    assert_eq!(graph.input_binding(InputPort::new(id, 1)), Binding::None);
+    assert!(!graph.bindings.contains_key(&InputPort::new(id, 0)));
+    assert!(!graph.bindings.contains_key(&InputPort::new(id, 1)));
 }
 
 #[test]
@@ -974,10 +975,10 @@ fn add_graph_node_seeds_default_const_binding() {
 
     // Port 0 had a default; port 1 did not.
     assert_eq!(
-        graph.input_binding(InputPort::new(id, 0)),
-        Binding::Const(3i64.into())
+        graph.bindings.get(&InputPort::new(id, 0)),
+        Some(&Binding::Const(3i64.into()))
     );
-    assert_eq!(graph.input_binding(InputPort::new(id, 1)), Binding::None);
+    assert!(!graph.bindings.contains_key(&InputPort::new(id, 1)));
 }
 
 #[test]
@@ -1189,8 +1190,8 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         "every dangling binding drops, the valid one stays"
     );
     assert!(matches!(
-        graph.input_binding(InputPort::new(b, 0)),
-        Binding::Bind(_)
+        graph.bindings.get(&InputPort::new(b, 0)),
+        Some(Binding::Bind(_))
     ));
     for dead in [
         InputPort::new(c, 5),
@@ -1198,16 +1199,17 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         InputPort::new(e, 0),
         InputPort::new(ghost, 0),
     ] {
-        assert!(matches!(graph.input_binding(dead), Binding::None));
+        assert!(!graph.bindings.contains_key(&dead));
     }
     assert!(matches!(
-        graph.input_binding(InputPort::new(graph_output, 0)),
-        Binding::Bind(_)
+        graph.bindings.get(&InputPort::new(graph_output, 0)),
+        Some(Binding::Bind(_))
     ));
-    assert!(matches!(
-        graph.input_binding(InputPort::new(graph_output, 1)),
-        Binding::None
-    ));
+    assert!(
+        !graph
+            .bindings
+            .contains_key(&InputPort::new(graph_output, 1))
+    );
 
     // Const bindings are never structurally dangling — kept regardless.
     graph.set_input_binding(
@@ -1229,7 +1231,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         "unresolvable-node wiring is preserved"
     );
     assert!(matches!(
-        graph.input_binding(InputPort::new(ghost_id, 3)),
-        Binding::Bind(_)
+        graph.bindings.get(&InputPort::new(ghost_id, 3)),
+        Some(Binding::Bind(_))
     ));
 }

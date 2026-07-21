@@ -46,8 +46,8 @@ fn apply_add_node_seeds_initial_bindings() {
 
     apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(
-        doc.graph.input_binding(port),
-        Binding::Const(StaticValue::Float(5.0)),
+        doc.graph.bindings.get(&port),
+        Some(&Binding::Const(StaticValue::Float(5.0))),
         "the seeded default landed as a const binding",
     );
 }
@@ -151,19 +151,19 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
         &mut doc,
         vec![Intent::SetInput {
             input: InputPort::new(pass, 0),
-            to: Binding::bind(sp, 0),
+            to: Some(Binding::bind(sp, 0)),
         }],
         &library,
     );
 
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(pass, 0)),
-        Binding::bind(sp, 0),
+        doc.graph.bindings.get(&InputPort::new(pass, 0)),
+        Some(&Binding::bind(sp, 0)),
         "the rewire landed"
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(sink, 0)),
-        Binding::None,
+        doc.graph.bindings.get(&InputPort::new(sink, 0)),
+        None,
         "the now-incompatible Float sink edge was severed in the same batch"
     );
 }
@@ -213,19 +213,19 @@ fn apply_intents_severs_through_a_passthrough_chain() {
         &mut doc,
         vec![Intent::SetInput {
             input: InputPort::new(p1, 0),
-            to: Binding::bind(sp, 0),
+            to: Some(Binding::bind(sp, 0)),
         }],
         &library,
     );
 
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(p2, 0)),
-        Binding::bind(p1, 0),
+        doc.graph.bindings.get(&InputPort::new(p2, 0)),
+        Some(&Binding::bind(p1, 0)),
         "pass2's wildcard input accepts the new type and is kept"
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(sink, 0)),
-        Binding::None,
+        doc.graph.bindings.get(&InputPort::new(sink, 0)),
+        None,
         "the cascade follows the chain and severs the two-hops-down sink edge"
     );
 }

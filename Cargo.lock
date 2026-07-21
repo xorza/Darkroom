@@ -4238,6 +4238,7 @@ dependencies = [
  "notify",
  "rand 0.10.2",
  "serde",
+ "serde_json",
  "strum",
  "thiserror 2.0.19",
  "tokio",

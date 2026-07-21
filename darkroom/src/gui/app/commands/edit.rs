@@ -41,7 +41,7 @@ impl App {
         self.editor.apply_edit(
             Intent::SetInput {
                 input: req.port,
-                to: Binding::Const(value),
+                to: Some(Binding::Const(value)),
             },
             &library,
         );

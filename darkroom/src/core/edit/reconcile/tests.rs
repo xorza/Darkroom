@@ -180,28 +180,25 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     // (was 2).
     let interior = doc.graph.graphs.get(&graph_id).unwrap();
     assert_eq!(
-        interior.input_binding(InputPort::new(fixture.sum, 0)),
-        Binding::bind(fixture.input, 0),
+        interior.bindings.get(&InputPort::new(fixture.sum, 0)),
+        Some(&Binding::bind(fixture.input, 0)),
     );
     assert_eq!(
-        interior.input_binding(InputPort::new(fixture.sum, 1)),
-        Binding::bind(fixture.input, 1),
+        interior.bindings.get(&InputPort::new(fixture.sum, 1)),
+        Some(&Binding::bind(fixture.input, 1)),
     );
 
     // Instance: old slot 0 stays (10), old slot 2 -> new slot 1 (12),
     // dropped slot 1 (11) is cleared.
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(inst, 0)),
-        Binding::Const(StaticValue::Int(10)),
+        doc.graph.bindings.get(&InputPort::new(inst, 0)),
+        Some(&Binding::Const(StaticValue::Int(10))),
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort::new(inst, 1)),
-        Binding::Const(StaticValue::Int(12)),
+        doc.graph.bindings.get(&InputPort::new(inst, 1)),
+        Some(&Binding::Const(StaticValue::Int(12))),
     );
-    assert_eq!(
-        doc.graph.input_binding(InputPort::new(inst, 2)),
-        Binding::None,
-    );
+    assert_eq!(doc.graph.bindings.get(&InputPort::new(inst, 2)), None,);
 }
 
 #[test]

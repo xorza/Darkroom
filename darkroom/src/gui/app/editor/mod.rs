@@ -784,13 +784,13 @@ mod tests {
         editor.apply_edit(
             Intent::SetInput {
                 input: InputPort::new(pass, 0),
-                to: Binding::bind(sp, 0),
+                to: Some(Binding::bind(sp, 0)),
             },
             &library,
         );
         assert_eq!(
-            editor.document.graph.input_binding(InputPort::new(sink, 0)),
-            Binding::None,
+            editor.document.graph.bindings.get(&InputPort::new(sink, 0)),
+            None,
             "the incompatible sink edge is severed"
         );
 
@@ -799,13 +799,13 @@ mod tests {
         // rather than leaving the severed edge dropped.
         assert!(undo(&mut editor));
         assert_eq!(
-            editor.document.graph.input_binding(InputPort::new(pass, 0)),
-            Binding::bind(fp, 0),
+            editor.document.graph.bindings.get(&InputPort::new(pass, 0)),
+            Some(&Binding::bind(fp, 0)),
             "the input rewire is undone"
         );
         assert_eq!(
-            editor.document.graph.input_binding(InputPort::new(sink, 0)),
-            Binding::bind(pass, 0),
+            editor.document.graph.bindings.get(&InputPort::new(sink, 0)),
+            Some(&Binding::bind(pass, 0)),
             "the severed edge is restored, not left dangling"
         );
     }

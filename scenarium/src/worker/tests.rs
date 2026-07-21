@@ -114,7 +114,7 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let print_node: Node = print_func.into();
     graph.insert(print_node_id, print_node);
 
-    graph.set_input_binding(InputPort::new(frame_event_node_id, 0), 1.into());
+    graph.set_input_binding(InputPort::new(frame_event_node_id, 0), Binding::from(1i64));
     graph.subscribe(frame_event_node_id, 0, print_node_id);
     graph.set_input_binding(
         InputPort::new(to_string_node_id, 0),
@@ -137,7 +137,7 @@ fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
     let print_node_id = graph.add(print_node);
     graph.set_input_binding(
         InputPort::new(print_node_id, 0),
-        StaticValue::String(message.to_string()).into(),
+        Binding::from(StaticValue::String(message.to_string())),
     );
     (graph, print_node_id)
 }

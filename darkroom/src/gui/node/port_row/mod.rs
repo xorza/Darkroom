@@ -290,7 +290,7 @@ fn input_label_cell(
                 .left
                 .clicked()
             {
-                out.push(set_input(port, Binding::None));
+                out.push(set_input(port, None));
             }
         });
 }

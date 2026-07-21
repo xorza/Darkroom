@@ -533,6 +533,6 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     };
     out.push(Intent::SetInput {
         input: InputPort::new(input.node_id, input.port_idx),
-        to: Binding::bind(output.node_id, output.port_idx),
+        to: Some(Binding::bind(output.node_id, output.port_idx)),
     });
 }

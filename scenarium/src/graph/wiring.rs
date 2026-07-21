@@ -55,11 +55,12 @@ impl DetachedNode {
         if self.node_id.is_nil() {
             return Err("detached node id must not be nil");
         }
-        if self.bindings.iter().any(|entry| {
-            matches!(entry.binding, Binding::None)
-                || !binding_touches(entry.port, &entry.binding, self.node_id)
-        }) {
-            return Err("detached bindings must be sparse and touch the detached node");
+        if self
+            .bindings
+            .iter()
+            .any(|entry| !binding_touches(entry.port, &entry.binding, self.node_id))
+        {
+            return Err("detached bindings must touch the detached node");
         }
         if self
             .bindings
@@ -189,27 +190,15 @@ impl Graph {
         self.pinned_outputs.extend(pinned_outputs);
     }
 
-    pub fn input_binding(&self, port: InputPort) -> Binding {
-        self.bindings.get(&port).cloned().unwrap_or(Binding::None)
-    }
-
-    pub fn set_input_binding(&mut self, port: InputPort, binding: Binding) {
-        if matches!(binding, Binding::None) {
-            self.bindings.remove(&port);
-        } else {
-            self.bindings.insert(port, binding);
+    pub fn set_input_binding(&mut self, port: InputPort, binding: impl Into<Option<Binding>>) {
+        match binding.into() {
+            Some(binding) => {
+                self.bindings.insert(port, binding);
+            }
+            None => {
+                self.bindings.remove(&port);
+            }
         }
-    }
-
-    pub fn node_bindings(
-        &self,
-        node_id: NodeId,
-        arity: usize,
-    ) -> impl Iterator<Item = BindingEntry> + '_ {
-        (0..arity).map(move |port_idx| BindingEntry {
-            port: InputPort::new(node_id, port_idx),
-            binding: self.input_binding(InputPort::new(node_id, port_idx)),
-        })
     }
 
     pub fn subscribe(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {

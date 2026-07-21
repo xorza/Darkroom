@@ -1164,6 +1164,20 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("graph has a nil origin"), "{error}");
+
+        let mut duplicate_bindings = serde_json::to_value(build_test_doc()).unwrap();
+        let bindings = duplicate_bindings["graph"]["bindings"]
+            .as_array_mut()
+            .unwrap();
+        bindings.push(bindings[0].clone());
+        let serialized = serde_json::to_vec(&duplicate_bindings).unwrap();
+        let error = Document::deserialize(SerdeFormat::Json, &serialized)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("duplicate binding for input port"),
+            "{error}"
+        );
     }
 
     #[test]

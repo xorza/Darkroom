@@ -36,7 +36,7 @@ pub(crate) fn commit_intent(
     // guard covering every binding path, including any that bypass the canvas.
     if let Intent::SetInput {
         input,
-        to: Binding::Bind(src),
+        to: Some(Binding::Bind(src)),
         ..
     } = &intent
         && doc
@@ -87,7 +87,7 @@ pub(crate) fn commit_intent_cascading(
             steps.extend(commit_intent(
                 Intent::SetInput {
                     input: dst,
-                    to: Binding::None,
+                    to: None,
                 },
                 doc,
                 target,
