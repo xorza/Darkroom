@@ -263,7 +263,7 @@ impl Graph {
     }
 
     /// Debug-only assert form of [`Self::check`].
-    pub fn debug_check(&self) {
+    pub fn check_debug(&self) {
         if !is_debug() {
             return;
         }
@@ -285,7 +285,7 @@ impl Graph {
     }
 
     /// Debug-only assert form of [`Self::check_for_execution`].
-    pub fn debug_check_for_execution(&self, library: &Library) {
+    pub fn check_for_execution_debug(&self, library: &Library) {
         if !is_debug() {
             return;
         }

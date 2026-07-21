@@ -267,7 +267,7 @@ impl ExecutionEngine {
         // default new, trim gone).
         self.cache.reconcile(&self.compiled.program);
 
-        self.compiled.validate_installed(&self.cache);
+        self.compiled.check_installed_debug(&self.cache);
     }
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node

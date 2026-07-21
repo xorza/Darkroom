@@ -92,7 +92,7 @@ impl Document {
     }
 
     /// Debug-only assert form of [`Self::check`].
-    pub(crate) fn debug_check(&self) {
+    pub(crate) fn check_debug(&self) {
         if !is_debug() {
             return;
         }

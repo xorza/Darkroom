@@ -51,7 +51,7 @@ pub struct DetachedNode {
 }
 
 impl DetachedNode {
-    fn validate(&self) -> Result<(), &'static str> {
+    fn check(&self) -> Result<(), &'static str> {
         if self.node_id.is_nil() {
             return Err("detached node id must not be nil");
         }
@@ -145,7 +145,7 @@ impl Graph {
 
     pub fn attach_node(&mut self, detached: DetachedNode) {
         detached
-            .validate()
+            .check()
             .expect("cannot attach an invalid detached node");
         assert!(
             !self.nodes.contains_key(&detached.node_id),

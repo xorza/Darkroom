@@ -116,7 +116,7 @@ impl Compiler {
             program,
             flatten_map: flatten_map.clone(),
         };
-        compiled.validate(library);
+        compiled.check_debug(library);
         Ok(Compilation {
             compiled,
             flatten_map,
@@ -127,7 +127,10 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::cache::RuntimeCache;
     use crate::execution::identity::test_support::FlattenMapBuilder;
+    use crate::execution::program::ExecutionNode;
+    use crate::node::definition::FuncId;
 
     #[test]
     fn node_address_chooses_a_representative_and_preserves_unknown_ids() {
@@ -150,5 +153,37 @@ mod tests {
             }
         );
         assert_eq!(compiled.node_address(unknown), NodeAddress::root(unknown));
+    }
+
+    #[test]
+    fn checks_return_compiled_and_installed_mismatches() {
+        let flat = NodeId::unique();
+        let missing_func = FuncId::unique();
+        let mut builder = FlattenMapBuilder::new();
+        builder.insert_leaf(flat, [], flat);
+        let mut program = ExecutionProgram::default();
+        program.e_nodes.insert(
+            flat,
+            ExecutionNode {
+                func_id: missing_func,
+                ..Default::default()
+            },
+        );
+        let compiled = CompiledGraph {
+            program,
+            flatten_map: Arc::new(builder.build()),
+        };
+
+        assert_eq!(
+            compiled.check(&Library::default()).unwrap_err().to_string(),
+            format!("execution node {flat:?} references missing func {missing_func:?}")
+        );
+        assert_eq!(
+            compiled
+                .check_installed(&RuntimeCache::default())
+                .unwrap_err()
+                .to_string(),
+            "runtime cache node set does not match the compiled program"
+        );
     }
 }

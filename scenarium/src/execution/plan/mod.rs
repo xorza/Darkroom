@@ -11,7 +11,7 @@
 use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
 use crate::execution::query::resolve_node_id;
-use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map, validate};
+use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map};
 use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 
@@ -141,7 +141,7 @@ impl Planner {
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            validate::schedule(program, plan);
+            plan.check_debug(program);
         }
         result
     }

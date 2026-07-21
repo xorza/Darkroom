@@ -1,4 +1,5 @@
-use hashbrown::HashMap;
+use anyhow::{Result, ensure};
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::graph::NodeId;
@@ -87,6 +88,38 @@ impl FlattenMap {
             "duplicate authoring node address {address:?}"
         );
         self.representatives.entry(interior).or_insert(address);
+    }
+
+    pub(crate) fn check(&self, flat_ids: impl IntoIterator<Item = NodeId>) -> Result<()> {
+        let expected: HashSet<_> = flat_ids.into_iter().collect();
+        ensure!(
+            self.leaves.len() == expected.len(),
+            "flatten map must have exactly one leaf per execution node"
+        );
+        ensure!(
+            self.flat_nodes.len() == self.leaves.len(),
+            "flatten map forward and reverse identity tables must have equal sizes"
+        );
+
+        for flat_id in expected {
+            let Some(leaf) = self.leaves.get(&flat_id) else {
+                anyhow::bail!("execution node {flat_id:?} has no flatten-map leaf");
+            };
+            ensure!(
+                self.flat_nodes.get(&leaf.address) == Some(&flat_id),
+                "flatten-map address must point back to its execution node"
+            );
+        }
+        for (address, flat_id) in &self.flat_nodes {
+            let Some(leaf) = self.leaves.get(flat_id) else {
+                anyhow::bail!("flatten-map address {address:?} points to no leaf");
+            };
+            ensure!(
+                &leaf.address == address,
+                "flatten-map leaf must point back to its authoring address"
+            );
+        }
+        Ok(())
     }
 
     fn instance_path(&self, mut scope: u32) -> Vec<NodeId> {
@@ -220,6 +253,7 @@ mod tests {
             map.attribution(flat).collect::<Vec<_>>(),
             vec![interior, inner, outer]
         );
+        map.check([flat]).unwrap();
     }
 
     #[test]
@@ -251,5 +285,34 @@ mod tests {
             Some(flat_b)
         );
         assert_eq!(map.representative(&interior), map.address(flat_a));
+        map.check([flat_a, flat_b]).unwrap();
+    }
+
+    #[test]
+    fn rejects_execution_node_and_leaf_key_mismatch() {
+        let flat = NodeId::unique();
+        let mut map = FlattenMap::default();
+        map.reset();
+        map.set_leaf(flat, 0, flat);
+
+        assert_eq!(
+            map.check([]).unwrap_err().to_string(),
+            "flatten map must have exactly one leaf per execution node"
+        );
+    }
+
+    #[test]
+    fn rejects_reverse_identity_mismatch() {
+        let flat = NodeId::unique();
+        let wrong_flat = NodeId::unique();
+        let mut map = FlattenMap::default();
+        map.reset();
+        map.set_leaf(flat, 0, flat);
+        map.flat_nodes.insert(NodeAddress::root(flat), wrong_flat);
+
+        assert_eq!(
+            map.check([flat]).unwrap_err().to_string(),
+            "flatten-map address must point back to its execution node"
+        );
     }
 }

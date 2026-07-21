@@ -175,7 +175,7 @@ pub fn test_graph() -> Graph {
         Binding::bind(mult_node_id, 0),
     );
 
-    graph.debug_check();
+    graph.check_debug();
 
     graph
 }

@@ -572,7 +572,7 @@ impl Document {
     }
 
     pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        self.debug_check();
+        self.check_debug();
         Ok(common::serialize(self, format)?)
     }
 
@@ -1049,7 +1049,7 @@ mod tests {
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
-        doc.debug_check();
+        doc.check_debug();
     }
 
     #[test]
@@ -1139,9 +1139,9 @@ mod tests {
     }
 
     #[test]
-    fn document_passes_debug_check() {
+    fn document_passes_check_debug() {
         let doc = build_test_doc();
-        doc.debug_check();
+        doc.check_debug();
     }
 
     #[test]
@@ -1199,7 +1199,7 @@ mod tests {
         );
         let deserialized = Document::deserialize(format, &serialized)
             .expect("document deserialization should succeed for test payload");
-        deserialized.debug_check();
+        deserialized.check_debug();
         assert_eq!(
             doc, deserialized,
             "the complete document should round-trip through {format:?}"
@@ -1220,7 +1220,7 @@ mod tests {
         let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
         *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
-        doc.debug_check();
+        doc.check_debug();
 
         let bytes = doc.serialize(SerdeFormat::Json).expect("serialize");
         let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).expect("load");
