@@ -9,7 +9,6 @@ use scenarium::Library;
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent_cascading;
 use crate::core::edit::intent::types::Intent;
-use crate::core::io::initial_document;
 use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
@@ -28,16 +27,7 @@ pub(crate) struct TerminalSession {
 impl TerminalSession {
     pub(crate) fn new(script_config: &ScriptConfig, wake: Wake) -> Self {
         let preferences = Preferences::load();
-        let model_paths = (&preferences.ml_models).into();
-        let initial = initial_document::load(&preferences);
-        let mut workspace =
-            Workspace::new(initial.open_document, script_config, wake, &model_paths);
-        if let Some(error) = initial.load_error {
-            workspace
-                .runtime
-                .status
-                .error(format!("load failed: {error:#}"));
-        }
+        let mut workspace = Workspace::new(script_config, wake, &preferences);
         workspace.normalize_document();
         Self {
             workspace,

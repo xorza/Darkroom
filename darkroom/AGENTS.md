@@ -61,7 +61,7 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/open_document/`** — `OpenDocument`: startup loading, the serialized
   `Document`, its active path, and pending-normalization state.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
-  `RuntimeHost` pairing and their run/save/cache coordination.
+  `RuntimeHost` pairing, startup loading, and run/save/cache coordination.
 - **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
   scripting host, and status log; no document or frontend policy.
 - **`core/terminal_session/`** — terminal/headless event interpretation and

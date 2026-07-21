@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use scenarium::NodeId;
 
 use crate::core::document::Document;
+use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::script::ScriptConfig;
@@ -20,13 +21,13 @@ pub(crate) struct Workspace {
 }
 
 impl Workspace {
-    pub(crate) fn new(
-        open: OpenDocument,
-        script_config: &ScriptConfig,
-        wake: Wake,
-        model_paths: &lens::MlModelPaths,
-    ) -> Self {
-        let mut runtime = RuntimeHost::new(script_config, wake, model_paths);
+    pub(crate) fn new(script_config: &ScriptConfig, wake: Wake, preferences: &Preferences) -> Self {
+        let model_paths = (&preferences.ml_models).into();
+        let mut runtime = RuntimeHost::new(script_config, wake, &model_paths);
+        let open = OpenDocument::load(preferences).unwrap_or_else(|error| {
+            runtime.status.error(format!("load failed: {error:#}"));
+            OpenDocument::empty()
+        });
         runtime.set_document_cache(open.path.as_deref());
         Self { open, runtime }
     }
