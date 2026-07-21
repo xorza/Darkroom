@@ -1,5 +1,7 @@
 use std::fs;
 
+use common::CancelToken;
+
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::testing::ScratchDirectory;
@@ -8,10 +10,26 @@ use crate::io::raw::*;
 
 #[test]
 fn test_load_raw_invalid_path() {
-    let result = load_raw(Path::new("/nonexistent/path/to/file.raf"));
+    let path = Path::new("/nonexistent/path/to/file.raf");
+    let result = load_raw(path, &CancelToken::never());
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("Failed to open file"));
+
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    assert!(matches!(
+        load_raw(path, &cancel),
+        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+    ));
+    assert!(matches!(
+        load_raw_cfa(path, &cancel),
+        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+    ));
+    assert!(matches!(
+        raw_cfa_frame_info(path, &cancel),
+        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+    ));
 }
 
 #[cfg(unix)]
@@ -21,7 +39,7 @@ fn test_load_raw_rejects_interior_nul_path() {
     use std::os::unix::ffi::OsStrExt;
 
     let path = Path::new(OsStr::from_bytes(b"invalid\0path.raf"));
-    let error = load_raw(path).unwrap_err();
+    let error = load_raw(path, &CancelToken::never()).unwrap_err();
     assert!(error.to_string().contains("interior NUL byte"));
 }
 
@@ -48,7 +66,7 @@ fn test_load_raw_rejects_invalid_files() {
     for case in cases {
         let path = directory.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
-        assert!(load_raw(&path).is_err(), "{case:?}");
+        assert!(load_raw(&path, &CancelToken::never()).is_err(), "{case:?}");
     }
 }
 
@@ -104,7 +122,7 @@ fn test_load_raw_valid_file() {
 
     init_tracing();
 
-    let result = load_raw(&path);
+    let result = load_raw(&path, &CancelToken::never());
     assert!(result.is_ok(), "Failed to load {:?}: {:?}", path, result);
 
     let image = result.unwrap();
@@ -140,7 +158,7 @@ fn test_load_raw_dimensions_match() {
         return;
     };
 
-    let image = load_raw(&path).unwrap();
+    let image = load_raw(&path, &CancelToken::never()).unwrap();
 
     // Header dimensions should match actual dimensions
     assert_eq!(image.metadata.header_dimensions.len(), 3);

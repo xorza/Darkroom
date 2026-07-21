@@ -7,14 +7,18 @@ pub(crate) mod sensor;
 #[cfg(test)]
 mod synthetic_tests;
 
-use error::ImageError;
-
+use common::CancelToken;
 use imaginarium::{ChannelCount, ColorFormat, Image};
 use std::path::Path;
 
+use crate::io::image::error::ImageError;
+use crate::io::image::fits::decode as fits_decode;
+use crate::io::image::fits::options::FitsLoadOptions;
+use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
 use crate::math::vec2us::Vec2us;
+use crate::resources;
 
 const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
 const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"];
@@ -23,6 +27,46 @@ const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"
 pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &[
     "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
 ];
+
+/// Cancellation, resource controls, and format policy shared by file decoders.
+#[derive(Debug, Clone)]
+pub struct LoadContext {
+    /// Cooperative cancellation token polled between bounded decode stages.
+    pub cancel: CancelToken,
+    /// FITS source, output, and estimated peak byte ceiling.
+    pub memory_limit_bytes: u64,
+    /// FITS-specific policy; ignored by non-FITS decoders.
+    pub fits: FitsLoadOptions,
+}
+
+impl LoadContext {
+    /// Creates a context with strict FITS defaults and the supplied resource controls.
+    pub fn new(cancel: CancelToken, memory_limit_bytes: u64) -> Self {
+        Self {
+            cancel,
+            memory_limit_bytes,
+            fits: FitsLoadOptions::default(),
+        }
+    }
+
+    pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
+        if self.cancel.is_cancelled() {
+            return Err(ImageError::Cancelled {
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Default for LoadContext {
+    fn default() -> Self {
+        Self::new(
+            CancelToken::never(),
+            resources::memory_budget(resources::available_memory()),
+        )
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceContainer {
@@ -42,11 +86,7 @@ pub enum DecoderProvenance {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransferProvenance {
-    FitsPhysical {
-        bscale: f64,
-        bzero: f64,
-        unit: Option<String>,
-    },
+    FitsPhysical(FitsTransferProvenance),
     RawNormalized,
     DeclaredLinearRaster,
     UnspecifiedRaster,
@@ -266,20 +306,22 @@ fn standard_container(extension: &str) -> SourceContainer {
 
 impl PreviewImage {
     /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
+        context.check_cancelled(path)?;
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_preview_fits(path).map(Into::into);
+            return fits_decode::load_preview_fits(path, context).map(Into::into);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw(path).map(Into::into);
+            return raw::load_raw(path, &context.cancel).map(Into::into);
         }
 
         if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
             let decoded = read_standard_image(path)?;
+            context.check_cancelled(path)?;
             let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
             let target = f32_target_format(&decoded);
             let image = decoded

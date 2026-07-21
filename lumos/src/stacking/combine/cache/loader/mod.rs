@@ -10,7 +10,9 @@ use common::CancelToken;
 use common::file_utils;
 
 use crate::concurrency;
+use crate::io::image::LoadContext;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::ChannelStats;
@@ -60,14 +62,18 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     let first_path = paths[0].as_ref();
     let available_memory = config.get_available_memory();
+    let context = LoadContext {
+        cancel: cancel.clone(),
+        ..LoadContext::default()
+    };
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
     // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (dimensions, first_image) = match I::peek_dimensions(first_path) {
+    let (dimensions, first_image) = match I::peek_dimensions(first_path, &context) {
         Some(dims) => (dims, None),
         None => {
-            let img = load_image::<I>(first_path)?;
+            let img = load_image::<I>(first_path, &context)?;
             (img.dimensions(), Some(img))
         }
     };
@@ -93,14 +99,14 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             dimensions,
             first_image,
             available_memory,
-            &cancel,
+            &context,
         )?
     } else {
         // Disk tier (large stacks): the serial-first-frame path. If the header was peeked we
         // haven't decoded frame 0 yet, so decode it now — rare, since calibration fits in RAM.
         let first = match first_image {
             Some(img) => img,
-            None => load_image::<I>(first_path)?,
+            None => load_image::<I>(first_path, &context)?,
         };
         load_to_disk::<I, P>(
             paths,
@@ -109,7 +115,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             dimensions,
             first,
             available_memory,
-            &cancel,
+            &context,
         )?
     };
 
@@ -127,11 +133,15 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-fn load_image<I: StackableImage>(path: &Path) -> Result<I, Error> {
-    I::load(path).map_err(|source| Error::ImageLoad {
-        path: path.to_path_buf(),
-        source: IoError::other(source),
-    })
+fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, Error> {
+    match I::load(path, context) {
+        Ok(image) => Ok(image),
+        Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
+        Err(source) => Err(Error::ImageLoad {
+            path: path.to_path_buf(),
+            source: IoError::other(source),
+        }),
+    }
 }
 
 impl CfaCache {
@@ -205,8 +215,9 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     dimensions: ImageDimensions,
     first: Option<I>,
     available_memory: u64,
-    cancel: &CancelToken,
+    context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
+    let cancel = &context.cancel;
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
     // stays resident in this tier, so only the budget left over feeds in-flight decode transients,
     // each charged its true ~2× footprint (`decode_transient_bytes`) so the load doesn't overshoot.
@@ -232,7 +243,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let image = load_image::<I>(path.as_ref())?;
+        let image = load_image::<I>(path.as_ref(), context)?;
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
                 index: idx,
@@ -288,8 +299,9 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     dimensions: ImageDimensions,
     first_image: I,
     available_memory: u64,
-    cancel: &CancelToken,
+    context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
+    let cancel = &context.cancel;
     let spill_directory = SpillDirectory::create(config.cache_dir.clone(), config.keep_cache)?;
     let cache_dir = &spill_directory.path;
 
@@ -326,7 +338,14 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             }
             let path_ref = path.as_ref();
             let base_filename = cache_filename(path_ref);
-            load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx, cancel)
+            load_and_cache_frame::<I>(
+                cache_dir,
+                &base_filename,
+                path_ref,
+                dimensions,
+                idx,
+                context,
+            )
         })?;
 
     // Build final vectors
@@ -471,8 +490,9 @@ fn load_and_cache_frame<I: StackableImage>(
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
-    cancel: &CancelToken,
+    context: &LoadContext,
 ) -> Result<LoadedStoredFrame, Error> {
+    let cancel = &context.cancel;
     let channels = dimensions.channels();
     let identity_before = source_identity(source_path)?;
 
@@ -508,7 +528,7 @@ fn load_and_cache_frame<I: StackableImage>(
         Ok(LoadedStoredFrame { frame, stats })
     } else {
         // Load image and write to cache
-        let image = load_image::<I>(source_path)?;
+        let image = load_image::<I>(source_path, context)?;
 
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {

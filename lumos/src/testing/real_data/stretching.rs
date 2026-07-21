@@ -3,6 +3,7 @@
 //! lives in `test_data/lumos_data/`).
 
 use crate::image_ops::intensity_plane;
+use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
@@ -33,7 +34,9 @@ fn stretch_stacked_light() {
     init_tracing();
 
     let path = calibration_dir().join("stacked_light.tiff");
-    let mut image = Image::from(&LinearImage::from_file(&path).expect("load stacked_light.tiff"));
+    let mut image = Image::from(
+        &LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff"),
+    );
     let desc = image.desc();
     assert!(desc.width > 0 && desc.height > 0);
 

@@ -18,7 +18,9 @@ use std::path::Path;
 
 use common::CancelToken;
 
+use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
+use crate::io::image::error::ImageError;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -144,21 +146,23 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     frames: &CalibrationSet<&[P]>,
     total_frames: usize,
     available: u64,
-) -> bool {
+    context: &LoadContext,
+) -> Result<bool, Error> {
     let Some(first) = [frames.dark, frames.flat, frames.bias, frames.flat_dark]
         .into_iter()
         .find(|paths| !paths.is_empty())
         .map(|paths| &paths[0])
     else {
-        return true;
+        return Ok(true);
     };
-    match CfaFrameInfo::from_file(first.as_ref()) {
-        Ok(info) => fits_in_memory(
+    match CfaFrameInfo::from_file(first.as_ref(), context) {
+        Ok(info) => Ok(fits_in_memory(
             info.dimensions.pixel_count() * std::mem::size_of::<f32>(),
             total_frames,
             available,
-        ),
-        Err(_) => true,
+        )),
+        Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
+        Err(_) => Ok(true),
     }
 }
 
@@ -320,10 +324,17 @@ impl CalibrationMasters {
     /// running them **sequentially with the full budget each** (freed between roles) keeps every
     /// role that individually fits in RAM, which beats parallel-on-disk. The fit check peeks one
     /// frame's header for the per-frame footprint (all calibration frames share a sensor).
+    ///
+    /// Returns [`Error::Cancelled`] when cancellation is requested during loading, stacking, or
+    /// defect detection.
     pub fn from_files<P: AsRef<Path> + Sync>(
         frames: CalibrationSet<&[P]>,
         sigma_threshold: f32,
+        cancel: CancelToken,
     ) -> Result<Self, Error> {
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         let counts = [
             frames.dark.len(),
             frames.flat.len(),
@@ -332,9 +343,13 @@ impl CalibrationMasters {
         ];
         let total_frames: usize = counts.iter().sum();
         let available = StackConfig::dark().cache.get_available_memory();
+        let context = LoadContext {
+            cancel: cancel.clone(),
+            ..LoadContext::default()
+        };
 
         let (dark, flat, bias, flat_dark) =
-            if frames_fit_in_memory(&frames, total_frames, available) {
+            if frames_fit_in_memory(&frames, total_frames, available, &context)? {
                 // Concurrent: frame-weighted budget per role keeps each in RAM (the whole set fits)
                 // while bounding the combined in-flight decode footprint.
                 let mut dark_cfg = StackConfig::dark();
@@ -349,25 +364,25 @@ impl CalibrationMasters {
                     Some(weighted_budget(available, counts[2], total_frames));
                 flat_dark_cfg.cache.available_memory =
                     Some(weighted_budget(available, counts[3], total_frames));
+                let dark_cancel = cancel.clone();
+                let flat_cancel = cancel.clone();
+                let bias_cancel = cancel.clone();
+                let flat_dark_cancel = cancel.clone();
 
                 // Independent stacks on the shared rayon pool — work-stealing interleaves their
                 // parallel sections, filling the gaps a single sequential role would leave idle.
                 let ((dark, flat), (bias, flat_dark)) = rayon::join(
                     move || {
                         rayon::join(
-                            move || stack_cfa_master(frames.dark, dark_cfg, CancelToken::never()),
-                            move || stack_cfa_master(frames.flat, flat_cfg, CancelToken::never()),
+                            move || stack_cfa_master(frames.dark, dark_cfg, dark_cancel),
+                            move || stack_cfa_master(frames.flat, flat_cfg, flat_cancel),
                         )
                     },
                     move || {
                         rayon::join(
-                            move || stack_cfa_master(frames.bias, bias_cfg, CancelToken::never()),
+                            move || stack_cfa_master(frames.bias, bias_cfg, bias_cancel),
                             move || {
-                                stack_cfa_master(
-                                    frames.flat_dark,
-                                    flat_dark_cfg,
-                                    CancelToken::never(),
-                                )
+                                stack_cfa_master(frames.flat_dark, flat_dark_cfg, flat_dark_cancel)
                             },
                         )
                     },
@@ -377,10 +392,10 @@ impl CalibrationMasters {
                 // Sequential, full budget each (each role's cache frees before the next loads), so a
                 // role that fits the whole budget stays in RAM instead of being forced to disk.
                 (
-                    stack_cfa_master(frames.dark, StackConfig::dark(), CancelToken::never())?,
-                    stack_cfa_master(frames.flat, StackConfig::flat(), CancelToken::never())?,
-                    stack_cfa_master(frames.bias, StackConfig::bias(), CancelToken::never())?,
-                    stack_cfa_master(frames.flat_dark, StackConfig::dark(), CancelToken::never())?,
+                    stack_cfa_master(frames.dark, StackConfig::dark(), cancel.clone())?,
+                    stack_cfa_master(frames.flat, StackConfig::flat(), cancel.clone())?,
+                    stack_cfa_master(frames.bias, StackConfig::bias(), cancel.clone())?,
+                    stack_cfa_master(frames.flat_dark, StackConfig::dark(), cancel.clone())?,
                 )
             };
 
@@ -392,7 +407,7 @@ impl CalibrationMasters {
                 flat_dark,
             },
             sigma_threshold,
-            CancelToken::never(),
+            cancel,
         )
     }
 

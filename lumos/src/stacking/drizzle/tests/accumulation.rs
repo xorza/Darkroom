@@ -81,6 +81,7 @@ fn test_drizzle_stack_empty_paths() {
     let result = drizzle_stack(
         Vec::<DrizzleFrame<std::path::PathBuf>>::new(),
         &config,
+        &LoadContext::default(),
         ProgressCallback::default(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));

@@ -3,6 +3,7 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image_ops::test_support::channel_plane;
+use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::testing::{calibration_dir, init_tracing, save_png};
@@ -36,7 +37,11 @@ fn denoise_reduces_linear_noise() {
     init_tracing();
 
     let mut img = Image::from(
-        &LinearImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+        &LinearImage::from_file(
+            calibration_dir().join("stacked_light.tiff"),
+            &LoadContext::default(),
+        )
+        .expect("load"),
     );
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.

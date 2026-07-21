@@ -55,6 +55,7 @@ fn main() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     )
     .expect("empty masters");
 

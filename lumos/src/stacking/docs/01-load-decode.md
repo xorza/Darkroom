@@ -148,9 +148,9 @@ garbage and enforce both compressed-input and decompressed-output limits.
 ### 2.2 Dispatch policy
 
 ```text
-CfaImage::from_file(path): camera RAW or validated sensor-plane FITS
-LinearImage::from_file(path): physical non-mosaic FITS or declared-linear float TIFF
-PreviewImage::from_file(path): preview-decoded FITS, RAW, TIFF, PNG, or JPEG
+CfaImage::from_file(path, context): camera RAW or validated sensor-plane FITS
+LinearImage::from_file(path, context): physical non-mosaic FITS or declared-linear float TIFF
+PreviewImage::from_file(path, context): preview-decoded FITS, RAW, TIFF, PNG, or JPEG
 ```
 
 The product type MUST be explicit. A generic entry point that sometimes produces clipped RGB and
@@ -1375,9 +1375,15 @@ preceding sections are the required behavior.
 - `physical_f32()` applies `BSCALE`/`BZERO` in `f64`, turns `BLANK` into NaN, and
   narrows to `f32` with defined rounding.
 - Lumos preserves those FITS physical values unchanged; `DATAMAX` is metadata only.
-- Lumos selects the first image-bearing HDU rather than assuming HDU zero.
-- Two-dimensional mono and one-/three-plane FITS shapes are validated and converted
-  to planar storage.
+- FITS loading selects an explicit HDU by zero-based index or `EXTNAME`/`EXTVER`; the
+  default accepts only an unambiguous single image HDU.
+- Two-dimensional mono and one-plane FITS shapes are accepted directly. Three-plane
+  cubes require explicit RGB interpretation before conversion to planar storage.
+- Selected-HDU provenance records index/name/version and `DATASUM`/`CHECKSUM` status;
+  absent checksums are accepted by default, while invalid checksums are rejected.
+- FITS shape and source/output/peak byte budgets are checked before pixel decode.
+  Plain and compressed images are converted in bounded row sections with cancellation
+  polls between chunks.
 - RAW loading keeps full dimensions and active margins separate.
 - The LibRaw black model is consolidated into common, per-channel, and repeating
   residual components.
@@ -1404,11 +1410,10 @@ preceding sections are the required behavior.
    `.fits.gz` names are rejected (the compound names are examined only by their final
    extension), and the hard-coded RAW list exposes only
    RAF/CR2/CR3/NEF/ARW/DNG despite broader LibRaw support.
-3. **HDU and cube semantics cannot be requested.** The first image is always selected
-   and every `NAXIS3=3` image is assumed to be RGB. Lumos does not expose
-   `EXTNAME`/`EXTVER` selection, checksum verification, `INHERIT` policy, declared
-   channel semantics, compressed-float quantization provenance, or complete WCS
-   retention.
+3. **FITS metadata policy is incomplete.** HDU index or `EXTNAME`/`EXTVER` selection,
+   explicit RGB cube semantics, and checksum verification are implemented. `INHERIT`
+   policy, compressed-float quantization provenance, and complete WCS retention remain
+   missing.
 4. **FITS CFA support is incomplete.** `BOTTOM-UP` unconditionally calls
    `flip_vertical()`; it should shift vertical phase by `(height-1) mod 2` if rows are
    reversed. `COLORTYP` conflicts and 36-character X-Trans FITS patterns are not
@@ -1441,8 +1446,10 @@ preceding sections are the required behavior.
 
 - `lumos/src/io/image/mod.rs` — shared metadata, preview dispatch, and standard preview conversion.
 - `lumos/src/io/image/linear.rs` — linear image representation, scientific loading, and layout conversion.
-- `lumos/src/io/image/fits/mod.rs` — FITS selection, scaling, metadata, and Bayer
-  interpretation.
+- `lumos/src/io/image/fits/decode/` — HDU selection, checksum validation, memory
+  preflight, bounded physical-pixel decoding, and CFA/linear load orchestration.
+- `lumos/src/io/image/fits/metadata/` — FITS header translation and CFA interpretation.
+- `lumos/src/io/image/fits/cfa.rs` — Lumos sensor-domain FITS persistence.
 - `lumos/src/io/image/cfa.rs` — signed CFA representation and demosaic routing.
 - `lumos/src/io/raw/mod.rs` — LibRaw boundary, black consolidation, RAW products.
 - `lumos/src/io/raw/normalize.rs` — clipped and unclipped normalization.

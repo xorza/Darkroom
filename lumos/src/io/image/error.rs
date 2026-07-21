@@ -5,6 +5,9 @@ use thiserror::Error;
 /// Errors that can occur when loading an astronomical image from disk.
 #[derive(Debug, Error)]
 pub enum ImageError {
+    #[error("Image load cancelled for '{path}'")]
+    Cancelled { path: PathBuf },
+
     #[error("Failed to load FITS file '{path}': {source}")]
     Fits {
         path: PathBuf,

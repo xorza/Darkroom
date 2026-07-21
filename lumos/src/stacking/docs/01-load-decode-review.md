@@ -222,7 +222,7 @@ loses full-raw geometry before demosaic.
   `2^63`, `u64::MAX`, adjacent large integers, and fine `BSCALE`; assert both values and
   the recorded loss classification.
 
-- [ ] **P1 — Add explicit HDU selection, cube semantics, and checksum policy.**
+- [x] **P1 — Add explicit HDU selection, cube semantics, and checksum policy.**
 
   **Contract.** Sections 3.2, 3.3, and 3.7 specify selector, channel semantics, and
   checksum behavior (`lumos/src/stacking/docs/01-load-decode.md:206-255` and
@@ -465,7 +465,7 @@ loses full-raw geometry before demosaic.
   the estimate plus an explicit allocator tolerance. Assert RAM and streaming paths make
   the same concurrency decision for the same per-frame peak.
 
-- [ ] **P1 — Thread cancellation and resource context through all load/decode entry points.**
+- [x] **P1 — Thread cancellation and resource context through all load/decode entry points.**
 
   **Evidence.** `StackableImage::load` accepts only a path at
   `lumos/src/stacking/frame_store/mod.rs:121-136`, so generic loading can poll only
@@ -588,13 +588,12 @@ loses full-raw geometry before demosaic.
 - [ ] Are any full-raw margins known to be valid illuminated halo for RCD/Markesteijn,
   or must the active rectangle always be a hard scientific boundary? This decides
   whether code or the normative full-raw-stencil requirement changes.
-- [ ] Should unselected `NAXIS3=3` FITS remain a compatibility-mode RGB assumption, or
-  should scientific loading reject it unless `FitsLoadOptions` declares channel
-  semantics? The document currently favors rejection.
+- [x] Unselected `NAXIS3=3` FITS is rejected by default; callers must explicitly choose
+  `FitsCubeInterpretation::Rgb`.
 - [ ] Which public precision modes must Lumos support beyond `f32`: exact integers,
   `f64`, rejection-only, or some combination? Provenance must still report narrowing.
-- [ ] Is `LinearImage::from_file` intended to remain a preview convenience? If so, name
-  and document it as such rather than using it as `StackableImage::load`.
+- [x] `LinearImage::from_file` is scientific-only; `PreviewImage::from_file` owns preview
+  decoding and cannot enter path stacking.
 
 ## Recommended implementation order
 

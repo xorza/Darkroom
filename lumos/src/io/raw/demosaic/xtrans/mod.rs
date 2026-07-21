@@ -39,7 +39,8 @@ pub(crate) fn process_xtrans(
     channel_black: [f32; 3],
     inv_range: f32,
     black_repeat: Option<&BlackRepeat>,
-) -> Result<[Vec<f32>; 3], XTransPatternError> {
+    cancel: &CancelToken,
+) -> Result<[Vec<f32>; 3], DemosaicError> {
     let raw_pattern = XTransPattern::new(raw_pattern)?;
 
     let xtrans = XTransImage::with_margins(
@@ -57,9 +58,7 @@ pub(crate) fn process_xtrans(
     );
 
     let demosaic_start = Instant::now();
-    // The u16 decode path isn't cancellable — a never-token can't yield `Cancelled`.
-    let rgb_pixels = markesteijn::demosaic(&xtrans, &CancelToken::never())
-        .expect("never-token demosaic cannot be cancelled");
+    let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(
@@ -381,6 +380,9 @@ impl<'a> XTransImage<'a> {
 
 #[cfg(test)]
 mod tests {
+    use common::CancelToken;
+
+    use crate::io::raw::demosaic::DemosaicError;
     use crate::io::raw::demosaic::xtrans::test_support::{test_pattern, test_pattern_array};
     use crate::io::raw::demosaic::xtrans::*;
 
@@ -457,13 +459,14 @@ mod tests {
                 [0.0; 3],
                 1.0,
                 None,
+                &CancelToken::never(),
             )
             .unwrap_err(),
-            XTransPatternError::Value {
+            DemosaicError::InvalidXTransPattern(XTransPatternError::Value {
                 row: 1,
                 column: 2,
                 value: 3,
-            }
+            })
         );
 
         let calibrated = vec![0.0f32; 12 * 12];
@@ -567,6 +570,7 @@ mod tests {
             [0.0; 3],
             1.0 / 4096.0,
             None,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -596,6 +600,7 @@ mod tests {
             [black; 3],
             inv_range,
             None,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -625,6 +630,7 @@ mod tests {
             [black; 3],
             inv_range,
             None,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -652,6 +658,7 @@ mod tests {
             [black; 3],
             inv_range,
             None,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -851,6 +858,7 @@ mod tests {
             [black; 3],
             inv_range,
             None,
+            &CancelToken::never(),
         )
         .unwrap();
         let rgb_f32 = process_xtrans_f32(

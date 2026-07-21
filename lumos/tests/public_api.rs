@@ -1,20 +1,67 @@
 use std::io::{Error, ErrorKind};
 
+use common::CancelToken;
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
     CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
-    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig,
+    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
+    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
+    FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
     ImageDimensions, ImageMetadata, InterpolationMethod, LinearFitClipConfig, LinearImage,
-    NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog,
-    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig,
+    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
+    Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError,
+    StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
     StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
     StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
-    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
-    WinsorizedClipConfig,
+    StarDetector, StarMatch, TransferProvenance, Transform, TransformType, TriangleConfig,
+    WarpParams, Weighting, WinsorizedClipConfig,
 };
+
+#[test]
+fn file_loading_policy_is_available_from_the_crate_root() {
+    let context = LoadContext {
+        cancel: CancelToken::never(),
+        memory_limit_bytes: 64 * 1024 * 1024,
+        fits: FitsLoadOptions {
+            hdu: FitsHduSelector::Name {
+                extname: "SCI".to_owned(),
+                extver: Some(2),
+            },
+            cube: FitsCubeInterpretation::Rgb,
+            checksum: FitsChecksumPolicy::RequireValid,
+        },
+    };
+    assert_eq!(context.memory_limit_bytes, 64 * 1024 * 1024);
+    assert_eq!(context.fits.cube, FitsCubeInterpretation::Rgb);
+
+    let provenance = TransferProvenance::FitsPhysical(FitsTransferProvenance {
+        bscale: 1.0,
+        bzero: 0.0,
+        unit: Some("adu".to_owned()),
+        hdu: FitsHduProvenance {
+            index: 3,
+            extname: Some("SCI".to_owned()),
+            extver: Some(2),
+        },
+        checksum: FitsChecksumProvenance {
+            datasum: FitsChecksumState::Valid,
+            checksum: FitsChecksumState::Valid,
+        },
+    });
+    assert!(matches!(
+        provenance,
+        TransferProvenance::FitsPhysical(FitsTransferProvenance {
+            hdu: FitsHduProvenance { index: 3, .. },
+            checksum: FitsChecksumProvenance {
+                datasum: FitsChecksumState::Valid,
+                checksum: FitsChecksumState::Valid,
+            },
+            ..
+        })
+    ));
+}
 
 #[test]
 fn stacking_configuration_types_are_available_from_the_crate_root() {

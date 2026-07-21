@@ -4,8 +4,9 @@ use std::path::Path;
 use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
 use rayon::prelude::*;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
-use crate::io::image::fits;
+use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
@@ -32,12 +33,13 @@ impl LinearImage {
     ///
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
     /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
+        context.check_cancelled(path)?;
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_linear_fits(path);
+            return fits_decode::load_linear_fits(path, context);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
@@ -56,6 +58,7 @@ impl LinearImage {
             }
 
             let decoded = read_standard_image(path)?;
+            context.check_cancelled(path)?;
             if decoded.desc().color_format.channel_type != ChannelType::Float {
                 return Err(scientific_rejection(
                     path,
@@ -177,8 +180,8 @@ impl StackableImage for LinearImage {
         &self.metadata
     }
 
-    fn load(path: &Path) -> Result<Self, ImageError> {
-        LinearImage::from_file(path)
+    fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
+        LinearImage::from_file(path, context)
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {

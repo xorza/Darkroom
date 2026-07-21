@@ -8,8 +8,9 @@ use std::path::Path;
 
 use rayon::prelude::*;
 
+use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
-use crate::io::image::fits;
+use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
@@ -72,12 +73,12 @@ pub(crate) struct CfaFrameInfo {
 }
 
 impl CfaFrameInfo {
-    pub(crate) fn from_file(path: &Path) -> Result<Self, ImageError> {
+    pub(crate) fn from_file(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         let extension = file_extension(path);
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            fits::fits_cfa_frame_info(path)
+            fits_decode::fits_cfa_frame_info(path, context)
         } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            raw::raw_cfa_frame_info(path)
+            raw::raw_cfa_frame_info(path, &context.cancel)
         } else {
             Err(scientific_rejection(
                 path,
@@ -117,12 +118,12 @@ impl StackableImage for CfaImage {
         self.quantization_sigma
     }
 
-    fn load(path: &std::path::Path) -> Result<Self, ImageError> {
-        CfaImage::from_file(path)
+    fn load(path: &std::path::Path, context: &LoadContext) -> Result<Self, ImageError> {
+        CfaImage::from_file(path, context)
     }
 
-    fn peek_dimensions(path: &std::path::Path) -> Option<ImageDimensions> {
-        CfaFrameInfo::from_file(path)
+    fn peek_dimensions(path: &std::path::Path, context: &LoadContext) -> Option<ImageDimensions> {
+        CfaFrameInfo::from_file(path, context)
             .ok()
             .map(|info| info.dimensions)
     }
@@ -149,15 +150,16 @@ impl CfaImage {
     }
 
     /// Load an un-demosaiced sensor image from camera RAW or mosaic FITS.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
+        context.check_cancelled(path)?;
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_cfa_fits(path);
+            return fits_decode::load_cfa_fits(path, context);
         }
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw_cfa(path);
+            return raw::load_raw_cfa(path, &context.cancel);
         }
         if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
             return Err(scientific_rejection(
@@ -177,7 +179,7 @@ impl CfaImage {
 
     /// Save this sensor-domain image as a checksummed floating-point FITS file.
     pub fn save_fits(&self, path: &Path) -> std::io::Result<()> {
-        fits::save_cfa_fits(path, self)
+        fits_cfa::save_cfa_fits(path, self)
     }
 
     /// Demosaic this CFA image into a 3-channel LinearImage.
@@ -270,6 +272,7 @@ impl CfaImage {
 
 #[cfg(test)]
 mod tests {
+    use crate::io::image::LoadContext;
     use crate::io::image::cfa::*;
     use crate::io::image::error::ImageError;
     use crate::io::raw::demosaic::DemosaicKind;
@@ -289,10 +292,10 @@ mod tests {
         };
         let path = common::test_utils::test_output_path("cfa_master_roundtrip.fits");
         cfa.save_fits(&path).unwrap();
-        let info = CfaFrameInfo::from_file(&path).unwrap();
+        let info = CfaFrameInfo::from_file(&path, &LoadContext::default()).unwrap();
         assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
         assert_eq!(info.demosaic, DemosaicKind::BayerRcd);
-        let loaded = CfaImage::from_file(&path).unwrap();
+        let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
 
         assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));
         assert_eq!(loaded.data.to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
@@ -319,7 +322,7 @@ mod tests {
         invalid_version[version_card + version_digit] = b'0';
         std::fs::write(&path, invalid_version).unwrap();
         assert!(matches!(
-            CfaImage::from_file(&path),
+            CfaImage::from_file(&path, &LoadContext::default()),
             Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("version")
         ));
 
@@ -331,10 +334,15 @@ mod tests {
             .unwrap();
         corrupted[offset] ^= 0x01;
         std::fs::write(&path, corrupted).unwrap();
-        assert!(matches!(
-            CfaImage::from_file(&path),
-            Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("checksum")
-        ));
+        let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ImageError::FitsUnsupported { reason, .. }
+                    if reason.contains("requires valid DATASUM and CHECKSUM")
+            ),
+            "{error:?}"
+        );
         std::fs::write(path, original).unwrap();
     }
 
@@ -355,7 +363,7 @@ mod tests {
             let path = common::test_utils::test_output_path(&format!("cfa_master_{name}.fits"));
 
             image.save_fits(&path).unwrap();
-            let loaded = CfaImage::from_file(path).unwrap();
+            let loaded = CfaImage::from_file(path, &LoadContext::default()).unwrap();
 
             assert_eq!(loaded.metadata.cfa_type, Some(cfa_type), "{name}");
             assert_eq!(loaded.data.pixels(), image.data.pixels(), "{name}");
