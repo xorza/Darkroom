@@ -9,10 +9,10 @@
 //! # Quick Start
 //!
 //! ```rust,ignore
-//! use lumos::{LinearImage, StarDetectionConfig, StarDetector};
+//! use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
 //!
 //! // Load an astronomical image
-//! let image = LinearImage::from_file("linear_light_001.fits")?;
+//! let image = LinearImage::from_file("linear_light_001.fits", &LoadContext::default())?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
@@ -38,8 +38,12 @@ pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::linear::LinearImage;
 pub use io::image::{
-    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer, TransferProvenance,
+    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, FitsChecksumProvenance,
+    FitsChecksumState, FitsHduProvenance, ImageDimensions, ImageMetadata, ImageProvenance,
+    PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer, TransferProvenance,
+};
+pub use io::image::load::{
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions, LoadContext,
 };
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;

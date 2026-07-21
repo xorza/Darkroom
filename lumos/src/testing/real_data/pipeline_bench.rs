@@ -122,7 +122,7 @@ fn bench_full_pipeline() {
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
     let calibrated: Vec<LinearImage> = concurrency::try_par_map_limited(&light_paths, 3, |p| {
-        let mut cfa = load_raw_cfa(p).unwrap();
+        let mut cfa = load_raw_cfa(p, &CancelToken::never()).unwrap();
         masters.calibrate(&mut cfa).unwrap();
         Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
     })

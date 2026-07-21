@@ -35,6 +35,9 @@ pub enum DrizzleError {
     #[error("No frames provided for drizzle")]
     NoFrames,
 
+    #[error("drizzle cancelled")]
+    Cancelled,
+
     #[error("Failed to load image '{path}': {source}")]
     ImageLoad {
         path: PathBuf,

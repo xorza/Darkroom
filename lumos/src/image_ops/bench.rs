@@ -20,6 +20,7 @@ use std::hint::black_box;
 use imaginarium::Image;
 
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::testing::calibration_dir;
 use crate::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch};
 
@@ -32,7 +33,10 @@ const ITERS: usize = 5;
 /// receive (a real stack, so its bright star cores exceed 1.0).
 fn linear_master() -> Image {
     Image::from(
-        &LinearImage::from_file(calibration_dir().join("stacked_light.tiff"))
+        &LinearImage::from_file(
+            calibration_dir().join("stacked_light.tiff"),
+            &LoadContext::default(),
+        )
             .expect("load stacked_light.tiff"),
     )
 }

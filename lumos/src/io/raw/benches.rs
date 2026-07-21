@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
 
+use common::CancelToken;
 use quickbench::quick_bench;
 
 use crate::testing::init_tracing;
@@ -21,7 +22,7 @@ fn raw_load(b: quickbench::Bencher) {
     let path = paths[0].clone();
     println!("Benchmarking load_raw on: {}", path.display());
 
-    b.bench(|| load_raw(&path).unwrap());
+    b.bench(|| load_raw(&path, &CancelToken::never()).unwrap());
 }
 
 /// Benchmark libraw's built-in demosaic at different quality levels.
@@ -103,7 +104,7 @@ fn bench_markesteijn_quality_vs_libraw() {
 
     // Load with our Markesteijn implementation
     let start = Instant::now();
-    let ours = load_raw(path).unwrap();
+    let ours = load_raw(path, &CancelToken::never()).unwrap();
     let our_time = start.elapsed();
     println!(
         "Our Markesteijn:   {:.1}ms  ({}x{}x{})",
@@ -203,7 +204,7 @@ fn bench_bayer_rcd_demosaic() {
     println!("Benchmarking Bayer demosaic on: {}\n", path.display());
 
     // Warmup
-    let _ = load_raw(path).unwrap();
+    let _ = load_raw(path, &CancelToken::never()).unwrap();
 
     // Our RCD demosaic
     println!("--- Our RCD demosaic ---");
@@ -212,7 +213,7 @@ fn bench_bayer_rcd_demosaic() {
     let mut image = None;
     for i in 0..iterations {
         let start = Instant::now();
-        let img = load_raw(path).unwrap();
+        let img = load_raw(path, &CancelToken::never()).unwrap();
         let elapsed = start.elapsed();
         times.push(elapsed);
         println!(
@@ -294,7 +295,7 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 
     // Our RCD
     let start = Instant::now();
-    let ours = load_raw(path).unwrap();
+    let ours = load_raw(path, &CancelToken::never()).unwrap();
     let our_time = start.elapsed();
     println!(
         "Our RCD:       {:.1}ms  ({}x{}x{})",

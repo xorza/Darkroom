@@ -53,7 +53,7 @@ impl DemosaicKind {
 #[derive(Debug)]
 pub(crate) struct Cancelled;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum DemosaicError {
     #[error("demosaicing cancelled")]
     Cancelled,

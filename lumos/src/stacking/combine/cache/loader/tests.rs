@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::stacking::combine::cache::loader::*;
 use crate::testing::ScratchDirectory;
 
@@ -20,7 +21,7 @@ fn load_test_frame(
         source_path,
         dimensions,
         frame_index,
-        &CancelToken::never(),
+        &LoadContext::new(CancelToken::never(), u64::MAX),
     )
 }
 

@@ -530,16 +530,13 @@ shape and divisor assumptions are asserted after mutation begins.
   iteration boundaries, and cancellation leaves no partially published product
   (`02-calibration.md:1493-1503`).
 
-  **Evidence.** Low-level `stack_cfa_master` accepts a token, and defect detection polls
-  it. In contrast, every role stack in `from_files` receives `CancelToken::never()` and
-  final construction does likewise at `../calibration_masters/mod.rs:461-501`.
-  `CalibrationMasters::calibrate` has no token at
+  **Evidence.** `stack_cfa_master` and `CalibrationMasters::from_files` accept a token,
+  and role loading, combining, and defect detection poll it. `CalibrationMasters::calibrate` has no token at
   `../calibration_masters/mod.rs:505-543`, and cosmic iterations have no cancellation
   input at `../calibration_masters/cosmic_ray.rs:95-163` and
   `../calibration_masters/cosmic_ray.rs:407-440`.
 
-  **Impact.** The ergonomic master-builder API cannot stop long multi-role decode and
-  combine work. Per-light cancellation can avoid launching decode and can interrupt
+  **Impact.** Per-light cancellation can avoid launching decode and can interrupt
   demosaic, but not calibration or optional repeated full-frame cosmic passes already in
   progress.
 

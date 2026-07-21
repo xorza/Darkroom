@@ -13,6 +13,7 @@ use common::file_utils;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
@@ -126,13 +127,13 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
     fn metadata(&self) -> &ImageMetadata;
-    fn load(path: &Path) -> Result<Self, ImageError>;
+    fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError>;
 
     fn quantization_sigma(&self) -> Option<f32> {
         None
     }
 
-    fn peek_dimensions(_path: &Path) -> Option<ImageDimensions> {
+    fn peek_dimensions(_path: &Path, _context: &LoadContext) -> Option<ImageDimensions> {
         None
     }
 

@@ -22,7 +22,8 @@ raw/
 
 ## Pipeline Flow
 
-`PreviewImage::from_file(path)` dispatches RAW extensions to the private preview decoder, which:
+`PreviewImage::from_file(path, context)` dispatches RAW extensions to the private preview decoder,
+which:
 
 1. Reads file into memory, opens via libraw FFI (`libraw_open_buffer`, `libraw_unpack`)
 2. Extracts dimensions, margins, black/maximum levels

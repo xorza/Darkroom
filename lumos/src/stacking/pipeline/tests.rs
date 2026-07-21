@@ -237,6 +237,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     )
     .expect("build calibration masters");
 
@@ -285,6 +286,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     )
     .expect("build calibration masters");
 

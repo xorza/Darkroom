@@ -121,6 +121,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     )
     .expect("failed to build calibration masters");
 

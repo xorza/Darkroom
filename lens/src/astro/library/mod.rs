@@ -14,10 +14,10 @@ use common::file_utils;
 use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
-    Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast, MlError, NeutralizeBackground,
-    OpError, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS, Reference, StackConfig,
-    TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only,
-    stack_cfa_master,
+    Denoise, ExtractBackground, Hdr, LinearImage, LoadContext, LocalContrast, MlError,
+    NeutralizeBackground, OpError, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS,
+    Reference, StackConfig, TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars,
+    remove_stars_starless_only, stack_cfa_master,
 };
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
@@ -110,7 +110,8 @@ pub fn astro_library() -> Library {
                     .description("FITS, camera-RAW, or standard image file to load."),
             )
             .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Decoded frame."))
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
+                let cancel = ctx.cancel_flag();
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 1);
                     assert_eq!(outputs.len(), 1);
@@ -118,12 +119,16 @@ pub fn astro_library() -> Library {
                     let path = inputs[0].value.as_fs_path().unwrap().to_owned();
                     // Decoding (FITS parse / libraw / demosaic) is heavy
                     // synchronous CPU work — keep it off the worker thread.
-                    let image = tokio::task::spawn_blocking(move || {
-                        PreviewImage::from_file(&path).map(RawImage::from)
+                    let image = run_cancellable(cancel, move |cancel| {
+                        let context = LoadContext {
+                            cancel,
+                            ..Default::default()
+                        };
+                        PreviewImage::from_file(&path, &context)
+                            .map(RawImage::from)
+                            .map_err(anyhow::Error::from)
                     })
-                    .await
-                    .map_err(anyhow::Error::from)?
-                    .map_err(anyhow::Error::from)?;
+                    .await?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(image));
 
@@ -874,7 +879,11 @@ fn build_masters_cached(
         };
         let cache_path = dir.join(file);
         if cache && cache_path.exists() {
-            match CfaImage::from_file(&cache_path) {
+            let context = LoadContext {
+                cancel: cancel.clone(),
+                ..Default::default()
+            };
+            match CfaImage::from_file(&cache_path, &context) {
                 Ok(master) => return Ok(Some(master)),
                 Err(error) => tracing::warn!(
                     path = %cache_path.display(),

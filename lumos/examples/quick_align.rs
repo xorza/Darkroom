@@ -14,7 +14,8 @@
 //! ```
 
 use lumos::{
-    InterpolationMethod, LinearImage, RegistrationConfig, StarDetector, WarpParams, register, warp,
+    InterpolationMethod, LinearImage, LoadContext, RegistrationConfig, StarDetector, WarpParams,
+    register, warp,
 };
 use std::env;
 use std::path::Path;
@@ -36,7 +37,8 @@ fn main() {
 
     // Load images
     println!("Loading reference: {}", ref_path.display());
-    let ref_image = LinearImage::from_file(ref_path).expect("Failed to load reference image");
+    let ref_image = LinearImage::from_file(ref_path, &LoadContext::default())
+        .expect("Failed to load reference image");
     println!(
         "  Dimensions: {}x{} ({} channel{})",
         ref_image.width(),
@@ -46,7 +48,8 @@ fn main() {
     );
 
     println!("Loading target: {}", target_path.display());
-    let target_image = LinearImage::from_file(target_path).expect("Failed to load target image");
+    let target_image = LinearImage::from_file(target_path, &LoadContext::default())
+        .expect("Failed to load target image");
     println!(
         "  Dimensions: {}x{} ({} channel{})",
         target_image.width(),

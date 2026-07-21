@@ -24,9 +24,9 @@ failed validation leaves both pixels and the calibrated flag unchanged.
   cancellation during hot/cold defect-map scans. Cold defects are detected from the raw flat, then
   the flat is consumed into a bias/flat-dark-subtracted, per-color normalized divisor. Cancellation
   returns `Error::Cancelled`; partial masters, prepared flats, or defect maps never escape.
-- `CalibrationMasters::from_files(frames, sigma)` schedules independent role stacks concurrently
+- `CalibrationMasters::from_files(frames, sigma, cancel)` schedules independent role stacks concurrently
   when the whole set fits the memory budget, or sequentially with the full budget per role when it
-  does not. This convenience constructor currently runs those role stacks to completion.
+  does not. Cancellation propagates through role decode, combine, and defect detection.
 - `CalibrationMasters::save(path)` / `load(path)` persist the prepared bundle as a versioned,
   checksummed multi-extension FITS file. A loaded bundle is immediately ready to calibrate lights.
 

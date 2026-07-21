@@ -1,4 +1,5 @@
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::load::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -173,8 +174,25 @@ fn test_from_files_all_empty_yields_no_masters() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     )
     .unwrap();
+
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    assert!(matches!(
+        CalibrationMasters::from_files(
+            CalibrationSet {
+                dark: &empty,
+                flat: &empty,
+                bias: &empty,
+                flat_dark: &empty,
+            },
+            DEFAULT_SIGMA_THRESHOLD,
+            cancel,
+        ),
+        Err(Error::Cancelled)
+    ));
 
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
     assert_eq!(masters.defect_summary(), None);
@@ -827,7 +845,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     ));
     masters.save(&path).unwrap();
     assert!(matches!(
-        CfaImage::from_file(&path),
+        CfaImage::from_file(&path, &LoadContext::default()),
         Err(ImageError::FitsUnsupported { reason, .. })
             if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
     ));

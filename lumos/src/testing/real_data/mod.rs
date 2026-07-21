@@ -30,6 +30,7 @@ mod ml_support {
     use std::path::PathBuf;
 
     use crate::io::image::linear::LinearImage;
+    use crate::io::image::load::LoadContext;
     use crate::testing::calibration_dir;
     use crate::{NeutralizeBackground, Scnr, Stretch};
     use imaginarium::Image;
@@ -60,7 +61,10 @@ mod ml_support {
     /// the display-domain `[0, 1]` input the ML filters (StarNet / DeepSNR) are trained for.
     pub(crate) fn stretched_master() -> Image {
         let mut img = Image::from(
-            &LinearImage::from_file(calibration_dir().join("stacked_light.tiff"))
+            &LinearImage::from_file(
+                calibration_dir().join("stacked_light.tiff"),
+                &LoadContext::default(),
+            )
                 .expect("load stacked_light.tiff"),
         );
 

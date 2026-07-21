@@ -12,6 +12,7 @@ use ::quickbench::quick_bench;
 use common::file_utils;
 
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
@@ -45,9 +46,11 @@ fn load_two_calibrated_lights() -> Option<(LinearImage, LinearImage)> {
     let last = &files[files.len() - 1];
 
     println!("Loading first: {:?}", first.file_name().unwrap());
-    let img1 = LinearImage::from_file(first).expect("Failed to load first light frame");
+    let img1 = LinearImage::from_file(first, &LoadContext::default())
+        .expect("Failed to load first light frame");
     println!("Loading last:  {:?}", last.file_name().unwrap());
-    let img2 = LinearImage::from_file(last).expect("Failed to load last light frame");
+    let img2 = LinearImage::from_file(last, &LoadContext::default())
+        .expect("Failed to load last light frame");
     Some((img1, img2))
 }
 
@@ -233,7 +236,10 @@ fn load_all_calibrated_lights() -> Option<(Vec<LinearImage>, Vec<PathBuf>)> {
 
     let images: Vec<LinearImage> = files
         .iter()
-        .map(|p| LinearImage::from_file(p).expect("Failed to load light frame"))
+        .map(|p| {
+            LinearImage::from_file(p, &LoadContext::default())
+                .expect("Failed to load light frame")
+        })
         .collect();
     Some((images, files))
 }
