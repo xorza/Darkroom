@@ -1111,7 +1111,7 @@ fn resolve_graph_picks_local_or_linked_source() {
 }
 
 #[test]
-fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
+fn normalize_drops_out_of_range_and_missing_emitter_subscriptions() {
     use crate::library::Library;
     use crate::node::event::EventLambda;
 
@@ -1132,8 +1132,7 @@ fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
     graph.subscribe(emitter_id, 1, subscriber_id); // event_idx past the one event
     graph.subscribe(ghost, 0, subscriber_id); // emitter doesn't exist
 
-    let removed = graph.prune_dangling_wiring(&library);
-    assert_eq!(removed, 2, "out-of-range and missing-emitter edges drop");
+    graph.normalize(&library);
     assert!(
         graph.is_subscribed(emitter_id, 0, subscriber_id),
         "the in-range edge survives"
@@ -1142,19 +1141,20 @@ fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
     assert!(!graph.is_subscribed(ghost, 0, subscriber_id));
 
     // Idempotent on an already-valid graph.
-    assert_eq!(graph.prune_dangling_wiring(&library), 0);
+    graph.normalize(&library);
+    assert_eq!(graph.subscriptions().count(), 1);
 
     // An emitter whose func is missing from the library has unknowable
     // arity, so its subscription is kept (not panicked on, not dropped).
     let ghost = Node::new(NodeKind::Func(FuncId::from_u128(0xdead)));
     let ghost_id = graph.add(ghost);
     graph.subscribe(ghost_id, 4, subscriber_id);
-    assert_eq!(graph.prune_dangling_wiring(&library), 0);
+    graph.normalize(&library);
     assert!(graph.is_subscribed(ghost_id, 4, subscriber_id));
 }
 
 #[test]
-fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
+fn normalize_drops_out_of_range_and_missing_binding_endpoints() {
     use crate::library::Library;
 
     // Func with one input + one output, so the only in-range port idx is 0.
@@ -1194,11 +1194,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         Binding::bind(graph_input, 0),
     );
 
-    let removed = graph.prune_dangling_wiring(&library);
-    assert_eq!(
-        removed, 5,
-        "every dangling binding drops, the valid one stays"
-    );
+    graph.normalize(&library);
     assert!(matches!(
         graph.bindings.get(&InputPort::new(b, 0)),
         Some(Binding::Bind(_))
@@ -1226,7 +1222,11 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         InputPort::new(b, 0),
         Binding::Const(crate::StaticValue::from(1i64)),
     );
-    assert_eq!(graph.prune_dangling_wiring(&library), 0);
+    graph.normalize(&library);
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(b, 0)),
+        Some(&Binding::Const(crate::StaticValue::from(1i64))),
+    );
 
     // A node whose func is absent from the library (a stub for a doc saved
     // against a richer library) has unknowable arity, so its wiring is
@@ -1235,11 +1235,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     let ghost_id = graph.add(ghost_func);
     graph.set_input_binding(InputPort::new(ghost_id, 3), Binding::bind(a, 0));
     graph.set_input_binding(InputPort::new(b, 0), Binding::bind(ghost_id, 7));
-    assert_eq!(
-        graph.prune_dangling_wiring(&library),
-        0,
-        "unresolvable-node wiring is preserved"
-    );
+    graph.normalize(&library);
     assert!(matches!(
         graph.bindings.get(&InputPort::new(ghost_id, 3)),
         Some(Binding::Bind(_))

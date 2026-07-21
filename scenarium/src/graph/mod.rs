@@ -19,8 +19,8 @@ id_type!(NodeId);
 
 pub(crate) mod clone;
 pub(crate) mod interface;
+mod normalize;
 mod query;
-pub(crate) mod reconcile;
 mod serde;
 #[cfg(test)]
 mod tests;
