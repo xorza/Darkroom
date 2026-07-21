@@ -1,17 +1,14 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::Graph as CoreGraph;
 use scenarium::Library;
 
-use crate::core::document::Document;
-use crate::core::engine::Engine;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
+use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::exit_dialog::{ExitChoice, ExitOutcome};
@@ -45,26 +42,17 @@ pub(crate) struct AppContext<'a> {
     pub(crate) status_error: Option<&'a str>,
 }
 
-/// Thin shell around the [`Editor`] (which owns the document + its edit
-/// pipeline + the GUI tree): `App` holds only the runtime/IO the editor
-/// borrows each frame — the [`Engine`] (func lib + worker + script host),
-/// the active theme, session preferences + file path, and the host handle.
+/// GUI policy around the shared [`Workspace`] and the [`Editor`] that borrows
+/// its open document. `App` owns preferences, dialogs, theme, and exit policy;
+/// document/runtime coordination remains frontend-independent.
 /// `update` drains external queues once, while replayable `record` runs
 /// `Editor::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     pub(crate) editor: Editor,
-    /// Shared runtime services — func lib + evaluation worker + script host
-    /// — built at startup. The GUI loads an `engine.library` snapshot each
-    /// frame and drains the worker/script queues through it. Off the
-    /// serialized state.
-    pub(crate) engine: Engine,
+    pub(crate) workspace: Workspace,
     pub(crate) theme: Theme,
     pub(crate) host_handle: HostHandle,
-    /// Last successfully loaded/saved file path. `Save…` and `Load…`
-    /// preopen the dialog at this directory so a session that touches
-    /// many files in the same folder doesn't re-navigate each time.
-    pub(crate) current_path: Option<PathBuf>,
     /// Persisted session state (active theme name + last document).
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
@@ -94,8 +82,6 @@ impl App {
         script_cfg: ScriptConfig,
         preferences: Preferences,
     ) -> Self {
-        let mut document: Document = CoreGraph::default().into();
-        document.main_view.auto_layout(&document.graph);
         // The worker + script host wake the winit loop via the host handle;
         // the headless/tui drivers swap in a tokio `Notify` (see
         // `crate::core::wake`).
@@ -105,13 +91,11 @@ impl App {
         };
         // `preferences` is loaded in `run_gui` before the window exists, so
         // its saved geometry can size the window at creation.
-        let model_paths = (&preferences.ml_models).into();
         let mut app = Self {
-            editor: Editor::new(document),
-            engine: Engine::new(&script_cfg, wake, &model_paths),
+            editor: Editor::new(),
+            workspace: Workspace::new(&script_cfg, wake, &preferences),
             theme: Theme::default(),
             host_handle: handle,
-            current_path: None,
             preferences,
             events_running: false,
             confirm_quit: false,
@@ -119,12 +103,9 @@ impl App {
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
         app.theme = Theme::from_preset(app.preferences.theme.resolve());
-        // Reopen the last document unless the user turned that off. A failed
-        // load (the file moved or was deleted) clears the stale path, so the
-        // next launch starts clean instead of retrying the broken path.
         if app.preferences.load_last_document
-            && let Some(path) = app.preferences.document_path.clone()
-            && !app.load_document(&path)
+            && app.preferences.document_path.is_some()
+            && app.workspace.open.path.is_none()
         {
             app.preferences.document_path = None;
             app.save_preferences();
@@ -146,8 +127,8 @@ impl App {
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {
         // Collect to drop the channel borrow before the status writes below
-        // (both live on `self.engine`).
-        let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
+        // (both live on `self.workspace.runtime`).
+        let events: Vec<WorkerEvent> = self.workspace.runtime.drain_worker().collect();
         for event in events {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
@@ -161,25 +142,29 @@ impl App {
                     // flatten map the engine kept when it sent this run.
                     self.editor
                         .run_state
-                        .set_results(&stats, &self.engine.flatten_map);
+                        .set_results(&stats, &self.workspace.runtime.flatten_map);
                     // A finished run supersedes any lingering failure message
                     // (e.g. an earlier event-loop tick's), so the loop
                     // self-heals in the status bar too.
-                    self.engine.status.error = None;
+                    self.workspace.runtime.status.error = None;
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     self.editor.run_state.clear();
-                    self.engine.status.error(format!("run failed: {err}"));
+                    self.workspace
+                        .runtime
+                        .status
+                        .error(format!("run failed: {err}"));
                 }
                 WorkerEvent::NodeProgress(progress) => self
                     .editor
                     .run_state
-                    .apply_progress(&progress, &self.engine.flatten_map),
+                    .apply_progress(&progress, &self.workspace.runtime.flatten_map),
                 WorkerEvent::PinnedOutputs(pinned) => {
-                    self.editor
-                        .run_state
-                        .pinned_outputs
-                        .ingest(ui, pinned, &self.editor.document);
+                    self.editor.run_state.pinned_outputs.ingest(
+                        ui,
+                        pinned,
+                        &self.workspace.open.document,
+                    );
                 }
             }
         }
@@ -190,14 +175,17 @@ impl App {
     /// = one undo entry), `run()` kicks one evaluation, `shutdown()` quits.
     /// Runs before the editor's frame so applied edits show the same frame.
     fn handle_script_inbound(&mut self) {
-        let events = self.engine.drain_script();
+        let events = self.workspace.runtime.drain_script();
         let mut run = false;
         for event in events {
             match event {
-                ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
+                ScriptMessage::Print { msg } => {
+                    self.workspace.runtime.status.info(format!("script: {msg}"))
+                }
                 ScriptMessage::Apply(intents) => {
-                    let library = self.engine.library.current.clone();
-                    self.editor.apply_external_intents(intents, &library);
+                    let library = self.workspace.runtime.library.current.clone();
+                    self.editor
+                        .apply_external_intents(&mut self.workspace.open, intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch
@@ -304,7 +292,9 @@ impl App {
         }
 
         let file_name = self
-            .current_path
+            .workspace
+            .open
+            .path
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
@@ -343,18 +333,19 @@ impl aperture::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.engine.library.current.clone();
+        let library = self.workspace.runtime.library.current.clone();
         let command = self.editor.frame(
+            &mut self.workspace.open,
             ui,
             &library,
             &self.theme,
             &mut self.preferences,
             self.events_running,
-            self.engine.status.error.as_deref(),
+            self.workspace.runtime.status.error.as_deref(),
         );
 
         if self.editor.take_caches_dirty() {
-            self.engine.save_caches(&self.editor.document.graph);
+            self.workspace.save_caches();
         }
 
         if let Some(command) = command {
