@@ -51,7 +51,7 @@ impl App {
                 .error("graph export: no graph selected or open".into());
             return;
         };
-        if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_graph_save_path(self.current_path.as_deref()) {
             match persistence::export_graph(graph, &path) {
                 Ok(()) => self.engine.status.error = None,
                 Err(err) => self
@@ -67,7 +67,7 @@ impl App {
     /// instantiated and the undo stack is untouched (existing history
     /// references no imported graph, so it stays valid).
     fn import_graph(&mut self) {
-        let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) else {
+        let Some(path) = dialogs::pick_graph_open_path(self.current_path.as_deref()) else {
             return;
         };
         match persistence::import_graph(&path) {

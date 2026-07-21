@@ -84,6 +84,7 @@ blake3 = { version = "1.8" }
 windows-sys = { version = "0.61" }
 dark-light = { version = "2.0" }
 rfd = { version = "0.17" }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 async-trait = { version = "0.1" }
 aligned-vec = { version = "0.6" }
 arrayvec = { version = "0.7", features = ["serde"] }

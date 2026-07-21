@@ -20,8 +20,8 @@ use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent_cascading;
 use crate::core::edit::intent::types::Intent;
 use crate::core::engine::Engine;
-use crate::core::io::persistence;
 use crate::core::io::preferences::Preferences;
+use crate::core::io::project;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
@@ -56,7 +56,7 @@ impl Session {
 
         let preferences = Preferences::load();
         let (document, current_path) = match preferences.document_path.as_deref() {
-            Some(path) => match persistence::load_document(path) {
+            Some(path) => match project::load(path) {
                 Ok(doc) => (doc, Some(path.to_path_buf())),
                 Err(err) => {
                     engine.status.error(format!("load failed: {err:#}"));
@@ -135,7 +135,7 @@ impl Session {
             return false;
         };
         self.reconcile_if_needed();
-        match persistence::save_document(&self.document, &path) {
+        match project::save(&self.document, &path) {
             Ok(()) => true,
             Err(err) => {
                 self.engine.status.error(format!("save failed: {err:#}"));

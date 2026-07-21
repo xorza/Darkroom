@@ -1,42 +1,58 @@
 //! GUI-side OS shell integration: native file-picker dialogs (rfd) and
-//! opening URLs in the user's browser. The document/graph byte⇄type
-//! plumbing lives in `crate::core::io::persistence` (no GUI deps); this side
-//! hands off to the OS. Failures degrade — a cancelled/failed pick returns
-//! `None`, a failed URL open logs — rather than crashing.
+//! opening URLs in the user's browser. Project and reusable-graph byte⇄type
+//! plumbing live in `crate::core::io::{project, persistence}`; this side hands
+//! paths off to those GUI-free modules. Failures degrade — a cancelled/failed
+//! pick returns `None`, a failed URL open logs — rather than crashing.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use scenarium::{FsPathConfig, FsPathMode};
 
-/// File-dialog extension filters. First entry is the default.
-const FILE_FILTERS: &[(&str, &[&str])] = &[
+use crate::core::io::project;
+
+const GRAPH_FILE_FILTERS: &[(&str, &[&str])] = &[
     ("JSON", &["json"]),
     ("Lz4 compressed JSON", &["lz4"]),
     ("Bitcode", &["bin"]),
     ("TOML", &["toml"]),
 ];
 
-/// Build an `rfd::FileDialog` preconfigured with the project's extension
-/// filters and (optionally) a starting directory from the last path's
-/// parent. Shared by the open and save flows so both stay in sync.
 fn file_dialog(start: Option<&Path>) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
-    for (name, exts) in FILE_FILTERS {
-        dialog = dialog.add_filter(*name, exts);
-    }
     if let Some(parent) = start.and_then(Path::parent) {
         dialog = dialog.set_directory(parent);
     }
     dialog
 }
 
-pub(crate) fn pick_open_path(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).pick_file()
+pub(crate) fn pick_project_open_path(start: Option<&Path>) -> Option<PathBuf> {
+    file_dialog(start)
+        .add_filter("Darkroom project", &[project::EXTENSION])
+        .pick_file()
 }
 
-pub(crate) fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).save_file()
+pub(crate) fn pick_project_save_path(start: Option<&Path>) -> Option<PathBuf> {
+    file_dialog(start)
+        .add_filter("Darkroom project", &[project::EXTENSION])
+        .save_file()
+        .map(project::with_extension)
+}
+
+pub(crate) fn pick_graph_open_path(start: Option<&Path>) -> Option<PathBuf> {
+    graph_file_dialog(start).pick_file()
+}
+
+pub(crate) fn pick_graph_save_path(start: Option<&Path>) -> Option<PathBuf> {
+    graph_file_dialog(start).save_file()
+}
+
+fn graph_file_dialog(start: Option<&Path>) -> rfd::FileDialog {
+    let mut dialog = file_dialog(start);
+    for (name, extensions) in GRAPH_FILE_FILTERS {
+        dialog = dialog.add_filter(*name, extensions);
+    }
+    dialog
 }
 
 /// Open a file/folder dialog for an `FsPath` input, honoring its config:

@@ -199,7 +199,7 @@ mod tests {
     fn populated_preferences_roundtrips() {
         let cfg = Preferences {
             theme: ThemeChoice::Light,
-            document_path: Some(PathBuf::from("/tmp/graph.json")),
+            document_path: Some(PathBuf::from("/tmp/graph.darkroom")),
             // Non-defaults (defaults are `true`) so the round-trip is meaningful.
             load_last_document: false,
             confirm_unsaved_on_exit: false,
@@ -223,7 +223,10 @@ mod tests {
         assert!(text.contains("mag_filter = \"linear\""));
         let back = roundtrip(&cfg);
         assert_eq!(back.theme, ThemeChoice::Light);
-        assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.json")));
+        assert_eq!(
+            back.document_path,
+            Some(PathBuf::from("/tmp/graph.darkroom"))
+        );
         assert!(!back.load_last_document);
         assert!(!back.confirm_unsaved_on_exit);
         assert_eq!(

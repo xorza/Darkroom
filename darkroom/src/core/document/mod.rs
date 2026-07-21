@@ -4,8 +4,6 @@ mod serde;
 pub(crate) mod validate;
 
 use ::serde::{Deserialize, Serialize};
-use anyhow::{Result, bail};
-use common::SerdeFormat;
 use glam::Vec2;
 use indexmap::IndexMap;
 use scenarium::GraphId;
@@ -570,22 +568,6 @@ impl Document {
     pub(crate) fn prune_dangling_wiring(&mut self, library: &Library) {
         self.graph.prune_dangling_wiring(library);
     }
-
-    pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        self.validate_debug();
-        Ok(common::serialize(self, format)?)
-    }
-
-    pub(crate) fn deserialize(format: SerdeFormat, input: &[u8]) -> Result<Self> {
-        if input.is_empty() {
-            bail!("document input is empty");
-        }
-
-        let doc = common::deserialize::<Document>(input, format)?;
-        doc.validate()?;
-
-        Ok(doc)
-    }
 }
 
 impl Eq for Document {}
@@ -1110,7 +1092,7 @@ mod tests {
     }
 
     #[test]
-    fn dock_layout_round_trips_in_every_format() {
+    fn dock_layout_round_trips_as_json() {
         use crate::core::document::dock::{DockDrop, SplitSide};
 
         let mut doc: Document = core_test_graph().into();
@@ -1128,14 +1110,13 @@ mod tests {
                 side: SplitSide::Right,
             },
         );
-        for format in SerdeFormat::all_formats_for_testing() {
-            let bytes = doc.serialize(format).expect("serialize with dock layout");
-            let back = Document::deserialize(format, &bytes).expect("deserialize");
-            assert_eq!(
-                back.layout, doc.layout,
-                "the split tree (groups, focus, ratio) round-trips for {format:?}"
-            );
-        }
+        let bytes = serde_json::to_vec_pretty(&doc).expect("serialize with dock layout");
+        let back: Document = serde_json::from_slice(&bytes).expect("deserialize");
+        back.validate().expect("round-tripped document is valid");
+        assert_eq!(
+            back.layout, doc.layout,
+            "the split tree (groups, focus, ratio) round-trips through JSON"
+        );
     }
 
     #[test]
@@ -1153,16 +1134,13 @@ mod tests {
         reordered.move_item_to_index(&first_key, last_index);
         assert_ne!(view, reordered);
 
-        for format in SerdeFormat::all_formats_for_testing() {
-            assert_roundtrip(format);
-        }
+        assert_roundtrip();
 
         let mut invalid = build_test_doc();
         invalid.graph.origin = Some(GraphId::nil());
-        let serialized = common::serialize(&invalid, SerdeFormat::Json).unwrap();
-        let error = Document::deserialize(SerdeFormat::Json, &serialized)
-            .unwrap_err()
-            .to_string();
+        let serialized = serde_json::to_vec(&invalid).unwrap();
+        let invalid: Document = serde_json::from_slice(&serialized).unwrap();
+        let error = invalid.validate().unwrap_err().to_string();
         assert!(error.contains("graph has a nil origin"), "{error}");
 
         let mut duplicate_bindings = serde_json::to_value(build_test_doc()).unwrap();
@@ -1171,7 +1149,7 @@ mod tests {
             .unwrap();
         bindings.push(bindings[0].clone());
         let serialized = serde_json::to_vec(&duplicate_bindings).unwrap();
-        let error = Document::deserialize(SerdeFormat::Json, &serialized)
+        let error = serde_json::from_slice::<Document>(&serialized)
             .unwrap_err()
             .to_string();
         assert!(
@@ -1190,19 +1168,23 @@ mod tests {
         core_test_graph().into()
     }
 
-    fn assert_roundtrip(format: SerdeFormat) {
+    fn assert_roundtrip() {
         let doc = build_test_doc();
-        let serialized = doc.serialize(format).expect("serialize document");
+        doc.validate_debug();
+        let serialized = serde_json::to_vec_pretty(&doc).expect("serialize document");
         assert!(
             !serialized.is_empty(),
             "serialized document should not be empty"
         );
-        let deserialized = Document::deserialize(format, &serialized)
+        let deserialized: Document = serde_json::from_slice(&serialized)
             .expect("document deserialization should succeed for test payload");
+        deserialized
+            .validate()
+            .expect("deserialized document is valid");
         deserialized.validate_debug();
         assert_eq!(
             doc, deserialized,
-            "the complete document should round-trip through {format:?}"
+            "the complete document should round-trip through JSON"
         );
     }
 
@@ -1222,8 +1204,9 @@ mod tests {
         *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
         doc.validate_debug();
 
-        let bytes = doc.serialize(SerdeFormat::Json).expect("serialize");
-        let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).expect("load");
+        let bytes = serde_json::to_vec_pretty(&doc).expect("serialize");
+        let reloaded: Document = serde_json::from_slice(&bytes).expect("load");
+        reloaded.validate().expect("reloaded document is valid");
         assert_eq!(
             reloaded.main_view.item_placements.get(&key).copied(),
             Some(pos),
@@ -1255,11 +1238,11 @@ mod tests {
             "unexpected validation error: {err:#}"
         );
 
-        // The same gate guards deserialization in every build (release too):
-        // encoding with bare serde bypasses `Document::serialize`'s debug
-        // assert, and the load still refuses the malformed document.
-        let bytes = common::serialize(&doc, SerdeFormat::Json).expect("serialize");
-        let err = Document::deserialize(SerdeFormat::Json, &bytes).unwrap_err();
+        // The project loader calls this same gate in every build (release too),
+        // so encoding with bare serde cannot make malformed state valid.
+        let bytes = serde_json::to_vec(&doc).expect("serialize");
+        let decoded: Document = serde_json::from_slice(&bytes).expect("deserialize");
+        let err = decoded.validate().unwrap_err();
         assert!(
             format!("{err:#}").contains("pinned output must have a view item"),
             "unexpected deserialize error: {err:#}"

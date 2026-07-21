@@ -1,6 +1,6 @@
-//! On-disk I/O and session state: file-dialog [`persistence`] for
-//! documents/themes/graphs, the [`preferences`] that remembers the last theme +
-//! document across launches, and the per-document disk-[`cache`] location.
+//! On-disk I/O and session state: zipped [`project`] documents, reusable-graph
+//! [`persistence`], the [`preferences`] that remember the last theme + document
+//! across launches, and the per-document disk-[`cache`] location.
 
 use std::path::PathBuf;
 
@@ -8,6 +8,7 @@ pub(crate) mod cache;
 pub(crate) mod library;
 pub(crate) mod persistence;
 pub(crate) mod preferences;
+pub(crate) mod project;
 
 /// `name` resolved relative to the process working directory — the shared
 /// path resolution behind the preferences and library files, which both

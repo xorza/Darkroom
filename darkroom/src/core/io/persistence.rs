@@ -1,8 +1,9 @@
-//! Byte ⇄ type plumbing for documents and reusable graphs — the GUI-free half
-//! of on-disk I/O. The file-picker dialogs and theme I/O live in
-//! `crate::gui::dialogs`. Pure persistence — no app state, no undo stack,
-//! no preferences; callers orchestrate (when to load/save, what to do with the
-//! result), this only turns paths into values and values into files.
+//! Byte ⇄ type plumbing for reusable graphs — the GUI-free half of graph I/O.
+//! Darkroom documents use the archive format in [`crate::core::io::project`].
+//! The file-picker dialogs live in `crate::gui::dialogs`. Pure persistence — no
+//! app state, no undo stack, no preferences; callers orchestrate when to
+//! import/export, while this module only turns paths into values and values
+//! into files.
 //! Failures return the reason with the path attached (render with `{:#}`);
 //! callers surface it through the status log, which also traces it.
 
@@ -12,53 +13,24 @@ use anyhow::{Context, Result};
 use common::{SerdeFormat, deserialize, file_utils, serialize};
 use scenarium::Graph;
 
-use crate::core::document::Document;
-
-/// Read + deserialize a document from `path`, picking the format from its
-/// extension. Errors on an unsupported extension, an unreadable file, a
-/// parse failure, or a document that fails [`Document::validate`].
-pub(crate) fn load_document(path: &Path) -> Result<Document> {
-    load_typed(path, Document::deserialize)
-}
-
-/// Serialize `doc` and write it to `path`, picking the format from its
-/// extension (defaulting to JSON for unknown extensions).
-pub(crate) fn save_document(doc: &Document, path: &Path) -> Result<()> {
-    save_typed(path, |format| doc.serialize(format))
-}
-
 /// Serialize a reusable graph and its nested graphs.
 pub(crate) fn export_graph(graph: &Graph, path: &Path) -> Result<()> {
-    save_typed(path, |format| Ok(serialize(graph, format)?))
+    let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Json);
+    let bytes = serialize(graph, format)?;
+    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable)
+        .with_context(|| path.display().to_string())
 }
 
 /// Read and validate a reusable graph from `path`.
 pub(crate) fn import_graph(path: &Path) -> Result<Graph> {
-    load_typed(path, |format, bytes| {
-        let graph = deserialize::<Graph>(bytes, format)?;
-        graph.validate()?;
-        Ok(graph)
-    })
-}
-
-/// Shared load shell: pick the format from the extension, read the file,
-/// hand both to `parse`. `parse` is a closure (not plain `deserialize`)
-/// because each type routes through its validating gate —
-/// [`Document::deserialize`] / [`Graph::validate`].
-fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T>) -> Result<T> {
     let format =
         SerdeFormat::from_file_name(&path.to_string_lossy()).context("unsupported file")?;
     let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
-    parse(format, &bytes).with_context(|| path.display().to_string())
-}
-
-/// Shared save shell: pick the format from the extension (JSON default),
-/// encode via `encode`, write the bytes.
-fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) -> Result<()> {
-    let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Json);
-    let bytes = encode(format)?;
-    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable)
-        .with_context(|| path.display().to_string())
+    let graph = deserialize::<Graph>(&bytes, format).with_context(|| path.display().to_string())?;
+    graph
+        .validate()
+        .with_context(|| path.display().to_string())?;
+    Ok(graph)
 }
 
 #[cfg(test)]

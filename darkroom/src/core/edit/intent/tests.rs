@@ -783,8 +783,6 @@ fn removing_a_node_captures_and_restores_its_pins() {
 
 #[test]
 fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
-    use common::SerdeFormat;
-
     let mut doc = Document::default();
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
@@ -871,8 +869,9 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     apply_step(&raise_pin, &mut doc, GraphRef::Main);
 
     // The whole point: the mixed render order round-trips through save/load.
-    let bytes = doc.serialize(SerdeFormat::Json).unwrap();
-    let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).unwrap();
+    let bytes = serde_json::to_vec_pretty(&doc).unwrap();
+    let reloaded: Document = serde_json::from_slice(&bytes).unwrap();
+    reloaded.validate().expect("reloaded document is valid");
     assert_eq!(
         stack_order(&reloaded),
         vec![b, a, c, pin],

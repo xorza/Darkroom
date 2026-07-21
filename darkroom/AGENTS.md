@@ -63,10 +63,11 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived graph-
   interface reconciliation).
-- **`core/io/`** — `persistence.rs` (file-dialog + serde I/O), `preferences.rs`
-  (`Preferences` session state), `library.rs` (shared graph library file),
-  `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
-  file, with a self-ignoring `.gitignore`).
+- **`core/io/`** — `project.rs` (`.darkroom` ZIP containing `project.json`),
+  `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
+  session state), `library.rs` (shared graph library file), `cache.rs`
+  (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
+  with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
   overlays/inspectors), `node/` (the node-body widget cluster), `dock/`
   (the dock's whole GUI half behind the two-call `DockUi` — pane-tree
@@ -379,9 +380,10 @@ Key cross-cutting mechanisms:
   draws so intersection tests run inline; hits drain into intents on release.
 
 ### Persistence + library (`src/io/`, `src/theme.rs`)
-`persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/preferences
-coupling — `commands.rs` orchestrates. Documents round-trip through any
-`SerdeFormat` (JSON is the default text format). `library.rs` reads/writes the shared
+`project.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
+`commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
+pretty-printed `project.json` document entry. `persistence.rs` separately keeps
+the multi-format reusable-graph import/export path. `library.rs` reads/writes the shared
 graph library (`darkroom.library.json`): a set of `Graph`s loaded into
 `Library` at startup and grown by the **promote/publish** menu commands. Local
 graphs track lineage via an `origin` field — "Publish" updates the

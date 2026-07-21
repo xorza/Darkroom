@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
-use crate::core::io::persistence;
+use crate::core::io::project;
 use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
 use crate::gui::dialogs;
@@ -28,7 +28,7 @@ impl App {
         match command {
             FileCommand::New => self.new_document(),
             FileCommand::Load => {
-                if let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) {
+                if let Some(path) = dialogs::pick_project_open_path(self.current_path.as_deref()) {
                     self.load_document(&path);
                 }
             }
@@ -52,7 +52,7 @@ impl App {
     /// `document_path`; the menu-load path ignores it, leaving the open doc).
     /// The failure surfaces in the status bar with its reason.
     pub(crate) fn load_document(&mut self, path: &Path) -> bool {
-        let doc = match persistence::load_document(path) {
+        let doc = match project::load(path) {
             Ok(doc) => doc,
             Err(err) => {
                 self.engine.status.error(format!("load failed: {err:#}"));
@@ -78,13 +78,13 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_project_save_path(self.current_path.as_deref()) {
             self.save_document(&path);
         }
     }
 
     fn save_document(&mut self, path: &Path) {
-        match persistence::save_document(&self.editor.document, path) {
+        match project::save(&self.editor.document, path) {
             Ok(()) => {
                 self.editor.dirty = false;
                 self.set_document_path(Some(path.to_path_buf()));

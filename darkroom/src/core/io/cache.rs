@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use common::file_utils;
 
 /// The cache directory for a document: `<stem>.darkroom-cache/` beside the
-/// document file (e.g. `proj/scene.json` → `proj/scene.darkroom-cache/`).
+/// document file (e.g. `proj/scene.darkroom` → `proj/scene.darkroom-cache/`).
 /// Per-document-named so two projects in one folder keep separate stores.
 pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
     let stem = doc_path.file_stem().unwrap_or_default();
@@ -51,12 +51,12 @@ mod tests {
     fn cache_root_is_named_after_stem_beside_the_file() {
         // Absolute path: cache sits in the same dir, stem + `.darkroom-cache`.
         assert_eq!(
-            document_cache_root(Path::new("/proj/scene.json")),
+            document_cache_root(Path::new("/proj/scene.darkroom")),
             PathBuf::from("/proj/scene.darkroom-cache")
         );
         // Relative path keeps its (empty) parent.
         assert_eq!(
-            document_cache_root(Path::new("scene.json")),
+            document_cache_root(Path::new("scene.darkroom")),
             PathBuf::from("scene.darkroom-cache")
         );
         // No extension → the whole filename is the stem.
@@ -66,8 +66,8 @@ mod tests {
         );
         // Two projects in one dir get distinct stores.
         assert_ne!(
-            document_cache_root(Path::new("/proj/a.json")),
-            document_cache_root(Path::new("/proj/b.json"))
+            document_cache_root(Path::new("/proj/a.darkroom")),
+            document_cache_root(Path::new("/proj/b.darkroom"))
         );
     }
 
@@ -79,7 +79,7 @@ mod tests {
             std::env::temp_dir().join(format!("darkroom-cache-test-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let doc_path = dir.join("scene.json");
+        let doc_path = dir.join("scene.darkroom");
 
         let root = prepare_document_cache_root(&doc_path);
 
