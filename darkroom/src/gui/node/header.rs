@@ -1,6 +1,6 @@
 //! Node header bar: the title plus the node's indicator chips, split into two
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
-//! bordered, hover-lifting chips you act on — `G` graph-open, `D` disable,
+//! bordered, hover-lifting chips you act on — `G` graph-open, `D` sink-disable,
 //! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
 //! that only describe the node — `■` sink and `~` impure. The markers ride
 //! in the [`header`] band beside the title; the run-time label (left) and the
@@ -199,9 +199,9 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 
 /// The strip under the header: the run-time label left-aligned, a `FILL`
 /// spacer, then the interactive chips right-aligned — `G` graph-open, `D`
-/// disable, `R`/`↓` cache. The controls group apart from the title's identity
-/// (header above); the run-time reads as the row's status counterweight. The
-/// disable chip always shows, so the row's height is reserved regardless.
+/// sink-disable, `R`/`↓` cache. The controls group apart from the title's
+/// identity (header above); the run-time reads as the row's status
+/// counterweight.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
@@ -259,21 +259,23 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 )
                 .show(ui);
             }
-            // Disable toggle: filled when the node is excluded from
-            // execution. Muted swatch (it's "off", not an alarm).
-            let disable_toggled = Badge::control(
-                "D",
-                theme.colors.text_muted,
-                node.disabled,
-                disable_badge_wid(node.id),
-                "Disable — exclude from the run",
-            )
-            .show(ui);
-            if disable_toggled {
-                out.push(Intent::SetNodeProperty {
-                    node_id: node.id,
-                    to: NodeProperty::Disabled(!node.disabled),
-                });
+            // Only runnable sinks can be disabled from Darkroom, so running a
+            // disabled node can still evaluate its ordinary upstream cone.
+            if node.can_disable() {
+                let disable_toggled = Badge::control(
+                    "D",
+                    theme.colors.text_muted,
+                    node.disabled,
+                    disable_badge_wid(node.id),
+                    "Disable — exclude this sink from graph runs",
+                )
+                .show(ui);
+                if disable_toggled {
+                    out.push(Intent::SetNodeProperty {
+                        node_id: node.id,
+                        to: NodeProperty::Disabled(!node.disabled),
+                    });
+                }
             }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and

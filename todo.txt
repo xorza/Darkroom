@@ -33,5 +33,3 @@ blobs and serialization directly to file to avoid memallocs
 build masters cache changes directory and invalidates digest
 
 node runtime is not refershed
-
-run button not shown for disabled nodes

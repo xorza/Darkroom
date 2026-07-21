@@ -161,8 +161,8 @@ pub(crate) struct SceneNode {
     pub graph: Option<GraphLink>,
     /// Sink node (its func is `sink` — no outputs feed downstream).
     pub sink: bool,
-    /// Excluded from execution (`Node::disabled`). The header badge
-    /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
+    /// Excluded from execution (`Node::disabled`). Sink headers expose the
+    /// toggle; the body paints any authored disabled node dimmed.
     pub disabled: bool,
     /// Where this node's output is cached ([`CacheMode`]). The header's two cache
     /// chips (RAM + disk) toggle its bits via `Intent::SetCacheMode`.
@@ -208,6 +208,13 @@ impl SceneNode {
     /// nothing.
     pub(crate) fn runnable(&self) -> bool {
         !self.boundary && !self.missing && self.graph.is_none()
+    }
+
+    /// Whether Darkroom exposes the disable toggle for this node. Limiting it
+    /// to runnable sinks keeps disabled nodes directly runnable with their
+    /// upstream cone intact.
+    pub(crate) fn can_disable(&self) -> bool {
+        self.sink && self.runnable()
     }
 }
 
@@ -653,12 +660,29 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui::scene::test_support::scene_node_stub;
     use scenarium::DataType;
     use scenarium::Graph;
     use scenarium::{InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
+    }
+
+    #[test]
+    fn only_runnable_sinks_expose_the_disable_toggle() {
+        let mut ui = Ui::default();
+        let mut node = scene_node_stub(&mut ui, NodeId::unique(), Vec2::ZERO);
+        assert!(!node.can_disable(), "a non-sink has no disable toggle");
+
+        node.sink = true;
+        assert!(node.can_disable(), "a runnable sink can be disabled");
+
+        node.missing = true;
+        assert!(
+            !node.can_disable(),
+            "an unresolved sink cannot be disabled because it cannot be run explicitly"
+        );
     }
 
     #[derive(Debug)]

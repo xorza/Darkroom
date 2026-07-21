@@ -267,11 +267,11 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
   `ExecuteNodes` seeding one node's cone, its outputs pinned resident for the
   preview fetch. Two triggers, both gated on `SceneNode::runnable` (instance/
-  boundary/missing nodes don't resolve as seeds; Scenarium's planner treats an
-  explicitly seeded disabled func as enabled for that run): the header's play
-  chip left of the title (drawn in `gui/node/header.rs`, click scanned by
-  `emit_play_clicks` and translated at canvas level) and the node context
-  menu's "Run to this node".
+  boundary/missing nodes don't resolve as seeds; Darkroom exposes the disable
+  toggle only on runnable sinks, and Scenarium treats an explicitly seeded
+  disabled sink as enabled for that run): the header's play chip left of the
+  title (drawn in `gui/node/header.rs`, click scanned by `emit_play_clicks` and
+  translated at canvas level) and the node context menu's "Run to this node".
 - **Per-document disk cache.** The worker starts memory-only;
   `Engine::set_document_cache` (called from `set_document_path` — i.e. on
   open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing
@@ -344,8 +344,9 @@ gesture state + the pure pointer→drop-zone classification. The rest:
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, graph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (play chip + title +
-  `G`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / disable /
-  RAM-cache / disk-cache / inspect; the
+  `G`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / sink-disable /
+  RAM-cache / disk-cache / inspect; the `D` control appears only on runnable
+  sinks, and the
   `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port
   columns + circles + binding menu; a required input's port paints in the

@@ -124,10 +124,11 @@ pub(crate) enum Intent {
         key: ItemRef,
     },
     /// Set one scalar property of a node — its `disabled` flag or its cache
-    /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: `D`
-    /// flips `Disabled` (ambient runs exclude it; an explicit node seed overrides
-    /// it once); the `R`/`↓` chips each flip one bit of `RuntimeCache` (the disk bit
-    /// persists the output so a reproducible node reloads instead of recomputing).
+    /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: a
+    /// sink's `D` flips `Disabled` (ambient runs exclude it; an explicit node
+    /// seed overrides it once); the `R`/`↓` chips each flip one bit of
+    /// `RuntimeCache` (the disk bit persists the output so a reproducible node
+    /// reloads instead of recomputing).
     SetNodeProperty {
         node_id: NodeId,
         to: NodeProperty,
