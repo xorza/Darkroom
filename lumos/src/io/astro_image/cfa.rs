@@ -5,16 +5,22 @@
 //! flats, bias) and hot pixel correction on raw data.
 
 use std::io::Error;
+use std::path::Path;
 
 use rayon::prelude::*;
 
 use common::file_utils;
 
 use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
+use crate::io::astro_image::fits;
+use crate::io::astro_image::{
+    AstroImage, AstroImageMetadata, ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS,
+    ImageDimensions, STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa,
+    scientific_rejection,
+};
+use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -85,14 +91,11 @@ impl StackableImage for CfaImage {
     }
 
     fn load(path: &std::path::Path) -> Result<Self, ImageError> {
-        load_raw_cfa(path)
+        CfaImage::from_file(path)
     }
 
-    /// CFA frames are always RAW, so the dimensions come straight from the RAW header — no decode.
     fn peek_dimensions(path: &std::path::Path) -> Option<ImageDimensions> {
-        raw_dimensions(path)
-            .ok()
-            .map(|size| ImageDimensions::new(size, 1))
+        cfa_dimensions(path).ok()
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {
@@ -103,6 +106,40 @@ impl StackableImage for CfaImage {
 }
 
 impl CfaImage {
+    /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
+    pub fn from_plane(data: Buffer2<f32>, metadata: AstroImageMetadata) -> Self {
+        assert!(
+            metadata.cfa_type.is_some(),
+            "CfaImage metadata must identify a monochrome or CFA sensor"
+        );
+        Self {
+            data,
+            metadata,
+            quantization_sigma: None,
+        }
+    }
+
+    /// Load an un-demosaiced sensor image from camera RAW or mosaic FITS.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+        let path = path.as_ref();
+        let extension = file_extension(path);
+
+        if FITS_EXTENSIONS.contains(&extension.as_str()) {
+            return fits_cfa(fits::load_fits(path)?, path);
+        }
+        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+            return raw::load_raw_cfa(path);
+        }
+        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+            return Err(scientific_rejection(
+                path,
+                "generic raster decoders do not establish a scientific CFA contract",
+            ));
+        }
+
+        Err(ImageError::UnsupportedFormat { extension })
+    }
+
     /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
     /// Metadata is negligible against a full-sensor plane.
     pub fn ram_bytes(&self) -> usize {
@@ -110,14 +147,14 @@ impl CfaImage {
     }
 
     /// Serialize this CFA image to `path` (bitcode: the CFA plane + metadata).
-    /// Pairs with [`Self::load`] for a calibration-master cache.
-    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+    /// Pairs with [`Self::load_cache`] for a calibration-master cache.
+    pub fn save_cache(&self, path: &Path) -> std::io::Result<()> {
         let bytes = common::serialize(self, common::SerdeFormat::Bitcode).map_err(Error::other)?;
         file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Cache)
     }
 
-    /// Load a CFA image written by [`Self::save`].
-    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
+    /// Load a CFA image written by [`Self::save_cache`].
+    pub fn load_cache(path: &Path) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
         common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(Error::other)
     }
@@ -127,10 +164,23 @@ impl CfaImage {
     pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<AstroImage, DemosaicError> {
         let width = self.data.width();
         let height = self.data.height();
-        let cfa_type =
-            self.metadata.cfa_type.clone().expect(
-                "CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()",
-            );
+        let mut metadata = self.metadata;
+        let cfa_type = metadata
+            .cfa_type
+            .clone()
+            .expect("CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()");
+        if let Some(provenance) = &mut metadata.provenance {
+            let (color, demosaic) = match &cfa_type {
+                CfaType::Mono => (ColorProvenance::Monochrome, DemosaicProvenance::None),
+                CfaType::Bayer(_) => (ColorProvenance::SensorRgb, DemosaicProvenance::LumosRcd),
+                CfaType::XTrans(_) => (
+                    ColorProvenance::SensorRgb,
+                    DemosaicProvenance::LumosMarkesteijn,
+                ),
+            };
+            provenance.color = color;
+            provenance.demosaic = demosaic;
+        }
         let pixels = self.data.into_vec();
 
         Ok(match &cfa_type {
@@ -138,7 +188,7 @@ impl CfaImage {
                 // No demosaicing needed - convert 1-channel to 1-channel AstroImage
                 let dims = ImageDimensions::new((width, height), 1);
                 let mut astro = AstroImage::from_pixels(dims, pixels);
-                astro.metadata = self.metadata;
+                astro.metadata = metadata;
                 astro
             }
             CfaType::Bayer(cfa_pattern) => {
@@ -157,7 +207,7 @@ impl CfaImage {
                 let planes = demosaic_bayer(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
-                astro.metadata = self.metadata;
+                astro.metadata = metadata;
                 astro
             }
             CfaType::XTrans(pattern) => {
@@ -169,7 +219,7 @@ impl CfaImage {
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
-                astro.metadata = self.metadata;
+                astro.metadata = metadata;
                 astro
             }
         })
@@ -214,8 +264,8 @@ mod tests {
             quantization_sigma: Some(0.000_01),
         };
         let path = common::test_utils::test_output_path("cfa_master_roundtrip.lcm");
-        cfa.save(&path).unwrap();
-        let loaded = CfaImage::load(&path).unwrap();
+        cfa.save_cache(&path).unwrap();
+        let loaded = CfaImage::load_cache(&path).unwrap();
 
         assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));
         assert_eq!(loaded.data.to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
@@ -308,7 +358,14 @@ mod tests {
 
     #[test]
     fn test_data_len() {
-        let img = make_cfa(10, 20, vec![0.0; 200], CfaType::Mono);
+        let img = CfaImage::from_plane(
+            Buffer2::new(10, 20, vec![0.0; 200]),
+            AstroImageMetadata {
+                cfa_type: Some(CfaType::Mono),
+                ..AstroImageMetadata::default()
+            },
+        );
         assert_eq!(img.data.len(), 200);
+        assert_eq!(img.quantization_sigma, None);
     }
 }

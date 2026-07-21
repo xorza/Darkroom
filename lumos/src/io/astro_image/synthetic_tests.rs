@@ -2,7 +2,7 @@
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
 //! real `load_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention, the
-//! integer normalization, physical float preservation, and null rejection. The demosaic path is
+//! physical integer/float preservation and null rejection. The demosaic path is
 //! exercised by building mosaics from known colours and demosaicing them back.
 
 use std::fs::File;
@@ -11,12 +11,14 @@ use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+use crate::stacking::frame_store::StackableImage;
 use crate::testing::make_cfa;
-use crate::{AstroImage, CfaType};
+use crate::{AstroImage, CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
 use common::CancelToken;
 use fits_well::header::Header;
-use fits_well::image::Image;
+use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
+use imaginarium::ColorFormat;
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
 fn write_and_load(name: &str, image: &Image) -> Result<AstroImage, ImageError> {
@@ -25,6 +27,14 @@ fn write_and_load(name: &str, image: &Image) -> Result<AstroImage, ImageError> {
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_fits(&path)
+}
+
+fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::PathBuf {
+    let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let mut writer = FitsWriter::new(File::create(&path).unwrap());
+    writer.write_image_with_header(image, header).unwrap();
+    writer.into_inner().sync_all().unwrap();
+    path
 }
 
 fn write_header_and_load(name: &str, header: &Header) -> Result<AstroImage, ImageError> {
@@ -89,16 +99,159 @@ fn fits_float32_round_trips_pixels_and_order() {
 }
 
 #[test]
-fn fits_unsigned16_round_trips_via_bzero_and_normalizes() {
+fn fits_signed_scaled_and_unsigned_samples_remain_physical() {
+    let signed = Image::new(vec![4, 1], vec![-32_768i16, -3, 0, 32_767]).unwrap();
+    let signed_loaded = write_and_load("int16", &signed).unwrap();
+    assert_eq!(
+        signed_loaded.channel(0).pixels(),
+        &[-32_768.0, -3.0, 0.0, 32_767.0]
+    );
+
+    let scaled = Image::new_scaled(
+        vec![3, 1],
+        vec![-3i16, 0, 4],
+        Scaling {
+            bscale: -2.5,
+            bzero: 10.0,
+            blank: None,
+        },
+    )
+    .unwrap();
+    let scaled_loaded = write_and_load("negative_bscale", &scaled).unwrap();
+    assert_eq!(scaled_loaded.channel(0).pixels(), &[17.5, 10.0, 0.0]);
+
     let (w, h) = (5usize, 1usize);
-    // Stored signed-16 + BZERO=32768 by `from_u16`; loaded back and divided by 65535 → [0,1].
     let raw = [0u16, 16384, 32768, 49152, 65535];
     let image = Image::from_u16(vec![w, h], &raw).unwrap();
 
     let loaded = write_and_load("uint16", &image).unwrap();
-    let expected: Vec<f32> = raw.iter().map(|&v| v as f32 / 65535.0).collect();
-    for (a, b) in loaded.channel(0).pixels().iter().zip(&expected) {
-        assert!((a - b).abs() < 1e-4, "normalized pixel {a} vs {b}");
+    let expected: Vec<f32> = raw.iter().map(|&value| value as f32).collect();
+    assert_eq!(loaded.channel(0).pixels(), expected);
+}
+
+#[test]
+fn fits_datamax_is_metadata_only() {
+    let image = Image::new(vec![4, 1], vec![-7i16, 0, 41, 300]).unwrap();
+    let mut low_header = Header::new();
+    low_header.set("DATAMAX", 100.0).unwrap();
+    let mut high_header = Header::new();
+    high_header.set("DATAMAX", 65_535.0).unwrap();
+    let low_path = write_with_header("datamax_100", &image, &low_header);
+    let high_path = write_with_header("datamax_65535", &image, &high_header);
+
+    let low = load_fits(&low_path).unwrap();
+    let high = load_fits(&high_path).unwrap();
+    assert_eq!(low.channel(0).pixels(), &[-7.0, 0.0, 41.0, 300.0]);
+    assert_eq!(high.channel(0).pixels(), low.channel(0).pixels());
+    assert_eq!(low.metadata.data_max, Some(100.0));
+    assert_eq!(high.metadata.data_max, Some(65_535.0));
+}
+
+#[test]
+fn mosaic_fits_uses_the_cfa_calibration_route() {
+    let (width, height) = (32usize, 32usize);
+    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let target = [0.8f32, 0.5, 0.2];
+    let dark_value = 0.1f32;
+    let pixels: Vec<f32> = (0..height)
+        .flat_map(|y| {
+            let pattern = pattern.clone();
+            (0..width).map(move |x| target[pattern.color_at(x, y) as usize] + dark_value)
+        })
+        .collect();
+    let image = Image::new(vec![width, height], pixels.clone()).unwrap();
+    let mut header = Header::new();
+    header.set("BAYERPAT", "RGGB").unwrap();
+    let path = write_with_header("bayer_cfa", &image, &header);
+
+    assert!(matches!(
+        AstroImage::from_file(&path),
+        Err(ImageError::ScientificInputRejected { .. })
+    ));
+    let mut loaded = CfaImage::from_file(&path).unwrap();
+    assert_eq!(loaded.data.pixels(), pixels);
+    assert_eq!(loaded.metadata.cfa_type, Some(pattern.clone()));
+    let cache_loaded = <crate::CfaImage as StackableImage>::load(&path).unwrap();
+    assert_eq!(cache_loaded.data, loaded.data);
+    assert_eq!(cache_loaded.metadata.cfa_type, loaded.metadata.cfa_type);
+    assert_eq!(
+        <crate::CfaImage as StackableImage>::peek_dimensions(&path),
+        Some(crate::ImageDimensions::new((width, height), 1))
+    );
+
+    let preview = PreviewImage::from_file(&path).unwrap();
+    assert!(matches!(
+        &preview.metadata.provenance,
+        Some(crate::ImageProvenance {
+            color: crate::ColorProvenance::SensorRgb,
+            demosaic: crate::DemosaicProvenance::LumosRcd,
+            ..
+        })
+    ));
+    let preview: imaginarium::Image = preview.into();
+    assert_eq!(preview.desc.color_format, ColorFormat::RGB_F32);
+    let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
+    for y in 6..height - 6 {
+        for x in 6..width - 6 {
+            let channel = pattern.color_at(x, y) as usize;
+            assert_eq!(
+                preview_pixels[(y * width + x) * 3 + channel],
+                target[channel] + dark_value
+            );
+        }
+    }
+
+    let dark = make_cfa(
+        width,
+        height,
+        vec![dark_value; width * height],
+        pattern.clone(),
+    );
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(dark),
+            flat: None,
+            bias: None,
+            flat_dark: None,
+        },
+        5.0,
+        CancelToken::never(),
+    )
+    .unwrap();
+    let mut equivalent = make_cfa(width, height, pixels, pattern.clone());
+    masters.calibrate(&mut loaded).unwrap();
+    masters.calibrate(&mut equivalent).unwrap();
+    assert_eq!(loaded.data, equivalent.data);
+
+    let demosaiced = loaded.demosaic(&CancelToken::never()).unwrap();
+    let equivalent_demosaiced = equivalent.demosaic(&CancelToken::never()).unwrap();
+    for channel in 0..3 {
+        assert_eq!(
+            demosaiced.channel(channel),
+            equivalent_demosaiced.channel(channel)
+        );
+    }
+    assert!(matches!(
+        demosaiced.metadata.provenance,
+        Some(crate::ImageProvenance {
+            container: crate::SourceContainer::Fits,
+            transfer: crate::TransferProvenance::FitsPhysical {
+                bscale: 1.0,
+                bzero: 0.0,
+                ..
+            },
+            color: crate::ColorProvenance::SensorRgb,
+            demosaic: crate::DemosaicProvenance::LumosRcd,
+            clipped: false,
+            ..
+        })
+    ));
+    for y in 6..height - 6 {
+        for x in 6..width - 6 {
+            let channel = pattern.color_at(x, y) as usize;
+            let expected = (target[channel] + dark_value) - dark_value;
+            assert_eq!(demosaiced.channel(channel)[y * width + x], expected);
+        }
     }
 }
 

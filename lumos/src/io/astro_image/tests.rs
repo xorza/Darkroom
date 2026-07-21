@@ -4,6 +4,7 @@ use imaginarium::{ColorFormat, Image, ImageDesc};
 
 use crate::io::astro_image::*;
 use crate::io::raw;
+use crate::stacking::frame_store::StackableImage;
 
 #[test]
 fn loadable_extensions_match_decoder_policies() {
@@ -14,7 +15,7 @@ fn loadable_extensions_match_decoder_policies() {
         .copied()
         .collect();
 
-    assert_eq!(ASTRO_IMAGE_EXTENSIONS, expected);
+    assert_eq!(PREVIEW_IMAGE_EXTENSIONS, expected);
 }
 
 #[test]
@@ -23,6 +24,7 @@ fn test_metadata_default() {
     assert!(meta.object.is_none());
     assert!(meta.header_dimensions.is_empty());
     assert!(meta.camera_white_balance.is_none());
+    assert!(meta.provenance.is_none());
 }
 
 #[test]
@@ -106,13 +108,8 @@ fn test_load_full_example_fits() {
     assert_eq!(image.metadata.bitpix, BitPix::Int32);
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
-    // FITS integer data is normalized to [0,1] on load
     let pixel = image.get_pixel_gray(5, 20);
-    let expected = 152.0 / i32::MAX as f32;
-    assert!(
-        (pixel - expected).abs() < 1e-6,
-        "pixel={pixel}, expected={expected}"
-    );
+    assert_eq!(pixel, 152.0);
 
     // No BAYERPAT header → cfa_type is None
     assert!(image.metadata.cfa_type.is_none());
@@ -174,6 +171,78 @@ fn test_save_rgb_tiff() {
     assert_eq!(loaded.width(), 2);
     assert_eq!(loaded.height(), 2);
     assert_eq!(loaded.channels(), 3);
+}
+
+#[test]
+fn product_constructors_separate_linear_science_from_preview_rasters() {
+    let float_path = test_output_path("product_constructors/linear_float.tiff");
+    let float_pixels = vec![-0.25f32, 0.5, 1.25, 3.0];
+    let float_image = Image::new_with_data(
+        ImageDesc::new(2, 2, ColorFormat::L_F32),
+        bytemuck::cast_slice(&float_pixels).to_vec(),
+    )
+    .unwrap();
+    float_image.save_file(&float_path).unwrap();
+
+    let scientific = AstroImage::from_file(&float_path).unwrap();
+    assert_eq!(scientific.channel(0).pixels(), float_pixels);
+    let preview: Image = PreviewImage::from_file(&float_path).unwrap().into();
+    assert_eq!(preview.desc.color_format, ColorFormat::L_F32);
+    assert_eq!(
+        bytemuck::cast_slice::<u8, f32>(preview.bytes()),
+        float_pixels
+    );
+
+    let integer_tiff = test_output_path("product_constructors/integer.tiff");
+    let png = test_output_path("product_constructors/display.png");
+    let jpeg = test_output_path("product_constructors/lossy.jpg");
+    let integer_image = Image::new_with_data(
+        ImageDesc::new(2, 2, ColorFormat::L_U8),
+        vec![0, 64, 128, 255],
+    )
+    .unwrap();
+    for path in [&integer_tiff, &png, &jpeg] {
+        integer_image.save_file(path).unwrap();
+        assert!(matches!(
+            AstroImage::from_file(path),
+            Err(ImageError::ScientificInputRejected { .. })
+        ));
+        assert!(matches!(
+            <AstroImage as StackableImage>::load(path),
+            Err(ImageError::ScientificInputRejected { .. })
+        ));
+        PreviewImage::from_file(path).unwrap();
+    }
+
+    let alpha_path = test_output_path("product_constructors/alpha.tiff");
+    let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
+    Image::new_with_data(
+        ImageDesc::new(2, 1, ColorFormat::RGBA_F32),
+        bytemuck::cast_slice(&alpha_pixels).to_vec(),
+    )
+    .unwrap()
+    .save_file(&alpha_path)
+    .unwrap();
+    assert!(matches!(
+        AstroImage::from_file(&alpha_path),
+        Err(ImageError::ScientificInputRejected { .. })
+    ));
+    let alpha_preview = PreviewImage::from_file(&alpha_path).unwrap();
+    assert!(matches!(
+        alpha_preview.metadata.provenance,
+        Some(ImageProvenance {
+            color: ColorProvenance::UnmanagedRaster {
+                alpha_dropped: true
+            },
+            ..
+        })
+    ));
+
+    let nonexistent_raw = test_output_path("product_constructors/nonexistent.dng");
+    assert!(matches!(
+        AstroImage::from_file(nonexistent_raw),
+        Err(ImageError::ScientificInputRejected { .. })
+    ));
 }
 
 #[test]
@@ -259,7 +328,10 @@ fn test_load_single_raw_from_env() {
 
     println!("Loading file: {:?}", first_file);
 
-    let image = AstroImage::from_file(first_file).expect("Failed to load image");
+    let image: imaginarium::Image = PreviewImage::from_file(first_file)
+        .expect("Failed to load image")
+        .into();
+    let image: AstroImage = image.into();
 
     println!(
         "Loaded image: {}x{}x{}",
@@ -551,13 +623,4 @@ fn test_image_dimensions_reject_pixel_count_overflow() {
 #[should_panic(expected = "Image sample count must fit in usize")]
 fn test_image_dimensions_reject_sample_count_overflow() {
     ImageDimensions::new((usize::MAX, 1), 3);
-}
-
-#[test]
-fn test_bitpix_normalization_max() {
-    assert_eq!(BitPix::UInt8.normalization_max(), Some(255.0));
-    assert_eq!(BitPix::UInt16.normalization_max(), Some(65535.0));
-    assert_eq!(BitPix::Int16.normalization_max(), Some(32767.0));
-    assert!(BitPix::Float32.normalization_max().is_none());
-    assert!(BitPix::Float64.normalization_max().is_none());
 }

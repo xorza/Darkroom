@@ -23,7 +23,10 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use crate::io::astro_image::{
+    AstroImage, AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
+    ImageDimensions, ImageProvenance, SourceContainer, TransferProvenance,
+};
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
@@ -911,9 +914,21 @@ fn open_libraw_input(
 /// image via [`AstroImage::from_planar_channels`]. The mono path and libraw's
 /// fallback emit a single flat buffer — grayscale or interleaved RGB — that
 /// [`AstroImage::from_pixels`] handles (grayscale zero-copy, RGB de-interleaved).
+#[derive(Debug)]
 enum DemosaicedPixels {
     Planar([Vec<f32>; 3]),
     Flat(Vec<f32>),
+}
+
+#[derive(Debug)]
+struct DecodedRawPreview {
+    pixels: DemosaicedPixels,
+    width: usize,
+    height: usize,
+    channels: usize,
+    cfa_type: Option<CfaType>,
+    color: ColorProvenance,
+    demosaic: DemosaicProvenance,
 }
 
 fn clamp_direct_raw_image(image: &mut AstroImage) {
@@ -926,53 +941,76 @@ fn clamp_direct_raw_image(image: &mut AstroImage) {
     }
 }
 
-pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
+pub(crate) fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
-    let (pixels, width, height, channels, cfa_type) = match sensor_type {
+    let decoded = match sensor_type {
         SensorType::Monochrome => {
             tracing::info!("Monochrome sensor detected, skipping demosaic");
             // Light frame: clamp to the [0, 1] display contract.
             let pixels = raw.extract_cfa_pixels::<true>()?;
-            (
-                DemosaicedPixels::Flat(pixels),
-                raw.width,
-                raw.height,
-                1,
-                None,
-            )
+            DecodedRawPreview {
+                pixels: DemosaicedPixels::Flat(pixels),
+                width: raw.width,
+                height: raw.height,
+                channels: 1,
+                cfa_type: None,
+                color: ColorProvenance::Monochrome,
+                demosaic: DemosaicProvenance::None,
+            }
         }
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
             let planes = raw.demosaic_bayer(cfa_pattern)?;
-            (
-                DemosaicedPixels::Planar(planes),
-                raw.width,
-                raw.height,
-                3,
-                Some(CfaType::Bayer(cfa_pattern)),
-            )
+            DecodedRawPreview {
+                pixels: DemosaicedPixels::Planar(planes),
+                width: raw.width,
+                height: raw.height,
+                channels: 3,
+                cfa_type: Some(CfaType::Bayer(cfa_pattern)),
+                color: ColorProvenance::SensorRgb,
+                demosaic: DemosaicProvenance::LumosRcd,
+            }
         }
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
             let visible_pattern = raw.visible_xtrans_pattern();
             let raw_pattern = raw.raw_xtrans_pattern();
             let planes = raw.demosaic_xtrans(raw_pattern)?;
-            (
-                DemosaicedPixels::Planar(planes),
-                raw.width,
-                raw.height,
-                3,
-                Some(CfaType::XTrans(visible_pattern)),
-            )
+            DecodedRawPreview {
+                pixels: DemosaicedPixels::Planar(planes),
+                width: raw.width,
+                height: raw.height,
+                channels: 3,
+                cfa_type: Some(CfaType::XTrans(visible_pattern)),
+                color: ColorProvenance::SensorRgb,
+                demosaic: DemosaicProvenance::LumosMarkesteijn,
+            }
         }
         SensorType::Unknown => {
             tracing::info!("Unknown CFA pattern, using libraw demosaic fallback");
             let (pixels, w, h, c) = raw.demosaic_libraw_fallback()?;
-            (DemosaicedPixels::Flat(pixels), w, h, c, Some(CfaType::Mono))
+            DecodedRawPreview {
+                pixels: DemosaicedPixels::Flat(pixels),
+                width: w,
+                height: h,
+                channels: c,
+                cfa_type: Some(CfaType::Mono),
+                color: ColorProvenance::Unspecified,
+                demosaic: DemosaicProvenance::LibRaw,
+            }
         }
     };
+    let DecodedRawPreview {
+        pixels,
+        width,
+        height,
+        channels,
+        cfa_type,
+        color,
+        demosaic,
+    } = decoded;
 
     let metadata = AstroImageMetadata {
         iso: raw.iso,
@@ -980,6 +1018,14 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         header_dimensions: vec![height, width, channels],
         cfa_type,
         camera_white_balance: raw.camera_white_balance,
+        provenance: Some(ImageProvenance {
+            container: SourceContainer::CameraRaw,
+            decoder: DecoderProvenance::LibRaw,
+            transfer: TransferProvenance::RawNormalized,
+            color,
+            clipped: true,
+            demosaic,
+        }),
         ..Default::default()
     };
     drop(raw);
@@ -1000,8 +1046,6 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
 /// Used for calibration frame processing (darks, flats, bias)
 /// where hot pixel correction must happen before demosaicing.
 ///
-/// For Unknown sensor types, falls back to `load_raw()` then wraps
-/// the demosaiced result as a Mono CfaImage.
 /// Read just the output pixel dimensions of a RAW file from its header — opening through LibRaw
 /// without the expensive `libraw_unpack`. Returns the same `width × height` [`load_raw_cfa`]
 /// produces, so `w · h · size_of::<f32>()` is the in-memory CFA frame footprint. Cheap enough to
@@ -1031,7 +1075,7 @@ pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
     Ok(Vec2us::new(width, height))
 }
 
-pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
+pub(crate) fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path)?;
 
     let cfa_type = match &raw.sensor_type {
@@ -1055,6 +1099,14 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
         header_dimensions: vec![raw.height, raw.width, 1],
         cfa_type: Some(cfa_type),
         camera_white_balance: raw.camera_white_balance,
+        provenance: Some(ImageProvenance {
+            container: SourceContainer::CameraRaw,
+            decoder: DecoderProvenance::LibRaw,
+            transfer: TransferProvenance::RawNormalized,
+            color: ColorProvenance::SensorCfa,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+        }),
         ..Default::default()
     };
 

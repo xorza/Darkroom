@@ -15,6 +15,8 @@ use std::path::Path;
 
 use imaginarium::{Buffer2, DeinterleavedImageData};
 
+use common::CancelToken;
+
 use crate::io::raw;
 use crate::math::sum::sum_f32;
 use crate::math::vec2us::Vec2us;
@@ -23,10 +25,67 @@ use crate::stacking::frame_store::StackableImage;
 const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
 const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"];
 
-/// Every file extension accepted by [`AstroImage::from_file`].
-pub const ASTRO_IMAGE_EXTENSIONS: &[&str] = &[
+/// Every file extension accepted by [`PreviewImage::from_file`].
+pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &[
     "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SourceContainer {
+    Fits,
+    CameraRaw,
+    Tiff,
+    Png,
+    Jpeg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DecoderProvenance {
+    FitsWell,
+    LibRaw,
+    Imaginarium,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TransferProvenance {
+    FitsPhysical {
+        bscale: f64,
+        bzero: f64,
+        unit: Option<String>,
+    },
+    RawNormalized,
+    DeclaredLinearRaster,
+    UnspecifiedRaster,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ColorProvenance {
+    SensorCfa,
+    SensorRgb,
+    Monochrome,
+    Unspecified,
+    UnmanagedRaster { alpha_dropped: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DemosaicProvenance {
+    None,
+    LumosRcd,
+    LumosMarkesteijn,
+    LibRaw,
+}
+
+/// Decoder decisions that affect the meaning of the returned samples.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ImageProvenance {
+    pub container: SourceContainer,
+    pub decoder: DecoderProvenance,
+    pub transfer: TransferProvenance,
+    pub color: ColorProvenance,
+    /// Whether this load path itself clipped samples.
+    pub clipped: bool,
+    pub demosaic: DemosaicProvenance,
+}
 
 /// FITS BITPIX values representing pixel data types.
 ///
@@ -47,22 +106,6 @@ pub enum BitPix {
     Int64,
     Float32,
     Float64,
-}
-
-impl BitPix {
-    /// Normalization divisor for converting integer FITS data to [0,1].
-    /// Returns `None` for float types (assumed already in correct range).
-    pub fn normalization_max(self) -> Option<f32> {
-        match self {
-            BitPix::UInt8 => Some(255.0),
-            BitPix::Int16 => Some(32767.0),
-            BitPix::UInt16 => Some(65535.0),
-            BitPix::Int32 => Some(2_147_483_647.0),
-            BitPix::UInt32 => Some(4_294_967_295.0),
-            BitPix::Int64 => Some(i64::MAX as f32),
-            BitPix::Float32 | BitPix::Float64 => None,
-        }
-    }
 }
 
 /// Image dimensions: pixel size and number of channels.
@@ -186,6 +229,7 @@ pub struct AstroImageMetadata {
     pub pixel_size_y: Option<f64>,
     /// Maximum valid pixel value (saturation level).
     pub data_max: Option<f64>,
+    pub provenance: Option<ImageProvenance>,
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
     pub calibrated: bool,
@@ -259,51 +303,221 @@ pub struct AstroImage {
     pub(crate) pixels: PixelData,
 }
 
+/// A decoded display or inspection product that cannot enter the scientific pipeline directly.
+#[derive(Debug)]
+pub struct PreviewImage {
+    pub metadata: AstroImageMetadata,
+    image: Image,
+}
+
+fn file_extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
+    ImageError::ScientificInputRejected {
+        path: path.to_path_buf(),
+        reason: reason.into(),
+    }
+}
+
+fn fits_cfa(image: AstroImage, path: &Path) -> Result<cfa::CfaImage, ImageError> {
+    if !image.is_grayscale() {
+        return Err(scientific_rejection(
+            path,
+            "scientific CFA input must have exactly one image plane",
+        ));
+    }
+    if image.metadata.cfa_type.is_none() {
+        return Err(scientific_rejection(
+            path,
+            "scientific CFA FITS input is missing validated CFA pattern metadata",
+        ));
+    }
+
+    let quantization_sigma = match (&image.metadata.bitpix, &image.metadata.provenance) {
+        (
+            BitPix::UInt8
+            | BitPix::Int16
+            | BitPix::UInt16
+            | BitPix::Int32
+            | BitPix::UInt32
+            | BitPix::Int64,
+            Some(ImageProvenance {
+                transfer: TransferProvenance::FitsPhysical { bscale, .. },
+                ..
+            }),
+        ) => Some(bscale.abs() as f32 * cfa::QUANTIZATION_SIGMA_PER_STEP),
+        _ => None,
+    };
+    let AstroImage {
+        mut metadata,
+        pixels,
+        ..
+    } = image;
+    if let Some(provenance) = &mut metadata.provenance {
+        provenance.color = ColorProvenance::SensorCfa;
+    }
+    Ok(cfa::CfaImage {
+        data: pixels.into_l(),
+        metadata,
+        quantization_sigma,
+    })
+}
+
+fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
+    Image::read_file(path).map_err(|source| ImageError::Image {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn standard_container(extension: &str) -> SourceContainer {
+    match extension {
+        "tiff" | "tif" => SourceContainer::Tiff,
+        "png" => SourceContainer::Png,
+        "jpg" | "jpeg" => SourceContainer::Jpeg,
+        _ => unreachable!("standard extension was validated before selecting its container"),
+    }
+}
+
+impl PreviewImage {
+    /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+        let path = path.as_ref();
+        let extension = file_extension(path);
+
+        if FITS_EXTENSIONS.contains(&extension.as_str()) {
+            let image = fits::load_fits(path)?;
+            let image = if image.metadata.cfa_type.is_some() {
+                fits_cfa(image, path)?
+                    .demosaic(&CancelToken::never())
+                    .expect("validated Bayer FITS preview demosaic cannot fail")
+            } else {
+                image
+            };
+            return Ok(image.into());
+        }
+
+        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+            return raw::load_raw(path).map(Into::into);
+        }
+
+        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+            let decoded = read_standard_image(path)?;
+            let alpha_dropped = decoded.desc.color_format.channel_count == ChannelCount::Rgba;
+            let mut image: AstroImage = decoded.into();
+            image.metadata.provenance = Some(ImageProvenance {
+                container: standard_container(&extension),
+                decoder: DecoderProvenance::Imaginarium,
+                transfer: TransferProvenance::UnspecifiedRaster,
+                color: ColorProvenance::UnmanagedRaster { alpha_dropped },
+                clipped: false,
+                demosaic: DemosaicProvenance::None,
+            });
+            return Ok(image.into());
+        }
+
+        Err(ImageError::UnsupportedFormat { extension })
+    }
+}
+
+pub(crate) fn cfa_dimensions(path: &Path) -> Result<ImageDimensions, ImageError> {
+    let extension = file_extension(path);
+    if FITS_EXTENSIONS.contains(&extension.as_str()) {
+        let dimensions = fits::fits_dimensions(path)?;
+        if !dimensions.is_grayscale() {
+            return Err(scientific_rejection(
+                path,
+                "scientific CFA input must have exactly one image plane",
+            ));
+        }
+        Ok(dimensions)
+    } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+        raw::raw_dimensions(path).map(|size| ImageDimensions::new(size, 1))
+    } else {
+        Err(scientific_rejection(
+            path,
+            "scientific CFA input must be camera RAW or FITS",
+        ))
+    }
+}
+
 impl AstroImage {
-    /// Load an astronomical image from a file.
+    /// Load an already-linear scientific image from a file.
     ///
     /// Supported formats:
     /// - FITS: .fit, .fits
-    /// - RAW: .raf, .cr2, .cr3, .nef, .arw, .dng
-    /// - Standard: .tiff, .tif, .png, .jpg, .jpeg
+    /// - FITS without CFA metadata: .fit, .fits
+    /// - Explicitly declared linear, floating-point TIFF: .tiff, .tif
     ///
-    /// **Linearity:** the pipeline assumes flux-linear (photon-proportional) pixels. FITS and RAW
-    /// satisfy this; standard formats are loaded as-is and *assumed* linear. PNG/JPEG and 8-bit
-    /// TIFF are typically sRGB-gamma encoded — **not** valid input for calibration/stacking/
-    /// photometry — so loading one logs a warning.
+    /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
+    /// [`cfa::CfaImage::from_file`] or [`PreviewImage::from_file`] for those products.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
         let path = path.as_ref();
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+        let extension = file_extension(path);
 
-        if FITS_EXTENSIONS.contains(&ext.as_str()) {
-            fits::load_fits(path)
-        } else if raw::RAW_EXTENSIONS.contains(&ext.as_str()) {
-            raw::load_raw(path)
-        } else if STANDARD_IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-            let image = Image::read_file(path).map_err(|e| ImageError::Image {
-                path: path.to_path_buf(),
-                source: e,
-            })?;
-            // Float TIFFs hold linear scientific data and are valid input; integer/8-bit standard
-            // formats (PNG/JPEG, 8-bit TIFF) are usually sRGB-gamma encoded, which corrupts the
-            // linear-domain pipeline. Only the latter is worth warning about.
-            if image.desc.color_format.channel_type != ChannelType::Float {
-                tracing::warn!(
-                    path = %path.display(),
-                    format = %ext,
-                    "loading a non-float standard image as linear; PNG/JPEG and 8-bit/integer \
-                     TIFF are usually sRGB-gamma encoded — non-linear input corrupts \
-                     calibration, stacking, and photometry"
-                );
+        if FITS_EXTENSIONS.contains(&extension.as_str()) {
+            let image = fits::load_fits(path)?;
+            if image.metadata.cfa_type.is_some() {
+                return Err(scientific_rejection(
+                    path,
+                    "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+                ));
             }
-            Ok(image.into())
-        } else {
-            Err(ImageError::UnsupportedFormat { extension: ext })
+            return Ok(image);
         }
+
+        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+            return Err(scientific_rejection(
+                path,
+                "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+            ));
+        }
+
+        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+            if !matches!(extension.as_str(), "tiff" | "tif") {
+                return Err(scientific_rejection(
+                    path,
+                    "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
+                ));
+            }
+
+            let decoded = read_standard_image(path)?;
+            if decoded.desc.color_format.channel_type != ChannelType::Float {
+                return Err(scientific_rejection(
+                    path,
+                    "scientific raster input must be an explicitly declared floating-point TIFF",
+                ));
+            }
+            if decoded.desc.color_format.channel_count == ChannelCount::Rgba {
+                return Err(scientific_rejection(
+                    path,
+                    "scientific raster input must not contain an alpha channel",
+                ));
+            }
+
+            let color = if decoded.desc.color_format.channel_count == ChannelCount::L {
+                ColorProvenance::Monochrome
+            } else {
+                ColorProvenance::Unspecified
+            };
+            let mut image: AstroImage = decoded.into();
+            image.metadata.provenance = Some(ImageProvenance {
+                container: standard_container(&extension),
+                decoder: DecoderProvenance::Imaginarium,
+                transfer: TransferProvenance::DeclaredLinearRaster,
+                color,
+                clipped: false,
+                demosaic: DemosaicProvenance::None,
+            });
+            return Ok(image);
+        }
+
+        Err(ImageError::UnsupportedFormat { extension })
     }
 
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
@@ -531,6 +745,22 @@ impl From<[Buffer2<f32>; 3]> for AstroImage {
             dimensions,
             pixels: PixelData::Rgb(DeinterleavedImageData::from_channels(planes)),
         }
+    }
+}
+
+impl From<AstroImage> for PreviewImage {
+    fn from(astro: AstroImage) -> Self {
+        let image = Image::from(&astro);
+        Self {
+            metadata: astro.metadata,
+            image,
+        }
+    }
+}
+
+impl From<PreviewImage> for Image {
+    fn from(preview: PreviewImage) -> Self {
+        preview.image
     }
 }
 
