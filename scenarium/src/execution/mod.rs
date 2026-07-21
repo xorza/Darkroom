@@ -382,7 +382,11 @@ impl ExecutionEngine {
         graph: &crate::graph::Graph,
         library: &crate::library::Library,
     ) -> std::result::Result<(), compile::CompileError> {
-        self.install(compile::Compiler::default().compile(graph, library)?);
+        self.install(
+            compile::Compiler::default()
+                .compile(graph, library)?
+                .compiled,
+        );
         Ok(())
     }
 

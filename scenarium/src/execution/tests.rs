@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::execution::compile::CompileError;
+use crate::execution::compile::{Compilation, CompileError, Compiler};
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
@@ -4941,14 +4941,21 @@ mod graph {
         let c_id = graph.add(c);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
 
+        let Compilation {
+            compiled,
+            flatten_map: retained_flatten_map,
+        } = Compiler::default().compile(&graph, &library).unwrap();
+        let interior_address = compiled.node_address(interior_sum_id);
+        let retained_flat_id = retained_flatten_map.flat_node(&interior_address).unwrap();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        eg.install(compiled);
 
         // Interior node: flattened id is remapped, but attribution points
         // back to the authoring interior id then the enclosing instance.
         let sum_flat = execution_node_id(&eg, &graph, &library, "sum").unwrap();
+        assert_eq!(sum_flat, retained_flat_id);
         assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
-        let attr: Vec<_> = eg.compiled.flatten_map.attribution(sum_flat).collect();
+        let attr: Vec<_> = retained_flatten_map.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.

@@ -75,7 +75,8 @@ impl FrameHarness {
         WorkerMessage::Update {
             compiled: Compiler::default()
                 .compile(&self.graph, &self.library)
-                .unwrap(),
+                .unwrap()
+                .compiled,
         }
     }
 
@@ -428,7 +429,10 @@ async fn execute_sinks_triggers_sink_nodes() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
             },
             WorkerMessage::ExecuteSinks,
         ])
@@ -457,7 +461,10 @@ async fn worker_streams_node_progress_before_finished() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
             },
             WorkerMessage::ExecuteSinks,
         ])
@@ -505,7 +512,10 @@ async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
             },
             WorkerMessage::ExecuteSinks,
         ])
@@ -563,7 +573,10 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
             },
             WorkerMessage::ExecuteNodes {
                 nodes: vec![NodeAddress::root(sum_id)],
@@ -761,7 +774,10 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .compiled,
             },
             WorkerMessage::ExecuteSinks,
             WorkerMessage::StartEventLoop,
@@ -797,7 +813,10 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     // land in the channel before the worker task is polled.
     worker
         .send_many([WorkerMessage::Update {
-            compiled: Compiler::default().compile(&graph, &library).unwrap(),
+            compiled: Compiler::default()
+                .compile(&graph, &library)
+                .unwrap()
+                .compiled,
         }])
         .unwrap();
     worker.send_many([WorkerMessage::ExecuteSinks]).unwrap();
@@ -917,6 +936,7 @@ fn empty_compiled() -> CompiledGraph {
     Compiler::default()
         .compile(&Graph::default(), &Library::default())
         .unwrap()
+        .compiled
 }
 
 #[test]
@@ -1227,7 +1247,10 @@ async fn disk_cache_persists_node_across_worker_restart() {
             .send_many([
                 WorkerMessage::SetDiskStore(cache),
                 WorkerMessage::Update {
-                    compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                    compiled: Compiler::default()
+                        .compile(&graph, &library)
+                        .unwrap()
+                        .compiled,
                 },
                 WorkerMessage::ExecuteSinks,
             ])
@@ -1315,7 +1338,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &lib).unwrap(),
+                compiled: Compiler::default().compile(&graph, &lib).unwrap().compiled,
             },
             WorkerMessage::ExecuteSinks,
         ])

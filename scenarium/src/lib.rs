@@ -20,7 +20,7 @@ pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::codec::{CodecError, CustomValueCodec};
-pub use execution::compile::{CompileError, CompiledGraph, Compiler};
+pub use execution::compile::{Compilation, CompileError, CompiledGraph, Compiler};
 pub use execution::disk_store::DiskStore;
 pub use execution::event::{EventRef, EventTrigger};
 #[cfg(any(test, feature = "internals"))]

@@ -36,10 +36,7 @@ pub struct CompileError {
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
-    /// Public: hosts keep this after sending the artifact to the worker —
-    /// run stats come back keyed by flat ids with no map of their own, so
-    /// projecting them onto authoring nodes uses the compile-phase map.
-    pub flatten_map: Arc<FlattenMap>,
+    pub(crate) flatten_map: Arc<FlattenMap>,
 }
 
 impl CompiledGraph {
@@ -52,6 +49,15 @@ impl CompiledGraph {
             .cloned()
             .unwrap_or_else(|| NodeAddress::root(node_id))
     }
+}
+
+/// The two ownership handles produced by compilation: an opaque artifact to
+/// move to the worker and the same flatten map retained by the host for
+/// projecting worker reports back onto authoring nodes.
+#[derive(Debug)]
+pub struct Compilation {
+    pub compiled: CompiledGraph,
+    pub flatten_map: Arc<FlattenMap>,
 }
 
 /// The compile entry point, owning reusable [`Flattener`] traversal scratch.
@@ -72,7 +78,7 @@ impl Compiler {
         &mut self,
         graph: &Graph,
         library: &Library,
-    ) -> Result<CompiledGraph, CompileError> {
+    ) -> Result<Compilation, CompileError> {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the flatten pass resolve every
         // reference infallibly.
@@ -105,12 +111,16 @@ impl Compiler {
         // with no library at run time.
         program.resolve_output_types(library);
 
+        let flatten_map = Arc::new(flatten_map);
         let compiled = CompiledGraph {
             program,
-            flatten_map: Arc::new(flatten_map),
+            flatten_map: flatten_map.clone(),
         };
         compiled.validate(library);
-        Ok(compiled)
+        Ok(Compilation {
+            compiled,
+            flatten_map,
+        })
     }
 }
 

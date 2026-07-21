@@ -5,8 +5,8 @@ use crate::graph::{
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
-use crate::{BindingEntry, DataType, closes_data_cycle};
-use common::SerdeFormat;
+use crate::{BindingEntry, DataType, DetachedNode, closes_data_cycle};
+use common::{SerdeFormat, deserialize, serialize};
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
@@ -868,32 +868,54 @@ fn fresh_copy_remaps_pinned_outputs() {
 }
 
 #[test]
-fn wiring_snapshot_round_trips_through_restore() {
+fn wiring_snapshot_round_trips_through_serde_and_restore() -> anyhow::Result<()> {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     let get_a_id = graph
         .find_by_name("get_a", NodeSearch::TopLevel)
         .unwrap()
         .id;
+    let pinned = OutputPort::new(sum_id, 0);
 
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
+    graph.set_output_pinned(pinned, true);
 
     let bindings = graph.bindings_touching(sum_id);
 
     assert_eq!(bindings.len(), 3);
 
+    let before = graph.clone();
     let edges_before = graph.edges().count();
     let detached = graph.detach_node(sum_id);
-    assert_eq!(detached.node_id, sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
     assert!(!graph.is_subscribed(get_a_id, 0, sum_id));
+    assert!(!graph.is_output_pinned(pinned));
 
-    graph.attach_node(detached);
+    let serialized = serialize(&detached, SerdeFormat::Bitcode)?;
+    let decoded: DetachedNode = deserialize(&serialized, SerdeFormat::Bitcode)?;
+    assert_eq!(decoded, detached);
 
-    assert_eq!(graph.edges().count(), edges_before);
-    assert!(graph.is_subscribed(get_a_id, 0, sum_id));
-    assert_eq!(graph.bindings_touching(sum_id), bindings);
+    let mut nil_id = detached.clone();
+    nil_id.node_id = NodeId::nil();
+    let mut mismatched = detached.clone();
+    mismatched.node_id = NodeId::unique();
+    for invalid in [nil_id, mismatched] {
+        let serialized = serialize(&invalid, SerdeFormat::Json)?;
+        let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Json)?;
+        let detached_graph = graph.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            graph.attach_node(decoded_invalid);
+        }));
+        assert!(result.is_err());
+        assert_eq!(graph, detached_graph, "failed attachment mutated the graph");
+    }
+
+    graph.attach_node(decoded);
+
+    assert_eq!(graph, before);
+
+    Ok(())
 }
 
 fn func_with_default(default: i64) -> Func {

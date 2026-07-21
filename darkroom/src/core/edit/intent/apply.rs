@@ -186,15 +186,12 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.selected = to_selection.clone();
         }
         GraphStep::RemoveNode { detached, .. } => {
-            assert!(
-                scope
-                    .graph
-                    .find(&detached.node_id, NodeSearch::TopLevel)
-                    .is_some(),
-                "apply RemoveNode expects node to be present"
-            );
-            let removed = scope.remove_node(&detached.node_id);
-            assert_eq!(&removed, detached, "removal snapshot changed before apply");
+            let current = scope
+                .graph
+                .snapshot_node(detached.node_id)
+                .expect("apply RemoveNode expects node to be present");
+            assert_eq!(&current, detached, "removal snapshot changed before apply");
+            scope.remove_node(&detached.node_id);
         }
         GraphStep::MoveSelection { moves, .. } => {
             for (key, _, to) in moves {
@@ -369,13 +366,6 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             item_placements,
             selected,
         } => {
-            assert!(
-                scope
-                    .graph
-                    .find(&detached.node_id, NodeSearch::TopLevel)
-                    .is_none(),
-                "revert RemoveNode expects removed node to be absent"
-            );
             scope.graph.attach_node(detached.clone());
             // Ascending slot order (captured that way), so each insert
             // lands among already-restored earlier slots and the original

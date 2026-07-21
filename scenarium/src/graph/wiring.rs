@@ -45,9 +45,59 @@ pub fn closes_data_cycle(
 pub struct DetachedNode {
     pub node_id: NodeId,
     pub node: Node,
-    bindings: Vec<BindingEntry>,
-    subscriptions: Vec<Subscription>,
-    pinned_outputs: Vec<OutputPort>,
+    pub bindings: Vec<BindingEntry>,
+    pub subscriptions: Vec<Subscription>,
+    pub pinned_outputs: Vec<OutputPort>,
+}
+
+impl DetachedNode {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.node_id.is_nil() {
+            return Err("detached node id must not be nil");
+        }
+        if self.bindings.iter().any(|entry| {
+            matches!(entry.binding, Binding::None)
+                || !binding_touches(entry.port, &entry.binding, self.node_id)
+        }) {
+            return Err("detached bindings must be sparse and touch the detached node");
+        }
+        if self
+            .bindings
+            .windows(2)
+            .any(|entries| entries[0].port >= entries[1].port)
+        {
+            return Err("detached bindings must have unique ordered ports");
+        }
+        if self
+            .subscriptions
+            .iter()
+            .any(|subscription| !subscription_touches(subscription, self.node_id))
+        {
+            return Err("detached subscriptions must touch the detached node");
+        }
+        if self
+            .subscriptions
+            .windows(2)
+            .any(|subscriptions| subscriptions[0] >= subscriptions[1])
+        {
+            return Err("detached subscriptions must be unique and ordered");
+        }
+        if self
+            .pinned_outputs
+            .iter()
+            .any(|port| port.node_id != self.node_id)
+        {
+            return Err("detached pins must belong to the detached node");
+        }
+        if self
+            .pinned_outputs
+            .windows(2)
+            .any(|ports| ports[0] >= ports[1])
+        {
+            return Err("detached pins must be unique and ordered");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,15 +143,50 @@ impl Graph {
     }
 
     pub fn attach_node(&mut self, detached: DetachedNode) {
-        self.insert(detached.node_id, detached.node);
-        self.bindings.extend(
+        detached
+            .validate()
+            .expect("cannot attach an invalid detached node");
+        assert!(
+            !self.nodes.contains_key(&detached.node_id),
+            "cannot attach a node that is already in the graph"
+        );
+        assert!(
             detached
                 .bindings
+                .iter()
+                .all(|entry| !self.bindings.contains_key(&entry.port)),
+            "cannot attach over bindings created after detachment"
+        );
+        assert!(
+            detached
+                .subscriptions
+                .iter()
+                .all(|subscription| !self.subscriptions.contains(subscription)),
+            "cannot attach over subscriptions created after detachment"
+        );
+        assert!(
+            detached
+                .pinned_outputs
+                .iter()
+                .all(|port| !self.pinned_outputs.contains(port)),
+            "cannot attach over pins created after detachment"
+        );
+
+        let DetachedNode {
+            node_id,
+            node,
+            bindings,
+            subscriptions,
+            pinned_outputs,
+        } = detached;
+        self.insert(node_id, node);
+        self.bindings.extend(
+            bindings
                 .into_iter()
                 .map(|entry| (entry.port, entry.binding)),
         );
-        self.subscriptions.extend(detached.subscriptions);
-        self.pinned_outputs.extend(detached.pinned_outputs);
+        self.subscriptions.extend(subscriptions);
+        self.pinned_outputs.extend(pinned_outputs);
     }
 
     pub fn input_binding(&self, port: InputPort) -> Binding {

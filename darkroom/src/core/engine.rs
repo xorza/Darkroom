@@ -10,7 +10,7 @@ use std::sync::Arc;
 use scenarium::DiskStore;
 use scenarium::FlattenMap;
 use scenarium::Library;
-use scenarium::{CompiledGraph, Compiler};
+use scenarium::{Compilation, CompiledGraph, Compiler};
 use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
@@ -137,8 +137,11 @@ impl Engine {
     /// the sticky error.
     fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
         match self.compiler.compile(graph, &self.library) {
-            Ok(compiled) => {
-                self.flatten_map = compiled.flatten_map.clone();
+            Ok(Compilation {
+                compiled,
+                flatten_map,
+            }) => {
+                self.flatten_map = flatten_map;
                 self.status.error = None;
                 Some(compiled)
             }
