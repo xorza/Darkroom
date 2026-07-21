@@ -13,10 +13,10 @@ use common::file_utils;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits;
+use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
-    LinearImage, STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa,
-    scientific_rejection,
+    STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa, scientific_rejection,
 };
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;

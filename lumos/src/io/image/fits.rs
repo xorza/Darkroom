@@ -9,9 +9,10 @@ use rayon::prelude::*;
 
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
+use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
+    ImageProvenance, SourceContainer, TransferProvenance,
 };
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {

@@ -35,10 +35,10 @@ pub mod testing;
 
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
+pub use io::image::linear::LinearImage;
 pub use io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, LinearImage, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
-    TransferProvenance,
+    ImageProvenance, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer, TransferProvenance,
 };
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;

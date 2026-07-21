@@ -29,7 +29,7 @@ mod stretching;
 mod ml_support {
     use std::path::PathBuf;
 
-    use crate::io::image::LinearImage;
+    use crate::io::image::linear::LinearImage;
     use crate::testing::calibration_dir;
     use crate::{NeutralizeBackground, Scnr, Stretch};
     use imaginarium::Image;

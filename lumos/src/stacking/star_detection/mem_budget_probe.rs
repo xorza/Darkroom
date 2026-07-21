@@ -40,7 +40,7 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use crate::io::image::LinearImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured, two_x_ceiling_mb};

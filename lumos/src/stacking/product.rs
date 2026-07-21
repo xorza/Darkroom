@@ -1,6 +1,6 @@
 use imaginarium::Buffer2;
 
-use crate::io::image::{LinearImage, PixelData};
+use crate::io::image::linear::{LinearImage, PixelData};
 
 /// A quality map that is either common to every image channel or channel-specific.
 #[derive(Debug)]

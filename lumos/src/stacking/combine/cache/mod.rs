@@ -6,7 +6,8 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::image::{ImageDimensions, ImageMetadata, LinearImage, PixelData};
+use crate::io::image::linear::{LinearImage, PixelData};
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;

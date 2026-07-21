@@ -111,13 +111,13 @@ loses full-raw geometry before demosaic.
 
   **Evidence.** `LinearImage::from_file` chooses solely by extension and returns physical
   FITS, direct-RAW preview, or generic raster values from the same API at
-  `lumos/src/io/image/mod.rs:262-307`. A non-float raster only emits a warning at
-  `lumos/src/io/image/mod.rs:291-303`; RGBA is converted to three-channel
+  `lumos/src/io/image/linear.rs`. A non-float raster only emits a warning in
+  `lumos/src/io/image/linear.rs`; RGBA is converted to three-channel
   `RGB_F32`, dropping alpha without a policy, at
-  `lumos/src/io/image/mod.rs:555-615`. Direct RAW is clamped at
+  `lumos/src/io/image/linear.rs`. Direct RAW is clamped at
   `lumos/src/io/raw/mod.rs:919-927` and `lumos/src/io/raw/mod.rs:987-993`.
   `StackableImage for LinearImage` delegates directly to that method at
-  `lumos/src/io/image/mod.rs:467-482`; `LightCache` instantiates the generic loader
+  `lumos/src/io/image/linear.rs`; `LightCache` instantiates the generic loader
   with `LinearImage` at `lumos/src/stacking/combine/cache/loader/mod.rs:157-172`; and the
   public path stack calls it at `lumos/src/stacking/combine/stack.rs:104-131`.
 

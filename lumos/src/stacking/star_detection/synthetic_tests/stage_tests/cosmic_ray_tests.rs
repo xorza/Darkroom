@@ -2,7 +2,8 @@
 //!
 //! Tests the cosmic ray detection via sharpness filtering.
 
-use crate::{ImageDimensions, LinearImage};
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;

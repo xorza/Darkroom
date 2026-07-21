@@ -8,7 +8,8 @@ use rayon::prelude::*;
 
 use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::{LinearImage, cfa_dimensions};
+use crate::io::image::cfa_dimensions;
+use crate::io::image::linear::LinearImage;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::stacking::calibration_masters::CalibrationMasters;

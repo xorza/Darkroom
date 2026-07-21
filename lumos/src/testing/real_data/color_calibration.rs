@@ -5,8 +5,9 @@
 use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::color_calibration::channel_backgrounds;
+use crate::io::image::linear::LinearImage;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{LinearImage, NeutralizeBackground, Scnr, Stretch};
+use crate::{NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;
 
 fn spread(bg: Rgb) -> f32 {

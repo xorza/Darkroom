@@ -12,7 +12,8 @@ use rayon::prelude::*;
 use common::file_utils;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::{ImageDimensions, ImageMetadata, LinearImage};
+use crate::io::image::linear::LinearImage;
+use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.

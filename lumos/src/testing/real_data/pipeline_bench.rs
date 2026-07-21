@@ -6,12 +6,13 @@ use common::CancelToken;
 
 use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::linear::LinearImage;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, LinearImage,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
     StarDetector, register, stack, warp,
 };

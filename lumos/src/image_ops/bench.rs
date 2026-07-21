@@ -19,11 +19,9 @@ use std::hint::black_box;
 
 use imaginarium::Image;
 
+use crate::io::image::linear::LinearImage;
 use crate::testing::calibration_dir;
-use crate::{
-    Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast, NeutralizeBackground, Scnr,
-    Stretch,
-};
+use crate::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch};
 
 // Must match the `#[quick_bench]` attributes below: quickbench's iter-capped loops call the closure
 // exactly `WARMUP_ITERS + ITERS` times, which is the pre-clone pool size.

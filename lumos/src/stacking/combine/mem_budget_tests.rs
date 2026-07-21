@@ -18,7 +18,7 @@ use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::LinearImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::frame_store::{fits_in_memory, load_concurrency, memory_budget};

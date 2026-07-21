@@ -72,7 +72,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## io/image — image container & loading
 
-- `LinearImage` (`io/image/mod.rs:248`): `metadata: ImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
+- `LinearImage` (`io/image/linear.rs`): `metadata: ImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
 - `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), opaque `ImageDimensions` (`mod.rs`, non-zero size + channels ∈ {1,3}, exposed through immutable accessors), `ImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
 - Entry points: `LinearImage::from_file` admits linear non-mosaic FITS and float TIFF, `CfaImage::from_file` admits camera RAW and mosaic FITS, and `PreviewImage::from_file` owns the public `PREVIEW_IMAGE_EXTENSIONS` display policy; `LinearImage::from_pixels` and `from_planar_channels` build explicit in-memory scientific products. `mean()` uses parallel Kahan summation.

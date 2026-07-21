@@ -1,7 +1,8 @@
 use common::CancelToken;
 use glam::DVec2;
 
-use crate::io::image::{ImageDimensions, LinearImage};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;

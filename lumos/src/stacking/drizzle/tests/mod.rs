@@ -3,7 +3,8 @@ use std::f64::consts::{FRAC_PI_4, PI};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::io::image::{ImageDimensions, LinearImage};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::drizzle::accumulator::test_support::{
     accumulated_flux_sum, add_image as add_test_image,
 };

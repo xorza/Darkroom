@@ -1439,8 +1439,8 @@ preceding sections are the required behavior.
 
 ### 10.3 Relevant source locations
 
-- `lumos/src/io/image/mod.rs` — dispatch, public image representation, standard
-  image conversion.
+- `lumos/src/io/image/mod.rs` — shared metadata, preview dispatch, and standard preview conversion.
+- `lumos/src/io/image/linear.rs` — linear image representation, scientific loading, and layout conversion.
 - `lumos/src/io/image/fits.rs` — FITS selection, scaling, metadata, and Bayer
   interpretation.
 - `lumos/src/io/image/cfa.rs` — signed CFA representation and demosaic routing.

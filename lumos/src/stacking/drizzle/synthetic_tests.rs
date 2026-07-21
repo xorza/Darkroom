@@ -7,7 +7,7 @@
 
 use glam::DVec2;
 
-use crate::io::image::LinearImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::stack::drizzle_images;

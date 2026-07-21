@@ -5,7 +5,9 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::StarDetector;
 use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::{
     BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
     FilterConfig, FwhmConfig, LocalBackgroundMethod, MeasurementConfig,
@@ -15,7 +17,6 @@ use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use crate::{LinearImage, StarDetector};
 use imaginarium::Buffer2;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]

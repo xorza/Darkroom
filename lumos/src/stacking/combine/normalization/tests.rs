@@ -1,7 +1,8 @@
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::io::image::{ImageDimensions, LinearImage};
+use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;

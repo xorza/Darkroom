@@ -22,10 +22,11 @@ use crate::io::image::error::ImageError;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::{SensorType, detect_sensor_type};
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
+    ImageProvenance, SourceContainer, TransferProvenance,
 };
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;

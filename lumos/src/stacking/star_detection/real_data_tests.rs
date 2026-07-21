@@ -4,11 +4,12 @@
 
 use std::time::Instant;
 
+use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::{calibration_dir, init_tracing};
-use crate::{CentroidMethod, ImageDimensions, LinearImage};
+use crate::{CentroidMethod, ImageDimensions};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;

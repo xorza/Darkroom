@@ -2,7 +2,7 @@
 
 use rayon::prelude::*;
 
-use crate::LinearImage;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
 use crate::stacking::star_detection::resources::DetectionResources;
@@ -105,8 +105,9 @@ fn combine_channels(image: &LinearImage, weights: [f32; 3], output: &mut Buffer2
 
 #[cfg(test)]
 mod tests {
+    use crate::io::image::ImageDimensions;
+    use crate::io::image::linear::LinearImage;
     use crate::stacking::star_detection::detector::stages::prepare::*;
-    use crate::{ImageDimensions, LinearImage};
 
     /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`
     /// (8 pixels at `center - mad`, 8 at `center + mad`).

@@ -1,5 +1,5 @@
-use crate::LinearImage;
 use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};

@@ -7,13 +7,14 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, test_support};
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
-use crate::{ImageDimensions, LinearImage};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -265,7 +266,7 @@ fn test_warp_homography_roundtrip() {
 
 #[test]
 fn test_warp_with_detected_transform() {
-    use crate::LinearImage;
+    use crate::io::image::linear::LinearImage;
 
     use crate::stacking::registration::{Config as RegConfig, register};
     use crate::stacking::star_detection::config::Config as StarConfig;

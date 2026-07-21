@@ -1596,3 +1596,4 @@ Stage 5 is complete only when:
 - `stacking/registration/{transform,resample}/`
 - `stacking/product.rs`
 - `io/image/mod.rs`
+- `io/image/linear.rs`

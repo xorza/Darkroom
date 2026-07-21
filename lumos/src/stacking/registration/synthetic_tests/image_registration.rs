@@ -4,7 +4,8 @@
 //! run star detection on both images, and verify that registration
 //! correctly recovers the applied transformation.
 
-use crate::{ImageDimensions, LinearImage};
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use glam::DVec2;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};

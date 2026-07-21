@@ -8,6 +8,8 @@
 
 use common::CancelToken;
 
+use crate::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::{StackConfig, Weighting};
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;
@@ -15,7 +17,6 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::rms_diff;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use crate::{ImageDimensions, LinearImage};
 use imaginarium::Buffer2;
 
 const W: usize = 128;

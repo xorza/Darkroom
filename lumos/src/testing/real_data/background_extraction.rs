@@ -4,9 +4,10 @@
 //! before/after. Gated behind the `real-data` feature.
 
 use crate::image_ops::intensity_plane;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{ExtractBackground, LinearImage, NeutralizeBackground, Scnr, Stretch};
+use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy

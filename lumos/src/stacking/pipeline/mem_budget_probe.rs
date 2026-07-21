@@ -39,7 +39,7 @@ use std::time::Instant;
 use common::CancelToken;
 use glam::DVec2;
 
-use crate::LinearImage;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::pipeline::align::align_and_stack;

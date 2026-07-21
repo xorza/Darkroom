@@ -6,8 +6,8 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::LinearImage;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -519,10 +519,13 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 mod tests {
     use arrayvec::ArrayVec;
 
-    use crate::io::image::PixelData;
+    use crate::io::image::ImageDimensions;
     use crate::io::image::cfa::{CfaImage, CfaType};
+    use crate::io::image::linear::LinearImage;
+    use crate::io::image::linear::PixelData;
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::CacheCore;
+    use crate::stacking::combine::cache::tests::make_test_cache;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::{Normalization, SmallN};
     use crate::stacking::combine::normalization;
@@ -535,10 +538,6 @@ mod tests {
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::ScratchDirectory;
-    use crate::{
-        io::image::{ImageDimensions, LinearImage},
-        stacking::combine::cache::tests::make_test_cache,
-    };
     use std::path::PathBuf;
 
     fn stack_frame(

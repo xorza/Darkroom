@@ -177,7 +177,7 @@ standalone drizzle
   the same multiplication for corners at `../drizzle/accumulator.rs:369`. No grid origin
   or output mode exists in `DrizzleConfig` at `../drizzle/config.rs:30`. Finalization uses
   `LinearImage::from_planar_channels` at `../drizzle/accumulator.rs:635`, whose constructor
-  installs default metadata at `../../io/image/mod.rs:389`.
+  installs default metadata in `../../io/image/linear.rs`.
 
   **Impact.** At `scale=2`, identity maps source center zero to output center zero instead
   of `0.5`; half of the first scaled source footprint lies outside the output. Rotated or

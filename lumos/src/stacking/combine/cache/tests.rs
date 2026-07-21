@@ -1,5 +1,5 @@
-use crate::io::image::LinearImage;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;

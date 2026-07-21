@@ -9,8 +9,8 @@ use common::CancelToken;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::LinearImage;
 use crate::io::image::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;

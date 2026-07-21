@@ -2,8 +2,8 @@
 
 use imaginarium::Buffer2;
 
-use crate::LinearImage;
-use crate::io::image::PixelData;
+use crate::io::image::linear::LinearImage;
+use crate::io::image::linear::PixelData;
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::transform::WarpTransform;
 
