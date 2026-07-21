@@ -51,8 +51,8 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         },
         ..Preferences::default()
     };
+    let open = OpenDocument::load(first_path.clone()).unwrap();
     let mut status = StatusLog::default();
-    let open = OpenDocument::restore(&mut preferences, &mut status);
     status.info("startup initialized".into());
     let mut workspace = Workspace::new(
         open,

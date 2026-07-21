@@ -7,7 +7,6 @@ use scenarium::Library;
 
 use crate::core::document::Document;
 use crate::core::io::document::{self, DocumentLoadError};
-use crate::core::io::preferences::Preferences;
 
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
@@ -17,22 +16,6 @@ pub(crate) struct OpenDocument {
 }
 
 impl OpenDocument {
-    pub(crate) fn load_preferred(preferences: &mut Preferences) -> Result<Self, DocumentLoadError> {
-        if !preferences.load_last_document {
-            return Ok(Self::default());
-        }
-        let Some(path) = preferences.document_path.clone() else {
-            return Ok(Self::default());
-        };
-        match Self::load(path) {
-            Ok(open) => Ok(open),
-            Err(error) => {
-                preferences.document_path = None;
-                Err(error)
-            }
-        }
-    }
-
     pub(crate) fn load(path: PathBuf) -> Result<Self, DocumentLoadError> {
         let document = document::load(&path)?;
         Ok(Self {
@@ -78,7 +61,6 @@ mod tests {
     use crate::core::document::Document;
     use crate::core::document::open_document::OpenDocument;
     use crate::core::io::document::DocumentLoadError;
-    use crate::core::io::preferences::Preferences;
 
     fn from_document(document: Document) -> OpenDocument {
         OpenDocument {
@@ -98,30 +80,6 @@ mod tests {
             error,
             DocumentLoadError::InvalidExtension { path: error_path } if error_path == path
         ));
-    }
-
-    #[test]
-    fn preferred_load_clears_only_a_path_that_failed_to_load() {
-        let rejected_path = PathBuf::from("not-a-document.json");
-        let mut preferences = Preferences {
-            document_path: Some(rejected_path.clone()),
-            ..Preferences::default()
-        };
-
-        let error = OpenDocument::load_preferred(&mut preferences).unwrap_err();
-
-        assert!(matches!(
-            error,
-            DocumentLoadError::InvalidExtension { path } if path == rejected_path
-        ));
-        assert_eq!(preferences.document_path, None);
-
-        let remembered_path = PathBuf::from("remembered.darkroom");
-        preferences.document_path = Some(remembered_path.clone());
-        preferences.load_last_document = false;
-        let open = OpenDocument::load_preferred(&mut preferences).unwrap();
-        assert!(open.path.is_none());
-        assert_eq!(preferences.document_path, Some(remembered_path));
     }
 
     #[test]
