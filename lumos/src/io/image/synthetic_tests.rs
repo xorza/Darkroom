@@ -238,11 +238,13 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         demosaiced.metadata.provenance,
         Some(crate::ImageProvenance {
             container: crate::SourceContainer::Fits,
-            transfer: crate::TransferProvenance::FitsPhysical {
-                bscale: 1.0,
-                bzero: 0.0,
-                ..
-            },
+            transfer: crate::TransferProvenance::FitsPhysical(
+                crate::FitsTransferProvenance {
+                    bscale: 1.0,
+                    bzero: 0.0,
+                    ..
+                },
+            ),
             color: crate::ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
             clipped: false,

@@ -9,7 +9,7 @@ use fits_well::io::{BLOCK_SIZE, HduKind};
 
 use crate::io::image::fits::*;
 use crate::io::image::fits::options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions, LoadContext,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
 };
 use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
 use crate::io::image::{LoadContext, TransferProvenance};
