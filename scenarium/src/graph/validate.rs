@@ -30,6 +30,10 @@ impl<'a> GraphChecker<'a> {
     }
 
     fn check_graph(&mut self, graph: &Graph) -> Result<()> {
+        ensure!(
+            graph.origin.is_none_or(|origin| !origin.is_nil()),
+            "graph has a nil origin"
+        );
         let mut boundary_inputs = 0usize;
         let mut boundary_outputs = 0usize;
         for (node_id, node) in &graph.nodes {

@@ -7,6 +7,7 @@ use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
+use anyhow::{Result, ensure};
 use hashbrown::HashMap as GraphMap;
 
 /// The metadata of a registered nominal type — a `Custom`
@@ -54,6 +55,15 @@ pub struct TypeEntry {
 }
 
 impl TypeEntry {
+    /// Validates that this declaration's runtime attachments match its kind.
+    pub fn check(&self) -> Result<()> {
+        if matches!(&self.decl, TypeDecl::Enum { .. }) {
+            ensure!(self.codec.is_none(), "enum type cannot have a codec");
+            ensure!(self.stamper.is_none(), "enum type cannot have a stamper");
+        }
+        Ok(())
+    }
+
     /// A custom type with no disk codec (not cacheable).
     pub fn custom(display_name: impl Into<String>) -> Self {
         Self {
@@ -136,7 +146,7 @@ impl Library {
     }
 
     pub fn add(&mut self, func: Func) {
-        func.validate();
+        func.check().expect("invalid function declaration");
         self.funcs.insert(func.id, func);
     }
 
@@ -160,6 +170,7 @@ impl Library {
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
+        entry.check().expect("invalid type declaration");
         let prev = self.types.insert(type_id, entry);
         assert!(prev.is_none(), "duplicate type registration");
     }
@@ -229,15 +240,48 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::graph::Graph;
     use crate::graph::interface::GraphId;
-    use crate::library::Library;
+    use crate::library::{Library, TypeEntry};
+    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
     use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};
-    use crate::{DynamicValue, StaticValue};
+    use crate::{
+        CancelToken, CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue,
+        ResourceStamp, ResourceStamper, StaticValue, TypeId,
+    };
+
+    #[derive(Debug)]
+    struct StubCodec;
+
+    #[async_trait::async_trait]
+    impl CustomValueCodec for StubCodec {
+        async fn encode(
+            &self,
+            _value: &dyn CustomValue,
+            _ctx: &mut ContextManager,
+        ) -> std::result::Result<Vec<u8>, CodecError> {
+            unreachable!()
+        }
+
+        fn decode(&self, _bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+            unreachable!()
+        }
+    }
+
+    #[derive(Debug)]
+    struct StubStamper;
+
+    impl ResourceStamper for StubStamper {
+        fn stamp(&self, _value: &DynamicValue, _cancel: &CancelToken) -> ResourceStamp {
+            ResourceStamp::default()
+        }
+    }
 
     #[test]
     fn insert_graph_replaces_definition_with_same_id() {
@@ -251,6 +295,96 @@ mod tests {
         library.insert_graph(id, Graph::new("After"));
         assert_eq!(library.graphs.len(), 1);
         assert_eq!(library.graph_by_id(&id).unwrap().name, "After");
+    }
+
+    #[test]
+    fn add_rejects_invalid_function_identities_and_wildcard_indices() {
+        let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
+            "value",
+            DataType::Custom(TypeId::nil()),
+        ));
+        let nil_output = Func::new(FuncId::unique(), "output")
+            .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
+        let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
+            .input(FuncInput::required("value", DataType::Any))
+            .wildcard_output("value", 1);
+        let invalid = [
+            (
+                "function id must not be nil".to_owned(),
+                Func::new(FuncId::nil(), "nil"),
+            ),
+            (
+                format!(
+                    "function {:?} input 0 has a nil nominal type id",
+                    nil_input.id
+                ),
+                nil_input,
+            ),
+            (
+                format!(
+                    "function {:?} output 0 has a nil nominal type id",
+                    nil_output.id
+                ),
+                nil_output,
+            ),
+            (
+                format!(
+                    "function {:?} output 0 mirrors input 1, but has 1 inputs",
+                    invalid_wildcard.id
+                ),
+                invalid_wildcard,
+            ),
+        ];
+
+        for (expected, func) in invalid {
+            assert_eq!(func.check().unwrap_err().to_string(), expected);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                Library::default().add(func);
+            }));
+            assert!(
+                result.is_err(),
+                "invalid declaration was registered: {expected}"
+            );
+        }
+
+        let valid = Func::new(FuncId::unique(), "wildcard")
+            .input(FuncInput::required("value", DataType::Any))
+            .wildcard_output("value", 0);
+        valid.check().unwrap();
+        let valid_id = valid.id;
+        let mut library = Library::default();
+        library.add(valid);
+        assert_eq!(library.by_id(&valid_id).unwrap().name, "wildcard");
+    }
+
+    #[test]
+    fn register_type_rejects_enum_runtime_attachments() {
+        let custom = TypeEntry::custom_with_codec("Custom", Arc::new(StubCodec))
+            .with_stamper(Arc::new(StubStamper));
+        custom.check().unwrap();
+        let mut library = Library::default();
+        let custom_id = TypeId::unique();
+        library.register_type(custom_id, custom);
+        assert!(library.types[&custom_id].codec.is_some());
+        assert!(library.types[&custom_id].stamper.is_some());
+
+        let mut enum_with_codec = TypeEntry::enum_with_variants("Enum", vec!["A".into()]);
+        enum_with_codec.codec = Some(Arc::new(StubCodec));
+        let enum_with_stamper = TypeEntry::enum_with_variants("Enum", vec!["A".into()])
+            .with_stamper(Arc::new(StubStamper));
+        for (expected, entry) in [
+            ("enum type cannot have a codec", enum_with_codec),
+            ("enum type cannot have a stamper", enum_with_stamper),
+        ] {
+            assert_eq!(entry.check().unwrap_err().to_string(), expected);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                Library::default().register_type(TypeId::unique(), entry);
+            }));
+            assert!(
+                result.is_err(),
+                "invalid declaration was registered: {expected}"
+            );
+        }
     }
 
     #[tokio::test]

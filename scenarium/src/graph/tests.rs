@@ -636,6 +636,16 @@ fn deserialize_rejects_corrupt_graph() {
         .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
     let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
+
+    let nil_origin = Graph {
+        origin: Some(GraphId::nil()),
+        ..Graph::default()
+    };
+    let bytes = nil_origin.serialize(SerdeFormat::Bitcode).unwrap();
+    let error = Graph::deserialize(&bytes, SerdeFormat::Bitcode)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("graph has a nil origin"), "{error}");
 }
 
 #[test]

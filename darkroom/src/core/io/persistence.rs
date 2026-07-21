@@ -65,6 +65,7 @@ fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) 
 mod tests {
     use common::test_utils::test_output_path;
     use scenarium::GraphEvent;
+    use scenarium::GraphId;
     use scenarium::NodeId;
 
     use super::*;
@@ -98,5 +99,12 @@ mod tests {
             err.contains("names missing emitter"),
             "structurally invalid graph must not import: {err}"
         );
+
+        let nil_origin_path = test_output_path("darkroom_persistence/nil-origin-graph.json");
+        let mut nil_origin = Graph::new("nil origin");
+        nil_origin.origin = Some(GraphId::nil());
+        export_graph(&nil_origin, &nil_origin_path).unwrap();
+        let error = format!("{:#}", import_graph(&nil_origin_path).unwrap_err());
+        assert!(error.contains("graph has a nil origin"), "{error}");
     }
 }

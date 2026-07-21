@@ -1156,6 +1156,14 @@ mod tests {
         for format in SerdeFormat::all_formats_for_testing() {
             assert_roundtrip(format);
         }
+
+        let mut invalid = build_test_doc();
+        invalid.graph.origin = Some(GraphId::nil());
+        let serialized = common::serialize(&invalid, SerdeFormat::Json).unwrap();
+        let error = Document::deserialize(SerdeFormat::Json, &serialized)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("graph has a nil origin"), "{error}");
     }
 
     #[test]
