@@ -1,35 +1,48 @@
-//! Publishing local graphs into the shared [`Library`]: the pure
-//! document↔library resolution + mutation behind the GUI's
-//! export / promote / publish commands. Operates only on [`Document`] +
-//! [`Library`] (no GUI, dialogs, or persistence), so it's unit-testable
-//! against bare types. The thin orchestration (file dialogs, marking the
-//! document dirty) stays in `gui::app::commands`, which runs the mutators
-//! through `RuntimeHost::edit_library` — the one path that reports persistence
-//! outcomes and propagates the grown library to its downstream copies.
+//! Pure document-to-graph-library promotion and publication operations.
 
 use scenarium::Library;
 use scenarium::{Graph, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::{Document, GraphRef, ItemRef};
+use crate::core::graph_library::GraphLibrary;
 
-/// Publish `node_id`'s local graph into `library`
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GraphPublicationTarget {
+    ActiveGraph,
+    LocalNode { target: GraphRef, node_id: NodeId },
+}
+
+pub(crate) fn publish_graph_to_library(
+    document: &mut Document,
+    graph_library: &mut GraphLibrary,
+    target: GraphPublicationTarget,
+) -> bool {
+    match target {
+        GraphPublicationTarget::ActiveGraph => promote_to_graph_library(document, graph_library),
+        GraphPublicationTarget::LocalNode { target, node_id } => {
+            publish_local_graph_to_library(document, graph_library, target, node_id)
+        }
+    }
+}
+
+/// Publish `node_id`'s local graph into `graph_library`
 /// (no disk write — the caller persists on success). Returns `false`
 /// when the node isn't a local graph instance in `target`.
 ///
 /// When its `origin` still resolves, that shared graph is updated in
 /// place so existing instances keep their link.
-/// Otherwise a fresh-id copy joins the library and the local graph's
+/// Otherwise a fresh-id copy joins the graph library and the local graph's
 /// `origin` is re-pointed at it, so a later publish
 /// updates rather than re-adds. The `origin` write is lineage metadata,
 /// deliberately *not* routed through undo.
-pub(crate) fn publish_local_graph(
+pub(crate) fn publish_local_graph_to_library(
     document: &mut Document,
-    library: &mut Library,
+    graph_library: &mut GraphLibrary,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
-    let Some((local_id, published, existing_lib)) = (|| {
+    let Some(source) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Graph(GraphLink::Local(local_id)) =
             scope.graph.find(&node_id, NodeSearch::TopLevel)?.kind
@@ -37,30 +50,69 @@ pub(crate) fn publish_local_graph(
             return None;
         };
         let local = scope.graph.graphs.get(&local_id)?;
-        let existing_lib = local.origin.filter(|id| library.graph_by_id(id).is_some());
-        Some((local_id, local.fresh_copy(), existing_lib))
+        let existing_lib = local
+            .origin
+            .filter(|id| graph_library.graphs.contains_key(id));
+        Some(PublishSource {
+            local_id,
+            graph: local.fresh_copy(),
+            existing_id: existing_lib,
+        })
     })() else {
         return false;
     };
 
-    let new_origin = existing_lib.unwrap_or_else(GraphId::unique);
-    library.insert_graph(new_origin, published);
-    set_origin(document, target, local_id, new_origin);
+    let new_origin = source.existing_id.unwrap_or_else(GraphId::unique);
+    graph_library.graphs.insert(new_origin, source.graph);
+    set_origin(document, target, source.local_id, new_origin);
     true
 }
 
-/// Promote the active/selected graph into `library` as a new entry
+#[derive(Debug)]
+struct PublishSource {
+    local_id: GraphId,
+    graph: Graph,
+    existing_id: Option<GraphId>,
+}
+
+/// Promote the active/selected graph into `graph_library` as a new entry
 /// (no disk write — the caller persists on success). Returns `false`
 /// when nothing resolves. On success the source local graph's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage.
-pub(crate) fn promote_to_library(document: &mut Document, library: &mut Library) -> bool {
-    let Some(source) = promote_source(document, library) else {
+pub(crate) fn promote_to_graph_library(
+    document: &mut Document,
+    graph_library: &mut GraphLibrary,
+) -> bool {
+    let Some(promotable) = resolve_promotable(document) else {
         return false;
     };
-    let published = source.graph.fresh_copy();
+    let Some((graph, relink)) = (|| -> Option<(Graph, Option<RelinkLocal>)> {
+        Some(match promotable {
+            Promotable::Node {
+                graph: holder,
+                link: GraphLink::Local(graph_id),
+            } => {
+                let graph = document.graph_for(holder)?.graphs.get(&graph_id)?.clone();
+                (graph, Some(RelinkLocal { holder, graph_id }))
+            }
+            Promotable::Node {
+                link: GraphLink::Shared(graph_id),
+                ..
+            } => (graph_library.graphs.get(&graph_id)?.clone(), None),
+            Promotable::OpenTab { id } => (
+                document.graph.graphs.get(&id)?.clone(),
+                Some(RelinkLocal {
+                    holder: GraphRef::Main,
+                    graph_id: id,
+                }),
+            ),
+        })
+    })() else {
+        return false;
+    };
     let lib_id = GraphId::unique();
-    library.insert_graph(lib_id, published);
-    if let Some(relink) = source.relink {
+    graph_library.graphs.insert(lib_id, graph.fresh_copy());
+    if let Some(relink) = relink {
         set_origin(document, relink.holder, relink.graph_id, lib_id);
     }
     true
@@ -77,15 +129,6 @@ fn set_origin(document: &mut Document, holder: GraphRef, graph_id: GraphId, orig
 }
 
 #[derive(Debug)]
-struct PromoteSource {
-    graph: Graph,
-    /// Where the source local graph lives, so we can point its `origin` at
-    /// the freshly-created library entry. `None` when the source is a
-    /// shared graph — nothing in the document to re-link.
-    relink: Option<RelinkLocal>,
-}
-
-#[derive(Debug)]
 struct RelinkLocal {
     holder: GraphRef,
     graph_id: GraphId,
@@ -98,47 +141,17 @@ enum Promotable {
 }
 
 /// Resolve the graph targeted by export.
-pub(crate) fn graph_to_export<'a>(
+pub(crate) fn graph_template_to_export<'a>(
     document: &'a Document,
     library: &'a Library,
 ) -> Option<&'a Graph> {
-    match resolve_promotable(document, library)? {
+    match resolve_promotable(document)? {
         Promotable::Node { graph, link } => document.graph_for(graph)?.resolve_graph(link, library),
         Promotable::OpenTab { id } => document.graph.graphs.get(&id),
     }
 }
 
-/// Like [`graph_to_export`], but for promoting into the library:
-/// returns an owned copy and, for a local source, where to update lineage.
-fn promote_source(document: &Document, library: &Library) -> Option<PromoteSource> {
-    let (graph, relink) = match resolve_promotable(document, library)? {
-        Promotable::Node { graph, link } => {
-            let nested = document
-                .graph_for(graph)?
-                .resolve_graph(link, library)?
-                .clone();
-            let relink = match link {
-                GraphLink::Local(id) => Some(RelinkLocal {
-                    holder: graph,
-                    graph_id: id,
-                }),
-                GraphLink::Shared(_) => None,
-            };
-            (nested, relink)
-        }
-        Promotable::OpenTab { id } => (
-            document.graph.graphs.get(&id)?.clone(),
-            Some(RelinkLocal {
-                holder: GraphRef::Main,
-                graph_id: id,
-            }),
-        ),
-    };
-    Some(PromoteSource { graph, relink })
-}
-
-/// Shared resolution for export and promote.
-fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotable> {
+fn resolve_promotable(document: &Document) -> Option<Promotable> {
     // Export/promote act on the active graph; a non-graph tab has none.
     let target = document.active_target()?;
     let graph = document.graph_for(target)?;
@@ -149,7 +162,6 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
             };
             if let Some(node) = graph.find(nid, NodeSearch::TopLevel)
                 && let NodeKind::Graph(link) = node.kind
-                && graph.resolve_graph(link, library).is_some()
             {
                 return Some(Promotable::Node {
                     graph: target,
@@ -168,9 +180,11 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use scenarium::Graph;
-    use scenarium::Node;
+    use scenarium::{FuncId, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
+
+    use crate::core::document::{Document, GraphRef, ItemRef};
+    use crate::core::edit::publish::{promote_to_graph_library, publish_local_graph_to_library};
+    use crate::core::graph_library::GraphLibrary;
 
     #[derive(Debug)]
     struct LocalInstance {
@@ -200,26 +214,26 @@ mod tests {
     #[test]
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = GraphId::unique();
-        let mut library = Library::default();
-        library.insert_graph(lib_id, Graph::new("Old"));
+        let mut graph_library = GraphLibrary::default();
+        graph_library.graphs.insert(lib_id, Graph::new("Old"));
 
         // Local copy linked to that library graph, with diverged content.
         let mut doc = Document::default();
         let local = add_local_instance(&mut doc, graph("New", Some(lib_id)));
 
-        assert!(publish_local_graph(
+        assert!(publish_local_graph_to_library(
             &mut doc,
-            &mut library,
+            &mut graph_library,
             GraphRef::Main,
             local.node_id
         ));
         assert_eq!(
-            library.graphs.len(),
+            graph_library.graphs.len(),
             1,
             "update in place — no new library entry"
         );
         assert_eq!(
-            library.graph_by_id(&lib_id).unwrap().name,
+            graph_library.graphs.get(&lib_id).unwrap().name,
             "New",
             "library graph took the local graph's content"
         );
@@ -232,17 +246,21 @@ mod tests {
 
     #[test]
     fn publish_without_origin_creates_entry_and_links_it() {
-        let mut library = Library::default();
+        let mut graph_library = GraphLibrary::default();
         let mut doc = Document::default();
         let local = add_local_instance(&mut doc, graph("Standalone", None));
 
-        assert!(publish_local_graph(
+        assert!(publish_local_graph_to_library(
             &mut doc,
-            &mut library,
+            &mut graph_library,
             GraphRef::Main,
             local.node_id
         ));
-        assert_eq!(library.graphs.len(), 1, "a new library entry was added");
+        assert_eq!(
+            graph_library.graphs.len(),
+            1,
+            "a new graph-library entry was added"
+        );
         let linked = doc
             .graph
             .graphs
@@ -251,22 +269,26 @@ mod tests {
             .origin
             .expect("local graph linked to the new entry");
         assert!(
-            library.graph_by_id(&linked).is_some(),
+            graph_library.graphs.contains_key(&linked),
             "origin points at the freshly-created library graph"
         );
     }
 
     #[test]
     fn promote_links_source_local_def_to_new_library_entry() {
-        let mut library = Library::default();
+        let mut graph_library = GraphLibrary::default();
         let mut doc = Document::default();
         // A local graph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
         let local = add_local_instance(&mut doc, graph("Widget", None));
         doc.main_view.selected.insert(ItemRef::Node(local.node_id));
 
-        assert!(promote_to_library(&mut doc, &mut library));
-        assert_eq!(library.graphs.len(), 1, "a new library entry is added");
+        assert!(promote_to_graph_library(&mut doc, &mut graph_library));
+        assert_eq!(
+            graph_library.graphs.len(),
+            1,
+            "a new graph-library entry is added"
+        );
         let owner = doc
             .graph
             .graphs
@@ -275,33 +297,58 @@ mod tests {
             .origin
             .expect("source local graph now carries an origin");
         assert!(
-            library.graph_by_id(&owner).is_some(),
+            graph_library.graphs.contains_key(&owner),
             "origin points at the freshly-promoted library entry"
         );
     }
 
     #[test]
-    fn promote_with_nothing_selected_is_a_noop() {
-        let mut library = Library::default();
+    fn promote_copies_a_selected_shared_graph() {
+        let source_id = GraphId::unique();
+        let source = Graph::new("Shared");
+        let mut graph_library = GraphLibrary::default();
+        graph_library.graphs.insert(source_id, source.clone());
         let mut doc = Document::default();
-        assert!(!promote_to_library(&mut doc, &mut library));
-        assert_eq!(library.graphs.len(), 0);
+        let node_id = doc
+            .graph
+            .add(Node::graph_instance(&source, GraphLink::Shared(source_id)));
+        doc.main_view.selected.insert(ItemRef::Node(node_id));
+
+        assert!(promote_to_graph_library(&mut doc, &mut graph_library));
+        assert_eq!(graph_library.graphs.len(), 2);
+        assert_eq!(graph_library.graphs.get(&source_id).unwrap(), &source);
+        assert_eq!(
+            graph_library
+                .graphs
+                .values()
+                .filter(|graph| graph.name == "Shared")
+                .count(),
+            2,
+            "promotion creates a new template instead of changing its source"
+        );
+    }
+
+    #[test]
+    fn promote_with_nothing_selected_is_a_noop() {
+        let mut graph_library = GraphLibrary::default();
+        let mut doc = Document::default();
+        assert!(!promote_to_graph_library(&mut doc, &mut graph_library));
+        assert!(graph_library.graphs.is_empty());
     }
 
     #[test]
     fn publish_non_graph_node_is_a_noop() {
-        use scenarium::FuncId;
-        let mut library = Library::default();
+        let mut graph_library = GraphLibrary::default();
         let mut doc = Document::default();
-        let node = Node::new(scenarium::NodeKind::Func(FuncId::unique()));
+        let node = Node::new(NodeKind::Func(FuncId::unique()));
         let node_id = doc.graph.add(node);
 
-        assert!(!publish_local_graph(
+        assert!(!publish_local_graph_to_library(
             &mut doc,
-            &mut library,
+            &mut graph_library,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(library.graphs.len(), 0, "nothing published");
+        assert!(graph_library.graphs.is_empty(), "nothing published");
     }
 }
