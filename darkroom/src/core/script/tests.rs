@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::document::ItemRef;
-use crate::core::library::{PublishedLibrary, test_support};
+use crate::core::runtime_library::{PublishedLibrary, test_support};
 use glam::Vec2;
 use rhai::Array;
 use scenarium::Library;

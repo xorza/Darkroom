@@ -7,8 +7,9 @@
 pub(crate) mod background_runtime;
 pub(crate) mod document;
 pub(crate) mod edit;
+pub(crate) mod graph_library;
 pub(crate) mod io;
-pub(crate) mod library;
+pub(crate) mod runtime_library;
 pub(crate) mod runtime_host;
 pub(crate) mod script;
 pub(crate) mod status;

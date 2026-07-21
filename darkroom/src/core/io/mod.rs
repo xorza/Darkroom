@@ -1,13 +1,13 @@
-//! On-disk I/O and session state: zipped [`document`] archives, reusable-graph
-//! [`persistence`], the [`preferences`] that remember the last theme + document
-//! across launches, and the per-document disk-[`cache`] location.
+//! On-disk I/O and session state: zipped [`document`] archives, reusable
+//! [`graph_template`] files, the persisted [`graph_library`], preferences, and
+//! the per-document disk-[`cache`] location.
 
 use std::path::PathBuf;
 
 pub(crate) mod cache;
 pub(crate) mod document;
-pub(crate) mod library;
-pub(crate) mod persistence;
+pub(crate) mod graph_library;
+pub(crate) mod graph_template;
 pub(crate) mod preferences;
 
 /// `name` resolved relative to the process working directory — the shared

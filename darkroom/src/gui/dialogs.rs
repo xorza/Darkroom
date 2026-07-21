@@ -1,6 +1,6 @@
 //! GUI-side OS shell integration: native file-picker dialogs (rfd) and
 //! opening URLs in the user's browser. Project and reusable-graph byte⇄type
-//! plumbing live in `crate::core::io::{document, persistence}`; this side hands
+//! plumbing live in `crate::core::io::{document, graph_template}`; this side hands
 //! paths off to those GUI-free modules. Failures degrade — a cancelled/failed
 //! pick returns `None`, a failed URL open logs — rather than crashing.
 
@@ -39,11 +39,11 @@ pub(crate) fn pick_project_save_path(start: Option<&Path>) -> Option<PathBuf> {
         .map(document::with_extension)
 }
 
-pub(crate) fn pick_graph_open_path(start: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn pick_graph_template_open_path(start: Option<&Path>) -> Option<PathBuf> {
     graph_file_dialog(start).pick_file()
 }
 
-pub(crate) fn pick_graph_save_path(start: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn pick_graph_template_save_path(start: Option<&Path>) -> Option<PathBuf> {
     graph_file_dialog(start).save_file()
 }
 

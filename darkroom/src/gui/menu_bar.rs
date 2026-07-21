@@ -83,18 +83,33 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
 fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "Graph", |ui, popup| {
         let mut command = None;
-        if MenuItem::new("Export…").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Graph(GraphCommand::Export));
-        }
-        if MenuItem::new("Import…").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Graph(GraphCommand::Import));
-        }
-        if MenuItem::new("Promote to Library…")
+        if MenuItem::new("Export Graph Template…")
             .show(ui, popup)
             .left
             .clicked()
         {
-            command = Some(AppCommand::Graph(GraphCommand::Promote));
+            command = Some(AppCommand::Graph(GraphCommand::ExportTemplate));
+        }
+        if MenuItem::new("Import into Document…")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            command = Some(AppCommand::Graph(GraphCommand::ImportIntoDocument));
+        }
+        if MenuItem::new("Add to Graph Library…")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            command = Some(AppCommand::Graph(GraphCommand::AddToGraphLibrary));
+        }
+        if MenuItem::new("Promote to Graph Library…")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            command = Some(AppCommand::Graph(GraphCommand::PromoteToGraphLibrary));
         }
         command
     })
