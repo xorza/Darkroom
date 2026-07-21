@@ -22,8 +22,7 @@ pub(crate) struct Workspace {
 
 impl Workspace {
     pub(crate) fn new(script_config: &ScriptConfig, wake: Wake, preferences: &Preferences) -> Self {
-        let model_paths = (&preferences.ml_models).into();
-        let mut runtime = RuntimeHost::new(script_config, wake, &model_paths);
+        let mut runtime = RuntimeHost::new(script_config, wake, preferences);
         let open = OpenDocument::load(preferences).unwrap_or_else(|error| {
             runtime.status.error(format!("load failed: {error:#}"));
             OpenDocument::empty()
