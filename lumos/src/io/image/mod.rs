@@ -3,6 +3,7 @@ pub(crate) mod error;
 pub(crate) mod fits;
 pub(crate) mod linear;
 pub(crate) mod linear_pixels;
+pub(crate) mod load;
 pub(crate) mod sensor;
 #[cfg(test)]
 mod synthetic_tests;
@@ -13,6 +14,7 @@ use imaginarium::{ChannelCount, ColorFormat, Image};
 use std::path::Path;
 
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load::LoadContext;
 use crate::io::raw;
 use crate::math::vec2us::Vec2us;
 
@@ -46,6 +48,8 @@ pub enum TransferProvenance {
         bscale: f64,
         bzero: f64,
         unit: Option<String>,
+        hdu: FitsHduProvenance,
+        checksum: FitsChecksumProvenance,
     },
     RawNormalized,
     DeclaredLinearRaster,
@@ -67,6 +71,27 @@ pub enum DemosaicProvenance {
     LumosRcd,
     LumosMarkesteijn,
     LibRaw,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FitsHduProvenance {
+    pub index: usize,
+    pub extname: Option<String>,
+    pub extver: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FitsChecksumState {
+    NotChecked,
+    Absent,
+    Unknown,
+    Valid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FitsChecksumProvenance {
+    pub datasum: FitsChecksumState,
+    pub checksum: FitsChecksumState,
 }
 
 /// Decoder decisions that affect the meaning of the returned samples.
@@ -266,20 +291,25 @@ fn standard_container(extension: &str) -> SourceContainer {
 
 impl PreviewImage {
     /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+    pub fn from_file<P: AsRef<Path>>(
+        path: P,
+        context: &LoadContext,
+    ) -> Result<Self, ImageError> {
         let path = path.as_ref();
+        context.check_cancelled(path)?;
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_preview_fits(path).map(Into::into);
+            return fits::load_preview_fits(path, context).map(Into::into);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw(path).map(Into::into);
+            return raw::load_raw(path, &context.cancel).map(Into::into);
         }
 
         if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
             let decoded = read_standard_image(path)?;
+            context.check_cancelled(path)?;
             let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
             let target = f32_target_format(&decoded);
             let image = decoded
