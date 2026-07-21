@@ -12,7 +12,7 @@ use crate::core::terminal_session::apply_intents;
 use crate::core::document::ItemRef;
 
 fn empty_document() -> Document {
-    OpenDocument::empty().document
+    OpenDocument::default().document
 }
 
 #[test]
