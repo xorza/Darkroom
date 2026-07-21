@@ -33,13 +33,13 @@ fn normalization_is_shared_across_run_and_replacement_boundaries() {
 }
 
 #[test]
-fn startup_and_replacement_repoint_the_runtime_cache_to_the_document() {
+fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
     let first_path = test_output_path("darkroom_workspace/first.darkroom");
     let second_path = test_output_path("darkroom_workspace/second.darkroom");
     let denoise_path = "/models/workspace-denoise.onnx";
     let star_removal_path = "/models/workspace-stars.onnx";
     project::save(&Document::default(), &first_path).unwrap();
-    let preferences = Preferences {
+    let mut preferences = Preferences {
         document_path: Some(first_path.clone()),
         ml_models: MlModelPreferences {
             denoise: denoise_path.into(),
@@ -71,6 +71,34 @@ fn startup_and_replacement_repoint_the_runtime_cache_to_the_document() {
             .inputs[1]
             .default_value,
         Some(StaticValue::FsPath(star_removal_path.to_owned()))
+    );
+
+    let updated_denoise_path = "/models/updated-denoise.onnx";
+    let updated_star_removal_path = "/models/updated-stars.onnx";
+    preferences.ml_models.denoise = updated_denoise_path.into();
+    preferences.ml_models.star_removal = updated_star_removal_path.into();
+    workspace.runtime.configure_ml_model_defaults(&preferences);
+    assert_eq!(
+        workspace
+            .runtime
+            .library
+            .current
+            .by_name("ML Denoise")
+            .unwrap()
+            .inputs[1]
+            .default_value,
+        Some(StaticValue::FsPath(updated_denoise_path.to_owned()))
+    );
+    assert_eq!(
+        workspace
+            .runtime
+            .library
+            .current
+            .by_name("ML Star Removal")
+            .unwrap()
+            .inputs[1]
+            .default_value,
+        Some(StaticValue::FsPath(updated_star_removal_path.to_owned()))
     );
     assert_eq!(
         test_support::disk_root(&workspace.runtime),
