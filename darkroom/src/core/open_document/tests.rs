@@ -5,6 +5,7 @@ use scenarium::{Binding, Func, FuncId, FuncInput, InputPort, Library, StaticValu
 
 use crate::core::document::Document;
 use crate::core::io::preferences::Preferences;
+use crate::core::io::project::ProjectLoadError;
 use crate::core::open_document::OpenDocument;
 
 #[test]
@@ -23,7 +24,7 @@ fn disabled_reopen_ignores_the_remembered_path() {
 
 #[test]
 fn failed_reopen_returns_the_load_error() {
-    let path = PathBuf::from("does-not-exist.darkroom");
+    let path = PathBuf::from("not-a-project.json");
     let preferences = Preferences {
         document_path: Some(path.clone()),
         ..Preferences::default()
@@ -31,7 +32,10 @@ fn failed_reopen_returns_the_load_error() {
 
     let error = OpenDocument::load(&preferences).unwrap_err();
 
-    assert!(error.to_string().contains(path.to_str().unwrap()));
+    assert!(matches!(
+        error,
+        ProjectLoadError::InvalidExtension { path: error_path } if error_path == path
+    ));
 }
 
 #[test]
