@@ -70,8 +70,8 @@ Root holds the entry point; implementation is grouped by responsibility:
   `EditScope`), `serde.rs` (custom ordered paint-stack wire format), and
   `validate.rs` (document/view structural validation).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
-  `action_stack/` (packed undo history), `reconcile/` (derived graph-
-  interface reconciliation).
+  `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
+  publication).
 - **`core/io/`** — `project.rs` (`.darkroom` ZIP containing `project.json`),
   `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
   session state), `library.rs` (shared graph library file), `cache.rs`
@@ -243,15 +243,14 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   change; `RuntimeHost` reports the persistence outcome and re-pushes the
   worker's `DiskStore` (its codec table rides a library snapshot).
 
-### Reconciliation (`src/edit/reconcile/`)
-Derived state, like `Scene`. `OpenDocument::normalize` runs before scene
-rebuild, execution, cache save, or document save when a structural edit marks
-normalization pending. It synchronizes each local
-graph's interface against its interior wiring: compacts unused boundary
-slots, remaps indices in the interior graph and across all instance bindings,
-then prunes bindings and subscriptions left dangling against the resulting
-interfaces and current library. Idempotent — a no-op on an already-canonical
-document.
+### Graph normalization (`scenarium::Graph::normalize`)
+Derived graph state lives in Scenarium. `OpenDocument::normalize` gates the
+operation on its pending flag before scene rebuild, execution, cache save, or
+document save. `Graph::normalize` recursively synchronizes each local graph's
+interface against its interior wiring, compacts unused boundary slots, remaps
+the owning graph's instance bindings, then prunes bindings and subscriptions
+left dangling against the resulting interfaces and current library. It is
+idempotent on an already-canonical graph tree.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view

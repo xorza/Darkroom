@@ -41,7 +41,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `graph/validate.rs` | Standalone and execution-entry graph validation |
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
 | `graph/clone.rs` | Deep copies with fresh node ids |
-| `graph/reconcile.rs` | Stale-library wiring cleanup |
+| `graph/reconcile/` | Recursive local-interface normalization and stale-library wiring cleanup |
 | `graph/query.rs` | Type and reachability queries |
 | `graph/interface/` | Graph identity, instance links, and exposed events |
 | `execution/compile.rs` | Host-side compiler and compiled artifact |
