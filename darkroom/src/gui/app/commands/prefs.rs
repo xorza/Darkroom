@@ -43,8 +43,9 @@ impl App {
     fn apply_preferences(&mut self, ui: &mut Ui) {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
         ui.theme = self.theme.aperture_theme.clone();
-        let paths = (&self.preferences.ml_models).into();
-        self.workspace.runtime.configure_ml_model_defaults(&paths);
+        self.workspace
+            .runtime
+            .configure_ml_model_defaults(&self.preferences);
         self.save_preferences();
     }
 
@@ -70,8 +71,9 @@ impl App {
             MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
             MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
         }
-        let paths = (&self.preferences.ml_models).into();
-        self.workspace.runtime.configure_ml_model_defaults(&paths);
+        self.workspace
+            .runtime
+            .configure_ml_model_defaults(&self.preferences);
         self.save_preferences();
     }
 
