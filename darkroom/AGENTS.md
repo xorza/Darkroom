@@ -60,14 +60,14 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
   `RuntimeHost` pairing and run/save/cache coordination.
-- **`core/runtime_host.rs`** — `RuntimeHost`: graph library, runtime library,
-  compiler, worker, scripting host, and status log; no document or frontend
-  policy.
-- **`core/graph_library/`** — `GraphLibrary`: user-owned reusable graph
-  definitions and their edit/persistence lifecycle.
+- **`core/runtime_host.rs`** — `RuntimeHost`: runtime library, compiler,
+  worker, scripting host, and status log; no document or frontend policy.
+- **`core/graph_library.rs`** — `GraphLibrary`: the user-owned reusable graph
+  definitions held privately by `RuntimeLibrary`.
 - **`core/runtime_library/`** — `RuntimeLibrary`: the ephemeral merged
-  Scenarium registry (built-ins, configured ML defaults, and graph-library
-  definitions) plus published snapshots for scripts and workers.
+  Scenarium registry (built-ins, configured ML defaults, and its graph-library
+  definitions), graph-library persistence API, and published snapshots for
+  scripts and workers.
 - **`core/terminal_session/`** — terminal/headless event interpretation and
   shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
@@ -195,9 +195,9 @@ Everything else is editor view-state, split per graph:
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
 
-`Library` is *not* here — `GraphLibrary` owns persistent reusable graphs,
-`RuntimeLibrary` owns current and published merged snapshots, and
-`RuntimeHost` coordinates both entities.
+`Library` is *not* here — `RuntimeLibrary` privately owns the persistent
+`GraphLibrary` plus the current and published merged snapshots; `RuntimeHost`
+coordinates that single library entity with the worker and script host.
 Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
@@ -246,8 +246,8 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `core/edit/publish.rs` (unit-tested against bare types, `&mut GraphLibrary`
   in / `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
   thin GUI orchestration (dialogs + dirty flag), running the mutators through
-  `RuntimeHost::edit_graph_library`. `GraphLibrary` persists the edit;
-  `RuntimeLibrary` recomposes and publishes the merged registry; `RuntimeHost`
+  `RuntimeHost::edit_graph_library`. `RuntimeLibrary` persists the edit,
+  recomposes, and publishes the merged registry; `RuntimeHost`
   reports the persistence outcome and re-pushes the worker's `DiskStore` (its
   codec table rides a library snapshot).
 
@@ -405,13 +405,13 @@ Key cross-cutting mechanisms:
 `document.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
 `commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
 pretty-printed `document.json` entry. `io/graph_template/` separately handles
-multi-format graph-template import/export. `GraphLibrary` owns the reusable
-definitions persisted by `io/graph_library/` in
+multi-format graph-template import/export. `RuntimeLibrary` privately owns the
+reusable `GraphLibrary` definitions persisted by `io/graph_library/` in
 `darkroom.graph-library.json`; promote, publish, and explicit template import
-edit only this entity. `RuntimeLibrary` is rebuilt from built-ins, ML model
-defaults, and those definitions after every change. Local graphs track lineage
-via an `origin` field — "Publish" updates the linked graph-library entry in
-place, else creates a new one.
+use its graph-library edit API. It rebuilds the merged Scenarium library from
+built-ins, ML model defaults, and those definitions after every change. Local
+graphs track lineage via an `origin` field — "Publish" updates the linked
+graph-library entry in place, else creates a new one.
 
 `Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. Failures degrade
