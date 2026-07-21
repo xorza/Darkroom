@@ -34,7 +34,7 @@ src/
 | `image/{blend_mode,conversion_format,vision_ctx}.rs` | `BlendMode`/`ColorFormat` datatypes; `VisionCtx` (GPU/CPU `ProcessingContext`). |
 | `astro/mod.rs` | Astro-domain module declarations. Scientific results are converted into the shared `Image` wire type. |
 | `astro/library/` | `astro_library()` — lumos nodes (category `astro`); tests in `tests.rs`. |
-| `astro/masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue` with its FITS disk codec. |
+| `astro/masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 | `astro/presets.rs` | `preset_enum!` macro + preset enums → lumos stage configs. Each enum gives a `variant_names()` list (the node's `value_variants` quick-pick) + `FromStr`/`config()`. No `DataType` handles — every preset node is a config-typed input with a `build_*_config` override. |
 | `config_node.rs` | Scenarium bridge over `common`'s struct introspection: `config_builder_func::<T: NodeConfig>()` maps a `common::Introspect` type's `FieldDesc`s → a `Func` with one input per field (`FieldKind`→`DataType`, `FieldValue`↔`StaticValue`/`DynamicValue`) → a wireable `ConfigValue<T>`. `NodeConfig` = `Introspect` + a stable wire `TYPE_ID`/`NAME`; checked numeric reconstruction failures surface through the node invocation error path. Inputs required unless the field is `Option<_>`; enum type IDs come from each `IntrospectEnum`'s explicit UUID identity. Also home of the shared `enum_input` FuncInput helper. |
 | `astro/configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) deriving `common::Introspect` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. Mirror enums (`BackgroundModeDef`) get `common::IntrospectEnum` from `#[derive(IntrospectEnum)]` (which delegates to their strum `Display`/`EnumString`). `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
@@ -44,7 +44,7 @@ src/
 - `image_library()` — builds a `Library` of the imaginarium image nodes.
 - `astro_library()` — builds a `Library` of the lumos astro nodes.
 - `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`; `gen_preview` reads a CPU view (`make_cpu` — no-op on CPU, download on GPU) and builds the thumbnail with the fused `imaginarium::Preview` op (area-average downscale + RGBA8 convert in one pass).
-- `Masters` — wrapper around `lumos::CalibrationMasters` with a FITS-backed disk-cache codec.
+- `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
 - `ConversionFormat` — enum of the 12 color-format conversion targets.
 - Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (file picker filtered by Lumos's authoritative FITS/RAW/standard extension set), `ASTRO_DIR_DATA_TYPE` (camera-RAW frame-folder picker), `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`. (The astro presets have no standalone datatype handles — every preset node is a config-typed input with `value_variants`.)
@@ -59,7 +59,7 @@ src/
 | `convert` | Convert image to a different color format (enum input). |
 | `blend` | Blend two images with configurable mode and alpha. |
 | `load_astro_image` | Decode a FITS/RAW/standard file into the shared `Image` wire type (off-thread). |
-| `build_masters` | Scan sorted camera-RAW paths from `darks`/`flats`/`bias`/`flat_darks` folders and stack them into `Masters` (off-thread, per-role via `stack_cfa_master` + `CalibrationMasters::from_images`). Scan failures retain the folder path instead of becoming an empty frame set. Declared **`Pure`** and defaults to Scenarium's disk cache: the digest folds each calibration folder's contents, while the `Masters` codec persists the complete prepared bundle as checksummed multi-extension FITS bytes outside the source folders. |
+| `build_masters` | Scan sorted camera-RAW paths from `darks`/`flats`/`bias`/`flat_darks` folders and stack them into `Masters` (off-thread, per-role via `stack_cfa_master` + `CalibrationMasters::from_images`). With `cache` enabled, each role is persisted as a checksummed `master_<role>.fits` in its source directory and loaded on the next run; unreadable caches warn and rebuild. |
 | `stack_lights` | Scan sorted camera-RAW paths, then calibrate + align + stack a `lights` folder (+ optional `Masters`) into shared `Image` outputs (`calibrate_align_stack`, off-thread). Missing/unreadable folders are scan errors; a readable folder with no RAW frames is reported separately. Each of detection/registration/combine is **one required** config-typed input: a preset quick-pick (`value_variants` dropdown, seeded to the first) that a `build_*_config` node can wire into to override. Inputs with a default/variants are **required + seeded** (not optional with a hidden fallback) — clearing one is a missing input (errored run, highlighted port), never a silent default. `masters` is the only genuinely-optional input (absent = no calibration). Both `stack_lights` and `build_masters` clone `ctx.cancel_flag()` into their `spawn_blocking` and pass it to lumos via the shared `run_cancellable` helper, so a cancelled run bails the stack/master build cooperatively. Both are **`Pure`** and keyed by the contents of their input folders. |
 | `auto_stretch` | Display-stretch an `Image`: a `method` value_variants quick-pick (`StretchPreset`), overridable by `build_stretch_config` → `lumos::Stretch::apply`, off-thread. |
 | `background_extract` / `denoise` / `scnr` / `neutralize_background` / `hdr_compress` / `local_contrast` | Per-frame `Image → Image` processing through lumos in-place ops, run off-thread. `background_extract`/`scnr` take a unified value-variants preset input; `denoise`/`hdr_compress`/`local_contrast` keep an inline scalar plus an optional config override. |
@@ -68,4 +68,4 @@ src/
 
 ## Dependencies
 
-common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tokio, async-trait.
+common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tracing, tokio, async-trait.
