@@ -1,4 +1,4 @@
-//! Darkroom project archives: one validated JSON document inside a ZIP file.
+//! Darkroom document archives: one validated JSON document inside a ZIP file.
 
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
@@ -12,11 +12,11 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::core::document::Document;
 
 pub(crate) const EXTENSION: &str = "darkroom";
-const DOCUMENT_ENTRY: &str = "project.json";
+const DOCUMENT_ENTRY: &str = "document.json";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ProjectLoadError {
+pub(crate) enum DocumentLoadError {
     #[error("{path} must use the .darkroom extension", path = .path.display())]
     InvalidExtension { path: PathBuf },
     #[error("{path}: {source}", path = .path.display())]
@@ -39,29 +39,29 @@ pub(crate) enum ProjectLoadError {
     },
     #[error("{path} contains overlapping ZIP entries", path = .path.display())]
     OverlappingEntries { path: PathBuf },
-    #[error("{path} must contain exactly one project.json, found {count}", path = .path.display())]
+    #[error("{path} must contain exactly one document.json, found {count}", path = .path.display())]
     DocumentEntryCount { path: PathBuf, count: usize },
-    #[error("failed to open project.json in {path}: {source}", path = .path.display())]
+    #[error("failed to open document.json in {path}: {source}", path = .path.display())]
     OpenDocumentEntry {
         path: PathBuf,
         #[source]
         source: zip::result::ZipError,
     },
-    #[error("{path} contains a non-file project.json entry", path = .path.display())]
+    #[error("{path} contains a non-file document.json entry", path = .path.display())]
     NonFileDocumentEntry { path: PathBuf },
     #[error(
-        "project.json in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
+        "document.json in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
         path = .path.display(),
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("failed to read project.json from {path}: {source}", path = .path.display())]
+    #[error("failed to read document.json from {path}: {source}", path = .path.display())]
     ReadDocument {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("invalid project.json in {path}: {source}", path = .path.display())]
+    #[error("invalid document.json in {path}: {source}", path = .path.display())]
     DeserializeDocument {
         path: PathBuf,
         #[source]
@@ -71,30 +71,30 @@ pub(crate) enum ProjectLoadError {
     InvalidDocument { path: PathBuf, reason: String },
 }
 
-pub(crate) fn load(path: &Path) -> Result<Document, ProjectLoadError> {
+pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
     if !has_extension(path) {
-        return Err(ProjectLoadError::InvalidExtension {
+        return Err(DocumentLoadError::InvalidExtension {
             path: path.to_path_buf(),
         });
     }
 
-    let file = File::open(path).map_err(|source| ProjectLoadError::Open {
+    let file = File::open(path).map_err(|source| DocumentLoadError::Open {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut archive = ZipArchive::new(file).map_err(|source| ProjectLoadError::InvalidArchive {
+    let mut archive = ZipArchive::new(file).map_err(|source| DocumentLoadError::InvalidArchive {
         path: path.to_path_buf(),
         source,
     })?;
     let has_overlapping_files =
         archive
             .has_overlapping_files()
-            .map_err(|source| ProjectLoadError::InspectArchive {
+            .map_err(|source| DocumentLoadError::InspectArchive {
                 path: path.to_path_buf(),
                 source,
             })?;
     if has_overlapping_files {
-        return Err(ProjectLoadError::OverlappingEntries {
+        return Err(DocumentLoadError::OverlappingEntries {
             path: path.to_path_buf(),
         });
     }
@@ -104,7 +104,7 @@ pub(crate) fn load(path: &Path) -> Result<Document, ProjectLoadError> {
         .filter(|name| *name == DOCUMENT_ENTRY)
         .count();
     if document_entries != 1 {
-        return Err(ProjectLoadError::DocumentEntryCount {
+        return Err(DocumentLoadError::DocumentEntryCount {
             path: path.to_path_buf(),
             count: document_entries,
         });
@@ -113,12 +113,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, ProjectLoadError> {
     let mut entry =
         archive
             .by_name(DOCUMENT_ENTRY)
-            .map_err(|source| ProjectLoadError::OpenDocumentEntry {
+            .map_err(|source| DocumentLoadError::OpenDocumentEntry {
                 path: path.to_path_buf(),
                 source,
             })?;
     if !entry.is_file() {
-        return Err(ProjectLoadError::NonFileDocumentEntry {
+        return Err(DocumentLoadError::NonFileDocumentEntry {
             path: path.to_path_buf(),
         });
     }
@@ -128,20 +128,20 @@ pub(crate) fn load(path: &Path) -> Result<Document, ProjectLoadError> {
     (&mut entry)
         .take(MAX_DOCUMENT_BYTES + 1)
         .read_to_end(&mut json)
-        .map_err(|source| ProjectLoadError::ReadDocument {
+        .map_err(|source| DocumentLoadError::ReadDocument {
             path: path.to_path_buf(),
             source,
         })?;
     ensure_load_document_size(path, json.len() as u64)?;
 
     let document: Document =
-        serde_json::from_slice(&json).map_err(|source| ProjectLoadError::DeserializeDocument {
+        serde_json::from_slice(&json).map_err(|source| DocumentLoadError::DeserializeDocument {
             path: path.to_path_buf(),
             source,
         })?;
     document
         .validate()
-        .map_err(|error| ProjectLoadError::InvalidDocument {
+        .map_err(|error| DocumentLoadError::InvalidDocument {
             path: path.to_path_buf(),
             reason: format!("{error:#}"),
         })?;
@@ -176,7 +176,7 @@ pub(crate) fn with_extension(mut path: PathBuf) -> PathBuf {
 fn ensure_extension(path: &Path) -> AnyResult<()> {
     ensure!(
         has_extension(path),
-        "Darkroom projects must use the .{EXTENSION} extension"
+        "Darkroom documents must use the .{EXTENSION} extension"
     );
     Ok(())
 }
@@ -196,9 +196,9 @@ fn ensure_document_size(size: u64) -> AnyResult<()> {
     Ok(())
 }
 
-fn ensure_load_document_size(path: &Path, size: u64) -> Result<(), ProjectLoadError> {
+fn ensure_load_document_size(path: &Path, size: u64) -> Result<(), DocumentLoadError> {
     if size > MAX_DOCUMENT_BYTES {
-        return Err(ProjectLoadError::DocumentTooLarge {
+        return Err(DocumentLoadError::DocumentTooLarge {
             path: path.to_path_buf(),
             size,
         });
@@ -227,15 +227,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_round_trips_as_one_json_entry() {
-        let path = test_output_path("darkroom_project/roundtrip.darkroom");
+    fn document_round_trips_as_one_json_entry() {
+        let path = test_output_path("darkroom_document/roundtrip.darkroom");
         let document = Document::default();
 
-        save(&document, &path).expect("save project");
-        assert_eq!(load(&path).expect("load project"), document);
+        save(&document, &path).expect("save document");
+        assert_eq!(load(&path).expect("load document"), document);
 
         let mut archive = ZipArchive::new(File::open(path).unwrap()).unwrap();
-        assert_eq!(archive.len(), 1, "projects contain only the document entry");
+        assert_eq!(archive.len(), 1, "archives contain only the document entry");
         let mut entry = archive.by_name(DOCUMENT_ENTRY).unwrap();
         assert_eq!(entry.compression(), CompressionMethod::Deflated);
         let mut json = String::new();
@@ -245,20 +245,20 @@ mod tests {
     }
 
     #[test]
-    fn project_extension_is_required_case_insensitively() {
+    fn document_extension_is_required_case_insensitively() {
         let document = Document::default();
-        let wrong = test_output_path("darkroom_project/wrong.json");
+        let wrong = test_output_path("darkroom_document/wrong.json");
         let error = save(&document, &wrong).unwrap_err().to_string();
         assert!(error.contains(".darkroom extension"), "{error}");
         assert!(
             matches!(
                 load(&wrong).unwrap_err(),
-                ProjectLoadError::InvalidExtension { path } if path == wrong
+                DocumentLoadError::InvalidExtension { path } if path == wrong
             ),
             "load reports the exact rejected path"
         );
 
-        let uppercase = test_output_path("darkroom_project/uppercase.DARKROOM");
+        let uppercase = test_output_path("darkroom_document/uppercase.DARKROOM");
         save(&document, &uppercase).expect("uppercase extension is valid");
         assert_eq!(load(&uppercase).unwrap(), document);
 
@@ -278,37 +278,37 @@ mod tests {
 
     #[test]
     fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
-        let corrupt = test_output_path("darkroom_project/corrupt.darkroom");
+        let corrupt = test_output_path("darkroom_document/corrupt.darkroom");
         std::fs::write(&corrupt, b"not a zip archive").unwrap();
         assert!(
             matches!(
                 load(&corrupt).unwrap_err(),
-                ProjectLoadError::InvalidArchive { path, .. } if path == corrupt
+                DocumentLoadError::InvalidArchive { path, .. } if path == corrupt
             ),
             "corrupt ZIP reports the exact archive path"
         );
 
-        let missing = test_output_path("darkroom_project/missing.darkroom");
+        let missing = test_output_path("darkroom_document/missing.darkroom");
         write_test_archive(&missing, "other.json", b"{}");
         assert!(
             matches!(
                 load(&missing).unwrap_err(),
-                ProjectLoadError::DocumentEntryCount { path, count: 0 } if path == missing
+                DocumentLoadError::DocumentEntryCount { path, count: 0 } if path == missing
             ),
             "missing document entry reports its archive and exact count"
         );
 
-        let malformed = test_output_path("darkroom_project/malformed.darkroom");
+        let malformed = test_output_path("darkroom_document/malformed.darkroom");
         write_test_archive(&malformed, DOCUMENT_ENTRY, b"{");
         assert!(
             matches!(
                 load(&malformed).unwrap_err(),
-                ProjectLoadError::DeserializeDocument { path, .. } if path == malformed
+                DocumentLoadError::DeserializeDocument { path, .. } if path == malformed
             ),
             "malformed JSON reports its archive"
         );
 
-        let invalid = test_output_path("darkroom_project/invalid.darkroom");
+        let invalid = test_output_path("darkroom_document/invalid.darkroom");
         let mut document = Document::default();
         document.graph.origin = Some(GraphId::nil());
         let json = serde_json::to_vec(&document).unwrap();
@@ -316,7 +316,7 @@ mod tests {
         assert!(
             matches!(
                 load(&invalid).unwrap_err(),
-                ProjectLoadError::InvalidDocument { path, reason }
+                DocumentLoadError::InvalidDocument { path, reason }
                     if path == invalid && reason.contains("graph has a nil origin")
             ),
             "structural validation retains the archive path and reason"
@@ -335,7 +335,7 @@ mod tests {
         ensure_load_document_size(path, MAX_DOCUMENT_BYTES).expect("load boundary is accepted");
         assert!(matches!(
             ensure_load_document_size(path, MAX_DOCUMENT_BYTES + 1).unwrap_err(),
-            ProjectLoadError::DocumentTooLarge {
+            DocumentLoadError::DocumentTooLarge {
                 path: error_path,
                 size
             } if error_path == path && size == MAX_DOCUMENT_BYTES + 1

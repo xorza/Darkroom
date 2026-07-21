@@ -71,7 +71,7 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
   publication).
-- **`core/io/`** — `project.rs` (`.darkroom` ZIP containing `project.json`),
+- **`core/io/`** — `document.rs` (`.darkroom` ZIP containing `document.json`),
   `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
   session state), `library.rs` (shared graph library file), `cache.rs`
   (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
@@ -393,7 +393,7 @@ Key cross-cutting mechanisms:
   draws so intersection tests run inline; hits drain into intents on release.
 
 ### Persistence + library (`src/io/`, `src/theme.rs`)
-`project.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
+`document.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
 `commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
 pretty-printed `project.json` document entry. `persistence.rs` separately keeps
 the multi-format reusable-graph import/export path. `library.rs` reads/writes the shared

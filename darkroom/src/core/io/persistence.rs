@@ -1,5 +1,5 @@
 //! Byte ⇄ type plumbing for reusable graphs — the GUI-free half of graph I/O.
-//! Darkroom documents use the archive format in [`crate::core::io::project`].
+//! Darkroom documents use the archive format in [`crate::core::io::document`].
 //! The file-picker dialogs live in `crate::gui::dialogs`. Pure persistence — no
 //! app state, no undo stack, no preferences; callers orchestrate when to
 //! import/export, while this module only turns paths into values and values

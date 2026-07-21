@@ -4,10 +4,10 @@ use common::test_utils::test_output_path;
 use scenarium::StaticValue;
 
 use crate::core::document::Document;
-use crate::core::io::cache::document_cache_root;
-use crate::core::io::preferences::{MlModelPreferences, Preferences};
-use crate::core::io::project;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::io::cache::document_cache_root;
+use crate::core::io::document;
+use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
 use crate::core::workspace::Workspace;
@@ -39,7 +39,7 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
     let second_path = test_output_path("darkroom_workspace/second.darkroom");
     let denoise_path = "/models/workspace-denoise.onnx";
     let star_removal_path = "/models/workspace-stars.onnx";
-    project::save(&Document::default(), &first_path).unwrap();
+    document::save(&Document::default(), &first_path).unwrap();
     let mut preferences = Preferences {
         document_path: Some(first_path.clone()),
         ml_models: MlModelPreferences {
@@ -106,7 +106,7 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         Some(document_cache_root(&first_path))
     );
 
-    project::save(&Document::default(), &second_path).unwrap();
+    document::save(&Document::default(), &second_path).unwrap();
     workspace.replace_document(OpenDocument::load(second_path.clone()).unwrap());
     assert_eq!(workspace.open.path, Some(second_path.clone()));
     assert_eq!(

@@ -1,5 +1,6 @@
 pub(crate) mod auto_layout;
 pub(crate) mod dock;
+pub(crate) mod open_document;
 mod serde;
 pub(crate) mod validate;
 
