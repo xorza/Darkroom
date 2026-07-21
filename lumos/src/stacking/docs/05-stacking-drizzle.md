@@ -1,1254 +1,1598 @@
-# Stage 5 — Stacking & Drizzle: Best Practices & Algorithms
+# Stage 5 — Statistical stacking and drizzle reconstruction
 
-## Scope & Goal
+This document specifies the final reconstruction stage of the Lumos astronomical
+pipeline. It is deliberately split into two parts:
 
-Stage 5 combines a set of registered (warped) frames into a single deep image. There
-are two fundamentally different reconstruction paradigms, and they are *not*
-interchangeable:
+- Sections 1–9 are the **normative implementation contract**. `MUST`, `SHOULD`, and
+  `MAY` have their usual requirements meaning. An implementation following these
+  sections should be scientifically and numerically complete.
+- Section 10 is a **source audit of Lumos as it exists on 2026-07-21**. It records
+  working behavior and gaps; it is not permission to copy a known limitation into
+  a new implementation.
 
-1. **Statistical stacking** — every output pixel is an independent estimator built
-   from the co-registered input samples at that location: a (possibly rejected,
-   normalized, weighted) **mean or median**. The output grid is the same size as the
-   inputs. This is what almost every deep-sky stack is, and it is the right default.
-   It maximizes signal-to-noise ratio (SNR) and removes transient outliers (cosmic
-   rays, satellites, planes, hot pixels) but cannot recover spatial resolution lost
-   to undersampling.
+The specification is grounded in Fruchter and Hook's variable-pixel linear
+reconstruction paper, Rosner's generalized ESD test, and source-level comparison
+with STScI `drizzle`, DrizzlePac, Siril, CCDProc, and SWarp. Revisions and links are
+listed in §12.
 
-2. **Drizzle** (Variable-Pixel Linear Reconstruction; Fruchter & Hook 2002) — a
-   *resampling* method that maps each shrunken input pixel ("drop") onto a finer
-   output grid, distributing flux by geometric overlap area. It can recover
-   resolution from **dithered, undersampled** data and removes geometric-distortion
-   photometric error, at the cost of introducing **correlated noise**. Drizzle is a
-   linear coadd, not a robust estimator — it does *not* by itself reject outliers
-   (rejection is done separately, e.g. the DrizzlePac median+blot+derivative CR
-   scheme, before drizzling).
-
-The goal of this document is to state, with the math and with citations into the
-cloned reference implementations, *what each method assumes, when it helps, when it
-hurts*, and to map that onto lumos's current implementation (`src/stacking/`,
-`src/drizzle/`).
-
-The governing principle: **maximize SNR while suppressing outliers and not corrupting
-photometry.** Mean stacking is the maximum-likelihood estimator for Gaussian noise and
-has the best SNR; everything else (median, rejection, robust estimators) trades a
-little of that efficiency for robustness against the non-Gaussian tail.
+The central rule is simple: **keep science values linear, keep geometry and
+statistical weight separate, and propagate the coefficients actually used.** A
+nice-looking image is not sufficient evidence that a stack is correct.
 
 ---
 
-## 1. Pre-combine conditioning
+## 1. Scope and terminology
 
-Before any pixels are combined, three things must be made consistent across frames:
-the **photometric scale/offset** (normalization), the **per-frame weight**, and the
-choice of a **reference frame**. Skipping these is the most common cause of bad
-stacks (see §7).
+### 1.1 Two reconstruction paths
 
-### 1.1 Reference frame selection by noise
+Stage 5 supports two related but non-interchangeable paths.
 
-The normalization and weighting are defined *relative to a reference frame*. The
-standard choice is the **lowest-noise frame** — it has the most stable background and
-makes the most reliable target for matching everyone else's statistics.
+**Registered statistical stacking** first resamples every input onto one common
+grid, then estimates each output sample independently from the values at that
+location. A weighted, outlier-rejected mean is the normal light-frame product. A
+median is a robust nonlinear alternative. This path is appropriate when the
+existing sampling is adequate or when drizzle's dither requirements are not met.
 
-- **lumos**: `select_reference_frame` (`src/stacking/combine/normalization/mod.rs`) picks the frame
-  with the lowest mean MAD (median absolute deviation) across channels. MAD is used
-  rather than standard deviation because it is robust to the stars/objects in the
-  frame — it measures background noise, not signal.
-- **Registered-frame domain**: reference selection and inverse-variance weighting use MAD captured
-  from each source before interpolation. Global normalization fits paired samples over the
-  intersection of coverage-valid, confidence-positive pixels, while multiplicative normalization
-  uses medians over that same domain. Warp fill and interpolation smoothing therefore cannot change
-  source-noise weights or become a false gain. Frames with disjoint support can still combine
-  without normalization using equal, manual, or source-noise weights; normalization returns
-  `NoCommonCoverage`.
-- **siril**: the reference image is user-selectable but defaults to the best-quality
-  frame; normalization coefficients are computed relative to it
-  (`src/stacking/normalization.c:142`, `compute normalization factors based on the
-  reference image`). siril warns and aborts if the reference image is not in the
-  selected set (`normalization.c:240`).
+**Drizzle** deposits each calibrated input pixel directly onto the output grid. It
+shrinks the input pixel to a drop and distributes that drop by mapped overlap. It
+therefore combines registration and resampling in one operation. Drizzle can
+recover sampling lost to an undersampled detector only when the input exposures
+provide complementary sub-pixel phases. It does not invent optical detail, and it
+does not reject cosmic rays by itself.
 
-Why lowest noise and not highest signal? The reference defines the *target
-background statistics*; you want that target to be as clean as possible so the
-additive/multiplicative transform you derive for every other frame is well
-determined.
+Never pre-warp an image and then drizzle that warped result. That performs two
+resampling operations, broadens the effective point-spread function (PSF), and
+correlates noise twice. Drizzle MUST consume calibrated source-grid samples plus
+their source-to-output mappings.
 
-### 1.2 Normalization: additive, multiplicative, and scaling
+### 1.2 Symbol table
 
-Frames taken across a night differ in sky background (light pollution gradient,
-moon, airmass) and transparency (clouds, dew). Two corrections:
+For frame `i`, channel `c`, source pixel `u`, and output pixel `o`:
 
-- **Additive (offset) normalization** removes a background pedestal difference. Used
-  for **light frames** where the sky brightness changed but the signal scale did not:
-  `out = in + (ref_location − frame_location)`. This is what you want when the only
-  thing that changed is the sky pedestal.
-- **Multiplicative (scaling) normalization** corrects a gain/transparency difference:
-  `out = in × (ref_scale / frame_scale)`. Used for **flat fields** (and sometimes
-  lights through thin cloud), because a flat's response is multiplicative.
+| Symbol | Meaning |
+|---|---|
+| `d_iuc` | calibrated, linear source sample before Stage 5 normalization |
+| `g_ic`, `b_ic` | multiplicative gain and additive offset |
+| `x_iuc = g_ic d_iuc + b_ic` | normalized sample |
+| `v_iuc` | variance of `x_iuc` in squared science units |
+| `m_iu` | binary validity mask: 1 usable, 0 unusable |
+| `q_iuc` | non-geometric statistical weight, normally `1/v_iuc` |
+| `W_i(r)` | inverse warp: common/reference coordinate `r` to source coordinate |
+| `F_i(u)` | forward map from source coordinate to common/reference coordinate |
+| `s` | output pixel size divided by input pixel size |
+| `S = 1/s` | output sampling factor; Lumos calls this `scale` |
+| `p` | `pixfrac`, the drop width divided by the source-pixel width |
+| `a_iuo` | fraction or kernel coefficient by which source pixel `u` contributes to output `o` |
+| `k_o` | number of valid input samples contributing to output `o` |
+| `N_eff,o` | effective number of independent weighted samples |
 
-siril separates *location* (additive) from *scale* (multiplicative) and offers four
-modes — `ADDITIVE`, `ADDITIVE_SCALING`, `MULTIPLICATIVE`, `MULTIPLICATIVE_SCALING`
-(`src/stacking/normalization.c:124-134`). In the robust "lite" path location is the
-median and scale is `1.5·MAD` (an approximation of `sqrt(bwmv)`, the biweight
-midvariance, itself an approximation of the IKSS scale estimator;
-`normalization.c:117-122`). The full path uses the IKSS location/scale estimators.
-The crucial subtlety in siril's additive transform: `poffset = pscale·offset −
-offset0` (`normalization.c:167`) — the offset is applied *after* the scale, so the two
-compose correctly.
+The subscript `c` is omitted when a value is shared by every channel.
 
-- **lumos**: `compute_frame_norms` (`src/stacking/combine/normalization/mod.rs`) implements two of
-  these. `Normalization::Global` is full additive+multiplicative
-  (`gain = ref_mad/frame_mad`, `offset = ref_median − frame_median·gain`), and
-  `Normalization::Multiplicative` is scale-only (`gain = ref_median/frame_median`).
-  Normalization is applied per channel.
+### 1.3 Pixel coordinates are part of the API
 
-**Background/sky matching** for mosaics and wide fields goes a step beyond a single
-scalar offset: a low-order *surface* (plane or polynomial) is fit and subtracted so
-that the seams between tiles match. SWarp does this with its `BACK_TYPE`/`BACK_SIZE`
-mesh background subtraction and `reproject`'s coadd has an explicit background-matching
-step (`reproject/mosaicking/background.py`) that solves for per-image additive levels
-minimizing overlap differences. lumos does **not** do surface background matching —
-its normalization is a single scalar offset per channel per frame, which is correct
-for a uniform sky-pedestal shift but not for gradient mismatch between mosaic tiles.
+Lumos uses integer-center coordinates: pixel `(x, y)` is centered at `(x, y)` and
+occupies
 
-### 1.3 Per-frame weighting
-
-If frames have unequal SNR (varying transparency, seeing, exposure), an equal-weight
-mean is suboptimal. The **statistically optimal linear weight is inverse-variance**:
-for independent Gaussian samples `x_i` with variance `σ_i²`, the minimum-variance
-unbiased estimator is
-
-```
-        Σ (x_i / σ_i²)
-x̂  =  ────────────────       with   Var(x̂) = 1 / Σ(1/σ_i²)
-          Σ (1 / σ_i²)
+```text
+[x - 0.5, x + 0.5) × [y - 0.5, y + 0.5).
 ```
 
-so `w_i = 1/σ_i²`. This is the *only* weighting that minimizes the variance of the
-combined pixel; equal weighting is optimal only when all `σ_i` are equal. **Proof
-sketch:** for a weighted mean `x̂ = Σw_i x_i / Σw_i`, `Var(x̂) = Σw_i²σ_i² / (Σw_i)²`.
-Minimizing over `{w_i}` by Lagrange (∂/∂w_j = 0) gives `w_j ∝ 1/σ_j²`; substituting back
-collapses the variance to `1/Σ(1/σ_i²)` — the Cramér-Rao bound for `N` Gaussian samples,
-so no unbiased linear combiner can do better. This is the same statement F&H make about
-drizzle's weighting being *"statistically optimum when inverse variance maps are used as
-the input weights"* (§5.3). Note `w_i ∝ SNR_i²` for fixed signal (since `SNR ∝ 1/σ` at
-fixed flux), which is why "SNR² weighting" and "inverse-variance weighting" are the same
-prescription expressed in different units. **Subexposure-weighting corollary:** for
-sky-noise-limited subs of equal length, `σ_i² ∝ sky_i`, so `w_i ∝ 1/sky_i` — the cloudy
-/ light-polluted / high-airmass sub is automatically down-weighted, and a sub twice as
-noisy contributes ¼ the weight, not ½.
+Every transform, bounding-box calculation, overlap routine, WCS update, test
+fixture, and serialization format MUST use that convention. A half-pixel error is
+not a harmless display offset: it changes dither phases and the reconstructed PSF.
 
-Reference implementations expose several practical proxies for `1/σ_i²`:
+Registration estimates the inverse-warp direction used by an interpolating warp:
 
-- **Noise weighting** (`w_i ∝ 1/σ_bg²`). siril's `compute_noise_weights`
-  (`src/stacking/median_and_mean.c:1110`):
-  `w = 1 / (pscale² · bgnoise²)` — inverse of the *scaled* background noise variance.
-  Note the `pscale²` term: weights must be computed in the *normalized* frame, so the
-  scaling coefficient enters squared. lumos's `Weighting::Noise`
-  (`src/stacking/stack.rs:271`) computes `w = 1/σ²` with `σ = mad_to_sigma(MAD)`
-  averaged across channels — the same idea, but it does **not** fold in the
-  normalization scale factor (a minor gap; see §8).
-- **FWHM / weighted-FWHM weighting** — better seeing → higher weight. siril's
-  `compute_wfwhm_weights` (`median_and_mean.c:1136`) uses
-  `w_i = (1/fwhm_i² − 1/fwhm_max²) / (1/fwhm_min² − 1/fwhm_max²)`, a normalized
-  inverse-square-FWHM so the worst frame gets weight 0 and the best gets 1. This is a
-  *quality* weight, not a noise weight, and is a heuristic.
-- **Star-count weighting** — more detected stars → clearer frame. siril
-  `compute_nbstars_weights` (`median_and_mean.c:1183`) uses a normalized squared
-  star-count excess.
-- **Exposure/sub-count weighting** (`NBSTACK_WEIGHT`) for already-partially-stacked
-  inputs.
+```text
+W_i : common/reference → source/target
+source = W_i(reference)
+```
 
-PixInsight's "Weighted BatchPreprocessing" derives a per-sub weight from an SNR
-estimate (noise + star quality), which is the same inverse-variance idea wrapped in a
-quality metric.
+Drizzle needs the opposite direction:
 
-**Best practice:** for light frames of varying quality, inverse-variance (noise)
-weighting is theoretically correct and should be the default; FWHM/star-count are
-useful *additional* quality gates that down-weight bloated frames the noise estimate
-alone wouldn't catch. For calibration frames (darks/bias/flats taken back-to-back
-under identical conditions), equal weighting is correct — they have equal variance by
-construction.
+```text
+F_i : source/target → common/reference
+reference = F_i(source) = inverse(W_i)(source).
+```
+
+The direction MUST be encoded in types or constructors, not only in a comment. A
+linear `Transform` can be inverted analytically. A `WarpTransform` containing SIP
+distortion requires a numerical inverse or a separately fitted forward model; its
+linear component alone is not an adequate substitute.
+
+### 1.4 Required input record
+
+Each frame entering Stage 5 SHOULD carry one coherent record:
+
+```text
+ReconstructionFrame
+    image                  linear source samples
+    variance               optional per-channel variance planes
+    data_quality           detector/calibration bit mask
+    user_mask              optional user/artifact mask
+    forward_map            source → common map for drizzle
+    inverse_map            common → source map for ordinary warping
+    photometric_gain       one per channel
+    background_offset      one per channel, or an explicitly modeled surface
+    exposure_time
+    source_pixel_area      angular area or WCS Jacobian
+    PSF / FWHM diagnostics
+    registration diagnostics and uncertainty
+    provenance
+```
+
+Image, variance, masks, transform, normalization, and provenance MUST remain paired.
+Parallel arrays whose indices can silently diverge are not an acceptable public
+interface.
+
+### 1.5 Separate five meanings often called “weight”
+
+The implementation MUST not overload one plane with all of these meanings:
+
+1. **Validity** answers whether a sample may be used at all.
+2. **Geometric support** answers how much of an interpolation kernel or drizzle
+   drop overlaps real data.
+3. **Statistical weight** describes inverse uncertainty in a valid sample.
+4. **Combination coefficient** is the actual multiplier in the output estimator.
+5. **Coverage** describes how many exposures/geometric samples support an output
+   location.
+
+A zero validity mask excludes a sample. Small geometric support can either exclude
+it or reduce its statistical influence according to the chosen reconstruction
+model. Neither quantity is itself a detector variance.
 
 ---
 
-## 2. Combination operators
+## 2. Pre-combination conditioning
 
-### 2.1 Mean vs median, and the √N law
+### 2.1 Validate before measuring statistics
 
-For `N` independent frames each with per-pixel noise `σ`, the **mean** of the stack
-has noise `σ/√N`, so
+Reject the job before allocation or accumulation when any of these conditions is
+true:
 
+- there are no frames;
+- dimensions, channel layouts, CFA layouts, units, or filter identities are
+  incompatible with the requested operation;
+- science or variance planes contain unexpected non-finite values;
+- a variance is negative or a supposedly valid sample has non-finite variance;
+- a transform is singular, non-finite, crosses a projective horizon inside the
+  used footprint, or cannot be inverted to the required tolerance;
+- exposure, normalization, or manual weight values are non-finite or invalid;
+- the chosen output grid is empty, overflows integer dimensions, or exceeds the
+  configured memory/disk budget;
+- fewer samples will remain than a selected rejection algorithm requires.
+
+NaN MAY be accepted only when the ingestion contract explicitly defines it as a
+masked sample and converts it to `m_iu = 0` before any arithmetic. Allowing an
+untracked NaN into an accumulator contaminates every downstream result it touches.
+
+### 2.2 Frame-level selection is not pixel weighting
+
+Reject an entire frame when it fails an acquisition-quality rule: gross tracking
+failure, clouds, focus failure, saturation fraction, incompatible exposure or
+filter, calibration failure, or registration quality. Record the reason.
+
+After those gates, retain continuous diagnostics such as background variance,
+transparency, FWHM, ellipticity, and registration RMS. A continuous weight MUST not
+be used to hide a frame that is scientifically invalid. Conversely, an arbitrary
+“best 80%” cut discards exposure without a statistical justification.
+
+Seeing-based weighting is objective-dependent. Scalar inverse-background-variance
+weights are optimal for estimating a common surface-brightness sample when PSFs are
+effectively equal. They are not universally optimal for point-source detection when
+PSFs differ. Zackay and Ofek show that optimal point-source coaddition filters each
+exposure by its own PSF before combining. Therefore Stage 5 SHOULD either:
+
+- propagate an effective, possibly spatially varying coadd PSF;
+- homogenize PSFs for a measurement product, accepting resolution loss; or
+- expose a separate PSF-aware/proper-coadd product for quantitative detection and
+  photometry.
+
+Do not multiply an inverse-variance weight by an undocumented “sharpness score” and
+continue to call the result inverse variance.
+
+### 2.3 Photometric and background normalization
+
+All samples combined at one output location MUST represent the same physical
+quantity. For each frame/channel, fit
+
+```text
+x_i(p) = g_i d_i(p) + b_i(p).
 ```
-SNR_stack = √N · SNR_single
+
+`g_i > 0` matches transparency/exposure response. `b_i` matches an additive sky
+pedestal; it can be a scalar or a deliberately fitted low-frequency surface.
+
+The fit domain MUST exclude:
+
+- invalid, saturated, and defect pixels;
+- cosmic rays and known trails;
+- low-support warped borders;
+- clipped sensor values;
+- regions absent from either member of a paired fit.
+
+For ordinary same-field light frames, a robust paired fit is preferable to matching
+only independent histograms:
+
+1. Choose a reference exposure or a synthetic photometric reference.
+2. Build a common valid domain in source-independent sky coordinates.
+3. Stratify samples spatially so a dense star cluster or one nebular region cannot
+   dominate the regression.
+4. Estimate an initial gain from a robust scale ratio and an initial offset from
+   medians.
+5. Compute paired residuals `r_j = y_j - (g x_j + b)`.
+6. Estimate their robust center and scale; keep a broad inlier window such as four
+   robust sigmas.
+7. Fit the slope with errors in both axes. Deming regression is appropriate when
+   source and reference noise variances are known. For paired centered moments
+   `S_xx`, `S_yy`, `S_xy` and noise-variance ratio
+   `λ = variance_y / variance_x`, use the stable positive root
+
+```text
+delta = S_yy - λ S_xx
+g = (delta + sqrt(delta² + 4 λ S_xy²)) / (2 S_xy)   when delta >= 0
+g = 2 λ S_xy / (sqrt(delta² + 4 λ S_xy²) - delta) when delta < 0
+b = median(y) - g median(x).
 ```
 
-This is the central result of stacking: SNR grows as the square root of the number of
-frames (or, since shot noise scales with √(signal) and signal scales with total
-integration time `t`, SNR ∝ √t). Doubling SNR requires 4× the frames; 10× SNR
-requires 100×.
+8. Validate `g`, the inlier count, residual structure, and extrapolation. Fall back
+   explicitly or fail; never convert a failed fit to identity without reporting it.
 
-The **median** is robust (a single huge outlier cannot move it) but is a *less
-efficient* estimator. **Derivation of the 0.80 factor:** for a sample of `N` draws from
-a distribution with density `f` and standard deviation `σ`, the asymptotic variance of
-the sample median is `1/(4N·f(m)²)` where `m` is the population median. For a Gaussian,
-`f(m) = 1/(σ√(2π))`, so `Var(median) = (σ²·2π)/(4N) = (π/2)·σ²/N`, versus `Var(mean) =
-σ²/N`. The ratio is exactly **`π/2 ≈ 1.5708`** in variance, so the median's standard
-error is larger than the mean's by `√(π/2) ≈ 1.2533`. Equivalently the median's
-statistical efficiency is `2/π ≈ 0.637` in *variance*, i.e. `√(2/π) ≈ 0.7979 ≈ 0.80` in
-*standard deviation*. So:
+For crowded or extended targets, star photometry can give a cleaner transparency
+gain: robustly fit cataloged matched-star fluxes after local background subtraction,
+then estimate the sky offset separately. A MAD ratio over the entire image can mix
+transparency, noise, object structure, and gradient changes.
 
+For mosaics, a single scalar offset per tile is often insufficient. Fit background
+surfaces only from sky regions or solve overlap differences between images. Protect
+real extended emission: an unconstrained polynomial can “correct” a nebula or galaxy
+out of existence. Store the fitted surface and overlap graph in provenance.
+
+The reference affects numerical scale, not attainable SNR. Prefer a well-exposed,
+unsaturated, photometrically stable frame with broad overlap and a good PSF. “Lowest
+MAD” alone tends to select a dark or transparency-reduced frame and is not a complete
+reference criterion.
+
+### 2.4 Propagate normalization into variance
+
+An affine offset does not change random variance; a gain does:
+
+```text
+x_i = g_i d_i + b_i
+Var(x_i) = g_i² Var(d_i).
 ```
-SNR_median ≈ 0.80 · √N · SNR_single        (asymptotic floor; loss is *smaller* at small N — below)
+
+Every inverse-variance weight and rejection residual MUST use the normalized
+variance. This squared-gain factor is easy to omit and can heavily over-weight a
+frame that was scaled upward.
+
+If `g_i` or `b_i` has material fit uncertainty, quantitative products SHOULD also
+propagate the induced common-mode covariance. Treating a fitted gain as exact is a
+reasonable display-stack approximation, but it must be stated.
+
+### 2.5 Input variance model
+
+The preferred input is a calibrated per-pixel variance plane. In electrons, a basic
+CCD/CMOS model is
+
+```text
+v = max(model_signal + model_sky, 0)
+    + read_noise_e²
+    + dark_current_variance
+    + calibration_variance.
 ```
 
-A median stack throws away ~20% of the SNR you could have had — roughly equivalent to
-discarding ~36% of your frames (`0.80² ≈ 0.637`, so you'd need `1/0.637 ≈ 1.57×` as
-many frames to match a mean's SNR). **Correction (pass 3):** the prior version added
-"the penalty is *worse* at small N (approached from below; ~0.74 at N=3)" — that is
-**backwards**. Direct numerical integration of the order-statistic variance for a
-Gaussian gives a *variance* efficiency `Var(mean)/Var(median)` of `0.743` at N=3,
-`0.697` at N=5, `0.669` at N=9, *decreasing monotonically* to the asymptotic
-`2/π ≈ 0.637` — i.e. the limit is approached **from above**. In *standard-deviation*
-terms that is `0.862` (N=3) → `0.835` (N=5) → `0.798` (N→∞), so a 3-frame median actually
-keeps ~86% of the mean's SNR, *more* than the ~80% asymptotic floor. The `~0.74` quoted
-before is the *variance* efficiency at N=3 (which is **above** the `0.637` asymptotic
-variance efficiency), not a worse SD efficiency than `0.80`. The real small-N caution
-about median/clipping is about the **robustness of the σ estimate** (§4.4), not SNR
-efficiency. Corroborated by standard order-statistics theory and astrophotography
-references (Siril docs; jonrista; Akinshin, *median-vs-mean*).
+Convert to the science image's units with the square of the unit conversion. Include
+flat-field uncertainty and any propagated calibration-master uncertainty when those
+are significant.
 
-**When is median worth it?** Median is the right choice only when (a) you have few
-frames and an unknown/heavy outlier population that rejection can't reliably model, or
-(b) you specifically want a maximally robust reference (e.g. the DrizzlePac CR
-median, §5.8, where the median image is a *model* not a science product). For a
-science stack, **a sigma-clipped mean almost always beats a plain median** — it keeps
-~99% of the mean's efficiency while removing outliers. siril, DSS, and PixInsight all
-default to clipped-mean for the final light stack and reserve median for
-robustness-critical intermediate steps.
+Use a model signal or a leave-one-out/reference estimate for the Poisson term. Using
+the noisy observed value itself in both numerator and inverse-variance weight makes
+the estimate signal-dependent and biased: downward noise excursions receive larger
+weight.
 
-### 2.2 Reference implementations
+If no variance plane exists, a frame-level robust background sigma is a useful proxy
+only in background-dominated regions. It is not a substitute for source Poisson
+noise, saturation masks, channel-specific response, or spatial defects. Mark products
+derived from this proxy as approximate.
 
-- **lumos**: `CombineMethod::Mean(Rejection)` and `CombineMethod::Median`
-  (`src/stacking/config.rs:13`). Mean carries a `Rejection` policy; median is plain.
-- **siril**: `median_and_mean.c` implements both, with the mean path running the full
-  rejection family (`apply_rejection_float`) before averaging.
-- **DSS**: distinguishes Average, Median, Kappa-Sigma (`nClip`/`KappaSigmaClip`),
-  Median-Kappa-Sigma (`MediannClip`/`MedianKappaSigmaClip`), Auto-Adaptive Weighted
-  Average, and Entropy-Weighted Average (`DeepSkyStackerKernel/DSSTools.h`,
-  `MultiBitmapProcess.cpp`).
+### 2.6 Statistical weights
 
-### 2.3 Trimmed and Winsorized means (the efficiency middle ground)
+For independent unbiased samples with known variances, the minimum-variance linear
+estimator uses
 
-Between the plain mean (best efficiency, no robustness) and the median (full
-robustness, 0.80 efficiency) sit two compromise estimators, both of which the rejection
-family reduces to:
+```text
+q_i = 1 / v_i
+mu = sum(q_i x_i) / sum(q_i)
+Var(mu) = 1 / sum(q_i).
+```
 
-- **Trimmed mean** — sort the `N` samples, *discard* the lowest and highest `α·N`, and
-  average the rest. A 10% trimmed mean of a Gaussian has ~0.97 efficiency yet rejects
-  one-sided contamination up to 10%. **Sigma/kappa-clipping is an adaptive trimmed
-  mean**: instead of trimming a fixed *fraction*, it trims everything past `κσ`, so the
-  trim count adapts to how heavy the tail actually is. The `SIGMEDIAN` /
-  median-kappa-sigma variants (siril `rejection_float.c:210`, DSS
-  `MedianKappaSigmaClip`) are the *replacing* cousin — rejected samples become the
-  median rather than being dropped, keeping `N` constant.
-- **Winsorized mean** — instead of discarding the tails, *clamp* them to the cutoff
-  value, then average. Retains all `N` samples' worth of count but caps their leverage.
-  This is the combination-operator analogue of the **σ-estimation** trick in §3.2;
-  the rejection there Winsorizes only to compute a robust *spread*, then clips the
-  original data, but the same clamp-don't-drop idea defines the Winsorized *mean*.
+The general formula, valid for arbitrary nonnegative weights, is
 
-The practical upshot: a sigma-clipped mean is, statistically, an adaptive trimmed mean,
-and that is *why* it keeps ~99% of the mean's efficiency while shedding outliers —
-it trims only the genuine tail, not the Gaussian core. This is the formal justification
-for the "clipped mean beats median for science stacks" rule of §2.1.
+```text
+a_i = q_i / sum(q)
+Var(mu) = sum(a_i² v_i).
+```
+
+It reduces to `1/sum(q)` only for true inverse-variance weights. Manual quality
+weights MUST use the general formula.
+
+Normalize weights only for numerical convenience; multiplying every `q_i` by the
+same positive constant does not change the estimate. Preserve their physical scale
+when an output inverse-variance map is promised.
+
+### 2.7 Calibration-master special cases
+
+Calibration stacks have different normalization rules from light frames.
+
+- **Bias:** no additive or multiplicative matching. Combine frames from one stable
+  acquisition regime. Use equal or measured inverse-variance weights and reject
+  transient events.
+- **Dark:** no arbitrary image-statistic normalization. Exposure/temperature/current
+  scaling is a physical calibration model and belongs upstream. A hot pixel is real
+  fixed structure, not an outlier merely because it is bright.
+- **Flat:** after bias/dark correction, normalize each flat multiplicatively by a
+  robust illumination level. Do not apply an additive sky-style correction. Reject
+  only transient contamination; fixed dust shadows and pixel-response structure are
+  the signal the master flat must retain.
 
 ---
 
-## 3. Pixel rejection algorithms
+## 3. Registered statistical stacking
 
-Rejection removes per-pixel outliers (cosmic rays, satellite/plane trails, hot/cold
-pixels not caught by calibration, aircraft) from the sample set *before* the mean is
-taken. Every method answers the same question — "is sample `x_i` too far from the
-estimated center given the estimated spread?" — but differs in (a) the *center*
-(mean / median / fitted line), (b) the *spread* (σ / MAD / Winsorized σ), (c)
-*iteration*, and (d) *failure modes with small N*.
+### 3.1 Resample each source once
 
-All clip methods share a hard floor: with very few samples you cannot tell signal
-from outlier. siril enforces `N − r > 4` to keep at least 4 samples
-(`rejection_float.c:188`); when fewer than ~3–4 frames survive it simply stops
-rejecting. **The whole family is statistically meaningless below ~6–8 frames** because
-the σ estimate is itself dominated by the outliers (see §4.4 and §7).
+For the conventional path, inverse-warp calibrated sources onto the common output
+grid with Stage 4's selected interpolation kernel. For each output/channel retain:
 
-The lumos rejection family lives in `src/stacking/rejection.rs`
-(`enum Rejection { None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd }`,
-`rejection.rs:831`).
+- the resampled science value;
+- geometric support;
+- the propagated variance, using squared interpolation coefficients;
+- an indication of which original pixels contributed;
+- any covariance description the resampler can provide.
 
-### 3.1 Sigma clipping / kappa-sigma
+If a resampled value is
 
-The canonical method. Iterate:
-
-1. Compute center `c` (median, robust) and spread `s` (σ or MAD) of the surviving
-   samples.
-2. Reject any `x_i` with `x_i − c > κ_high·s` (high) or `c − x_i > κ_low·s` (low).
-3. Recompute `c`, `s`; repeat until no samples are rejected (or N too small).
-
-"**Kappa-sigma**" is the same algorithm; "kappa" (κ) is just the symbol some packages
-(DSS, PixInsight) use for the threshold instead of "sigma multiplier". Typical
-`κ ≈ 3` high, often looser low (cosmic rays and trails are positive outliers; there
-are few negative ones, so `κ_low` matters less — confirmed in the PixInsight
-guidance: "the low parameter is not that important").
-
-```
-reject x_i  ⇔  (c − x_i > κ_low·s)  ∨  (x_i − c > κ_high·s)
+```text
+y_o = sum_j h_oj x_j / sum_j h_oj,
 ```
 
-- siril `sigma_clipping_float` (`rejection_float.c:49`) with the `SIGMA` case
-  iterating `do … while (changed && N > 3)` (`:174-208`); uses median as center and
-  `siril_stats_float_sd` as spread. The **MAD** variant (`case MAD`) is identical but
-  substitutes `siril_stats_float_mad` for the spread (`:181`) — more robust because
-  MAD is not inflated by the very outliers you're trying to reject.
-- DSS `KappaSigmaClip` (`DSSTools.h:606`) iterates a *fixed* number of times
-  (`lNrIterations`) using **mean ± κσ** (not median-centered), recomputing dynamic
-  stats each pass. `MedianKappaSigmaClip` (`:677`) is the "median-kappa-sigma" variant
-  that *replaces* rejected pixels with the median rather than dropping them — this
-  keeps `N` constant so the final average is over a fixed count (DSS's
-  `SIGMEDIAN`-like behavior; siril has the same idea in its `SIGMEDIAN` case,
-  `rejection_float.c:210`).
-- lumos `SigmaClip` (`rejection.rs`, `SigmaClipConfig` at `rejection.rs:20`) — separate
-  low/high sigma, iterative; median center + MAD spread, with a Welford mean+stddev
-  early-exit that skips the median/MAD pass when no sample can possibly clip
-  (`no_outliers_possible`, `rejection.rs:138`).
+then, for independent source pixels,
 
-**Assumptions:** Gaussian core, outliers in the tails, enough samples that the
-center/spread are well estimated. **Failure mode:** with few frames, a single bright
-cosmic ray inflates σ so much that *nothing* is rejected (masking); using a
-median+MAD center/spread mitigates this but doesn't cure the small-N problem.
-
-### 3.2 Winsorized sigma clipping
-
-Winsorization computes the spread *robustly* by first **clipping the distribution's
-tails to the ±1.5σ values** (rather than removing them), iterating to a stable σ, and
-only *then* applying the σ-clip rejection on the original data. This gives a σ
-estimate that is not blown up by the outliers, so clipping converges correctly even
-with a fat tail.
-
-siril `WINSORIZED` (`rejection_float.c:223`):
-
-```
-repeat:
-    σ ← sd(stack);  m ← median(stack)
-    w ← copy(stack)
-    repeat:                                    # winsorize to ±1.5σ
-        w[j] ← clamp(w[j], m − 1.5σ, m + 1.5σ)
-        σ₀ ← σ;  σ ← 1.134 · sd(w)             # 1.134 corrects Winsorized-σ bias
-    until |σ − σ₀| ≤ 0.0005·σ₀
-    reject stack[i] with sigma_clipping(σ, m)  # clip ORIGINAL data with robust σ
-until no change
+```text
+Var(y_o) = sum_j h_oj² Var(x_j) / (sum_j h_oj)².
 ```
 
-The magic constant **1.134** is the bias-correction factor that rescales the
-Winsorized standard deviation back to an unbiased estimate of the true Gaussian σ
-(because clamping the tails shrinks the variance). **Where 1.134 comes from:**
-Winsorizing a Gaussian at Huber's `c = 1.5` (i.e. clamping everything beyond ±1.5σ to
-exactly ±1.5σ) leaves a distribution whose variance is smaller than the parent σ². The
-deflation factor for `c = 1.5` works out to ≈ `1/1.134² ≈ 0.778`, so multiplying the
-Winsorized sd by `1.134 ≈ 1/√0.778` restores an (asymptotically) unbiased σ estimate.
-The value is specific to `c = 1.5` — a different Winsorizing cutoff needs a different
-factor. This `c = 1.5` / `1.134` pairing is the one PixInsight, siril, and lumos all
-use; it is documented in PixInsight's Winsorized-sigma-clipping notes and Huber's robust
-statistics. **Verified (pass 3) by direct numerical integration:** for the symmetric
-Winsorized Gaussian at `c = 1.5`, `E[ψ_{1.5}(z)²] = ∫_{−1.5}^{1.5} z²φ(z) dz +
-1.5²·2(1−Φ(1.5)) = 0.47783 + 0.30063 = 0.77846`, so the bias factor is exactly
-`1/√0.77846 = 1.13339 ≈ 1.134` — siril/lumos's constant to four digits. (`ψ_c` is
-Huber's clipped score, which is just the Winsorized variable `clamp(z, −c, c)`; its
-second moment is the deflated variance.) lumos hard-codes exactly this:
-`HUBER_C = 1.5` (`rejection.rs:201`), `WINSORIZED_CORRECTION = 1.134`
-(`rejection.rs:203`), `WINSORIZE_CONVERGENCE = 0.0005` (`rejection.rs:205`) — bit-for-bit
-the same constants as siril's `1.5f`, `1.134f`, `0.0005f` (`rejection_float.c:230-237`),
-including the same iterate-to-stable-σ inner loop.
+Interpolation creates covariance between neighboring output pixels whenever they
+share source samples. A scalar confidence map can describe the diagonal variance;
+it cannot describe that covariance.
 
-**Best practice:** Winsorized sigma clipping is the **recommended default for small-to-
-moderate frame counts** (PixInsight community: "Winsorized when fewer than ~20 subs").
-It is more robust than plain sigma clipping at the same threshold and rarely worse.
+### 3.2 Per-output gather contract
 
-### 3.3 Linear-fit clipping
+At each output/channel, gather a compact array of records, not disconnected value
+and weight arrays:
 
-Sort the samples, fit a **straight line** `y = a·i + b` through the sorted values vs.
-index, and reject points whose vertical distance to the line exceeds `κ·σ` where σ is
-the mean absolute residual. The rationale: across a long sub-stack, the background of
-a given pixel may *trend* (changing sky, gradient), so the "center" is not a constant
-but a line; fitting the trend removes spurious rejections and catches true outliers
-better with many frames.
-
-siril `LINEARFIT` (`rejection_float.c:260`):
-
-```
-quicksort(stack)
-fit line (a,b) over (index, value)            # siril_fit_linear
-σ ← (1/N) Σ |stack[i] − (a·i + b)|            # mean absolute residual
-reject stack[i] with line_clipping(a·i+b, σ)
-iterate until no change
+```text
+Sample { value, variance, weight, frame_id, valid }
 ```
 
-lumos `LinearFit` (`LinearFitClipConfig`, `rejection.rs:362`) implements the same
-sorted-index least-squares + residual clip.
+A sample is usable only if all relevant masks are good, geometric support passes the
+configured threshold, and value/variance/weight are finite. Apply normalization
+before rejection. Preserve `frame_id` through every sort, partition, and compaction.
 
-**Best practice:** linear-fit clipping is the **recommended method for large frame
-counts** (PixInsight community: "25+ subs use linear fit"). With many frames it is the
-most discriminating; with few frames the line is poorly constrained and it
-under-performs Winsorized clipping.
+When no sample survives, emit the configured invalid/fill value and zero validity,
+coverage, weight, and effective count. Do not silently emit a valid zero.
 
-### 3.4 Percentile clipping
+### 3.3 Plain and weighted mean
 
-A *non-iterative* method for **very small N** (3–5 frames) where σ cannot be
-estimated. Reject samples whose fractional deviation from the median exceeds a
-percentage:
+For survivors `S`, compute in at least `f64` or with compensated accumulation:
 
-```
-reject low   ⇔  median − x_i > median · p_low
-reject high  ⇔  x_i − median > median · p_high
-```
-
-(siril `percentile_clipping`, `rejection_float.c:31` — note the threshold is a
-*fraction of the median value*, not a count-based percentile.) lumos
-`PercentileClipConfig` (`rejection.rs:529`) takes `low`/`high` as percentages
-(0–50). Because it does not need a σ estimate or iteration, it is the safe choice when
-you have too few frames for sigma clipping. **Failure mode:** thresholds are absolute
-fractions of the median, so it is sensitive to background level and does not adapt to
-the actual noise.
-
-### 3.5 Generalized ESD (GESD / Grubbs)
-
-The most statistically principled method, designed to detect **up to `r` outliers**
-with a controlled false-positive rate `α`. It repeatedly applies the Grubbs test:
-
-```
-Grubbs statistic at each step:   G = max_i |x_i − x̄| / s        (x̄ = mean, s = sd)
-remove the most extreme x_i, recompute, repeat up to r times → G_1, G_2, …, G_r
+```text
+Q  = sum_{i in S} q_i
+N  = sum_{i in S} q_i x_i
+C2 = sum_{i in S} q_i²
+mu = N / Q
+N_eff = Q² / C2.
 ```
 
-Each `G_k` is compared against a critical value derived from the **Student-t inverse
-CDF**. The exact NIST/Rosner form (parsed from the NIST e-Handbook, pass 2) indexes by
-`i = 1…r` (number already removed):
+`N_eff` equals the count for equal weights and decreases as one frame dominates. It
+is often more informative than raw coverage.
 
+Also compute the actual modeled variance:
+
+```text
+V_num = sum_{i in S} q_i² v_i
+V_out = V_num / Q².
 ```
-              (n−i) · t_{p, n−i−1}                                α
-λ_i  =  ──────────────────────────────── ,   p = 1 − ─────────────────
-        √((n−i−1+t²)·(n−i+1))                          2·(n − i + 1)
+
+When `q_i = 1/v_i`, `V_out = 1/Q`. Store the general result rather than assuming
+that identity.
+
+The familiar `sqrt(N)` SNR improvement follows only for independent equal-noise
+frames. Correlation, unequal weights, source Poisson noise, and systematic errors
+change it.
+
+### 3.4 Median
+
+Define the median convention exactly. Recommended behavior is:
+
+- odd `k`: sorted element `z[k/2]`;
+- even `k`: arithmetic mean of `z[k/2 - 1]` and `z[k/2]`.
+
+An upper-middle-only median is a biased convention for even sample counts unless it
+is explicitly required for compatibility.
+
+The median is nonlinear. It has no fixed linear coefficient map, so a
+`sum(weights²)/sum(weights)²` plane is not its variance. For equal independent
+Gaussian samples, the large-`N` result is
+
+```text
+Var(median) ≈ (pi / 2) sigma² / N,
+SNR_median ≈ sqrt(2/pi) sqrt(N) SNR_single ≈ 0.798 sqrt(N) SNR_single.
 ```
 
-where `t_{p,ν}` is the 100p-th percentile of the t-distribution with `ν` d.o.f. This is
-**identical** to the per-step form `λ = (m−1)·t / √(m·(m−2+t²))` with `t = t_inv(1 −
-α/(2m), m−2)` once you set `m = n − i + 1` (the live sample count at step `i`): then
-`m−1 = n−i`, `m−2 = n−i−1`, `m = n−i+1`, and `p = 1 − α/(2m)` line up exactly. siril
-codes the `m` (decrementing `size`) convention; the doc's earlier `(n−1)t/√(n(n−2+t²))`
-is this same form at the first step (`m = n`). The number of outliers is the *largest*
-`i` for which `G_i > λ_i`. Because the comparison is done backward (test for the most
-outliers that still pass), GESD is robust to **masking** (one outlier hiding another) —
-NIST's worked example flags **3** outliers at α=0.05 where sequential Grubbs *"would
-stop at the first iteration and declare no outliers."* NIST also notes the t-critical
-approximation is *"very accurate for n ≥ 25 and reasonably accurate for n ≥ 15"* — below
-that, neither the t- nor the normal-approximation should be trusted much.
+Finite-sample order-statistic formulas or a bootstrap are needed for a rigorous
+median uncertainty. A weighted median is a different estimator and MUST be named as
+such; otherwise requested frame weights should produce an error or an explicit
+warning.
 
-- siril `GESDT` (`rejection_float.c:301`) with `grubbs_stat` (`:82`) and the critical
-  values precomputed via the exact t-inverse CDF
-  `gsl_cdf_tdist_Pinv(1 − sig/(2·size), size−2)` (`median_and_mean.c:1481`) — this is
-  *exactly* the λ formula above. The max number of outliers is
-  `floor(N · sig[0])` (`:1480`), i.e. a fraction of the stack.
-- lumos `Gesd` (`GesdConfig`, `rejection.rs:616`; `reject` at `:668`) implements the
-  same two-sided mean/sample-sd statistic and backward scan as NIST. Critical values use
-  an accurate Student-t inverse CDF and the live sample count, and are cached per rayon
-  worker for a `(sample count, max outliers, α)` configuration. Automatic `max_outliers`
-  targets `N/4`, capped at two below 25 samples and ten thereafter; explicit values remain
-  available for independently validated contamination policies. The `StackConfig::gesd()`
-  preset falls back to median below 15 frames.
-  The implementation is checked against NIST's 54-value worked example and all ten
-  tabulated statistics and critical values. Deterministic Gaussian Monte Carlo at
-  `N = 15, 25, 50, 100` verifies the family-wise false-positive rate against `α = 0.05`.
+A median is useful for very small contaminated sets and for constructing a robust
+model in a drizzle/blot rejection pass. A rejected weighted mean normally retains
+more SNR for the final light stack.
 
-**Assumptions:** approximately Gaussian core, outlier fraction below `r/N`. GESD needs
-`n ≥ ~3` to even compute (siril guards `nb_frames < 3` at `median_and_mean.c:1281`)
-and only makes statistical sense with `N ≥ 15`; the Lumos preset enforces that floor.
+### 3.5 Rejection and combination are separate operations
 
-### 3.6 MAD-based clipping
+Every rejection algorithm produces a survivor mask over the original sample
+records. The final estimator then combines those survivors. “Winsorized sigma
+clipping,” for example, uses Winsorization to estimate a robust scale but normally
+rejects original samples before the final mean; it does not necessarily average the
+clamped values.
 
-Not a separate algorithm so much as a *robust spread choice* within sigma clipping:
-use **MAD** (`MAD = median(|x_i − median(x)|)`) scaled to a σ-equivalent via
-`σ ≈ 1.4826·MAD` instead of the sample standard deviation. Because the median and MAD
-are not inflated by outliers, MAD-based clipping converges correctly even with a heavy
-tail and is preferable to mean+sd clipping. siril exposes it as the `MAD` rejection
-case (`rejection_float.c:175-181`), identical to sigma clipping but with
-`siril_stats_float_mad` as the spread. lumos uses MAD throughout its frame statistics
-(`FrameStats`, `frame_store/mod.rs`) and `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`) in
-`math/statistics`.
+Rejection SHOULD operate on standardized residuals when variances differ:
 
-### 3.7 Min-frame requirements summary
+```text
+r_i = (x_i - model_i) / sqrt(v_i + v_model_i).
+```
 
-| Method | Min sensible N | Best regime | Spread used |
-|--------|----------------|-------------|-------------|
-| Percentile | 3 | 3–5 frames | none (fraction of median) |
-| Winsorized σ-clip | ~6 | 6–20 frames | Winsorized σ (×1.134) |
-| Sigma / kappa-σ | ~8 | 8–20 frames | sd or MAD |
-| Linear-fit | ~15 | 20+ frames | mean abs residual |
-| GESD | 15 | 15+ frames, controlled FPR | sample sd, exact t-critical |
+If the center/model uncertainty is ignored, document that approximation. Applying
+one raw-value sigma threshold to heteroscedastic samples rejects noisy frames more
+often even when their values are statistically consistent.
+
+Asymmetric thresholds are useful because cosmic rays and trails are usually positive,
+while interpolation ringing and calibration defects can be negative. Inclusive
+bounds are recommended: keep a value exactly on the threshold.
+
+Never permit rejection to reduce the sample below the estimator's declared minimum.
+Stop before that removal and report that the pixel was underconstrained.
+
+### 3.6 Iterative median/MAD sigma clipping
+
+For a survivor set `S`:
+
+1. Compute `m = median(x_i)`.
+2. Compute `MAD = median(|x_i - m|)`.
+3. Convert to a Gaussian-consistent scale with
+   `sigma_MAD = 1.482602218505602 * MAD`.
+4. With no per-sample variance, use
+   `sigma = max(sigma_MAD, sigma_floor)`, where `sigma_floor` comes from a
+   quantization/noise model, and compare raw deviations with `k_low*sigma` and
+   `k_high*sigma`.
+5. With per-sample variance, form standardized residuals
+
+```text
+r_i = (x_i - m) / sqrt(v_i + v_m).
+```
+
+   `v_m` is the center-estimate variance, preferably computed leave-one-out so
+   sample `i` is not compared with a model containing itself. Estimate a robust
+   residual-scale multiplier
+
+```text
+s_r = max(1, 1.482602218505602 * median(|r_i - median(r)|)).
+```
+
+   Then keep `-k_low*s_r <= r_i <= k_high*s_r`. The floor at one prevents a
+   small sample fluctuation from claiming that a trusted noise model is too broad;
+   an optional variance-rescaling mode may relax this only when explicitly
+   configured.
+6. Recompute center, center variance, and scales from survivors until no new
+   rejection or `max_iterations` is reached.
+
+`MAD = 0` MUST NOT be interpreted as “there are no outliers.” A stack containing
+many exactly equal quantized values and one cosmic ray has zero MAD. The propagated
+noise/quantization floor resolves this case; without one, any fallback is heuristic
+and must be tested explicitly.
+
+A range-based fast path is legal only if it proves that the exact algorithm cannot
+reject anything. It must reproduce the zero-scale and boundary semantics of the
+full path.
+
+Fixed `k` does not give a fixed family-wise false-rejection rate as frame count
+grows. Presets SHOULD become more conservative with large `N`, or offer a
+multiplicity-aware mode.
+
+### 3.7 Winsorized sigma clipping
+
+The name is used for several variants. The configuration and documentation MUST
+state the exact one. A Siril-style robust-scale/reject algorithm is:
+
+```text
+S = all valid samples
+repeat outer:
+    m = median(S)
+    s = sample_standard_deviation(S)
+    repeat inner:
+        Y = clamp_each(S, m - 1.5*s, m + 1.5*s)
+        s_new = 1.134 * sample_standard_deviation(Y)
+        stop when abs(s_new - s) <= 0.0005*s
+        s = s_new
+    reject original samples outside [m - k_low*s, m + k_high*s]
+until no change or minimum survivors reached
+```
+
+Set a finite inner-iteration cap and define behavior when `s = 0`. Keep the median
+and all index associations exact through sorting. The `1.134` factor is tied to this
+Huber/Winsorized estimator; it is not a universal correction for every clamping
+scheme.
+
+This method is robust at smaller `N` than ordinary mean/standard-deviation clipping,
+but thresholds still need validation against representative sensor noise and
+outlier populations. The raw-value form assumes comparable variances. For
+heteroscedastic data, run the robust estimation on standardized model residuals and
+apply the resulting survivor mask to the original samples.
+
+### 3.8 Fixed-fraction trimming
+
+Lumos's operation called percentile clipping is a fixed-count trimmed mean. Define
+it without ambiguity:
+
+```text
+sort ascending with frame IDs
+n_low  = floor(k * p_low  / 100)
+n_high = floor(k * p_high / 100)
+keep [n_low, k - n_high)
+```
+
+Require `0 <= p_low,p_high < 100` and at least one survivor; a stricter API SHOULD
+require several survivors for a mean. Ties are retained or removed according to
+their sorted positions, so this method always removes the configured counts even
+from clean Gaussian data. Report the realized counts.
+
+This is not Siril's historical “percentile clipping,” which compares fractional
+deviation from the median. The two algorithms must not share serialized names
+without a qualifier.
+
+### 3.9 Rank-linear-fit clipping
+
+The Siril/PixInsight-family method used by Lumos is an **order-statistic fit**, not a
+fit against exposure time, frame number, a reference-image value, or spatial
+position:
+
+1. Optionally run one robust median/MAD seed rejection.
+2. Sort survivors by value, preserving their frame IDs.
+3. Fit `z_j = a + b j` to sorted rank `j = 0..k-1` by least squares.
+4. Compute residuals `e_j = z_j - (a + b j)`.
+5. Estimate residual scale using the explicitly selected statistic.
+6. Reject ranks outside the asymmetric residual band.
+7. Repeat the sort/fit/reject step to convergence or the iteration cap.
+
+If the scale is `mean(abs(e_j))`, the thresholds are multiples of mean absolute
+residual, **not Gaussian sigma**. Parameter names and UI labels must say so or apply
+the appropriate consistency conversion.
+
+Sorting removes temporal identity from the independent variable. Therefore this
+method does not fit a time trend and does not remove a sky gradient. It can tolerate
+a broad, smoothly ordered distribution of per-frame values, which is why it may
+appear helpful when normalization residuals vary, but a real spatial background
+mismatch should be fixed by normalization rather than hidden inside rejection.
+
+A statistically cleaner order-distribution model MAY fit expected normal quantiles
+instead of raw rank, but that is a different algorithm and needs its own tests and
+name.
+
+### 3.10 Generalized ESD (Rosner)
+
+GESD tests up to `r` outliers in an approximately i.i.d. Gaussian sample. For the
+live sample `S_i` of size `n_i = n - i + 1`:
+
+```text
+mean_i = mean(S_i)
+s_i    = sample_standard_deviation(S_i)
+R_i    = max_j |x_j - mean_i| / s_i
+```
+
+Remove the maximizing sample provisionally and repeat for `i = 1..r`. For a
+two-sided test at significance `alpha`, compute
+
+```text
+p_i      = 1 - alpha / (2 n_i)
+t_i      = StudentT_inverse_cdf(p_i, df = n_i - 2)
+lambda_i = (n_i - 1) * t_i / sqrt(n_i * (n_i - 2 + t_i²)).
+```
+
+The number of outliers is the **largest** `i` for which `R_i > lambda_i`. Restore all
+provisional removals after that index. Stopping at the first failed test is wrong
+because masking can make a later statistic significant.
+
+Use sample, not population, standard deviation; live sample size in both `p_i` and
+degrees of freedom; an accurate Student-t inverse; and stable `f64` moments. Rosner's
+critical-value approximation is very accurate for `n >= 25` and reasonably accurate
+for `n >= 15`. Below that, use a declared fallback.
+
+GESD's Gaussian i.i.d. assumptions do not hold for raw heteroscedastic samples.
+Standardize them first or do not present `alpha` as a calibrated false-positive
+probability. `r` is an upper bound on contamination, not a free “aggressiveness”
+slider.
+
+### 3.11 Small-N policy
+
+The small-stack fallback is part of the configuration and provenance. Suggested
+starting policy:
+
+| Valid samples at a pixel | Suggested estimator |
+|---:|---|
+| 0 | invalid/fill |
+| 1 | the sample, flagged `N_eff=1` |
+| 2 | weighted mean only if both agree under the noise model; otherwise underconstrained |
+| 3–4 | median or a carefully validated robust rule |
+| 5–14 | Winsorized or median/MAD clipping with conservative thresholds |
+| >= 15 | GESD becomes statistically defensible; sigma/Winsorized remain valid |
+
+The decision SHOULD use the local valid count, not only the global number of
+frames. Edges and masked regions can have a much smaller `N` than the center.
+
+### 3.12 RGB and CFA policy
+
+For raw mosaic data, calibration and transient rejection at the CFA sample level
+avoid demosaic-induced correlations and colored cosmic-ray artifacts. Samples may
+only be compared within the same CFA color/filter class.
+
+For RGB data, choose and record one of two policies:
+
+- **Per-channel rejection:** maximizes use of unaffected channels but can produce
+  different survivor sets and color shifts.
+- **Joint rejection:** detect an artifact from standardized multi-channel residuals
+  and reject that frame in all channels; better for chromatic consistency and broad
+  artifacts.
+
+Whichever policy is selected, weight, variance, survivor count, and rejection maps
+must have the same channel shape as the estimator. A shared scalar frame-noise
+weight is only justified when channel variances have already been equalized.
+
+### 3.13 Required statistical-stack outputs
+
+A quantitative product SHOULD contain:
+
+- linear science image;
+- validity mask;
+- geometric coverage count/fraction before rejection;
+- survivor count after rejection;
+- sum of actual combination weights;
+- `N_eff`;
+- propagated variance in science units;
+- optional empirical scatter or reduced-chi-square map;
+- low/high rejection count maps, preferably per channel;
+- effective PSF/provenance and registration diagnostics.
+
+The coefficient-only quantity
+
+```text
+L_o = sum(q_i²) / sum(q_i)² = 1/N_eff
+```
+
+is useful, but it is an actual variance only when every contributing input has the
+same unit variance. Name it `linear_variance_factor`, not `variance`.
+
+An optional model-check is
+
+```text
+chi2 = sum((x_i - mu)² / v_i)
+nu   = max(k - 1, 1).
+```
+
+Large `chi2/nu` indicates underestimated variance, unmodeled normalization/PSF
+differences, variability, or remaining artifacts. Rejection biases the conditional
+scatter downward, so do not use post-clipping scatter alone as a fully calibrated
+uncertainty.
+
+### 3.14 Reference pseudocode
+
+```text
+for each output tile:
+    load aligned science, variance, support, and masks for every frame
+    for each output pixel and channel:
+        samples = []
+        for frame i:
+            if mask_good(i) and support(i) > support_min:
+                x = gain[i,c] * warped_value[i,c] + offset[i,c]
+                v = gain[i,c]^2 * warped_variance[i,c]
+                q = choose_weight(v, frame_quality, interpolation_model)
+                if finite(x, v, q) and v >= 0 and q > 0:
+                    samples.push({x, v, q, frame_id=i})
+
+        geometric_count = len(samples)
+        survivors = reject(samples, local_small_n_policy)
+
+        if estimator is mean:
+            Q    = compensated_sum(q)
+            N    = compensated_sum(q*x)
+            C2   = compensated_sum(q*q)
+            Vnum = compensated_sum(q*q*v)
+            output = N/Q
+            variance = Vnum/(Q*Q)
+            n_eff = Q*Q/C2
+        else if estimator is median:
+            output = defined_median(survivor values)
+            variance = median_uncertainty_or_missing
+
+        write science, validity, counts, Q, n_eff, variance, rejection diagnostics
+```
 
 ---
 
-## 4. Statistical correctness
+## 4. Drizzle: geometric reconstruction
 
-### 4.1 Variance propagation
+### 4.1 When drizzle is justified
 
-For a weighted mean `x̂ = Σw_i x_i / Σw_i`, the output variance is
+Drizzle is useful only when all of these are substantially true:
 
+- the scene is static and the data remain linear;
+- the detector undersamples the optical PSF;
+- exposures contain sufficiently accurate complementary sub-pixel phases;
+- mappings include all relevant distortion;
+- masks remove cosmic rays, trails, defects, saturation, and transient sources;
+- output scale and `pixfrac` are chosen from sampling diagnostics rather than a
+  desire for a larger file.
+
+If the source PSF is already sampled by roughly 2–2.5 pixels across its FWHM, a
+finer grid may aid display or alignment but contains little new information. If all
+dithers share nearly the same fractional phase, increasing `S` mostly produces
+holes or correlated interpolation.
+
+Drizzle is linear reconstruction, not deconvolution. It cannot restore frequencies
+removed by the optical PSF, detector response, focus, tracking, or registration
+error.
+
+### 4.2 Construct the output grid from pixel boundaries
+
+Choose an output mode explicitly: reference footprint, intersection, union/mosaic,
+or caller-provided WCS/grid. For each source, map the boundary of its valid pixel
+footprint through `F_i`. With nonlinear distortion, sample boundary curves
+adaptively; four image corners are insufficient when an edge is curved.
+
+Let common-coordinate bounds be `[x_min, x_max) × [y_min, y_max)` and let `S = 1/s`.
+Then
+
+```text
+width  = ceil(S * (x_max - x_min))
+height = ceil(S * (y_max - y_min)).
 ```
-Var(x̂) = Σ(w_i² σ_i²) / (Σw_i)²
+
+Map a common coordinate to integer-center output coordinates with
+
+```text
+o_x = S * (r_x - x_min) - 0.5
+o_y = S * (r_y - y_min) - 0.5.
 ```
 
-which for the optimal `w_i = 1/σ_i²` collapses to `Var(x̂) = 1/Σ(1/σ_i²)`. After
-rejecting `k` of `N` samples the effective `N` drops to `N−k`, so the output noise
-grows by `√(N/(N−k))` — heavy rejection costs SNR. This is why over-aggressive
-clipping (too small κ) is harmful: each rejected good pixel raises the noise.
+The `-0.5` term aligns **boundaries**, not just centers. For a reference image whose
+footprint is `[-0.5, width-0.5)`, `x_min=-0.5`; at `S=2`, source center `0` maps to
+output coordinate `0.5`, so the scaled source boundary maps exactly onto the output
+boundary. Simply computing `o = S*r` causes a half-output-footprint shift and clips
+one side.
 
-The STScI drizzle core propagates variance explicitly: `update_data_var`
-(`cdrizzlebox.c:91`) co-adds variance arrays using **squared weights**
-(`v = (var·vc² + dow²·d2)/vc_plus_dow²`, `:135`) — the correct propagation for a
-weighted average, since `Var(Σw x) = Σw² Var(x)`. lumos's stacker does **not**
-accept a distinct input-variance image for every frame. Both statistical stacking and drizzle emit
-`StackProduct.weight`. Linear statistical combines and drizzle additionally emit
-`StackProduct.linear_variance = Some(Σw_i²/(Σw_i)²)` from the actual contributing samples; median
-output uses `None` because it has no linear coefficients. RGB statistical quality maps use
-`QualityMap::PerChannel` because rejection can select different survivors per channel;
-monochrome statistical output and drizzle use `QualityMap::Shared`.
+Derive output WCS, pixel scale, reference pixel, crop offset, and physical pixel area
+from this same mapping. Metadata MUST describe the produced grid; copying the source
+WCS unchanged or resetting metadata is wrong.
 
-### 4.2 Weight maps and coverage maps
+### 4.3 Square-drop geometry
 
-Both paradigms benefit from carrying a per-pixel weight:
+For input pixel center `u=(x,y)`, create its `pixfrac`-shrunken square in source
+coordinates:
 
-- In **stacking**, a per-pixel weight (e.g. inverse-variance, or a quality mask
-  flagging bad columns/edges) lets you down-weight rather than hard-reject, and the
-  output weight image records the surviving WHT after multiplying each frame weight by per-pixel
-  confidence. Equal weighting therefore tracks survivor count where confidence is one;
-  Noise/Manual frame weights are normalized before applying confidence.
-  `StackProduct.coverage` stays a separate scalar fraction of frames with geometric support;
-  zero confidence removes statistical weight without erasing that support.
-- In **drizzle**, the **coverage/weight map is mandatory** — it records `W_xy = Σ
-  a_xy·w_i` (the accumulated overlap-area × input-weight; **per F&H Eq. 4 there is no
-  `s²` in the weight** — the `s²` lives only in the flux numerator, Eq. 5) and is what
-  the flux is normalized by. Edge pixels and chip gaps get low coverage; `min_coverage`
-  masks them. lumos returns this as `StackProduct.coverage` normalized to [0,1];
-  STScI returns `output_counts` (`cdrizzlebox.c`,
-  `p->output_counts`).
+```text
+D_source = [x-p/2, x+p/2] × [y-p/2, y+p/2].
+```
 
-### 4.3 Correlated noise from resampling
+Map that footprint through `F_i` and the output-grid transform. For an affine or a
+valid homography without a horizon crossing, mapped edges remain straight and the
+four mapped corners define the footprint. For SIP or other nonlinear maps, subdivide
+edges/cells until the maximum mapping chord error is below a configured fraction of
+an output pixel; then deposit the resulting polygons.
 
-Any resampling — interpolation during registration warp, *or* drizzle whenever drops
-overlap (i.e. `pixfrac > 0`, increasing with `r = p/s`; in lumos terms `r = pixfrac·scale`, §5.6) — spreads one
-input pixel's value across several output pixels. Adjacent output pixels then share
-input samples and their noise becomes **correlated**. The
-consequence: the **pixel-to-pixel RMS measured in the output underestimates the true
-noise on larger (aperture) scales**, because it misses the off-diagonal covariance
-terms. This biases any noise-based weighting or SNR estimate computed *after*
-resampling, and it makes faint extended features look smoother (better) than they
-really are. (Quantified for drizzle in §5.6.) The practical rule: **compute noise
-statistics and weights from the un-resampled frames whenever possible**, and treat
-post-resample pixel RMS as a lower bound.
+Let `D_iu` be the mapped drop, `A_iu` its area in output-pixel units, and `P_o` the
+unit-square footprint of output pixel `o`. Compute
 
-### 4.4 Bias of clipping with few frames
+```text
+A_iuo = area(D_iu intersect P_o)
+a_iuo = A_iuo / A_iu.
+```
 
-With small `N` the sample σ is a poor estimate of the true σ and is itself biased low
-(for the sample sd) or dominated by the outlier (for sd that includes it). Two
-failure modes:
+For a fully contained drop, `sum_o a_iuo = 1`. This division by mapped drop area is
+the Jacobian/area normalization. Do **not** divide by another local Jacobian after
+forming `a_iuo`.
 
-- **Masking:** one extreme outlier inflates σ so that the threshold `κσ` is wide
-  enough to keep the outlier itself — nothing is rejected. Robust center/spread
-  (median + MAD, Winsorized σ, GESD's backward scan) mitigates this.
-- **Swamping / over-rejection:** with `N ≈ 3–5`, random scatter can push a *good*
-  sample past `κσ` of a poorly-estimated center, and you reject signal. siril's
-  `N − r > 4` floor (`rejection_float.c:188`) and the `N > 3` loop guards exist
-  precisely to stop this.
+Use robust polygon clipping or STScI's `boxer`/Green's-theorem method. Validate
+orientation, finiteness, convexity where assumed, positive area, output bounds, and
+the overlap-sum invariant. A projective denominator approaching zero is a transform
+error, not a tiny-area pixel to skip silently.
 
-The honest conclusion (also PixInsight's documented guidance): **do not sigma-clip
-below ~8 frames.** Use percentile clipping (3–5) or just a plain median for tiny
-stacks; the rejection statistics are not trustworthy.
+### 4.4 F&H accumulation equations
+
+For a positive square-drop coefficient and non-geometric statistical weight `q_iu`,
+define
+
+```text
+c_iuo = m_iu * q_iu * a_iuo.
+```
+
+Accumulate per output/channel:
+
+```text
+N_o    += c_iuo * x_iuc
+W_o    += c_iuo
+Vnum_o += c_iuo² * v_iuc
+C2_o   += c_iuo².
+```
+
+Finalize when `W_o > 0`:
+
+```text
+science_o                = N_o / W_o
+variance_o               = Vnum_o / W_o²
+linear_variance_factor_o = C2_o / W_o²
+N_eff,o                  = W_o² / C2_o.
+```
+
+This is the batch form of Fruchter and Hook's iterative weighted update. It also
+matches STScI's square kernel: overlap is divided by the mapped drop area exactly
+once.
+
+If a pixel contributes to several outputs, the outputs share that input noise.
+`variance_o` is the correct diagonal term for independent source pixels, but the
+off-diagonal covariance is nonzero:
+
+```text
+Cov(o, p) = sum_iu c_iuo c_iup v_iu / (W_o W_p).
+```
+
+### 4.5 Flux units versus surface-brightness units
+
+The output-unit contract MUST be explicit.
+
+If input samples represent **surface brightness** or count rate per angular area,
+the weighted mean above preserves that quantity. A uniform field has the same
+numeric value at every output scale.
+
+If input samples represent **integrated flux per input pixel**, an output pixel has
+area `s²` times an input pixel for equal square plate scales. Convert each input
+sample to the desired output-pixel flux before accumulation:
+
+```text
+x_for_output = x_input * s²
+v_for_output = v_input * s⁴.
+```
+
+Derive statistical weights after that unit conversion. In particular, an
+inverse-variance weight changes by `1/s⁴`; using a pre-conversion weight with a
+post-conversion variance makes both the estimator and its uncertainty inconsistent.
+
+This is the `s²` science-numerator factor in Fruchter and Hook and the `iscale`
+distinction in STScI `drizzle`. It does not belong in `W_o`.
+
+With `S=2`, omitting `s²=1/4` preserves numeric surface brightness but makes the sum
+over output pixels four times the input sum. That is correct only if the output is
+declared a surface-brightness image. Never infer units from an accidental sum test.
+
+For spatially varying WCS pixel area, use the appropriate local angular-area
+conversion and document whether detector flat-fielding has already produced a
+surface-brightness-like value.
+
+### 4.6 Kernel definitions
+
+#### Exact square
+
+The exact mapped polygon from §4.3 is the scientific default. It handles rotation,
+shear, affine scale, and valid projective geometry. It is the canonical drizzle
+kernel.
+
+#### Turbo
+
+Turbo replaces the mapped quadrilateral with an axis-aligned rectangle centered at
+the mapped input center. For a uniform scale it uses width `p/s = pS` in output
+pixels and normalizes overlap by that rectangle's area. It is an approximation when
+rotation, shear, anisotropic scale, or spatial distortion is non-negligible.
+
+Turbo MUST NOT apply an additional Jacobian after its overlap coefficients already
+sum to one. Select it only after a configured bound on its footprint error relative
+to exact square, or expose it as an explicit speed/accuracy tradeoff.
+
+#### Point
+
+Point is the `p → 0` interlacing limit. Deposit at the output pixel containing the
+mapped source center with coefficient one. It needs excellent phase coverage and
+accurate transforms. It MUST NOT divide its unit coefficient by an extra Jacobian.
+Allowing `pixfrac=0` for Point is clearer than requiring a positive ignored value.
+
+#### Gaussian
+
+A Gaussian kernel is not the canonical flux-conserving square drizzle drop. Define
+its FWHM/support and normalization exactly. If
+
+```text
+K(dx,dy) = exp(-(dx²+dy²)/(2 sigma²)),
+sigma = (p/s) / 2.354820045,
+```
+
+then compute all support taps, normalize by the full phase-dependent tap sum, and
+discard taps outside the output grid without renormalizing the remainder. Renormalizing
+only in-bounds taps changes the estimator at image edges. Variance uses squared
+normalized coefficients.
+
+STScI explicitly warns that its Gaussian and Lanczos drizzle kernels do not conserve
+flux. A Lumos alternative with different normalization must not claim bit-for-bit or
+photometric equivalence to STScI.
+
+#### Lanczos
+
+Lanczos-`a` is the separable signed interpolation kernel
+
+```text
+L_a(x) = sinc(x) sinc(x/a), |x| < a; 0 otherwise
+K(dx,dy) = L_a(dx) L_a(dy).
+```
+
+Signed coefficients require special treatment:
+
+- preserve negative science values; never clamp the final image to zero;
+- accumulate variance with coefficient squares;
+- do not use the signed denominator as a coverage map;
+- track geometric/absolute support separately;
+- guard against a near-zero signed coefficient sum;
+- do not renormalize only the in-bounds signed taps at an edge.
+
+Lanczos is interpolation-like rather than the square variable-pixel algorithm.
+Restricting it to `s=1`, `p=1` is a defensible initial policy. It should not be the
+default for quantitative drizzle reconstruction.
+
+### 4.7 Masks and channel shape
+
+The source validity mask MUST combine detector DQ, calibration defects, saturation,
+cosmic-ray/trail masks, user masks, and non-finite handling before deposition.
+Statistical weight zero is an acceptable internal representation of invalidity only
+if a separate validity/context output remains available.
+
+A per-pixel weight plane that is shared by RGB channels cannot represent a defect or
+variance affecting only one channel. Support per-channel masks/variance or explicitly
+use a joint-rejection policy.
+
+Track at least:
+
+- geometric contributor count or context;
+- statistical `W_o`;
+- `N_eff`;
+- validity;
+- actual variance;
+- DQ bitwise combination according to a documented rule.
+
+Do not define coverage as `W_o / max(W)`. That ratio changes globally when one pixel
+has an unusually large weight, mixes geometry with exposure quality, and is unusable
+with signed kernels. A `min_coverage` threshold should compare an explicit local
+support metric with an expected exposure/support model.
+
+### 4.8 Drizzle outlier rejection: median, blot, derivative, mask
+
+Direct per-output sigma clipping is not sufficient for drizzle because one source
+pixel contributes to multiple output pixels and input samples do not initially share
+one grid. Use a source-plane masking pass modeled on Fruchter–Hook/DrizzlePac:
+
+1. Drizzle each exposure separately onto the common grid, normally with `p=1` for a
+   smooth, well-covered model.
+2. Form a robust median/model from those aligned products.
+3. **Blot** the common model back into each original source grid using the exact
+   inverse geometry and consistent unit scaling.
+4. Compute a derivative image `D_i` from the blotted model to tolerate small
+   registration and model-blurring errors near real edges.
+5. Compare original and blotted samples in source coordinates.
+
+For data in ADU with gain `G` electrons/ADU and read noise `RN_e` electrons, a
+consistent noise estimate is
+
+```text
+sigma_ADU = sqrt(G * max(B + sky, 0) + RN_e²) / G,
+delta     = abs(I - B).
+```
+
+The first-pass good-pixel criterion is
+
+```text
+delta <= derivative_scale_1 * D + snr_1 * sigma_ADU.
+```
+
+6. Grow around first-pass bad pixels. A neighboring pixel failing a second, more
+   sensitive criterion
+
+```text
+delta <= derivative_scale_2 * D + snr_2 * sigma_ADU
+```
+
+   is also marked bad. DrizzlePac implements the neighborhood condition with a 3×3
+   convolution of the first-pass good mask.
+7. Add detector DQ, saturation blooms, and spatially detected trail masks.
+8. Run the final drizzle once from original calibrated inputs with the completed
+   source masks and the selected final `p`/grid.
+
+The two thresholds, derivative definition, growth radius, gain/units, and sky term
+must be serialized in provenance. For satellite and aircraft trails, augment the
+pixel test with connected-component/line detection and growth; a thin per-pixel
+test alone can leave fragmented tracks.
+
+### 4.9 Choosing output scale and `pixfrac`
+
+Use measured sampling, not fixed folklore.
+
+1. Measure source PSF FWHM and registration uncertainty across the field.
+2. Plot fractional dither phases after the complete distortion map.
+3. Make a Point-kernel phase-coverage image on candidate output grids.
+4. Simulate the actual masks and weights; inspect minimum/percentile support and
+   `N_eff`, not only mean coverage.
+5. Choose an output scale that gives useful sampling of the narrowest reliable PSF.
+   A practical start is about 2–2.5 output pixels across FWHM, then validate with
+   stars; this is not a universal Nyquist proof for every PSF.
+6. Start with `p` slightly larger than `s` so drops spill into adjacent output pixels,
+   as STScI recommends, then reduce it only while coverage remains acceptably uniform.
+7. Compare encircled energy, stellar FWHM/ellipticity, astrometry, aperture flux,
+   blank-sky covariance, and holes across candidate settings.
+
+For an ideal integer `S×S` interlace, at least `S²` well-distributed phases are
+needed even before masks and rejected pixels. Random dithers generally need more.
+More frames at the same phase improve SNR but not sampling rank.
+
+Smaller `p` reduces the extra drop convolution and correlated noise but increases
+coverage variation and holes. Larger `p` smooths coverage but broadens the PSF and
+correlates neighbors. Increasing `S` without phase diversity only divides the same
+information among more pixels.
+
+### 4.10 Correlated noise
+
+Square drizzle with `p>0` splits one noisy source pixel among neighboring outputs.
+Their noise is correlated, so pixel-to-pixel RMS understates noise in an aperture or
+smoothed measurement.
+
+For many uniformly distributed dithers with equal weights, Fruchter and Hook define
+
+```text
+r = p/s = pS.
+```
+
+The asymptotic correlation ratio is
+
+```text
+R = 1 / (1 - r/3),             r <= 1
+R = r / (1 - 1/(3r)),          r >= 1.
+```
+
+Sanity checks: `p→0` gives `R→1`; both branches give `R=1.5` at `r=1`; and larger
+`p/s` increases correlation. The formula assumes a filled uniform dither pattern
+and square drops. It is not valid unchanged for sparse/structured phases, spatially
+varying distortion or weights, Gaussian kernels, or Lanczos.
+
+For the real dataset, estimate covariance by one or more of:
+
+- propagate a compact covariance stencil from shared source coefficients;
+- drizzle independent unit-white-noise realizations through the exact transforms,
+  masks, weights, and kernel;
+- measure blank-sky apertures over several sizes after removing real structure.
+
+For an aperture with coefficient vector `h`, use
+
+```text
+Var(aperture) = h^T C h,
+```
+
+not merely the sum of diagonal variance pixels. Store the kernel/settings needed to
+reproduce the correction.
+
+### 4.11 Drizzle reference pseudocode
+
+```text
+grid = build_output_grid_from_mapped_pixel_boundaries(frames, mode, S)
+validate_grid_and_transforms(grid, frames)
+
+if artifact masks are incomplete:
+    per_frame_drizzles = drizzle_each_frame_for_model(p=1)
+    robust_model = median(per_frame_drizzles)
+    for each frame:
+        blot = map_model_back_to_source(robust_model, frame.inverse_geometry)
+        derivative = spatial_derivative(blot)
+        frame.artifact_mask |= two_pass_noise_derivative_test(
+            frame.image, blot, derivative, frame.variance
+        )
+
+initialize tiled N, W, Vnum, C2, contributor_count, context, dq
+for frames in deterministic order:
+    compute normalization and normalized variance
+    for each valid source pixel u:
+        drop = map_shrunken_source_footprint(u, p, frame.forward_map, grid)
+        require finite positive drop area
+        for output pixel o intersecting drop:
+            a = overlap_area(drop, pixel(o)) / area(drop)
+            c = statistical_weight(u) * a
+            N[o,c]    += c * science_for_output_units(u,c)
+            W[o,c]    += c
+            Vnum[o,c] += c*c * variance_for_output_units(u,c)
+            C2[o,c]   += c*c
+            update contributor/context/DQ separately
+
+for each output pixel/channel:
+    valid = support_policy_passes and W > 0
+    science = N/W if valid else fill
+    variance = Vnum/(W*W) if valid else invalid
+    n_eff = W*W/C2 if valid else 0
+write grid metadata, normalization, transforms, masks, kernel, and diagnostics
+```
 
 ---
 
-## 5. Drizzle (Fruchter & Hook 2002)
+## 5. Numerical, memory, and determinism requirements
 
-Drizzle is *Variable-Pixel Linear Reconstruction*. Reference implementation: the STScI
-C core in `.tmp/refs/drizzle/src/cdrizzlebox.c` (`dobox` dispatcher,
-`do_kernel_*` per kernel, `boxer`/`sgarea` polygon overlap, `update_data` flux
-accumulation). lumos mirrors this in `src/drizzle/mod.rs`.
+### 5.1 Precision
 
-### 5.1 The footprint-mapping idea
+Science storage may remain `f32`, but normalization fits, transform geometry,
+polygon areas, moments, weight totals, and large accumulations SHOULD use `f64`.
+Compensated or pairwise summation is required where a long stack or large dynamic
+range can lose small contributions.
 
-Each input pixel is shrunk by **pixfrac** `p ∈ (0,1]` into a "drop", then its four
-corners are mapped through the geometric transform onto a finer **output grid** whose
-pixels are `scale`× smaller in linear size (lumos's `scale`, the super-resolution
-factor; equivalently F&H's output/input pixel-size ratio `s = 1/scale` — see §5.5 for
-this reciprocal, which is easy to get wrong). The drop is a quadrilateral on the output
-grid; its overlap area with each output pixel determines how much flux that output pixel
-receives.
+Reject non-finite intermediates with frame/pixel context. Do not repair them by
+clamping. In particular, signed calibrated samples and signed Lanczos results are
+valid; negative is not synonymous with invalid.
 
-- **Square kernel** (`do_kernel_square`, `cdrizzlebox.c:1982`): transforms all four
-  corners (`interpolate_four_points`), computes the **exact polygon-pixel overlap**
-  with `boxer()` (`:280`), which sums signed sub-areas under each edge via `sgarea()`
-  (`:174`, Green's-theorem line-integral area). Correct under rotation/shear. lumos:
-  `add_image_square` (`drizzle/accumulator.rs`) with `boxer`.
-- **Turbo kernel** (`do_kernel_turbo`, `:1841`, lumos default): approximates the drop
-  as an **axis-aligned rectangle** centered on the transformed pixel center, overlap
-  via the simple `over()` rectangle intersection (`:460`). Fast; valid only when
-  rotation between frames is small. lumos: `add_image_turbo` (`drizzle/accumulator.rs`) using
-  `math::rect::Rect::overlap_area`.
+### 5.2 Tiling and streaming
 
-### 5.2 The Jacobian and flux conservation
+Ordinary stacking SHOULD process output row/tile chunks sized from a declared memory
+budget and support resident or memory-mapped source planes.
 
-When the transform changes the pixel scale (distortion, output `scale`), the drop's
-area on the output grid is not constant. To **conserve flux per unit area**, the weight
-is divided by the local **Jacobian** (the area magnification of the transform):
+Drizzle can stream one source at a time, but the output accumulators can dominate
+memory: for `C` channels, science numerator, weight, variance numerator, coefficient
+squares, support, and context require several full output planes. A scalable design
+uses output tiles:
 
-```
-w_effective = w_input / |J|        (per input pixel)
-```
+1. map each source frame's valid footprint to output tile ranges;
+2. process only source pixels whose drops intersect the active tile, including a
+   kernel halo;
+3. write finalized or mergeable accumulator tiles to the selected storage tier;
+4. keep summation order deterministic.
 
-STScI computes `jaco = ½·((x₁−x₃)(y₀−y₂) − (x₀−x₂)(y₁−y₃))` (`cdrizzlebox.c:1376`) —
-the signed area of the output quadrilateral via the diagonal cross product — and uses
-`w = get_pixel(weights)·weight_scale / jaco` (`:1393`; comment: *"Scale the weighting
-mask … inversely by the Jacobian to ensure conservation of weight in the output"*). The
-sign is irrelevant because, as the STScI comment notes, anticlockwise corners make both
-`jaco` and the `boxer` areas negative, so it cancels on division. lumos computes the
-same Jacobian in `add_image_square` (`mod.rs:443`) and a `local_jacobian` for turbo
-(`mod.rs:356`), dividing the weight by it. The data value is also multiplied by
-`iscale` in STScI (`d = get_pixel(...) * p->iscale`, `:640`/`:1380`) so surface
-brightness is preserved.
+Do not change numerical results when the memory tier changes. RAM and mmap/tiled
+paths should be bit-identical when they use the same defined reduction order, or
+within a documented tolerance if parallel reductions differ.
 
-This Jacobian correction is the **headline F&H feature**. F&H §5 (Photometry) states it
-plainly: camera distortion means *"pixels at the corner of each CCD subtend less area
-on the sky than those near the center … point sources near the corners of the chip are
-artificially brightened compared to those in the center. By scaling the weights of the
-input pixels by their areal overlap with the output pixel, and by moving input points
-to their corrected geometric positions, Drizzle largely removes this effect. In the
-case of pixfrac = 1, this correction is exact."* Their quantitative test: a 4% edge
-brightening from WF distortion is reduced to **0.004 mag RMS** after drizzling at
-`scale=0.5, pixfrac=0.6` (§5 of the paper), and ≤0.015 mag with realistic random
-dithers plus CR masks — the photometric-fidelity numbers that justify aperture
-photometry on drizzled images.
+### 5.3 Cancellation and progress
 
-### 5.3 The flux & weight update equation
+Poll cancellation during loading, validation, normalization sampling, per-tile
+combine, per-frame drizzle deposition, blotting, and finalization. Return no partial
+science product as if it were complete. Progress phases should distinguish load,
+normalization, model drizzle, blot/rejection, final accumulation, and output.
 
-**Correction/confirmation (pass 2):** the F&H paper is now read in full; here are the
-*verbatim* equations (their §2, Eqs. 2–5). When input pixel `(xᵢ,yᵢ)` with data
-`d_{xᵢyᵢ}` and weight `w_{xᵢyᵢ}` is added to output pixel `(xₒ,yₒ)` with running value
-`I`, running weight `W`, and fractional overlap `0 < a_{xᵢyᵢxₒyₒ} < 1`, the *iterative*
-update (Eqs. 2, 3) is
+### 5.4 Provenance and metadata
 
-```
-W'  =  a·w  +  W                                         (F&H Eq. 2)
+Record at minimum:
 
-       d · a · w · s²  +  I · W
-I'  =  ───────────────────────────                       (F&H Eq. 3)
-                W'
-```
+- ordered input identities and rejection reasons;
+- calibration/linear units and flux-vs-surface-brightness convention;
+- reference and normalization coefficients/surfaces;
+- variance model and weight semantics;
+- transform direction, full coefficients/SIP, output WCS/grid/crop;
+- estimator, rejection parameters, and local fallback policy;
+- drizzle kernel, `s`, `S`, `p`, edge normalization, and covariance method;
+- software version and deterministic/non-deterministic reduction mode.
 
-"where a factor of `s²` is introduced to conserve surface intensity" (`s = scale`,
-output-to-input pixel-size ratio). After all inputs, the closed form (Eqs. 4, 5, with
-Einstein summation over all input pixels of all images) is
-
-```
-W_{xₒyₒ}  =  Σ a · w                                      (F&H Eq. 4)
-
-             Σ d · a · w · s²
-I_{xₒyₒ}  =  ───────────────────                          (F&H Eq. 5)
-                W_{xₒyₒ}
-```
-
-The earlier (pass 1) rendering of this doc had the algebra right — the only refinement
-is that the `s²` factor multiplies the **flux numerator** (surface-intensity
-conservation), and the **weight** `W` accumulates the bare `a·w` (Eq. 4 has *no* `s²`).
-STScI's `update_data` (`cdrizzlebox.c:32`) implements Eq. 3 as a **running weighted
-average** with `dow = a·w` and the `s²` folded into `d` upstream via `d = data·iscale`
-(`cdrizzlebox.c:640`, `iscale = s²`-type factor):
-
-```
-if W == 0:   I_out  = d
-else:        I_out  = (I_out · W + dow · d) / (W + dow)
-in all cases: W_new = W + dow                            # dow = a·w
-```
-
-F&H also state the deep design property directly: *"the linear weighting scheme is
-statistically optimum when inverse variance maps are used as the input weights"* — i.e.
-`w_i = 1/σ_i²` makes Eq. 5 the minimum-variance estimator (§1.3). lumos does this in two
-halves: `accumulate` (`mod.rs:603`) sums `flux·pixel_weight` into the flux buffer and
-`pixel_weight` into the weight buffer, then `finalize` (`mod.rs:625`) divides
-`data/weights` once at the end (`val = data[idx]/w`, `mod.rs:667`) — algebraically the
-same weighted average as Eqs. 4–5 **except for the global `s²` factor, which lumos
-omits** (see the closing paragraph of this subsection), just deferred to one final
-division. The
-variance-aware variant `update_data_var` (`:91`) additionally co-adds variance arrays
-with **squared** weights `v = (var·vc² + dow²·d2)/vc_plus_dow²` (`:135`) — the correct
-`Var(Σwx)=Σw²Var(x)` propagation (§4.1), and exactly the `w²s⁴σ²` form that reappears in
-the F&H correlated-noise derivation (§5.6).
-
-This is a **linear** combination — lumos's output is exactly
-`Σ(a·w·flux)/Σ(a·w)`, i.e. F&H Eqs. 4–5 **without the `s²` factor**.
-**Correction (pass 3):** the prior version called this total-flux-conserving; it is not,
-quite. F&H put `s²` (`= s_F&H² = 1/scale_lumos²`) in the flux numerator (Eq. 5), and
-STScI folds it into the data via `d = data·iscale` with `iscale = s²`
-(`cdrizzlebox.c:640`; `iscale = scale·scale` at `cdrizzleapi.c:324`, where STScI's
-`scale` is F&H's `s`, *not* lumos's super-resolution `scale`); that factor is what makes
-the output conserve surface intensity / total integrated flux across the pixel-size
-change. lumos drops it — the `scale²` in its Jacobian cancels between the flux buffer and
-the weight buffer, so a flat field of value `F` drizzles back to `F`. lumos
-therefore preserves the **input per-pixel DN scale**, not F&H's flux normalization, and
-its integrated counts grow by `scale²`. Because `s²` is a *single global constant*, this
-leaves SNR, linearity, and *relative* aperture photometry on one drizzled frame intact
-(it cancels in any ratio) and arguably makes lumos's drizzle output directly comparable
-to its ordinary mean-stack output; it only shifts the absolute level. But it is **not**
-the F&H/STScI flux convention — relevant if you mix drizzled and undrizzled frames or do
-cross-pipeline absolute photometry (§8).
-
-### 5.4 Kernels
-
-| Kernel | Footprint model | Overlap function | Notes |
-|--------|-----------------|------------------|-------|
-| **Square** | shrunken quadrilateral, exact clip | `boxer`/`sgarea` polygon area | correct under rotation/shear; STScI default for accuracy |
-| **Turbo** | axis-aligned rectangle | `over()` rect-rect | fast approximation; OK for small rotation; lumos default |
-| **Point** | flux all at drop center | nearest output pixel | fastest, needs the best dithering; no Jacobian needed (`do_kernel_point`, `:1457`) |
-| **Gaussian** | Gaussian droplet, FWHM = drop size | `exp(−r²·efac)` LUT-free | smooths/redistributes flux; `pfo` clamped ≥1.2/pscale so no holes (`:1577`) |
-| **Lanczos2/3** | sinc-windowed sinc | precomputed LUT (`create_lanczos_lut`) | highest fidelity but **only valid at pixfrac=1, scale=1**; can ring (negative lobes) |
-
-STScI dispatches via `kernel_handler_map` (`cdrizzlebox.c:2144`). lumos mirrors all
-five (`DrizzleKernel`, `drizzle/mod.rs:63`). **Correction (pass 3):** lumos does *not*
-"forbid" Lanczos off `pixfrac=scale=1` — it only emits a `tracing::warn!` and then runs
-the kernel anyway (`mod.rs:271-281`: "Lanczos kernel should only be used with
-pixfrac=1.0 and scale=1.0"), applying a `val.max(0.0)` clamp on the output to suppress
-negative ringing (`mod.rs:669`). STScI behaves the same — it warns and *ignores* pixfrac
-in the Lanczos kernel rather than erroring (`cdrizzlebox.c:1702`). Three further lumos
-specifics worth noting: (a) its Lanczos is **Lanczos-3 only** (`a = 3`, separable
-`lanczos_kernel(dx)·lanczos_kernel(dy)`, `mod.rs:312-323`; STScI also offers Lanczos-2);
-(b) its Gaussian and Lanczos paths **normalise the kernel to sum 1** per input pixel
-before accumulating (two-pass `add_image_radial`, `mod.rs:520-599`), so the drop's total
-weight is conserved regardless of kernel shape; and (c) lumos's **Point** kernel *does*
-apply the Jacobian (`weight·pw/jaco`, `mod.rs:508`), so the table's "no Jacobian needed"
-note describes STScI's `do_kernel_point`, not lumos's.
-
-### 5.5 pixfrac and output scale
-
-- **pixfrac `p`** is, in F&H's exact words, *"the ratio of the linear size of the drop
-  to the input pixel"*. Limits, stated verbatim in F&H §2: *"interlacing is equivalent
-  to Drizzle in the limit of pixfrac → 0.0, while shift-and-add is equivalent to
-  pixfrac = 1.0."* So `p → 0` ≡ **interlacing** (drops become points, requires perfect
-  sub-pixel dither coverage or you get holes — "if the drop size is sufficiently small
-  not all output pixels have data added to them from each input image"); `p = 1` ≡
-  **shift-and-add** (full pixel convolution, maximal overlap). F&H's image-quality
-  argument (their Eq. 1, `I = T⊗O⊗E⊗P⊗G`): drizzle *replaces the convolution by the
-  physical pixel `P` with a convolution by the smaller kernel `p`*, and "as convolutions
-  add as the sum of squares, the effect of this replacement is often quite
-  significant" — this is *why* a smaller pixfrac sharpens the image.
-- **scale `s`** is *"the ratio of the linear size of an output pixel to an input
-  pixel"* (F&H §2) — so **`s < 1` means a *finer* output grid**: `s = 0.5` makes each
-  output pixel ½ the input pixel and doubles the linear sampling. F&H note the sweet
-  spot: when the dithers map onto output-grid centers and *"pixfrac and scale are chosen
-  so that p is only slightly greater than s, one obtains the full advantages of
-  interlacing"* — the convolutions with both `p` and the output grid `G` effectively
-  drop away while the small drop overlap still fills missing data. In the `r = p/s`
-  parameterization of §5.6 that sweet spot is `r` slightly above 1. You can only
-  *recover* finer detail if the data are dithered and undersampled.
-
-  **Correction (pass 3) — lumos's `scale` is the *reciprocal* of F&H's `s`.** lumos's
-  `scale` is the linear *super-resolution factor* (`output_width = scale·input_width`,
-  `mod.rs:189`): the output grid is `scale`× **finer**, so each output pixel is `1/scale`
-  the size of an input pixel. Hence `s_F&H = 1/scale_lumos`, and the F&H ratio is
-  `r = p/s = pixfrac · scale_lumos` — equivalently, **`r` is just lumos's
-  `drop_size = pixfrac·scale` measured in output pixels** (`mod.rs:269`). The prior
-  version's "`s=2` (output pixel = ½ input)" was self-contradictory: under F&H's
-  definition `s=2` makes the output pixel *twice* the input (coarser); 2× finer sampling
-  is `s = 0.5`, i.e. `scale_lumos = 2`. When applying the §5.6 formula to lumos
-  parameters, use `r = pixfrac·scale`, **not** `pixfrac/scale`.
-
-Typical optimal values from STScI/HST experience: **final pixfrac 0.7–0.9** for
-well-dithered data, with the grid `scale` chosen so the output pixel is ~0.5–0.7× the
-input. lumos defaults `scale=2.0, pixfrac=0.8` (`DrizzleConfig::default`,
-`mod.rs:107`); the `x3` preset drops pixfrac to 0.7 (`mod.rs:137`).
-
-**lumos's default `r` is therefore high, not low (pass 3).** Using `r = pixfrac·scale`
-(above): the default `scale=2.0, pixfrac=0.8` gives `r = 1.6` (drop = 1.6 output pixels)
-→ `R = r/(1−1/(3r)) ≈ 2.0`; the `x3` preset (`scale=3, pixfrac=0.7`) gives `r = 2.1` →
-`R ≈ 2.5`. Both sit well **above** the F&H/Casertano sweet spot `r ≈ 1.2–1.25`
-(`R ≈ 1.6`): lumos's defaults favour uniform coverage and a smooth result at the cost of
-substantial correlated noise — the *opposite* end of the tradeoff from the "keep `r`
-modestly below 1" advice in §5.9 (which is the low-correlated-noise choice). To reach
-`r < 1` in lumos you need `pixfrac < 1/scale` (e.g. `pixfrac ≤ 0.45` at `scale=2`).
-
-**Drizzle in practice — the HDF-S numbers (Casertano et al. 2000, parsed pass 2).** The
-canonical worked example of choosing these parameters: for the final HDF-S WFPC2 combine
-Casertano used *"a pixel scale of 0.4 WF pixels, and a footprint of 0.5 WF pixels"* —
-i.e. output pixel = 0.4× input (`scale ≈ 2.5`), drop = 0.5× input (`pixfrac = 0.5`), so
-`r = p/s = 0.5/0.4 = 1.25`. They also ran a *coarser intermediate* combine at 0.6 WF
-pixels (`60 mas`) with footprint 1.0 specifically because *"60 mas [is] more than
-adequate for a proper cosmic ray rejection, but not as demanding in terms of number of
-input images and pointing quality as the scale of 40 mas/pixel desired for"* the final
-science image. This is the standard two-tier pattern: a forgiving large-pixel combine
-for the CR median, a fine-pixel combine for the science product. The PC chip (smaller
-pixels) got `pixfrac = 0.8` — *footprint and pixfrac are tuned per detector sampling*,
-not globally. Casertano's weighting was strictly *background-noise* inverse-variance
-(*"weighting each input exposure in inverse proportion to the square of the noise per
-pixel … weights that reflect only the noise due to the background, both sky and
-detector, without considering the local signal due to individual objects"*) — using the
-measured *signal* to set per-pixel noise *"can produce biased results"*, the same trap
-flagged in §4.3. The output weight map yields the **equivalent single-pixel noise**
-`σ̄_i = 1/√W_i` (Casertano Eq. 1), the practical handle on the correlated-noise problem:
-on large scales the true area noise is the quadrature sum of `σ̄_i`, *not* of the
-(correlation-suppressed) measured pixel RMS.
-
-### 5.6 Correlated-noise penalty (the cost of drizzle)
-
-The price of resampling is correlated noise (§4.3). The F&H derivation (now read in
-full from the paper — see *Primary sources parsed (pass 2)*) defines the noise
-correlation ratio `R = σ_c/σ_p` (Eq. 8): the ratio of the *true* block-summed noise
-`σ_c` (the variance you'd get if drops only landed on the pixel under their center) to
-the *measured* per-output-pixel noise `σ_p`. `R > 1` always, because pixel-to-pixel RMS
-on a drizzled image **misses the off-diagonal covariance** and so underestimates the
-true large-scale noise by the factor `R`. F&H derive `σ_c²` and `σ_p²` explicitly
-(their Eqs. 6–7, weights enter as `w²·s⁴·σ²`, the same squared-weight propagation as
-`update_data_var`):
-
-```
-σ_c² = Σ_C w²s⁴σ² / (Σ_C w)²          (drops only on center pixel)
-σ_p² = Σ_P a²w²s⁴σ² / (Σ_P aw)²        (all drops overlapping the pixel)
-R    = σ_c / σ_p                       (Eq. 8)
-```
-
-For a uniform dither continuously filling the output plane (`r = p/s`, with `s` the F&H
-output/input pixel-size ratio; **in lumos's parameters `r = pixfrac·scale`** since
-`s = 1/scale_lumos`, §5.5), the sums become integrals and F&H give the closed form
-(their Eqs. 9–10):
-
-```
-r ≥ 1 :   R = r / (1 − 1/(3r))         (F&H Eq. 9)
-r ≤ 1 :   R = 1 / (1 − r/3)            (F&H Eq. 10)
-```
-
-**Correction (pass 2):** the prior version of this doc wrote the `r ≤ 1` case as
-`R = r/(1 − r/3)`. That is the form printed in the **DrizzlePac Handbook §3.3** (and
-parroted by many secondary sources), but it is a **typo in the Handbook** — the
-original F&H 2002 paper (Eq. 10, read directly from the PDF) has numerator **1**, not
-`r`. The F&H form is the physically correct one: as `r → 0` (interlacing limit),
-`R → 1/(1−0) = 1` (no correlated noise, exactly as F&H state — "Consider then the
-situation when pixfrac, p, is set to zero. There is then no correlated noise in the
-output image"), whereas the Handbook's `r/(1−r/3)` wrongly gives `R → 0`, which is
-impossible since `R ≥ 1` by construction. Both forms coincide at `r = 1` (`R = 1.5`),
-which is why the error is easy to miss. Use the F&H form.
-
-Worked example from F&H (Eq. 9, `r ≥ 1` branch): `p=0.6, s=0.5 → r=1.2 →
-R = 1.2/(1 − 1/3.6) = 1.2/0.7222 = 1.662`. So with those parameters the apparent
-pixel-to-pixel noise is ~40% *lower* than the real aperture-scale noise.
-
-**Correction (pass 2): the monotonicity is the opposite of what pass 1 stated.** `R(r)`
-is *monotonically increasing* in `r = p/s`: it is **minimal** (`R → 1`, no correlated
-noise) at `r → 0` (interlacing limit), `R = 1.5` at `r = 1`, and grows without bound for
-`r > 1`. So **larger** pixfrac relative to scale (larger `r`) means *more* overlap
-between drops and *more* correlated noise, not less. The pass-1 claim that "smaller
-pixfrac inflates correlated noise" was backwards.
-
-The actual drizzle tradeoff is therefore a three-way tension, not a single axis:
-
-- **Small `r` (small pixfrac / large scale):** drops barely overlap → low correlated
-  noise (`R → 1`) and the sharpest result, *but* poor coverage — output pixels receive
-  few samples, the *uncorrelated* per-pixel variance is high, and with insufficient
-  dither you get **holes**. This is the regime where coverage, not correlation, limits
-  you.
-- **Large `r` (large pixfrac / fine scale):** heavy drop overlap → uniform coverage and
-  smooth-looking output, *but* high correlated noise (`R` large), so the pixel-to-pixel
-  RMS badly understates the true aperture-scale noise and resolution is lost to the
-  pixel re-convolution.
-- The sweet spot F&H and Casertano land on is `r` slightly above 1 (`R ≈ 1.5–1.7`):
-  enough overlap to fill coverage robustly, while keeping the correlated-noise penalty
-  bounded and most of the resolution. Note `R` never reaches 1 for a coverage-adequate
-  pixfrac — even good parameters carry `R ≈ 1.5` of correlated-noise penalty under a
-  filled uniform dither, which is *why* §4.3's rule (compute noise on un-resampled
-  frames) matters.
-
-### 5.7 Dithering requirement
-
-Drizzle's resolution recovery **requires sub-pixel dithering**: the frames must sample
-the scene at different sub-pixel phases so the finer output grid is filled. F&H frame
-this physically (§2): a dither is *"offset samples from the same convolved image"* —
-the detector samples `Id = T⊗O⊗E` at different sub-pixel positions, and drizzle
-reassembles those offset samples on the fine grid. Without dither, every frame samples
-the same phase, the finer grid has empty cells (or all drops land identically), and
-drizzle reduces to a noisier interpolation that *adds* correlated noise for *no*
-resolution gain. F&H's title and abstract scope the method explicitly to *"undersampled,
-dithered data"*, and F&H §2 cautions the drop must be *"small enough to avoid degrading
-the image, but large enough so that after all images are drizzled the coverage is
-reasonably uniform"* — the dither-vs-pixfrac coverage tradeoff. Crucially, F&H §1 also
-warn what drizzle is **not**: it *"does not attempt to improve upon the final image
-resolution by enhancing the high frequency components"* (that is *image restoration* —
-Richardson-Lucy, max-entropy — which trades S/N for resolution). Drizzle is *image
-reconstruction*: it recovers only the information lost to the **pixel** convolution
-`P`, not information lost to the optics `O`. **Drizzling un-dithered, well-sampled
-(Nyquist or oversampled) data is therefore an anti-pattern** — there is no undersampling
-to undo, so you pay the correlated-noise cost and gain nothing; a plain stacked mean is
-strictly better. lumos's drizzle takes per-frame `Transform`s (`drizzle_stack`,
-`mod.rs:937`) and does not itself verify dither diversity — that is the caller's
-responsibility.
-
-### 5.8 Rejection in the drizzle workflow (DrizzlePac CR scheme)
-
-Because drizzle is a *linear* coadd it cannot reject cosmic rays itself. The
-median+blot+derivative scheme **originates in the F&H paper itself** (§3, "Cosmic Ray
-Detection") — DrizzlePac's `drizCR` is the modern implementation. F&H's exact 7-step
-recipe (paraphrasing their numbered list, §3):
-
-1. Drizzle each image to a separate sub-sampled output using **pixfrac = 1.0**.
-2. Take the **median** of the aligned drizzled images → *"a first estimate of an image
-   free of cosmic-rays."*
-3. **Blot** (the F&H program literally named "Blot") — map the median back to each
-   input's distorted plane by interpolation.
-4. Take the **spatial derivative** of each blotted image — used *"to estimate the
-   degree to which errors in the computed image shift or the blurring effect of taking
-   the median could have distorted the value of the blotted estimate."*
-5. Compare each original to its blot: *"Where the difference is larger than can be
-   explained by noise statistics, the flattening effect of taking the median or an
-   error in the shift, the suspect pixel is masked."*
-6. Repeat on **pixels adjacent** to already-masked ones, *"using a more stringent
-   comparison criterion"* (neighbor growth).
-7. Finally, drizzle the inputs onto a single output using the masks, *"For this final
-   combination a smaller pixfrac than in step 1) will usually be used in order to
-   maximize the resolution."*
-
-The key insight (step 4, the derivative term) is F&H's: the threshold widens where the
-blotted model is *steep* (PSF cores, edges), because median-blurring and small shift
-errors there produce large legitimate differences that would otherwise be misflagged as
-CRs. The DrizzlePac implementation makes this concrete:
-
-The exact test from `drizzlepac/drizCR.py` (`:320-334`):
-
-```
-t1 = |input − blot|
-ta = √(gain·|blot + sky| + readnoise²)               # expected noise (e⁻)
-t2 = scale·blot_deriv + snr·ta/gain                  # threshold: noise + derivative term
-cr_mask = (t1 ≤ t2)                                  # keep if within threshold
-```
-
-run twice with two (snr, scale) pairs (defaults `driz_cr_snr="3.5 3.0"`,
-`driz_cr_scale="1.2 0.7"`, `drizCR.py:92-107`), with a 3×3 neighbor-growth step
-(`tmp2 ≥ 9`) and radial/CTE-tail dilation of flagged pixels (`:346-373`). The flagged
-CRs become zero-weight in the final drizzle. The derivative term `scale·blot_deriv` is
-the key insight: it widens the tolerance where the image is steep (PSF cores, edges)
-so undersampled structure isn't mistaken for CRs. siril's drizzle path similarly
-rejects pixels with zero drizzle weight before combining (`rejection_float.c:117-126`).
-
-lumos's drizzle has **no** built-in CR rejection or blot step — each `DrizzleFrame`
-accepts an optional `pixel_weight_map` through which a caller can supply pre-computed
-rejection masks, but the median+blot+derivative scheme is not
-implemented (see §8).
-
-### 5.9 When drizzle is justified vs harmful
-
-- **Justified:** undersampled data (PSF FWHM ≲ 2 px), **good sub-pixel dither**
-  diversity, many frames, geometric distortion to correct, and you need either
-  resolution recovery or distortion-free photometry. In lumos's parameters the F&H ratio
-  is `r = pixfrac·scale` (§5.5), and there are two defensible targets (§5.6): F&H and
-  Casertano themselves used `r ≈ 1.2–1.25` (`R ≈ 1.6`) to *guarantee* uniform coverage;
-  if instead you want to **minimise correlated noise** and have enough dither/frames to
-  keep coverage, push `r` modestly *below* 1 (`r ≈ 0.8 → R ≈ 1.36`, which at `scale=2`
-  means `pixfrac ≈ 0.4`). Either way `r` is `pixfrac·scale`, not `pixfrac/scale`.
-- **Harmful / pointless:** well-sampled (Nyquist or oversampled) data, no/poor dither,
-  few frames, or when you only want SNR. In these cases drizzle adds correlated noise
-  and resampling blur for no benefit — a robust stacked mean wins. Drizzle is *not* a
-  general-purpose stacker.
+Output metadata must be derived, not copied blindly from one input and not reset to
+defaults.
 
 ---
 
-## 6. Recommended best-practice implementation (decision guide)
+## 6. Recommended starting policies
 
-**Always, before combining:** normalize (additive for lights, multiplicative for
-flats), pick the lowest-noise reference, and weight by inverse-variance if frame
-quality varies.
+These are starting points to validate, not universal constants.
 
-| Frame type | Combine | Rejection | Weighting | Normalization |
-|------------|---------|-----------|-----------|---------------|
-| **Bias** | mean | sigma/winsorized (if N≥8) else mean | equal | none (or additive) |
-| **Dark** | mean | sigma/winsorized (N≥8) | equal | none |
-| **Flat** | mean | winsorized / sigma | equal | **multiplicative** (per-color mean) |
-| **Light, few (≤5)** | median *or* mean + **percentile** | percentile | equal/quality | additive |
-| **Light, 6–20** | mean | **Winsorized sigma** (κ≈3) | inverse-variance | additive (+ scaling if transparency varies) |
-| **Light, 20+** | mean | **Linear-fit** (or GESD) | inverse-variance + FWHM gate | additive + scaling |
-| **Light, satellite/plane-heavy** | mean | Winsorized/GESD (robust) | inverse-variance | additive |
+| Dataset | Reconstruction | Normalization | Weight | Rejection |
+|---|---|---|---|---|
+| Bias master | same-grid mean | none | equal or inverse variance | conservative Winsorized/transient mask |
+| Dark master | same-grid mean | physical upstream scaling only | equal or inverse variance | conservative Winsorized/transient mask |
+| Flat master | same-grid mean | multiplicative illumination level | propagated inverse variance | conservative clip of transients |
+| Light, adequate sampling | registered weighted mean | robust gain + sky offset | per-pixel inverse variance | standardized asymmetric robust clip |
+| Light, very small `N` | registered median/robust mean | same | explicit | local small-N policy |
+| Undersampled, good dithers | exact Square drizzle | same | per-pixel inverse variance | source masks from median+blot+derivative |
+| Mosaic | registered coadd or Square drizzle | overlap-constrained background + photometry | per-pixel inverse variance | masks plus robust combine/model |
+| Point-source measurement | PSF-aware/proper coadd | photometric | model-derived | model/mask dependent |
 
-**Drizzle parameters:**
-- Use drizzle *only* for dithered + undersampled data.
-- `scale`: 1.5–2.0 typical; only as fine as the dither diversity supports.
-- `pixfrac`: 0.7–0.9. In lumos's parameters the F&H ratio is `r = pixfrac·scale`
-  (§5.5), so lumos's defaults (`scale=2, pixfrac=0.8`) already give `r = 1.6`, `R ≈ 2.0`
-  — coverage-safe but with substantial correlated noise. Smaller `r` means *less*
-  correlated noise (`R → 1` as `r → 0`) but worse coverage; don't push `r` so low that
-  output pixels under-sample / form holes (§5.6 corrected monotonicity). F&H/Casertano
-  targeted `r ≈ 1.2–1.25` (`R ≈ 1.6`); go lower only with many frames and excellent
-  dither.
-- `kernel`: **Square** for accuracy under rotation; **Turbo** for speed with small
-  rotation (lumos default); **Point** only with superb dithering; **Lanczos** only at
-  pixfrac=1, scale=1 (and accept ringing).
-- `min_coverage`: ~0.1–0.5 to mask under-sampled edges/chip gaps.
-- Reject CRs *before* drizzling (median+blot+derivative), never rely on drizzle to do
-  it.
+Use exact Square as drizzle's correctness reference. Optimize to Turbo only after
+cross-checking it over translations, rotations, shear, scale, and distortion.
 
 ---
 
-## 7. Pitfalls & anti-patterns
+## 7. Verification requirements
 
-1. **Sigma clipping with < 8 frames.** The σ estimate is dominated by the very
-   outliers you want to remove → masking or swamping. Use percentile clipping or a
-   plain median for tiny stacks.
-2. **Rejection without normalization.** If frames have different sky pedestals or
-   gains, the spread across frames is dominated by the *offset*, not noise, so clipping
-   rejects whole frames' worth of good pixels at the bright/faint ends. **Normalize
-   first, always.**
-3. **Plain mean (no rejection) on CR/satellite/plane data.** A single cosmic ray or
-   trail leaks straight into the average as a bright streak. The mean is only safe when
-   the data are genuinely outlier-free (e.g. already-rejected, or short clean subs).
-4. **Drizzle without dithering.** Pays the correlated-noise + resampling-blur cost for
-   zero resolution gain. Use a stacked mean instead.
-5. **pixfrac too small for the coverage.** Small pixfrac with too few dither phases
-   leaves empty/under-covered output pixels (**holes**) — the dominant failure of small
-   pixfrac. **Correction (pass 2):** the prior wording claimed correlated noise "blows
-   up as `r → 0`"; that is backwards. By F&H Eq. 10, `R = 1/(1 − r/3) → 1` as `r → 0`
-   (interlacing has the *least* correlated noise). The real cost of small pixfrac is
-   *coverage*, not correlation: too few independent samples land on each output pixel, so
-   it's the *uncorrelated* per-pixel variance (and holes) that hurt, while `R` actually
-   *decreases* toward 1. Increase pixfrac (toward `r ≈ 1`, `R ≈ 1.5`) or add dither
-   diversity. (Note: `R` is **monotonically increasing in `r`** — minimal at `r → 0`
-   where `R → 1`, `R = 1.5` at `r = 1`, and growing without bound for `r > 1`.)
-6. **Ignoring correlated noise.** Measuring SNR or deriving inverse-variance weights
-   from the *pixel-to-pixel RMS of a drizzled/resampled image* underestimates the true
-   noise (by `R`, §5.6) and biases everything downstream. Compute noise on un-resampled
-   frames.
-7. **Equal weighting of unequal-SNR subs.** Throws away SNR; a cloudy/poor-seeing sub
-   should be down-weighted (or dropped), not averaged in at full weight.
-8. **Median as the default science combine.** Costs ~20% of SNR (`0.80·√N`) vs a
-   clipped mean that keeps ~99%. Median is for robustness-critical *intermediate*
-   products (e.g. the DrizzlePac CR model), not the final light stack.
-9. **Lanczos drizzle at pixfrac≠1 / scale≠1.** Invalid; produces ringing and
-   flux-conservation errors. (lumos guards this; some pipelines don't.)
-10. **GESD/clipping critical values from a normal instead of Student-t.** For small N
-    the t-distribution's heavy tails matter; using the normal under-estimates the
-    threshold and over-rejects.
+Tests must validate numeric answers and invariants, not merely successful execution.
 
----
+### 7.1 Statistical-combine tests
 
-## 8. How lumos currently does it — and gaps/opportunities
+1. **Equal mean:** `[1,2,3,4] → 2.5`; variance for four unit-variance samples is
+   `1/4`; `N_eff=4`.
+2. **Weighted mean:** values `[10,20]`, variances `[1,4]` give weights `[1,1/4]`,
+   mean `12`, variance `0.8`, and `N_eff=25/17`.
+3. **Manual-weight variance:** compare `sum(q²v)/sum(q)²` with a hand calculation;
+   prove it does not incorrectly collapse to `1/sum(q)`.
+4. **Gain propagation:** doubling a frame's science scale multiplies its variance by
+   four and divides its inverse-variance weight by four.
+5. **Normalization:** recover known gain/offset from paired synthetic structure with
+   noise and injected outliers; test failed overlap and degenerate covariance.
+6. **MAD zero:** many equal quantized samples plus one outlier must exercise the
+   defined variance-floor behavior.
+7. **Sigma boundaries:** values exactly on low/high thresholds survive; asymmetric
+   sides differ as configured; iteration changes the result on a masking example.
+8. **Winsorized:** hand-check clamping, `1.134` update, convergence, outer rejection,
+   and minimum-survivor stop.
+9. **Trimmed fraction:** hand-check floor counts, asymmetric trimming, ties, and the
+   minimum survivor rule.
+10. **Rank fit:** demonstrate that sorting preserves frame/weight association and
+    that the scale is mean absolute residual if so configured.
+11. **GESD:** reproduce Rosner/NIST example critical values and three-outlier result;
+    test the largest-passing-index rule and `n=15/25` boundaries.
+12. **Median:** test odd and even conventions and confirm no linear variance factor
+    is emitted.
+13. **Local small N:** masked borders trigger local fallback even when global frame
+    count is large.
+14. **RGB/CFA:** verify channel-specific and joint masks exactly; never compare
+    unlike CFA colors.
+15. **Precision:** compare compensated/SIMD results with an `f64` reference over
+    large offsets plus small signals.
+16. **Storage tiers:** RAM and mmap/tiled paths produce the declared identical or
+    tolerance-bounded result.
 
-**What lumos has (correct and well-grounded):**
+### 7.2 Drizzle geometry and photometry tests
 
-- Full rejection family `None | SigmaClip | Winsorized | LinearFit | Percentile |
-  Gesd` (`src/stacking/rejection.rs:831`), matching the siril set, with
-  presets `sigma_clipped / winsorized / linear_fit / median / mean / gesd / percentile
-  / weighted` (`config.rs:98`) and frame presets `light/flat/dark/bias` (`config.rs:164`).
-- Pre-warp lowest-MAD reference selection, paired Global (additive+multiplicative) and
-  common-domain Multiplicative normalization, source-noise × interpolation-confidence
-  inverse-variance weighting, and equal/manual weighting.
-- Winsorized σ with the correct 1.134 bias factor (`rejection.rs:203`); textbook
-  two-sided GESD with mean/sample-sd statistics, accurate Student-t critical values,
-  and a backward scan (`rejection.rs`); MAD-based robust spread in the clipping and
-  frame-statistics paths.
-- Drizzle: all five kernels, exact `boxer` polygon clipping for Square, Jacobian
-  weight conservation, deferred weighted-average `accumulate`/`finalize`, coverage map
-  with `min_coverage` masking, Lanczos **warned** (not blocked — it still runs) off
-  pixfrac=scale=1 with negative-lobe clamping (`drizzle/mod.rs:271`, `:669`).
-- Memory-tiered stacking caches (in-memory vs mmap, `combine/cache/loader/mod.rs`) so large stacks
-  don't OOM. `LightCache` computes registered-frame `FrameStats` (median + MAD) sequentially with
-  one reused scratch buffer over the shared valid-support mask, identically for RAM and mmap planes.
+1. **Boundary mapping:** identity with `S=2` maps source center `0` to output `0.5`
+   for a reference-footprint grid and maps both outer source boundaries exactly.
+2. **Overlap conservation:** for interior drops, `sum_o A_overlap/A_drop = 1` over
+   random phases, `p`, rotation, shear, affine scale, and safe homographies.
+3. **Square reference:** compare polygon overlap and accumulated weights with pinned
+   STScI `cdrizzle` fixtures.
+4. **No double Jacobian:** Square, Turbo, Point, and normalized positive kernels
+   preserve total per-input coefficient under uniform affine scale according to
+   their defined semantics.
+5. **Units:** a constant surface-brightness field keeps its numeric value at every
+   `S`; a one-pixel integrated-flux impulse preserves total output flux only when
+   the `s²` convention is applied.
+6. **Translation/dither:** an ideal 2×2 half-pixel phase set at `S=2`, `p→0`
+   interlaces into the expected four phases without holes.
+7. **Rotation/shear:** exact Square matches a brute-force supersampled overlap
+   reference; Turbo's measured error remains within its selection bound.
+8. **Nonlinear mapping:** adaptive SIP subdivision converges as tolerance tightens.
+9. **Masks:** a zero-weight cosmic-ray pixel contributes to no output numerator,
+   variance, weight, context, or DQ-good count.
+10. **Variance:** hand-compute `sum(c²v)/W²`; Monte Carlo white-noise trials match the
+    predicted diagonal.
+11. **Covariance:** two outputs sharing one source pixel have the analytically
+    predicted nonzero covariance.
+12. **Lanczos:** negative inputs/results remain signed, squared coefficients drive
+    variance, and near-zero signed denominators are invalid rather than clamped.
+13. **Edges:** kernels are not renormalized merely because support falls outside the
+    requested crop; explicit crop loss is measurable.
+14. **Coverage:** changing one frame's statistical weight does not alter geometric
+    contributor count; an extreme central weight does not globally rescale edge
+    validity.
+15. **Metadata:** output WCS maps pixel centers/boundaries back to the same sky
+    coordinates and records output pixel area/units.
+16. **Blot rejection:** injected cosmic rays and trails are masked while shifted
+    stellar cores survive derivative-aware thresholds.
+17. **Cancellation and memory:** cancel every phase; enforce budget/overflow errors;
+    compare streamed/tiled output with the all-resident reference.
 
-**Gaps / opportunities (ranked):**
+### 7.3 End-to-end scientific tests
 
-1. **No data-dependent variance propagation.** STScI's `update_data_var`
-   (`cdrizzlebox.c:91`) propagates input variance with squared weights. lumos returns
-   a conditional linear factor `Σwᵢ²/(Σwᵢ)²`, but does not accept a distinct variance model for
-   each input frame or pixel. Median output has no linear factor.
-2. **No drizzle CR rejection (median + blot + derivative).** lumos relies on
-   caller-supplied `DrizzleFrame::pixel_weight_map` values. Implementing the DrizzlePac `drizCR` scheme
-   (`drizzlepac/drizCR.py`) — drizzle→median→blot→derivative-thresholded mask — would
-   make the drizzle path self-contained. This also needs a **blot** (inverse-drizzle)
-   operation, which lumos lacks (STScI: `cdrizzleblot.c`).
-3. **Normalization is scalar-per-channel only; no surface/gradient background
-   matching.** Fine for uniform pedestal shifts, insufficient for mosaics or strong
-   gradients. A low-order plane/poly background match (cf. `reproject`'s
-   `mosaicking/background.py`, SWarp's mesh background) would be needed for mosaics.
-4. **No FWHM / star-count quality weighting.** lumos has only Equal/Noise/Manual;
-   siril and PixInsight additionally weight by seeing/star-count, which catches bloated
-   frames that the background-noise estimate alone would not.
-5. **Drizzle does not validate dither diversity.** It will happily drizzle un-dithered
-   data and produce a correlated-noise-inflated result with no warning (§5.7).
-6. **Drizzle output omits F&H's `s²` flux factor (pass 3).** `accumulate`/`finalize`
-   compute `Σ(a·w·flux)/Σ(a·w)` with no `s²` term (`mod.rs:603`/`:667`), so the output
-   preserves the input per-pixel DN scale (flat field DN `F` → `F`) rather than F&H
-   Eq. 5's surface-intensity normalization (STScI folds `s² = scale²` into the flux via
-   `iscale`, `cdrizzlebox.c:640`). `s²` is a single global constant, so SNR and
-   *relative* photometry are unaffected and the choice arguably makes drizzle output
-   comparable to the ordinary stack; but absolute integrated counts scale by `scale²`
-   and the output is **not** in F&H/STScI flux units — note it for cross-pipeline
-   photometry (§5.3). This is a documented behavioural difference, not necessarily a bug.
+- inject stars with known flux, PSF, background, Poisson/read noise, dithers,
+  distortion, bad pixels, cosmic rays, and a satellite trail;
+- recover aperture flux, centroid, FWHM, ellipticity, background, variance, and
+  rejection masks against hand-defined tolerances;
+- compare ordinary registered stack and drizzle at equal output sampling;
+- prove drizzle improves sampled resolution only for the phase-diverse undersampled
+  set, not the repeated-phase control;
+- compare blank-sky aperture noise with the propagated covariance/correlation model.
 
 ---
 
-## Primary sources parsed (pass 2)
+## 8. Common failure modes
 
-PDFs/pages read directly this pass (saved under `.tmp/papers/`), with the load-bearing
-takeaway each resolved:
+- **Double resampling:** pre-warping and then drizzling.
+- **Transform reversal:** passing registration's reference-to-source inverse warp to
+  a source-to-output deposition API without inversion.
+- **Lost distortion:** inverting only the linear transform and dropping SIP.
+- **Half-pixel grid error:** scaling centers as `S*x` while sizing the grid from
+  scaled pixel boundaries.
+- **Histogram-only transparency fit:** confusing noise/structure MAD with
+  photometric gain.
+- **Unscaled variance:** applying gain `g` to data but not `g²` to variance.
+- **Observed-value Poisson weights:** biasing the weighted mean toward downward
+  fluctuations.
+- **Raw-value clipping:** applying equal thresholds to unequal-variance samples.
+- **Zero MAD early exit:** keeping an obvious isolated outlier in quantized data.
+- **Misnamed algorithms:** treating fixed-count trimming as Siril percentile
+  clipping, or rank fit as a temporal/spatial gradient fit.
+- **Weight as coverage:** normalizing accumulated statistical weight by a global
+  maximum and using it as geometric validity.
+- **Second Jacobian:** dividing a drop coefficient by local area after it was already
+  normalized by mapped drop area.
+- **Signed-kernel clamp:** forcing negative Lanczos/science values to zero.
+- **Crop renormalization:** renormalizing a kernel over only in-bounds taps and
+  brightening edge contributions.
+- **Diagonal-only uncertainty:** summing drizzle variance pixels as if neighbors were
+  independent.
+- **Drizzle without dithers:** creating more pixels, not more information.
+- **Background overfit:** subtracting extended astrophysical emission as a mosaic
+  “gradient.”
 
-- **Fruchter & Hook 2002, *Drizzle* (PASP 114:144)** —
-  `.tmp/papers/fruchter_hook_2002_drizzle.txt` (the previously-garbled PDF, now fully
-  legible). **Resolved:** the verbatim accumulation equations (Eqs. 2–5: `W' = a·w + W`;
-  `I' = (d·a·w·s² + I·W)/W'`; with `s²` only in the **flux** numerator, never in the
-  weight), the correlated-noise derivation (Eqs. 6–8, weights enter as `w²s⁴σ²`;
-  `R = σ_c/σ_p`), and the closed-form `R` (Eqs. 9–10). **Correction it forced:** the
-  `r ≤ 1` branch is `R = 1/(1 − r/3)` (numerator 1), *not* `r/(1 − r/3)` — see §5.6. Also
-  resolved: the interlacing↔shift-and-add limits, the photometry numbers (0.004 / ≤0.015
-  mag), and the 7-step median+blot+derivative CR recipe (which *originates here*, not in
-  DrizzlePac) — §§5.2, 5.3, 5.5, 5.7, 5.8.
-- **Casertano et al. 2000, *WFPC2 Observations of the HDF-S* (AJ 120:2747)** —
-  arXiv `astro-ph/0010245` → `.tmp/papers/casertano_2000_hdfs.txt`. **Added:** real-world
-  drizzle parameters (`scale = 0.4` WF px, `pixfrac = 0.5` WF px → `r = 1.25`; PC chip
-  `pixfrac = 0.8`; coarse 60 mas intermediate for CR, fine 40 mas for science),
-  background-only inverse-variance weighting (signal-based weighting "can produce biased
-  results"), and the equivalent single-pixel noise `σ̄ = 1/√W` from the output weight map
-  — §5.5. (The first download under the task's `astro-ph/0004178` ID was the *wrong*
-  paper — a CMB `Pseudo-Cl` paper; the correct HDF-S preprint was found via the arXiv API
-  and is the one cited here.)
-- **DrizzlePac Handbook §3.3, *Weight Maps and Correlated Noise*** (HST docs, web) →
-  `.tmp/papers/drizzlepac_handbook_3_3.html`. Confirms the `R = σ_c/σ_p` framing and the
-  `r=1.2 → R=1.662` example, **but** prints the `r ≤ 1` branch as `r/(1 − r/3)` — the
-  typo this doc previously inherited; F&H's original is authoritative (§5.6).
-- **NIST e-Handbook §1.3.5.17.3, *Generalized ESD Test*** (web) →
-  `.tmp/papers/nist_gesd.html`. **Resolved** the exact λ critical-value formula
-  `λ_i = (n−i)·t_{p,n−i−1} / √((n−i−1+t²)(n−i+1))`, `p = 1 − α/(2(n−i+1))`, and reconciled
-  it index-for-index with siril's decrementing-`size` form (§3.5). Confirms masking
-  robustness (3 outliers vs Grubbs' 0) and the `n ≥ 15`/`n ≥ 25` accuracy bounds.
+---
 
-**Re-verified in cloned source (cite file:line):** siril `rejection_float.c`
-Winsorized `1.5f / 1.134f / 0.0005f` (`:230-237`), `median_and_mean.c` GESD t-critical
-`gsl_cdf_tdist_Pinv(1 − sig/(2·size), size−2)` then `λ = (size−1)t/√(size(size−2+t²))`
-(`:1481-1484`), noise weights `1/(pscale²·bgnoise²)` (`:1122`), wFWHM/nbstars weights
-(`:1136`/`:1183`); cdrizzle `update_data` running weighted average (`:32`),
-`update_data_var` squared-weight variance `(var·vc²+dow²·d2)/vc_plus_dow²` (`:135`),
-`boxer`/`sgarea` (`:280`/`:174`), `over()` rect-intersect (`:460`), square-kernel
-Jacobian `0.5((x₁−x₃)(y₀−y₂)−(x₀−x₂)(y₁−y₃))` with `w = weights·weight_scale/jaco`
-(`:1376`/`:1393`), Gaussian `pfo` clamp `≥1.2/pscale_ratio` (`:1576`), Lanczos pixfrac
-warning (`:1701`); DrizzlePac `drizCR.py` threshold `t2 = mult·blot_deriv + snr·ta/gain`,
-defaults `3.5 3.0` / `1.2 0.7`, `tmp2 ≥ 9` (`:320-336`). **lumos confirmed:**
-the GESD statistic, live-count λ formula, and exact Student-t quantile now match the
-NIST/Siril contract; Winsorized constants
-`HUBER_C=1.5 / WINSORIZED_CORRECTION=1.134` (`rejection.rs:201-203`); lowest-mean-MAD
-reference; paired registered-frame normalization; source-domain inverse-variance noise weighting
-with interpolation confidence applied once;
-drizzle `accumulate`/`finalize` deferred weighted average (`mod.rs`).
+## 9. Open-source implementation comparison
 
-**Resolved in pass 3 (were "open"):** the **1.134** factor is now nailed by direct
-numerical integration — `E[ψ_{1.5}(z)²] = 0.47783 + 0.30063 = 0.77846`, so
-`1/√0.77846 = 1.13339 ≈ 1.134`, exactly siril/lumos's constant (§3.2); no statistics
-reference printing the literal "1.134" is needed, the integral pins it. The small-N
-median efficiency is likewise computed exactly: *variance* efficiency `0.743` at N=3
-(SD `0.862`), `0.697`/`0.835` at N=5, *decreasing* to the asymptotic `2/π = 0.637`
-(SD `0.798`) — which **overturned** the pass-1/2 claim that the penalty is "worse at
-small N, approached from below" (§2.1; the limit is approached from *above*, small N is
-*more* efficient).
+### 9.1 STScI `drizzle`
 
-## Verification & corrections (pass 3)
+The maintained STScI implementation is the primary geometric reference.
 
-A third pass re-checked every load-bearing claim manually against lumos source and the
-cloned references, and ran the two numerical integrations above. New corrections
-(marked `**Correction (pass 3):**` inline):
+- `pixmap` explicitly maps input coordinates to output coordinates.
+- the exact Square kernel maps the four shrunken corners, computes mapped drop area
+  (`jaco`), and uses `overlap/jaco` once;
+- Turbo uses an axis-aligned footprint normalized by `pixel_scale_ratio²/p²` without
+  an additional local Jacobian;
+- Point deposits a unit coefficient without a Jacobian;
+- Gaussian and Lanczos use kernel coefficients and STScI warns that they do not
+  conserve flux;
+- `iscale` separates science-unit scaling from `pixel_scale_ratio`, which sizes
+  kernels;
+- `data2` is accumulated with squared weights for variance propagation;
+- DQ and context outputs remain separate from the science/weight images.
 
-| § | Pass-1/2 said | Pass-3 corrected to |
-|---|---------------|---------------------|
-| 2.1 | median penalty "worse at small N (~0.74), approached from below" | RE approached **from above**; small N is *more* efficient (N=3: var 0.743 / SD 0.862 vs asymptotic 0.637 / 0.798); the `0.74` is the *variance* efficiency at N=3 |
-| 3.5 / 8 | lumos GESD differed from siril only by normal-vs-t | It also used `n − 2i` instead of the live count `n − i` and a median+MAD statistic. All three divergences are now resolved by the textbook implementation. |
-| 5.1 / 5.5 / 5.6 | "`s = scale`", "`s=2` (output pixel = ½ input)", "`r = pixfrac/scale`" | lumos's `scale = 1/s_F&H`; for lumos parameters **`r = pixfrac·scale`** (= `drop_size` in output px). `s=0.5` (not 2) gives a half-size output pixel |
-| 5.5 / 6 | (implicit) lumos defaults are coverage-/noise-balanced | lumos defaults `scale=2, pixfrac=0.8` give `r = 1.6`, `R ≈ 2.0` (x3 → `r=2.1`, `R ≈ 2.5`) — **high** correlated noise, above the F&H/Casertano `r ≈ 1.2` sweet spot |
-| 5.3 / 8 | drizzle "total flux preserved … same as Eqs. 4–5" | lumos **omits F&H's global `s²` flux factor** (no `iscale`), preserving the input per-pixel DN scale instead; integrated counts scale by `scale²` (benign: a global constant) |
-| 5.4 / 8 | lumos "explicitly forbids" Lanczos off pixfrac=scale=1 | lumos only **warns** and runs anyway (`mod.rs:271-281`); also Lanczos-3-only, kernel normalised to sum 1, and lumos's Point kernel *does* apply the Jacobian |
+These details are visible in `src/cdrizzlebox.c` and `drizzle/resample.py` at the
+pinned revision in §12.
 
-Citation fixes (line numbers drifted or pointed at the wrong file): `enum Rejection`
-`config.rs:831` → `rejection.rs:831`; `SigmaClipConfig` `config.rs:20` →
-`rejection.rs:20`; GESD `reject` `:716` → `:668`; `max_outliers` `N/4` `rejection.rs:42`
-→ `:657`; Winsorized const `rejection.rs:202` → `:203`; `drizzle_stack` `mod.rs:876` →
-`:937` (twice); presets `config.rs:71` → `:98`.
+### 9.2 DrizzlePac
 
-**Re-verified as correct (no change needed):** the headline pass-2 correlated-noise
-correction (F&H Eq. 10 numerator is **1**; the DrizzlePac Handbook §3.3 prints
-`r/(1−r/3)` — confirmed *both* against `fruchter_hook_2002_drizzle.txt` line 560 and
-`drizzlepac_handbook_3_3.html` line 791); F&H Eqs. 2–5 with `s²` only in the flux
-numerator (paper lines 154-176); the `R(r)` monotonicity and `r=1.2 → R=1.662` worked
-example; the 0.004 / ≤0.015 mag photometry numbers (lines 314-344); the 7-step
-median+blot+derivative CR recipe (lines 233-253); Casertano's HDF-S parameters
-(`scale 0.4`/`pixfrac 0.5` → `r=1.25`, PC `0.8`, 60 mas CR / 40 mas science) and
-background-only inverse-variance weighting; siril's normalization modes / `poffset =
-pscale·offset − offset0` / noise & wFWHM & nbstars weights / Winsorized
-`1.5f/1.134f/0.0005f` / GESD `gsl_cdf_tdist_Pinv` λ; DSS `KappaSigmaClip` /
-`MedianKappaSigmaClip`; DrizzlePac `drizCR.py` `t1/ta/t2` thresholds and `3.5 3.0` /
-`1.2 0.7` defaults; STScI `update_data` / `update_data_var` / `jaco` / `boxer` / `sgarea`
-/ `iscale = scale²`.
+DrizzlePac supplies the rejection workflow missing from the linear drizzle kernel:
+separate drizzles, median model, blot back to the source plane, derivative-aware
+two-threshold cosmic-ray detection, neighborhood growth, and final masked drizzle.
+Its current `drizCR.py` implements the threshold as the sum of a model-derivative
+term and a gain/read-noise term.
 
-## 9. References
+### 9.3 Siril
 
-### Source code (cloned references)
+Siril is a useful same-domain reference for astrophotography stacking:
 
-- STScI drizzle C core — `.tmp/refs/drizzle/src/cdrizzlebox.c`:
-  `update_data` (:32), `update_data_var` (:91), `sgarea` (:174), `boxer` (:280),
-  `over` (:460), `compute_pscale_ratio` (:504), `do_kernel_point` (:1457),
-  `do_kernel_gaussian` (:1549), `do_kernel_lanczos` (:1688), `do_kernel_turbo`
-  (:1841), `do_kernel_square` (:1982), `dobox` (:2160), kernel dispatch table (:2144).
-  Blot: `.tmp/refs/drizzle/src/cdrizzleblot.c`.
-- DrizzlePac CR rejection — `.tmp/refs/drizzlepac/drizzlepac/drizCR.py` (`_driz_cr`
-  :220, the t1/ta/t2 threshold :320-334), `createMedian.py`, `ablot.py`.
-- siril stacking — `.tmp/refs/siril/src/stacking/`: `rejection_float.c`
-  (`percentile_clipping` :31, `sigma_clipping_float` :49, `line_clipping` :62,
-  `grubbs_stat` :82, `apply_rejection_float` :100, WINSORIZED :223, LINEARFIT :260,
-  GESDT :301); `median_and_mean.c` (`compute_noise_weights` :1110,
-  `compute_wfwhm_weights` :1136, `compute_nbstars_weights` :1183, GESD t-critical
-  :1481); `normalization.c` (modes :124-134, ref-relative transform :142-177).
-- DeepSkyStacker — `.tmp/refs/DeepSkyStacker/DeepSkyStackerKernel/DSSTools.h`
-  (`KappaSigmaClip` :606, `MedianKappaSigmaClip` :677); `MultiBitmapProcess.cpp`
-  (Entropy / AutoAdapt method names).
-- SWarp / reproject — `.tmp/refs/swarp/` (mesh background, weighted coadd),
-  `.tmp/refs/reproject/reproject/mosaicking/background.py` (background matching).
-- lumos — `src/stacking/combine/{config.rs, stack.rs, rejection.rs, cache/}`,
-  `src/drizzle/mod.rs`.
+- normalization distinguishes additive, multiplicative, and scale variants;
+- noise weights include the square of the normalization scale;
+- Winsorized clipping has an inner Huber clamp/scale loop and an outer reject/repeat
+  loop;
+- linear-fit clipping sorts the pixel stack and fits value against rank;
+- its “percentile” method is fractional deviation from the median, not fixed-count
+  trimming;
+- GESD is exposed for larger stacks.
 
-### Online sources
+Source comparison is more reliable than copying old UI documentation; semantics
+have changed across Siril releases.
 
-- Fruchter & Hook 2002, *Drizzle: A Method for the Linear Reconstruction of
-  Undersampled Images*, PASP 114:144 — https://arxiv.org/abs/astro-ph/9808087 ,
-  https://iopscience.iop.org/article/10.1086/338393 . **Parsed in full this pass** →
-  `.tmp/papers/fruchter_hook_2002_drizzle.txt` (Eqs. 2–10 quoted in §§5.2–5.8).
-- Casertano et al. 2000, *WFPC2 Observations of the Hubble Deep Field-South*, AJ 120:2747
-  — https://arxiv.org/abs/astro-ph/0010245 . **Parsed this pass** →
-  `.tmp/papers/casertano_2000_hdfs.txt` (real-world drizzle parameters, background-noise
-  weighting, `σ̄ = 1/√W`; §5.5).
-- STScI, *Dithering and the Drizzle Algorithm* —
-  https://www.stsci.edu/ftp/science/hdf/combination/drizzle.html
-- STScI HST docs, *Weight Maps and Correlated Noise* (the `R` formula — note its `r ≤ 1`
-  branch `r/(1−r/3)` is a typo; F&H's `1/(1−r/3)` is correct, §5.6) —
-  https://hst-docs.stsci.edu/drizzpac/chapter-3-description-of-the-drizzle-algorithm/3-3-weight-maps-and-correlated-noise
-- The DrizzlePac Handbook —
-  https://www.stsci.edu/files/live/sites/www/files/home/scientific-community/software/drizzlepac/_documents/drizzlepac-handbook-v1.pdf
-- drizzle package user docs (pixfrac/scale/kernels) —
-  https://spacetelescope-drizzle.readthedocs.io/en/stable/drizzle/user.html
-- NIST Engineering Statistics Handbook, *Generalized ESD Test for Outliers* (Grubbs
-  statistic, λ critical value) —
-  https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h3.htm
-- PixInsight ImageIntegration rejection guidance (Winsorized < ~20 subs, Linear-fit
-  25+) — https://www.cloudynights.com/forums/topic/697077-question-about-rejection-algorithms-in-pixinsight/ ,
-  https://dslr-astrophotography.com/detailed-pixel-rejection-methods/
-- Siril stacking docs (rejection, median 0.8√N efficiency) —
-  https://siril.readthedocs.io/en/stable/preprocessing/stacking.html
-- Median vs mean efficiency (`√(π/2)`, `0.80`) — corroborated across
-  https://jonrista.com/the-astrophotographers-guide/astrophotography-basics/snr/ and
-  https://medium.com/@rupesh.rupeshs/image-stacking-and-signal-quality-a3b7d310df70
-- Finite-sample (small-N) median efficiency approached *from above* (var-eff `0.743`
-  at N=3 ↓ `2/π`) — A. Akinshin, *Understanding the pitfalls of preferring the median*
-  https://aakinshin.net/posts/median-vs-mean/ , cross-checked by direct numerical
-  integration of the order-statistic variance (pass 3, §2.1).
-- PixInsight rejection-by-frame-count guidance (Linear Fit >25, Winsorized 15–25,
-  Averaged Sigma 9–15, Percentile 5–9) —
-  https://www.astropixelprocessor.com/community/faq/when-to-use-which-outlier-rejection-filter/ ,
-  https://chaoticnebula.com/pixinsight-image-integration/
+### 9.4 CCDProc and Astropy
+
+CCDProc cleanly separates clipping-generated masks from combination and offers a
+memory-limited `combine` path, per-image/per-pixel weights, mean, median, extrema
+clipping, and Astropy sigma clipping. Its code is a good API reference, but its
+default uncertainty calculations are not a substitute for the general propagated
+weighted-variance formula: source inspection shows the average-combine uncertainty
+is based on sample deviation divided by survivor-count square root even when a
+weighted mean is requested.
+
+### 9.5 SWarp
+
+SWarp demonstrates large-image resampling/mosaic coaddition, weight-map handling,
+background modeling, and a clipped weighted mean. Its clipped path compares samples
+with a median using an effective noise term that includes the input variance map and
+signal/gain term, then inverse-variance combines survivors. It is a useful reference
+for heteroscedastic rejection and tile-scale engineering, not for variable-pixel
+drizzle geometry.
+
+### 9.6 Proper coaddition
+
+Zackay and Ofek's proper coadd is outside Lumos's current Stage 5 API but sets an
+important boundary on claims of “optimal” stacking. A scalar weighted mean is
+minimum-variance for a common pixel value under its assumptions. When exposures have
+different PSFs and the goal is point-source detection/photometry, a PSF-aware Fourier
+coadd can preserve more information and produce white noise. Stage 5 should reserve
+room for that product rather than baking a seeing heuristic into statistical weight.
+
+---
+
+## 10. Current Lumos source audit — 2026-07-21
+
+This section describes the repository at the audit date. “Implemented” does not mean
+the normative design above should be weakened; “gap” does not mean code was changed
+as part of this documentation work.
+
+### 10.1 Statistical stack: working behavior
+
+The current combine path has several strong foundations:
+
+- `StackFrame::registered` preserves source-domain MAD statistics before
+  interpolation and carries separate warp coverage/confidence planes.
+- coverage gates sample inclusion; interpolation confidence multiplies the
+  statistical weight exactly once.
+- registered global normalization fits paired samples over a common valid domain,
+  uses stratified sampling, robust residual clipping, and errors-in-variables Deming
+  gain; multiplicative normalization uses common-domain statistics.
+- noise weighting includes normalization gain squared through
+  `1/(gain * sigma)²`; the older claim that gain was omitted is stale.
+- value/index association is retained through rejection sorts and compaction.
+- weighted mean uses precision-preserving compensated accumulation.
+- GESD uses Rosner's two-sided mean/sample-standard-deviation statistic, accurate
+  Student-t critical values, and the largest passing index; its preset falls back to
+  median below 15 frames.
+- mean products emit per-channel sums of surviving effective weights and
+  `sum(w²)/sum(w)²`; median correctly emits no linear variance factor.
+- RAM and mmap tiers share the chunked combine path, with validation, cancellation,
+  and tests for tier equivalence.
+
+### 10.2 Statistical stack: corrections and remaining gaps
+
+| Priority | Finding | Consequence / required direction |
+|---|---|---|
+| P0 | No calibrated per-pixel variance plane enters combine. | Noise weight is a frame-level background-MAD proxy; the linear factor is not science variance. Implement §2.5 and `sum(w²v)/sum(w)²`. |
+| P1 | Rejection uses raw normalized values and ignores heteroscedastic variances/weights. | Noisy samples have uncalibrated rejection probability. Standardize residuals. |
+| P1 | `coverage` counts geometrically supported frames before rejection and ignores confidence. | It cannot answer how many samples survived. Add survivor/rejection/`N_eff` maps rather than changing coverage's meaning silently. |
+| P1 | Global normalization requires support common to every registered frame. | Disjoint mosaic tiles return `NoCommonCoverage`; there is no overlap-graph or surface background solution. |
+| P1 | Reference selection is lowest average source MAD. | It is robust and stable but not a full photometric/PSF/overlap reference criterion. |
+| P1 | RGB noise weighting averages channel sigmas into one frame scalar. | It is not per-channel inverse variance; channel-shaped variance/weights are needed. |
+| P1 | Median ignores requested frame weighting (with a warning). | Correct for an unweighted median, but the API should make weighted-median intent explicit. |
+| P1 | Sigma clipping exits when MAD is zero; its `N>=10` fast path also treats constant trimmed data as no-rejection. | An isolated outlier on otherwise equal/quantized samples can survive. Add a propagated noise/quantization floor. |
+| P1 | Current Winsorized mode starts with `1.134` times an RMS about the median, performs one robust-estimate/reject pass, and does not repeat Siril's outer reject/re-estimate loop. Siril starts its first clamp from an uncorrected ordinary sample deviation. The Lumos enum comment says “replace” although the final combine rejects originals. | Fix naming/docs or implement the declared variant exactly; do not claim source equivalence. |
+| P1 | LinearFit's first pass is median/MAD; later passes fit sorted value against rank and scale by mean absolute residual. | Existing comments that it fits a reference relation or handles sky gradients are misleading; `sigma_*` parameter names are not statistically calibrated. |
+| P1 | Percentile removes `floor(N*p/100)` values from each sorted tail. | This is a trimmed mean, not Siril percentile-deviation clipping. Rename serialized/UI semantics. |
+| P2 | Preset fallbacks are based on global frame count. | Local edge/mask counts can be smaller; resolve fallback per output sample. |
+| P2 | Final median averages the two middle values for even `N`, but hot-path rejection centers/MADs use an upper-middle order statistic. | The estimator and rejection center have different even-`N` conventions; make the distinction intentional and test asymmetric effects. |
+| P2 | No explicit low/high rejection maps, survivor count, chi-square, or effective PSF are emitted. | Quantitative diagnosis and artifact auditing remain limited. |
+
+### 10.3 Drizzle: working behavior
+
+The independent public drizzle API currently provides:
+
+- streaming of path inputs one frame at a time;
+- exact Square polygon overlap ported from STScI `boxer` geometry;
+- Turbo, Point, Gaussian, and Lanczos-3 alternatives;
+- frame and nonnegative per-pixel scalar weight maps;
+- a shared accumulated weight and coefficient-square linear factor;
+- validation of `scale`, `pixfrac`, fill, coverage threshold, and the policy that
+  Lanczos requires `scale=1`, `pixfrac=1`.
+
+The Square kernel's `overlap / mapped_drop_area` coefficient agrees with the STScI
+reference for supported linear/projective transforms.
+
+### 10.4 Drizzle: correctness and integration gaps
+
+| Priority | Finding | Consequence / required direction |
+|---|---|---|
+| P0 | Drizzle is a standalone API and is not wired into the alignment/stacking pipeline. | Normalization, source statistics, masks, registration diagnostics, and output provenance are not coordinated. |
+| P0 | `DrizzleFrame.transform` is documented input→common, while registration's canonical `Transform`/`WarpTransform` maps reference→source for inverse warping. The same base type permits the wrong direction. | A caller can drizzle with a reversed transform. Use direction-specific types and derive the forward map. |
+| P0 | Drizzle accepts only linear/projective `Transform`; registration's optional SIP lives in `WarpTransform` and has no forward inverse here. | Drizzle silently cannot reproduce Stage 4's full distortion correction. Implement a numerically invertible complete map. |
+| P0 | Output centers use `scale * transformed_center` and dimensions use `ceil(input_size*scale)` without the boundary-derived half-pixel offset. | For `scale != 1`, the grid is shifted relative to its scaled source footprint, clipping one side and leaving asymmetric blank area. Implement §4.2. |
+| P0 | Output grid is fixed from one input size; there is no union/intersection/crop offset or WCS derivation. Finalization constructs `AstroImage::from_planar_channels`, which resets metadata. | Mosaics, transformed extents, units, astrometry, and provenance are lost. |
+| P0 | Turbo, Point, Gaussian, and Lanczos divide their already normalized per-input coefficients by `local_jacobian`; Square does not. STScI applies no such second division to those kernels. | Relative frame/pixel weights are distorted under scale or spatially varying transforms, and kernels disagree. Remove the extra factor or redefine/test coefficients from first principles. |
+| P0 | Lanczos finalization clamps negative values to zero. | This breaks linearity, signed calibrated data, ringing symmetry, background statistics, and photometry. Never clamp science output. |
+| P0 | Frame validation checks dimensions and weight maps but not transform validity or non-finite source samples. | A NaN or invalid homography can contaminate accumulators or produce nonsensical indices. |
+| P1 | No input variance/DQ/channel mask enters drizzle; `weight_sq` assumes unit common input variance. | Output is a coefficient factor, not propagated uncertainty; artifacts require externally prepared scalar weights. |
+| P1 | There is no separate-drizzle/median/blot/derivative rejection workflow. | Drizzle itself cannot reject cosmic rays or trails. |
+| P1 | Coverage is accumulated signed/statistical weight divided by its global maximum; `min_coverage` uses the same global ratio. | Geometry, exposure quality, Jacobian, and signed kernels are conflated; one extreme pixel changes validity elsewhere. |
+| P1 | Gaussian/Lanczos normalize over only in-bounds taps. | The kernel changes at crop edges. Lanczos also permits negative accumulated weights while coverage assumes a nonnegative weight field. |
+| P1 | Turbo remains axis-aligned with nominal `p*scale` size under every transform. | Rotation/shear/anisotropic or spatial scale is only approximated; exact Square should be the correctness default. |
+| P1 | Science omits F&H `s²` and therefore uses surface-brightness-like numeric semantics, but output metadata does not state this. | Summed output DN grows by `S²`; callers cannot reliably interpret flux units. |
+| P1 | Output accumulators are resident `f32` sums with no compensated reduction or cancellation during deposition. | Very large outputs/stacks can exceed memory, lose small contributions, and cannot be interrupted promptly. |
+| P2 | `pixfrac=0` is rejected even for Point, which ignores it. | The interlacing limit cannot be represented directly. |
+| P2 | A single shared weight plane is used for all channels. | Per-channel variance/masks and chromatic rejection cannot be represented. |
+
+### 10.5 Recommended implementation order
+
+1. Introduce an explicit reconstruction-frame/grid/unit/variance contract and
+   direction-specific full mappings, then integrate drizzle with the Stage 4 result.
+2. Correct boundary-derived grid geometry, output WCS/metadata, transform validation,
+   and Square reference behavior.
+3. Remove the non-Square second-Jacobian error; eliminate Lanczos clamping; separate
+   signed statistical weight from geometric coverage.
+4. Add per-channel masks, DQ/context, actual variance propagation, survivor/support
+   diagnostics, and tiled `f64`/compensated accumulators.
+5. Implement the median+blot+derivative source-mask workflow.
+6. Standardize statistical-stack rejection with per-pixel variance and make the
+   rejection variants/names match their actual mathematics.
+7. Add covariance/PSF diagnostics and, separately, a proper-coadd path for
+   measurement-oriented products.
+
+---
+
+## 11. Definition of done
+
+Stage 5 is complete only when:
+
+- ordinary stack and drizzle consume one coherent frame record with explicit units,
+  variance, masks, and transform directions;
+- normalization and weights are measured in valid domains and propagated through
+  variance;
+- every rejection method has exact documented semantics, local small-N behavior,
+  survivor diagnostics, and reference-vector tests;
+- drizzle maps pixel boundaries onto a caller-visible output WCS, applies full
+  distortion once, conserves the declared quantity, and never clamps linear science;
+- masks are generated in the source plane for drizzle artifacts;
+- output variance uses actual coefficients and covariance is either propagated or
+  explicitly characterized;
+- memory tier, parallelism, and cancellation do not change scientific semantics;
+- synthetic end-to-end tests recover flux, astrometry, PSF, noise, and masks within
+  stated tolerances.
+
+---
+
+## 12. Sources and pinned implementations
+
+### Primary literature and statistical references
+
+- A. S. Fruchter and R. N. Hook, “Drizzle: A Method for the Linear
+  Reconstruction of Undersampled Images,” PASP 114, 144–152 (2002),
+  [arXiv:astro-ph/9808087v2](https://arxiv.org/abs/astro-ph/9808087),
+  [DOI 10.1086/338393](https://doi.org/10.1086/338393). Primary source for drop
+  geometry, weighted accumulation, `s²`, masks/blot flow, and correlated noise.
+- B. Rosner, “Percentage Points for a Generalized ESD Many-Outlier Procedure,”
+  Technometrics 25(2), 165–172 (1983),
+  [DOI 10.1080/00401706.1983.10487848](https://doi.org/10.1080/00401706.1983.10487848).
+- NIST/SEMATECH, [Generalized Extreme Studentized Deviate Test for
+  Outliers](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h3.htm).
+  Formula and worked Rosner example.
+- B. Zackay and E. O. Ofek, “How to coadd images? I. Optimal source detection and
+  photometry using ensembles of images,”
+  [arXiv:1512.06872](https://arxiv.org/abs/1512.06872).
+- B. Zackay and E. O. Ofek, “How to coadd images? II. A coaddition image that is
+  optimal for any purpose in the background dominated noise limit,”
+  [arXiv:1512.06879](https://arxiv.org/abs/1512.06879).
+
+### Open-source implementations and official documentation
+
+- STScI `drizzle`, revision
+  [`f9e6f52a9ee69ba82d53f8826535083781e956fa`](https://github.com/spacetelescope/drizzle/tree/f9e6f52a9ee69ba82d53f8826535083781e956fa):
+  [`src/cdrizzlebox.c`](https://github.com/spacetelescope/drizzle/blob/f9e6f52a9ee69ba82d53f8826535083781e956fa/src/cdrizzlebox.c)
+  and
+  [`drizzle/resample.py`](https://github.com/spacetelescope/drizzle/blob/f9e6f52a9ee69ba82d53f8826535083781e956fa/drizzle/resample.py).
+- DrizzlePac official source documentation,
+  [`drizzlepac.drizCR`](https://drizzlepac.readthedocs.io/en/latest/_modules/drizzlepac/drizCR.html),
+  for blot/derivative cosmic-ray thresholds and growth.
+- STScI HST notebooks,
+  [Optimizing the Image Sampling](https://spacetelescope.github.io/hst_notebooks/notebooks/DrizzlePac/optimize_image_sampling/optimize_image_sampling.html),
+  for practical output-scale/`pixfrac` validation.
+- Siril, revision
+  [`8ce9baa37215ae9783de16fa9e0d7a610303588d`](https://gitlab.com/free-astro/siril/-/tree/8ce9baa37215ae9783de16fa9e0d7a610303588d/src/stacking):
+  `normalization.c`, `median_and_mean.c`, and `rejection_float.c`.
+- Astropy CCDProc, revision
+  [`c80e1f00b9326882c6b67011ea53b5bfc3be5d4f`](https://github.com/astropy/ccdproc/tree/c80e1f00b9326882c6b67011ea53b5bfc3be5d4f),
+  and its official guide,
+  [Combining images and generating masks from clipping](https://ccdproc.readthedocs.io/en/2.5.0/image_combination.html).
+- Astropy,
+  [`sigma_clip`](https://docs.astropy.org/en/stable/api/astropy.stats.sigma_clipping.sigma_clip.html),
+  for explicit iterative center/scale/mask semantics.
+- SWarp, revision
+  [`bf4f496f18c04a8d32022b45449ef8675ab9b3da`](https://github.com/astromatic/swarp/tree/bf4f496f18c04a8d32022b45449ef8675ab9b3da),
+  especially `src/coadd.c` and `src/back.c` for weighted/clipped mosaic coaddition
+  and background handling.
+
+### Local Lumos source audited
+
+- `stacking/combine/config.rs`
+- `stacking/combine/normalization/mod.rs`
+- `stacking/combine/rejection.rs`
+- `stacking/combine/cache/mod.rs`
+- `stacking/combine/stack.rs`
+- `stacking/drizzle/{accumulator,config,geometry,stack}.rs`
+- `stacking/registration/{transform,resample}/`
+- `stacking/product.rs`
+- `io/astro_image/mod.rs`

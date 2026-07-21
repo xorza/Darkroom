@@ -1,1101 +1,1503 @@
-# Stage 3 — Star Detection: Best Practices & Algorithms
+# Stage 3 — Star detection and registration-catalog construction
 
-## Scope & Goal
+## 1. Purpose and required result
 
-Stage 3 turns a calibrated, registered-or-not 2D frame into a catalog of point
-sources, each with a sub-pixel position and a set of quality metrics (flux, SNR,
-FWHM, ellipticity, roundness, sharpness, saturation/cosmic-ray flags). This
-catalog feeds Stage 4 (registration: triangle matching + RANSAC needs clean,
-well-localized stars) and any photometry. The detection problem decomposes into
-six sub-problems, and the literature has converged on a canonical solution for
-each:
+This stage converts one calibrated, linear image into a catalog of point-source
+measurements suitable for geometric registration. It does **not** produce
+science-grade photometry merely because the catalog contains a flux field.
+Registration needs repeatable positions, realistic position uncertainties, clean
+source classification, and good coverage of the field. Those requirements are
+different from maximizing the number of detections or estimating total stellar
+flux as accurately as possible.
 
-1. **Background & noise estimation** — what is "sky" at every pixel, and what is σ.
-2. **Detection** — which pixels are significantly above sky (matched-filter +
-   threshold + connected-component labeling).
-3. **Deblending** — splitting touching/overlapping sources into distinct objects.
-4. **Centroiding** — locating each source to a small fraction of a pixel.
-5. **Measured parameters** — flux, SNR, FWHM, eccentricity, DAOFIND
-   sharpness/roundness, saturation, cosmic-ray discrimination.
-6. **Filtering** — rejecting non-stellar detections.
+The implementation described here has the following ordered responsibilities:
 
-The two reference implementations that define "best practice" are **Source
-Extractor** (SExtractor; Bertin & Arnouts 1996) — re-implemented cleanly as the
-C library **SEP** — and **DAOFIND/DAOPHOT** (Stetson 1987), re-implemented in
-**photutils**. Where they disagree, this document says so. Goal of this section
-of the doc: give the actual formulas and defaults, separate best practice from
-anti-patterns, and map them onto what lumos does (§8).
+1. validate the image, mask, variance, metadata, and coordinate convention;
+2. construct one or more *detection* planes without changing the measurement data;
+3. estimate spatially varying background and blank-sky noise;
+4. estimate the point-spread function (PSF) scale if it was not supplied;
+5. compute a variance-aware point-source detection statistic;
+6. form connected detections and split blends;
+7. measure every candidate on calibrated, unconvolved pixels;
+8. attach flags and uncertainties rather than silently discarding information;
+9. select a clean, spatially distributed registration catalog; and
+10. return diagnostics that distinguish “empty sky” from a failed algorithm.
 
-The single most important architectural rule, stated up front because every
-subsection depends on it: **detection, centroiding, and flux/SNR all operate on a
-*background-subtracted* image, with a *spatially varying* noise map σ(x,y).** A
-constant sky and a constant σ are the two assumptions that break first on real
-astrophotography data (gradients, vignetting, light pollution, amp glow).
+The central architectural rule is:
 
----
+> Filtering, channel combination, whitening, median filtering, and thresholding
+> may create temporary detection products. Centroids, saturation, PSF parameters,
+> and fluxes must be measured from the original calibrated measurement planes,
+> with the original masks and variance propagated into the measurement.
 
-## 1. Background & noise estimation
+Photutils follows the same important separation: `DAOStarFinder` searches a
+convolved image but fits its marginal centroids on the unconvolved input image.
+SExtractor likewise separates detection processing from measurement and carries
+weight maps and extraction flags through the catalog. See the
+[Photutils DAOStarFinder documentation](https://photutils.readthedocs.io/en/stable/api/photutils.detection.DAOStarFinder.html)
+and [SExtractor processing overview](https://sextractor.readthedocs.io/en/latest/Processing.html).
 
-### 1.1 The tiled-mesh approach
+### 1.1 Normative language
 
-Sky is not constant. Gradients from light pollution, moonlight, vignetting,
-amplifier glow, and large galaxies/nebulae mean that a single global sky value
-is wrong almost everywhere. SExtractor's solution, adopted essentially
-universally, is a **coarse mesh**: divide the image into tiles (SExtractor
-`BACK_SIZE`, default 64×64 px; SEP `bw`,`bh`; photutils `Background2D`
-`box_size`), estimate a robust sky level and σ per tile, then **interpolate** the
-tile grid back up to a full-resolution per-pixel map.
+`MUST`, `MUST NOT`, `SHOULD`, and `MAY` are requirements in the usual RFC sense.
+Sections 2–14 specify the target implementation. Section 15 audits the current
+Lumos implementation; it is descriptive, not permission to retain a known flaw.
 
-The tile must be **large enough to contain mostly sky** (so the robust estimator
-sees a sky-dominated histogram) but **small enough to track the gradient**.
-64 px is the canonical default; lumos uses 64 (`BackgroundConfig::tile_size`).
-For heavy gradients shrink it; for sparse fields you can enlarge.
+### 1.2 Non-goals
 
-### 1.2 The robust per-tile estimator: sigma-clipped mode
+This stage does not:
 
-Within each tile, SExtractor estimates sky from the **clipped histogram of pixel
-values**. The procedure (verified in SEP `background.c`):
+- apply a display stretch, gamma, tone curve, white balance, or gamut transform;
+- infer a WCS or solve the frame transform;
+- repair calibration defects that Stage 2 should have masked;
+- promise unbiased multiband photometry from a synthetic detection plane; or
+- resolve severely crowded fields without a simultaneous PSF model.
 
-1. Compute mean and σ of the tile (`backstat`, `background.c:277`).
-2. Build a histogram with bins spanning ±`QUANTIF_NSIGMA`=5 σ
-   (`background.c:382-386`).
-3. **Iteratively clip** the histogram at ±3σ around its *median* until σ
-   converges (relative change ≤ `EPS=1e-4`, i.e. <0.01% on the σ ratio) or σ
-   drops below 0.1, max 100 iterations (`backguess`, `background.c:490-524`;
-   the loop guard is `fabs(sig/sig1 − 1.0) > EPS`).
-4. Choose the sky estimate by a **crowding criterion** (`background.c:525-531`):
+## 2. Input, output, and coordinate contracts
 
-   ```
-   if |mean - median| / σ < 0.3:   sky = 2.5·median − 1.5·mean   (the "mode")
-   else:                            sky = median
-   ```
+### 2.1 Required input bundle
 
-The `2.5·median − 1.5·mean` form is **Pearson's empirical mode estimator** for a
-mildly skewed unimodal distribution. **Verified verbatim (pass 2)** in both primary
-sources:
+The detector SHOULD receive a named input structure rather than a bare
+`AstroImage`:
 
-- SExtractor `back.c:698-699,735-737`: `medfac = prefs.back_pearson` (=2.5),
-  `meafac = prefs.back_pearson − 1.0` (=1.5), and the sky is
-  `qzero + (medfac·med − meafac·mea)·qscale` when `fabs((mea−med)/sig) < 0.3`,
-  else `qzero + med·qscale`. **`BACK_PEARSON` is a configurable parameter**
-  (`preflist.h:264`, default 2.5), so SExtractor's mode is the *family*
-  `α·med − (α−1)·mea`; 2.5/1.5 is just the default α.
-- SEP `background.c:528-530` is byte-identical:
-  `fabs((mea − med)/sig) < 0.3 ? qzero + (2.5·med − 1.5·mea)·qscale
-  : qzero + med·qscale`.
-
-**Nuance the prior pass missed: `med` and `mea` are *histogram-domain* quantities.**
-Both implementations work on the per-tile histogram (bins of width `qscale` spanning
-±5σ from `qzero`), iteratively clipping at `med ± 3σ`. `mea` is the histogram's
-intensity-weighted mean *in bin units*; `med` is **not** a sorted median but a
-**histogram-interpolated median** found by walking two pointers inward from the
-clipped ends until the cumulative counts balance, then linearly interpolating within
-the crossover bin (`background.c:508-511`). The final sky is `qzero + (…)·qscale` —
-i.e. the bin-unit estimate scaled back to ADU. This is why a naive "sorted-median +
-sample-mean" reimplementation will not bit-match SExtractor even with the right
-coefficients.
-
-Photutils exposes the formula (but on raw pixel arrays, not a histogram) as
-`SExtractorBackground`: *"(2.5 · median) − (1.5 · mean). If (mean − median)/std >
-0.3 then the median is used instead"* (photutils `background/core.py:430-478`).
-The closely related **MMM** estimator (DAOPHOT) uses `3·median − 2·mean`
-(photutils `MMMBackground`, `core.py:388-425`) — i.e. the same family with α=3.
-
-**Why mode, not mean or median?** In an *uncrowded* tile the sky histogram is a
-near-Gaussian with a faint positive tail from undetected sources. The mean is
-pulled up by that tail; the median is more robust but still slightly biased; the
-2.5·med−1.5·mean mode corrects the residual skew and recovers the true peak of
-the sky distribution. When the tile is *crowded* (large `|mean−median|/σ`), the
-mode formula is unreliable, so SExtractor falls back to the plain median. This
-0.3 switch is the single most-cited subtlety of SExtractor background estimation
-and is easy to omit (lumos does — see §8).
-
-The per-tile **noise** σ is the σ of the *clipped* histogram (`backguess`
-returns `*sigma = sig·qscale`, `background.c:533`). This becomes the σ(x,y) map.
-
-> **Source disagreement / nuance.** photutils decouples the two: you pick a
-> `bkg_estimator` (e.g. `SExtractorBackground`) and a *separate*
-> `bkgrms_estimator` (e.g. `MADStdBackgroundRMS` = 1.4826·MAD, or
-> `StdBackgroundRMS`). SExtractor/SEP tie them together (both from the same
-> clipped histogram). MAD-based σ (`1.4826·MAD`) is more outlier-robust than the
-> clipped standard deviation and is what lumos uses: the RGB-plane noise weights
-> in `prepare.rs:74`, and the per-tile σ in `tile_grid.rs`
-> (`compute_tile_stats` → `sigma_clipped_median_mad`, `:452`, returns the
-> sigma-clipped **median** plus `mad_to_sigma(mad)`); `MAD_TO_SIGMA = 1.4826022`.
-
-### 1.3 Mesh filtering (remove bright-source contamination)
-
-A tile centered on a bright star or galaxy gets a biased sky even after
-clipping. SExtractor median-filters the *tile grid itself* with a small kernel
-(`BACK_FILTERSIZE`, default 3×3) before interpolation: each node is replaced by
-the median of its neighbors **only if** the change exceeds `BACK_FILTERTHRESH`
-(`fthresh`) — SEP `filterback`, `background.c:540-659`, the test is
-`fabs(med − back[i]) >= fthresh`. The σ map is median-filtered alongside the sky
-map (`background.c:627`). **The default `fthresh` is `0.0` in both tools**
-(SExtractor `BACK_FILTTHRESH`, `preflist.h:62`, range `[0, BIG]`; SEP
-`fthresh=0.0`, `sep.pyx:390`), so `|med − back| >= 0` is always true and the
-**default behavior is unconditional replacement** with the 3×3 neighbor median.
-The threshold only suppresses replacement once a user raises it above zero. Bad
-tiles (too few good pixels, `BACK_MINGOODFRAC`=0.5) are flagged `-BIG` and
-filled from the nearest valid tile (`background.c:569-596`). This step is what
-makes the mesh robust to a few contaminated tiles.
-
-lumos **does** median-filter its tile grid — `apply_median_filter`
-(`tile_grid.rs:208-249`) runs on every `compute()` (`:87`), replacing each tile's
-median *and* σ with the median of its 3×3 tile neighborhood (`:244-245`,
-edge tiles use the available neighbors). Because the replacement is
-**unconditional**, this matches SExtractor/SEP at their default `fthresh=0`.
-Two deviations: lumos exposes no `fthresh` knob (it cannot replicate a non-zero
-`BACK_FILTERTHRESH`), and it skips the filter entirely for grids smaller than
-3×3 tiles (`:212`), whereas SExtractor/SEP still filter small grids with a
-shrunk window.
-
-### 1.4 Interpolation: bicubic spline, not bilinear
-
-The coarse grid is interpolated to per-pixel resolution with a **natural
-bicubic spline** (C²-continuous), not bilinear. SEP precomputes the y-direction
-second derivatives once (`makebackspline`, `background.c:682`) and evaluates a
-1D natural cubic spline per row in x (`bkg_line_flt_internal`,
-`background.c:790-900`). Bilinear interpolation (`sep_bkg_pix`,
-`background.c:740`) is offered only for spot queries. lumos matches this:
-natural bicubic spline, tridiagonal solve per row, SIMD segment evaluation
-(`background/mod.rs:167-297`, `interpolate_row`). Bilinear creates visible
-kinks at tile boundaries that imprint onto faint photometry; bicubic does not.
-
-### 1.5 Object masking (iterative refinement)
-
-For crowded fields the first sky estimate is still biased high because object
-flux leaks into every tile. The fix is **iterate**: detect sources at the first
-sky, **mask them** (dilated to cover the PSF wings), re-estimate sky on the
-masked image, repeat. SExtractor calls this `BACK_TYPE`/2-pass detection;
-photutils `Background2D` takes a `coverage_mask`/`mask` and a `SExtractorBackground`
-estimator; lumos implements it as `BackgroundRefinement::Iterative{iterations}`
-(`background/mod.rs:60-96`, `refine_background` → `create_object_mask` +
-`dilate_mask`). Best practice: enable ≥1 refinement pass on dense fields; skip it
-on sparse ones for speed.
-
-### 1.6 Global map vs. local annulus
-
-Two philosophies for the sky *under a given star*:
-
-- **Global map** (SExtractor default): read σ and sky from the interpolated
-  mesh. Fast, smooth, but a nearby bright neighbor or nebular filament can bias
-  the local sky.
-- **Local annulus** (DAOPHOT/aperture photometry): a sky ring around each star
-  (e.g. inner = stamp radius, outer = 1.5×), robustly averaged (sigma-clipped
-  median). More local, better in nebulosity, but noisier (fewer pixels) and can
-  be contaminated by neighbors falling in the annulus.
-
-lumos supports both via `LocalBackgroundMethod::{GlobalMap, LocalAnnulus}`
-(`centroid/mod.rs:213-253`, `compute_annulus_background`, sigma-clipped median,
-≥10 px required). Best practice: global mesh for detection thresholding; local
-annulus for *measurement* of individual stars in nebulosity.
-
----
-
-## 2. Detection
-
-### 2.1 Matched-filter convolution (the optimal pre-filter)
-
-The optimal linear statistic for detecting a known shape in additive noise is the
-**matched filter**: cross-correlate the (background-subtracted) image with a
-kernel shaped like the PSF. For point sources the kernel is a Gaussian matched to
-the seeing FWHM. This is the well-known optimal statistic for detecting a single
-source in white Gaussian noise (Zackay & Ofek 2017; SEP filter docs).
-
-When noise is uniform across pixels, the matched filter reduces to plain
-convolution with the kernel — exactly what SExtractor does
-(`filter.c:convolve`, `filter.c:53`). The general form, for signal template `S`,
-data `D`, noise covariance `C`, is (SEP docs):
-
-```
-SNR = (Sᵀ C⁻¹ D) / sqrt(Sᵀ C⁻¹ S)
+```text
+StarDetectionInput
+    measurement_planes[c] : calibrated linear samples, common dimensions
+    permanent_mask         : per-pixel bit flags
+    variance | sky_rms     : optional per-pixel uncertainty product
+    saturation_level[c]    : optional valid sensor limit in plane units
+    gain[c]                : optional electrons per image unit
+    read_noise[c]          : optional electrons RMS
+    cfa/demosaic metadata  : sampling and correlation provenance
+    exposure metadata      : identifiers and normalization provenance
 ```
 
-With uniform σ this is `conv(D,K) / (σ · sqrt(Σ K²))`. **The kernel-energy
-normalization `sqrt(Σ K²)` is essential**: it makes the filtered image's noise
-equal the per-pixel σ again, so a fixed `n·σ` threshold has the same
-false-alarm rate before and after filtering. lumos gets this right — `matched_filter`
-divides by `noise_norm = sqrt(Σ K²)` so that `filtered > sigma·noise` is a valid
-SNR cut (`convolution/mod.rs:99-117`; separable path computes
-`(Σk₁²)·(Σk₁²)` then sqrt).
+All planes MUST have the same width and height, contain finite values wherever
+the mask says the sample is valid, and remain alive until measurement finishes.
+An empty image, zero width, mismatched plane dimensions, non-finite configuration,
+or a mask/variance shape mismatch is an error. “No accepted stars” is a valid
+successful result and must not be conflated with those errors.
 
-> **What SExtractor actually does with the kernel (pass 2, primary source).**
-> SExtractor's `getconv` (`filter.c:177-195`) computes **two** norms: `sum = Σ|K|`
-> and `varnorm = sqrt(ΣK²)`. It divides the convolution mask by **`Σ|K|`** (so the
-> *convolved sky stays unbiased* — a flat field convolves to itself), and keeps
-> `varnorm = sqrt(ΣK²)` separately for the *significance* test. The two
-> formulations — "normalize kernel by `Σ|K|`, then threshold the convolved value
-> against `(varnorm/Σ|K|)·σ`" vs. lumos's "normalize the *output noise* by
-> `sqrt(ΣK²)`, then threshold against `1·σ`" — are the **same n·σ cut up to a
-> constant**. lumos's is the cleaner SNR-image form (it makes `filtered/σ` directly
-> the per-pixel SNR). Note lumos does **not** zero-mean the kernel the way DAOFIND
-> does (the "lowered Gaussian", §5.4), so lumos's convolution does not get DAOFIND's
-> automatic sky-slope cancellation — it relies on prior background subtraction.
+The permanent mask is a bit set, not one boolean. At minimum it must be able to
+represent:
 
-SEP goes further than SExtractor: with a per-pixel variance map it does a *full*
-matched filter (deweighting noisy pixels), where plain `conv` would fail. The SEP
-JOSS paper (Barbary 2016, `.tmp/papers/sep_barbary2016.txt`) lists *"Optimized
-matched filter for variable noise in source extraction"* as one of the features
-**added beyond** the original SExtractor — confirming this is a SEP extension, not a
-SExtractor feature. Makovoz & Marleau 2005 (MOPEX, `.tmp/papers/makovoz2005.txt`)
-note that when many sources are present the pixel distribution is *"highly
-non-Gaussian … the linear filter becomes sub-optimal and the optimal filter is
-non-linear"*, and that *"the filtered images are used for detection only"* — the
-same convolve-to-detect / measure-on-the-raw-image discipline (§2.1 pitfall).
+```text
+INVALID       NaN, infinity, missing data, or otherwise unusable sample
+SATURATED     clipped sensor value or a sample belonging to a saturated plateau
+DEFECT        bad/hot/dead pixel or bad column from calibration
+COSMIC_RAY    Stage-2 cosmic-ray detection
+INTERPOLATED  sample synthesized by defect repair or demosaicing
+USER_MASK     externally excluded region
+```
 
-**Kernel choice.** SExtractor ships Gaussian masks for FWHM 1.5–5 px; the
-default `default.conv` is a 3×3 Gaussian (FWHM≈2 px). Matching the kernel to the
-actual FWHM maximizes faint-source SNR; over-smoothing merges close pairs and
-hurts deblending. lumos auto-estimates FWHM first (§5) then builds a
-(possibly elliptical) Gaussian kernel (`config.psf_axis_ratio`, `psf_angle`).
+Detection normally excludes `INVALID | SATURATED | DEFECT | COSMIC_RAY |
+USER_MASK`. `INTERPOLATED` may be used for detection, but must be recorded because
+it changes the noise correlation and must not be treated as an independent sensor
+sample in a precision fit.
 
-> **Pitfall — convolution and centroids.** SExtractor and DAOFIND detect on the
-> *convolved* image and compute the **sharpness denominator and SROUND** there, but
-> measure flux, position, and the GROUND marginals on the *unconvolved* image
-> (convolution shifts/biases moments and destroys flux linearity). lumos correctly
-> thresholds on the filtered plane but measures flux/FWHM/centroid on the original
-> plane (`detect.rs:98-110` vs `measure.rs`). It computes **both** roundness indices
-> and sharpness on the *unconvolved* stamp — diverging from DAOFIND/photutils for
-> sharpness's `H` denominator and for SROUND (§5.4, §8 gap).
+### 2.2 Pixel coordinates
 
-### 2.2 Thresholding
+Internally, pixel-center coordinates are zero based:
 
-A pixel is "detected" if `(I − sky) > n·σ(x,y)` (or `filtered > n·σ` after
-matched filtering). The threshold `n` (SExtractor `DETECT_THRESH`, default
-1.5σ for analysis but commonly 3–5σ for clean catalogs; photutils
-`detect_threshold` with `nsigma`; lumos `DetectionConfig::sigma_threshold`, default 4.0)
-trades completeness against false-alarm rate. For a Gaussian
-noise field, the per-pixel false-positive rate at 5σ is ~3×10⁻⁷; with a
-minimum-area requirement (below) the effective rate drops much further.
+```text
+first pixel center = (x, y) = (0.0, 0.0)
+x increases with column index
+y increases with row index
+valid centers: 0 <= x <= width - 1, 0 <= y <= height - 1
+```
 
-**Best practice:** threshold against the *local* σ map, never a global scalar.
-A global threshold over-detects in noisy corners (vignette) and misses faint
-stars in clean centers. lumos thresholds per-pixel against `stats.noise`
-(`threshold_mask`).
+All seeds, centroids, bounding boxes, distances, PSF models, and registration
+consumers MUST use this convention. A FITS table that uses the FITS pixel
+convention adds 1 to both coordinates exactly once at its serialization boundary.
+Astrometry.net explicitly notes the FITS `(1,1)` first-pixel-center convention;
+mixing it with a zero-based internal catalog causes an exact one-pixel transform
+error.
 
-### 2.3 Minimum area & connected-component labeling
+### 2.3 Required catalog
 
-Single hot pixels and read-noise spikes pass a per-pixel threshold; real sources
-span several contiguous pixels. Require a **minimum number of connected pixels
-above threshold** (SExtractor `DETECT_MINAREA`, typically 3–5; lumos
-`min_area`, default 5, `config.rs:290`). Combined with a matched filter and an
-n·σ cut this is the classic SExtractor detection criterion.
+The internal source record needs more than the current `Star` fields. A complete
+registration measurement contains at least:
 
-Grouping above-threshold pixels into objects is **connected-component labeling
-(CCL)**. Two families:
+```text
+source_id
+x, y                              f64 pixel-center position
+position_covariance_xx, xy, yy   pixel^2
+detection_snr, detection_scale
+flux, flux_variance              explicitly named flux definition
+local_background, local_sky_rms
+peak_value
+fwhm_major, fwhm_minor, theta
+eccentricity
+fit_reduced_chi2, fit_iterations
+segmentation_id, footprint_area, valid_fit_pixels
+nearest_neighbour_distance
+flags
+```
 
-- **Lutz one-pass algorithm** (Lutz 1980), used by SExtractor/SEP
-  (`lutz.c`): a single raster scan maintaining a marker/segment state machine
-  (`'S'`,`'s'`,`'f'`,`'F'` markers, a per-column status stack) that merges
-  8-connected runs on the fly and emits objects when a feature completes. Memory
-  ~one image row. This is also the engine reused for deblending (§3).
-- **Union-find / two-pass (run-length)**: label runs, union adjacent runs across
-  rows, flatten. Easier to parallelize. lumos uses **RLE + lock-free atomic
-  union-find**, strip-parallel with boundary merges (`labeling/mod.rs`,
-  `Connectivity::{Four, Eight}`, `runs_connected`).
+Flags must include, where applicable, `EDGE`, `MASKED_CORE`, `SATURATED`,
+`INTERPOLATED_CORE`, `BLENDED`, `DEBLEND_FAILED`, `NEIGHBOUR_CONTAMINATED`,
+`FIT_FAILED`, `FIT_BOUNDARY`, `BAD_COVARIANCE`, `BAD_BACKGROUND`, and
+`PSF_MISMATCH`. Retaining a flagged raw catalog before final selection is vital for
+diagnostics and for future policies that may tolerate different defects.
 
-**Connectivity:** 8-connectivity (diagonal neighbors count) is the astronomy
-default — diagonally-touching PSF pixels belong to the same star. lumos defaults
-to 8 across every preset (`config.rs:273` `connectivity: Connectivity::Eight`).
-Use 4-connectivity only if you deliberately want to split diagonal bridges.
+The result also returns:
 
----
+```text
+StarDetectionResult
+    raw_sources
+    registration_sources
+    background_summary
+    psf_summary
+    rejection_counts_by_flag_or_rule
+    stage_timings
+    configuration_and_algorithm_version
+```
 
-## 3. Deblending
+## 3. Detection planes and multichannel images
 
-Two stars whose PSFs overlap produce a single connected component above
-threshold. Deblending decides whether that blob is one object or several, and
-partitions its pixels.
+### 3.1 Measurement data are immutable
 
-### 3.1 SExtractor multi-threshold tree + contrast (the gold standard)
+No operation in this section may overwrite `measurement_planes`. A median filter
+is nonlinear, modifies PSF width and subpixel phase, suppresses saturation
+plateaus, and changes flux. It is acceptable only as a named temporary detection
+product. A convolved image is likewise never a measurement plane.
 
-This is the algorithm to implement. From SEP `deblend.c` and Bertin & Arnouts
-1996 §2.2:
+Detection after demosaicing inherits correlated, color-dependent noise. Whenever
+possible, detect on a linear pre-demosaic luminance-like plane or propagate the
+demosaicer's covariance information. If detection is performed on demosaiced RGB,
+the empirical renormalization in §7.5 is required.
 
-1. For each detected object, re-threshold its pixels at **`DEBLEND_NTHRESH`
-   levels** (default **32**) spaced **exponentially** (geometrically) between the
-   detection threshold `t₀` and the object's peak. SEP verbatim (`deblend.c:120-122`):
-   `thresh = thresh0 · pow(peak/thresh0, k/N)` where `peak = obj.fdpeak`,
-   `thresh0 = obj.thresh`. Exponential spacing puts more levels near the bright
-   core where blends separate.
-2. **Build a tree bottom-up.** At each rising level, re-run Lutz CCL
-   (`deblend.c:130-141`) on the pixels above that level. A component that splits
-   into two children at a higher threshold becomes a branch point. Each node
-   records its integrated flux above its own threshold.
-3. **Prune top-down with the contrast criterion.** A branch is accepted as a
-   separate object only if its integrated flux exceeds **`DEBLEND_MINCONT`**
-   (default **0.005**) **times the detection-isophotal flux of the original (root)
-   object** (`fdflux`): SEP `value0 = objlist[0].obj[0].fdflux · deblend_mincont`
-   (`deblend.c:116`) and the test
-   `obj[j].fdflux − obj[j].thresh·obj[j].fdnpix > value0` (`deblend.c:179`).
-   Only when **two or more** children clear this bar is the parent actually split
-   (`if (m > 1)`, `deblend.c:184`); otherwise it stays a single object.
+### 3.2 Known source color: optimal linear combination
 
-   > **Correction (pass 2): "total flux" → root *detection-isophotal* flux.** The
-   > prior pass said the bar is `MINCONT × the *total* flux of the root object`.
-   > Primary-source `fdflux` is the flux summed **above the detection threshold
-   > isophote** at deblend time (not an aperture or total/Kron flux), and the
-   > per-branch quantity tested is `fdflux − thresh·fdnpix` (flux *above that
-   > branch's own level*). Holwerda's *SExtractor for Dummies*
-   > (`.tmp/papers/holwerda_dummies.txt:1182-1186`) states the criterion in words:
-   > a branch is a separate object iff *"(1) the number of counts in the branch is
-   > above a certain fraction of the total count in the entire 'island'"* and
-   > *"(2) there is at least one other branch above the same level that is also
-   > above this fraction"* — confirming both the **root/island-relative** bar and
-   > the **≥2-children** rule.
-4. **Reassign leftover faint pixels.** Pixels below the split level are assigned
-   to the most probable progenitor by a bivariate-Gaussian profile likelihood
-   (`gatherup`, `analyse.c`/`deblend.c:274-391`), with a stochastic
-   tie-break.
+At one pixel, let the background-subtracted channel vector be `d`, its channel
+covariance be `C`, and the expected relative source response be `q`. The
+minimum-variance unbiased scalar response is
 
-`DEBLEND_MINCONT` controls aggressiveness: **0 = maximal deblending** (every
-local peak becomes an object), **1 = no deblending**. 0.005 is the SExtractor
-default; lower it (e.g. 0.0001) for crowded fields, raise it to suppress
-spurious splits of noisy bright stars.
+```text
+w = C^-1 q / (q^T C^-1 q)
+D = w^T d
+Var(D) = 1 / (q^T C^-1 q)
+```
 
-photutils `deblend_sources` re-implements this with watershed:
-`n_levels=32`, `contrast=0.001`, `mode ∈ {exponential, linear, sinh}`
-(`segmentation/deblend.py:44-103`). It adds a **watershed segmentation** step on
-the multi-threshold seeds and notes `contrast=0` → every local peak is an object;
-`contrast=1` → no deblending. The `sinh` mode spaces levels independent of the
-peak/min ratio.
+For independent channels this reduces to `w_c ∝ q_c / variance_c`. Plain
+inverse-variance weighting is the special case `q_c = 1`; it assumes equal source
+amplitudes in all channels. It is not optimal for an unknown stellar spectral
+energy distribution, and a strongly red or blue star can be diluted by the other
+bands. The assumed `q`, covariance convention, and resulting weights must be saved
+in diagnostics.
 
-### 3.2 Local-maxima / watershed (the fast alternative)
+### 3.3 Unknown source color
 
-A simpler, faster approach: find local maxima in the component, keep those that
-pass a prominence + separation test, and assign each pixel to the nearest peak
-(Voronoi by peak) or via watershed flooding. This is essentially `contrast=0`
-multi-threshold deblending without the tree. It is faster and adequate for
-well-separated stars, but it **over-deblends** noisy bright stars (every bump in
-the PSF wings becomes a "star") and lacks the flux-contrast safeguard. It is the
-right default only when sources are sparse.
+There is no single linear combination that is optimal for every color. Use one of
+these explicit policies:
 
-lumos offers both, selected by `DetectionConfig::deblend_n_thresholds`,
-default **0** → `deblend_local_maxima`; ≥2 → `deblend_multi_threshold`):
+1. **Registration band:** select a configured plane, normally green/luminance,
+   and use only that plane for both detection and measurement.
+2. **Per-band union:** compute detections independently per plane, merge candidates
+   within a PSF-scaled radius, then fit the chosen registration plane or fit all
+   planes with one shared `(x,y)` and independent fluxes.
+3. **Chi-square discovery image:** after each channel is background-subtracted,
+   PSF-filtered, and standardized, compute `Q = sum_c S_c^2`. Under independent
+   sky noise, `Q` has a chi-square distribution with `k` degrees of freedom. Set a
+   threshold from that distribution, not by treating `sqrt(Q)` as a normal sigma.
+   `Q` is for candidate discovery only; it is nonlinear and must never supply
+   flux, shape, peak, or centroid measurements.
 
-- `deblend/local_maxima/mod.rs`: local maxima + prominence + separation +
-  nearest-peak Voronoi, ArrayVec for ≤`MAX_PEAKS` peaks.
-- `deblend/multi_threshold/mod.rs`: exponential levels
-  (`threshold = low·ratio^(level/N)`, `mod.rs:500-502`), a tree, and a contrast
-  criterion (`collect_significant_leaves`, `mod.rs:795-834`).
+The chi-square approach follows the multiband detection idea in
+[Szalay, Connolly & Szokoly (1999)](https://arxiv.org/abs/astro-ph/9811086).
+For ordinary Bayer astrophotography, a configured registration plane or a
+per-band union is easier to reason about and test.
 
-> **Source disagreement — what flux the contrast is relative to.** SExtractor
-> tests each branch against `MINCONT · root_total_flux` (a single global bar).
-> lumos tests each child against `min_contrast · parent_node_flux` (a *recursive,
-> relative* bar; `mod.rs:811-816`). These are *not* equivalent: lumos's recursive
-> form can either over- or under-split relative to SExtractor depending on the
-> blend hierarchy. If bit-compatibility with SExtractor is a goal this is a real
-> behavioral gap (§8).
+### 3.4 Optional artifact-suppression plane
 
-### 3.3 Deblending tradeoffs
+If residual CFA structure demands a 3x3 median detection plane, name it
+`artifact_suppressed_detection`, retain the unsmoothed detection plane, and set a
+diagnostic. Estimate its blank-sky noise empirically after filtering; neither the
+original MAD nor the independent-pixel convolution formula remains valid. Every
+accepted seed must still be refit on unfiltered measurement pixels.
 
-| Failure mode | Cause | Symptom |
+## 4. Noise and variance semantics
+
+Incorrectly combining an empirical sky RMS with a read-noise term counts the read
+noise twice. The API must choose one of the following models and record which one
+was used.
+
+### 4.1 Empirical blank-sky model
+
+Let `sigma_sky(i)` be the RMS measured from calibrated blank-sky pixels. It already
+contains sky photon noise, read noise, quantization, and any calibration/demosaic
+effects visible in those pixels. For a source model `s_i` in normalized image units
+and gain `G` electrons per normalized unit:
+
+```text
+V_i = sigma_sky(i)^2 + max(s_i, 0) / G + V_extra(i)
+```
+
+`V_extra` contains variance not represented by nearby blank sky, such as propagated
+flat-field uncertainty. Do **not** add `(read_noise_e / G)^2` again.
+
+### 4.2 Physics-built variance model
+
+If variance is propagated from raw sensor terms rather than measured from sky:
+
+```text
+V_i = max(m_i, 0) / G + (read_noise_e / G)^2 + V_calibration(i)
+```
+
+where `m_i` is the expected total pre-background-subtraction signal in normalized
+units. The same model must be used consistently for detection, fitting, flux
+uncertainty, and simulation tests.
+
+### 4.3 Covariance
+
+The formulas above describe diagonal variance. Demosaicing, resampling, denoising,
+median filtering, and some calibration operations create covariance between
+pixels. The exact matched filter uses the covariance matrix (§7.2). If storing a
+full covariance is impractical, the implementation must empirically normalize the
+detection statistic and inflate fitted covariance using blank-sky residuals. It
+must not silently call correlated samples independent.
+
+## 5. Spatial background and blank-sky RMS
+
+SExtractor's proven design is a grid of robust mesh estimates, a median filter on
+that grid, and smooth interpolation. Its official background documentation
+describes iterative 3-sigma clipping, the `2.5 median - 1.5 mean` mode estimate,
+median filtering, and bicubic-spline interpolation:
+[Modeling the background](https://sextractor.readthedocs.io/en/latest/Background.html).
+
+The target algorithm below keeps that structure while making masks, invalid
+meshes, edge behavior, and RMS positivity explicit.
+
+### 5.1 Mesh geometry
+
+Given tile size `T`, define
+
+```text
+grid_width  = ceil(width / T)
+grid_height = ceil(height / T)
+tile(gx, gy) = [gx*T, min((gx+1)*T, width))
+             x [gy*T, min((gy+1)*T, height))
+tile center = ((x0 + x1 - 1)/2, (y0 + y1 - 1)/2)
+```
+
+Edge tiles are truncated, not padded or mirrored. Use all finite, permanently
+unmasked pixels by default. With `tile_area` actual pixels, a tile is valid only if
+
+```text
+good_count >= max(32, ceil(min_good_fraction * tile_area))
+```
+
+where the default `min_good_fraction` is `0.5`. A tile with too few samples is
+invalid; it must never fall back to using its masked source pixels.
+
+Sampling is normally unnecessary for a 64x64 mesh. If a cap is needed for very
+large tiles, use deterministic stratified or reservoir sampling over the valid
+pixel list. A fixed two-dimensional stride is forbidden because it aliases Bayer,
+row, column, and periodic readout patterns.
+
+### 5.2 Per-mesh robust estimate
+
+For valid samples `v`, perform this exact array-domain estimator:
+
+Throughout this algorithm, sort finite f64 values for statistics. For odd `n`, the
+median is `v[n/2]`; for even `n`, it is
+`0.5 * (v[n/2-1] + v[n/2])`. MAD uses the same median convention on absolute
+deviations. Convert to f32 only when storing the finished grid.
+
+1. Set the working set to every valid sample.
+2. For at most `clip_iterations` (default 3):
+   - compute the median `m`;
+   - compute `MAD = median(|v_i - m|)`;
+   - set `sigma = 1.482602218505602 * MAD`;
+   - if `sigma == 0`, retain only samples equal to `m` and stop;
+   - otherwise retain samples satisfying `|v_i - m| <= 3 sigma`;
+   - stop if no sample was removed.
+3. Recompute final median `m`, arithmetic mean `mu`, MAD, and `sigma` from the
+   retained set.
+4. Estimate the background:
+
+```text
+if sigma > 0 and abs(mu - m) < 0.3 * sigma:
+    background = 2.5*m - 1.5*mu
+else:
+    background = m
+```
+
+5. Mark the tile invalid if the result is non-finite, no samples remain, or the
+   RMS is not positive. A truly constant synthetic image may use a configured
+   numerical noise floor, but real data with zero measured noise is a diagnostic,
+   not evidence of infinite SNR.
+
+This is intentionally not promised to bit-match SExtractor. SExtractor and SEP
+derive the statistics from a quantized clipped histogram; Lumos uses sorted
+array-domain median and MAD. The statistical contract above is what tests should
+pin.
+
+### 5.3 Repair invalid grid nodes
+
+If every grid node is invalid, return `BackgroundUnavailable`. Otherwise replace
+each invalid node with the nearest valid node in squared grid-coordinate distance;
+ties choose the smallest `(gy, gx)` in row-major order. Do this from an immutable
+copy of validity so a filled node cannot become a new source for another fill.
+Record the number and locations of repaired nodes.
+
+Median-filter both background and log-RMS grids with the available neighbors in a
+3x3 window, including grids narrower than three nodes. The filter output must be
+computed from an immutable input grid. Interpolating `log(sigma)` and exponentiating
+prevents a cubic interpolator from creating a negative RMS.
+
+### 5.4 Interpolation
+
+Use separable natural cubic splines at the actual tile-center coordinates. For
+samples `(x_j, f_j)`, natural end conditions are `f''_0 = f''_(n-1) = 0`; interior
+second derivatives solve
+
+```text
+h_(j-1) f''_(j-1)
++ 2(h_(j-1) + h_j) f''_j
++ h_j f''_(j+1)
+= 6[(f_(j+1)-f_j)/h_j - (f_j-f_(j-1))/h_(j-1)]
+```
+
+with `h_j = x_(j+1)-x_j`. In interval `j`, for
+`a=(x_(j+1)-x)/h_j` and `b=(x-x_j)/h_j`, evaluate
+
+```text
+f(x) = a*f_j + b*f_(j+1)
+     + ((a^3-a) f''_j + (b^3-b) f''_(j+1)) * h_j^2 / 6
+```
+
+First spline down the grid's y direction for each grid column, then across x for
+each output row. With one node along an axis, use that value; with two, use linear
+interpolation. Clamp query coordinates to the first and last tile center rather
+than extrapolating beyond them. Interpolate background directly and `log(sigma)`
+for RMS, then return `sigma = max(exp(log_sigma), sigma_floor)`.
+
+Use a per-pixel numerical floor
+
+```text
+sigma_floor = max(configured_absolute_floor,
+                  16 * f32::EPSILON * max(1, abs(background)))
+```
+
+with `configured_absolute_floor = 1e-6` for Lumos' normalized f32 images. Reaching
+the floor sets a diagnostic; it prevents division by zero but is not a substitute
+for a physical noise estimate.
+
+Natural bicubic interpolation can overshoot the background around steep gradients.
+The repaired/median-filtered grid, finite checks, and source-masking refinement are
+therefore not optional details.
+
+### 5.5 Iterative source masking
+
+Crowded fields bias the first mesh estimate upward. For `N` configured refinement
+passes:
+
+1. compute the current background and RMS maps;
+2. form a provisional significance mask `I - B > mask_sigma * sigma`, with
+   `mask_sigma` normally equal to the detection threshold;
+3. OR this mask with the permanent invalid/source mask;
+4. dilate only the newly detected-source portion with a Euclidean disk of radius
+   `ceil(max(configured_dilation, 2.5 * current_fwhm))`;
+5. recompute all tiles while excluding the combined mask.
+
+Never replace an all-masked tile with its unmasked contaminated pixels. It becomes
+an invalid grid node and follows §5.3. Stop after exactly `N` passes for deterministic
+behavior; optionally report the maximum background-grid change for diagnostics.
+
+### 5.6 Per-source local background
+
+Detection always uses the global maps. Measurement may refine the sky around one
+source with an annulus:
+
+```text
+r_inner = max(fit_radius, 3 * fwhm_major)
+r_outer = r_inner + max(4, ceil(2 * fwhm_major))
+```
+
+Exclude permanent-mask pixels, every segmentation footprint dilated by one FWHM,
+and pixels outside the frame. Apply the same median/MAD 3-sigma clip. Require at
+least `max(20, 0.25 * nominal_annulus_pixels)` valid pixels. Return the median sky,
+blank-sky RMS, valid count, and estimated background variance. If the annulus fails,
+use the global map and set `BAD_BACKGROUND`; never silently mix annulus sky with a
+global-map RMS.
+
+## 6. PSF scale and template construction
+
+### 6.1 FWHM bootstrap
+
+A matched filter needs a PSF scale before the final catalog exists. If metadata or
+a configured FWHM is unavailable, bootstrap it as follows:
+
+1. Start with the configured fallback FWHM `f0`; default 4 pixels.
+2. Run a high-threshold (`max(6 sigma, 1.5 * normal_threshold)`) candidate search
+   using either no filter or the three-template bank `{0.7 f0, f0, 1.4 f0}`.
+3. Reject masked, saturated, edge, blended, and non-isolated candidates. Isolation
+   requires no other seed within `4 f0`.
+4. Fit a pixel-integrated elliptical Gaussian or Moffat model on the original
+   measurement plane. Keep finite fits with positive-definite covariance,
+   `0.5 <= FWHM <= 30`, and acceptable residuals.
+5. Require at least `min_psf_stars` (default 10). Otherwise retain `f0` and record
+   `ConfiguredFallback` plus the number of usable stars.
+6. Compute median `m` and scaled MAD `s = 1.4826022185 * MAD`. Replace `s` with
+   `max(s, 0.05*m)` to avoid a zero-width clipping interval. Retain widths with
+   `|FWHM-m| <= 3s`, then take the median of the survivors.
+
+Use symmetric clipping. Removing only broad outliers retains cosmic rays and hot
+pixels at the narrow end. A second bootstrap iteration with the new FWHM is enough;
+continued iteration adds instability without useful information.
+
+For severe field curvature, estimate a spatial PSF model after the initial catalog:
+fit robust low-order surfaces to `log(FWHM_major)`, `log(FWHM_minor)`, and orientation
+using bright isolated stars. Fall back to the global median wherever local support is
+insufficient.
+
+### 6.2 Pixel-integrated template
+
+The template `P_i(x0,y0)` is the fraction of unit source flux expected in pixel
+`i`, not the continuous PSF sampled at the pixel center:
+
+```text
+P_i(x0,y0) = integral over pixel i of p(x-x0, y-y0) dx dy
+sum over the untruncated template P_i = 1
+```
+
+This distinction prevents pixel-phase centroid and width bias in undersampled
+images. Anderson & King show why the detector-integrated effective PSF, rather
+than only the optical PSF, is the relevant model for high-precision astrometry:
+[Toward High-Precision Astrometry with WFPC2](https://arxiv.org/abs/astro-ph/0006325).
+
+For an axis-aligned Gaussian, integrate exactly with differences of `erf` in x and
+y. For a rotated Gaussian or Moffat profile, use fixed-order two-dimensional
+Gauss-Legendre quadrature per pixel; 4x4 nodes are the minimum and 8x8 is the
+reference path for tests. Normalize after truncation. A Gaussian radius of 4 major
+axis sigma encloses `1-exp(-8)`, approximately 99.966% of circular two-dimensional
+flux. Record the truncation and reject any kernel whose finite sum is non-positive.
+
+The normalized elliptical Gaussian is
+
+```text
+p(u) = exp(-0.5 * u^T Sigma^-1 u) / (2*pi*sqrt(det(Sigma)))
+```
+
+For a normalized elliptical Moffat with `beta > 1`,
+
+```text
+p(r_e) = (beta - 1) / (pi * alpha_major * alpha_minor)
+         * [1 + r_e^2]^(-beta)
+r_e^2 = u_major^2/alpha_major^2 + u_minor^2/alpha_minor^2
+FWHM_axis = 2 * alpha_axis * sqrt(2^(1/beta) - 1)
+```
+
+Template orientation is counter-clockwise from positive x. State this convention
+once in the API and test 0, 45, and 90 degree kernels.
+
+## 7. Variance-aware point-source detection
+
+### 7.1 Residual image
+
+For each detection plane form
+
+```text
+D_i = I_i - B_i
+```
+
+Do not clamp negative residuals. Negative sky fluctuations are required for the
+detection statistic to have zero mean. Masked pixels receive zero statistical
+weight; they are not filled by reflection, mirroring, or a local median.
+
+### 7.2 Independent-noise matched filter
+
+For a template centered at trial position `q`, variance `V_i`, and usable-pixel
+indicator `M_i` (`1` usable, `0` excluded), compute in f64:
+
+```text
+A(q) = sum_i M_i * P_i(q) * D_i / V_i
+H(q) = sum_i M_i * P_i(q)^2 / V_i
+
+flux_hat(q) = A(q) / H(q)
+flux_variance(q) = 1 / H(q)
+S(q) = A(q) / sqrt(H(q))
+```
+
+Require finite `H > 0` and a configurable template-energy fraction. The sums
+below cover the complete nominal truncated kernel; out-of-frame and masked samples
+have `M_i = 0`:
+
+```text
+E_valid(q) = sum_i M_i * P_i(q)^2
+E_full(q)  = sum_i P_i(q)^2
+E_valid(q) / E_full(q) >= min_kernel_information
+```
+
+with default `0.8`. This handles masks and image boundaries without pretending
+missing pixels contain zero signal. It also makes `S` a unit-normal detection
+statistic under the independent Gaussian-noise model. SEP implements this
+variance-aware numerator and denominator, and its derivation generalizes to full
+covariance; see [SEP matched-filter documentation](https://sep.readthedocs.io/en/latest/filter.html).
+
+For stationary variance `V_i = sigma^2`, this reduces to
+
+```text
+S = sum(P_i D_i) / (sigma * sqrt(sum(P_i^2)))
+```
+
+Dividing an ordinary convolution only by `sqrt(sum(P^2))` but comparing it to the
+RMS at the kernel center is valid only when noise is locally stationary and
+uncorrelated.
+
+### 7.3 Correlated-noise form
+
+For residual vector `D`, template `P`, and covariance matrix `C` over the valid
+template footprint:
+
+```text
+S = P^T C^-1 D / sqrt(P^T C^-1 P)
+```
+
+This is the optimal linear statistic. A practical implementation may whiten the
+image and template with a locally estimated stationary noise power spectrum. If it
+does not model `C`, it must apply §7.5 and label the statistic
+`EmpiricallyNormalized`, not “exact SNR.” Zackay & Ofek discuss matched filtering
+for optimal point-source detection in
+[How to Coadd Images I](https://arxiv.org/abs/1512.06872).
+
+### 7.4 Multiple scales
+
+When seeing is uncertain or spatially variable, evaluate a small geometric bank,
+for example `{0.7 f, f, 1.4 f}`. For each pixel retain the greatest statistic and
+its scale. Candidate non-maximum suppression is performed jointly in `(x,y,scale)`:
+two maxima within `0.5 * min(FWHM_a,FWHM_b)` represent the same seed, and the larger
+`S` wins; exact ties choose the smaller scale, then `(y,x)`.
+
+Searching multiple correlated templates increases the trials factor. The requested
+threshold must therefore be calibrated on blank-sky simulations using the same
+bank, rather than claiming that every `S > 4` peak has a one-template Gaussian
+false-alarm probability.
+
+### 7.5 Empirical null normalization
+
+Even with an analytic variance map, estimate the null distribution of `S` in each
+background mesh after masking provisional sources and permanent defects:
+
+```text
+mu_S    = median(S_blank)
+sigma_S = 1.4826022185 * median(abs(S_blank - mu_S))
+Z       = (S - mu_S) / sigma_S
+```
+
+Interpolate `mu_S` and positive `sigma_S` as in §5. Require enough blank samples;
+otherwise use neighboring valid meshes. On well-modeled independent noise,
+`mu_S ~= 0` and `sigma_S ~= 1`. Large deviations are diagnostics for correlation,
+bad background, or an incorrect variance map. Threshold the empirically normalized
+`Z` when it is enabled.
+
+### 7.6 Threshold semantics
+
+Use two thresholds:
+
+```text
+peak_threshold      default 4.0 sigma
+footprint_threshold default 2.5 sigma, <= peak_threshold
+```
+
+A pixel is inside a provisional footprint iff `Z > footprint_threshold`; strict
+`>` is part of the contract. A footprint survives only if it contains at least one
+seed with `Z > peak_threshold`. This hysteresis grows a statistically significant
+core into enough of its lower-SNR PSF footprint for topology and deblending without
+allowing a 2.5-sigma fluctuation to create a source by itself.
+
+Thresholds are configuration values, not universal astronomical constants. Validate
+them by completeness and false-positive tests for each camera/pipeline, especially
+after resampling or demosaicing.
+
+## 8. Connected components and seed extraction
+
+### 8.1 Labeling
+
+Label the footprint mask with configured 4- or 8-connectivity; 8-connectivity is
+the default for star images. Labels are assigned deterministically in row-major
+first-contact order. For every component collect:
+
+```text
+label, area, bounding box, touches_edge
+maximum Z and its location
+number of peak-threshold pixels
+permanent-mask overlap
+```
+
+Apply `min_area` only after a component has been built. Do not discard a large
+parent component before deblending: a crowded island can exceed `max_area` while
+containing many valid stars. `max_area` may reject an unsplit final leaf or trigger
+a “too complex” fallback, but it cannot bypass the deblender.
+
+If `2 * edge_margin >= min(width,height)`, configuration is invalid for that image;
+return an error instead of a warning followed by an empty catalog.
+
+### 8.2 Local maxima, including plateaus
+
+Inside each component, find 8-connected plateaus of equal `Z` values. A plateau is
+a maximum if no neighbor outside it has a greater `Z`. Represent it by the
+`D`-positive weighted centroid of plateau pixels; if the positive weight is zero,
+use their arithmetic centroid. Its peak coordinate for deterministic comparisons is
+the smallest row-major plateau pixel.
+
+This rule detects a saturated or quantized flat top instead of requiring one pixel
+to be strictly greater than all eight neighbors. Saturated plateaus remain flagged
+and normally do not enter the registration catalog.
+
+Suppress seed pairs closer than
+`max(configured_min_separation, 0.5 * local_fwhm)`. Sort candidates by descending
+`Z`, then ascending `(y,x)`; greedily keep a seed only if it is not within the
+strict separation radius of an earlier kept seed.
+
+“Prominence” means the peak-to-saddle difference in the same standardized topology
+image, not a fraction of the brightest raw pixel. Raw peak fractions change when a
+background pedestal or gradient is added and therefore are not valid prominence.
+
+## 9. Deblending
+
+Deblending and measurement of blends are separate problems. A perfect segmentation
+map does not make an independent square-stamp measurement unbiased if that stamp
+still contains the neighbor.
+
+### 9.1 Reference SExtractor/SEP behavior
+
+SExtractor and SEP create a hierarchy at exponentially spaced thresholds between
+the detection threshold and the component peak. SEP defaults to 32 thresholds and
+minimum contrast 0.005. A branch is significant only if its integrated intensity
+above its branch threshold exceeds the configured fraction of the root object's
+integrated flux, and a parent splits only when at least two children are
+significant. SEP then probabilistically gathers low-level pixels into the surviving
+branches and optionally CLEANs detections explainable by a brighter object's
+profile. These details are visible in SEP's `src/deblend.c` and `src/extract.c`, not
+just in the high-level phrase “SExtractor-style.”
+
+The target Lumos algorithm uses the same tree idea but operates in standardized
+coordinates so spatial noise gradients do not change the topology.
+
+### 9.2 Variance-aware multithreshold tree
+
+For one parent footprint use the empirically normalized matched-filter statistic
+from §7.5 as the topology image:
+
+```text
+R_i = Z_i
+```
+
+for topology. Let `r0 = footprint_threshold` and `rp` be the component maximum.
+If `rp <= r0`, return the unsplit parent. For `N >= 2` levels define
+
+```text
+r_k = r0 * (rp / r0)^(k/N),  k = 0..N
+```
+
+At each level, label 8-connected pixels belonging to the parent for which
+`R_i >= r_k`. Discard level components smaller than `min_area`. Associate a
+level-`k+1` component with the unique level-`k` component containing it; ties or a
+non-unique parent indicate an internal logic error.
+
+For a branch `b` born or evaluated at level `r_k`, define its excess-significance
+volume
+
+```text
+Q_b = sum over pixels i in b of max(R_i - r_k, 0)
+Q_root = sum over pixels i in root of max(R_i - r0, 0)
+```
+
+A child is significant when all are true:
+
+```text
+child area >= min_area
+Q_child >= min_contrast * Q_root
+distance(child_peak, sibling_peak) >= min_separation
+```
+
+Commit a split only if at least two children are significant. Otherwise retain the
+parent branch and continue following its strongest descendant. Traverse top-down
+with stable ordering by descending `Q`, then `(peak_y, peak_x)`. Enforce explicit
+limits on thresholds, nodes, children, and recursion depth; overflow sets
+`DEBLEND_FAILED` and returns the unsplit parent rather than dropping it.
+
+The above `Q` is deliberately an internal detection contrast, not physical flux.
+Scientific flux is measured later on original pixels.
+
+### 9.3 Final pixel ownership
+
+Assign the parent footprint to retained leaves with a marker-controlled watershed
+on `-R`:
+
+1. seed each retained leaf at its maximum plateau;
+2. process pixels in descending `R`, with row-major order breaking equal-value ties;
+3. a pixel reached by one label inherits it;
+4. a pixel simultaneously reached by multiple labels is a watershed boundary;
+5. after all parent pixels are processed, assign boundary pixels to the label whose
+   pixel-integrated PSF predicts the greatest value there; exact ties use leaf ID.
+
+This preserves the component, is deterministic, and respects saddles better than a
+nearest-peak Voronoi split. Assert that every parent pixel has exactly one final
+owner and that leaf areas sum to the parent area.
+
+### 9.4 Fast local-maxima mode
+
+A local-maxima-only mode MAY be retained for sparse fields. It must use plateau
+maxima and saddle prominence from §8.2, and its final ownership still follows the
+watershed above. Name it `LocalMaximaWatershed`; do not describe nearest-peak
+Voronoi assignment with a raw global-peak fraction as equivalent to SExtractor.
+
+### 9.5 Crowded measurement
+
+If another retained source lies within the fit stamp, either:
+
+- fit all neighboring sources simultaneously with one local background plane and
+  the same local PSF; or
+- mask pixels owned by neighbors and require enough remaining template information.
+
+The simultaneous model is preferred. Measuring each deblended seed in an
+unrestricted square stamp biases centroid, flux, shape, and SNR toward its neighbor.
+
+## 10. Centroid and PSF measurement
+
+Vakili & Hogg found that ordinary center-of-light moments do not approach the
+Cramér-Rao bound, while PSF-aware methods can:
+[Do fast stellar centroiding methods saturate the Cramér-Rao lower bound?](https://arxiv.org/abs/1610.05873).
+Use a pixel-integrated PSF fit for the registration position when it succeeds and
+an explicitly flagged windowed centroid as the fallback.
+
+### 10.1 Fit stamp
+
+For local major-axis FWHM `f`, use
+
+```text
+radius = clamp(ceil(2.0 * f), 4, configured_max_radius)
+```
+
+and a square stamp centered on the seed. Exclude permanent-invalid pixels rather
+than substituting values. If less than 80% of the unmasked template information or
+fewer than the number of fit parameters plus 5 pixels remain, fail the fit. A stamp
+crossing the frame boundary sets `EDGE`; it is not mirrored.
+
+### 10.2 Preferred simultaneous PSF model
+
+For source `j`, normalized pixel-integrated PSF `P_ij`, flux `F_j`, and a local
+background plane, model valid pixel `i` as
+
+```text
+m_i = b0 + bx*(x_i-x_ref) + by*(y_i-y_ref)
+      + sum_j F_j * P_ij(x_j, y_j, PSF_shape_at_j)
+```
+
+The default fit keeps PSF shape fixed from bright isolated stars and solves source
+positions, positive fluxes, and the background plane. Faint stars do not contain
+enough information to fit two widths, orientation, centroid, flux, and background
+independently. A high-SNR diagnostic mode may fit an elliptical shape, but it must
+report the additional covariance.
+
+Minimize
+
+```text
+chi2 = sum_i (I_i - m_i)^2 / V_i
+```
+
+using the consistent variance convention in §4. With an empirical sky model,
+update `V_i = sigma_sky_i^2 + max(sum_j F_j P_ij,0)/G + V_extra_i` after accepted
+iterations. Without gain, keep the empirical variance fixed.
+
+Analytic derivatives or derivatives of the quadrature-integrated PSF are strongly
+preferred. Finite differences must use a scale-aware central step and be compared
+against analytic/numerical reference derivatives in tests.
+
+### 10.3 Optimizer acceptance
+
+A Levenberg–Marquardt implementation must expose its termination reason. Suggested
+defaults are 50 accepted/rejected iterations, initial damping `1e-3`, damping times
+10 after rejection and divided by 10 after acceptance. Stop successfully when both
+
+```text
+max scaled parameter step < 1e-6
+relative chi2 improvement < 1e-8
+```
+
+or when the centroid movement is below `1e-4` pixel and relative chi-square change
+is below `1e-8`. Reject rather than accept a result when:
+
+- the iteration limit is reached without a convergence condition;
+- any parameter, residual, or covariance is non-finite;
+- flux is non-positive;
+- the position moves more than `min(1.5 pixels, 0.5 FWHM)` from its seed;
+- a parameter rests on a hard bound;
+- the normal matrix is singular or not positive definite;
+- fewer than the required valid pixels remain; or
+- the fitted model is grossly inconsistent with the data.
+
+“Grossly inconsistent” should be calibrated, but a default registration filter may
+require `0.25 <= reduced_chi2 <= 4` when the variance is trusted. If variance scale
+is empirical, use robust residual quantiles and report reduced chi-square without
+pretending its textbook distribution is exact.
+
+### 10.4 Position covariance
+
+At the accepted solution compute
+
+```text
+C_parameters = inverse(J^T W J)
+```
+
+where `J` is the model Jacobian and `W=diag(1/V_i)`. If the absolute variance is
+unknown and estimated only up to scale, multiply by reduced chi-square. The 2x2
+`(x,y)` block is the reported position covariance. Require positive eigenvalues and
+a finite condition number; otherwise set `BAD_COVARIANCE` and exclude the source
+from uncertainty-ranked registration.
+
+The major position variance is the larger eigenvalue of this block, not the
+stellar-shape major axis.
+
+### 10.5 Windowed-centroid fallback
+
+Given current position `(x_t,y_t)`, Gaussian window sigma `s_w`, radius
+`r_max = 4 s_w`, valid measurement residuals `D_i`, and
+`w_i = exp(-r_i^2/(2 s_w^2))`, iterate
+
+```text
+x_(t+1) = x_t + 2 * sum(w_i D_i (x_i-x_t)) / sum(w_i D_i)
+y_(t+1) = y_t + 2 * sum(w_i D_i (y_i-y_t)) / sum(w_i D_i)
+```
+
+using signed background-subtracted samples and excluding masked pixels. Start with
+`s_w = max(FWHM/2.354820045, 0.7)` and the seed position. Stop at movement below
+`2e-4` pixel or after 16 iterations. Reject a non-positive denominator, non-finite
+step, any step over one pixel, or an unconverged result. The factor 2 is part of the
+SExtractor windowed-position update; omitting it is a different estimator. See
+[SExtractor windowed positional parameters](https://sextractor.readthedocs.io/en/latest/PositionWin.html).
+
+Return the fallback with `FIT_FAILED | WINDOWED_CENTROID`. Its uncertainty must be
+estimated from its Jacobian/noise propagation or an empirically calibrated error
+model; a made-up fixed subpixel error is not acceptable.
+
+## 11. Measurements, classification, and flags
+
+### 11.1 Flux and SNR
+
+Every flux field must name its estimator. For registration, use the fitted PSF
+flux `F` when the fit succeeds. A useful diagnostic aperture flux is
+
+```text
+F_ap = sum_i a_i * (I_i - B_i)
+```
+
+where `a_i` is the exact fractional overlap of pixel `i` with the aperture.
+Residuals remain signed; replacing every negative residual with zero biases faint
+flux positive, biases size, and makes blank apertures appear to contain signal.
+
+For independent pixels with a separately estimated local background,
+
+```text
+Var(F_ap) = sum_i a_i^2 V_i
+          + (sum_i a_i)^2 Var(B_hat)
+```
+
+plus covariance terms when samples are correlated. If the background is the median
+of `n` independent Gaussian annulus samples, the asymptotic variance is
+approximately `pi * sigma^2 / (2n)`; sigma clipping, masks, and correlation change
+that value, so bootstrap or an effective-sample correction is preferable. For a
+PSF fit, take flux variance from the full parameter covariance, including covariance
+with background and neighboring stars.
+
+Define
+
+```text
+SNR = flux / sqrt(flux_variance)
+```
+
+and store detection SNR separately from measurement SNR. Do not use the full square
+stamp pixel count for an aperture that is circular, weighted, masked, or PSF-fit.
+
+### 11.2 Peak and saturation
+
+`peak_value` is the maximum calibrated measurement-plane value in the source core,
+before background subtraction. A source is saturated if the permanent saturation
+mask intersects the core or if any core pixel reaches the metadata-derived clipping
+level. A fixed threshold such as `0.95` is valid only if the loader guarantees that
+exact normalization and preserves clipped samples; it is not a general saturation
+test.
+
+Default registration selection rejects saturated sources. A future wing-only
+saturated-star fitter may retain them, but it must mask the plateau, fit a calibrated
+PSF to the wings, and expose a separate uncertainty policy.
+
+### 11.3 Shape
+
+For an accepted elliptical PSF fit, report major/minor FWHM and orientation directly
+from the fitted shape or the local PSF model. For a covariance-like source shape
+matrix with ordered eigenvalues `lambda_major >= lambda_minor > 0`, Gaussian-
+equivalent definitions are
+
+```text
+FWHM_major = 2.354820045 * sqrt(lambda_major)
+FWHM_minor = 2.354820045 * sqrt(lambda_minor)
+eccentricity = sqrt(1 - lambda_minor/lambda_major)
+```
+
+State whether the matrix is an unweighted moment, Gaussian-windowed/deconvolved
+moment, or model covariance. Values from different definitions are not interchangeable.
+
+Estimate the frame's stellar FWHM distribution only from isolated, unsaturated,
+high-SNR sources. With median `m` and scaled MAD
+`s = max(1.4826022185*MAD, 0.05*m)`, a default stellar-width filter is symmetric:
+
+```text
+abs(FWHM - m) <= 3*s
+```
+
+The shape threshold may be relaxed at field edges when a spatial PSF model predicts
+optical coma there. That is preferable to a single global eccentricity cut that
+systematically removes one part of the image.
+
+### 11.4 Sharpness and DAOFIND roundness names
+
+Do not attach DAOFIND names to different formulas. Photutils' current implementation
+and documentation define:
+
+- `SROUND`/`roundness1` from bilateral versus four-fold symmetry of the **convolved**
+  cutout, with the center removed and a factor of 2;
+- `GROUND`/`roundness2 = 2(Hx-Hy)/(Hx+Hy)`, where `Hx` and `Hy` are amplitudes from
+  weighted marginal Gaussian fits to the **unconvolved** image; and
+- sharpness as `(unconvolved central pixel - mean of unconvolved surrounding
+  pixels) / convolved peak` within the kernel mask.
+
+See [Photutils DAOStarFinder](https://photutils.readthedocs.io/en/stable/api/photutils.detection.DAOStarFinder.html)
+and its open-source `photutils/detection/daofinder.py`. If Lumos keeps
+`peak/background-subtracted-3x3-flux`, marginal-peak difference, or marginal
+half-asymmetry metrics, rename them descriptively, for example
+`core_peak_fraction`, `marginal_peak_imbalance`, and `marginal_asymmetry`. Their
+empirical thresholds then need Lumos-specific calibration.
+
+Fit residuals are generally more interpretable classifiers than loosely named
+roundness values:
+
+```text
+reduced chi-square
+maximum standardized residual
+core residual / flux
+axis ratio and orientation residual relative to local PSF
+nearest-neighbour contamination
+```
+
+A cosmic ray is normally masked by Stage 2. As a defensive fallback, reject sources
+that are narrower than the locally expected PSF, have a high core residual, and
+intersect a Laplacian/cosmic mask. Do not infer “cosmic ray” from one sharpness
+number alone.
+
+### 11.5 Duplicate semantics
+
+Deblending decides whether close peaks are distinct physical candidates. Duplicate
+removal only merges repeated detections of the same peak across channels, scales,
+or algorithms. Cluster detections with radius
+
+```text
+r_duplicate = max(configured_floor, 0.25 * local_FWHM)
+```
+
+and keep the measurement with the smallest valid major position variance; then use
+higher detection SNR and stable `(y,x)` as tie breakers. A configured zero radius
+must take an explicit disabled fast path. Duplicate removal must not undo a valid
+deblend merely because two stars are closer than a global 8-pixel constant.
+
+## 12. Registration-catalog selection
+
+The raw source catalog is not yet the best transform catalog. Astrometry.net's
+pipeline sorts source lists, removes line-like artifacts, and spatially uniformizes
+the sources before solving; see its
+[code overview](https://astrometry.net/doc/code.html). Lumos should make this a
+separate, deterministic selection step.
+
+### 12.1 Eligibility
+
+Default registration eligibility requires:
+
+```text
+no INVALID, SATURATED, EDGE, FIT_FAILED, BAD_COVARIANCE,
+   DEBLEND_FAILED, MASKED_CORE, or NEIGHBOUR_CONTAMINATED flag
+finite x, y and positive-definite position covariance
+measurement SNR >= configured minimum
+FWHM and shape consistent with the local stellar PSF
+nearest neighbour far enough for the chosen measurement model
+```
+
+Keep the reason count for every failed rule. The policy may allow a windowed-
+centroid fallback when too few PSF fits survive, but that relaxation must appear in
+diagnostics.
+
+### 12.2 Quality ordering
+
+Stable-sort eligible sources by this lexicographic key:
+
+1. major position variance ascending;
+2. absolute `log(reduced_chi2)` ascending when meaningful;
+3. detection SNR descending;
+4. flux descending;
+5. `y`, then `x`, ascending.
+
+Position uncertainty ranks the quantity registration actually consumes. Flux is
+only a late tie breaker: the brightest stars may saturate, cluster near a nebula,
+or all occupy the same portion of the frame.
+
+### 12.3 Spatial uniformization
+
+Given desired catalog size `K`, image width `W`, height `H`, and approximately
+`C = max(1, ceil(K/2))` spatial cells:
+
+```text
+nx = max(1, round(sqrt(C * W/H)))
+ny = max(1, ceil(C/nx))
+cell_x = min(nx-1, floor(x/W * nx))
+cell_y = min(ny-1, floor(y/H * ny))
+```
+
+Insert sources into cells in the quality order above. Emit the first item from
+each non-empty cell in row-major cell order, then the second item from each cell,
+and so on until `K` sources are emitted or all cells are exhausted. This is the
+same useful principle as Astrometry.net's `uniformize.py`: quality order is
+preserved within a cell while successive sweeps give every region an opportunity
+to contribute.
+
+If the downstream transform needs a minimum geometric span, verify that selected
+positions cover configured fractions of x and y and are not nearly collinear. If
+coverage fails, return the best available list with a `POOR_SPATIAL_COVERAGE`
+diagnostic; do not fabricate sources.
+
+### 12.4 Sequence consistency
+
+Registration quality also depends on repeatability across frames. Later stages may
+prefer sources found in several neighboring frames, but Stage 3 must not use a
+frame-specific flux-only cut that changes the catalog discontinuously with small
+seeing or transparency changes. Position uncertainty, local-PSF consistency, and
+spatial sweeps are more stable selection inputs.
+
+## 13. End-to-end reference algorithm
+
+The following pseudocode fixes stage ordering and data ownership. Helper functions
+return named results and errors, not ambiguous tuples.
+
+```text
+detect_stars(input, config):
+    validate_input_and_config(input, config)
+
+    detection_products = build_detection_planes(input.measurement_planes,
+                                                  input.permanent_mask,
+                                                  config.channel_policy)
+
+    background = estimate_mesh_background(detection_products.primary,
+                                          input.permanent_mask,
+                                          config.background)
+
+    psf = supplied_or_bootstrap_psf(detection_products,
+                                    input.measurement_planes,
+                                    input.permanent_mask,
+                                    background,
+                                    config.psf)
+
+    if config.background.refinement_passes > 0:
+        background = refine_background_with_source_masks(..., psf)
+
+    detection = matched_filter_significance(detection_products,
+                                             input.variance_or_sky_rms,
+                                             input.permanent_mask,
+                                             background,
+                                             psf,
+                                             config.detection)
+
+    normalized = empirical_null_normalize(detection,
+                                          input.permanent_mask,
+                                          background,
+                                          config.detection)
+
+    footprints = hysteresis_components(normalized,
+                                       config.footprint_threshold,
+                                       config.peak_threshold,
+                                       config.connectivity)
+
+    deblended = []
+    for footprint in footprints in label order:
+        deblended.extend(deblend_or_flag(footprint, normalized,
+                                        detection_products.primary,
+                                        background, psf, config.deblend))
+
+    groups = build_overlapping_fit_groups(deblended, psf, config.measurement)
+
+    raw_sources = parallel_map_in_stable_slots(groups, group ->
+        fit_group_on_measurement_pixels(group,
+                                        input.measurement_planes,
+                                        input.permanent_mask,
+                                        input.variance_or_sky_rms,
+                                        background, psf,
+                                        config.measurement))
+
+    attach_shape_classification_flags(raw_sources, psf, config.quality)
+    deduplicate_cross_scale_and_cross_channel(raw_sources, config.duplicate)
+    registration_sources = select_and_uniformize(raw_sources, input.dimensions,
+                                                  config.registration_catalog)
+
+    return StarDetectionResult(raw_sources, registration_sources,
+                               background.summary, psf.summary, diagnostics)
+```
+
+Parallel workers may process tiles, components, and independent fit groups, but
+their outputs occupy preassigned indices and are compacted only after joining. Do
+not let scheduler completion order determine labels, source IDs, tie breaks, or
+catalog order.
+
+## 14. Failure handling, diagnostics, and performance
+
+### 14.1 Expected errors
+
+Return a typed error for invalid configuration/input, no valid background tiles,
+non-finite or non-positive noise maps, allocation failure where recoverable, and
+cancellation. A complex individual blend, failed individual PSF fit, or rejected
+source is not a whole-frame error; return a flagged source or a counted rejection.
+
+### 14.2 Diagnostics
+
+At minimum report:
+
+```text
+valid/masked/interpolated/saturated pixel counts
+valid and repaired background tiles
+median and range of background, sky RMS, and empirical S normalization
+PSF origin, FWHM/axis range, and bootstrap star count
+pixels above footprint and peak thresholds
+component count and size distribution
+deblend splits/failures/overflow counts
+fit success, fallback, boundary, and covariance-failure counts
+rejections by every quality rule
+raw, eligible, and spatially selected source counts
+spatial coverage metrics
+```
+
+Intermediate background, RMS, normalized significance, labels, and segmentation
+maps should be optionally capturable for debugging without being mandatory members
+of every result.
+
+### 14.3 Determinism
+
+All comparisons state strict versus inclusive behavior. All equal-value cases use
+stable keys. Reductions that affect catalog values use f64 and a deterministic
+order, or an explicitly tested reproducible pairwise reduction. Results must be
+identical across configured thread counts within the documented floating-point
+tolerance, and catalog order must be exactly identical.
+
+### 14.4 Memory and cancellation
+
+Reuse frame-sized planes and per-thread scratch, but never alias a detection product
+with immutable measurement data. Bound deblend nodes, fit-group size, kernel radius,
+and diagnostic capture. Check cancellation between background passes, convolution
+row blocks, component batches, and fit groups. Releasing pooled buffers is part of
+every error and cancellation path.
+
+## 15. Current Lumos implementation audit
+
+This audit reflects the repository inspected on 2026-07-21. Module paths are given
+instead of line numbers because line numbers drift.
+
+### 15.1 Current pipeline and defaults
+
+`StarDetector::detect` currently performs:
+
+```text
+prepare one grayscale plane
+-> estimate/refine tiled background
+-> fixed or bootstrapped FWHM
+-> Gaussian convolution, threshold, CCL, deblend
+-> centroid and metrics
+-> quality filters, flux sort, FWHM filter, duplicate removal
+```
+
+Important default values are:
+
+| Area | Current default |
+|---|---|
+| background | 64-pixel tiles, 3 clip iterations, no refinement, dilation 3 |
+| detection | 4 sigma, 8-connectivity, min area 5, max area 500, edge 10 |
+| PSF | circular, FWHM 4 pixels, auto-estimation off |
+| deblend | local maxima, separation 3, raw peak fraction 0.3, max 8 leaves |
+| optional multithreshold | disabled; contrast 0.005 when enabled |
+| measurement | weighted moments, global background, no sensor model |
+| final filter | SNR 10, eccentricity 0.6, sharpness 0.7, roundness 0.5 |
+| duplicate/FWHM | 8-pixel duplicate radius, upper 3-MAD FWHM rejection |
+
+The configuration also provides wide-field, high-resolution, crowded-field, and
+precision-ground presets. Defaults are not correctness guarantees; their statistical
+meaning depends on the issues below.
+
+### 15.2 What is already sound and worth retaining
+
+- The detector is decomposed into preparation, background, FWHM, detection,
+  measurement, and filtering stages with reusable buffers and extensive unit,
+  synthetic, SIMD/scalar, memory-budget, and real-data tests.
+- Background meshes use sigma-clipped median/MAD and the `2.5 median - 1.5 mean`
+  mode switch, filter the tile grid, and interpolate with natural cubic splines.
+- Matched filtering subtracts background without clipping negative residuals,
+  normalizes the Gaussian kernel, supports an elliptical kernel, and has optimized
+  separable/SIMD paths.
+- Thresholding has explicit 4/8-connectivity, packed masks, deterministic tests,
+  component diagnostics, and both fast and multithreshold deblenders.
+- FWHM bootstrapping records whether a real estimate or fallback was used and
+  applies symmetric median/MAD clipping to bootstrap widths.
+- Gaussian and Moffat LM fitting, adaptive windowed shape moments, local annulus
+  background, sensor-model configuration, flux sorting, sparse duplicate lookup,
+  and rejection diagnostics already provide useful building blocks.
+
+### 15.3 P0 correctness and data-contract gaps
+
+1. **Detection and measurement share a derived plane.** `stages/prepare.rs`
+   inverse-MAD-variance combines RGB and applies a 3x3 median whenever CFA metadata
+   remains set. `stages/measure.rs` then measures on that same plane. Consequently
+   centroid, FWHM, flux, peak, saturation, and SNR are measurements of a synthetic,
+   possibly nonlinear median-filtered image rather than the calibrated source
+   planes. The code comment that inverse-variance combination is optimal for an
+   unknown flat SED is also too broad: it is optimal only for its assumed channel
+   response vector.
+2. **There is no mask or propagated variance input.** Bad pixels, hot columns,
+   saturation, cosmic rays, interpolated samples, and user masks cannot be excluded
+   consistently from background, convolution, deblending, fitting, or metrics.
+3. **The matched-filter threshold is not variance-aware.** `convolution/mod.rs`
+   uses stationary-kernel energy normalization and `threshold_mask` compares the
+   result with the RMS at the output pixel. Noise variation inside the footprint,
+   masks, demosaic correlation, and median-filter correlation are absent from the
+   statistic; image edges are mirrored rather than represented as reduced template
+   information.
+4. **Flux and SNR are positively biased.** `centroid/mod.rs::compute_star` clamps
+   every background-subtracted stamp sample to zero, sums the full square stamp,
+   and uses that full pixel count for noise. The reported flux is not the Gaussian
+   or Moffat fit flux. The optional `NoiseModel` adds read noise to an empirical
+   sky RMS that already normally contains read noise, so its documented semantics
+   double count read noise.
+5. **Saturation is not metadata-driven.** `star.rs` uses a fixed normalized peak
+   threshold of 0.95, and the stored peak is the candidate region's raw derived-plane
+   peak. A median-filtered detection plane can suppress the very plateau the check
+   needs.
+6. **Deblend ownership is ignored during measurement.** A deblended `Region` only
+   supplies a seed/bounding summary. Each source is measured in a complete square
+   stamp without neighbor masking or simultaneous fitting, so crowded-star positions
+   and metrics remain biased after a nominally successful split.
+
+### 15.4 P1 algorithm gaps
+
+1. Background estimation caps a tile at 1024 samples with a regular 2-D stride in
+   the unmasked path, which can alias periodic sensor/CFA patterns. If refinement
+   masks every sample, the tile falls back to all pixels and reintroduces the source
+   contamination. There is no invalid-tile/minimum-good-fraction state. The 3x3 grid
+   median is skipped unless both grid dimensions are at least three, and the spline
+   edge behavior can extrapolate before the first tile center. The fast median helper
+   selects the upper middle sample for even counts instead of the target midpoint
+   convention, producing a small avoidable offset in even-sized fixtures.
+2. Components larger than `max_area` are discarded in
+   `detector/stages/detect.rs` **before** deblending. A crowded island can therefore
+   lose every valid star. The final child filter checks minimum area and edge but
+   does not symmetrically apply a maximum leaf area. An edge margin that consumes
+   the whole image only logs a warning and filters every region instead of returning
+   an invalid-for-image configuration error.
+3. Local-maxima deblending in `deblend/local_maxima` requires strict single-pixel
+   maxima, measures prominence as a fraction of the component's brightest raw
+   derived-plane value, caps peaks at eight, and uses nearest-peak Voronoi ownership.
+   It misses plateaus and is sensitive to background pedestal and gradient.
+4. Multithreshold deblending in `deblend/multi_threshold` is not equivalent to
+   SExtractor despite the current description. Its levels, detection floor, branch
+   flux sums, and peaks use raw derived-plane values rather than background-
+   subtracted normalized detection statistics or intensity above branch threshold.
+   It uses eight-connectivity internally and assigns final pixels by nearest peak. The
+   root-relative contrast correction is good, but the measurement domain and pixel
+   gathering remain different from SEP/SExtractor.
+5. `WeightedMoments` clamps residuals positive and applies an ordinary weighted
+   mean update without SExtractor's factor 2. Hitting the ten-iteration limit is
+   still accepted because convergence state is not returned.
+6. The Gaussian fit is axis-aligned and cannot represent rotated ellipticity; the
+   Moffat fit is circular with fixed beta. Both evaluate the profile at pixel centers
+   instead of integrating over pixels, return no production position covariance,
+   and accept too little fit-quality information. Moffat configuration also accepts
+   `0 < beta <= 1`, for which a unit-total-flux two-dimensional Moffat profile is not
+   integrable. These limitations matter most for undersampled data, precisely where
+   subpixel registration is sensitive to pixel phase.
+7. Local annuli ignore permanent masks and neighboring footprints. Ten samples are
+   considered sufficient regardless of nominal annulus area, and a failed annulus
+   silently falls back to the global map.
+8. FWHM bootstrapping inherits the same derived-plane measurements and does not
+   require isolation. Final FWHM filtering builds its reference from the brightest
+   half of the catalog and rejects only broad upper outliers, not anomalously narrow
+   detections. Duplicate removal keeps the brightest entry within a fixed global
+   separation rather than the most precise one and can merge distinct deblended
+   stars; zero separation lacks an explicit disabled fast path for the spatial-hash
+   branch.
+
+### 15.5 P1 naming and catalog gaps
+
+- `Star::roundness1` is documented as DAOFIND GROUND, but the implementation uses
+  the maxima of marginal sums rather than fitted marginal Gaussian amplitudes and
+  omits Photutils' factor 2.
+- `Star::roundness2` is documented as DAOFIND SROUND, but the implementation is the
+  non-negative hypotenuse of left/right and top/bottom marginal imbalance. DAOFIND
+  SROUND is a signed convolved-image quadrant symmetry statistic.
+- Lumos sharpness is background-subtracted peak divided by positive-clipped 3x3
+  core flux, not DAOFIND sharpness.
+- `Star` has no flags, position covariance, flux variance, background, fit quality,
+  axes/orientation, segmentation ID, mask coverage, neighbor distance, or detection
+  scale. Downstream code cannot distinguish a precise isolated fit from a fallback
+  centroid with hidden contamination.
+- The returned catalog is sorted only by flux after global quality cuts. There is
+  no uncertainty ranking or spatial uniformization for registration.
+
+### 15.6 Recommended implementation order
+
+The safest dependency order is:
+
+1. introduce input masks/variance, richer flags/catalog, and keep measurement planes
+   separate from detection products;
+2. make background estimation mask-correct with invalid tiles and positive RMS;
+3. replace center-RMS convolution thresholding with the variance-aware statistic and
+   empirical null normalization;
+4. measure original pixels with pixel-integrated PSF fits and covariance;
+5. make deblending operate on standardized residuals and honor ownership in grouped
+   measurement;
+6. replace misleading metrics/names and add uncertainty/spatial catalog selection;
+7. only then retune thresholds and presets on synthetic and real datasets.
+
+Retuning current constants before fixing their statistical domains would bake the
+existing biases into new defaults.
+
+## 16. Verification requirements
+
+Every new or modified non-GUI algorithm requires exact tests. Real-image snapshots
+are useful regressions but cannot establish correctness because truth is unknown.
+
+### 16.1 Background tests
+
+- Hand-compute median, MAD, clip membership, mode/median switch, invalid-tile fill,
+  and interpolation for tiny grids.
+- Constant, linear-gradient, vignetting, nebulosity, crowded, and masked synthetic
+  fields must recover known background and RMS within predeclared tolerances.
+- Verify that all-masked tiles never inspect masked values and all-invalid grids
+  return an error.
+- Compare full-pixel and capped-sampling paths on Bayer-like, row-periodic, and
+  column-periodic patterns to catch sampling alias.
+- Assert RMS is finite and positive at every output pixel, including edges and
+  one-/two-node grid axes.
+
+### 16.2 Matched-filter tests
+
+- For a hand-sized template and nonuniform variance, assert exact `A`, `H`, flux,
+  flux variance, and `S` from the equations in §7.2.
+- Mask each kernel pixel in turn and verify the result against a scalar reference.
+- Cross-check separable, full 2-D, SIMD, and scalar paths for the same integrated
+  template.
+- On at least `10^7` blank independent Gaussian samples, verify mean near 0, variance
+  near 1, and exceedance rates consistent with the configured threshold and number
+  of template trials.
+- Repeat with demosaic/resampling correlation and verify empirical normalization
+  restores the calibrated null width.
+- Inject stars across subpixel phases, FWHM, axis ratio, angle, masks, field position,
+  and flux; plot/measure completeness at fixed false-positive rate.
+
+### 16.3 Labeling and deblending tests
+
+- Exhaustive small masks must match scalar 4- and 8-connectivity references.
+- Pin strict threshold equality, row-major labels, plateaus, edge contact, and
+  separation equality.
+- Two- and three-star blends sweep separation, contrast, FWHM, background gradient,
+  and noise. Assert exact leaf count where resolvable and graceful unsplit flags
+  where not.
+- Check every parent pixel receives one owner, leaf areas sum exactly to parent
+  area, no peak is outside its leaf, and thread count cannot change ownership.
+- Components over `max_area` must reach the deblender; overflow must return an
+  unsplit flagged component rather than disappear.
+- Compare a compatibility fixture with pinned SEP output while keeping Lumos-specific
+  standardized-tree tests separate.
+
+### 16.4 Centroid and fit tests
+
+- Generate pixel-integrated Gaussian and Moffat stars at a dense subpixel grid,
+  including FWHM below 2 pixels. Assert signed centroid bias versus pixel phase is
+  below the declared target and has no repeating phase pattern.
+- Cross-check model derivatives with high-accuracy central differences.
+- Sweep SNR, background, gain, read noise, masks, saturation, ellipticity, rotation,
+  beta, stamp size, and neighbor separation.
+- Simultaneous blends must recover both positions better than independent full-stamp
+  fits on the same fixture.
+- For repeated noise realizations, standardized errors
+  `(estimate-truth)/reported_sigma` must have mean near 0 and RMS near 1. Check joint
+  2-D covariance coverage, not only x and y separately.
+- Force every optimizer termination path and assert only genuine convergence is
+  accepted. Boundary, singular, non-finite, insufficient-pixel, and iteration-limit
+  cases must set the correct flags.
+- Windowed fallback tests must pin the factor-2 update and convergence/rejection rules.
+
+### 16.5 Catalog and invariance tests
+
+- Uniformization must emit the exact expected sequence for hand-built cells,
+  preserve within-cell quality order, handle empty cells, and stop exactly at `K`.
+- Adding a constant background, multiplying image/background/RMS by one positive
+  scale, or changing thread count must preserve positions and selection as predicted
+  by the equations.
+- RGB tests need red-only, green-only, blue-only, and neutral stars with unequal
+  noise; known-color combination, per-band union, and chi-square discovery must each
+  demonstrate their documented behavior.
+- Verify FITS serialization adds the coordinate offset exactly once.
+- End-to-end synthetic registration fixtures must show that uncertainty-ranked,
+  spatially uniform catalogs improve transform recovery versus flux-only sorting.
+
+## 17. Sources and inspected open-source implementations
+
+### 17.1 Primary and official references
+
+- Bertin & Arnouts, 1996, [SExtractor: Software for source extraction](https://aas.aanda.org/articles/aas/pdf/1996/08/ds1060.pdf).
+- SExtractor 2.24.2 documentation:
+  [processing](https://sextractor.readthedocs.io/en/latest/Processing.html),
+  [background](https://sextractor.readthedocs.io/en/latest/Background.html), and
+  [windowed positions](https://sextractor.readthedocs.io/en/latest/PositionWin.html).
+- Barbary and SEP contributors,
+  [SEP matched-filter derivation](https://sep.readthedocs.io/en/latest/filter.html)
+  and [extraction API](https://sep.readthedocs.io/en/latest/api/sep.extract.html).
+- Stetson, 1987,
+  [DAOPHOT — A Computer Program for Crowded-Field Stellar Photometry](https://articles.adsabs.harvard.edu/pdf/1987PASP...99..191S).
+- Photutils,
+  [DAOStarFinder 3.0 documentation](https://photutils.readthedocs.io/en/stable/api/photutils.detection.DAOStarFinder.html).
+- Vakili & Hogg, 2016,
+  [Do fast stellar centroiding methods saturate the Cramér-Rao lower bound?](https://arxiv.org/abs/1610.05873).
+- Zackay & Ofek, 2017,
+  [How to Coadd Images I: Optimal Source Detection and Photometry](https://arxiv.org/abs/1512.06872).
+- Anderson & King, 2000,
+  [Toward High-Precision Astrometry with WFPC2 I](https://arxiv.org/abs/astro-ph/0006325).
+- Szalay, Connolly & Szokoly, 1999,
+  [Simultaneous Multicolor Detection of Faint Galaxies](https://arxiv.org/abs/astro-ph/9811086).
+- Lang et al., 2010,
+  [Astrometry.net: Blind astrometric calibration](https://arxiv.org/abs/0910.2233)
+  and [Astrometry.net code structure](https://astrometry.net/doc/code.html).
+
+### 17.2 Source trees inspected
+
+The source-level audit used these exact revisions, cloned under `.tmp/refs/`:
+
+| Project | Revision | Relevant code |
 |---|---|---|
-| **Over-deblending** | contrast too low, or local-maxima w/o contrast | one bright star → several spurious "stars" in its wings; corrupts registration |
-| **Under-deblending** | contrast too high, too few thresholds | close double → one elongated blob; bad centroid, high eccentricity |
-| **Saturation spikes** | bleed columns / diffraction spikes | spikes deblended into fake companions |
-
-Best practice: multi-threshold + contrast (≥16 thresholds, contrast 0.001–0.005)
-for science/crowded fields; local-maxima for speed on sparse frames; always
-gate the final catalog on eccentricity and a duplicate-removal pass (§5, §6).
-
----
-
-## 4. Centroiding
-
-### 4.1 Intensity-weighted moments (first-moment / barycenter)
-
-The cheapest centroid is the flux-weighted first moment over the
-background-subtracted stamp:
-
-```
-x̄ = Σ (Iᵢ − sky)·xᵢ / Σ (Iᵢ − sky),   ȳ similarly
-```
-
-SExtractor's basic `X_IMAGE`/`Y_IMAGE` are exactly this isophotal barycenter
-(`analyse.c:204-213`: `mx += cval·x`, then `xm = mx/rv`). It is unbiased *only*
-if the stamp is symmetric about the true center and the threshold/window does not
-clip the PSF asymmetrically. In practice the **isophotal** barycenter is biased:
-the detection threshold chops the PSF at a level, and the surviving footprint is
-not symmetric, so faint stars get pulled toward bright neighbors and toward the
-noisier side. This is the classic centroid bias.
-
-### 4.2 Windowed / Gaussian-weighted iterative centroid (best practice for moments)
-
-The fix is a **Gaussian window** centered on the current estimate, iterated to
-convergence. SExtractor `XWIN_IMAGE`/`YWIN_IMAGE`
-(`doc/src/PositionWin.rst`):
-
-```
-w_i = exp(−r_i² / (2 s²)),   s = d₅₀ / sqrt(8 ln 2)   (d₅₀ = half-flux diameter)
-x^(t+1) = x^(t) + 2 · [Σ w_i I_i (x_i − x^(t))] / [Σ w_i I_i]      (likewise y)
-```
-
-iterated until the shift < 2×10⁻⁴ px. **Verified verbatim (pass 2)** from the
-SExtractor manual `PositionWin.html`: the iteration *"is initialized"* with the
-isophotal `x̄`,`ȳ`; the Gaussian window FWHM *"is the diameter of the disk that
-contains half of the object flux (d₅₀)"* (so `s = d₅₀/√(8 ln 2)`); the update
-carries the explicit **`+2·…`** prefactor; and *"the process stops when the change
-in position between two iterations is less than 2×10⁻⁴ pixel, a condition which is
-achieved in about 3 to 5 iterations in practice."* The **factor of 2** is a
-fixed-point accelerator: for a Gaussian source under a matched Gaussian window the
-naive weighted-mean update moves only ~half the way to the true centroid each step
-(the window itself pulls the estimate back), so doubling the step makes the
-iteration a near-Newton fixed point — which is why XWIN converges in 3-5 steps
-where the un-accelerated form (lumos) needs more. SExtractor states XWIN/YWIN
-accuracy is *"actually very close to that of PSF-fitting on focused and properly
-sampled star images"* and, for *"isolated objects with Gaussian-like profiles … is
-close to the theoretical limit set by image noise."* The Gaussian window suppresses
-the contribution of distant/contaminating pixels and removes the isophotal-threshold
-bias.
-
-lumos's `WeightedMoments` is this iterative Gaussian-weighted centroid
-(`centroid/mod.rs:437-503`, `refine_centroid`): weight
-`= value · exp(−dist²/2σ²)` with σ from the expected FWHM (×0.8 for tighter
-weighting), iterated ≤10 times to a 10⁻⁴ px threshold. **Difference from XWIN:**
-lumos uses the plain weighted-mean update (`new = Σwx/Σw`) **without** the
-SExtractor factor-of-2 acceleration. The plain form still converges to the
-weighted centroid, just more slowly; with a generous iteration cap (10) this is
-fine, but it is a deliberate deviation worth noting.
-
-### 4.3 PSF fitting: Gaussian vs. Moffat (best precision)
-
-For the best sub-pixel accuracy, fit a model PSF to the stamp by nonlinear least
-squares:
-
-- **2D Gaussian** (6 params: x₀,y₀, amplitude, σ_x, σ_y, background; or +θ for
-  rotation). Good for space-based / well-corrected optics. Underestimates the
-  wings of atmospheric seeing PSFs.
-- **2D Moffat** `I(r) = I₀ · [1 + (r/α)²]^(−β)` (Moffat 1969). The β parameter
-  controls the wing heaviness; β≈2.5–4.8 fits atmospheric seeing far better than
-  a Gaussian, which is the β→∞ limit. FWHM = 2α·sqrt(2^(1/β) − 1).
-
-**PSFEx and field-varying PSFs (clarified, pass 2).** For wide fields the PSF is
-*not* constant — it broadens and elongates toward the corners (off-axis
-aberrations, defocus, tracking). **PSFEx** models this: it samples bright,
-unsaturated, isolated stars across the frame and fits a **pixel-basis** (or
-Gauss-Laguerre "polar shapelet") PSF model whose coefficients **vary polynomially
-with field position** (and optionally other "context" parameters). Reading the
-PSFEx source (`.tmp/refs/psfex/src/diagnostic.c:184-225`), the **Moffat fit is a
-*diagnostic*** — PSFEx fits a Moffat (and a "pixel-free" Moffat) to the
-*reconstructed* PSF at a grid of field positions purely to *report* FWHM /
-elongation / asymmetry (`moffat_fwhm_min/max` over the snapshot grid); it is **not**
-the underlying PSF model. The takeaway for measurement: (1) a single global Gaussian
-or Moffat is wrong across a wide field — interpolate the PSF, or at least fit each
-star's own shape; (2) **aperture flux** (sum within a fixed radius) is model-free
-but throws away SNR and needs an aperture correction, while **PSF flux** (amplitude
-× model integral) is optimal but only as good as the PSF model — the right choice
-depends on whether you trust your PSF more than your aperture-correction curve.
-
-lumos implements per-star fits (not field-varying models) via a shared
-Levenberg–Marquardt optimizer: `CentroidMethod::{WeightedMoments, GaussianFit,
-MoffatFit{beta}}` (`config.rs:44`), `centroid/gaussian_fit/` (6-param, SIMD),
-`centroid/moffat_fit/` (5–6 param, fixed or fit β), `lm_optimizer.rs` +
-`linear_solver.rs`. It seeds the fit with 2 moment iterations then lets LM refine
-independently (`measure.rs`/`centroid/mod.rs:304-401`). Documented accuracy:
-~0.05 px (moments) vs ~0.01 px (fit). Because each star is fit independently, lumos
-naturally accommodates a slowly field-varying PSF without an explicit interpolation
-model — at the cost of more parameters per source and no shared regularization.
-
-### 4.4 Marginal 1D Gaussian (DAOFIND's centroid)
-
-DAOFIND fits separate 1D Gaussians to the **marginal** (row-summed and
-column-summed) distributions of the **unconvolved** stamp (the marginal *shape* is
-taken from the kernel; the data summed is the original image — see §5.4 correction)
-— cheaper than a full 2D fit, and the basis of both the DAOFIND sub-pixel shift
-(`x_centroid = x_max + dx`) and GROUND roundness (§5.4). photutils
-`daofind_marginal_fit` / `_marginal_*` (`daofinder.py:596-709,862-896`).
-
-### 4.5 Accuracy limits and LM pitfalls
-
-The Cramér–Rao floor for centroiding a Gaussian of FWHM `w` at SNR is roughly
-`σ_pos ≈ w / (2.35 · SNR)` per axis (background-limited). At SNR=100, FWHM=3 px →
-~0.013 px — which is why XWIN and PSF-fitting both land near 0.01 px. You cannot
-beat this with a better algorithm; only more photons help.
-
-**Levenberg–Marquardt pitfalls** (verified across the IMFIT and microscopy-PSF
-literature):
-
-- **Local minima.** LM is fast but *"highly susceptible to becoming trapped in
-  local minima unless very good initial guesses are made."* Seed x₀,y₀ from the
-  moment centroid, σ from the second moment (lumos: `estimate_sigma_from_moments`,
-  `centroid/mod.rs:171-196`), amplitude from peak−sky.
-- **Fitting an un-background-subtracted stamp.** If background is not removed (or
-  not a free parameter), the fit amplitude and σ are biased and flux is wrong.
-  lumos passes `local_bg` into the fit and subtracts it (`measure.rs`/
-  `gaussian_fit`). Make background either pre-subtracted or a fit parameter —
-  never ignored.
-- **Too small a stamp** clips the wings → σ/β biased low, flux underestimated.
-  Rule of thumb ≥1.5×FWHM radius; lumos uses 1.75×FWHM (≈99% of Gaussian flux),
-  clamped 4–15 px (`centroid/mod.rs:44-90`).
-- **Staged fitting** (fix rotation first, then free it) avoids divergence on
-  near-circular sources where θ is ill-constrained.
-
----
-
-## 5. Measured parameters & quality metrics
-
-### 5.1 Flux
-
-**Isophotal flux** = sum of background-subtracted pixels above threshold within
-the object (SExtractor `FLUX_ISO`; `analyse.c` `rv += cval`). Threshold-dependent
-(faint wings below threshold are lost). **Aperture** and **PSF-fit (PSF_FLUX)**
-fluxes are less biased but need a model/aperture. For detection-stage catalogs,
-isophotal or fixed-stamp summed flux is standard. lumos sums
-`(I − sky).max(0)` over the measurement stamp (`compute_star`,
-`centroid/mod.rs:574-577`). Note: clamping negatives to 0 biases faint-source
-flux slightly *high* (it discards negative noise excursions) — acceptable for
-detection, wrong for precise photometry.
-
-### 5.2 SNR — the CCD equation
-
-The signal-to-noise of a star measured over `npix` pixels, in electrons, is the
-**CCD equation** (Howell; verified at Dhillon PHY217):
-
-```
-            S* · sqrt(t·g)                          (S* in ADU, g = e⁻/ADU)
-SNR = ───────────────────────────────────────
-       sqrt( S* + npix·( S_sky + S_dark/g + R²/(g·t) ) )
-```
-
-or, in electrons with total source counts `N*`:
-
-```
-SNR = N* / sqrt( N* + npix·( N_sky + N_dark + R² ) )
-```
-
-where `N*` = source electrons (its own **shot noise** = sqrt(N\*)), `N_sky` = sky
-e⁻ per pixel, `N_dark` = dark e⁻ per pixel, `R` = read noise e⁻/pixel, `npix` =
-pixels in the aperture. Each noise term enters as a **variance** (they add in
-quadrature because the underlying processes are independent): source shot noise
-`N*`, sky shot noise `npix·N_sky`, dark shot noise `npix·N_dark`, read noise
-`npix·R²`. A fifth term, **digitization/quantization noise** `npix·(g²/12)` (the
-±½-ADU rounding of the ADC, gain `g` in e⁻/ADU), is usually folded into the
-effective read noise and omitted; it matters only at very low read noise. **Two
-regimes:**
-
-- **Shot/sky-limited** (bright source or bright sky): SNR ∝ sqrt(N\*) ∝ sqrt(t).
-- **Read-noise-limited** (faint source, short exposure): denominator ≈
-  sqrt(npix)·R, so SNR ∝ N\* ∝ t (linear in exposure).
-
-A subtle bias the CCD equation hides: `npix` is the *aperture* pixel count, treated
-as exact, but the sky level subtracted under the source is itself estimated and
-carries error `npix²·σ_sky²/n_sky` (n_sky = sky-annulus pixel count). Photometry
-codes that use a small sky annulus add this term; lumos's global-mesh σ makes it
-negligible. The equation also assumes Poisson ≈ Gaussian, valid for `N ≳ 10` e⁻.
-
-lumos implements the normalized-domain equivalent in `compute_snr`. A
-`NoiseModel` supplies `G`, electrons represented by one normalized pixel unit,
-and read noise `R` in electrons:
-`total_var = flux/G + npix·(σ_sky² + (R/G)²)` (shot + sky + read). Without a
-noise model it uses the background-limited `total_var = npix·σ_sky²`, i.e.
-`SNR = flux / (σ_sky·sqrt(npix))`. Two implementation details worth stating:
-`npix` is the **full square stamp** `(2r+1)²`, not an
-above-threshold/aperture pixel count — flux is summed over the same full stamp,
-so signal and the `npix`-scaled noise terms are consistent but both span a
-larger region than a tight aperture would; and `σ_sky` (`avg_noise`) is the mean
-of the per-pixel noise map over the stamp's **outer ring** (`r² > (r−2)²`), a
-local sky-noise estimate rather than a global scalar. Configure the model with
-`G = electrons_per_adu × adu_per_normalized_unit`; passing the physical
-electrons-per-ADU value directly is dimensionally wrong.
-
-### 5.3 FWHM & eccentricity from second moments
-
-From the flux-weighted second central moments
-`x2 = Σw·(x−x̄)²/Σw`, `y2`, `xy` (SExtractor `analyse.c:228-230`):
-
-- **Size:** for a Gaussian, `E[r²] = 2σ²`, so `σ = sqrt((x2+y2)/2)` and
-  `FWHM = 2.3548·σ`. lumos: `sigma_sq = sum_r2/flux/2`,
-  `fwhm = sigma_to_fwhm(sqrt)` (`centroid/mod.rs:612-613`).
-- **Shape:** the moment matrix `[[x2,xy],[xy,y2]]` has eigenvalues λ₁≥λ₂ giving
-  semi-axes `a=sqrt(λ₁)`, `b=sqrt(λ₂)` (SExtractor `A_IMAGE`,`B_IMAGE`,`THETA`,
-  `analyse.c:273-296`). **Eccentricity** `e = sqrt(1 − (b/a)²) = sqrt(1 − λ₂/λ₁)`
-  (lumos `centroid/mod.rs:616-630`); **ellipticity** `= 1 − b/a`. Circular → 0.
-  When the source is unresolved (moment matrix near-singular,
-  `x2·y2−xy² < 0.00694`) SExtractor adds `1/12 = 0.0833333` to each diagonal
-  moment (the pixel-quantization variance of a uniform 1-px-wide distribution)
-  and flags `OBJ_SINGU` (SEP `analyse.c:259-263`: `if (xm2·ym2 − xym·xym <
-  0.00694) { xm2 += 0.0833333; ym2 += 0.0833333; … |= SEP_OBJ_SINGU; }`) — a
-  subtlety lumos does not replicate. (Without it, an unresolved 1–2 px blob can
-  drive `λ₂→0` and force `e→1`, spuriously failing the eccentricity gate.)
-
-Eccentricity is the single most useful non-stellar reject: galaxies, blends, and
-trailed stars have high e; round PSFs have e≈0.
-
-### 5.4 DAOFIND sharpness & roundness (Stetson 1987)
-
-**What Stetson 1987 actually defines** (parsed from the original PASP paper, §II.A,
-`.tmp/papers/stetson1987.txt`). DAOFIND first builds `H`, the array of best-fit
-Gaussian *central heights* — equivalent to convolving the data `D` with a
-**"lowered" (zero-integral) truncated Gaussian** `G' = G − ⟨G⟩` so that
-`Σ H = 0` (the constant + sloping sky cancels): `H = Σ(GD)−(ΣG)(ΣD)/n) /
-(Σ(G²)−(ΣG)²/n)` with `σ = FWHM/2.355`. Detections are local maxima of `H` above
-`Hmin` (the n·σ threshold). Stetson then gives **two** secondary indices:
-
-- **sharp** = `D_central / ⟨D_neighbors⟩`-style ratio. Verbatim:
-  `d_{i0j0} = D_{i0j0} − ⟨D⟩` (observed difference between the central pixel and
-  the *mean of the remaining pixels used in the fit*), and
-  **`sharp = d / H`** — the central intensity excess divided by the best-fit
-  Gaussian height. *"For a very narrow profile, such as that caused by a cosmic-ray
-  event, all of the intensity will be contained in the central pixel … hence sharp >
-  1. … moderately-peaked objects, such as star images … should scatter about a value
-  significantly less than unity and greater than zero."* Accept `0.2 < sharp < 1.0`.
-- **round** (Stetson defines only ONE): *"compares the peakedness of the enhancement
-  in the x-direction with that in the y-direction: the height of the best-fitting
-  one-dimensional Gaussian function of x, hx, is compared to the height … of y, hy."*
-  Charge-overflow columns give `hx ≫ 0, hy ≈ 0`; *"a roundness criterion readily
-  distinguishes stars (round ≈ 0) from bad rows and columns (round ≈ ±2)."* The
-  ±2 range fixes the normalization as **`round = 2·(hx − hy)/(hx + hy)`**. Accept
-  `−1.0 < round < 1.0`. **This is what photutils later named GROUND.** Stetson's
-  "round" has **no** symmetry/quadrant variant — the SROUND statistic was added by
-  the IRAF DAOFIND reimplementation and inherited by photutils.
-
-**What photutils computes** (verified line-by-line in `daofinder.py`):
-
-- **sharpness** (`daofinder.py:580-594`) = `(peak − data_mean) / convdata_peak`,
-  where `peak` and `data_mean` (mean over the kernel-masked footprint excluding the
-  peak) come from the **unconvolved** cutout and `convdata_peak` is the peak of the
-  **convolved** cutout = Stetson's `H`. So sharpness ≈ Stetson's `d/H`. Accept
-  `(0.2, 1.0)`.
-- **roundness1 = SROUND** (`daofinder.py:534-577`) — *symmetry* index. Zero the
-  central pixel of the **convolved** cutout, split into four quadrants, and compute
-  `sum2 = −q1 + q2 − q3 + q4`, `sum4 = Σ|cutout_conv|`, then
-  **`roundness1 = 2·sum2/sum4`**. Circular → 0.
-- **roundness2 = GROUND** (`daofinder.py:964-976`) — *marginal-Gaussian* index,
-  **`roundness2 = 2·(hx − hy)/(hx + hy)`**, where hx,hy are least-squares
-  amplitudes of 1D Gaussians (shaped from the *kernel's* marginal) fit to the
-  marginal x/y distributions of the **unconvolved** image (docstring of
-  `daofind_marginal_fit`: *"to the marginal x/y distributions of the original
-  (unconvolved) image"*). x-extended → negative, y-extended → positive. Accept
-  `(−1.0, 1.0)`; kernel `sigma_radius=1.5`. **This is Stetson's original `round`.**
-
-> **FINAL VERDICT (pass 2): the "swapped" claim is CONFIRMED, with two extra
-> caveats.** photutils + IRAF DAOFIND fix the convention as **roundness1 = SROUND
-> (quadrant 2-fold/4-fold symmetry, on the convolved stamp)** and **roundness2 =
-> GROUND (marginal-Gaussian height ratio, on the unconvolved stamp)** — and
-> Stetson's *single* original `round` is exactly GROUND. lumos reverses both names
-> (`star.rs:24-30`, `centroid/mod.rs:671-694`):
->
-> - lumos `roundness1` is documented and computed as **GROUND-like**:
->   `safe_ratio(hx − hy, hx + hy)` (`centroid/mod.rs:673-675`) → matches photutils
->   **`roundness2`**, the *reverse* name. Two further deviations: lumos **drops the
->   factor of 2** photutils carries, and lumos takes `hx`/`hy` as the **max of the
->   raw marginal-sum profile** (`marginal_x.iter().fold(0, f64::max)`), *not* a
->   least-squares 1D-Gaussian amplitude — so it is a marginal-peak ratio, not a
->   marginal-Gaussian-fit ratio.
-> - lumos `roundness2` is computed as **SROUND-like**: `hypot(asym_x, asym_y)` of
->   the left/right and top/bottom marginal asymmetries (`centroid/mod.rs:681-688`)
->   → fills the role of photutils **`roundness1`**, the *reverse* name. But it is an
->   *ad-hoc 1D-marginal asymmetry RMS*, not Stetson/IRAF's quadrant `2·sum2/sum4`
->   ratio. It is clamped to `[0, 1]`, so it can never go negative and cannot encode
->   the directional sign that SROUND carries.
-> - **Both are computed on the *unconvolved* stamp** — `compute_star` is handed
->   the raw `pixels` plane (`centroid/mod.rs:528-535`, called from `measure.rs`),
->   never the matched-filter output. photutils computes sharpness and SROUND on the
->   **convolved** cutout (only GROUND uses the unconvolved image), so lumos diverges
->   on the image *and* the formula for its SROUND analogue.
->
-> Net effect: both indices are still computed and both are gated by `is_round`
-> (`star.rs:52-54`), so circular vs. elongated discrimination still works; but the
-> field names are the inverse of every published reference, the directional sign of
-> SROUND is lost, and neither index is bit-comparable to photutils/DAOFIND. The fix
-> is purely cosmetic for detection but important for anyone cross-checking: swap the
-> names, restore the factor of 2 on GROUND, fit (not max) the marginal Gaussians,
-> compute the symmetry index as `2·sum2/sum4` over convolved quadrants, and feed the
-> convolved stamp.
-
-**Correction (pass 2) — GROUND is on the *unconvolved* image, not convolved.** The
-prior pass said all three DAOFIND stats are "computed on the convolved image." That
-is right for sharpness's denominator and for SROUND, but photutils explicitly fits
-the GROUND marginals to the **original (unconvolved)** data (`daofind_marginal_fit`
-docstring). Stetson's text agrees: `round` compares 1D-Gaussian heights `hx`,`hy`
-fit "by a formula involving sums of the image-brightness values identical in form to
-equation (1)" — i.e. of the *image* `D`, not of `H`.
-
-### 5.5 Saturation, bleed, spikes & cosmic-ray flagging
-
-- **Saturation:** flag stars whose peak exceeds a fraction of the ADC/well limit
-  (SExtractor `SATUR_LEVEL` → `FLAGS` bit 2). Saturated cores have flat tops →
-  biased centroids and meaningless flux. lumos: `Star::is_saturated(threshold)`,
-  default 0.95 of normalized max (`star.rs:38`, applied in `filter.rs:46`).
-- **Bleed columns / charge overflow:** a grossly overexposed star spills charge
-  along the readout column (vertical bleed) or row, producing a long thin
-  detection. This is exactly the case Stetson's `round` was *designed* to catch:
-  *"false detections arise in the charge overflow columns and rows from grossly
-  overexposed objects … much more elongated in x or y than star images … hx ≫ 0
-  and hy ≈ 0 … round ≈ ±2"* (Stetson 1987, `.tmp/papers/stetson1987.txt:662-783`).
-  So a hard eccentricity cut *plus* an axis-aligned roundness (GROUND) cut rejects
-  bleed. SExtractor flags the saturated parent (`FLAGS` bit 2) and the deblend can
-  shatter a bleed trail into fake companions — see §3.3.
-- **Diffraction spikes:** four (or six) symmetric rays from a bright star
-  (secondary-mirror spider or aperture edges). They are highly elongated but
-  **inclined** to the axes, so an axis-aligned roundness misses them (Stetson notes
-  `round` *"does not select against objects which are elongated in a direction
-  inclined to the rows and columns"*); the eccentricity-from-eigenvalues cut (§5.3)
-  is the rotation-invariant discriminator that does. lumos has no dedicated
-  spike model; it relies on the eccentricity gate.
-- **Cosmic rays:** sharp, often single-/few-pixel spikes far narrower than the
-  PSF. Two discriminators: (a) **sharpness** — CRs have sharpness ≫ a real star
-  (Stetson: a CR concentrates *"all of the intensity … in the central pixel … hence
-  sharp > 1"*; lumos `is_cosmic_ray(max_sharpness)`, default 0.7, `star.rs:45`,
-  `filter.rs:55`); (b) **Laplacian edge detection** (van Dokkum 2001,
-  L.A.Cosmic): a CR's edges are sharper than any PSF-convolved source, so a
-  Laplacian-filtered/SNR image flags CRs while *"reliably discriminating between
-  poorly sampled point sources and cosmic rays"* — the right tool when the PSF is
-  undersampled and a simple sharpness cut would reject real faint stars. The most
-  robust CR rejection, though, is **multi-frame**: a CR appears in one sub only,
-  so sigma-clipped stacking (Stage 5) removes it. For single-frame detection,
-  sharpness is a cheap first pass; Laplacian is the rigorous upgrade.
-
-### 5.6 Star–galaxy separation (CLASS_STAR / neural net)
-
-For science catalogs SExtractor adds a dedicated **stellarity** index
-`CLASS_STAR ∈ [0, 1]` (0 = galaxy/non-star, 1 = star), output of a small
-pre-trained **neural network** (`default.nnw`). Per Holwerda's tutorial
-(`.tmp/papers/holwerda_dummies.txt:2674-2979`), the net is fed the object's **7
-isophotal areas** (`ISO0..ISO7`, areas above evenly-spaced levels), the **peak
-intensity**, and the **`SEEING_FWHM`** — the seeing scale is essential because
-"compact" is defined relative to the PSF. The output separates point sources
-(stars: their isophotal areas shrink fast with level, like the PSF) from extended
-sources (galaxies: shallow area-vs-level profile). CLASS_STAR degrades at faint
-magnitudes and in crowding; modern pipelines replace it with `SPREAD_MODEL` (a
-linear discriminant between the local PSF and a slightly broadened PSF) or a CNN.
-
-For lumos, whose targets are stars and whose downstream consumer is *registration*
-(which wants clean point sources), full star–galaxy classification is overkill: the
-eccentricity + FWHM-outlier + sharpness gates already reject the obvious extended /
-elongated objects. The seeing-relative idea is the transferable lesson — lumos's
-auto-FWHM (§3 fwhm stage) plays the role of `SEEING_FWHM`, and a future
-"compactness vs. measured FWHM" cut would be the cheap analogue of `SPREAD_MODEL`.
-
----
-
-## 6. Recommended best-practice implementation
-
-A reference pipeline, in order:
-
-1. **Reduce to one detection plane.** Grayscale → copy. Color → noise-weighted
-   (inverse-variance) channel sum — the linear analogue of SExtractor's χ²
-   detection image, kept *linear* so flux/centroid stay valid. (Do **not** use
-   perceptual Rec.709 luminance: it crushes red/blue stars.) CFA → 3×3 median
-   first to kill mosaic artifacts.
-2. **Background:** 64-px tiled mesh; per tile, sigma-clipped histogram → mode
-   `2.5·med−1.5·mean` (median if `|mean−med|/σ ≥ 0.3`); σ from clipped std or
-   1.4826·MAD; **3×3 median-filter the tile grid** (sky *and* σ; replacement
-   gated by `BACK_FILTERTHRESH`, default 0 = unconditional);
-   natural-bicubic interpolate to per-pixel sky and σ. On crowded fields, ≥1
-   object-masked refinement pass.
-3. **FWHM:** auto-estimate from a strict first-pass detection (high threshold,
-   robust median/MAD of round bright stars).
-4. **Detect:** matched-filter convolve with a Gaussian (or elliptical) kernel
-   matched to FWHM, normalized by `sqrt(ΣK²)`; threshold at 3–5σ against the
-   *local* σ map; CCL (Lutz or union-find, 8-connectivity); `DETECT_MINAREA` ≥3.
-5. **Deblend:** multi-threshold (≥16–32 exponential levels) + contrast
-   (0.001–0.005, relative to *root* flux); fall back to local-maxima only for
-   sparse/speed cases.
-6. **Centroid & measure on the *unconvolved* plane:** iterative Gaussian-windowed
-   moments (XWIN-style, with the factor-of-2 acceleration) for speed, or 2D
-   Gaussian/Moffat LM fit (seeded from moments, background subtracted, ≥1.5×FWHM
-   stamp) for precision. Compute flux, CCD-equation SNR, FWHM and eccentricity
-   from second moments, and DAOFIND shape stats: **sharpness and SROUND on the
-   convolved stamp, GROUND (marginal-Gaussian heights) on the unconvolved stamp**
-   (§5.4).
-7. **Filter:** reject saturated, low-SNR, high-eccentricity, high-sharpness
-   (CR), and non-round sources; MAD-clip FWHM outliers; remove duplicates; sort
-   by flux.
-
----
-
-## 7. Pitfalls & anti-patterns
-
-- **Global background on a gradient field.** A single sky value (or a single σ)
-  over a vignetted / light-polluted frame over-detects in the bright corners and
-  misses faint stars in clean regions. → tiled mesh + per-pixel σ.
-- **Fixed ADU threshold without a noise model.** "Detect everything above 1000
-  counts" has a wildly varying false-alarm rate across the frame and across
-  exposures. → threshold in units of local σ.
-- **Bilinear background interpolation.** Visible tile-boundary kinks imprint on
-  faint photometry. → natural bicubic spline.
-- **Skipping the 0.3 crowding switch / mesh median-filter.** A bright object in a
-  tile biases sky high; without the median-filter or the mode/median switch the
-  local sky is wrong and faint neighbors vanish.
-- **Isophotal (threshold-clipped) centroid bias.** The detection threshold chops
-  the PSF asymmetrically; the barycenter is pulled off-center, worst for faint
-  stars near bright neighbors. → Gaussian-windowed iterative centroid or PSF fit.
-- **Fitting an un-background-subtracted stamp.** Biases amplitude, σ, β, and
-  flux; can prevent convergence. → subtract sky or fit it as a parameter.
-- **Stamp too small for the PSF wings.** σ/β biased low, flux underestimated. →
-  ≥1.5×FWHM radius.
-- **LM without a good seed.** Lands in a local minimum (e.g. on a noise spike or
-  a neighbor). → seed from moments; stage the rotation parameter.
-- **Convolution before measuring flux/centroid.** Matched filtering is for
-  *detection/thresholding* and for DAOFIND shape stats only; measure flux,
-  position, and FWHM on the *unconvolved* image.
-- **Over-deblending** (contrast too low / local-maxima without a contrast bar):
-  one bright star explodes into spurious companions in its wings, poisoning
-  registration. **Under-deblending** (contrast too high): close doubles merge
-  into one elongated blob.
-- **Counting cosmic rays / hot pixels as stars.** A per-pixel threshold + 1-pixel
-  area passes them. → minimum area, sharpness cut, Laplacian (L.A.Cosmic), and
-  ultimately multi-frame sigma-clipping.
-- **Clamping negative (sky-subtracted) pixels to zero before summing flux.**
-  Biases faint-source flux high by discarding negative noise. Fine for detection,
-  wrong for photometry.
-- **Trusting saturated-star centroids/FWHM.** Flat-topped cores give garbage
-  shape and position. → flag and exclude from FWHM estimation and registration.
-
----
-
-## 8. How lumos currently does it — and gaps/opportunities
-
-**Pipeline (`detector/mod.rs:122-222`, `StarDetector::detect`):** prepare → background (+optional
-iterative refine) → FWHM estimate → detect (matched filter + threshold + CCL +
-deblend) → measure (parallel centroid + metrics) → filter. This matches the
-canonical six-stage flow and is well-structured.
-
-**What lumos gets right (matches best practice):**
-
-- Tiled (64 px) sigma-clipped background with **natural bicubic** interpolation
-  and **per-pixel σ** map (`background/mod.rs`), MAD-based σ (1.4826·MAD).
-- **3×3 tile-grid median filter** on both the sky and σ grids
-  (`tile_grid.rs:208-249`, run on every `compute()`) — matches SExtractor/SEP
-  `filterback` at its default `BACK_FILTERTHRESH=0` (unconditional replacement).
-- Optional **object-masked iterative refinement** for crowded fields
-  (`refine_background`).
-- **Matched-filter** detection with correct `sqrt(ΣK²)` kernel-energy
-  normalization so the n·σ cut is a true SNR cut (`convolution/mod.rs:46-117`);
-  per-pixel (local) σ thresholding.
-- **Min-area + 8-connectivity CCL** via parallel RLE + lock-free union-find
-  (`labeling/`).
-- **Both deblenders:** multi-threshold tree + contrast (SExtractor-style) and
-  fast local-maxima.
-- **Iterative Gaussian-weighted centroid** plus **Gaussian and Moffat LM fits**,
-  seeded from moments with background subtracted and a 1.75×FWHM stamp.
-- **Full CCD-equation SNR** when a `NoiseModel` is supplied; sensible
-  background-limited fallback.
-- Eccentricity from the second-moment eigenvalues; saturation and sharpness-based
-  CR flags; MAD-based FWHM outlier rejection; duplicate removal; noise-weighted
-  RGB detection plane (better than Rec.709 for colored stars).
-
-**Gaps / opportunities (ordered by impact):**
-
-1. **roundness1/roundness2 are swapped vs. the DAOFIND/photutils convention**
-   (CONFIRMED pass 2 against Stetson 1987 + photutils source — see §5.4 verdict).
-   lumos `roundness1` = GROUND-like `(hx−hy)/(hx+hy)` (= photutils `roundness2`),
-   lumos `roundness2` = an asymmetry-RMS (≈ photutils `roundness1`), reversed names.
-   Extra deviations: GROUND drops the factor of 2 and uses the marginal-sum *max*
-   rather than a 1D-Gaussian *fit amplitude*; SROUND is a 1D-marginal asymmetry RMS
-   clamped to `[0,1]` (loses the directional sign), not Stetson/IRAF's quadrant
-   `2·sum2/sum4`; both are computed on the *unconvolved* stamp (photutils does
-   sharpness + SROUND on the *convolved* stamp, GROUND on the unconvolved). Fix:
-   swap the names, restore the ×2 on GROUND, least-squares-fit the marginals,
-   compute SROUND as `2·sum2/sum4` over convolved quadrants
-   (`star.rs:24-30`, `centroid/mod.rs:671-694`).
-2. **Background mode estimator is median/MAD only — no `2.5·med−1.5·mean` mode and
-   no 0.3 crowding switch.** lumos's per-tile statistic is the sigma-clipped
-   *median* with `σ = 1.4826·MAD` (`tile_grid.rs:452`); SExtractor/SEP use the
-   Pearson mode `2.5·med−1.5·mean` (falling back to median when `|mean−med|/σ ≥
-   0.3`). Adding the mode (with the median fallback) would shave the residual
-   positive-tail bias in uncrowded tiles, matching SExtractor/SEP exactly. This
-   is now the single highest-value background-fidelity gap (the tile-grid median
-   filter, previously flagged here, is in fact present — see §1.3).
-3. **Multi-threshold contrast is relative to the *parent node* flux, not the
-   *root/total* flux** as in SExtractor (`mod.rs:811-816` vs SEP
-   `deblend.c:116`, `value0 = root.fdflux · mincont`). This changes split
-   behavior; align with SExtractor's global `MINCONT·root_flux` bar if cross-tool
-   consistency matters.
-4. **Windowed centroid lacks the SExtractor factor-of-2 update acceleration**
-   (`centroid/mod.rs:491` is the plain `Σwx/Σw`). Harmless to accuracy with 10
-   iterations, but adding it matches XWIN and converges in 3–5 steps.
-5. **Sharpness is `peak/core_flux` (3×3)** (`centroid/mod.rs:644-649`), an
-   approximation of DAOFIND's `(peak − mean_neighbors)/Gaussian_height`. The
-   DAOFIND form is more discriminating for CRs vs. undersampled stars; consider
-   it, or add a **Laplacian (L.A.Cosmic) CR test** for undersampled data where a
-   sharpness cut would reject real faint stars.
-6. **Flux clamps negatives to 0** (`centroid/mod.rs:574`) — fine for detection,
-   biases photometry; expose an unclamped flux for measurement use. SNR's
-   `npix` is also the full square stamp `(2r+1)²`, not an aperture count (§5.2).
-7. **No singular-moment 1/12 regularization / `OBJ_SINGU` flag** for unresolved
-   sources (SEP `analyse.c:259-263`, threshold `x2·y2−xy² < 0.00694`) —
-   FWHM/eccentricity of 1–2 px blobs can be ill-defined and over-reject.
-
-None of these block correct detection; #1 (roundness naming) and #2 (background
-mode) are the highest-value alignments with the reference implementations.
-
----
-
-## Primary sources parsed (pass 2)
-
-PDF/HTML fetched and read this pass (saved under `.tmp/papers/`, parsed with
-`pdftotext`). Each line: source → takeaway → local file.
-
-- **Stetson 1987, DAOPHOT/FIND, PASP 99 191** (`.tmp/papers/stetson1987.txt`, 32 pp,
-  text layer clean). *The decisive source for the roundness verdict.* Settled:
-  Stetson defines a **single** roundness, `round = 2·(hx−hy)/(hx+hy)` from marginal
-  1D-Gaussian heights (= photutils GROUND, accept `−1<round<1`, bad rows/cols → ±2);
-  `sharp = d/H` = (central pixel − neighbor mean) / best-fit Gaussian height (accept
-  `0.2<sharp<1`); the detection image `H` is the convolution with a **lowered
-  (zero-integral) Gaussian** so sky slope cancels. SROUND is **not** Stetson's — it
-  is a later IRAF/photutils addition.
-- **Bertin & Arnouts 1996, SExtractor, A&AS 117 393** (`.tmp/papers/bertin1996.pdf`,
-  12 pp, downloaded from ADS — **scanned image, no text layer**, `pdftotext` yields
-  only the bibcode). Could not quote directly; substituted the SExtractor C source
-  (`.tmp/refs/sextractor`), the SExtractor readthedocs manual, Holwerda's tutorial,
-  and SEP source — all of which trace to this paper.
-- **Barbary 2016, SEP, JOSS 1(6) 58** (`.tmp/papers/sep_barbary2016.txt`). Confirmed
-  the *"optimized matched filter for variable noise"* is a SEP feature **added beyond**
-  SExtractor; SEP aims for SExtractor-compatible results from in-memory arrays.
-- **Makovoz & Marleau 2005, MOPEX point-source extraction** (`.tmp/papers/makovoz2005.txt`,
-  34 pp). Linear matched filter is optimal only for a single source / Gaussian noise;
-  with many sources the optimal filter is non-linear; *"filtered images are used for
-  detection only"* (corroborates the convolve-to-detect, measure-on-raw discipline);
-  multi-threshold "passive deblending" by progressively raising the segmentation
-  threshold.
-- **Holwerda, *Source Extractor for Dummies*** (`.tmp/papers/holwerda_dummies.txt`,
-  87 pp). Deblend criterion in words: branch counts > fraction (`MINCONT`) of **total
-  island count** AND ≥1 other branch passes — corroborates the root-flux bar and the
-  ≥2-children rule. CLASS_STAR neural net fed by 7 isophotal areas + peak + SEEING_FWHM.
-  *Caveat:* its prose has the mode/median switch **backwards** ("mean in non-crowded,
-  `2.5·med−1.5·mean` in crowded") — the C source is authoritative (mode when *not*
-  crowded). Bicubic-spline background interpolation + `BACK_FILTERSIZE` confirmed.
-- **SExtractor manual, PositionWin** (`.tmp/papers/positionwin.html`). XWIN/YWIN
-  verbatim: window FWHM = `d₅₀`; explicit `+2·…` update; converges in 3-5 iters at
-  `<2×10⁻⁴` px; accuracy *"very close to … PSF-fitting"* and *"close to the
-  theoretical limit set by image noise."*
-
-**Re-read cloned source this pass (cite file:line):** SEP `background.c:478-535`
-(mode + 0.3 switch + histogram-interpolated median), `deblend.c:116,120-122,179,184`
-(root-flux `value0`, exponential `pow(peak/thresh0,k/N)`, split test, ≥2-children);
-SExtractor `back.c:698-699,735-737` + `preflist.h:264` (`BACK_PEARSON`=2.5 →
-medfac/meafac), `filter.c:177-195` (`Σ|K|` normalization + `varnorm=√ΣK²`); photutils
-`daofinder.py:534-577` (SROUND `2·sum2/sum4`), `:580-594` (sharpness), `:862-976`
-(GROUND marginal-Gaussian fit on *unconvolved* image, `2·(hx−hy)/(hx+hy)`); PSFEx
-`diagnostic.c:184-225` (Moffat as a *diagnostic*, not the PSF model); lumos
-`star.rs:24-30`, `centroid/mod.rs:671-694` (roundness), `:491` (no XWIN ×2 —
-plain `Σwx/Σw`), `convolution/mod.rs:99-117` (`√ΣK²`), `multi_threshold/mod.rs`
-(parent-relative contrast), `config.rs:265,272,273,286,287,290` (defaults).
-
-**Still unverifiable / could not parse:** Bertin & Arnouts 1996 itself (scanned
-image — secondary sources cover all cited claims); Zackay & Ofek 2017 not
-re-fetched this pass (carried from pass 1 with its published claims).
-
----
-
-## Re-verification (pass 3)
-
-Every claim above was re-checked against the cloned reference source and the
-lumos tree, plus targeted online re-fetches. Corrections applied this pass:
-
-- **lumos *does* median-filter its tile grid** (the largest fix). `tile_grid.rs`
-  `apply_median_filter` (`:208-249`) runs on every `compute()` (`:87`), replacing
-  each tile's median **and** σ with the 3×3 tile-neighborhood median (`:244-245`).
-  SEP/SExtractor default `fthresh = 0.0` (`sep.pyx:390`; `preflist.h:62`,
-  `BACK_FILTTHRESH 0.0`), so their `filterback` replacement is *also unconditional
-  by default* — lumos matches it. The prior "no tile-grid median filter" gap was
-  wrong; §1.3, the §8 "gets right" list, and the §8 gap list are corrected. Only
-  residual deviations: lumos has no `fthresh` knob and skips grids < 3×3 tiles.
-- **Singular-moment threshold is `< 0.00694`, not `0.0694`** — SEP
-  `analyse.c:259` (`if (xm2·ym2 − xym·xym < 0.00694)`), then `+= 0.0833333`
-  (= 1/12) and `SEP_OBJ_SINGU` (`:260-263`). Fixed in §5.3 and §8.
-- **Background convergence is `<0.01%`, not `<0.02%`** — `EPS=1e-4` with guard
-  `fabs(sig/sig1 − 1.0) > EPS` (SEP `background.c:467,490`). Fixed in §1.2.
-- **§5.2 expanded:** lumos's `compute_snr` has *three* branches (gain+read,
-  gain-only, neither), and `npix` is the full square stamp `(2r+1)²`, with
-  `σ_sky` taken from the stamp's outer ring — now stated explicitly.
-
-Re-confirmed unchanged (primary source re-read this pass, cite file:line):
-SEP `background.c:528-530` (mode `2.5·med−1.5·mea` + 0.3 switch), `:508-511`
-(histogram-interpolated median), `:625` (filterback `|med−back|>=fthresh`);
-`deblend.c:116,120-122,179,184` (root `value0`, `pow(fdpeak/thresh0,k/xn)`,
-branch test, `m>1`); SExtractor `filter.c:178-195` (`Σ|K|` norm + `varnorm=√ΣK²`,
-zero-sum→variance fallback); SEP `deblend_nthresh=32,cont=0.005` (`sep.pyx:610`),
-SExtractor `DEBLEND_NTHRESH 32 / DEBLEND_MINCONT 0.005` (`preflist.h:207-208`),
-photutils `n_levels=32,contrast=0.001` watershed (`deblend.py:45,582`); photutils
-`daofinder.py:533-577` (SROUND quadrants `2·sum2/sum4`, convolved), `:579-594`
-(sharpness `(peak−data_mean)/convdata_peak`), `:862-976` (GROUND
-`2·(hx−hy)/(hx+hy)`, lstsq marginal Gaussians on the **unconvolved** image),
-`background/core.py:436,478` (`2.5·med−1.5·mean`+0.3), `:388-394` (MMM
-`3·med−2·mean`), `sigma_radius=1.5` (`:211`); PSFEx `diagnostic.c:182-184`
-(`psf_diagnostic` "by fitting Moffat models" — diagnostic only). Online: CCD
-equation re-fetched (Dhillon PHY217 — `S·t·g / √(S·t·g + Ssky·t·g·npix +
-Sdark·t·npix + R²·npix)`, read noise un-rooted; lumos's rearrangement is
-algebraically equivalent); Moffat `FWHM = 2α√(2^(1/β)−1)`, Gaussian = β→∞ limit,
-β=1 = Lorentzian (photutils/MNRAS). lumos source re-read in full this pass:
-`star.rs`, `config.rs`, `centroid/mod.rs`, `convolution/mod.rs`,
-`detector/mod.rs`, `detector/stages/{prepare,detect,measure,filter,fwhm}.rs`,
-`background/{mod,estimate}.rs`, `tile_grid.rs`, `math/statistics/mod.rs` — all
-file:line citations confirmed current.
-
----
-
-## 9. References
-
-### Cloned source code (read directly)
-
-- **SEP** (clean SExtractor C library) — `$HOME/Projects/Scenarium/lumos/.tmp/refs/sep/src/`:
-  - `background.c` — `backstat` (clipped mean/σ, :277), `backhisto` (:398),
-    `backguess` (mode estimator + 0.3 switch, :466-536), `filterback` (mesh
-    median filter, :540), `makebackspline`/`bkg_line_flt_internal` (bicubic,
-    :682, :790), `sep_bkg_pix` (bilinear, :740).
-  - `lutz.c` — Lutz one-pass 8-connected extraction (`lutz`, :101).
-  - `deblend.c` — multi-threshold tree + contrast (`deblend`, :63; exponential
-    levels :121; `value0=fdflux·mincont` :116; split test :179-198;
-    `gatherup` :274).
-  - `analyse.c` — `preanalyse` (peak/bbox, :100), `analyse` (moments, flux, a/b/θ,
-    cxx/cyy/cxy, singular-moment handling, :168), `analysemthresh` (CLEAN, :39).
-- **SExtractor** (canonical) — `$HOME/Projects/Scenarium/lumos/.tmp/refs/sextractor/src/`:
-  - `back.c` — mode estimator with `medfac`/`meafac` from `BACK_PEARSON`
-    (:698-738), `filterback` (:751).
-  - `filter.c` — `convolve` (matched-filter scan-line, :53), `getconv`
-    (kernel normalization by Σ|K| or ΣK², :115-200).
-  - `scan.c` — detection thresholding / variable threshold (:373-375), `analyse`.
-- **photutils** — `$HOME/Projects/Scenarium/lumos/.tmp/refs/photutils/photutils/`:
-  - `background/core.py` — `SExtractorBackground` (2.5·med−1.5·mean + 0.3 switch,
-    :430-478), `MMMBackground` (3·med−2·mean, :388), `MADStdBackgroundRMS` (:604).
-  - `detection/daofinder.py` — `sharpness` (:580), `roundness1`=SROUND (quadrant
-    symmetry on convolved data, :534-577), `roundness2`=GROUND (marginal Gaussian
-    heights, :964-976), marginal fits (:596-709).
-  - `segmentation/deblend.py` — `deblend_sources` (n_levels=32, contrast=0.001,
-    exponential/linear/sinh + watershed, :44-103).
-- **PSFEx** — `$HOME/Projects/Scenarium/lumos/.tmp/refs/psfex/src/`
-  (`psf.c`, `sample.c`, `diagnostic.c`) — Moffat/Gaussian PSF modeling and
-  field variation.
-
-### lumos source (grounding)
-
-`$HOME/Projects/Scenarium/lumos/src/star_detection/`:
-`detector/mod.rs` (pipeline), `detector/stages/{prepare,background→,fwhm,detect,
-measure,filter}.rs`, `background/{mod,estimate,tile_grid}.rs`, `convolution/mod.rs`
-(matched filter), `labeling/mod.rs` (CCL), `deblend/{local_maxima,multi_threshold}/`,
-`centroid/{mod,gaussian_fit,moffat_fit,lm_optimizer}.rs`, `star.rs`, `config.rs`.
-
-### Online sources (verified ≥2 where noted)
-
-- Bertin & Arnouts 1996, *SExtractor: Software for source extraction*, A&AS 117,
-  393 — https://aas.aanda.org/articles/aas/pdf/1996/08/ds1060.pdf and ADS
-  https://ui.adsabs.harvard.edu/abs/1996A%26AS..117..393B/abstract
-- *Source Extractor for Dummies* (Holwerda) — https://arxiv.org/pdf/astro-ph/0512139
-- SExtractor manual — background, detection, deblending defaults:
-  https://sextractor.readthedocs.io/en/latest/  (Background, Position,
-  PositionWin pages)
-- SExtractor windowed positions (XWIN/YWIN iterative formula, factor of 2,
-  accuracy claim) — https://sextractor.readthedocs.io/en/latest/PositionWin.html
-- SEP matched-filter docs (`SNR = SᵀC⁻¹D / sqrt(SᵀC⁻¹S)`, uniform-noise
-  reduction to convolution) — https://sep.readthedocs.io/en/stable/filter.html
-- photutils `SExtractorBackground` / `MMMBackground` / DAOStarFinder docs
-  (sharpness/SROUND/GROUND definitions, defaults) —
-  https://photutils.readthedocs.io/en/stable/api/photutils.detection.DAOStarFinder.html
-- Stetson 1987, *DAOPHOT*, PASP 99, 191 — DAOFIND sharpness/roundness origin.
-- CCD equation / SNR — Dhillon PHY217:
-  https://vikdhillon.staff.shef.ac.uk/teaching/phy217/detectors/phy217_det_ccdeqn.html
-  and ESO https://www.eso.org/~ohainaut/ccd/sn.html (Howell, *Handbook of CCD
-  Astronomy*, is the textbook reference).
-- Zackay & Ofek 2017, *How to COAAD Images I* (optimal matched-filter detection)
-  — https://iopscience.iop.org/article/10.3847/1538-4357/836/2/187
-- van Dokkum 2001, *Cosmic-Ray Rejection by Laplacian Edge Detection*, PASP 113,
-  1420 — https://arxiv.org/abs/astro-ph/0108003
-- Moffat 1969, *A theoretical investigation of focal stellar images* (Moffat
-  profile) — A&A 3, 455.
-- IMFIT (Erwin 2015) on LM local-minima sensitivity —
-  https://iopscience.iop.org/article/10.1088/0004-637X/799/2/226
+| [SEP](https://github.com/sep-developers/sep) | [`93b3ac52`](https://github.com/sep-developers/sep/tree/93b3ac52e0f6cb26449204dc8bc8c3cf65602f0f) | `src/background.c`, `convolve.c`, `deblend.c`, `extract.c` |
+| [SExtractor](https://github.com/astromatic/sextractor) | [`c011a00e`](https://github.com/astromatic/sextractor/tree/c011a00e38325817d8cd3c47be07386d7d957213) | `src/back.c`, `filter.c`, `clean.c`, `winpos.c` |
+| [Photutils](https://github.com/astropy/photutils) | [`7d7bc607`](https://github.com/astropy/photutils/tree/7d7bc6072f0c473d80f40c2dfa505bb5d04b18f2) | `photutils/detection/daofinder.py`, detection/segmentation code |
+| [Astrometry.net](https://github.com/dstndstn/astrometry.net) | [`623b3c31`](https://github.com/dstndstn/astrometry.net/tree/623b3c31a7a5566c1fde8d0a32445aa2ee31b8b3) | `util/simplexy.c`, `uniformize.py`, solver documentation |
+| [Siril](https://gitlab.com/free-astro/siril) | [`8ce9baa3`](https://gitlab.com/free-astro/siril/-/tree/8ce9baa37215ae9783de16fa9e0d7a610303588d) | `src/algos/star_finder.c`, `PSF.c`, registration callers |
+
+Notable implementation lessons from the audit:
+
+- SEP uses the full inverse-variance matched statistic when a noise array exists;
+  simple convolution is explicitly a different mode.
+- SEP/SExtractor deblending evaluates a threshold hierarchy, root-relative branch
+  contrast, pixel gathering, cleaning, and flags; copying only exponential levels
+  and a contrast number does not reproduce it.
+- Photutils separates convolved detection from unconvolved marginal measurement and
+  gives precise, inspectable definitions for DAOFIND sharpness/roundness.
+- Astrometry.net's `simplexy` background-subtracts, PSF-smooths, labels blobs, and
+  searches peaks, while its solver preparation separately sorts, removes line-like
+  artifacts, and spatially uniformizes the catalog.
+- Siril detects peaks on a Gaussian-smoothed image, handles plateau/saturation cases,
+  then fits original pixels with Gaussian/Moffat profiles and rejects candidates
+  using width, roundness, residual, amplitude, and profile checks. Its exact choices
+  are not all adopted here, but the separation of candidate filtering from original-
+  pixel PSF fitting is directly relevant.
