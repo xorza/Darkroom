@@ -97,8 +97,8 @@ editor-only lineage pointing from a local graph to its shared source.
 
 ## A.5 Validation and recursion
 
-`Graph::check()` validates any graph, including its interface, boundaries, nested
-graphs, and exposed events. `Graph::check_for_execution()` additionally resolves
+`Graph::validate()` validates any graph, including its interface, boundaries, nested
+graphs, and exposed events. `Graph::validate_for_execution()` additionally resolves
 the complete local/shared graph tree against the library and requires the entry
 graph to have no interface or boundary nodes. The document boundary applies the
 same entry constraints without requiring a runtime library.

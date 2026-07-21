@@ -141,7 +141,7 @@ impl Planner {
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            plan.check_debug(program);
+            plan.validate_debug(program);
         }
         result
     }

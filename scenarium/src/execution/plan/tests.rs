@@ -93,7 +93,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     let c = f.node(true, &[(false, bind(b, 0))], 1);
 
     let mut p = plan(&f);
-    p.check(&f.compiled.program).unwrap();
+    p.validate(&f.compiled.program).unwrap();
     assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
     for idx in [a, b, c] {
         assert!(p.verdicts[&idx].wants_execute());
@@ -102,7 +102,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
 
     p.process_order.swap(0, 1);
     assert_eq!(
-        p.check(&f.compiled.program).unwrap_err().to_string(),
+        p.validate(&f.compiled.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}")
     );
 }

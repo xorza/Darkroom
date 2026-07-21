@@ -82,7 +82,7 @@ impl Compiler {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the flatten pass resolve every
         // reference infallibly.
-        if let Err(e) = graph.check_for_execution(library) {
+        if let Err(e) = graph.validate_for_execution(library) {
             tracing::error!(error = %e, "compile rejected: invalid graph");
             return Err(CompileError {
                 message: e.to_string(),
@@ -106,7 +106,7 @@ impl Compiler {
         );
 
         // Resolve the program's output-type pool from the full library (every func
-        // is present — `check_for_execution` validated them), making the compiled program
+        // is present — `validate_for_execution` validated them), making the compiled program
         // self-describing: the digest and the disk cache's codec check read it
         // with no library at run time.
         program.resolve_output_types(library);
@@ -116,7 +116,7 @@ impl Compiler {
             program,
             flatten_map: flatten_map.clone(),
         };
-        compiled.check_debug(library);
+        compiled.validate_debug(library);
         Ok(Compilation {
             compiled,
             flatten_map,
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn checks_return_compiled_and_installed_mismatches() {
+    fn validation_returns_compiled_and_installed_mismatches() {
         let flat = NodeId::unique();
         let missing_func = FuncId::unique();
         let mut builder = FlattenMapBuilder::new();
@@ -175,12 +175,15 @@ mod tests {
         };
 
         assert_eq!(
-            compiled.check(&Library::default()).unwrap_err().to_string(),
+            compiled
+                .validate(&Library::default())
+                .unwrap_err()
+                .to_string(),
             format!("execution node {flat:?} references missing func {missing_func:?}")
         );
         assert_eq!(
             compiled
-                .check_installed(&RuntimeCache::default())
+                .validate_installed(&RuntimeCache::default())
                 .unwrap_err()
                 .to_string(),
             "runtime cache node set does not match the compiled program"

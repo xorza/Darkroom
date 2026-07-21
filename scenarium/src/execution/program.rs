@@ -173,7 +173,7 @@ impl ExecutionProgram {
     /// Fill the `output_types` pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
     /// flatten, where every compiled node's func is guaranteed present
-    /// (`check_for_execution` resolved them). Results are memoized by [`OutputIdx`];
+    /// (`validate_for_execution` resolved them). Results are memoized by [`OutputIdx`];
     /// unresolved and cyclic wildcard ports store `DataType::Any`.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
@@ -192,7 +192,7 @@ impl ExecutionProgram {
                 let port = (output_idx.0 - e_node.outputs.start) as usize;
                 let func = node_func(self, library, node_id).expect(
                     "a compiled node's func is registered in the library \
-                     (validated at check_for_execution)",
+                     (validated at validate_for_execution)",
                 );
                 match &func.outputs[port].ty {
                     OutputType::Fixed(data_type) => OutputTypeSource::Fixed(data_type.clone()),
@@ -223,7 +223,7 @@ impl ExecutionProgram {
 
 /// The func backing `node_id`: a special node's hardcoded spec, else the library
 /// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
-/// for the program's own (`check_for_execution`-validated) library, never happens.
+/// for the program's own (`validate_for_execution`-validated) library, never happens.
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,

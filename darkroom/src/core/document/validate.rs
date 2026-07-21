@@ -7,7 +7,7 @@ use scenarium::Graph as CoreGraph;
 use crate::core::document::{Document, GraphView, ItemRef, tab_alive};
 
 impl GraphView {
-    fn check(&self, graph: &CoreGraph) -> Result<()> {
+    fn validate(&self, graph: &CoreGraph) -> Result<()> {
         ensure!(
             self.viewport.is_valid(),
             "graph viewport must have finite pan and positive finite zoom"
@@ -59,8 +59,8 @@ impl GraphView {
 
 impl Document {
     /// Full structural validation for untrusted documents.
-    pub(crate) fn check(&self) -> Result<()> {
-        self.graph.check()?;
+    pub(crate) fn validate(&self) -> Result<()> {
+        self.graph.validate()?;
         ensure!(
             self.graph.inputs.is_empty()
                 && self.graph.outputs.is_empty()
@@ -72,16 +72,16 @@ impl Document {
             "entry graph cannot contain interface boundary nodes"
         );
 
-        self.main_view.check(&self.graph).context("main view")?;
+        self.main_view.validate(&self.graph).context("main view")?;
         for (id, view) in &self.local_views {
             let graph = self.graph.graphs.get(id).with_context(|| {
                 format!("local_views entry references missing local graph {id:?}")
             })?;
-            view.check(graph)
+            view.validate(graph)
                 .with_context(|| format!("graph {id:?} view"))?;
         }
 
-        self.layout.check()?;
+        self.layout.validate()?;
         for tab in self.layout.all_tabs() {
             ensure!(
                 tab_alive(&self.graph, tab),
@@ -91,12 +91,12 @@ impl Document {
         Ok(())
     }
 
-    /// Debug-only assert form of [`Self::check`].
-    pub(crate) fn check_debug(&self) {
+    /// Debug-only assert form of [`Self::validate`].
+    pub(crate) fn validate_debug(&self) {
         if !is_debug() {
             return;
         }
-        self.check()
+        self.validate()
             .expect("document structural invariant violated");
     }
 }

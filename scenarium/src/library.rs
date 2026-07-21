@@ -56,7 +56,7 @@ pub struct TypeEntry {
 
 impl TypeEntry {
     /// Validates that this declaration's runtime attachments match its kind.
-    pub fn check(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if matches!(&self.decl, TypeDecl::Enum { .. }) {
             ensure!(self.codec.is_none(), "enum type cannot have a codec");
             ensure!(self.stamper.is_none(), "enum type cannot have a stamper");
@@ -146,7 +146,7 @@ impl Library {
     }
 
     pub fn add(&mut self, func: Func) {
-        func.check().expect("invalid function declaration");
+        func.validate().expect("invalid function declaration");
         self.funcs.insert(func.id, func);
     }
 
@@ -170,7 +170,7 @@ impl Library {
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
-        entry.check().expect("invalid type declaration");
+        entry.validate().expect("invalid type declaration");
         let prev = self.types.insert(type_id, entry);
         assert!(prev.is_none(), "duplicate type registration");
     }
@@ -316,7 +316,7 @@ mod tests {
     fn register_type_rejects_enum_runtime_attachments() {
         let custom = TypeEntry::custom_with_codec("Custom", Arc::new(StubCodec))
             .with_stamper(Arc::new(StubStamper));
-        custom.check().unwrap();
+        custom.validate().unwrap();
         let mut library = Library::default();
         let custom_id = TypeId::unique();
         library.register_type(custom_id, custom);
@@ -331,7 +331,7 @@ mod tests {
             ("enum type cannot have a codec", enum_with_codec),
             ("enum type cannot have a stamper", enum_with_stamper),
         ] {
-            assert_eq!(entry.check().unwrap_err().to_string(), expected);
+            assert_eq!(entry.validate().unwrap_err().to_string(), expected);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Library::default().register_type(TypeId::unique(), entry);
             }));

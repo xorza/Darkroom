@@ -59,7 +59,7 @@ impl PortKind {
 /// the whole document (graph interiors included), so no graph ref is
 /// needed alongside — upheld by `Graph::fresh_copy` at every copy
 /// boundary (import/localize/detach) and enforced by
-/// [`Document::check`].
+/// [`Document::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct PortRef {
     pub node_id: NodeId,
@@ -170,7 +170,7 @@ pub(crate) struct GraphView {
     /// node independently, and `Intent::Raise` lifts either kind to the
     /// top. Exactly one `Node` item per graph node, exactly one `Pin`
     /// item per *currently pinned* output (unpinning removes the item;
-    /// undo restores it, slot included) — enforced by [`Self::check`].
+    /// undo restores it, slot included) — enforced by [`Self::validate`].
     ///
     /// A pin's position is absolute rather than port-relative: the
     /// widget sits where it was put and does *not* follow its node when
@@ -572,7 +572,7 @@ impl Document {
     }
 
     pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        self.check_debug();
+        self.validate_debug();
         Ok(common::serialize(self, format)?)
     }
 
@@ -582,7 +582,7 @@ impl Document {
         }
 
         let doc = common::deserialize::<Document>(input, format)?;
-        doc.check()?;
+        doc.validate()?;
 
         Ok(doc)
     }
@@ -661,14 +661,14 @@ mod tests {
                 "interior ids are fresh per import"
             );
         }
-        doc.check().unwrap();
+        doc.validate().unwrap();
     }
 
     #[test]
-    fn check_rejects_duplicate_node_ids_across_graphs() {
+    fn validate_rejects_duplicate_node_ids_across_graphs() {
         // The same node id planted in the root graph and a def interior —
         // unreachable through the editor (import/localize/detach sever
-        // identity via `fresh_copy`), so it's corrupt input `check` refuses.
+        // identity via `fresh_copy`), so it's corrupt input validation refuses.
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let graph_id = doc.create_graph();
@@ -679,10 +679,10 @@ mod tests {
             .unwrap()
             .insert(node_id, dup);
 
-        let err = doc.check().unwrap_err();
+        let err = doc.validate().unwrap_err();
         assert!(
             format!("{err:#}").contains("occurs in more than one authoring graph"),
-            "unexpected check error: {err:#}"
+            "unexpected validation error: {err:#}"
         );
     }
 
@@ -1049,7 +1049,7 @@ mod tests {
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
-        doc.check_debug();
+        doc.validate_debug();
     }
 
     #[test]
@@ -1099,10 +1099,10 @@ mod tests {
         // Delete the node: the viewer tab dies with it (like a graph
         // tab whose def vanished).
         doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
-        let err = doc.check().unwrap_err();
+        let err = doc.validate().unwrap_err();
         assert!(
             format!("{err:#}").contains("open tab references a missing target"),
-            "unexpected check error: {err:#}"
+            "unexpected validation error: {err:#}"
         );
         doc.ensure_valid_layout();
         assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
@@ -1139,9 +1139,9 @@ mod tests {
     }
 
     #[test]
-    fn document_passes_check_debug() {
+    fn document_passes_validate_debug() {
         let doc = build_test_doc();
-        doc.check_debug();
+        doc.validate_debug();
     }
 
     #[test]
@@ -1199,7 +1199,7 @@ mod tests {
         );
         let deserialized = Document::deserialize(format, &serialized)
             .expect("document deserialization should succeed for test payload");
-        deserialized.check_debug();
+        deserialized.validate_debug();
         assert_eq!(
             doc, deserialized,
             "the complete document should round-trip through {format:?}"
@@ -1207,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn check_accepts_and_round_trips_a_pinned_output_with_its_item() {
+    fn validate_accepts_and_round_trips_a_pinned_output_with_its_item() {
         // A well-formed document — every pinned output carries a view item
         // (`for_graph` seeds one; the edit layer does the same on pin) —
         // validates and round-trips, position, slot, and all.
@@ -1220,7 +1220,7 @@ mod tests {
         let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
         *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
-        doc.check_debug();
+        doc.validate_debug();
 
         let bytes = doc.serialize(SerdeFormat::Json).expect("serialize");
         let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).expect("load");
@@ -1237,9 +1237,9 @@ mod tests {
     }
 
     #[test]
-    fn check_rejects_pin_item_drift_in_both_directions() {
+    fn validate_rejects_pin_item_drift_in_both_directions() {
         // A pinned output with no view item is malformed: the edit layer's
-        // `MoveSelection` build looks the item up unconditionally, so check
+        // `MoveSelection` build looks the item up unconditionally, so validation
         // surfaces the drift rather than letting it crash later. Pin the
         // port *after* the view was built so nothing seeds the item.
         let graph = core_test_graph();
@@ -1249,10 +1249,10 @@ mod tests {
         );
         let mut doc: Document = graph.into();
         doc.graph.set_output_pinned(port, true);
-        let err = doc.check().unwrap_err();
+        let err = doc.validate().unwrap_err();
         assert!(
             format!("{err:#}").contains("pinned output must have a view item"),
-            "unexpected check error: {err:#}"
+            "unexpected validation error: {err:#}"
         );
 
         // The same gate guards deserialization in every build (release too):
@@ -1272,10 +1272,10 @@ mod tests {
         doc.main_view
             .item_placements
             .insert(ItemRef::Pin(port), Vec2::ZERO);
-        let err = doc.check().unwrap_err();
+        let err = doc.validate().unwrap_err();
         assert!(
             format!("{err:#}").contains("view item references an output that isn't pinned"),
-            "unexpected check error: {err:#}"
+            "unexpected validation error: {err:#}"
         );
     }
 }

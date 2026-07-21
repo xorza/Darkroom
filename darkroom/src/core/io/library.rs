@@ -63,7 +63,7 @@ fn read_graphs(path: &Path) -> Result<HashMap<GraphId, Graph>> {
     for (graph_id, graph) in &lib.graphs {
         anyhow::ensure!(!graph_id.is_nil(), "{}: nil graph id", path.display());
         graph
-            .check()
+            .validate()
             .with_context(|| format!("{}: invalid graph {:?}", path.display(), graph.name))?;
     }
     Ok(lib.graphs)
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn structurally_invalid_def_is_quarantined_like_a_parse_failure() {
-        // Parses fine but fails `Graph::check` (dangling event
+        // Parses fine but fails `Graph::validate` (dangling event
         // emitter): the load refuses it and moves the file aside, exactly
         // like syntactic corruption.
         let path = test_output_path("darkroom_library/invalid-def.json");

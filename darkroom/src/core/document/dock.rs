@@ -14,7 +14,7 @@
 //! diff depends on it) and group iteration a plain vec scan in
 //! left-to-right pane order.
 //!
-//! Invariants (checked by [`DockLayout::check`]):
+//! Invariants (checked by [`DockLayout::validate`]):
 //! - the vec is canonical pre-order, fully reachable from slot 0;
 //! - exactly one group holds the `Main` graph tab (the *primary* group,
 //!   successor of the old "tabs[0] is Main" rule);
@@ -572,10 +572,10 @@ impl DockLayout {
     /// invariant list. A deserialized layout is untrusted input, so a
     /// violation is a returned error, not a panic (indices are
     /// bounds-checked before any slot access). Graph-tab existence is the
-    /// caller's ([`Document::check`] holds the graph).
+    /// caller's ([`Document::validate`] holds the graph).
     ///
-    /// [`Document::check`]: crate::core::document::Document::check
-    pub(crate) fn check(&self) -> Result<()> {
+    /// [`Document::validate`]: crate::core::document::Document::validate
+    pub(crate) fn validate(&self) -> Result<()> {
         // Canonical pre-order: walking the tree must visit exactly the
         // slots 0..len in order — this covers reachability, no dead
         // slots, and acyclicity in one sweep.
@@ -691,7 +691,7 @@ mod tests {
     #[test]
     fn default_is_a_single_main_group() {
         let l = DockLayout::default();
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.groups().count(), 1);
         assert_eq!(l.primary().tabs, [main_tab()]);
         assert_eq!(l.focused, l.primary().id);
@@ -705,7 +705,7 @@ mod tests {
 
         // Split the viewer off to the right: a Row split, primary first,
         // the new single-tab group second, focused. The re-packed vec is
-        // pre-order: [split, primary, new] — check pins that shape.
+        // pre-order: [split, primary, new] — validation pins that shape.
         l.move_tab(
             viewer(1),
             DockDrop::Split {
@@ -713,7 +713,7 @@ mod tests {
                 side: SplitSide::Right,
             },
         );
-        l.check().unwrap();
+        l.validate().unwrap();
         let (s, first, second) = root_split(&l);
         assert_eq!(s.dir, SplitDir::Row);
         assert_eq!(s.ratio, 0.5);
@@ -736,7 +736,7 @@ mod tests {
                 index: 1,
             },
         );
-        l.check().unwrap();
+        l.validate().unwrap();
         assert!(
             matches!(l.node(DockLayout::ROOT), DockNode::Group(_)),
             "split collapsed"
@@ -765,7 +765,7 @@ mod tests {
                     side,
                 },
             );
-            l.check().unwrap();
+            l.validate().unwrap();
             let (s, first, _) = root_split(&l);
             assert_eq!(s.dir, dir);
             let DockNode::Group(first) = first else {
@@ -834,7 +834,7 @@ mod tests {
         let lone = l.focused;
 
         l.close_tab(lone, 0);
-        l.check().unwrap();
+        l.validate().unwrap();
         assert!(
             matches!(l.node(DockLayout::ROOT), DockNode::Group(_)),
             "empty pane collapsed"
@@ -845,7 +845,7 @@ mod tests {
         l.close_tab(primary, 0);
         assert_eq!(l.primary().tabs[0], main_tab());
         l.close_tab(primary, 99);
-        l.check().unwrap();
+        l.validate().unwrap();
     }
 
     #[test]
@@ -857,7 +857,7 @@ mod tests {
 
         // Closing the active last tab clamps active onto the previous one.
         l.close_tab(primary, 2);
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.primary().tabs, [main_tab(), TabRef::Preferences]);
         assert_eq!(l.primary().active, 1);
 
@@ -868,7 +868,7 @@ mod tests {
         let mut l = seeded();
         l.activate(primary, 2);
         l.close_tab(primary, 1);
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.primary().active, 1, "clamped into range");
     }
 
@@ -887,7 +887,7 @@ mod tests {
                     index,
                 },
             );
-            l.check().unwrap();
+            l.validate().unwrap();
             l.primary().tabs.clone()
         };
 
@@ -965,7 +965,7 @@ mod tests {
         // a collapse), are ignored.
         l.set_ratio(DockPath::ROOT.first(), 0.5);
         l.set_ratio(DockPath::ROOT.first().second(), 0.5);
-        l.check().unwrap();
+        l.validate().unwrap();
         let (s, ..) = root_split(&l);
         assert_eq!(s.ratio, RATIO_MIN, "stale paths change nothing");
     }
@@ -991,7 +991,7 @@ mod tests {
             );
             target = l.focused;
         }
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.groups().count(), 5);
         assert_eq!(l.group_depth(target), Some(MAX_SPLIT_DEPTH));
 
@@ -1028,7 +1028,7 @@ mod tests {
         // Pruning the split-off viewer collapses its pane; the primary
         // keeps the rest.
         l.retain_tabs(|t| t != viewer(2));
-        l.check().unwrap();
+        l.validate().unwrap();
         assert!(matches!(l.node(DockLayout::ROOT), DockNode::Group(_)));
         assert_eq!(
             l.all_tabs().collect::<Vec<_>>(),
@@ -1039,7 +1039,7 @@ mod tests {
     #[test]
     fn nested_splits_stay_canonical() {
         // Two nested splits: [rootsplit, primary, innersplit, v1, v2] in
-        // pre-order once packed — check's walk pins the exact shape,
+        // pre-order once packed — validation's walk pins the exact shape,
         // and moving a tab out of the inner split dissolves only that
         // level.
         let mut l = seeded();
@@ -1060,7 +1060,7 @@ mod tests {
                 side: SplitSide::Bottom,
             },
         );
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.groups().count(), 3);
         assert_eq!(
             l.all_tabs().collect::<Vec<_>>(),
@@ -1076,7 +1076,7 @@ mod tests {
                 index: 99, // clamps to the end
             },
         );
-        l.check().unwrap();
+        l.validate().unwrap();
         assert_eq!(l.groups().count(), 2);
         let (_, _, second) = root_split(&l);
         let DockNode::Group(second) = second else {
@@ -1106,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn check_rejects_each_corruption() {
+    fn validate_rejects_each_corruption() {
         use scenarium::GraphId;
 
         // Base: a valid two-pane layout — [split, primary(Main, Prefs),
@@ -1121,7 +1121,7 @@ mod tests {
                     side: SplitSide::Right,
                 },
             );
-            l.check().unwrap();
+            l.validate().unwrap();
             l
         };
 
@@ -1221,7 +1221,7 @@ mod tests {
         for (name, corrupt, expected) in cases {
             let mut l = base.clone();
             corrupt(&mut l);
-            let err = l.check().unwrap_err().to_string();
+            let err = l.validate().unwrap_err().to_string();
             assert!(err.contains(expected), "{name}: unexpected error: {err}");
         }
 
@@ -1234,7 +1234,7 @@ mod tests {
         };
         g.tabs.retain(|t| *t != main_tab());
         g.active = 0;
-        let err = l.check().unwrap_err().to_string();
+        let err = l.validate().unwrap_err().to_string();
         assert!(
             err.contains("no group holds the Main graph tab"),
             "missing Main: unexpected error: {err}"

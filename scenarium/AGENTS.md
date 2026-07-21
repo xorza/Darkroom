@@ -11,7 +11,7 @@ crate-private, so downstream crates import public concepts directly from
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
 bindings, event subscriptions, pinned outputs, and local graphs.
 Identity exists only in the map key; `Node` is authored data and does not store
-its id. `Graph` is the persisted model. `Graph::check` enforces node-id
+its id. `Graph` is the persisted model. `Graph::validate` enforces node-id
 uniqueness across the whole reachable authoring tree. Node removal and
 restoration use `DetachedNode`, which keeps the id, node, all touching wiring,
 subscriptions, and pins together.

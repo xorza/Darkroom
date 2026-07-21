@@ -16,7 +16,7 @@ use crate::core::document::Document;
 
 /// Read + deserialize a document from `path`, picking the format from its
 /// extension. Errors on an unsupported extension, an unreadable file, a
-/// parse failure, or a document that fails [`Document::check`].
+/// parse failure, or a document that fails [`Document::validate`].
 pub(crate) fn load_document(path: &Path) -> Result<Document> {
     load_typed(path, Document::deserialize)
 }
@@ -36,7 +36,7 @@ pub(crate) fn export_graph(graph: &Graph, path: &Path) -> Result<()> {
 pub(crate) fn import_graph(path: &Path) -> Result<Graph> {
     load_typed(path, |format, bytes| {
         let graph = deserialize::<Graph>(bytes, format)?;
-        graph.check()?;
+        graph.validate()?;
         Ok(graph)
     })
 }
@@ -44,7 +44,7 @@ pub(crate) fn import_graph(path: &Path) -> Result<Graph> {
 /// Shared load shell: pick the format from the extension, read the file,
 /// hand both to `parse`. `parse` is a closure (not plain `deserialize`)
 /// because each type routes through its validating gate —
-/// [`Document::deserialize`] / [`Graph::check`].
+/// [`Document::deserialize`] / [`Graph::validate`].
 fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T>) -> Result<T> {
     let format =
         SerdeFormat::from_file_name(&path.to_string_lossy()).context("unsupported file")?;
@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn graph_import_round_trips_and_gates_on_check() {
+    fn graph_import_round_trips_and_gates_on_validation() {
         let path = test_output_path("darkroom_persistence/graph.json");
         let graph = Graph::new("ok").category("test");
         export_graph(&graph, &path).unwrap();
@@ -83,7 +83,7 @@ mod tests {
         let decoded: Graph = deserialize(&bytes, SerdeFormat::Json).unwrap();
         assert_eq!(decoded, graph, "unknown extensions default to JSON");
 
-        // A graph that parses but fails `Graph::check` (dangling event
+        // A graph that parses but fails `Graph::validate` (dangling event
         // emitter) is refused at the import gate. Export doesn't gate —
         // it writes editor-built state.
         let bad_path = test_output_path("darkroom_persistence/bad-graph.json");

@@ -29,7 +29,7 @@ impl<'a> GraphChecker<'a> {
         }
     }
 
-    fn check_graph(&mut self, graph: &Graph) -> Result<()> {
+    fn validate_graph(&mut self, graph: &Graph) -> Result<()> {
         ensure!(
             graph.origin.is_none_or(|origin| !origin.is_nil()),
             "graph has a nil origin"
@@ -70,7 +70,7 @@ impl<'a> GraphChecker<'a> {
                             format!("node {:?} references a missing graph", node_id)
                         })?;
                         if let GraphLink::Shared(id) = link {
-                            self.check_shared(*id, nested)?;
+                            self.validate_shared(*id, nested)?;
                         }
                     }
                 }
@@ -230,14 +230,14 @@ impl<'a> GraphChecker<'a> {
 
         for (graph_id, nested) in &graph.graphs {
             ensure!(!graph_id.is_nil(), "local graph has a nil id");
-            self.check_graph(nested)
+            self.validate_graph(nested)
                 .map_err(|error| anyhow::anyhow!("in local graph {:?}: {error:#}", nested.name))?;
         }
 
         Ok(())
     }
 
-    fn check_shared(&mut self, graph_id: GraphId, graph: &Graph) -> Result<()> {
+    fn validate_shared(&mut self, graph_id: GraphId, graph: &Graph) -> Result<()> {
         if self.checked_shared.contains(&graph_id) {
             return Ok(());
         }
@@ -247,7 +247,7 @@ impl<'a> GraphChecker<'a> {
             graph.name
         );
         let result = self
-            .check_graph(graph)
+            .validate_graph(graph)
             .map_err(|error| anyhow::anyhow!("in shared graph {:?}: {error:#}", graph.name));
         self.shared_path.remove(&graph_id);
         result?;
@@ -258,21 +258,22 @@ impl<'a> GraphChecker<'a> {
 
 impl Graph {
     /// Validate this reusable graph and its complete local graph tree.
-    pub fn check(&self) -> Result<()> {
-        GraphChecker::new(None).check_graph(self)
+    pub fn validate(&self) -> Result<()> {
+        GraphChecker::new(None).validate_graph(self)
     }
 
-    /// Debug-only assert form of [`Self::check`].
-    pub fn check_debug(&self) {
+    /// Debug-only assert form of [`Self::validate`].
+    pub fn validate_debug(&self) {
         if !is_debug() {
             return;
         }
-        self.check().expect("graph structural invariant violated");
+        self.validate()
+            .expect("graph structural invariant violated");
     }
 
     /// Validate an execution entry and every local or reachable shared graph
     /// against `library`.
-    pub fn check_for_execution(&self, library: &Library) -> Result<()> {
+    pub fn validate_for_execution(&self, library: &Library) -> Result<()> {
         ensure!(
             self.inputs.is_empty() && self.outputs.is_empty() && self.events.is_empty(),
             "entry graph cannot expose an interface"
@@ -281,15 +282,15 @@ impl Graph {
             self.nodes.values().all(|node| !node.kind.is_boundary()),
             "entry graph cannot contain interface boundary nodes"
         );
-        GraphChecker::new(Some(library)).check_graph(self)
+        GraphChecker::new(Some(library)).validate_graph(self)
     }
 
-    /// Debug-only assert form of [`Self::check_for_execution`].
-    pub fn check_for_execution_debug(&self, library: &Library) {
+    /// Debug-only assert form of [`Self::validate_for_execution`].
+    pub fn validate_for_execution_debug(&self, library: &Library) {
         if !is_debug() {
             return;
         }
-        self.check_for_execution(library)
+        self.validate_for_execution(library)
             .expect("graph structural invariant violated");
     }
 }

@@ -310,7 +310,7 @@ impl Func {
     }
 
     /// Validates this function declaration independently of a graph.
-    pub fn check(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         ensure!(!self.id.is_nil(), "function id must not be nil");
         ensure!(
             !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
@@ -356,7 +356,7 @@ mod tests {
     use crate::{DataType, TypeId};
 
     #[test]
-    fn check_rejects_invalid_identities_and_wildcard_indices() {
+    fn validate_rejects_invalid_identities_and_wildcard_indices() {
         let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
             "value",
             DataType::Custom(TypeId::nil()),
@@ -395,13 +395,13 @@ mod tests {
         ];
 
         for (expected, func) in invalid {
-            assert_eq!(func.check().unwrap_err().to_string(), expected);
+            assert_eq!(func.validate().unwrap_err().to_string(), expected);
         }
 
         Func::new(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 0)
-            .check()
+            .validate()
             .unwrap();
     }
 

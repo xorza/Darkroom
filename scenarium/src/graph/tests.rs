@@ -30,7 +30,7 @@ fn roundtrip_serialization() -> anyhow::Result<()> {
 }
 
 #[test]
-fn check_rejects_node_ids_reused_across_graph_levels() {
+fn validate_rejects_node_ids_reused_across_graph_levels() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let node_id = NodeId::unique();
     let mut interior = Graph::default();
@@ -42,7 +42,7 @@ fn check_rejects_node_ids_reused_across_graph_levels() {
     graph.insert(node_id, node);
     graph.insert_graph(graph_id, interior);
 
-    let error = graph.check().unwrap_err().to_string();
+    let error = graph.validate().unwrap_err().to_string();
     assert!(error.contains("occurs in more than one authoring graph"));
 }
 
@@ -72,25 +72,27 @@ fn pinned_outputs_roundtrip_serialization() -> anyhow::Result<()> {
 }
 
 #[test]
-fn check_passes_for_valid_graph() {
-    assert!(test_graph().check().is_ok());
+fn validate_passes_for_valid_graph() {
+    assert!(test_graph().validate().is_ok());
 }
 
 #[test]
-fn check_accepts_reusable_graph_while_compile_check_rejects_it_as_entry() {
+fn validate_accepts_reusable_graph_while_compile_validation_rejects_it_as_entry() {
     let mut graph = Graph::new("reusable")
         .input(FuncInput::optional("value", DataType::Int))
         .output(FuncOutput::new("result", DataType::Int));
     graph.add(Node::new(NodeKind::GraphInput));
     graph.add(Node::new(NodeKind::GraphOutput));
 
-    assert!(graph.check().is_ok());
-    let error = graph.check_for_execution(&Default::default()).unwrap_err();
+    assert!(graph.validate().is_ok());
+    let error = graph
+        .validate_for_execution(&Default::default())
+        .unwrap_err();
     assert!(error.to_string().contains("entry graph"));
 }
 
 #[test]
-fn check_for_execution_validates_shared_graph_structure_and_recursion() {
+fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     let graph_id = GraphId::unique();
     let mut shared = Graph::new("recursive");
     shared.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
@@ -101,7 +103,10 @@ fn check_for_execution_validates_shared_graph_structure_and_recursion() {
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
-    let error = graph.check_for_execution(&library).unwrap_err().to_string();
+    let error = graph
+        .validate_for_execution(&library)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("recursive"));
 
     let graph_id = GraphId::unique();
@@ -115,7 +120,10 @@ fn check_for_execution_validates_shared_graph_structure_and_recursion() {
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
-    let error = graph.check_for_execution(&library).unwrap_err().to_string();
+    let error = graph
+        .validate_for_execution(&library)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("at most one GraphInput"));
 }
 
@@ -206,7 +214,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
 }
 
 #[test]
-fn check_rejects_dangling_binding() {
+fn validate_rejects_dangling_binding() {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     // Repoint sum's input at a node that doesn't exist.
@@ -215,7 +223,9 @@ fn check_rejects_dangling_binding() {
         Binding::bind(NodeId::unique(), 0),
     );
 
-    let err = graph.check().expect_err("dangling binding must fail check");
+    let err = graph
+        .validate()
+        .expect_err("dangling binding must fail validation");
     assert!(err.to_string().contains("binds to missing node"));
 }
 
@@ -225,8 +235,8 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     use crate::node::definition::FuncId;
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
-    // valid — only the `const_only` flag decides whether check accepts it.
-    let check = |const_only: bool| -> anyhow::Result<()> {
+    // valid — only the `const_only` flag decides whether validation accepts it.
+    let validate = |const_only: bool| -> anyhow::Result<()> {
         let port = FuncInput::required("locked", DataType::Int);
         let port = if const_only { port.const_only() } else { port };
         let func = Func::new(FuncId::unique(), "f")
@@ -239,14 +249,14 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
         let producer = graph.add_func_node(&func);
         let consumer = graph.add_func_node(&func);
         graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-        graph.check_for_execution(&library)
+        graph.validate_for_execution(&library)
     };
 
     assert!(
-        check(false).is_ok(),
+        validate(false).is_ok(),
         "a normal input accepts a wired binding"
     );
-    let err = check(true).expect_err("a const-only input must reject a wired binding");
+    let err = validate(true).expect_err("a const-only input must reject a wired binding");
     assert!(
         err.to_string().contains("const-only"),
         "unexpected error: {err}"
@@ -254,7 +264,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 }
 
 #[test]
-fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
+fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     use crate::library::Library;
     use crate::{DataType, StaticValue};
 
@@ -281,7 +291,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     let f = g.add_func_node(&str_sink);
     g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
     let err = g
-        .check_for_execution(&library)
+        .validate_for_execution(&library)
         .expect_err("Int into a String input must be rejected");
     assert!(
         err.to_string().contains("incompatible"),
@@ -293,7 +303,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     let s = g.add_func_node(&int_src);
     let i = g.add_func_node(&int_sink);
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
-    assert!(g.check_for_execution(&library).is_ok());
+    assert!(g.validate_for_execution(&library).is_ok());
 
     // The check resolves *through* a passthrough: Int → pass → Int is fine,
     // Int → pass → String is rejected (the wildcard carries the real type).
@@ -304,7 +314,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     let i = g.add_func_node(&int_sink);
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
     assert!(
-        g.check_for_execution(&library).is_ok(),
+        g.validate_for_execution(&library).is_ok(),
         "Int through a passthrough into Int is compatible"
     );
 
@@ -312,7 +322,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     let f = g.add_func_node(&str_sink);
     g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
     assert!(
-        g.check_for_execution(&library)
+        g.validate_for_execution(&library)
             .is_err_and(|e| e.to_string().contains("incompatible")),
         "Int through a passthrough into String must be rejected"
     );
@@ -326,7 +336,7 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
         Binding::Const(StaticValue::String("x".into())),
     );
     assert!(
-        g.check_for_execution(&library)
+        g.validate_for_execution(&library)
             .is_err_and(|e| e.to_string().contains("incompatible")),
         "a String constant on an Int input must be rejected"
     );
@@ -335,13 +345,13 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
         Binding::Const(StaticValue::Float(2.5)),
     );
     assert!(
-        g.check_for_execution(&library).is_ok(),
+        g.validate_for_execution(&library).is_ok(),
         "a numeric constant satisfies a numeric input"
     );
 }
 
 #[test]
-fn check_for_execution_rejects_out_of_range_pinned_output() {
+fn validate_for_execution_rejects_out_of_range_pinned_output() {
     use crate::library::Library;
 
     let func = Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int));
@@ -352,11 +362,11 @@ fn check_for_execution_rejects_out_of_range_pinned_output() {
     let id = graph.add_func_node(&func);
 
     graph.set_output_pinned(OutputPort::new(id, 0), true);
-    assert!(graph.check_for_execution(&library).is_ok());
+    assert!(graph.validate_for_execution(&library).is_ok());
 
     graph.set_output_pinned(OutputPort::new(id, 1), true);
     let err = graph
-        .check_for_execution(&library)
+        .validate_for_execution(&library)
         .expect_err("output 1 doesn't exist on a one-output func");
     assert!(err.to_string().contains("out of range"), "{err}");
 }

@@ -90,7 +90,7 @@ impl FlattenMap {
         self.representatives.entry(interior).or_insert(address);
     }
 
-    pub(crate) fn check(&self, flat_ids: impl IntoIterator<Item = NodeId>) -> Result<()> {
+    pub(crate) fn validate(&self, flat_ids: impl IntoIterator<Item = NodeId>) -> Result<()> {
         let expected: HashSet<_> = flat_ids.into_iter().collect();
         ensure!(
             self.leaves.len() == expected.len(),
@@ -253,7 +253,7 @@ mod tests {
             map.attribution(flat).collect::<Vec<_>>(),
             vec![interior, inner, outer]
         );
-        map.check([flat]).unwrap();
+        map.validate([flat]).unwrap();
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
             Some(flat_b)
         );
         assert_eq!(map.representative(&interior), map.address(flat_a));
-        map.check([flat_a, flat_b]).unwrap();
+        map.validate([flat_a, flat_b]).unwrap();
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
         map.set_leaf(flat, 0, flat);
 
         assert_eq!(
-            map.check([]).unwrap_err().to_string(),
+            map.validate([]).unwrap_err().to_string(),
             "flatten map must have exactly one leaf per execution node"
         );
     }
@@ -311,7 +311,7 @@ mod tests {
         map.flat_nodes.insert(NodeAddress::root(flat), wrong_flat);
 
         assert_eq!(
-            map.check([flat]).unwrap_err().to_string(),
+            map.validate([flat]).unwrap_err().to_string(),
             "flatten-map address must point back to its execution node"
         );
     }

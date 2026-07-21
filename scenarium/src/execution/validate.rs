@@ -1,5 +1,5 @@
 //! Self-consistency checks for the compiled program, runtime cache, and per-run
-//! plan. Each fallible `check` method has an `is_debug()`-gated `check_debug`
+//! plan. Each fallible `validate` method has an `is_debug()`-gated `validate_debug`
 //! wrapper, so production call sites pay nothing while tests can inspect exact
 //! validation errors.
 
@@ -18,10 +18,10 @@ impl CompiledGraph {
     /// it was compiled from. The source graph is gone after flattening, so this
     /// validates each `e_node` against its func and checks binding integrity.
     /// The debug wrapper runs at compile (where the library is in hand); the
-    /// library-free install-side checks live in [`Self::check_installed`].
-    pub(crate) fn check(&self, library: &Library) -> Result<()> {
+    /// library-free install-side checks live in [`Self::validate_installed`].
+    pub(crate) fn validate(&self, library: &Library) -> Result<()> {
         let program = &self.program;
-        self.flatten_map.check(program.e_nodes.keys().copied())?;
+        self.flatten_map.validate(program.e_nodes.keys().copied())?;
         for (node_id, e_node) in &program.e_nodes {
             ensure!(
                 !e_node.func_id.is_nil(),
@@ -85,19 +85,19 @@ impl CompiledGraph {
         Ok(())
     }
 
-    /// Debug-only assert form of [`Self::check`].
-    pub(crate) fn check_debug(&self, library: &Library) {
+    /// Debug-only assert form of [`Self::validate`].
+    pub(crate) fn validate_debug(&self, library: &Library) {
         if !is_debug() {
             return;
         }
-        self.check(library)
+        self.validate(library)
             .expect("compiled graph invariant violated");
     }
 
     /// The engine's runtime `cache` has exactly this artifact's node ids after
     /// `reconcile` — the install-side half of the checks;
-    /// artifact-vs-library consistency runs at compile ([`Self::check`]).
-    pub(crate) fn check_installed(&self, cache: &RuntimeCache) -> Result<()> {
+    /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
+    pub(crate) fn validate_installed(&self, cache: &RuntimeCache) -> Result<()> {
         ensure!(
             cache.slots.len() == self.program.e_nodes.len(),
             "runtime cache node set does not match the compiled program"
@@ -118,19 +118,19 @@ impl CompiledGraph {
         Ok(())
     }
 
-    /// Debug-only assert form of [`Self::check_installed`].
-    pub(crate) fn check_installed_debug(&self, cache: &RuntimeCache) {
+    /// Debug-only assert form of [`Self::validate_installed`].
+    pub(crate) fn validate_installed_debug(&self, cache: &RuntimeCache) {
         if !is_debug() {
             return;
         }
-        self.check_installed(cache)
+        self.validate_installed(cache)
             .expect("installed compiled graph invariant violated");
     }
 }
 
 impl ExecutionPlan {
     /// A planned schedule is a unique post-order DFS whose bindings name valid outputs.
-    pub(crate) fn check(&self, program: &ExecutionProgram) -> Result<()> {
+    pub(crate) fn validate(&self, program: &ExecutionProgram) -> Result<()> {
         ensure!(
             self.process_order.len() <= program.e_nodes.len(),
             "execution order contains more entries than the program"
@@ -191,12 +191,12 @@ impl ExecutionPlan {
         Ok(())
     }
 
-    /// Debug-only assert form of [`Self::check`].
-    pub(crate) fn check_debug(&self, program: &ExecutionProgram) {
+    /// Debug-only assert form of [`Self::validate`].
+    pub(crate) fn validate_debug(&self, program: &ExecutionProgram) {
         if !is_debug() {
             return;
         }
-        self.check(program)
+        self.validate(program)
             .expect("execution plan invariant violated");
     }
 }

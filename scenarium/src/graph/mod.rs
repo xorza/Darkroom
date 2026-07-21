@@ -411,7 +411,7 @@ impl Graph {
     }
     pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
         let graph: Self = deserialize(serialized, format)?;
-        graph.check()?;
+        graph.validate()?;
         Ok(graph)
     }
 

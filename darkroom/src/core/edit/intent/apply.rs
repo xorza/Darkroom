@@ -279,7 +279,7 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
 
 /// Mark or clear whether one output port is pinned, keeping the view item
 /// in lockstep (a `Pin` item exists iff the port is pinned — the invariant
-/// `GraphView::check` enforces). Shared by `apply_graph` (writes `to`,
+/// `GraphView::validate` enforces). Shared by `apply_graph` (writes `to`,
 /// `restore_slot: None` — a fresh pin lands at the top of the paint stack
 /// with a zero position; the GUI paths always follow with a seed
 /// `MoveSelection` that places it, and a script driving the intent
