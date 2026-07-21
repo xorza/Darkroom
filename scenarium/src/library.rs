@@ -245,7 +245,7 @@ mod tests {
     use crate::graph::Graph;
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
-    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncId, FuncInput};
     use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
@@ -298,63 +298,18 @@ mod tests {
     }
 
     #[test]
-    fn add_rejects_invalid_function_identities_and_wildcard_indices() {
-        let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
-            "value",
-            DataType::Custom(TypeId::nil()),
-        ));
-        let nil_output = Func::new(FuncId::unique(), "output")
-            .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
-        let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
-            .input(FuncInput::required("value", DataType::Any))
-            .wildcard_output("value", 1);
-        let invalid = [
-            (
-                "function id must not be nil".to_owned(),
-                Func::new(FuncId::nil(), "nil"),
-            ),
-            (
-                format!(
-                    "function {:?} input 0 has a nil nominal type id",
-                    nil_input.id
-                ),
-                nil_input,
-            ),
-            (
-                format!(
-                    "function {:?} output 0 has a nil nominal type id",
-                    nil_output.id
-                ),
-                nil_output,
-            ),
-            (
-                format!(
-                    "function {:?} output 0 mirrors input 1, but has 1 inputs",
-                    invalid_wildcard.id
-                ),
-                invalid_wildcard,
-            ),
-        ];
-
-        for (expected, func) in invalid {
-            assert_eq!(func.check().unwrap_err().to_string(), expected);
+    fn add_rejects_invalid_function_declarations() {
+        for func in [
+            Func::new(FuncId::nil(), "nil"),
+            Func::new(FuncId::unique(), "wildcard")
+                .input(FuncInput::required("value", DataType::Any))
+                .wildcard_output("value", 1),
+        ] {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Library::default().add(func);
             }));
-            assert!(
-                result.is_err(),
-                "invalid declaration was registered: {expected}"
-            );
+            assert!(result.is_err(), "invalid declaration was registered");
         }
-
-        let valid = Func::new(FuncId::unique(), "wildcard")
-            .input(FuncInput::required("value", DataType::Any))
-            .wildcard_output("value", 0);
-        valid.check().unwrap();
-        let valid_id = valid.id;
-        let mut library = Library::default();
-        library.add(valid);
-        assert_eq!(library.by_id(&valid_id).unwrap().name, "wildcard");
     }
 
     #[test]

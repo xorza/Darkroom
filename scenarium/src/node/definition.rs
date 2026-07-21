@@ -352,7 +352,58 @@ impl Func {
 #[cfg(test)]
 mod tests {
     use crate::graph::CacheMode;
-    use crate::node::definition::{Func, FuncId};
+    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::{DataType, TypeId};
+
+    #[test]
+    fn check_rejects_invalid_identities_and_wildcard_indices() {
+        let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
+            "value",
+            DataType::Custom(TypeId::nil()),
+        ));
+        let nil_output = Func::new(FuncId::unique(), "output")
+            .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
+        let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
+            .input(FuncInput::required("value", DataType::Any))
+            .wildcard_output("value", 1);
+        let invalid = [
+            (
+                "function id must not be nil".to_owned(),
+                Func::new(FuncId::nil(), "nil"),
+            ),
+            (
+                format!(
+                    "function {:?} input 0 has a nil nominal type id",
+                    nil_input.id
+                ),
+                nil_input,
+            ),
+            (
+                format!(
+                    "function {:?} output 0 has a nil nominal type id",
+                    nil_output.id
+                ),
+                nil_output,
+            ),
+            (
+                format!(
+                    "function {:?} output 0 mirrors input 1, but has 1 inputs",
+                    invalid_wildcard.id
+                ),
+                invalid_wildcard,
+            ),
+        ];
+
+        for (expected, func) in invalid {
+            assert_eq!(func.check().unwrap_err().to_string(), expected);
+        }
+
+        Func::new(FuncId::unique(), "wildcard")
+            .input(FuncInput::required("value", DataType::Any))
+            .wildcard_output("value", 0)
+            .check()
+            .unwrap();
+    }
 
     #[test]
     fn default_cache_mode_defaults_to_none_and_builder_overrides() {
