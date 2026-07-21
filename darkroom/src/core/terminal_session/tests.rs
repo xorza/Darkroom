@@ -5,8 +5,8 @@ use scenarium::StaticValue;
 use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::Document;
-use crate::core::edit::intent::types::Intent;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::intent::types::Intent;
 use crate::core::terminal_session::apply_intents;
 
 use crate::core::document::ItemRef;

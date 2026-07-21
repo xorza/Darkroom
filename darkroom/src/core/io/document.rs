@@ -82,10 +82,11 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut archive = ZipArchive::new(file).map_err(|source| DocumentLoadError::InvalidArchive {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|source| DocumentLoadError::InvalidArchive {
+            path: path.to_path_buf(),
+            source,
+        })?;
     let has_overlapping_files =
         archive
             .has_overlapping_files()

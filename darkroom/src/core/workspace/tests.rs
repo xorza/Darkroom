@@ -132,7 +132,7 @@ fn disabled_reopen_ignores_the_remembered_path() {
 #[test]
 fn startup_load_failure_falls_back_to_empty_and_reports_the_error() {
     let preferences = Preferences {
-        document_path: Some("not-a-project.json".into()),
+        document_path: Some("not-a-document.json".into()),
         ..Preferences::default()
     };
 

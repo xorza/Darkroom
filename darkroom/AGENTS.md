@@ -395,7 +395,7 @@ Key cross-cutting mechanisms:
 ### Persistence + library (`src/io/`, `src/theme.rs`)
 `document.rs` is pure path⇄document I/O, no `App`/undo/preferences coupling —
 `commands/file.rs` orchestrates. A `.darkroom` project is a ZIP archive with one
-pretty-printed `project.json` document entry. `persistence.rs` separately keeps
+pretty-printed `document.json` entry. `persistence.rs` separately keeps
 the multi-format reusable-graph import/export path. `library.rs` reads/writes the shared
 graph library (`darkroom.library.json`): a set of `Graph`s loaded into
 `Library` at startup and grown by the **promote/publish** menu commands. Local

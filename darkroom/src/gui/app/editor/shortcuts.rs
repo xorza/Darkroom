@@ -8,10 +8,10 @@ use std::collections::BTreeSet;
 
 use aperture::{Key, Shortcut, Ui};
 
+use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, remove_selection_intents};
 use crate::core::edit::intent::types::{Intent, UndoStep};
-use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
