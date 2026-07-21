@@ -312,7 +312,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
     };
     let first = load_linear_fits(&path, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
-    let TransferProvenance::FitsPhysical { hdu, checksum, .. } =
+    let TransferProvenance::FitsPhysical(FitsTransferProvenance { hdu, checksum, .. }) =
         &first.metadata.provenance.as_ref().unwrap().transfer
     else {
         panic!("expected FITS provenance");
@@ -364,7 +364,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     write_image(&absent_path, &image);
 
     let verified_absent = load_linear_fits(&absent_path, &load_context()).unwrap();
-    let TransferProvenance::FitsPhysical { checksum, .. } =
+    let TransferProvenance::FitsPhysical(FitsTransferProvenance { checksum, .. }) =
         &verified_absent.metadata.provenance.as_ref().unwrap().transfer
     else {
         panic!("expected FITS provenance");
@@ -388,7 +388,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         .write_image(&image)
         .unwrap();
     let valid = load_linear_fits(&valid_path, &require).unwrap();
-    let TransferProvenance::FitsPhysical { checksum, .. } =
+    let TransferProvenance::FitsPhysical(FitsTransferProvenance { checksum, .. }) =
         &valid.metadata.provenance.as_ref().unwrap().transfer
     else {
         panic!("expected FITS provenance");
@@ -410,7 +410,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         ..load_context()
     };
     let ignored = load_linear_fits(&valid_path, &ignore).unwrap();
-    let TransferProvenance::FitsPhysical { checksum, .. } =
+    let TransferProvenance::FitsPhysical(FitsTransferProvenance { checksum, .. }) =
         &ignored.metadata.provenance.as_ref().unwrap().transfer
     else {
         panic!("expected FITS provenance");
