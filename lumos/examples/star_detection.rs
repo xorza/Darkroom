@@ -21,7 +21,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
-        eprintln!("Supported formats: FITS, TIFF, PNG, RAW (RAF, CR2, CR3, NEF, ARW, DNG)");
+        eprintln!("Supported formats: linear FITS and floating-point TIFF");
         std::process::exit(1);
     }
     let image_path = Path::new(&args[1]);

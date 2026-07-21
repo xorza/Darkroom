@@ -13,12 +13,11 @@
 //! cargo run --release --example quick_align -- /path/to/reference.fits /path/to/target.fits /path/to/output.tiff
 //! ```
 
-use std::env;
-use std::path::Path;
-
 use lumos::{
     AstroImage, InterpolationMethod, RegistrationConfig, StarDetector, WarpParams, register, warp,
 };
+use std::env;
+use std::path::Path;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -27,7 +26,7 @@ fn main() {
             "Usage: {} <reference_image> <target_image> <output_path>",
             args[0]
         );
-        eprintln!("Supported formats: FITS, TIFF, PNG, RAW (RAF, CR2, CR3, NEF, ARW, DNG)");
+        eprintln!("Supported formats: linear FITS and floating-point TIFF");
         std::process::exit(1);
     }
 

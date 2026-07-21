@@ -75,7 +75,7 @@ loses full-raw geometry before demosaic.
 
 ## Batch 1 — prevent silent scientific-data corruption
 
-- [ ] **P0 — Remove the second normalization of FITS physical values.**
+- [x] **P0 — Remove the second normalization of FITS physical values.**
 
   **Contract.** The document defines `physical = BZERO + BSCALE * stored` and explicitly
   forbids `physical / DATAMAX` at
@@ -103,7 +103,7 @@ loses full-raw geometry before demosaic.
   negative `BSCALE`, nonzero `BZERO`, signed integer, and canonical unsigned results
   against `fits-well::ReadImage::physical`.
 
-- [ ] **P0 — Make scientific intent a type/API boundary; do not let preview products enter `stack(paths)`.**
+- [x] **P0 — Make scientific intent a type/API boundary; do not let preview products enter `stack(paths)`.**
 
   **Contract.** Sections 1.1 and 2.2 require distinct products and an explicit intent:
   `lumos/src/stacking/docs/01-load-decode.md:21-58` and
@@ -125,19 +125,18 @@ loses full-raw geometry before demosaic.
   preview can be statistically combined as if it were linear scientific data. Metadata
   contains no provenance discriminator capable of detecting the substitution later.
 
-  **Change.** Introduce an explicit `LoadIntent`/`LoadOptions` and a typed result such as
-  `LoadedFrame::{ScientificCfa, LinearScientific, Preview}`. Restrict path-based
-  scientific stacking to the first two variants. Keep an ergonomic preview loader, but
-  make conversion from `Preview` into a scientific stack impossible without an explicit,
-  named override. Record container, decoder, transfer, color, clipping, and demosaic
-  provenance.
+  **Change.** Give `CfaImage`, `AstroImage`, and `PreviewImage` separate `from_file`
+  constructors whose concrete result types establish the requested contract. Restrict
+  path-based scientific stacking to the first two types. Keep `PreviewImage` opaque and
+  convertible to the display image type without an implicit conversion into `AstroImage`.
+  Record container, decoder, transfer, color, clipping, and demosaic provenance.
 
   **Validation.** Assert that path stacking rejects JPEG, untagged PNG/TIFF, alpha
   raster data, and direct RAW preview. Assert that a physical FITS image and an explicitly
   declared linear float TIFF follow the scientific route, while the same TIFF under a
   preview policy cannot be passed accidentally.
 
-- [ ] **P0 — Route mosaic FITS through `CfaImage` and CFA calibration.**
+- [x] **P0 — Route mosaic FITS through `CfaImage` and CFA calibration.**
 
   **Contract.** Mosaic RAW and mosaic FITS are both scientific-CFA products
   (`lumos/src/stacking/docs/01-load-decode.md:25-40`), and the required sequence is

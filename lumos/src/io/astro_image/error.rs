@@ -32,6 +32,9 @@ pub enum ImageError {
     #[error("Unsupported file extension: '{extension}'")]
     UnsupportedFormat { extension: String },
 
+    #[error("Scientific image input '{path}' was rejected: {reason}")]
+    ScientificInputRejected { path: PathBuf, reason: String },
+
     #[error("Failed to save image: {source}")]
     Save { source: imaginarium::Error },
 }

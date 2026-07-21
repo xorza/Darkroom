@@ -11,7 +11,7 @@ use std::time::Instant;
 use ::quickbench::quick_bench;
 use common::file_utils;
 
-use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage};
+use crate::io::astro_image::AstroImage;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
@@ -31,7 +31,7 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
         return None;
     }
 
-    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
         .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(
@@ -221,7 +221,7 @@ fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
         return None;
     }
 
-    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
         .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(

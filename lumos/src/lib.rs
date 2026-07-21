@@ -12,7 +12,7 @@
 //! use lumos::{AstroImage, StarDetectionConfig, StarDetector};
 //!
 //! // Load an astronomical image
-//! let image = AstroImage::from_file("light_001.fits")?;
+//! let image = AstroImage::from_file("linear_light_001.fits")?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
@@ -36,10 +36,12 @@ pub mod testing;
 pub use io::astro_image::cfa::{CfaImage, CfaType};
 pub use io::astro_image::error::ImageError;
 pub use io::astro_image::{
-    ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata, BitPix, ImageDimensions,
+    AstroImage, AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
+    ImageDimensions, ImageProvenance, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
+    TransferProvenance,
 };
+pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
-pub use io::raw::{RAW_EXTENSIONS, load_raw, load_raw_cfa};
 pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
