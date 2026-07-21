@@ -1,9 +1,11 @@
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use lens::MlModelPaths;
 use scenarium::{Graph, GraphId, StaticValue};
 
 use crate::core::graph_library::GraphLibrary;
+use crate::core::io::graph_library::GraphLibrarySaveError;
 use crate::core::runtime_library::RuntimeLibrary;
 
 #[test]
@@ -41,13 +43,15 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     assert_eq!(published.graphs.get(&graph_id).unwrap().name, "shared");
 
     let second_id = GraphId::unique();
-    let outcome = library.edit_graph_library(|graphs| {
-        graphs.graphs.insert(second_id, Graph::new("second"));
-        false
-    });
-    assert!(!outcome.changed);
+    let outcome = library.edit_graph_library_with(
+        |graphs| {
+            graphs.graphs.insert(second_id, Graph::new("second"));
+            true
+        },
+        |_| Ok(()),
+    );
+    assert!(outcome.changed);
     assert!(outcome.persist_error.is_none());
-    library.recompose();
     assert_eq!(
         library.current.graphs.get(&second_id).unwrap().name,
         "second"
@@ -58,4 +62,49 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
         "graph synchronization retains the configured ML defaults"
     );
     assert!(library.published.load().graphs.contains_key(&second_id));
+}
+
+#[test]
+fn graph_library_edit_distinguishes_noop_and_failed_persistence() {
+    let mut library = RuntimeLibrary::new(&MlModelPaths::default());
+    let noop = library.edit_graph_library_with(
+        |_| false,
+        |_| panic!("a no-op graph-library edit must not persist"),
+    );
+    assert!(!noop.changed);
+    assert!(noop.persist_error.is_none());
+
+    let graph_id = GraphId::unique();
+    let failed = library.edit_graph_library_with(
+        |graphs| {
+            graphs.graphs.insert(graph_id, Graph::new("memory only"));
+            true
+        },
+        |_| {
+            Err(GraphLibrarySaveError::Publish {
+                path: PathBuf::from("graph-library.json"),
+                source: io::Error::other("disk unavailable"),
+            })
+        },
+    );
+    assert!(failed.changed);
+    assert!(
+        matches!(
+            failed.persist_error,
+            Some(GraphLibrarySaveError::Publish { path, source })
+                if path == Path::new("graph-library.json")
+                    && source.kind() == io::ErrorKind::Other
+                    && source.to_string() == "disk unavailable"
+        ),
+        "the exact persistence failure is retained"
+    );
+    assert_eq!(
+        library.current.graphs.get(&graph_id).unwrap().name,
+        "memory only"
+    );
+    assert_eq!(
+        library.published.load().graphs.get(&graph_id).unwrap().name,
+        "memory only",
+        "a failed save does not roll back the active runtime"
+    );
 }
