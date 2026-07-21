@@ -17,9 +17,7 @@ pub(crate) struct OpenDocument {
 }
 
 impl OpenDocument {
-    pub(crate) fn load_preferred(
-        preferences: &mut Preferences,
-    ) -> Result<Self, DocumentLoadError> {
+    pub(crate) fn load_preferred(preferences: &mut Preferences) -> Result<Self, DocumentLoadError> {
         if !preferences.load_last_document {
             return Ok(Self::default());
         }
