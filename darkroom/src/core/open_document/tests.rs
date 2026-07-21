@@ -25,7 +25,7 @@ fn normalization_prunes_stale_wiring_once_and_rearms_after_replace() {
     assert!(!open.normalization_pending);
     assert!(open.document.graph.bindings.is_empty());
 
-    open.replace(document(), None);
+    open = OpenDocument::new(document(), None);
     assert!(open.normalization_pending);
     assert_eq!(open.document.graph.bindings.len(), 1);
     open.normalize(&library);
