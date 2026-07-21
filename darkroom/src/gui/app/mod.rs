@@ -68,11 +68,10 @@ pub(crate) struct App {
 }
 
 impl App {
-    /// Build the app before the first frame: assemble the func lib +
-    /// seed document, then restore persisted preferences (saved theme +
-    /// last document) and push the resolved aperture theme onto `Ui`.
-    /// Restore failures degrade silently to defaults — a missing or
-    /// corrupt preferences, or a deleted document, must not block launch.
+    /// Build the app before the first frame: restore the preferred document,
+    /// assemble runtime services, and push the resolved aperture theme onto
+    /// `Ui`. Document restore failures degrade to an empty document and are
+    /// retained in the shared status log rather than blocking launch.
     ///
     /// Handed to [`aperture::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
@@ -80,7 +79,7 @@ impl App {
         ui: &mut Ui,
         handle: HostHandle,
         script_cfg: ScriptConfig,
-        preferences: Preferences,
+        mut preferences: Preferences,
     ) -> Self {
         // The worker + script host wake the winit loop via the host handle;
         // the headless/tui drivers swap in a tokio `Notify` (see
@@ -93,7 +92,7 @@ impl App {
         // its saved geometry can size the window at creation.
         let mut app = Self {
             editor: Editor::new(),
-            workspace: Workspace::new(&script_cfg, wake, &preferences),
+            workspace: Workspace::new(&script_cfg, wake, &mut preferences),
             theme: Theme::default(),
             host_handle: handle,
             preferences,
@@ -103,13 +102,6 @@ impl App {
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
         app.theme = Theme::from_preset(app.preferences.theme.resolve());
-        if app.preferences.load_last_document
-            && app.preferences.document_path.is_some()
-            && app.workspace.open.path.is_none()
-        {
-            app.preferences.document_path = None;
-            app.save_preferences();
-        }
         // Resolved theme (default, or whatever the preferences restored)
         // onto the Ui so aperture widgets paint correctly frame 1.
         ui.theme = app.theme.aperture_theme.clone();

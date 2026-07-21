@@ -14,6 +14,7 @@ use scenarium::{Compilation, CompiledGraph, Compiler};
 use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
+use crate::core::io::preferences::Preferences;
 use crate::core::library::RuntimeLibrary;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
@@ -54,31 +55,37 @@ impl RuntimeHost {
     pub(crate) fn new(
         script_cfg: &ScriptConfig,
         wake: Wake,
-        model_paths: &lens::MlModelPaths,
+        preferences: &Preferences,
+        mut status: StatusLog,
     ) -> Self {
-        let loaded = RuntimeLibrary::load(model_paths);
+        let model_paths = (&preferences.ml_models).into();
+        let library = match RuntimeLibrary::load(&model_paths) {
+            Ok(library) => library,
+            Err(error) => {
+                status.error(format!("library load failed: {error}"));
+                RuntimeLibrary::new(&model_paths)
+            }
+        };
         let worker = WorkerBridge::new(wake.clone());
-        let script = ScriptHost::start(script_cfg, loaded.library.published.clone(), wake);
-        let mut host = Self {
-            library: loaded.library,
+        let script = ScriptHost::start(script_cfg, library.published.clone(), wake);
+        let host = Self {
+            library,
             worker,
             disk_root: None,
             compiler: Compiler::default(),
             flatten_map: Arc::default(),
-            status: StatusLog::default(),
+            status,
             script,
         };
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
         host.refresh_disk_store();
-        if let Some(err) = loaded.error {
-            host.status.error(format!("library load failed: {err:#}"));
-        }
         host
     }
 
-    pub(crate) fn configure_ml_model_defaults(&mut self, paths: &lens::MlModelPaths) {
-        if self.library.update_ml_model_paths(paths) {
+    pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
+        let model_paths = (&preferences.ml_models).into();
+        if self.library.update_ml_model_paths(&model_paths) {
             self.refresh_disk_store();
         }
     }

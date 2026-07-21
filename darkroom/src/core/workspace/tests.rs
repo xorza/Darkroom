@@ -11,17 +11,12 @@ use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
 use crate::core::status::StatusLog;
-use crate::core::workspace::Workspace;
+use crate::core::workspace::{self as workspace_module, Workspace};
 
 #[test]
 fn normalization_is_shared_across_run_and_replacement_boundaries() {
-    let mut workspace = Workspace::new(
-        OpenDocument::default(),
-        &ScriptConfig::default(),
-        Arc::new(|| {}),
-        &Preferences::default(),
-        StatusLog::default(),
-    );
+    let mut preferences = Preferences::default();
+    let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
     assert!(workspace.open.normalization_pending);
     assert!(
@@ -51,22 +46,9 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         },
         ..Preferences::default()
     };
-    let open = OpenDocument::load(first_path.clone()).unwrap();
-    let mut status = StatusLog::default();
-    status.info("startup initialized".into());
-    let mut workspace = Workspace::new(
-        open,
-        &ScriptConfig::default(),
-        Arc::new(|| {}),
-        &preferences,
-        status,
-    );
+    let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
     assert_eq!(workspace.open.path, Some(first_path.clone()));
-    assert_eq!(
-        workspace.runtime.status.lines().collect::<Vec<_>>(),
-        ["startup initialized"]
-    );
     assert_eq!(
         workspace
             .runtime
@@ -128,5 +110,21 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
     assert_eq!(
         test_support::disk_root(&workspace.runtime),
         Some(document_cache_root(&second_path))
+    );
+
+    preferences.document_path = Some("invalid.json".into());
+    let mut status = StatusLog::default();
+    let open =
+        workspace_module::load_preferred_document_with(&mut preferences, &mut status, |_| {
+            Err("preferences save failed: disk unavailable".into())
+        });
+    assert!(open.path.is_none());
+    assert_eq!(preferences.document_path, None);
+    assert_eq!(
+        status.lines().collect::<Vec<_>>(),
+        [
+            "load failed: invalid.json must use the .darkroom extension",
+            "preferences save failed: disk unavailable"
+        ]
     );
 }

@@ -14,6 +14,35 @@ use crate::core::wake::Wake;
 #[cfg(test)]
 mod tests;
 
+fn load_preferred_document(preferences: &mut Preferences, status: &mut StatusLog) -> OpenDocument {
+    load_preferred_document_with(preferences, status, Preferences::save)
+}
+
+fn load_preferred_document_with(
+    preferences: &mut Preferences,
+    status: &mut StatusLog,
+    save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
+) -> OpenDocument {
+    let Some(path) = preferences
+        .document_path
+        .clone()
+        .filter(|_| preferences.load_last_document)
+    else {
+        return OpenDocument::default();
+    };
+    match OpenDocument::load(path) {
+        Ok(open) => open,
+        Err(error) => {
+            status.error(format!("load failed: {error:#}"));
+            preferences.document_path = None;
+            if let Err(error) = save_preferences(preferences) {
+                status.error(error);
+            }
+            OpenDocument::default()
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Workspace {
     pub(crate) open: OpenDocument,
@@ -22,12 +51,12 @@ pub(crate) struct Workspace {
 
 impl Workspace {
     pub(crate) fn new(
-        open: OpenDocument,
         script_config: &ScriptConfig,
         wake: Wake,
-        preferences: &Preferences,
-        status: StatusLog,
+        preferences: &mut Preferences,
     ) -> Self {
+        let mut status = StatusLog::default();
+        let open = load_preferred_document(preferences, &mut status);
         let mut runtime = RuntimeHost::new(script_config, wake, preferences, status);
         runtime.set_document_cache(open.path.as_deref());
         Self { open, runtime }
