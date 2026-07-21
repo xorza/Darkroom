@@ -1,11 +1,41 @@
+use std::path::PathBuf;
+
 use scenarium::Graph;
 use scenarium::{Binding, Func, FuncId, FuncInput, InputPort, Library, StaticValue};
 
 use crate::core::document::Document;
+use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 
 #[test]
-fn normalization_prunes_stale_wiring_once_and_rearms_after_replace() {
+fn disabled_reopen_ignores_the_remembered_path() {
+    let preferences = Preferences {
+        document_path: Some(PathBuf::from("does-not-exist.darkroom")),
+        load_last_document: false,
+        ..Preferences::default()
+    };
+
+    let open = OpenDocument::load(&preferences).unwrap();
+
+    assert!(open.path.is_none());
+    assert!(open.document.graph.is_empty());
+}
+
+#[test]
+fn failed_reopen_returns_the_load_error() {
+    let path = PathBuf::from("does-not-exist.darkroom");
+    let preferences = Preferences {
+        document_path: Some(path.clone()),
+        ..Preferences::default()
+    };
+
+    let error = OpenDocument::load(&preferences).unwrap_err();
+
+    assert!(error.to_string().contains(path.to_str().unwrap()));
+}
+
+#[test]
+fn normalization_prunes_stale_wiring_once_for_each_open_document() {
     let func_id = FuncId::unique();
     let previous = Func::new(func_id, "changed")
         .input(FuncInput::required("removed", scenarium::DataType::Float));

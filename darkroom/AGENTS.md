@@ -58,8 +58,8 @@ Root holds the entry point; implementation is grouped by responsibility:
   sub-enums with one handler submodule each: `file` / `graph` / `run` /
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
-- **`core/open_document/`** — `OpenDocument`: the serialized `Document`, its
-  active path, and pending-normalization state.
+- **`core/open_document/`** — `OpenDocument`: startup loading, the serialized
+  `Document`, its active path, and pending-normalization state.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
   `RuntimeHost` pairing and their run/save/cache coordination.
 - **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
@@ -74,8 +74,7 @@ Root holds the entry point; implementation is grouped by responsibility:
   interface reconciliation).
 - **`core/io/`** — `project.rs` (`.darkroom` ZIP containing `project.json`),
   `persistence.rs` (reusable-graph serde I/O), `preferences.rs` (`Preferences`
-  session state), `initial_document/` (shared startup selection), `library.rs`
-  (shared graph library file), `cache.rs`
+  session state), `library.rs` (shared graph library file), `cache.rs`
   (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
   with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/

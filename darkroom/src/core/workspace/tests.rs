@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use common::test_utils::test_output_path;
-use lens::MlModelPaths;
 
 use crate::core::document::Document;
 use crate::core::io::cache::document_cache_root;
+use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
@@ -16,7 +16,7 @@ fn normalization_is_shared_across_run_and_replacement_boundaries() {
         OpenDocument::empty(),
         &ScriptConfig::default(),
         Arc::new(|| {}),
-        &MlModelPaths::default(),
+        &Preferences::default(),
     );
 
     assert!(workspace.open.normalization_pending);
@@ -40,7 +40,7 @@ fn replacement_repoints_the_runtime_cache_to_the_new_document() {
         OpenDocument::empty(),
         &ScriptConfig::default(),
         Arc::new(|| {}),
-        &MlModelPaths::default(),
+        &Preferences::default(),
     );
 
     assert_eq!(test_support::disk_root(&workspace.runtime), None);
