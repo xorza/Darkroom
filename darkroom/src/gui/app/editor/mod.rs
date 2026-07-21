@@ -20,7 +20,7 @@ use crate::core::edit::intent::duplicate::{
 };
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::core::io::preferences::Preferences;
-use crate::core::open_document::OpenDocument;
+use crate::core::document::open_document::OpenDocument;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
@@ -554,7 +554,7 @@ mod tests {
 
     use crate::core::document::{Document, GraphRef, ItemRef, PortKind, PortRef, TabRef};
     use crate::core::edit::intent::types::Intent;
-    use crate::core::open_document::OpenDocument;
+    use crate::core::document::open_document::OpenDocument;
     use crate::gui::UiAction;
     use crate::gui::app::editor::Editor;
     use crate::gui::image_viewer::ImageViewer;

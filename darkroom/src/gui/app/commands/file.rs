@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::core::open_document::OpenDocument;
+use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
 use crate::gui::dialogs;

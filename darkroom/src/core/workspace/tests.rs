@@ -7,7 +7,7 @@ use crate::core::document::Document;
 use crate::core::io::cache::document_cache_root;
 use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::io::project;
-use crate::core::open_document::OpenDocument;
+use crate::core::document::open_document::OpenDocument;
 use crate::core::runtime_host::test_support;
 use crate::core::script::ScriptConfig;
 use crate::core::workspace::Workspace;

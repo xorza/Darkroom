@@ -58,8 +58,6 @@ Root holds the entry point; implementation is grouped by responsibility:
   sub-enums with one handler submodule each: `file` / `graph` / `run` /
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
-- **`core/open_document/`** — `OpenDocument`: startup loading, the serialized
-  `Document`, its active path, and pending-normalization state.
 - **`core/workspace/`** — `Workspace`: the shared `OpenDocument` +
   `RuntimeHost` pairing, startup loading, and run/save/cache coordination.
 - **`core/runtime_host.rs`** — `RuntimeHost`: library, compiler, worker,
@@ -67,8 +65,9 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/terminal_session/`** — terminal/headless event interpretation and
   shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `serde.rs` (custom ordered paint-stack wire format), and
-  `validate.rs` (document/view structural validation).
+  `EditScope`), `open_document.rs` (`OpenDocument`: startup loading, active
+  path, and pending normalization), `serde.rs` (custom ordered paint-stack
+  wire format), and `validate.rs` (document/view structural validation).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
   publication).
