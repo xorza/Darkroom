@@ -248,8 +248,10 @@ Derived state, like `Scene`. `OpenDocument::normalize` runs before scene
 rebuild, execution, cache save, or document save when a structural edit marks
 normalization pending. It synchronizes each local
 graph's interface against its interior wiring: compacts unused boundary
-slots, remaps indices in the interior graph and across all instance bindings.
-Idempotent — a no-op on an already-canonical document.
+slots, remaps indices in the interior graph and across all instance bindings,
+then prunes bindings and subscriptions left dangling against the resulting
+interfaces and current library. Idempotent — a no-op on an already-canonical
+document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view

@@ -66,7 +66,7 @@ fn connecting_placeholder_grows_input_with_inferred_type() {
     graph.insert_graph(graph_id, fixture.graph);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let graph = doc.graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.inputs.len(), 1, "placeholder use materialized a slot");
@@ -89,7 +89,7 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
     graph.insert_graph(graph_id, fixture.graph);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let graph = doc.graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.outputs.len(), 1);
@@ -110,7 +110,7 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     graph.insert_graph(graph_id, fixture.graph);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
     let names: Vec<String> = doc
         .graph
         .graphs
@@ -124,7 +124,7 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
 
     // Idempotent: a second pass changes nothing.
     let before = doc.graph.graphs.get(&graph_id).unwrap().inputs.clone();
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
     let after = doc.graph.graphs.get(&graph_id).unwrap().inputs.clone();
     assert_eq!(before, after);
 }
@@ -162,7 +162,7 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     );
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     // Interface compacted to [A, C].
     let names: Vec<String> = doc
@@ -212,7 +212,7 @@ fn unused_graph_input_shrinks_interface() {
     graph.insert_graph(graph_id, fixture.graph);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let inputs = &doc.graph.graphs.get(&graph_id).unwrap().inputs;
     assert_eq!(inputs.len(), 1);
@@ -233,7 +233,7 @@ fn existing_port_type_is_rederived_from_wiring() {
     graph.insert_graph(graph_id, fixture.graph);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let input = &doc.graph.graphs.get(&graph_id).unwrap().inputs[0];
     assert_eq!(input.name, "A", "authored name preserved");
@@ -264,7 +264,7 @@ fn passthrough_ports_are_null_typed() {
     graph.insert_graph(graph_id, interior);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let graph = doc.graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.inputs.len(), 1);
@@ -320,7 +320,7 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     graph.insert_graph(graph_id, interior);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&library);
+    doc.normalize(&library);
 
     let graph = doc.graph.graphs.get(&graph_id).unwrap();
     assert_eq!(graph.outputs.len(), 1);

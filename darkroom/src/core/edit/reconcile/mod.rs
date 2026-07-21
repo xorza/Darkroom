@@ -41,8 +41,8 @@ struct SidePlan<T> {
 }
 
 /// Reconcile one nested graph's interface against its boundary wiring.
-/// Entry point is [`Document::reconcile_boundaries`] (in `document.rs`),
-/// which loops this over every local graph.
+/// [`Document::normalize`] loops this over every local graph before pruning
+/// wiring left dangling against the resulting interfaces.
 pub(crate) fn reconcile_graph(doc: &mut Document, graph_id: GraphId, library: &Library) {
     let (inputs, outputs) = {
         let Some(graph) = doc.graph.graphs.get(&graph_id) else {
