@@ -9,9 +9,11 @@ use fits_well::table::{ColumnData, TableBuilder, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::fits::{
-    CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHduMetadata, encode_cfa_hdu, fits_to_io, read_cfa_hdu,
+use crate::io::image::fits::cfa::{
+    CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHduMetadata, encode_cfa_hdu,
 };
+use crate::io::image::fits::decode::read_cfa_hdu;
+use crate::io::image::fits::error::fits_to_io;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::defect_map::DefectMap;

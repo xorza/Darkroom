@@ -8,7 +8,7 @@
 use std::fs::File;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::load_linear_fits;
+use crate::io::image::fits::decode::load_linear_fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;

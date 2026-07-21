@@ -9,7 +9,7 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits;
+use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::LoadContext;
 use crate::io::image::{
@@ -76,7 +76,7 @@ impl CfaFrameInfo {
     pub(crate) fn from_file(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         let extension = file_extension(path);
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            fits::fits_cfa_frame_info(path, context)
+            fits_decode::fits_cfa_frame_info(path, context)
         } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
             raw::raw_cfa_frame_info(path, &context.cancel)
         } else {
@@ -159,7 +159,7 @@ impl CfaImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_cfa_fits(path, context);
+            return fits_decode::load_cfa_fits(path, context);
         }
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
             return raw::load_raw_cfa(path, &context.cancel);
@@ -182,7 +182,7 @@ impl CfaImage {
 
     /// Save this sensor-domain image as a checksummed floating-point FITS file.
     pub fn save_fits(&self, path: &Path) -> std::io::Result<()> {
-        fits::save_cfa_fits(path, self)
+        fits_cfa::save_cfa_fits(path, self)
     }
 
     /// Demosaic this CFA image into a 3-channel LinearImage.

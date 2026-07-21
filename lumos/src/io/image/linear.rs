@@ -5,7 +5,7 @@ use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
 use rayon::prelude::*;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits;
+use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::LoadContext;
 use crate::io::image::{
@@ -42,7 +42,7 @@ impl LinearImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_linear_fits(path, context);
+            return fits_decode::load_linear_fits(path, context);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {

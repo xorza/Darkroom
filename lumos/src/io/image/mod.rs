@@ -12,6 +12,7 @@ use imaginarium::{ChannelCount, ColorFormat, Image};
 use std::path::Path;
 
 use crate::io::image::error::ImageError;
+use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::linear::LinearImage;
@@ -314,7 +315,7 @@ impl PreviewImage {
         let extension = file_extension(path);
 
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits::load_preview_fits(path, context).map(Into::into);
+            return fits_decode::load_preview_fits(path, context).map(Into::into);
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
