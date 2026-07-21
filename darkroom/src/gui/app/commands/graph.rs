@@ -1,6 +1,6 @@
 //! Graph-template import/export and graph-library publishing orchestration.
 
-use scenarium::{GraphId, NodeId};
+use scenarium::NodeId;
 
 use crate::core::edit::publish;
 use crate::core::io::graph_template;
@@ -42,7 +42,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a graph, that
     /// open graph is exported. No-op when neither resolves.
     fn export_active_graph_template(&mut self) {
-        let library = self.workspace.runtime.library.current.clone();
+        let library = self.workspace.runtime.library.published.load();
         let Some(graph) =
             publish::graph_template_to_export(&self.workspace.open.document, &library)
         else {
@@ -97,14 +97,8 @@ impl App {
         };
         match graph_template::load(&path) {
             Ok(graph) => {
-                let id = GraphId::unique();
                 let graph = graph.fresh_copy();
-                self.workspace
-                    .runtime
-                    .edit_graph_library(move |library| {
-                        library.graphs.insert(id, graph);
-                        true
-                    });
+                self.workspace.runtime.add_graph_template(graph);
             }
             Err(error) => self
                 .workspace
@@ -121,16 +115,10 @@ impl App {
     /// resolves.
     fn promote_active_graph(&mut self) {
         let document = &mut self.workspace.open.document;
-        if self
-            .workspace
-            .runtime
-            .edit_graph_library(|library| {
-                publish::promote_to_graph_library(document, library)
-            })
-        {
+        if self.workspace.runtime.promote_graph(document) {
             // Re-points the local graph's `origin` in the document — an
             // unsaved change (may over-flag when the link already existed).
-            // The status outcome is owned by `edit_graph_library`.
+            // The status outcome is owned by the runtime host.
             self.editor.dirty = true;
         } else {
             self.workspace
@@ -154,14 +142,12 @@ impl App {
         if self
             .workspace
             .runtime
-            .edit_graph_library(|library| {
-                publish::publish_local_graph(document, library, target, node_id)
-            })
+            .publish_local_graph(document, target, node_id)
         {
             // Publishing a fresh entry re-points the local graph's `origin`
             // in the document — an unsaved change (an update-in-place
             // publish touches only the library, so this may over-flag).
-            // The status outcome is owned by `edit_graph_library`.
+            // The status outcome is owned by the runtime host.
             self.editor.dirty = true;
         } else {
             self.workspace

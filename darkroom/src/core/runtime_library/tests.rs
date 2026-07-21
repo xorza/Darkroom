@@ -47,7 +47,7 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     assert_eq!(published.graphs.get(&graph_id).unwrap().name, "shared");
 
     let second_id = GraphId::unique();
-    let outcome = library.edit_graph_library_with(
+    let outcome = library.persist_graph_library_change_with(
         |graphs| {
             graphs.graphs.insert(second_id, Graph::new("second"));
             true
@@ -83,7 +83,7 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
 #[test]
 fn graph_library_edit_distinguishes_noop_and_failed_persistence() {
     let mut library = RuntimeLibrary::new(&MlModelPaths::default());
-    let noop = library.edit_graph_library_with(
+    let noop = library.persist_graph_library_change_with(
         |_| false,
         |_| panic!("a no-op graph-library edit must not persist"),
     );
@@ -91,7 +91,7 @@ fn graph_library_edit_distinguishes_noop_and_failed_persistence() {
     assert!(noop.persist_error.is_none());
 
     let graph_id = GraphId::unique();
-    let failed = library.edit_graph_library_with(
+    let failed = library.persist_graph_library_change_with(
         |graphs| {
             graphs.graphs.insert(graph_id, Graph::new("memory only"));
             true
