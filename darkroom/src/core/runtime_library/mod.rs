@@ -69,15 +69,10 @@ impl RuntimeLibrary {
 
     pub(crate) fn import_graph_template(&mut self, graph: Graph) -> RuntimeLibraryChange {
         let graph_id = GraphId::unique();
-        self.persist_graph_library_change_with(
-            move |library| {
-                library
-                    .graphs
-                    .insert(graph_id, graph.fresh_copy())
-                    .is_none()
-            },
-            graph_library_io::save,
-        )
+        self.graph_library
+            .graphs
+            .insert(graph_id, graph.fresh_copy());
+        self.finish_graph_library_change(true)
     }
 
     pub(crate) fn publish_graph_to_library(
@@ -85,20 +80,13 @@ impl RuntimeLibrary {
         document: &mut Document,
         target: GraphPublicationTarget,
     ) -> RuntimeLibraryChange {
-        self.persist_graph_library_change_with(
-            |library| publish::publish_graph_to_library(document, library, target),
-            graph_library_io::save,
-        )
+        let changed = publish::publish_graph_to_library(document, &mut self.graph_library, target);
+        self.finish_graph_library_change(changed)
     }
 
-    fn persist_graph_library_change_with(
-        &mut self,
-        edit: impl FnOnce(&mut GraphLibrary) -> bool,
-        persist: impl FnOnce(&GraphLibrary) -> Result<(), GraphLibrarySaveError>,
-    ) -> RuntimeLibraryChange {
-        let changed = edit(&mut self.graph_library);
+    fn finish_graph_library_change(&mut self, changed: bool) -> RuntimeLibraryChange {
         let persist_error = changed
-            .then(|| persist(&self.graph_library))
+            .then(|| graph_library_io::save(&self.graph_library))
             .and_then(Result::err);
         let outcome = RuntimeLibraryChange {
             changed,
