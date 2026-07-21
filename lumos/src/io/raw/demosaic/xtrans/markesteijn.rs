@@ -33,14 +33,24 @@
 use common::CancelToken;
 
 use crate::io::raw::alloc_uninit_vec;
-use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
+use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
 const ARENA_WORDS_PER_PIXEL: usize = 18;
+
+pub(crate) fn demosaic_memory(width: usize, height: usize) -> DemosaicMemory {
+    let pixels = width.saturating_mul(height);
+    let output_words = pixels.saturating_mul(3);
+    let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);
+    DemosaicMemory {
+        output_bytes: output_words.saturating_mul(std::mem::size_of::<f32>()),
+        peak_bytes: peak_words.saturating_mul(std::mem::size_of::<f32>()),
+    }
+}
 
 /// Preallocated arena for all Markesteijn demosaic working memory.
 ///
@@ -66,7 +76,7 @@ impl DemosaicArena {
         let total = ARENA_WORDS_PER_PIXEL * pixels;
 
         // SAFETY: Every element in every region is fully written by parallel passes
-        // before being read. See per-step comments in demosaic_xtrans_markesteijn().
+        // before being read. See per-step comments in demosaic().
         let storage = unsafe { alloc_uninit_vec::<f32>(total) };
 
         tracing::debug!(
@@ -112,7 +122,7 @@ impl DemosaicArena {
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
 ///
 /// Returns unclipped planar channels `[R, G, B]`, each `width * height`.
-pub(crate) fn demosaic_xtrans_markesteijn(
+pub(crate) fn demosaic(
     xtrans: &XTransImage,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
@@ -486,7 +496,7 @@ mod tests {
                 0,
                 test_pattern(),
             );
-            let planes = demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap();
+            let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
             for sample in case.samples {
                 let index = sample.y * WIDTH + sample.x;
                 for (channel, plane) in planes.iter().enumerate() {
@@ -514,8 +524,7 @@ mod tests {
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb =
-            interleave_planes(demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap());
+        let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
         assert_eq!(rgb.len(), w * h * 3);
     }
 
@@ -528,8 +537,7 @@ mod tests {
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb =
-            interleave_planes(demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap());
+        let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
         // Uniform input should produce approximately uniform output
         for (i, &v) in rgb.iter().enumerate() {
@@ -553,8 +561,7 @@ mod tests {
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb =
-            interleave_planes(demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap());
+        let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
         for (i, &v) in rgb.iter().enumerate() {
             assert!(v.is_finite(), "NaN/Inf at pixel {}", i);
@@ -570,8 +577,7 @@ mod tests {
         let data = vec![0u16; raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb =
-            interleave_planes(demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap());
+        let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
         for &v in &rgb {
             assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
         }
@@ -601,8 +607,7 @@ mod tests {
             None,
         );
 
-        let rgb =
-            interleave_planes(demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never()).unwrap());
+        let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
         // At green pixel positions, the green channel should be approximately the raw value
         for y in 0..h {

@@ -351,7 +351,7 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 #[test]
 #[ignore]
 fn bench_rcd_demosaic_core() {
-    use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
+    use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 
     println!("Benchmarking RCD demosaic core (synthetic data)\n");
 
@@ -367,13 +367,13 @@ fn bench_rcd_demosaic_core() {
         let bayer = BayerImage::with_margins(&data, w, h, w, h, 0, 0, CfaPattern::Rggb);
 
         // Warmup
-        let _ = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();
+        let _ = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();
 
         let iterations = 5;
         let mut times = Vec::with_capacity(iterations);
         for _ in 0..iterations {
             let start = Instant::now();
-            let _rgb = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();
+            let _rgb = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();
             let elapsed = start.elapsed();
             times.push(elapsed);
         }

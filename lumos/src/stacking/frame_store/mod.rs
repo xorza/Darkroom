@@ -14,6 +14,7 @@ use common::file_utils;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -455,8 +456,7 @@ pub(crate) fn fits_in_memory(
 
 /// Calibrated/warped pixels plus detection or warp scratch.
 pub(crate) const PER_FRAME_WORKING_PLANES: usize = 8;
-/// Adds the demosaic arena held during decode.
-pub(crate) const PER_FRAME_DECODE_PLANES: usize = 14;
+const PER_FRAME_RESIDENT_PLANES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MemoryPlan {
@@ -467,30 +467,47 @@ pub(crate) struct MemoryPlan {
 
 pub(crate) fn plan_memory(
     plane_bytes: usize,
+    demosaic: DemosaicMemory,
     frame_count: usize,
     threads: usize,
     available: u64,
 ) -> MemoryPlan {
-    let warped_bytes = 4 * plane_bytes;
-    let concurrent = frame_count.min(threads);
-    let scratch_reserve = (PER_FRAME_WORKING_PLANES as u64)
-        .saturating_mul(plane_bytes as u64)
-        .saturating_mul(concurrent as u64);
-    let frame_budget = available.saturating_sub(scratch_reserve);
-    let fits_in_ram = fits_in_memory(warped_bytes, frame_count, frame_budget);
+    assert!(
+        frame_count > 0,
+        "memory planning requires at least one frame"
+    );
+    let workers = frame_count.min(threads.max(1));
+    let working_bytes = PER_FRAME_WORKING_PLANES.saturating_mul(plane_bytes);
+    let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
+    let usable = memory_budget(available);
+
+    let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
+    let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
+    let warped_bytes = PER_FRAME_RESIDENT_PLANES.saturating_mul(plane_bytes);
+    let warped_resident = (warped_bytes as u64).saturating_mul(frame_count as u64);
+    let working_peak =
+        warped_resident.saturating_add((working_bytes as u64).saturating_mul(workers as u64));
+    let fits_in_ram = decode_minimum.max(working_peak) <= usable;
+
+    let (decode_resident_frames, decode_bytes) = if fits_in_ram {
+        (frame_count, decode_extra)
+    } else {
+        (0, demosaic.peak_bytes.max(working_bytes))
+    };
+    let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
     let decode_concurrency = load_concurrency(
-        plane_bytes,
-        PER_FRAME_DECODE_PLANES * plane_bytes,
-        0,
+        demosaic.output_bytes,
+        decode_bytes,
+        decode_resident_frames,
         available,
-        threads,
+        workers,
     );
     let warp_concurrency = load_concurrency(
-        plane_bytes,
-        PER_FRAME_WORKING_PLANES * plane_bytes,
-        0,
+        warped_bytes,
+        working_bytes,
+        warp_resident_frames,
         available,
-        threads,
+        workers,
     );
     MemoryPlan {
         fits_in_ram,

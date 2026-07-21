@@ -7,8 +7,7 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency;
-use crate::io::image::cfa::CfaImage;
-use crate::io::image::cfa_dimensions;
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
@@ -27,12 +26,6 @@ use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
-
-/// Max light frames decoded+demosaiced concurrently. The RAW decode is the one
-/// uninterruptible step, so this caps the work a cancel must drain and peak
-/// memory; the demosaic (work-conserving across cores) keeps the pool busy
-/// within a batch, so the cap costs little throughput.
-const MAX_CONCURRENT_LIGHTS: usize = 4;
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
@@ -59,13 +52,21 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // Tier decision: peek the sensor dimensions (no decode) and plan the memory tier. If the warped
     // frames plus the RAM path's per-frame scratch won't fit ~75% RAM, stream through a disk cache so
     // peak RAM stays flat in the frame count.
-    let dimensions = cfa_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
-        path: light_paths[0].as_ref().to_path_buf(),
-        source,
-    })?;
-    let plane_bytes = dimensions.pixel_count() * std::mem::size_of::<f32>();
+    let frame_info =
+        CfaFrameInfo::from_file(light_paths[0].as_ref()).map_err(|source| Error::Load {
+            path: light_paths[0].as_ref().to_path_buf(),
+            source,
+        })?;
+    let plane_bytes = frame_info.dimensions.pixel_count() * std::mem::size_of::<f32>();
+    let demosaic_memory = frame_info.demosaic.memory(frame_info.dimensions);
     let available = config.stack.cache.get_available_memory();
-    let plan = plan_memory(plane_bytes, total, rayon::current_num_threads(), available);
+    let plan = plan_memory(
+        plane_bytes,
+        demosaic_memory,
+        total,
+        rayon::current_num_threads(),
+        available,
+    );
     if !plan.fits_in_ram {
         tracing::info!(
             frames = total,
@@ -77,6 +78,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 
     tracing::info!(
         frames = total,
+        concurrency = plan.decode_concurrency,
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
     );
     let done = AtomicUsize::new(0);
@@ -86,7 +88,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // (see `CfaImage::demosaic`), so the heavy phase stays interruptible at full
     // core utilization within a batch.
     let calibrated: Vec<LinearImage> =
-        concurrency::try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
+        concurrency::try_par_map_limited(light_paths, plan.decode_concurrency, |path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));

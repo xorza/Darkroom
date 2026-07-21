@@ -436,7 +436,7 @@ loses full-raw geometry before demosaic.
 
 ## Batch 4 — make resource and cancellation promises real
 
-- [ ] **P0 — Derive memory planning from the selected demosaic algorithm and honor it on both tiers.**
+- [x] **P0 — Derive memory planning from the selected demosaic algorithm and honor it on both tiers.**
 
   **Evidence.** Markesteijn allocates an 18-`f32`-word-per-pixel arena at
   `lumos/src/io/raw/demosaic/xtrans/markesteijn.rs:41-70`, then allocates three output

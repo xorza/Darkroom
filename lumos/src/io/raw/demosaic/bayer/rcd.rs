@@ -13,7 +13,7 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
-use crate::io::raw::demosaic::Cancelled;
+use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::io::raw::{
     alloc_uninit_vec,
     demosaic::bayer::{BayerImage, CfaPattern},
@@ -25,6 +25,32 @@ const EPSSQ: f32 = 1e-10;
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
+
+pub(crate) fn demosaic_memory(
+    raw_width: usize,
+    raw_height: usize,
+    width: usize,
+    height: usize,
+) -> DemosaicMemory {
+    let raw_pixels = raw_width.saturating_mul(raw_height);
+    let active_pixels = width.saturating_mul(height);
+    let half_pixels = raw_width.div_ceil(2).saturating_mul(raw_height);
+
+    let directional_peak = raw_pixels
+        .saturating_mul(6)
+        .saturating_add(half_pixels.saturating_mul(2));
+    let output_peak = raw_pixels
+        .saturating_mul(4)
+        .saturating_add(active_pixels.saturating_mul(3));
+    DemosaicMemory {
+        output_bytes: active_pixels
+            .saturating_mul(3)
+            .saturating_mul(std::mem::size_of::<f32>()),
+        peak_bytes: directional_peak
+            .max(output_peak)
+            .saturating_mul(std::mem::size_of::<f32>()),
+    }
+}
 
 /// Pre-computed row stride multiples used throughout the algorithm.
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +115,7 @@ fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
 ///
 /// Input: Bayer data and margin info. Calibrated samples may be outside `[0, 1]`.
 /// Output: planar RGB f32 channels for the active area (width × height).
-pub(crate) fn rcd_demosaic(
+pub(crate) fn demosaic(
     bayer: &BayerImage,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {

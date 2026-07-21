@@ -56,20 +56,30 @@ fn calibration_paths() -> Option<CalibrationPaths> {
 
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn raw_dimensions_matches_full_decode() {
-    // `from_files` sizes its in-memory-vs-disk decision from `raw_dimensions` (a header peek, no
+fn raw_frame_info_matches_full_decode() {
+    // `from_files` sizes its in-memory-vs-disk decision from `raw_cfa_frame_info` (a header peek, no
     // decode). That peek must report exactly the dims a full decode produces, or the memory budget
     // would be wrong.
     let Some(paths) = calibration_paths() else {
         panic!("calibration frames missing — run scripts/fetch-test-data.sh");
     };
     let path = &paths.darks[0];
-    let peeked = raw::raw_dimensions(path).expect("peek dims");
+    let peeked = raw::raw_cfa_frame_info(path).expect("peek frame info");
     let loaded = raw::load_raw_cfa(path).expect("full decode");
     assert_eq!(
-        (peeked.x, peeked.y),
+        (peeked.dimensions.width(), peeked.dimensions.height()),
         (loaded.data.width(), loaded.data.height()),
         "peeked header dims must match the decoded frame"
+    );
+    assert_eq!(
+        peeked.demosaic,
+        loaded
+            .metadata
+            .cfa_type
+            .as_ref()
+            .expect("decoded CFA type")
+            .demosaic_kind(),
+        "peeked sensor layout must select the decoded frame's demosaic algorithm"
     );
 }
 

@@ -13,11 +13,11 @@ use crate::io::image::fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{
     ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
-    STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, scientific_rejection,
+    STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
 };
 use crate::io::raw;
-use crate::io::raw::demosaic::DemosaicError;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -53,6 +53,36 @@ impl CfaType {
         match self {
             CfaType::Mono => 1,
             CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
+        }
+    }
+
+    pub(crate) fn demosaic_kind(&self) -> DemosaicKind {
+        match self {
+            Self::Mono => DemosaicKind::Mono,
+            Self::Bayer(_) => DemosaicKind::BayerRcd,
+            Self::XTrans(_) => DemosaicKind::XTransMarkesteijn,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CfaFrameInfo {
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) demosaic: DemosaicKind,
+}
+
+impl CfaFrameInfo {
+    pub(crate) fn from_file(path: &Path) -> Result<Self, ImageError> {
+        let extension = file_extension(path);
+        if FITS_EXTENSIONS.contains(&extension.as_str()) {
+            fits::fits_cfa_frame_info(path)
+        } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+            raw::raw_cfa_frame_info(path)
+        } else {
+            Err(scientific_rejection(
+                path,
+                "scientific CFA input must be camera RAW or FITS",
+            ))
         }
     }
 }
@@ -92,7 +122,9 @@ impl StackableImage for CfaImage {
     }
 
     fn peek_dimensions(path: &std::path::Path) -> Option<ImageDimensions> {
-        cfa_dimensions(path).ok()
+        CfaFrameInfo::from_file(path)
+            .ok()
+            .map(|info| info.dimensions)
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {
@@ -181,7 +213,7 @@ impl CfaImage {
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
-                use crate::io::raw::demosaic::bayer::{BayerImage, demosaic_bayer};
+                use crate::io::raw::demosaic::bayer::{BayerImage, rcd};
 
                 let bayer = BayerImage::with_margins(
                     &pixels,
@@ -193,7 +225,7 @@ impl CfaImage {
                     0,
                     *cfa_pattern,
                 );
-                let planes = demosaic_bayer(&bayer, cancel)?;
+                let planes = rcd::demosaic(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
@@ -240,6 +272,7 @@ impl CfaImage {
 mod tests {
     use crate::io::image::cfa::*;
     use crate::io::image::error::ImageError;
+    use crate::io::raw::demosaic::DemosaicKind;
     use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
     use crate::testing::make_cfa;
 
@@ -256,6 +289,9 @@ mod tests {
         };
         let path = common::test_utils::test_output_path("cfa_master_roundtrip.fits");
         cfa.save_fits(&path).unwrap();
+        let info = CfaFrameInfo::from_file(&path).unwrap();
+        assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
+        assert_eq!(info.demosaic, DemosaicKind::BayerRcd);
         let loaded = CfaImage::from_file(&path).unwrap();
 
         assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));

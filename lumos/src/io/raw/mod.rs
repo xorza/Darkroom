@@ -21,16 +21,16 @@ use crate::io::image::error::ImageError;
 
 use rayon::prelude::*;
 
-use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::{SensorType, detect_sensor_type};
 use crate::io::image::{
     BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
     ImageProvenance, SourceContainer, TransferProvenance,
 };
-use crate::math::vec2us::Vec2us;
 use common::CancelToken;
-use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
+use demosaic::DemosaicKind;
+use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
 use imaginarium::Buffer2;
 
@@ -556,7 +556,7 @@ impl UnpackedRaw {
 
         let demosaic_start = Instant::now();
         // The u16 decode path isn't cancellable — a never-token can't yield `Cancelled`.
-        let rgb_pixels = demosaic_bayer(&bayer, &CancelToken::never())
+        let rgb_pixels = rcd::demosaic(&bayer, &CancelToken::never())
             .expect("never-token demosaic cannot be cancelled");
         let demosaic_elapsed = demosaic_start.elapsed();
 
@@ -1047,11 +1047,8 @@ pub(crate) fn load_raw(path: &Path) -> Result<LinearImage, ImageError> {
 /// Used for calibration frame processing (darks, flats, bias)
 /// where hot pixel correction must happen before demosaicing.
 ///
-/// Read just the output pixel dimensions of a RAW file from its header — opening through LibRaw
-/// without the expensive `libraw_unpack`. Returns the same `width × height` [`load_raw_cfa`]
-/// produces, so `w · h · size_of::<f32>()` is the in-memory CFA frame footprint. Cheap enough to
-/// size a memory budget before committing to full decodes.
-pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
+/// Read output dimensions and sensor layout without the expensive `libraw_unpack`.
+pub(crate) fn raw_cfa_frame_info(path: &Path) -> Result<CfaFrameInfo, ImageError> {
     // SAFETY: libraw_init returns a valid pointer or null on failure.
     let inner = unsafe { sys::libraw_init(0) };
     if inner.is_null() {
@@ -1073,7 +1070,24 @@ pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
             format!("libraw: Invalid output dimensions: {width}x{height}"),
         ));
     }
-    Ok(Vec2us::new(width, height))
+    // SAFETY: opening succeeded, so the image metadata is initialized.
+    let filters = unsafe { (*inner).idata.filters };
+    let colors = unsafe { (*inner).idata.colors };
+    let demosaic = match detect_sensor_type(filters, colors) {
+        SensorType::Monochrome => DemosaicKind::Mono,
+        SensorType::Bayer(_) => DemosaicKind::BayerRcd,
+        SensorType::XTrans => DemosaicKind::XTransMarkesteijn,
+        SensorType::Unknown => {
+            return Err(raw_err(
+                path,
+                "raw CFA extraction is unsupported for unknown sensor types",
+            ));
+        }
+    };
+    Ok(CfaFrameInfo {
+        dimensions: ImageDimensions::new((width, height), 1),
+        demosaic,
+    })
 }
 
 pub(crate) fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {

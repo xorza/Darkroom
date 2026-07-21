@@ -1,12 +1,8 @@
 //! Bayer CFA demosaicing module.
 
-mod rcd;
+pub(crate) mod rcd;
 #[cfg(test)]
 mod tests;
-
-use common::CancelToken;
-
-use crate::io::raw::demosaic::Cancelled;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
@@ -175,15 +171,4 @@ impl<'a> BayerImage<'a> {
             raw_cfa_pattern,
         }
     }
-}
-
-/// Demosaic a Bayer CFA image to RGB using the RCD algorithm.
-///
-/// Returns planar channels `[R, G, B]`, each `width * height`, cropped to the
-/// active area.
-pub(crate) fn demosaic_bayer(
-    bayer: &BayerImage,
-    cancel: &CancelToken,
-) -> Result<[Vec<f32>; 3], Cancelled> {
-    rcd::rcd_demosaic(bayer, cancel)
 }

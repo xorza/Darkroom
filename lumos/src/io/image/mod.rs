@@ -302,27 +302,6 @@ impl PreviewImage {
     }
 }
 
-pub(crate) fn cfa_dimensions(path: &Path) -> Result<ImageDimensions, ImageError> {
-    let extension = file_extension(path);
-    if FITS_EXTENSIONS.contains(&extension.as_str()) {
-        let dimensions = fits::fits_dimensions(path)?;
-        if !dimensions.is_grayscale() {
-            return Err(scientific_rejection(
-                path,
-                "scientific CFA input must have exactly one image plane",
-            ));
-        }
-        Ok(dimensions)
-    } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-        raw::raw_dimensions(path).map(|size| ImageDimensions::new(size, 1))
-    } else {
-        Err(scientific_rejection(
-            path,
-            "scientific CFA input must be camera RAW or FITS",
-        ))
-    }
-}
-
 impl From<LinearImage> for PreviewImage {
     fn from(linear: LinearImage) -> Self {
         let image = Image::from(&linear);

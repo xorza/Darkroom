@@ -10,13 +10,12 @@
 //! with homogeneity-based selection for high-quality output.
 
 mod hex_lookup;
-mod markesteijn;
+pub(crate) mod markesteijn;
 mod markesteijn_steps;
 
 use std::time::Instant;
 
 use common::CancelToken;
-use markesteijn::demosaic_xtrans_markesteijn;
 
 use crate::io::raw::BlackRepeat;
 use crate::io::raw::demosaic::DemosaicError;
@@ -59,7 +58,7 @@ pub(crate) fn process_xtrans(
 
     let demosaic_start = Instant::now();
     // The u16 decode path isn't cancellable — a never-token can't yield `Cancelled`.
-    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never())
+    let rgb_pixels = markesteijn::demosaic(&xtrans, &CancelToken::never())
         .expect("never-token demosaic cannot be cancelled");
     let demosaic_elapsed = demosaic_start.elapsed();
 
@@ -102,7 +101,7 @@ pub(crate) fn process_xtrans_f32(
     );
 
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans, cancel)?;
+    let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(

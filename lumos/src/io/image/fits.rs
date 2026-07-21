@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use common::{CancelToken, file_utils};
 use imaginarium::Buffer2;
 
-use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{
@@ -134,6 +134,43 @@ fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
+fn validate_cfa_container_headers(
+    path: &Path,
+    primary: Option<&Header>,
+    image: &Header,
+) -> Result<bool, ImageError> {
+    if let Some(primary) = primary
+        && let Some(format) = primary
+            .get_text("LUMOSFMT")
+            .map_err(|source| fits_err(path, source))?
+        && format != CFA_FITS_FORMAT
+    {
+        return Err(fits_unsupported(
+            path,
+            format!("Lumos {format} FITS is not a standalone {CFA_FITS_FORMAT} image"),
+        ));
+    }
+
+    let is_lumos_cfa = image
+        .get_text("LUMOSFMT")
+        .map_err(|source| fits_err(path, source))?
+        .is_some_and(|format| format == CFA_FITS_FORMAT);
+    if is_lumos_cfa {
+        let version = image
+            .get_integer("LUMOSVER")
+            .map_err(|source| fits_err(path, source))?;
+        if version != Some(CFA_FITS_VERSION) {
+            return Err(fits_unsupported(
+                path,
+                format!(
+                    "unsupported Lumos CFA FITS version {version:?}; expected {CFA_FITS_VERSION}"
+                ),
+            ));
+        }
+    }
+    Ok(is_lumos_cfa)
+}
+
 /// Load an already-linear astronomical image from a FITS file.
 pub(crate) fn load_linear_fits(path: &Path) -> Result<LinearImage, ImageError> {
     read_first_image(path)?.into_linear(path)
@@ -177,40 +214,16 @@ pub(crate) fn load_cfa_fits(path: &Path) -> Result<CfaImage, ImageError> {
         source,
     })?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(|source| fits_err(path, source))?;
-    if let Some(primary) = reader.hdus().first()
-        && let Some(format) = primary
-            .header
-            .get_text("LUMOSFMT")
-            .map_err(|source| fits_err(path, source))?
-        && format != CFA_FITS_FORMAT
-    {
-        return Err(fits_unsupported(
-            path,
-            format!("Lumos {format} FITS is not a standalone {CFA_FITS_FORMAT} image"),
-        ));
-    }
     let index = *reader
         .image_indices()
         .first()
         .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
-    if reader.hdus()[index]
-        .header
-        .get_text("LUMOSFMT")
-        .map_err(|source| fits_err(path, source))?
-        .is_some_and(|format| format == CFA_FITS_FORMAT)
-    {
-        let version = reader.hdus()[index]
-            .header
-            .get_integer("LUMOSVER")
-            .map_err(|source| fits_err(path, source))?;
-        if version != Some(CFA_FITS_VERSION) {
-            return Err(fits_unsupported(
-                path,
-                format!(
-                    "unsupported Lumos CFA FITS version {version:?}; expected {CFA_FITS_VERSION}"
-                ),
-            ));
-        }
+    let is_lumos_cfa = validate_cfa_container_headers(
+        path,
+        reader.hdus().first().map(|hdu| &hdu.header),
+        &reader.hdus()[index].header,
+    )?;
+    if is_lumos_cfa {
         let report = reader
             .verify_checksum(index)
             .map_err(|source| fits_err(path, source))?;
@@ -351,7 +364,7 @@ pub(crate) fn fits_to_io(source: fits_well::FitsError) -> IoError {
     }
 }
 
-pub(crate) fn fits_dimensions(path: &Path) -> Result<ImageDimensions, ImageError> {
+pub(crate) fn fits_cfa_frame_info(path: &Path) -> Result<CfaFrameInfo, ImageError> {
     let file = File::open(path).map_err(|source| ImageError::Io {
         path: path.to_path_buf(),
         source,
@@ -362,13 +375,36 @@ pub(crate) fn fits_dimensions(path: &Path) -> Result<ImageDimensions, ImageError
         .first()
         .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
     let hdu = &reader.hdus()[index];
+    validate_cfa_container_headers(
+        path,
+        reader.hdus().first().map(|primary| &primary.header),
+        &hdu.header,
+    )?;
     let shape = match hdu.kind {
         HduKind::CompressedImage => {
             compressed_shape(&hdu.header).map_err(|source| fits_err(path, source))?
         }
         _ => hdu.header.axes().map_err(|source| fits_err(path, source))?,
     };
-    dimensions_from_shape(path, &shape)
+    let dimensions = dimensions_from_shape(path, &shape)?;
+    if !dimensions.is_grayscale() {
+        return Err(fits_unsupported(
+            path,
+            "scientific CFA input must have exactly one image plane",
+        ));
+    }
+    let cfa_type = read_cfa_from_headers(&hdu.header)
+        .map_err(|source| fits_err(path, source))?
+        .ok_or_else(|| {
+            fits_unsupported(
+                path,
+                "scientific CFA FITS input is missing validated CFA pattern metadata",
+            )
+        })?;
+    Ok(CfaFrameInfo {
+        dimensions,
+        demosaic: cfa_type.demosaic_kind(),
+    })
 }
 
 fn compressed_shape(header: &Header) -> fits_well::Result<Vec<usize>> {

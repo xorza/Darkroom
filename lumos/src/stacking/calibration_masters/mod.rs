@@ -18,8 +18,7 @@ use std::path::Path;
 
 use common::CancelToken;
 
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::cfa_dimensions;
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -153,9 +152,9 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     else {
         return true;
     };
-    match cfa_dimensions(first.as_ref()) {
-        Ok(dims) => fits_in_memory(
-            dims.pixel_count() * std::mem::size_of::<f32>(),
+    match CfaFrameInfo::from_file(first.as_ref()) {
+        Ok(info) => fits_in_memory(
+            info.dimensions.pixel_count() * std::mem::size_of::<f32>(),
             total_frames,
             available,
         ),
