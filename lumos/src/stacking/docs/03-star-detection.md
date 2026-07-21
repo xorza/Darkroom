@@ -58,7 +58,7 @@ This stage does not:
 ### 2.1 Required input bundle
 
 The detector SHOULD receive a named input structure rather than a bare
-`AstroImage`:
+`LinearImage`:
 
 ```text
 StarDetectionInput

@@ -32,7 +32,7 @@ src/
 | `image/mod.rs` | `Image` — `imaginarium::ImageBuffer` as a `CustomValue` (thumbnail via the fused `imaginarium::Preview` op: `make_cpu` + one-pass downscale→RGBA8). |
 | `image/library.rs` | `image_library()` — imaginarium nodes (category `image`). |
 | `image/{blend_mode,conversion_format,vision_ctx}.rs` | `BlendMode`/`ColorFormat` datatypes; `VisionCtx` (GPU/CPU `ProcessingContext`). |
-| `astro/mod.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
+| `astro/mod.rs` | `AstroFrame` — `lumos::LinearImage` as a `CustomValue` (CPU thumbnail preview). |
 | `astro/library/` | `astro_library()` — lumos nodes (category `astro`); tests in `tests.rs`. |
 | `astro/masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 | `astro/presets.rs` | `preset_enum!` macro + preset enums → lumos stage configs. Each enum gives a `variant_names()` list (the node's `value_variants` quick-pick) + `FromStr`/`config()`. No `DataType` handles — every preset node is a config-typed input with a `build_*_config` override. |
@@ -44,7 +44,7 @@ src/
 - `image_library()` — builds a `Library` of the imaginarium image nodes.
 - `astro_library()` — builds a `Library` of the lumos astro nodes.
 - `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`; `gen_preview` reads a CPU view (`make_cpu` — no-op on CPU, download on GPU) and builds the thumbnail with the fused `imaginarium::Preview` op (area-average downscale + RGBA8 convert in one pass).
-- `AstroFrame` — wrapper around `lumos::AstroImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
+- `AstroFrame` — wrapper around `lumos::LinearImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
 - `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
 - `ConversionFormat` — enum of the 12 color-format conversion targets.

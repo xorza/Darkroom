@@ -2,9 +2,13 @@ use crate::image_ops::rgb::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
+#[cfg(feature = "real-data")]
+use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
+#[cfg(feature = "real-data")]
+use common::CancelToken;
 
 #[test]
 fn loadable_extensions_match_decoder_policies() {
@@ -29,7 +33,7 @@ fn test_metadata_default() {
 
 #[test]
 fn test_convert_to_imaginarium_image_grayscale() {
-    let astro = AstroImage::from_pixels(
+    let astro = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
     );
@@ -50,7 +54,7 @@ fn test_convert_to_imaginarium_image_grayscale() {
 
 #[test]
 fn test_convert_to_imaginarium_image_rgb() {
-    let astro = AstroImage::from_pixels(
+    let astro = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
             1.0, 0.0, 0.0, // red
@@ -83,7 +87,7 @@ fn test_convert_fits_to_imaginarium_image() {
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
     );
-    let astro = AstroImage::from_file(path).unwrap();
+    let astro = LinearImage::from_file(path).unwrap();
     let image: Image = astro.into();
 
     let desc = image.desc;
@@ -98,7 +102,7 @@ fn test_load_full_example_fits() {
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
     );
-    let image = AstroImage::from_file(path).unwrap();
+    let image = LinearImage::from_file(path).unwrap();
 
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
@@ -128,29 +132,29 @@ fn test_from_image_no_stride_padding() {
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let astro: AstroImage = image.into();
+    let linear = linear_from_image(&image);
 
-    assert_eq!(astro.width(), 3);
-    assert_eq!(astro.height(), 2);
-    assert_eq!(astro.channels(), 1);
-    assert_eq!(astro.channel(0).pixels(), &pixels[..]);
+    assert_eq!(linear.width(), 3);
+    assert_eq!(linear.height(), 2);
+    assert_eq!(linear.channels(), 1);
+    assert_eq!(linear.channel(0).pixels(), &pixels[..]);
 }
 
 #[test]
 fn test_mean() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
     assert!((image.mean() - 2.5).abs() < f32::EPSILON);
 }
 
 #[test]
 fn test_save_grayscale_tiff() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_gray.tiff");
 
     image.save(&output_path).unwrap();
     assert!(output_path.exists());
 
-    let loaded = AstroImage::from_file(&output_path).unwrap();
+    let loaded = LinearImage::from_file(&output_path).unwrap();
     assert_eq!(loaded.width(), 2);
     assert_eq!(loaded.height(), 2);
     assert_eq!(loaded.channels(), 1);
@@ -158,7 +162,7 @@ fn test_save_grayscale_tiff() {
 
 #[test]
 fn test_save_rgb_tiff() {
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
     );
@@ -167,7 +171,7 @@ fn test_save_rgb_tiff() {
     image.save(&output_path).unwrap();
     assert!(output_path.exists());
 
-    let loaded = AstroImage::from_file(&output_path).unwrap();
+    let loaded = LinearImage::from_file(&output_path).unwrap();
     assert_eq!(loaded.width(), 2);
     assert_eq!(loaded.height(), 2);
     assert_eq!(loaded.channels(), 3);
@@ -184,7 +188,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .unwrap();
     float_image.save_file(&float_path).unwrap();
 
-    let scientific = AstroImage::from_file(&float_path).unwrap();
+    let scientific = LinearImage::from_file(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
     let preview: Image = PreviewImage::from_file(&float_path).unwrap().into();
     assert_eq!(preview.desc.color_format, ColorFormat::L_F32);
@@ -204,11 +208,11 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     for path in [&integer_tiff, &png, &jpeg] {
         integer_image.save_file(path).unwrap();
         assert!(matches!(
-            AstroImage::from_file(path),
+            LinearImage::from_file(path),
             Err(ImageError::ScientificInputRejected { .. })
         ));
         assert!(matches!(
-            <AstroImage as StackableImage>::load(path),
+            <LinearImage as StackableImage>::load(path),
             Err(ImageError::ScientificInputRejected { .. })
         ));
         PreviewImage::from_file(path).unwrap();
@@ -224,7 +228,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .save_file(&alpha_path)
     .unwrap();
     assert!(matches!(
-        AstroImage::from_file(&alpha_path),
+        LinearImage::from_file(&alpha_path),
         Err(ImageError::ScientificInputRejected { .. })
     ));
     let alpha_preview = PreviewImage::from_file(&alpha_path).unwrap();
@@ -240,14 +244,14 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let nonexistent_raw = test_output_path("product_constructors/nonexistent.dng");
     assert!(matches!(
-        AstroImage::from_file(nonexistent_raw),
+        LinearImage::from_file(nonexistent_raw),
         Err(ImageError::ScientificInputRejected { .. })
     ));
 }
 
 #[test]
 fn test_save_invalid_extension() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_invalid.xyz");
 
     let result = image.save(&output_path);
@@ -255,27 +259,27 @@ fn test_save_invalid_extension() {
 }
 
 #[test]
-fn test_roundtrip_astro_to_image_to_astro() {
-    let gray = AstroImage::from_pixels(
+fn test_roundtrip_linear_to_image_to_linear() {
+    let gray = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
     );
 
     let image: Image = gray.clone().into();
-    let restored: AstroImage = image.into();
+    let restored = linear_from_image(&image);
 
     assert_eq!(restored.dimensions(), gray.dimensions());
     for (a, b) in gray.channel(0).iter().zip(restored.channel(0).iter()) {
         assert!((a - b).abs() < 1e-6);
     }
 
-    let rgb = AstroImage::from_pixels(
+    let rgb = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
     );
 
     let image: Image = rgb.clone().into();
-    let restored: AstroImage = image.into();
+    let restored = linear_from_image(&image);
 
     assert_eq!(restored.dimensions(), rgb.dimensions());
     for c in 0..rgb.channels() {
@@ -286,21 +290,21 @@ fn test_roundtrip_astro_to_image_to_astro() {
 }
 
 #[test]
-fn test_image_rgba_to_astro_drops_alpha() {
+fn test_image_rgba_to_linear_drops_alpha() {
     let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
     let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let astro: AstroImage = image.into();
+    let linear = linear_from_image(&image);
 
-    assert_eq!(astro.channels(), 3);
-    assert!((astro.channel(0)[0] - 1.0).abs() < 1e-6);
-    assert!((astro.channel(1)[0] - 0.0).abs() < 1e-6);
-    assert!((astro.channel(2)[0] - 0.0).abs() < 1e-6);
-    assert!((astro.channel(0)[1] - 0.0).abs() < 1e-6);
-    assert!((astro.channel(1)[1] - 1.0).abs() < 1e-6);
-    assert!((astro.channel(2)[1] - 0.0).abs() < 1e-6);
+    assert_eq!(linear.channels(), 3);
+    assert!((linear.channel(0)[0] - 1.0).abs() < 1e-6);
+    assert!((linear.channel(1)[0] - 0.0).abs() < 1e-6);
+    assert!((linear.channel(2)[0] - 0.0).abs() < 1e-6);
+    assert!((linear.channel(0)[1] - 0.0).abs() < 1e-6);
+    assert!((linear.channel(1)[1] - 1.0).abs() < 1e-6);
+    assert!((linear.channel(2)[1] - 0.0).abs() < 1e-6);
 }
 
 #[cfg(feature = "real-data")]
@@ -328,10 +332,10 @@ fn test_load_single_raw_from_env() {
 
     println!("Loading file: {:?}", first_file);
 
-    let image: imaginarium::Image = PreviewImage::from_file(first_file)
-        .expect("Failed to load image")
-        .into();
-    let image: AstroImage = image.into();
+    let image = CfaImage::from_file(first_file)
+        .expect("Failed to load CFA image")
+        .demosaic(&CancelToken::never())
+        .expect("Failed to demosaic CFA image");
 
     println!(
         "Loaded image: {}x{}x{}",
@@ -353,7 +357,7 @@ fn test_load_single_raw_from_env() {
 
 #[test]
 fn test_rgb_image_creation_and_operations() {
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
             10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
@@ -375,7 +379,7 @@ fn test_rgb_image_creation_and_operations() {
 
 #[test]
 fn test_get_pixel_gray() {
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
@@ -390,7 +394,7 @@ fn test_get_pixel_gray() {
 
 #[test]
 fn test_get_pixel_channel_rgb() {
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
@@ -414,14 +418,14 @@ fn test_get_pixel_channel_rgb() {
 #[test]
 fn test_from_planar_channels_grayscale() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
-    let image = AstroImage::from_planar_channels(ImageDimensions::new((2, 2), 1), channels);
+    let image = LinearImage::from_planar_channels(ImageDimensions::new((2, 2), 1), channels);
 
     assert!(image.is_grayscale());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
 
     let plane = Buffer2::new(2, 2, vec![5.0, 6.0, 7.0, 8.0]);
     let pixels = plane.pixels().as_ptr();
-    let image = AstroImage::from(plane);
+    let image = LinearImage::from(plane);
     assert_eq!(image.dimensions(), ImageDimensions::new((2, 2), 1));
     assert_eq!(image.channel(0).pixels(), &[5.0, 6.0, 7.0, 8.0]);
     assert_eq!(image.channel(0).pixels().as_ptr(), pixels);
@@ -429,7 +433,7 @@ fn test_from_planar_channels_grayscale() {
 
 #[test]
 fn test_from_planar_channels_rgb() {
-    let image = AstroImage::from_planar_channels(
+    let image = LinearImage::from_planar_channels(
         ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
     );
@@ -445,7 +449,7 @@ fn test_from_planar_channels_rgb() {
         Buffer2::new(2, 1, vec![11.0, 12.0]),
     ];
     let green_pixels = planes[1].pixels().as_ptr();
-    let image = AstroImage::from(planes);
+    let image = LinearImage::from(planes);
     assert_eq!(image.dimensions(), ImageDimensions::new((2, 1), 3));
     assert_eq!(image.channel(0).pixels(), &[7.0, 8.0]);
     assert_eq!(image.channel(1).pixels(), &[9.0, 10.0]);
@@ -456,7 +460,7 @@ fn test_from_planar_channels_rgb() {
 #[test]
 fn test_channel_mut() {
     let mut image =
-        AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
+        LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     image.channel_mut(0)[0] = 10.0;
     image.channel_mut(0)[3] = 40.0;
@@ -466,7 +470,7 @@ fn test_channel_mut() {
 
 #[test]
 fn test_get_pixel_rgb() {
-    let image = AstroImage::from_pixels(
+    let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
@@ -491,7 +495,7 @@ fn test_get_pixel_rgb() {
 
 #[test]
 fn test_set_pixel_rgb() {
-    let mut image = AstroImage::from_pixels(
+    let mut image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
@@ -536,7 +540,7 @@ fn test_set_pixel_rgb() {
 #[test]
 fn test_get_pixel_gray_mut() {
     let mut image =
-        AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
+        LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     *image.get_pixel_gray_mut(0, 0) = 10.0;
     *image.get_pixel_gray_mut(1, 1) = 40.0;
@@ -547,7 +551,7 @@ fn test_get_pixel_gray_mut() {
 
 #[test]
 fn test_into_interleaved_pixels_grayscale() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     let interleaved = image.into_interleaved_pixels();
     assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0]);
@@ -555,7 +559,7 @@ fn test_into_interleaved_pixels_grayscale() {
 
 #[test]
 fn test_into_interleaved_pixels_rgb() {
-    let image = AstroImage::from_planar_channels(
+    let image = LinearImage::from_planar_channels(
         ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 4.0], vec![2.0, 5.0], vec![3.0, 6.0]],
     );
@@ -566,11 +570,11 @@ fn test_into_interleaved_pixels_rgb() {
 
 #[test]
 fn test_sub_assign() {
-    let mut image = AstroImage::from_pixels(
+    let mut image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
-    let source = AstroImage::from_pixels(
+    let source = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
     );

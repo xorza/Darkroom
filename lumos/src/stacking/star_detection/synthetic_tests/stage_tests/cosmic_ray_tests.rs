@@ -2,7 +2,7 @@
 //!
 //! Tests the cosmic ray detection via sharpness filtering.
 
-use crate::{AstroImage, ImageDimensions};
+use crate::{ImageDimensions, LinearImage};
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
@@ -50,7 +50,7 @@ fn test_cosmic_ray_rejection() {
     detection_config.fwhm.expected = 0.0;
 
     let image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
+        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
     let mut detector = StarDetector::from_config(detection_config.clone()).unwrap();
     let result = detector.detect(&image);
     let stars = result.stars;
@@ -168,7 +168,7 @@ fn detected_real_stars_have_low_sharpness() {
 
     let mut detection_config = Config::default();
     detection_config.fwhm.expected = 0.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
+    let image = LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
     let stars = StarDetector::from_config(detection_config)
         .unwrap()
         .detect(&image)

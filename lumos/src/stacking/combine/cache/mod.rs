@@ -6,7 +6,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::astro_image::{AstroImageMetadata, ImageDimensions, LinearImage, PixelData};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -578,7 +578,7 @@ impl LightCache {
             chunk_available_memory,
         } = combined;
         let dimensions = self.core.dimensions;
-        let image = AstroImage {
+        let image = LinearImage {
             metadata: self.core.metadata.clone(),
             dimensions,
             pixels,

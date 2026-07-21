@@ -10,8 +10,8 @@ use rayon::prelude::*;
 use crate::io::astro_image::cfa::CfaType;
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{
-    AstroImage, AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, SourceContainer, TransferProvenance,
+    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
+    ImageDimensions, ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
 };
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
@@ -29,7 +29,7 @@ fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
 }
 
 /// Load an astronomical image from a FITS file.
-pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
+pub(crate) fn load_fits(path: &Path) -> Result<LinearImage, ImageError> {
     // Read the whole file once, then decode straight from the bytes: `from_bytes`
     // borrows the buffer in place, so `read_image` skips the per-data-unit staging
     // copy that the seeking `open` path pays.
@@ -104,14 +104,14 @@ pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
     // Use from_planar_channels for RGB, from_pixels for grayscale.
-    let mut astro = if img_dims.channels == 3 {
+    let mut image = if img_dims.channels == 3 {
         let channels = pixels.chunks_exact(plane_size).map(|c| c.to_vec());
-        AstroImage::from_planar_channels(img_dims, channels)
+        LinearImage::from_planar_channels(img_dims, channels)
     } else {
-        AstroImage::from_pixels(img_dims, pixels)
+        LinearImage::from_pixels(img_dims, pixels)
     };
-    astro.metadata = metadata;
-    Ok(astro)
+    image.metadata = metadata;
+    Ok(image)
 }
 
 pub(crate) fn fits_dimensions(path: &Path) -> Result<ImageDimensions, ImageError> {
@@ -232,7 +232,7 @@ struct NullSummary {
 }
 
 /// `physical_f32` represents integer `BLANK` and floating nulls as non-finite values. Until
-/// `AstroImage` carries a validity plane, accepting those values would either poison arithmetic or
+/// `LinearImage` carries a validity plane, accepting those values would either poison arithmetic or
 /// invent valid zero-valued samples, so the entire image is rejected with a summary.
 fn validate_fits_pixels(pixels: Vec<f32>) -> Result<Vec<f32>, NullSummary> {
     let nulls = pixels

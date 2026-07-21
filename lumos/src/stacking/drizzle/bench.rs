@@ -8,7 +8,7 @@ use glam::DVec2;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::LinearImage;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::stack::drizzle_images;
@@ -20,7 +20,7 @@ const N_FRAMES: usize = 8;
 
 /// `N_FRAMES` copies of one synthetic field, each with a small sub-pixel dither — the input a
 /// drizzle integration sees.
-fn dithered_set() -> Vec<DrizzleFrame<AstroImage>> {
+fn dithered_set() -> Vec<DrizzleFrame<LinearImage>> {
     let base = star_field(1000, 1000, 250, 5).image;
     (0..N_FRAMES)
         .map(|i| {

@@ -9,10 +9,10 @@
 //! # Quick Start
 //!
 //! ```rust,ignore
-//! use lumos::{AstroImage, StarDetectionConfig, StarDetector};
+//! use lumos::{LinearImage, StarDetectionConfig, StarDetector};
 //!
 //! // Load an astronomical image
-//! let image = AstroImage::from_file("linear_light_001.fits")?;
+//! let image = LinearImage::from_file("linear_light_001.fits")?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
@@ -36,9 +36,9 @@ pub mod testing;
 pub use io::astro_image::cfa::{CfaImage, CfaType};
 pub use io::astro_image::error::ImageError;
 pub use io::astro_image::{
-    AstroImage, AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
-    TransferProvenance,
+    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
+    ImageDimensions, ImageProvenance, LinearImage, PREVIEW_IMAGE_EXTENSIONS, PreviewImage,
+    SourceContainer, TransferProvenance,
 };
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;

@@ -11,7 +11,7 @@ use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, LinearImage,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
     StarDetector, register, stack, warp,
 };
@@ -120,7 +120,7 @@ fn bench_full_pipeline() {
     assert!(!light_paths.is_empty(), "No light frames found");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
-    let calibrated: Vec<AstroImage> = concurrency::try_par_map_limited(&light_paths, 3, |p| {
+    let calibrated: Vec<LinearImage> = concurrency::try_par_map_limited(&light_paths, 3, |p| {
         let mut cfa = load_raw_cfa(p).unwrap();
         masters.calibrate(&mut cfa).unwrap();
         Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
@@ -167,13 +167,13 @@ fn bench_full_pipeline() {
     let ref_stars = &all_stars[0];
 
     // Pair up frames to register (skip reference frame 0)
-    let to_register: Vec<(&AstroImage, &[Star])> = calibrated[1..]
+    let to_register: Vec<(&LinearImage, &[Star])> = calibrated[1..]
         .iter()
         .zip(all_stars[1..].iter())
         .map(|(img, stars)| (img, stars.as_slice()))
         .collect();
 
-    let warped_frames: Vec<AstroImage> =
+    let warped_frames: Vec<LinearImage> =
         concurrency::try_par_map_limited(&to_register, 3, |(img, stars)| {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
@@ -194,7 +194,7 @@ fn bench_full_pipeline() {
     println!("  Elapsed: {:?}", step_start.elapsed());
 
     // Build registered set: reference (unwarped) + warped frames
-    let mut registered: Vec<&AstroImage> = Vec::with_capacity(calibrated.len());
+    let mut registered: Vec<&LinearImage> = Vec::with_capacity(calibrated.len());
     registered.push(&calibrated[0]);
     for warped in &warped_frames {
         registered.push(warped);

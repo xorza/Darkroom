@@ -13,7 +13,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
 use crate::stacking::frame_store::StackableImage;
 use crate::testing::make_cfa;
-use crate::{AstroImage, CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
+use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, LinearImage, PreviewImage};
 use common::CancelToken;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
@@ -21,7 +21,7 @@ use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
-fn write_and_load(name: &str, image: &Image) -> Result<AstroImage, ImageError> {
+fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image).unwrap();
@@ -37,7 +37,7 @@ fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::P
     path
 }
 
-fn write_header_and_load(name: &str, header: &Header) -> Result<AstroImage, ImageError> {
+fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, ImageError> {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
@@ -165,7 +165,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let path = write_with_header("bayer_cfa", &image, &header);
 
     assert!(matches!(
-        AstroImage::from_file(&path),
+        LinearImage::from_file(&path),
         Err(ImageError::ScientificInputRejected { .. })
     ));
     let mut loaded = CfaImage::from_file(&path).unwrap();

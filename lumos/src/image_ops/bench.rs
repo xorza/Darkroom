@@ -21,7 +21,8 @@ use imaginarium::Image;
 
 use crate::testing::calibration_dir;
 use crate::{
-    AstroImage, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
+    Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast, NeutralizeBackground, Scnr,
+    Stretch,
 };
 
 // Must match the `#[quick_bench]` attributes below: quickbench's iter-capped loops call the closure
@@ -33,7 +34,7 @@ const ITERS: usize = 5;
 /// receive (a real stack, so its bright star cores exceed 1.0).
 fn linear_master() -> Image {
     Image::from(
-        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff"))
+        &LinearImage::from_file(calibration_dir().join("stacked_light.tiff"))
             .expect("load stacked_light.tiff"),
     )
 }

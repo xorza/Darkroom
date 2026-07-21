@@ -24,8 +24,8 @@ use rayon::prelude::*;
 use crate::io::astro_image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{
-    AstroImage, AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
-    ImageDimensions, ImageProvenance, SourceContainer, TransferProvenance,
+    AstroImageMetadata, BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance,
+    ImageDimensions, ImageProvenance, LinearImage, SourceContainer, TransferProvenance,
 };
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
@@ -911,9 +911,9 @@ fn open_libraw_input(
 /// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
 ///
 /// Our RGB demosaic kernels emit planar `[R, G, B]`, taken zero-copy into the
-/// image via [`AstroImage::from_planar_channels`]. The mono path and libraw's
+/// image via [`LinearImage::from_planar_channels`]. The mono path and libraw's
 /// fallback emit a single flat buffer — grayscale or interleaved RGB — that
-/// [`AstroImage::from_pixels`] handles (grayscale zero-copy, RGB de-interleaved).
+/// [`LinearImage::from_pixels`] handles (grayscale zero-copy, RGB de-interleaved).
 #[derive(Debug)]
 enum DemosaicedPixels {
     Planar([Vec<f32>; 3]),
@@ -931,7 +931,7 @@ struct DecodedRawPreview {
     demosaic: DemosaicProvenance,
 }
 
-fn clamp_direct_raw_image(image: &mut AstroImage) {
+fn clamp_direct_raw_image(image: &mut LinearImage) {
     for channel in 0..image.channels() {
         image
             .channel_mut(channel)
@@ -941,7 +941,7 @@ fn clamp_direct_raw_image(image: &mut AstroImage) {
     }
 }
 
-pub(crate) fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
+pub(crate) fn load_raw(path: &Path) -> Result<LinearImage, ImageError> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
@@ -1031,13 +1031,13 @@ pub(crate) fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     drop(raw);
 
     let dimensions = ImageDimensions::new((width, height), channels);
-    let mut astro = match pixels {
-        DemosaicedPixels::Planar(planes) => AstroImage::from_planar_channels(dimensions, planes),
-        DemosaicedPixels::Flat(px) => AstroImage::from_pixels(dimensions, px),
+    let mut image = match pixels {
+        DemosaicedPixels::Planar(planes) => LinearImage::from_planar_channels(dimensions, planes),
+        DemosaicedPixels::Flat(px) => LinearImage::from_pixels(dimensions, px),
     };
-    clamp_direct_raw_image(&mut astro);
-    astro.metadata = metadata;
-    Ok(astro)
+    clamp_direct_raw_image(&mut image);
+    image.metadata = metadata;
+    Ok(image)
 }
 
 /// Load raw file and return un-demosaiced CFA data.

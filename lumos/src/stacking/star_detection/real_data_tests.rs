@@ -8,12 +8,20 @@ use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::{calibration_dir, init_tracing};
-use crate::{AstroImage, CentroidMethod};
+use crate::{CentroidMethod, ImageDimensions, LinearImage};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
+
+fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
+    assert_eq!(image.desc.color_format, ColorFormat::L_F32);
+    LinearImage::from_pixels(
+        ImageDimensions::new((image.desc.width, image.desc.height), 1),
+        bytemuck::cast_slice(image.bytes()).to_vec(),
+    )
+}
 
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
@@ -34,17 +42,17 @@ fn test_detect_rho_opiuchi() {
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 
-    let astro_image: AstroImage = img.into();
+    let linear_image = linear_image_from_l_f32(&img);
     println!(
         "Image size: {}x{}",
-        astro_image.width(),
-        astro_image.height()
+        linear_image.width(),
+        linear_image.height()
     );
 
     let mut detector = StarDetector::from_config(Config::precise_ground()).unwrap();
 
     let start = Instant::now();
-    let result = detector.detect(&astro_image);
+    let result = detector.detect(&linear_image);
     let elapsed = start.elapsed();
 
     println!("Detection time: {:?}", elapsed);
@@ -138,9 +146,9 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 
-    let astro_image: AstroImage = img.into();
-    let width = astro_image.width();
-    let height = astro_image.height();
+    let linear_image = linear_image_from_l_f32(&img);
+    let width = linear_image.width();
+    let height = linear_image.height();
     println!("Image size: {width}x{height}");
 
     let config = Config::precise_ground();
@@ -149,7 +157,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     let out = |name: &str| test_output_path(&format!("rho-opiuchi-inspect/{name}"));
 
     // 1. Grayscale
-    let grayscale = prepare::prepare(&astro_image, &mut pool);
+    let grayscale = prepare::prepare(&linear_image, &mut pool);
     image_writer::save_grayscale_stretched(
         grayscale.pixels(),
         width,
@@ -306,15 +314,15 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 
-    let astro_image: AstroImage = img.into();
+    let linear_image = linear_image_from_l_f32(&img);
     println!(
         "Image size: {}x{}",
-        astro_image.width(),
-        astro_image.height()
+        linear_image.width(),
+        linear_image.height()
     );
     let mut config = Config::precise_ground();
     config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
     let mut detector = StarDetector::from_config(config).unwrap();
 
-    b.bench(|| detector.detect(&astro_image));
+    b.bench(|| detector.detect(&linear_image));
 }

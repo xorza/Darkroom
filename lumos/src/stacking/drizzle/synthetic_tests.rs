@@ -7,7 +7,7 @@
 
 use glam::DVec2;
 
-use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::LinearImage;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::stack::drizzle_images;
@@ -24,7 +24,7 @@ fn dithered_frames(
     scene: &Scene,
     camera: &Camera,
     dithers: &[DVec2],
-) -> (Vec<AstroImage>, Vec<Transform>) {
+) -> (Vec<LinearImage>, Vec<Transform>) {
     dithers
         .iter()
         .map(|&d| {
@@ -41,9 +41,9 @@ fn dithered_frames(
 }
 
 fn drizzle_frames(
-    images: Vec<AstroImage>,
+    images: Vec<LinearImage>,
     transforms: &[Transform],
-) -> Vec<DrizzleFrame<AstroImage>> {
+) -> Vec<DrizzleFrame<LinearImage>> {
     assert_eq!(images.len(), transforms.len());
     images
         .into_iter()
@@ -203,7 +203,7 @@ fn drizzle_dithering_recovers_resolution() {
         ProgressCallback::default(),
     )
     .unwrap();
-    let replicated_imgs: Vec<AstroImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
+    let replicated_imgs: Vec<LinearImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
     let replicated_tf: Vec<Transform> = (0..dithers.len()).map(|_| transforms[4]).collect();
     let replicated = drizzle_images(
         drizzle_frames(replicated_imgs, &replicated_tf),

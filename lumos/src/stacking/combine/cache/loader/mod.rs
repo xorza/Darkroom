@@ -11,7 +11,7 @@ use common::file_utils;
 
 use crate::concurrency;
 use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
+use crate::io::astro_image::{AstroImageMetadata, ImageDimensions, LinearImage};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -168,7 +168,7 @@ impl LightCache {
             frames,
             frame_stats,
             core,
-        } = load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
+        } = load_tiered::<LinearImage, P>(paths, config, progress, cancel)?;
         let frame_norms = compute_frame_norms(&frame_stats, normalization);
         let frames = frames
             .into_iter()

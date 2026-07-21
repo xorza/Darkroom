@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::LinearImage;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;
@@ -26,7 +26,7 @@ use crate::stacking::pipeline::result::{AlignStackResult, Error};
 /// the stack proceeds with whatever aligned. A single
 /// input frame is returned as its own "stack".
 pub fn align_and_stack(
-    lights: Vec<AstroImage>,
+    lights: Vec<LinearImage>,
     config: &AlignStackConfig,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
@@ -64,7 +64,7 @@ pub fn align_and_stack(
             Ok::<_, Error>(result.stars)
         })
     }?;
-    let mut detected_frames: Vec<DetectedFrame<AstroImage>> = lights
+    let mut detected_frames: Vec<DetectedFrame<LinearImage>> = lights
         .into_iter()
         .zip(detected_stars)
         .map(|(image, stars)| DetectedFrame { image, stars })

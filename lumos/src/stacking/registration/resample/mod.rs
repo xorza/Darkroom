@@ -2,7 +2,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::AstroImage;
+use crate::LinearImage;
 use crate::io::astro_image::PixelData;
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::transform::WarpTransform;
@@ -23,7 +23,7 @@ mod tests;
 /// the inverse white-noise variance implied by the normalized interpolation coefficients.
 #[derive(Debug)]
 pub struct WarpResult {
-    pub image: AstroImage,
+    pub image: LinearImage,
     pub coverage: Buffer2<f32>,
     pub confidence: Buffer2<f32>,
 }
@@ -52,8 +52,12 @@ pub struct WarpResult {
 /// let config = RegistrationConfig::default();
 /// let aligned = warp(&target_image, &result.warp_transform(), &config.warp).image;
 /// ```
-pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpParams) -> WarpResult {
-    let mut output = AstroImage {
+pub fn warp(
+    image: &LinearImage,
+    warp_transform: &WarpTransform,
+    config: &WarpParams,
+) -> WarpResult {
+    let mut output = LinearImage {
         metadata: image.metadata.clone(),
         dimensions: image.dimensions,
         pixels: PixelData::new_default(image.width(), image.height(), image.channels()),

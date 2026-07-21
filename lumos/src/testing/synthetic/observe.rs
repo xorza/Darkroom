@@ -6,7 +6,7 @@
 //! read noise → defects → saturate. A noiseless [`Camera::ideal`] collapses this to the clean
 //! image, so the *same* code path produces both the stimulus and its truth.
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::astro_image::{ImageDimensions, LinearImage};
 use crate::stacking::registration::transform::Transform;
 use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
@@ -60,7 +60,7 @@ pub struct FrameTruth {
 /// A rendered frame plus its ground truth.
 #[derive(Debug, Clone)]
 pub struct SimFrame {
-    pub image: AstroImage,
+    pub image: LinearImage,
     pub truth: FrameTruth,
 }
 
@@ -145,7 +145,7 @@ pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
     }
 
     let dims = ImageDimensions::new((width, height), 1);
-    let mut image = AstroImage::from_planar_channels(dims, [raw]);
+    let mut image = LinearImage::from_planar_channels(dims, [raw]);
     image.metadata.image_type = Some("Light".to_string());
     image.metadata.exposure_time = Some(obs.exposure_s as f64);
 

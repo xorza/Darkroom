@@ -104,7 +104,7 @@ use crate::math::statistics::sigma_clipped_median_mad;
 
 /// Neutralize the per-channel sky background: shift each channel so its (robust) background level
 /// matches the darkest channel's, making the sky neutral. Linear-domain; run before the stretch.
-pub fn neutralize_background(image: &mut AstroImage, kappa: f32, iterations: usize) {
+pub fn neutralize_background(image: &mut LinearImage, kappa: f32, iterations: usize) {
     if !image.is_rgb() {
         return; // nothing to neutralize on a single channel
     }
@@ -176,7 +176,7 @@ nebulae. Offer the mask form with a tunable `amount`, and/or mask bright OIII re
 use crate::image_ops::rgb::Rgb;
 
 /// SCNR Average-Neutral green removal: G' = min(G, (R+B)/2). Run on the stretched image.
-pub fn scnr_average_neutral(image: &mut AstroImage) {
+pub fn scnr_average_neutral(image: &mut LinearImage) {
     image.par_map_pixels(
         |l| l, // grayscale: no chroma to neutralize
         |px| Rgb {
@@ -189,7 +189,7 @@ pub fn scnr_average_neutral(image: &mut AstroImage) {
 
 /// SCNR Additive-Mask with an amount knob (0 = off, 1 = full), to spare genuine teal:
 ///   m = min(1, R+B);  G' = G·(1−a)·(1−m) + m·G
-pub fn scnr_additive_mask(image: &mut AstroImage, amount: f32) {
+pub fn scnr_additive_mask(image: &mut LinearImage, amount: f32) {
     image.par_map_pixels(
         |l| l,
         |px| {

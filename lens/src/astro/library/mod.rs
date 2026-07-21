@@ -13,11 +13,11 @@ use common::CancelToken;
 use common::file_utils;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet, CfaImage,
-    DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast, MlError,
-    NeutralizeBackground, OpError, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS,
-    Reference, StackConfig, TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars,
-    remove_stars_starless_only, stack_cfa_master,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
+    Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast, MlError, NeutralizeBackground,
+    OpError, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS, Reference, StackConfig,
+    TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only,
+    stack_cfa_master,
 };
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
@@ -333,8 +333,8 @@ pub fn astro_library() -> Library {
                     })
                     .await?;
 
-                    let coverage = AstroImage::from(result.product.coverage);
-                    let weight = AstroImage::from(result.product.weight);
+                    let coverage = LinearImage::from(result.product.coverage);
+                    let weight = LinearImage::from(result.product.weight);
                     outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
                         &result.product.image,
                     )));

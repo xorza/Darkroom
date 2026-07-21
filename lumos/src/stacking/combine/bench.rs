@@ -9,7 +9,7 @@ use common::CancelToken;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::AstroImage;
+use crate::LinearImage;
 use crate::io::astro_image::ImageDimensions;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
@@ -17,7 +17,7 @@ use crate::stacking::progress::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).
-fn synth_frame(w: usize, h: usize, frame: u32) -> AstroImage {
+fn synth_frame(w: usize, h: usize, frame: u32) -> LinearImage {
     let n = w * h;
     let offset = 0.05 + (frame as f32) * 0.002;
     let gain = 1.0 + (frame as f32) * 0.01;
@@ -31,7 +31,7 @@ fn synth_frame(w: usize, h: usize, frame: u32) -> AstroImage {
         let idx = ((k as u32).wrapping_mul(2246822519) ^ frame) as usize % n;
         px[idx] = 0.95;
     }
-    AstroImage::from_planar_channels(ImageDimensions::new((w, h), 1), [px])
+    LinearImage::from_planar_channels(ImageDimensions::new((w, h), 1), [px])
 }
 
 const W: usize = 1024;

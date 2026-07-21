@@ -1,7 +1,7 @@
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::astro_image::{ImageDimensions, LinearImage};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -100,7 +100,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
         .enumerate()
         .map(|(frame_index, channels)| {
             StoredLightFrame::from_memory(
-                AstroImage::from_planar_channels(dimensions, channels),
+                LinearImage::from_planar_channels(dimensions, channels),
                 Some(coverage.clone()),
                 None,
                 FrameStats {

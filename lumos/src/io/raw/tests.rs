@@ -75,7 +75,7 @@ fn malformed_xtrans_metadata_returns_raw_image_error() {
 #[test]
 fn direct_raw_boundary_clamps_finished_image_once() {
     let dimensions = ImageDimensions::new((3, 1), 3);
-    let mut image = AstroImage::from_planar_channels(
+    let mut image = LinearImage::from_planar_channels(
         dimensions,
         [
             vec![-0.25, 0.5, 1.25],

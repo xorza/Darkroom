@@ -1,7 +1,7 @@
 use std::io::Error;
 use std::path::Path;
 
-use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::LinearImage;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;
@@ -10,7 +10,7 @@ use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
-) -> Result<DrizzleFrame<AstroImage>, DrizzleError> {
+) -> Result<DrizzleFrame<LinearImage>, DrizzleError> {
     let DrizzleFrame {
         source,
         transform,
@@ -18,7 +18,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
         pixel_weight_map,
     } = frame;
     let path = source.as_ref();
-    let image = AstroImage::from_file(path).map_err(|error| DrizzleError::ImageLoad {
+    let image = LinearImage::from_file(path).map_err(|error| DrizzleError::ImageLoad {
         path: path.to_path_buf(),
         source: Error::other(error),
     })?;
@@ -98,7 +98,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
 /// Returns an error for invalid configuration, missing frames, inconsistent image dimensions, or
 /// invalid frame weights.
 pub fn drizzle_images(
-    frames: Vec<DrizzleFrame<AstroImage>>,
+    frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
 ) -> Result<StackProduct, DrizzleError> {

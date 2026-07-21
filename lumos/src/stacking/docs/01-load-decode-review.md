@@ -16,7 +16,7 @@ contract:
 
 1. Integer FITS physical values are divided a second time, often by the per-frame
    `DATAMAX` value.
-2. `stack(paths)` reaches the mixed-purpose `AstroImage::from_file`, so warning-only
+2. `stack(paths)` reaches the mixed-purpose `LinearImage::from_file`, so warning-only
    PNG/JPEG/TIFF inputs and clipped direct-RAW previews can enter a scientific stack.
 3. FITS pixels are decoded, and compressed images can be decompressed, before Lumos
    validates shape or a memory budget; a zero-length axis then reaches an assertion.
@@ -39,11 +39,11 @@ when the current call graph silently substitutes a scientifically different prod
 ```text
 stack(paths)
   -> LightCache::from_paths
-  -> StackableImage::load<AstroImage>
-  -> AstroImage::from_file
-       -> FITS physical_f32 -> integer re-normalization -> AstroImage
-       -> RAW demosaic -> preview clamp -> AstroImage
-       -> PNG/JPEG/TIFF decode -> warning only -> AstroImage
+  -> StackableImage::load<LinearImage>
+  -> LinearImage::from_file
+       -> FITS physical_f32 -> integer re-normalization -> LinearImage
+       -> RAW demosaic -> preview clamp -> LinearImage
+       -> PNG/JPEG/TIFF decode -> warning only -> LinearImage
 
 calibrate_align_stack(raw_paths)
   -> load_raw_cfa
@@ -61,7 +61,7 @@ loses full-raw geometry before demosaic.
 
 | Specification area | Production status | Main evidence |
 |---|---|---|
-| Distinct scientific-CFA and linear/preview products | Not enforced | `AstroImage::from_file` returns FITS, clipped RAW, and generic raster data through one type and one method |
+| Distinct scientific-CFA and linear/preview products | Not enforced | `LinearImage::from_file` returns FITS, clipped RAW, and generic raster data through one type and one method |
 | Content-based dispatch | Missing | Dispatch is based on three extension lists |
 | FITS physical conversion and null rejection | Partly implemented, then corrupted | `physical_f32()` is correct; `prepare_fits_pixels` subsequently rescales integers |
 | FITS HDU, cube, checksum, orientation, and provenance policy | Mostly missing | First image and every three-plane cube are accepted by fixed policy |
@@ -109,26 +109,26 @@ loses full-raw geometry before demosaic.
   `lumos/src/stacking/docs/01-load-decode.md:21-58` and
   `lumos/src/stacking/docs/01-load-decode.md:148-170`.
 
-  **Evidence.** `AstroImage::from_file` chooses solely by extension and returns physical
+  **Evidence.** `LinearImage::from_file` chooses solely by extension and returns physical
   FITS, direct-RAW preview, or generic raster values from the same API at
   `lumos/src/io/astro_image/mod.rs:262-307`. A non-float raster only emits a warning at
   `lumos/src/io/astro_image/mod.rs:291-303`; RGBA is converted to three-channel
   `RGB_F32`, dropping alpha without a policy, at
   `lumos/src/io/astro_image/mod.rs:555-615`. Direct RAW is clamped at
   `lumos/src/io/raw/mod.rs:919-927` and `lumos/src/io/raw/mod.rs:987-993`.
-  `StackableImage for AstroImage` delegates directly to that method at
+  `StackableImage for LinearImage` delegates directly to that method at
   `lumos/src/io/astro_image/mod.rs:467-482`; `LightCache` instantiates the generic loader
-  with `AstroImage` at `lumos/src/stacking/combine/cache/loader/mod.rs:157-172`; and the
+  with `LinearImage` at `lumos/src/stacking/combine/cache/loader/mod.rs:157-172`; and the
   public path stack calls it at `lumos/src/stacking/combine/stack.rs:104-131`.
 
   **Impact.** A JPEG, transfer-encoded PNG, untagged TIFF, or clipped/demosaiced RAW
   preview can be statistically combined as if it were linear scientific data. Metadata
   contains no provenance discriminator capable of detecting the substitution later.
 
-  **Change.** Give `CfaImage`, `AstroImage`, and `PreviewImage` separate `from_file`
+  **Change.** Give `CfaImage`, `LinearImage`, and `PreviewImage` separate `from_file`
   constructors whose concrete result types establish the requested contract. Restrict
   path-based scientific stacking to the first two types. Keep `PreviewImage` opaque and
-  convertible to the display image type without an implicit conversion into `AstroImage`.
+  convertible to the display image type without an implicit conversion into `LinearImage`.
   Record container, decoder, transfer, color, clipping, and demosaic provenance.
 
   **Validation.** Assert that path stacking rejects JPEG, untagged PNG/TIFF, alpha
@@ -143,7 +143,7 @@ loses full-raw geometry before demosaic.
   calibrate before demosaic (`lumos/src/stacking/docs/01-load-decode.md:73-89`).
 
   **Evidence.** FITS CFA parsing only assigns `metadata.cfa_type` while returning an
-  `AstroImage` at `lumos/src/io/astro_image/fits.rs:83-104`. `CfaImage`'s frame-store
+  `LinearImage` at `lumos/src/io/astro_image/fits.rs:83-104`. `CfaImage`'s frame-store
   loader accepts camera RAW only at `lumos/src/io/astro_image/cfa.rs:87-95`, and the
   end-to-end calibration pipeline hard-codes `load_raw_cfa` at
   `lumos/src/stacking/pipeline/streaming.rs:101-113`.
@@ -593,7 +593,7 @@ loses full-raw geometry before demosaic.
   semantics? The document currently favors rejection.
 - [ ] Which public precision modes must Lumos support beyond `f32`: exact integers,
   `f64`, rejection-only, or some combination? Provenance must still report narrowing.
-- [ ] Is `AstroImage::from_file` intended to remain a preview convenience? If so, name
+- [ ] Is `LinearImage::from_file` intended to remain a preview convenience? If so, name
   and document it as such rather than using it as `StackableImage::load`.
 
 ## Recommended implementation order

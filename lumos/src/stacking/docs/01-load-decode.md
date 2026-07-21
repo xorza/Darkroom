@@ -44,7 +44,7 @@ clamped merely to make them fit `[0, 1]`.
 Use this for already-monochrome data, already-demosaiced linear RGB, or a deliberately
 developed preview.
 
-`AstroImage` contains one or three planar `Buffer2<f32>` channels. Its numeric domain
+`LinearImage` contains one or three planar `Buffer2<f32>` channels. Its numeric domain
 depends on provenance:
 
 | Provenance | Required domain |
@@ -149,7 +149,7 @@ garbage and enforce both compressed-input and decompressed-output limits.
 
 ```text
 CfaImage::from_file(path): camera RAW or validated sensor-plane FITS
-AstroImage::from_file(path): physical non-mosaic FITS or declared-linear float TIFF
+LinearImage::from_file(path): physical non-mosaic FITS or declared-linear float TIFF
 PreviewImage::from_file(path): preview-decoded FITS, RAW, TIFF, PNG, or JPEG
 ```
 
@@ -1349,7 +1349,7 @@ should expose a conservative peak-memory estimator before launching work.
 
 The preferred order for completing Stage 1 is:
 
-1. Split the public API into `CfaImage`, `AstroImage`, and `PreviewImage` constructors.
+1. Split the public API into `CfaImage`, `LinearImage`, and `PreviewImage` constructors.
 2. Replace extension-only dispatch with content-confirmed detection.
 3. Correct FITS numeric provenance and remove `DATAMAX` normalization.
 4. Add explicit FITS HDU selection, checksum policy, and metadata inheritance policy.
@@ -1382,7 +1382,7 @@ preceding sections are the required behavior.
 - The LibRaw black model is consolidated into common, per-channel, and repeating
   residual components.
 - `load_raw_cfa` preserves signed normalized samples for calibration.
-- `PreviewImage::from_file`, `AstroImage::from_file`, and `CfaImage::from_file` establish
+- `PreviewImage::from_file`, `LinearImage::from_file`, and `CfaImage::from_file` establish
   separate preview, linear-scientific, and sensor-CFA products with decoder, transfer,
   color, clipping, and demosaic provenance.
 - Path stacking admits only non-mosaic physical FITS and explicitly declared float

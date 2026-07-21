@@ -295,9 +295,9 @@ impl PixelData {
     }
 }
 
-/// Represents an astronomical image.
+/// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
-pub struct AstroImage {
+pub struct LinearImage {
     pub metadata: AstroImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     pub(crate) pixels: PixelData,
@@ -324,7 +324,7 @@ fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
-fn fits_cfa(image: AstroImage, path: &Path) -> Result<cfa::CfaImage, ImageError> {
+fn fits_cfa(image: LinearImage, path: &Path) -> Result<cfa::CfaImage, ImageError> {
     if !image.is_grayscale() {
         return Err(scientific_rejection(
             path,
@@ -353,7 +353,7 @@ fn fits_cfa(image: AstroImage, path: &Path) -> Result<cfa::CfaImage, ImageError>
         ) => Some(bscale.abs() as f32 * cfa::QUANTIZATION_SIGMA_PER_STEP),
         _ => None,
     };
-    let AstroImage {
+    let LinearImage {
         mut metadata,
         pixels,
         ..
@@ -409,16 +409,22 @@ impl PreviewImage {
         if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
             let decoded = read_standard_image(path)?;
             let alpha_dropped = decoded.desc.color_format.channel_count == ChannelCount::Rgba;
-            let mut image: AstroImage = decoded.into();
-            image.metadata.provenance = Some(ImageProvenance {
-                container: standard_container(&extension),
-                decoder: DecoderProvenance::Imaginarium,
-                transfer: TransferProvenance::UnspecifiedRaster,
-                color: ColorProvenance::UnmanagedRaster { alpha_dropped },
-                clipped: false,
-                demosaic: DemosaicProvenance::None,
-            });
-            return Ok(image.into());
+            let target = f32_target_format(&decoded);
+            let image = decoded
+                .convert(target)
+                .expect("standard image converts to its f32 channel format");
+            let metadata = AstroImageMetadata {
+                provenance: Some(ImageProvenance {
+                    container: standard_container(&extension),
+                    decoder: DecoderProvenance::Imaginarium,
+                    transfer: TransferProvenance::UnspecifiedRaster,
+                    color: ColorProvenance::UnmanagedRaster { alpha_dropped },
+                    clipped: false,
+                    demosaic: DemosaicProvenance::None,
+                }),
+                ..Default::default()
+            };
+            return Ok(Self { metadata, image });
         }
 
         Err(ImageError::UnsupportedFormat { extension })
@@ -446,7 +452,7 @@ pub(crate) fn cfa_dimensions(path: &Path) -> Result<ImageDimensions, ImageError>
     }
 }
 
-impl AstroImage {
+impl LinearImage {
     /// Load an already-linear scientific image from a file.
     ///
     /// Supported formats:
@@ -505,7 +511,7 @@ impl AstroImage {
             } else {
                 ColorProvenance::Unspecified
             };
-            let mut image: AstroImage = decoded.into();
+            let mut image = linear_from_image(&decoded);
             image.metadata.provenance = Some(ImageProvenance {
                 container: standard_container(&extension),
                 decoder: DecoderProvenance::Imaginarium,
@@ -544,7 +550,7 @@ impl AstroImage {
             PixelData::Rgb(DeinterleavedImageData::from_channels([r, g, b]))
         };
 
-        AstroImage {
+        LinearImage {
             metadata: AstroImageMetadata::default(),
             dimensions,
             pixels: pixel_data,
@@ -599,7 +605,7 @@ impl AstroImage {
             ]))
         };
 
-        AstroImage {
+        LinearImage {
             metadata: AstroImageMetadata::default(),
             dimensions,
             pixels: pixel_data,
@@ -678,13 +684,13 @@ impl AstroImage {
     }
 }
 
-impl StackableImage for AstroImage {
+impl StackableImage for LinearImage {
     fn dimensions(&self) -> ImageDimensions {
         self.dimensions()
     }
 
     fn channel(&self, c: usize) -> &[f32] {
-        AstroImage::channel(self, c)
+        LinearImage::channel(self, c)
     }
 
     fn metadata(&self) -> &AstroImageMetadata {
@@ -692,7 +698,7 @@ impl StackableImage for AstroImage {
     }
 
     fn load(path: &Path) -> Result<Self, ImageError> {
-        AstroImage::from_file(path)
+        LinearImage::from_file(path)
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
@@ -708,8 +714,8 @@ impl StackableImage for AstroImage {
     }
 }
 
-impl SubAssign<&AstroImage> for AstroImage {
-    fn sub_assign(&mut self, rhs: &AstroImage) {
+impl SubAssign<&LinearImage> for LinearImage {
+    fn sub_assign(&mut self, rhs: &LinearImage) {
         assert_eq!(self.dimensions, rhs.dimensions, "Image dimensions mismatch");
         let w = self.dimensions.size.x;
         for c in 0..self.channels() {
@@ -726,7 +732,7 @@ impl SubAssign<&AstroImage> for AstroImage {
     }
 }
 
-impl From<Buffer2<f32>> for AstroImage {
+impl From<Buffer2<f32>> for LinearImage {
     fn from(plane: Buffer2<f32>) -> Self {
         let dimensions = ImageDimensions::new((plane.width(), plane.height()), 1);
         Self {
@@ -737,7 +743,7 @@ impl From<Buffer2<f32>> for AstroImage {
     }
 }
 
-impl From<[Buffer2<f32>; 3]> for AstroImage {
+impl From<[Buffer2<f32>; 3]> for LinearImage {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
         let dimensions = ImageDimensions::new((planes[0].width(), planes[0].height()), 3);
         Self {
@@ -748,11 +754,11 @@ impl From<[Buffer2<f32>; 3]> for AstroImage {
     }
 }
 
-impl From<AstroImage> for PreviewImage {
-    fn from(astro: AstroImage) -> Self {
-        let image = Image::from(&astro);
+impl From<LinearImage> for PreviewImage {
+    fn from(linear: LinearImage) -> Self {
+        let image = Image::from(&linear);
         Self {
-            metadata: astro.metadata,
+            metadata: linear.metadata,
             image,
         }
     }
@@ -764,27 +770,27 @@ impl From<PreviewImage> for Image {
     }
 }
 
-impl From<&AstroImage> for Image {
-    fn from(astro: &AstroImage) -> Self {
+impl From<&LinearImage> for Image {
+    fn from(linear: &LinearImage) -> Self {
         // imaginarium owns the planar→interleaved transpose; each `PixelData`
         // arm already holds the `DeinterleavedImageData` it interleaves from
         // (borrowed, so an RGB master isn't cloned — `save` takes `&self`).
-        match &astro.pixels {
+        match &linear.pixels {
             PixelData::L(planes) => Image::from(planes),
             PixelData::Rgb(planes) => Image::from(planes),
         }
     }
 }
 
-impl From<AstroImage> for Image {
-    fn from(astro: AstroImage) -> Self {
-        Image::from(&astro)
+impl From<LinearImage> for Image {
+    fn from(linear: LinearImage) -> Self {
+        Image::from(&linear)
     }
 }
 
 /// The `f32` target format a given image deinterleaves into: `L_F32` for
 /// grayscale, `RGB_F32` for color.
-fn astro_target_format(image: &Image) -> ColorFormat {
+fn f32_target_format(image: &Image) -> ColorFormat {
     match image.desc.color_format.channel_count {
         ChannelCount::L => ColorFormat::L_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
@@ -792,9 +798,9 @@ fn astro_target_format(image: &Image) -> ColorFormat {
 }
 
 /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into a
-/// planar [`AstroImage`]. This is the single unavoidable copy a per-channel op
+/// planar [`LinearImage`]. This is the single unavoidable copy a per-channel op
 /// pays to get planar data; callers must convert to f32 first.
-fn astro_from_f32_image(image: &Image) -> AstroImage {
+fn linear_from_f32_image(image: &Image) -> LinearImage {
     let (width, height) = (image.desc.width, image.desc.height);
     // imaginarium owns the interleaved→planar transpose; the image is guaranteed
     // f32 here, so the variant deinterleaves into 1 or 3 planes.
@@ -812,37 +818,22 @@ fn astro_from_f32_image(image: &Image) -> AstroImage {
     };
 
     let dimensions = ImageDimensions::new((width, height), pixels.channels());
-    AstroImage {
+    LinearImage {
         metadata: AstroImageMetadata::default(),
         dimensions,
         pixels,
     }
 }
 
-impl From<Image> for AstroImage {
-    fn from(image: Image) -> Self {
-        let target = astro_target_format(&image);
-        let image = image
-            .convert(target)
-            .expect("Failed to convert image to f32");
-        astro_from_f32_image(&image)
-    }
-}
-
-impl From<&Image> for AstroImage {
-    fn from(image: &Image) -> Self {
-        // Already f32: deinterleave straight from the borrow (one copy). A
-        // non-f32 image is rare here (the processing path is RGB_F32) and needs
-        // a format conversion first — `convert_to` reads the borrow directly.
-        let target = astro_target_format(image);
-        if image.desc.color_format == target {
-            astro_from_f32_image(image)
-        } else {
-            let converted = image
-                .convert_to(target)
-                .expect("Failed to convert image to f32");
-            astro_from_f32_image(&converted)
-        }
+fn linear_from_image(image: &Image) -> LinearImage {
+    let target = f32_target_format(image);
+    if image.desc.color_format == target {
+        linear_from_f32_image(image)
+    } else {
+        let converted = image
+            .convert_to(target)
+            .expect("image converts to its f32 channel format");
+        linear_from_f32_image(&converted)
     }
 }
 
@@ -886,9 +877,9 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
 #[cfg(test)]
 mod test_support {
     use crate::image_ops::rgb::Rgb;
-    use crate::io::astro_image::{self, AstroImage, PixelData};
+    use crate::io::astro_image::{self, LinearImage, PixelData};
 
-    impl AstroImage {
+    impl LinearImage {
         pub(crate) fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
             debug_assert!(x < self.width() && y < self.height());
             debug_assert!(self.is_grayscale());

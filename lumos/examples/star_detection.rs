@@ -14,7 +14,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, StarDetectionConfig, StarDetector};
+use lumos::{LinearImage, StarDetectionConfig, StarDetector};
 
 fn main() {
     // Get image path from command line
@@ -28,7 +28,7 @@ fn main() {
 
     // Load the image
     println!("Loading image: {}", image_path.display());
-    let image = AstroImage::from_file(image_path).expect("Failed to load image");
+    let image = LinearImage::from_file(image_path).expect("Failed to load image");
     println!(
         "Image dimensions: {}x{} ({} channel{})",
         image.width(),

@@ -2,11 +2,11 @@ use std::io::{Error, ErrorKind};
 
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, AstroImageMetadata,
-    CacheConfig, CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet,
-    CombineMethod, DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
-    FrameStoreError, GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig,
-    NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog,
+    AlignStackError, AlignStackResult, AlignmentSummary, AstroImageMetadata, CacheConfig,
+    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod,
+    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError,
+    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, LinearImage, NoiseModel,
+    Normalization, PercentileClipConfig, QualityMap, RansacConfig, RegistrationCatalog,
     RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
     SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -275,7 +275,7 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 #[test]
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
-        image: AstroImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
+        image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
         coverage: Buffer2::new(2, 1, vec![1.0, 0.5]),
         weight: QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0])),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
@@ -308,7 +308,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
 
     let shared_plane = Buffer2::new(2, 1, vec![3.0, 4.0]);
     let shared_pixels = shared_plane.pixels().as_ptr();
-    let shared_image = AstroImage::from(QualityMap::Shared(shared_plane));
+    let shared_image = LinearImage::from(QualityMap::Shared(shared_plane));
     assert_eq!(shared_image.dimensions(), ImageDimensions::new((2, 1), 1));
     assert_eq!(shared_image.channel(0).pixels(), &[3.0, 4.0]);
     assert_eq!(shared_image.channel(0).pixels().as_ptr(), shared_pixels);
@@ -320,7 +320,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     ];
     let per_channel_pixels = per_channel_planes[1].pixels().as_ptr();
     let per_channel_map = QualityMap::PerChannel(per_channel_planes);
-    let per_channel_image = AstroImage::from(per_channel_map);
+    let per_channel_image = LinearImage::from(per_channel_map);
     assert_eq!(
         per_channel_image.dimensions(),
         ImageDimensions::new((1, 1), 3)

@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::concurrency;
 use crate::io::astro_image::cfa::CfaImage;
-use crate::io::astro_image::{AstroImage, cfa_dimensions};
+use crate::io::astro_image::{LinearImage, cfa_dimensions};
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::stacking::calibration_masters::CalibrationMasters;
@@ -36,7 +36,7 @@ const MAX_CONCURRENT_LIGHTS: usize = 4;
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
-/// (dark/flat/defect) in place, demosaic to an `AstroImage`, then hand the calibrated frames
+/// (dark/flat/defect) in place, demosaic to a `LinearImage`, then hand the calibrated frames
 /// to [`align_and_stack`]. A frame that fails to **load** is a hard error (bad input); a frame
 /// that fails to **register** is dropped and reported in
 /// [`AlignmentSummary::dropped`](crate::stacking::pipeline::result::AlignmentSummary::dropped).
@@ -84,7 +84,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // peak demosaic memory. The demosaic itself polls `cancel` between stages
     // (see `CfaImage::demosaic`), so the heavy phase stays interruptible at full
     // core utilization within a batch.
-    let calibrated: Vec<AstroImage> =
+    let calibrated: Vec<LinearImage> =
         concurrency::try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
@@ -100,13 +100,13 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and demosaic to
-/// an `AstroImage`. The per-frame core shared by the RAM and streaming calibrate paths.
+/// a `LinearImage`. The per-frame core shared by the RAM and streaming calibrate paths.
 fn decode_calibrate_demosaic(
     path: &Path,
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
     cancel: &CancelToken,
-) -> Result<AstroImage, Error> {
+) -> Result<LinearImage, Error> {
     let mut cfa = CfaImage::from_file(path).map_err(|source| Error::Load {
         path: path.to_path_buf(),
         source,

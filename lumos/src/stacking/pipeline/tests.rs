@@ -1,7 +1,7 @@
 use common::CancelToken;
 use glam::DVec2;
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::io::astro_image::{ImageDimensions, LinearImage};
 use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;
@@ -15,7 +15,7 @@ use crate::testing::synthetic::fixtures::star_field;
 
 #[derive(Debug)]
 struct BaseField {
-    image: AstroImage,
+    image: LinearImage,
     registration: RegistrationConfig,
 }
 
@@ -27,7 +27,7 @@ fn base_field() -> BaseField {
 }
 
 /// Warp `base` by a pure translation to fake a dithered exposure.
-fn shifted(base: &AstroImage, reg: &RegistrationConfig, dx: f64, dy: f64) -> AstroImage {
+fn shifted(base: &LinearImage, reg: &RegistrationConfig, dx: f64, dy: f64) -> LinearImage {
     let t = Transform::translation(DVec2::new(dx, dy));
     warp(base, &WarpTransform::new(t), &reg.warp).image
 }
@@ -84,7 +84,7 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     } = base_field();
     let dims = base.dimensions;
     // A flat frame has no stars → registration fails → it is dropped, not fatal.
-    let blank = AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let blank = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![base.clone(), shifted(&base, &reg, 5.0, 3.0), blank];
 
     let config = AlignStackConfig {
@@ -147,7 +147,7 @@ fn all_non_reference_frames_dropped_errors() {
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
     let BaseField { image: base, .. } = base_field();
     let dims = base.dimensions;
-    let blank = || AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
     let frames = vec![base, blank(), blank()];
 
@@ -171,7 +171,7 @@ fn auto_reference_picks_the_richest_frame() {
     // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
     // anchor on frame 1.
     let dims = base.dimensions;
-    let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
     let result =
@@ -207,7 +207,7 @@ fn public_input_errors() {
         },
         ..AlignStackConfig::default()
     };
-    let image = AstroImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
+    let image = LinearImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
     let error = align_and_stack(vec![image], &config, CancelToken::never()).unwrap_err();
     assert!(matches!(
         error,

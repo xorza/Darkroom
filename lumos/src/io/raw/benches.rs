@@ -395,7 +395,7 @@ fn bench_rcd_demosaic_core() {
 }
 
 /// Load raw file using libraw's built-in demosaic (for benchmarking comparison).
-fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, ImageError> {
+fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<LinearImage, ImageError> {
     let raw = open_raw(path)?;
 
     // Set demosaic quality before processing
@@ -406,7 +406,7 @@ fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, I
     let (pixels, out_width, out_height, num_channels) = raw.demosaic_libraw_fallback()?;
 
     let dimensions = ImageDimensions::new((out_width, out_height), num_channels);
-    Ok(AstroImage::from_pixels(dimensions, pixels))
+    Ok(LinearImage::from_pixels(dimensions, pixels))
 }
 
 #[derive(Debug)]
@@ -433,8 +433,8 @@ struct ImageCompareStats {
 }
 
 fn compare_images(
-    a: &AstroImage,
-    b: &AstroImage,
+    a: &LinearImage,
+    b: &LinearImage,
     width: usize,
     height: usize,
     border: usize,
@@ -459,8 +459,8 @@ fn compare_images(
 }
 
 fn compare_color_structure(
-    a: &AstroImage,
-    b: &AstroImage,
+    a: &LinearImage,
+    b: &LinearImage,
     transforms: &[ChannelCompareStats; 3],
     width: usize,
     height: usize,
@@ -589,8 +589,8 @@ fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
     assert!((channel.correlation - 1.0).abs() < 1e-12);
 
     let dimensions = ImageDimensions::new((1, 1), 3);
-    let black = AstroImage::from_pixels(dimensions, vec![0.0; 3]);
-    let colored = AstroImage::from_pixels(dimensions, vec![3.0, 1.0, 5.0]);
+    let black = LinearImage::from_pixels(dimensions, vec![0.0; 3]);
+    let colored = LinearImage::from_pixels(dimensions, vec![3.0, 1.0, 5.0]);
     let transforms = std::array::from_fn(|_| ChannelCompareStats {
         mae: 0.0,
         max_abs: 0.0,

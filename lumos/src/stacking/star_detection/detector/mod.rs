@@ -10,7 +10,7 @@ mod bench;
 
 use serde::{Deserialize, Serialize};
 
-use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::LinearImage;
 
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
@@ -113,7 +113,7 @@ impl StarDetector {
     }
 
     /// Detect stars in a single image.
-    pub fn detect(&mut self, image: &AstroImage) -> DetectionResult {
+    pub fn detect(&mut self, image: &LinearImage) -> DetectionResult {
         let width = image.width();
         let height = image.height();
 

@@ -14,8 +14,8 @@ use common::file_utils;
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::fits;
 use crate::io::astro_image::{
-    AstroImage, AstroImageMetadata, ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS,
-    ImageDimensions, STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa,
+    AstroImageMetadata, ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
+    LinearImage, STANDARD_IMAGE_EXTENSIONS, cfa_dimensions, file_extension, fits_cfa,
     scientific_rejection,
 };
 use crate::io::raw;
@@ -159,9 +159,9 @@ impl CfaImage {
         common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(Error::other)
     }
 
-    /// Demosaic this CFA image into a 3-channel AstroImage.
+    /// Demosaic this CFA image into a 3-channel LinearImage.
     /// Consumes self.
-    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<AstroImage, DemosaicError> {
+    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<LinearImage, DemosaicError> {
         let width = self.data.width();
         let height = self.data.height();
         let mut metadata = self.metadata;
@@ -185,11 +185,11 @@ impl CfaImage {
 
         Ok(match &cfa_type {
             CfaType::Mono => {
-                // No demosaicing needed - convert 1-channel to 1-channel AstroImage
+                // No demosaicing needed - convert 1-channel to 1-channel LinearImage
                 let dims = ImageDimensions::new((width, height), 1);
-                let mut astro = AstroImage::from_pixels(dims, pixels);
-                astro.metadata = metadata;
-                astro
+                let mut image = LinearImage::from_pixels(dims, pixels);
+                image.metadata = metadata;
+                image
             }
             CfaType::Bayer(cfa_pattern) => {
                 use crate::io::raw::demosaic::bayer::{BayerImage, demosaic_bayer};
@@ -206,9 +206,9 @@ impl CfaImage {
                 );
                 let planes = demosaic_bayer(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
-                let mut astro = AstroImage::from_planar_channels(dims, planes);
-                astro.metadata = metadata;
-                astro
+                let mut image = LinearImage::from_planar_channels(dims, planes);
+                image.metadata = metadata;
+                image
             }
             CfaType::XTrans(pattern) => {
                 use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
@@ -218,9 +218,9 @@ impl CfaImage {
                 )?;
 
                 let dims = ImageDimensions::new((width, height), 3);
-                let mut astro = AstroImage::from_planar_channels(dims, planes);
-                astro.metadata = metadata;
-                astro
+                let mut image = LinearImage::from_planar_channels(dims, planes);
+                image.metadata = metadata;
+                image
             }
         })
     }

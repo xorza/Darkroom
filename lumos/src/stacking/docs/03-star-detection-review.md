@@ -55,7 +55,7 @@ domains need correction before presets or performance kernels are retuned.
 ## Current production data flow
 
 ```text
-AstroImage
+LinearImage
   -> copy mono OR globally inverse-MAD-weight RGB
   -> if metadata.cfa_type is present: nonlinear 3x3 median filter
   -> tiled empirical background + RMS
@@ -84,7 +84,7 @@ map reaches the measurement stage.
 | Specification area | Production status | Main evidence |
 |---|---|---|
 | Immutable measurement planes separate from detection products | Incorrect | prepared plane is passed to both detection and measurement |
-| Permanent mask, variance/RMS, saturation, provenance input | Missing | `detect` accepts only `&AstroImage` |
+| Permanent mask, variance/RMS, saturation, provenance input | Missing | `detect` accepts only `&LinearImage` |
 | Runtime validation, typed failure, and cancellation | Missing | detection returns `DetectionResult` directly |
 | Robust tiled background | Partly implemented | clipping/mode/spline exist; invalid tiles and positive RMS do not |
 | Variance-aware matched statistic | Incomplete | correct only for locally stationary independent noise |
@@ -144,7 +144,7 @@ map reaches the measurement stage.
   measurements must remain those of the immutable source samples. Assert that merely
   retaining CFA provenance after demosaic does not median-filter measurement data.
 
-- [ ] **P0 — Replace `detect(&AstroImage) -> DetectionResult` with a validated, cancellable input/result contract.**
+- [ ] **P0 — Replace `detect(&LinearImage) -> DetectionResult` with a validated, cancellable input/result contract.**
 
   **Contract.** Section 2 requires image, permanent bit mask, uncertainty, saturation,
   and coordinate metadata with exact shape/finite validation; section 14 requires
@@ -152,7 +152,7 @@ map reaches the measurement stage.
   (`03-star-detection.md:58`, `03-star-detection.md:76`,
   `03-star-detection.md:1150`, and `03-star-detection.md:1189`).
 
-  **Evidence.** The public call accepts only `&AstroImage` and cannot fail at
+  **Evidence.** The public call accepts only `&LinearImage` and cannot fail at
   `../star_detection/detector/mod.rs:115`. The only error type is configuration-time,
   and configuration validation occurs only in `from_config` at
   `../star_detection/detector/mod.rs:96`. No production stage accepts a permanent mask
