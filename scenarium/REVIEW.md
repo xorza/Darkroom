@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in cache identity and behavior: function and codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
+Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in cache identity and behavior: codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
 
 The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, a wide positional lambda ABI, parallel compiled-data pools with distributed invariants, and large execution modules that own several distinct responsibilities. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
@@ -13,8 +13,6 @@ The main structural problems are late registry validation, mixed lifecycle state
 ## Critical
 
 - [ ] **Disk-cache presence checks block the async worker.** Blob coverage probes synchronously open, read, and inspect files during reuse resolution and before stores, while failed hydration also deletes files synchronously. Disk-backed graphs can therefore stall the worker once per cache probe despite body reads and writes using the blocking pool (`src/execution/disk_store/mod.rs:57-69`, `src/execution/disk_store/mod.rs:140-150`, `src/execution/disk_store/mod.rs:175-198`, `src/execution/cache/mod.rs:481-497`).
-
-- [ ] **Function implementations have no cache revision.** `Func` carries a stable `FuncId` and executable lambda but no implementation revision, while `node_digest` keys pure results by the global domain, `FuncId`, output signature, and inputs. Changing value logic under the same persisted identity and signature can silently reuse RAM or disk values produced by the old implementation (`src/node/definition.rs:186-212`, `src/execution/digest/mod.rs:15-21`, `src/execution/digest/mod.rs:234-288`).
 
 - [ ] **Custom codec revisions are absent from blob identity.** Type registration records only an optional codec, and disk-hit eligibility checks only whether a codec is present. A breaking codec change does not re-key existing blobs, so old bytes may be decoded under new semantics or rejected only during body verification (`src/library.rs:44-55`, `src/execution/disk_store/mod.rs:103-112`, `src/execution/digest/mod.rs:35-36`, `../lens/src/image/codec/mod.rs:18-25`, `../lens/src/image/codec/mod.rs:82-91`).
 

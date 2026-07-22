@@ -157,6 +157,21 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first[0], first[1]);
     assert_ne!(first[1], first[2]);
     assert_ne!(first[0], first[2]);
+
+    p.program.e_nodes.get_mut(&e_node_id(0)).unwrap().version = 1;
+    let versioned = digests(&p);
+    assert_ne!(
+        first[0], versioned[0],
+        "a function version re-keys its node"
+    );
+    assert_ne!(
+        first[1], versioned[1],
+        "a function version propagates downstream"
+    );
+    assert_eq!(
+        first[2], versioned[2],
+        "an independent node ignores another function's version"
+    );
 }
 
 #[test]
@@ -231,8 +246,8 @@ fn fs_path_folds_file_identity_and_path() {
     assert_eq!(
         d_other,
         Some(Digest([
-            146, 239, 40, 142, 65, 20, 168, 176, 50, 39, 8, 92, 111, 114, 244, 116, 75, 9, 185,
-            107, 251, 223, 168, 66, 148, 196, 31, 123, 202, 44, 186, 180,
+            229, 175, 129, 161, 174, 17, 125, 62, 209, 177, 194, 55, 184, 231, 165, 251, 85, 188,
+            112, 243, 165, 247, 15, 70, 103, 132, 182, 87, 91, 106, 51, 222,
         ])),
         "moving identity collection must not change cache keys"
     );

@@ -108,6 +108,8 @@ pub(crate) struct ExecutionNode {
     pub events: Span,
 
     pub func_id: FuncId,
+    /// Copied from `Func`; changing it invalidates this pure node's cache key.
+    pub version: u32,
 
     pub lambda: FuncLambda,
 }

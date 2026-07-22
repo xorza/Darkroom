@@ -316,6 +316,7 @@ impl<'a> Run<'a> {
                     outputs: Span::new(outputs_start, func.outputs.len() as u32),
                     events: Span::new(events_start, func.events.len() as u32),
                     func_id: func.id,
+                    version: func.version,
                     lambda: func.lambda.clone(),
                 },
             );

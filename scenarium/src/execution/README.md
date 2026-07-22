@@ -182,8 +182,8 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 
 ## B.2 The content digest is the cache key (`digest.rs`)
 
-A node's output is a pure function of its `func_id`, resolved input values, upstream
-outputs, and the content of any external files it reads. `node_digest` (`digest.rs`)
+A node's output is a pure function of its `func_id`, function `version`, resolved input
+values, upstream outputs, and the content of any external files it reads. `node_digest` (`digest.rs`)
 folds exactly that into a 256-bit BLAKE3 `Digest`. Before the fold,
 `RunResourceStamps` (`resource.rs`) resolves filesystem identities and custom resource
 stamps on Tokio's blocking pool, memoizing each identity for the run. The resolver then
@@ -191,8 +191,9 @@ computes node digests producer-first from prepared resource identities and each 
 producer's *already-stamped* `current_digest`, with no recursive digest traversal or I/O
 inside `node_digest`.
 
-- **Equal digest ⇒ identical computation** only while the implementation behind each
-  `FuncId` remains stable for the cache's lifetime.
+- **Function implementation.** A pure `Func`'s `version` is folded beside its stable
+  `FuncId`; incrementing it invalidates that function and every downstream digest without
+  breaking authored nodes that reference the `FuncId`.
 - **Reproducibility taint.** Only `Pure` nodes are hashed; an `Impure` node, or any node
   with a non-reproducible producer, has digest `None` = "always recompute, never cache",
   for RAM and disk alike (a `None` producer folds to a `None` consumer).

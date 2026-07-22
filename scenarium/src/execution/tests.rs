@@ -128,11 +128,14 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Optio
 
 mod cache_persistence {
     use super::*;
+    use crate::async_lambda;
     use crate::execution::cache::ValueState;
     use crate::execution::disk_store::DiskStore;
     use crate::execution::report::{PinnedOutputs, RunEvent};
+    use crate::node::definition::{FuncId, FuncOutput};
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -179,6 +182,82 @@ mod cache_persistence {
             Some(dir.0.clone()),
         ));
         engine
+    }
+
+    #[tokio::test]
+    async fn function_version_invalidates_ram_and_disk_without_changing_identity() {
+        let dir = TempDir::new("func-version");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let printed = Arc::new(StdMutex::new(Vec::new()));
+        let generator_func_id = FuncId::unique();
+        let make_lib = |result: i64, version: u32| {
+            let invocation_calls = calls.clone();
+            let printed_values = printed.clone();
+            let mut library = test_func_lib(TestFuncHooks {
+                print: Arc::new(move |value| printed_values.lock().unwrap().push(value)),
+                ..default_hooks()
+            });
+            let mut generator = Func::new(generator_func_id, "generate")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new("V", DataType::Int))
+                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                    invocation_calls = invocation_calls.clone()
+                } => {
+                    invocation_calls.fetch_add(1, Ordering::SeqCst);
+                    outputs[0] = StaticValue::Int(result).into();
+                    Ok(())
+                }));
+            generator.version = version;
+            library.add(generator);
+            library
+        };
+
+        let library_v0 = make_lib(1, 0);
+        let mut graph = Graph::default();
+        let mut generator = node(&library_v0, "generate");
+        generator.cache = CacheMode::Both;
+        let generator_id = graph.add(generator);
+        let print_id = graph.add(node(&library_v0, "Print"));
+        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generator_id, 0));
+        let e_node_id = root_execution_node(generator_id);
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &library_v0).unwrap();
+        let first = engine.execute_sinks().await.unwrap();
+        assert!(
+            first
+                .executed_nodes
+                .iter()
+                .any(|node| node.e_node_id == e_node_id)
+        );
+
+        let library_v1 = make_lib(2, 1);
+        engine.update(&graph, &library_v1).unwrap();
+        let changed = engine.execute_sinks().await.unwrap();
+        assert!(
+            changed
+                .executed_nodes
+                .iter()
+                .any(|node| node.e_node_id == e_node_id),
+            "a version change must reject both the resident value and old disk blob"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(*printed.lock().unwrap(), vec![1, 2]);
+        drop(engine);
+
+        let mut reopened = disk_engine(&dir);
+        reopened.update(&graph, &library_v1).unwrap();
+        let reused = reopened.execute_sinks().await.unwrap();
+        assert!(
+            !reused
+                .executed_nodes
+                .iter()
+                .any(|node| node.e_node_id == e_node_id),
+            "the replacement version must be reusable from disk"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(*printed.lock().unwrap(), vec![1, 2, 2]);
     }
 
     /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer

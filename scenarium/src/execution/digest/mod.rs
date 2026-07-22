@@ -1,7 +1,7 @@
 //! Content digests for node outputs — the validity key for the per-slot RAM cache
 //! and the node-keyed disk cache.
 //!
-//! A node's output is a pure function of its function identity, its resolved input
+//! A node's output is a pure function of its function identity and version, its resolved input
 //! values, the outputs of its upstream producers, and the content of
 //! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
@@ -14,8 +14,8 @@
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
-//! - **`FuncId` is the behavior contract.** Output *types* are folded, but changing a
-//!   lambda's value logic under the same identity and signature can reuse an old digest.
+//! - **`Func::version` is the implementation contract.** Bump it when a lambda can return
+//!   different values for the same inputs; leaving it unchanged can reuse an old digest.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
@@ -46,10 +46,10 @@ use crate::{DataType, StaticValue};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-const DOMAIN: &[u8] = b"scenarium-cache-v2";
+const DOMAIN: &[u8] = b"scenarium-cache-v3";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
-/// digests mean the same function identity, params, upstream outputs, and file inputs.
+/// digests mean the same function identity and version, params, upstream outputs, and file inputs.
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -219,7 +219,7 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 }
 
 /// A node's **content digest** — the one content key it's cached under, folding its identity
-/// (func id + output types) plus its structural inputs. The single digest the whole
+/// (func id + version + output types) plus its structural inputs. The single digest the whole
 /// cache keys on: RAM reuse ([`RuntimeCache::is_resident_hit`]), disk load/store, and downstream
 /// folding all read the node's stamped `current_digest`. Computed producer-first
 /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
@@ -248,7 +248,8 @@ pub(crate) fn node_digest(
     let mut hasher = DigestHasher::new();
     hasher
         .write_bytes(DOMAIN)
-        .write_pod(e_node.func_id.as_u128());
+        .write_pod(e_node.func_id.as_u128())
+        .write_pod(e_node.version);
 
     let out_types = program.node_output_types(e_node);
     hasher.write_pod(out_types.len() as u64);

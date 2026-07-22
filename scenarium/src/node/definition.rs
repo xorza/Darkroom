@@ -186,6 +186,9 @@ id_type!(FuncId);
 #[derive(Default, Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
+    /// Version of this function's output semantics. Folded into pure-node cache keys;
+    /// increment it when the implementation can return different values for the same inputs.
+    pub version: u32,
     pub name: String,
     pub category: String,
     pub sink: bool,
