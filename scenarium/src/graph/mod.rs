@@ -96,7 +96,7 @@ pub struct Subscription {
 ///   is needed, and dropped after the run to free RAM.
 /// - `Ram` — resident in the live engine and reused across runs, but lost on reload.
 /// - `Disk` — persisted to the disk store (survives reload); its RAM copy
-///   is demoted to disk-only after the run and reloaded lazily.
+///   is dropped after the run and reloaded lazily when demanded.
 /// - `Both` — resident in RAM *and* on disk: hot reuse this session plus survival across
 ///   reloads.
 ///
@@ -104,7 +104,7 @@ pub struct Subscription {
 /// honored only for a node with a content digest (a reproducible cone); a node with an
 /// impure node anywhere upstream has no digest, so it's silently kept memory-only and
 /// never risks serving a stale value, whatever its mode. The on-disk backend is wired only
-/// once a caller enables it (`ExecutionEngine::set_disk_store` with a disk root); until
+/// once a caller attaches a `DiskStore` with a disk root; until
 /// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {
@@ -117,7 +117,7 @@ pub enum CacheMode {
 
 impl CacheMode {
     /// Whether the node's value is retained in RAM and reused across runs (`Ram`/`Both`).
-    /// The other modes drop or demote the RAM copy after each run.
+    /// The other modes drop the RAM copy after each run.
     pub fn caches_in_ram(self) -> bool {
         matches!(self, CacheMode::Ram | CacheMode::Both)
     }

@@ -129,39 +129,6 @@ fn hydrate_turns_a_miss_into_a_hit() {
 }
 
 #[test]
-fn replacing_disk_store_clears_only_disk_availability() {
-    let mut cache = RuntimeCache::default();
-    let on_disk = insert_slot(
-        &mut cache,
-        1,
-        RuntimeSlot {
-            value: ValueState::OnDisk,
-            ..Default::default()
-        },
-    );
-    let resident = insert_slot(
-        &mut cache,
-        2,
-        RuntimeSlot {
-            value: ValueState::Resident {
-                snapshot: complete_snapshot(out()),
-                produced_under: None,
-            },
-            ..Default::default()
-        },
-    );
-
-    cache.set_disk_store(DiskStore::default());
-
-    assert!(matches!(cache.slots[&on_disk].value, ValueState::Empty));
-    assert_eq!(
-        cache.slots[&resident].output_values().unwrap()[0].as_i64(),
-        Some(1),
-        "resident values do not belong to either disk store"
-    );
-}
-
-#[test]
 fn resident_hit_derives_coverage_from_values() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
@@ -331,25 +298,17 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
             ..Default::default()
         },
     );
-    // Slot C: OnDisk — resident nowhere, contributes zero.
-    insert_slot(
-        &mut cache,
-        3,
-        RuntimeSlot {
-            current_digest: Some(d),
-            value: ValueState::OnDisk,
-            ..Default::default()
-        },
-    );
+    // Slot C: empty — contributes zero.
+    insert_slot(&mut cache, 3, RuntimeSlot::default());
 
-    // shared (100/10) counted once + the 5/0 value; scalar and OnDisk add nothing.
+    // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
     let stats = cache.resident_ram_stats();
     assert_eq!(stats.total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(stats.total.total(), 115);
 
     // Per-node: no cross-slot dedup — each node reports what it holds. Slot A holds
     // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
-    // the OnDisk slot C is omitted.
+    // the empty slot C is omitted.
     assert_eq!(stats.by_node.len(), 2);
     assert!(stats.by_node.contains(&NodeRamUsage {
         e_node_id: ExecutionNodeId::from_u128(1),

@@ -156,7 +156,7 @@ async fn worker_loop<ExecutionCallback>(
         }
 
         if let Some(cache) = intent.disk_store.take() {
-            execution_engine.set_disk_store(cache);
+            execution_engine.cache.disk_store = cache;
             execution_engine.store_resident_caches().await;
         }
 

@@ -154,7 +154,7 @@ this Part) — copied onto the flat node as `ExecutionNode.cache`:
 |------|:-:|:-:|---|
 | `None` | ✗ | ✗ | value **dropped** — recomputes whenever next needed |
 | `Ram`  | ✓ | ✗ | value **kept resident**, reused across runs; lost on reopen |
-| `Disk` | ✗ | ✓ | RAM copy **demoted to disk-only** (`OnDisk`); reloads at the live frontier |
+| `Disk` | ✗ | ✓ | RAM copy **dropped**; disk is probed when demand reaches the node |
 | `Both` | ✓ | ✓ | value **kept resident** *and* on disk — hot reuse + survives reopen |
 
 This is **storage only** — the mode never feeds the content digest (§B.2). Purity alone
@@ -164,9 +164,10 @@ consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomp
 value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
 a content digest attests the value produced under it, however it came to be resident; the
 RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`evict_unused`, §B.6). Disk reuse is gated on `persists_to_disk`. `evict_unused` reclaims
-RAM the mode doesn't call to hold — demoting to a disk blob when one exists (lossless),
-else dropping only a non-RAM mode's value.
+`evict_unused`, §B.6). Disk reuse is gated on `persists_to_disk`. Disk availability is not
+mirrored in RAM: the resolver derives the target from the current digest and probes it only
+when demand reaches the node. `evict_unused` drops non-RAM values directly; an unused `Both`
+value is dropped only after its disk header proves the blob can replace it.
 
 ## B.1 What opts into disk
 
@@ -176,8 +177,8 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 1. The node has a **content digest** — its whole upstream cone is reproducible (§B.2).
    An impure node, or anything downstream of one, has no digest and is silently kept
    memory-only — it can never risk serving a stale value.
-2. A **disk root** is configured (`ExecutionEngine::set_disk_store` with a
-   `disk_root`). Until then `Disk`/`Both` degrade to memory-only.
+2. A **disk root** is configured on the worker's `DiskStore`. Until then `Disk`/`Both`
+   degrade to memory-only.
 
 ## B.2 The content digest is the cache key (`digest.rs`)
 
@@ -259,19 +260,16 @@ Each `ExecutionNodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the resolver
-value:          ValueState        // Empty | Resident { snapshot, produced_under }
-                                  //       | OnDisk
+value:          ValueState       // Empty | Resident { snapshot, produced_under }
 ```
 
-`ValueState` is one enum, not the old three loosely-coupled fields — so the previously
-representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
-fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
+`ValueState` records only RAM residency; disk availability is derived from the node id,
+cache mode, current digest, and store root when demanded. The reuse test is
+**`is_resident_hit`** — the slot is
 `Resident`, its `produced_under` equals the current digest, and every demanded snapshot
 value is bound. A `None` `current_digest` (impure cone) never hits.
-`OnDisk` means a resident slot was demoted after its current disk blob was validated. It is
-not a reuse verdict: the resolver still verifies and decodes the body before cutting its
-producer cone. A disk-cached value behind another reused node is never opened and therefore
-never enters RAM (B.6).
+A disk-cached value behind another reused node is never opened and therefore never enters
+RAM or acquires any runtime availability marker (B.6).
 
 ## B.6 Execution-time lifecycle (`cache/` policy over `disk_store/` I/O)
 
@@ -304,26 +302,23 @@ resolution and execution then follow this lifecycle:
    demanded output fails the node; skipped outputs may remain `Unbound`. Resident snapshots
    store only those values; `store_node` derives disk coverage from them and skips an existing
    frame only when both digest and coverage match. A broader result overwrites it.
-4. **mid-run release — `reclaim_slot`.** The executor seeds `RemainingOutputReads` from
+4. **mid-run release.** The executor seeds `RemainingOutputReads` from
    the resolver's exact, cache-aware reader counts and counts them *down* as each running
    consumer reads a bound producer (`ExecutionFrame::collect_inputs`). When an output
    reaches zero its value is cleared one output at a time, and once *every* output of a
-   **non-RAM** node is spent its whole slot is reclaimed the instant its last consumer
-   reads it — `reclaim_slot` demotes it to `OnDisk` if a blob serves it (a `Disk` value),
-   else drops it (`None`). A `Ram`/`Both` node is left resident (kept hot for reuse).
+   **non-RAM** node is spent its whole resident value is dropped the instant its last
+   consumer reads it. A `Ram`/`Both` node is left resident (kept hot for reuse).
    This bounds a chain's peak RAM to its active frontier instead of every intermediate
    at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
    moment it finishes.
-5. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
-   leftovers step 4 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
+5. **after the run → `evict_unused`.** Sweep the leftovers step 4 didn't reach — a prior
+   run's untouched value, or a non-RAM value a consumer
    never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
    run executed or read stays resident — as does a node-seeded preview root (`plan.pinned`),
-   whose retained value is the point of its run; every other resident value goes through
-   `reclaim_slot`:
-   demoted to `OnDisk` **iff** a blob can serve it again (lossless — a later run
-   reloads), else a **non-RAM** value (`None`, or a `Disk` value whose blob is missing) is
-   dropped outright and a `Ram`/`Both` leftover with no blob is kept — so eviction never forces
-   a recompute of a value a mode promised to retain.
+   whose retained value is the point of its run. Every non-RAM leftover is dropped outright.
+   An unused `Both` value is dropped only when its blob header covers the resident outputs;
+   otherwise it remains in RAM, so eviction never forces a recompute of a value the RAM mode
+   promised to retain.
 
 ### Worked example
 

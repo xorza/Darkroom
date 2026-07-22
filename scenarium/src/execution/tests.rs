@@ -177,10 +177,7 @@ mod cache_persistence {
         use crate::library::Library;
         use std::sync::Arc;
         let mut engine = ExecutionEngine::default();
-        engine.set_disk_store(DiskStore::new(
-            Arc::new(Library::default()),
-            Some(dir.0.clone()),
-        ));
+        engine.cache.disk_store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
         engine
     }
 
@@ -507,8 +504,8 @@ mod cache_persistence {
         };
 
         // get_a(7) → sum(Both) = 7+7 = 14 → mult(Both) = 14*7 = 98 → print. `Both`
-        // (RAM + disk) so the frontier the run reads is kept resident, not demoted —
-        // that retention is what this test asserts (pure `Disk` would demote it).
+        // (RAM + disk) so the frontier the run reads is kept resident — that retention
+        // is what this test asserts (pure `Disk` would drop its RAM copy).
         let lib = make_lib();
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a"));
@@ -579,10 +576,8 @@ mod cache_persistence {
         );
 
         let empty_dir = TempDir::new("chain-empty");
-        engine.set_disk_store(DiskStore::new(
-            Arc::new(Library::default()),
-            Some(empty_dir.0.clone()),
-        ));
+        engine.cache.disk_store =
+            DiskStore::new(Arc::new(Library::default()), Some(empty_dir.0.clone()));
         assert!(
             engine.cache.slots[&root_execution_node(mult_id)]
                 .output_values()
@@ -619,8 +614,8 @@ mod cache_persistence {
         let lib = test_func_lib(default_hooks());
 
         // get_a(1) → sum(Both) = 2 → mult(Both) = 2 → print, one engine. `Both`
-        // (RAM + disk) keeps a used value resident and demotes an unused leftover —
-        // the retain-vs-evict split this test asserts (pure `Disk` would demote both).
+        // (RAM + disk) keeps a used value resident and drops an unused reloadable leftover —
+        // the retain-vs-evict split this test asserts (pure `Disk` would drop both RAM copies).
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a"));
         let mut sum = node(&lib, "sum");
@@ -667,9 +662,9 @@ mod cache_persistence {
         let sum_resident = engine.cache.slots[&root_execution_node(sum_id)]
             .output_values()
             .is_some();
-        let sum_disk = matches!(
+        let sum_empty = matches!(
             engine.cache.slots[&root_execution_node(sum_id)].value,
-            ValueState::OnDisk
+            ValueState::Empty
         );
         let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
             .output_values()
@@ -682,8 +677,8 @@ mod cache_persistence {
             "the unused prior-run value is evicted from RAM"
         );
         assert!(
-            sum_disk,
-            "the evicted value stays available on disk for reload"
+            sum_empty,
+            "the evicted value leaves no mirrored disk state in RAM"
         );
         assert!(
             mult_resident,
@@ -692,6 +687,23 @@ mod cache_persistence {
         assert!(
             get_a_resident,
             "a non-reloadable (Memory) value is kept, never force-recomputed"
+        );
+
+        // Changing only mult makes demand reach sum's empty slot without changing sum's disk key.
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
+        assert!(cached(&stats, sum_id), "sum reloads from disk on demand");
+        assert!(!ran(&stats, sum_id), "sum does not recompute");
+        assert!(
+            ran(&stats, mult_id),
+            "the changed downstream node recomputes"
+        );
+        assert!(
+            engine.cache.slots[&root_execution_node(sum_id)]
+                .output_values()
+                .is_some(),
+            "the demanded Both value is resident again"
         );
     }
 
@@ -702,7 +714,7 @@ mod cache_persistence {
             .iter()
             .any(|e| e.e_node_id == root_execution_node(id))
     }
-    /// A top-level node reused a cache (RAM hit, disk hit, or a still-available cut) last run.
+    /// A top-level node reused a cache or remained resident behind a cut last run.
     fn cached(stats: &ExecutionStats, id: NodeId) -> bool {
         stats.cached_nodes.contains(&root_execution_node(id))
     }
@@ -773,8 +785,8 @@ mod cache_persistence {
                 slot.value
             ),
             CacheMode::Disk => assert!(
-                matches!(slot.value, ValueState::OnDisk),
-                "Disk demotes its RAM copy to disk-only after the run: {:?}",
+                matches!(slot.value, ValueState::Empty),
+                "Disk drops its RAM copy after the run: {:?}",
                 slot.value
             ),
             CacheMode::Ram | CacheMode::Both => assert!(
@@ -1339,7 +1351,7 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.set_disk_store(DiskStore::new(Arc::new(lib), Some(dir.0.clone())));
+            eg.cache.disk_store = DiskStore::new(Arc::new(lib), Some(dir.0.clone()));
             eg
         };
 
@@ -1569,7 +1581,7 @@ mod cache_persistence {
 
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
             let mut engine = ExecutionEngine::default();
-            engine.set_disk_store(DiskStore::new(Arc::new(library), Some(dir.0.clone())));
+            engine.cache.disk_store = DiskStore::new(Arc::new(library), Some(dir.0.clone()));
             engine
         };
 
@@ -1688,10 +1700,7 @@ mod resource_binds {
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::execution::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
-        engine.set_disk_store(DiskStore::new(
-            Arc::new(Library::default()),
-            Some(dir.0.clone()),
-        ));
+        engine.cache.disk_store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
         engine
     }
 
