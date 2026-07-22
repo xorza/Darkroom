@@ -7,7 +7,10 @@ use crate::execution::identity::ExecutionNodeId;
 #[test]
 fn flatten_id_is_identity_at_top_level() {
     let id = NodeId::from_u128(0xABCD);
-    assert_eq!(flatten_id(&[], id), ExecutionNodeId::from_node_id(id));
+    assert_eq!(
+        NodeId::from(ExecutionNodeId::from_authoring(&[id]).as_uuid()),
+        id
+    );
 }
 
 /// A nested node's id is a deterministic hash of (descent path, interior id):
@@ -17,30 +20,38 @@ fn flatten_id_is_identity_at_top_level() {
 #[test]
 fn flatten_id_nested_is_deterministic_and_path_sensitive() {
     let interior = NodeId::from_u128(7);
-    let path = [NodeId::from_u128(1), NodeId::from_u128(2)];
+    let path = [NodeId::from_u128(1), NodeId::from_u128(2), interior];
 
-    let id = flatten_id(&path, interior);
-    assert_eq!(id, flatten_id(&path, interior), "deterministic");
-    assert_ne!(id, ExecutionNodeId::from_node_id(interior));
+    let id = ExecutionNodeId::from_authoring(&path);
+    assert_eq!(id, ExecutionNodeId::from_authoring(&path), "deterministic");
+    assert_ne!(id, ExecutionNodeId::from_authoring(&[interior]));
 
-    let other_path = [NodeId::from_u128(1), NodeId::from_u128(3)];
+    let other_path = [NodeId::from_u128(1), NodeId::from_u128(3), interior];
     assert_ne!(
         id,
-        flatten_id(&other_path, interior),
+        ExecutionNodeId::from_authoring(&other_path),
         "the descent path changes the id"
     );
     assert_ne!(
         id,
-        flatten_id(&path, NodeId::from_u128(8)),
+        ExecutionNodeId::from_authoring(&[
+            NodeId::from_u128(1),
+            NodeId::from_u128(2),
+            NodeId::from_u128(8),
+        ]),
         "the interior id changes the id"
     );
 
     // A different *instance* of the same composite (distinct leading id) yields
     // a distinct flat id — two copies of one graph don't share cache slots.
-    let single = [NodeId::from_u128(1)];
-    let other_single = [NodeId::from_u128(9)];
     assert_ne!(
-        flatten_id(&single, interior),
-        flatten_id(&other_single, interior)
+        ExecutionNodeId::from_authoring(&[NodeId::from_u128(1), interior]),
+        ExecutionNodeId::from_authoring(&[NodeId::from_u128(9), interior])
     );
+}
+
+#[test]
+#[should_panic(expected = "an authoring path must include its leaf node")]
+fn rejects_an_empty_authoring_path() {
+    ExecutionNodeId::from_authoring(&[]);
 }

@@ -6,7 +6,7 @@ Scenarium has a strong top-level architecture. The authoring `Graph` is distinct
 
 The main weaknesses are now at subsystem seams:
 
-- Execution reports remain flat-runtime data at the public callback boundary, although each ID now has a distinct execution-only type and an ordered installed program supplies its interpretation.
+- Execution reports use strongly typed execution identities, and the ordered installed program supplies their authoring attribution without materializing graph paths.
 - The optional disk cache can turn a corrupt or concurrently removed blob into a failed node for one run, and its header probes perform synchronous filesystem I/O on the async worker path.
 - A stable `FuncId` is also the entire computation-version key, so changing a function implementation can silently reuse values produced by the old implementation.
 - Function, type, and context registration APIs permit invalid or misleading states that are rejected late—or, for several advisory fields, never consumed at all.
@@ -20,9 +20,7 @@ The most valuable sequence is to fix execution identity and cache transparency f
 
 `Compiler` validates an authoring `Graph`, recursively flattens graph instances into an `ExecutionProgram`, resolves output types, and returns a self-contained `CompiledGraph`. `Worker` reduces batches of public `WorkerMessage`s into an intent, installs shared compiled state, acknowledges that state through its ordered report stream, plans roots, prepares resource stamps, resolves digests/cache liveness, executes surviving nodes, and reports flat-ID progress and statistics. `RuntimeCache` owns persistent node state, resident outputs, disk availability state, digest stamping, codec dispatch, hydration, persistence, reclamation, and RAM accounting.
 
-## Batch 1 — Critical: make executions self-identifying and seed-safe
-
-- [ ] **Return authoring addresses from the public reporting boundary.** The ordered `Installed(Arc<CompiledGraph>)` report fixes program correlation for Scenarium's serial worker, and `ExecutionNodeId`/`ExecutionInputPort` now prevent flat identities from being confused with authoring `NodeId`/`InputPort`. However, `RunProgress`, almost every field of `ExecutionStats`, and worker errors still expose execution identities (`src/execution/report.rs`, `src/execution/stats.rs`, `src/worker/protocol.rs`), leaving downstream consumers responsible for projection. Map runtime results into `NodeAddress` plus named input/output address types before invoking the public callback, and keep flat-only statistics private to execution.
+## Batch 1 — Critical: make event seeds safe
 
 - [ ] **Validate event seeds as strictly as exact node seeds.** Exact `ExecutionNodeId` node seeds return `Error::NodeSeedNotFound` when absent, but public `WorkerMessage::InjectEvents` accepts `EventRef`s and `collect_roots` directly indexes both the node map and event slice (`src/execution/plan/mod.rs`, `src/worker/protocol.rs`). One malformed, out-of-range, or stale injected event can panic the worker task. Validate its execution identity and event index with structured errors, or make injection crate-private if only the internal event loop should use it. Cover missing nodes, out-of-range indices, and events queued across a program replacement.
 

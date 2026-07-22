@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::DiskStore;
-use scenarium::{CompiledGraph, Compiler, NodeAddress, WorkerReport};
+use scenarium::{CompiledGraph, Compiler, ExecutionNodeId, WorkerReport};
 use scenarium::{Graph, NodeId};
 
 use crate::core::document::{Document, GraphRef};
@@ -170,11 +170,9 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        let execution_node = compiled
-            .execution_node(&NodeAddress::root(node_id))
-            .expect("runnable root node must exist in the freshly compiled graph");
+        let e_node_id = ExecutionNodeId::from_authoring(&[node_id]);
         self.worker.install(compiled);
-        self.worker.run_node(execution_node);
+        self.worker.run_node(e_node_id);
         true
     }
 

@@ -8,9 +8,8 @@ use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
 
-/// Hand-built compile artifact for planner tests (an empty flatten map — every
-/// node is "top-level", so seed ids resolve directly). Inputs are
-/// `(required, binding)`.
+/// Hand-built compile artifact for planner tests. Every node gets a root
+/// attribution leaf. Inputs are `(required, binding)`.
 #[derive(Default)]
 struct Fix {
     compiled: CompiledGraph,

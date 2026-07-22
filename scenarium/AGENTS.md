@@ -20,10 +20,11 @@ Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain
 the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
-BLAKE3. `FlattenMap` maps each execution id to an exact `NodeAddress` and back.
-A `NodeAddress` contains the graph-instance path plus the interior node id.
-Targeted runs seed exact `ExecutionNodeId`s; pinned-output delivery uses exact
-authoring addresses.
+BLAKE3 from the enclosing instance ids and interior node id. `FlattenMap`
+retains only the compact scope ancestry needed to attribute each execution id
+to its authored node and enclosing instances. Targeted runs and runtime reports
+use exact `ExecutionNodeId`s; the host projects them through the installed
+`CompiledGraph` when it needs authoring identities.
 
 ## Source layout
 
@@ -47,7 +48,7 @@ authoring addresses.
 | `graph/interface/` | Graph identity, instance links, and exposed events |
 | `execution/compile.rs` | Host-side compiler and compiled artifact |
 | `execution/flatten/` | Composite lowering |
-| `execution/identity.rs` | Scoped authoring addresses and flatten provenance |
+| `execution/identity.rs` | Execution identities and compact authoring attribution |
 | `execution/program.rs` | Private flat runtime program |
 | `execution/plan/` | Structural scheduling and missing-input verdicts |
 | `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |

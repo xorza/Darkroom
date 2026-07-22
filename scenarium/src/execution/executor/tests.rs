@@ -12,7 +12,6 @@ use crate::execution::program::{ExecutionInput, ExecutionNode, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
-use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::{FuncLambda, InvokeError, OutputDemand};
 use crate::{DataType, StaticValue};
@@ -77,25 +76,6 @@ impl Prog {
         let start = self.program.e_nodes[&e_node_id].outputs.start as usize;
         self.program.output_pinned[start + port] = pinned;
     }
-}
-
-/// A `FlattenMap` where every node in `program` maps to itself as a top-level
-/// leaf — mirrors how the real flattener leaves top-level ids unchanged, so
-/// `flatten.interior(id) == Some(id)` for every node. `Prog` fixtures bypass
-/// the flattener entirely; this is the minimal stand-in the pinned-output
-/// push needs (it looks up `interior` only, never the composite-instance
-/// attribution chain `RunProgress` uses).
-fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
-    let mut flatten = FlattenMap::default();
-    // `reset` seeds the root scope (index 0) that every leaf below points at —
-    // without it `scopes` stays empty and `attribution`'s walk (used for the
-    // `RunProgress` Started/Finished sends, not just the pinned-output push)
-    // indexes out of bounds.
-    flatten.reset();
-    for e_node_id in program.e_nodes.keys().copied() {
-        flatten.set_leaf(e_node_id, 0, NodeId::from(e_node_id.as_uuid()));
-    }
-    flatten
 }
 
 #[derive(Debug)]
@@ -219,7 +199,6 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
             &run.resolved,
             &mut cache,
             &mut resource_stamps,
-            &FlattenMap::default(),
             None,
             CancelToken::never(),
         )
@@ -247,18 +226,14 @@ async fn run_with(
             &resolver.run,
             cache,
             &mut resource_stamps,
-            &FlattenMap::default(),
             None,
             CancelToken::never(),
         )
         .await
 }
 
-/// Like [`run`] but wires a live [`RunEvent`] channel through the executor
-/// (with a [`self_mapped_flatten`] map, since this fixture bypasses the real
-/// flattener) and drains every `PinnedOutputs` it sent, for tests asserting
-/// exactly what the pinned-output push sends (and, via the returned cache,
-/// what it leaves resident afterward).
+/// Like [`run`] but wires a live [`RunEvent`] channel through the executor and
+/// drains every `PinnedOutputs` it sent.
 async fn run_with_pinned(
     program: &ExecutionProgram,
     run: &TestRun,
@@ -267,7 +242,6 @@ async fn run_with_pinned(
     cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
-    let flatten = self_mapped_flatten(program);
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
     let stats = executor
         .run(
@@ -276,7 +250,6 @@ async fn run_with_pinned(
             &run.resolved,
             &mut cache,
             &mut resource_stamps,
-            &flatten,
             Some(&tx),
             CancelToken::never(),
         )
@@ -533,7 +506,7 @@ async fn pinned_output_pushes_right_after_it_runs() {
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "one push for the one finished node");
-    assert_eq!(pushes[0].node.node_id, NodeId::from(a.as_uuid()));
+    assert_eq!(pushes[0].e_node_id, a);
     assert_eq!(pushes[0].values.len(), 1);
     assert_eq!(pushes[0].values[0].port_idx, 0);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
@@ -585,7 +558,7 @@ async fn pinned_root_pushes_every_output() {
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].node.node_id, NodeId::from(a.as_uuid()));
+    assert_eq!(pushes[0].e_node_id, a);
     assert_eq!(pushes[0].values.len(), 2);
     assert_eq!(pushes[0].values[0].port_idx, 0);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));

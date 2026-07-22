@@ -8,7 +8,7 @@ use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
-use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, NodeAddress};
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::report::RunPhase;
 use crate::execution::stats::ExecutionStats;
 use crate::execution::{Result as ExecResult, RunSeeds};
@@ -28,7 +28,7 @@ use crate::worker::protocol::{WorkerMessage, WorkerReport};
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_node_id(node_id)
+    ExecutionNodeId::from_authoring(&[node_id])
 }
 
 /// Print messages a run logged, in order — `print` now logs via
@@ -537,8 +537,11 @@ async fn worker_streams_node_progress_before_finished() {
                     "progress maps to the node"
                 );
                 assert_eq!(
-                    compiled.authoring_address(p.e_node_id).unwrap(),
-                    &NodeAddress::root(print_node_id),
+                    compiled
+                        .attribution(p.e_node_id)
+                        .unwrap()
+                        .collect::<Vec<_>>(),
+                    vec![print_node_id],
                 );
                 match p.phase {
                     RunPhase::Started { .. } => started += 1,
@@ -623,30 +626,21 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
 
     let finished = next_finished_run(&mut rx).await;
     let stats = finished.result.unwrap();
-    let addresses: HashSet<_> = stats
+    let attributions: HashSet<_> = stats
         .executed_nodes
         .iter()
         .map(|stats| {
             finished
                 .compiled
-                .authoring_address(stats.e_node_id)
+                .attribution(stats.e_node_id)
                 .unwrap()
+                .collect::<Vec<_>>()
         })
-        .filter(|address| address.node_id == interior)
-        .cloned()
+        .filter(|attribution| attribution.first() == Some(&interior))
         .collect();
     assert_eq!(
-        addresses,
-        HashSet::from([
-            NodeAddress {
-                instances: vec![instance_a],
-                node_id: interior,
-            },
-            NodeAddress {
-                instances: vec![instance_b],
-                node_id: interior,
-            },
-        ])
+        attributions,
+        HashSet::from([vec![interior, instance_a], vec![interior, instance_b],])
     );
 }
 
@@ -1066,16 +1060,18 @@ async fn queued_separate_install_and_run_commands_preserve_program_order() {
     assert_eq!(
         first
             .compiled
-            .authoring_address(root_execution_node(print_a))
-            .unwrap(),
-        &NodeAddress::root(print_a),
+            .attribution(root_execution_node(print_a))
+            .unwrap()
+            .collect::<Vec<_>>(),
+        vec![print_a],
     );
     assert_eq!(
         second
             .compiled
-            .authoring_address(root_execution_node(print_b))
-            .unwrap(),
-        &NodeAddress::root(print_b),
+            .attribution(root_execution_node(print_b))
+            .unwrap()
+            .collect::<Vec<_>>(),
+        vec![print_b],
     );
     assert_eq!(messages(&first.result.unwrap()), ["first"]);
     assert_eq!(messages(&second.result.unwrap()), ["second"]);
@@ -1155,26 +1151,28 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
     assert_eq!(
         finished
             .compiled
-            .authoring_address(root_execution_node(source))
-            .unwrap(),
-        &NodeAddress::root(source),
+            .attribution(root_execution_node(source))
+            .unwrap()
+            .collect::<Vec<_>>(),
+        vec![source],
     );
     assert_eq!(
         finished
             .compiled
-            .authoring_address(root_execution_node(sink))
-            .unwrap(),
-        &NodeAddress::root(sink),
+            .attribution(root_execution_node(sink))
+            .unwrap()
+            .collect::<Vec<_>>(),
+        vec![sink],
     );
-    let replacement_execution_node = root_execution_node(replacement_node);
-    assert_eq!(
+    let replacement_e_node_id = root_execution_node(replacement_node);
+    assert!(matches!(
         finished
             .compiled
-            .authoring_address(replacement_execution_node),
+            .attribution(replacement_e_node_id),
         Err(ExecutionIdentityError::NodeNotFound {
-            e_node_id: replacement_execution_node,
-        })
-    );
+            e_node_id,
+        }) if e_node_id == replacement_e_node_id
+    ));
 
     let installed = timeout(Duration::from_secs(5), rx.recv())
         .await

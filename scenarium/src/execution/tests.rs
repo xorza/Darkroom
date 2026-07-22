@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::execution::compile::{CompileError, Compiler};
-use crate::execution::identity::{ExecutionNodeId, NodeAddress};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeSearch, OutputPort};
 use crate::library::Library;
@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_node_id(node_id)
+    ExecutionNodeId::from_authoring(&[node_id])
 }
 
 fn execution_node_name<'a>(
@@ -25,13 +25,11 @@ fn execution_node_name<'a>(
     library: &'a Library,
     e_node_id: ExecutionNodeId,
 ) -> &'a str {
-    let address = execution_graph
-        .compiled
-        .flatten_map
-        .address(e_node_id)
-        .unwrap();
+    let mut attribution = execution_graph.compiled.attribution(e_node_id).unwrap();
+    let node_id = attribution.next().unwrap();
+    let instances = attribution.collect::<Vec<_>>();
     let mut current = graph;
-    for instance in &address.instances {
+    for instance in instances.iter().rev() {
         let link = current
             .find(instance, NodeSearch::TopLevel)
             .unwrap()
@@ -40,10 +38,7 @@ fn execution_node_name<'a>(
             .unwrap();
         current = current.resolve_graph(link, library).unwrap();
     }
-    &current
-        .find(&address.node_id, NodeSearch::TopLevel)
-        .unwrap()
-        .name
+    &current.find(&node_id, NodeSearch::TopLevel).unwrap().name
 }
 
 fn execution_node_id(
@@ -273,7 +268,7 @@ mod cache_persistence {
             "mult did not recompute"
         );
         let pinned = receive_pinned(&mut rx);
-        assert_eq!(pinned.node.node_id, mult_id);
+        assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
         assert_eq!(pinned.values.len(), 1);
         assert_eq!(pinned.values[0].port_idx, 0);
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
@@ -312,7 +307,7 @@ mod cache_persistence {
             "targeted refresh releases the hydrated Disk value after delivery"
         );
         let pinned = receive_pinned(&mut rx);
-        assert_eq!(pinned.node.node_id, mult_id);
+        assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
 
         // Changing one input to a const makes `mult` miss, while its other input
@@ -880,7 +875,7 @@ mod cache_persistence {
         // reclaimed to its on-disk blob once `Print` finished reading it this
         // run — hydrate it back to inspect the served bytes.
         use crate::execution::query::test_support::resolve_e_node_id;
-        let e_node_id = resolve_e_node_id(&engine.compiled, &NodeAddress::root(mult_id)).unwrap();
+        let e_node_id = resolve_e_node_id(&engine.compiled, &[mult_id]).unwrap();
         engine
             .cache
             .hydrate_slot(&engine.compiled.program, e_node_id)
@@ -3187,13 +3182,12 @@ mod composite_behavior {
             .unwrap()
             .id;
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let address = NodeAddress {
-            instances: vec![outer_inst, inner_inst],
-            node_id: deep_id,
-        };
-        let e_node_id = compiled.flatten_map.flat_node(&address).unwrap();
+        let e_node_id = ExecutionNodeId::from_authoring(&[outer_inst, inner_inst, deep_id]);
         assert!(compiled.program.e_nodes.contains_key(&e_node_id));
-        assert_eq!(compiled.flatten_map.address(e_node_id), Some(&address));
+        assert_eq!(
+            compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
+            vec![deep_id, inner_inst, outer_inst]
+        );
         assert!(
             reruns_with_cache(&graph, &library, "deep"),
             "doubly-nested impure interior recomputes"
@@ -3242,17 +3236,14 @@ mod composite_behavior {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        let first_address = NodeAddress {
-            instances: vec![first_instance],
-            node_id: inner_id,
-        };
-        let first_execution = eg.compiled.execution_node(&first_address).unwrap();
+        let first_e_node_id = ExecutionNodeId::from_authoring(&[first_instance, inner_id]);
+        let second_e_node_id = ExecutionNodeId::from_authoring(&[second_instance, inner_id]);
 
         let (tx, mut rx) = unbounded_channel();
         let stats = eg
             .execute(
                 RunSeeds {
-                    nodes: vec![first_execution],
+                    nodes: vec![first_e_node_id],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -3268,11 +3259,11 @@ mod composite_behavior {
         while let Ok(event) = rx.try_recv() {
             if let RunEvent::PinnedOutputs(outputs) = event {
                 assert_eq!(outputs.values[0].value.as_i64(), Some(11));
-                pushed.push(outputs.node);
+                pushed.push(outputs.e_node_id);
             }
         }
         pushed.sort();
-        let expected = vec![first_address];
+        let expected = vec![first_e_node_id];
         assert_eq!(pushed, expected);
         assert!(
             graph
@@ -3282,19 +3273,16 @@ mod composite_behavior {
             "execution leaves the nested authoring node disabled"
         );
         assert!(
-            eg.get_argument_values_at(&expected[0])
+            eg.get_argument_values_at(first_e_node_id)
                 .unwrap()
                 .outputs
                 .is_empty()
         );
         assert!(
-            eg.get_argument_values_at(&NodeAddress {
-                instances: vec![second_instance],
-                node_id: inner_id,
-            })
-            .unwrap()
-            .outputs
-            .is_empty()
+            eg.get_argument_values_at(second_e_node_id)
+                .unwrap()
+                .outputs
+                .is_empty()
         );
     }
 }
@@ -5081,7 +5069,6 @@ mod graph {
 
         assert_eq!(eg.compiled.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
-            let address = NodeAddress::root(node.id);
             assert!(
                 eg.compiled
                     .program
@@ -5091,13 +5078,10 @@ mod graph {
             );
             assert_eq!(
                 eg.compiled
-                    .flatten_map
-                    .address(root_execution_node(node.id)),
-                Some(&address)
-            );
-            assert_eq!(
-                eg.compiled.flatten_map.flat_node(&address),
-                Some(root_execution_node(node.id))
+                    .attribution(root_execution_node(node.id))
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                vec![node.id]
             );
         }
     }
@@ -5144,28 +5128,24 @@ mod graph {
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
 
         let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-        let interior_address = NodeAddress {
-            instances: vec![c_id],
-            node_id: interior_sum_id,
-        };
         let retained_compiled = Arc::clone(&compiled);
-        let retained_flat_id = retained_compiled
-            .flatten_map
-            .flat_node(&interior_address)
-            .unwrap();
+        let retained_e_node_id = ExecutionNodeId::from_authoring(&[c_id, interior_sum_id]);
         let mut eg = ExecutionEngine::default();
         eg.install(compiled);
 
         // Interior node: flattened id is remapped, but attribution points
         // back to the authoring interior id then the enclosing instance.
-        let sum_flat = execution_node_id(&eg, &graph, &library, "sum").unwrap();
-        assert_eq!(sum_flat, retained_flat_id);
+        let sum_e_node_id = execution_node_id(&eg, &graph, &library, "sum").unwrap();
+        assert_eq!(sum_e_node_id, retained_e_node_id);
         assert_ne!(
-            sum_flat,
+            sum_e_node_id,
             root_execution_node(interior_sum_id),
             "flattened id is remapped"
         );
-        let attr: Vec<_> = retained_compiled.attribution(sum_flat).unwrap().collect();
+        let attr: Vec<_> = retained_compiled
+            .attribution(sum_e_node_id)
+            .unwrap()
+            .collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.
@@ -5266,10 +5246,10 @@ mod graph {
         eg.update(&graph, &library).unwrap();
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
-        let reactor_flat = execution_node_id(&eg, &graph, &library, "Print").unwrap();
+        let reactor_e_node_id = execution_node_id(&eg, &graph, &library, "Print").unwrap();
         assert_eq!(
             subscriber_ids(&eg, root_execution_node(emitter_id), 0),
-            vec![reactor_flat]
+            vec![reactor_e_node_id]
         );
     }
 
@@ -5829,17 +5809,17 @@ mod compile_regressions {
         );
 
         let mut program = ExecutionProgram::default();
-        let execution_node_id = root_execution_node(node_id);
+        let e_node_id = root_execution_node(node_id);
         program.inputs.push(ExecutionInput {
             required: true,
             stamper: None,
             binding: ExecutionBinding::Bind(ExecutionOutputPort {
-                e_node_id: execution_node_id,
+                e_node_id,
                 port_idx: 0,
             }),
         });
         program.e_nodes.insert(
-            execution_node_id,
+            e_node_id,
             ExecutionNode {
                 func_id: passthrough.id,
                 inputs: Span::new(0, 1),
@@ -5849,7 +5829,7 @@ mod compile_regressions {
         );
         program.resolve_output_types(&library);
         assert_eq!(
-            program.node_output_types(&program.e_nodes[&execution_node_id]),
+            program.node_output_types(&program.e_nodes[&e_node_id]),
             &[DataType::Any]
         );
     }
@@ -5917,11 +5897,10 @@ mod compile_regressions {
         );
     }
 
-    /// Inspecting a node *inside* a graph goes by its authoring id — the flat id
-    /// is hashed from the descent path, so the query must resolve through the
-    /// flatten map instead of missing and silently returning nothing.
+    /// Inspecting a node *inside* a graph requires its complete authoring path,
+    /// because the execution id is hashed from that path.
     #[tokio::test(flavor = "multi_thread")]
-    async fn interior_node_inspection_resolves_authoring_id() {
+    async fn interior_node_inspection_derives_execution_id_from_authoring_path() {
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 4),
@@ -5971,11 +5950,8 @@ mod compile_regressions {
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );
         let values = eg
-            .get_argument_values_at(&NodeAddress {
-                instances: vec![inst_id],
-                node_id: sum_interior_id,
-            })
-            .expect("the interior node resolves through the flatten map");
+            .get_argument_values_at(ExecutionNodeId::from_authoring(&[inst_id, sum_interior_id]))
+            .expect("the interior execution node exists");
         assert_eq!(
             values.outputs[0].as_i64(),
             Some(6),
