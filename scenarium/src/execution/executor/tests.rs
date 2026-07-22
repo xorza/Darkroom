@@ -218,7 +218,9 @@ async fn run_with(
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
     let mut resolver = Resolver::default();
     let mut resource_stamps = RunResourceStamps::default();
-    resolver.resolve(program, plan, cache, &resource_stamps);
+    resolver
+        .resolve(program, plan, cache, &resource_stamps)
+        .await;
     executor
         .run(
             program,

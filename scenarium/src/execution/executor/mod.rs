@@ -57,8 +57,7 @@ enum NodeOutcome {
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
     Failed { secs: f64, error: RunError },
-    /// Never ran — an upstream dependency errored, a bound input's blob failed to load,
-    /// or its func has no implementation attached.
+    /// Never ran — an upstream dependency errored or its func has no implementation attached.
     Skipped { error: RunError },
 }
 
@@ -126,17 +125,7 @@ struct ExecutionFrame<'a> {
 }
 
 impl ExecutionFrame<'_> {
-    async fn hydrate_resource_producers(&mut self, e_node_id: ExecutionNodeId) {
-        for input in self.program.node_inputs(&self.program.e_nodes[&e_node_id]) {
-            if input.stamper.is_some()
-                && let ExecutionBinding::Bind(addr) = &input.binding
-            {
-                self.cache.hydrate_slot(self.program, addr.e_node_id).await;
-            }
-        }
-    }
-
-    async fn emit_pinned_values(
+    fn emit_pinned_values(
         &mut self,
         e_node_id: ExecutionNodeId,
         events: Option<&UnboundedSender<RunEvent>>,
@@ -155,11 +144,6 @@ impl ExecutionFrame<'_> {
         if pinned_ports.is_empty() {
             return;
         }
-        if self.cache.slots[&e_node_id].output_values().is_none()
-            && !self.cache.hydrate_slot(self.program, e_node_id).await
-        {
-            return;
-        }
 
         let values = pinned_ports
             .into_iter()
@@ -176,36 +160,29 @@ impl ExecutionFrame<'_> {
             .expect(EVENTS_OUTLIVE_RUN);
     }
 
-    async fn collect_inputs(&mut self, e_node_id: ExecutionNodeId) -> Result<(), RunError> {
+    fn collect_inputs(&mut self, e_node_id: ExecutionNodeId) {
         self.inputs.clear();
         let node_inputs = self.program.node_inputs(&self.program.e_nodes[&e_node_id]);
-        for (input_idx, e_input) in node_inputs.iter().enumerate() {
+        for e_input in node_inputs {
             let value = match &e_input.binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) => {
                     let target = addr.e_node_id;
                     let port_idx = addr.port_idx;
-                    self.cache.hydrate_slot(self.program, target).await;
                     let output_idx = self.program.output_idx(target, port_idx);
                     let take = self.remaining_reads.is_last(output_idx)
                         && !self.program.e_nodes[&target].cache.caches_in_ram();
-                    let Some(value) =
-                        self.cache
-                            .read_output_port(self.program, target, port_idx, take)
-                    else {
-                        return Err(RunError::InputLoadFailed {
-                            func_id: self.program.e_nodes[&e_node_id].func_id,
-                            input: input_idx,
-                        });
-                    };
+                    let value = self
+                        .cache
+                        .read_output_port(self.program, target, port_idx, take)
+                        .expect("a resolved producer output must be resident when consumed");
                     self.finish_read(target, port_idx, output_idx);
                     value
                 }
             };
             self.inputs.push(InvokeInput { value });
         }
-        Ok(())
     }
 
     fn cancel_input_reads(&mut self, e_node_id: ExecutionNodeId) {
@@ -351,7 +328,6 @@ impl Executor {
                 let reused = match resolved.disposition[&e_node_id] {
                     Disposition::Reuse => true,
                     Disposition::Run if frame.cache.slots[&e_node_id].current_digest.is_none() => {
-                        frame.hydrate_resource_producers(e_node_id).await;
                         frame
                             .resource_stamps
                             .prepare_node(
@@ -365,7 +341,7 @@ impl Executor {
                             .cache
                             .stamp_digest(program, frame.resource_stamps, e_node_id);
                         let demand = resolved.outputs.demand.slice(e_node.outputs);
-                        let reused = frame.cache.check_reuse(program, e_node_id, demand);
+                        let reused = frame.cache.check_reuse(program, e_node_id, demand).await;
                         if reused {
                             frame.cancel_input_reads(e_node_id);
                         }
@@ -375,7 +351,7 @@ impl Executor {
                 };
                 if reused {
                     *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Reused;
-                    frame.emit_pinned_values(e_node_id, events).await;
+                    frame.emit_pinned_values(e_node_id, events);
                     continue;
                 }
 
@@ -391,15 +367,9 @@ impl Executor {
                     continue;
                 }
 
-                // Load the node's inputs, pulling any disk-cached producer in on demand (the
-                // lazy frontier read) and releasing each producer whose last read this
-                // satisfies. A bound producer whose blob failed to load drops this node for
-                // the run under its own reason (`InputLoadFailed`) — unlike an errored
-                // dependency, there is no upstream error to point at.
-                if let Err(error) = frame.collect_inputs(e_node_id).await {
-                    mark_skipped(frame.cache, &mut self.outcomes, e_node_id, error);
-                    continue;
-                }
+                // Read already-resolved inputs and release each producer whose last read this
+                // satisfies. Disk reuse is hydrated before the resolver cuts producer cones.
+                frame.collect_inputs(e_node_id);
 
                 let output_count = e_node.outputs.len as usize;
                 let event_state = frame.cache.slots[&e_node_id].event_state.clone();
@@ -507,7 +477,7 @@ impl Executor {
                 // borrow doesn't cross it.
                 if succeeded {
                     // Deliver before later consumers can release values; host delivery is not a reader.
-                    frame.emit_pinned_values(e_node_id, events).await;
+                    frame.emit_pinned_values(e_node_id, events);
                     frame
                         .cache
                         .store_node(program, e_node_id, &mut self.ctx_manager)
@@ -535,9 +505,8 @@ impl Executor {
 
 /// Drop `e_node_id` from this run: clear any stale cached output so it isn't served as
 /// this run's result, and record the outcome under the caller's reason —
-/// [`RunError::SkippedUpstream`] for an errored dependency, [`RunError::InputLoadFailed`]
-/// for a cached input that failed to load, [`RunError::MissingLambda`] for a func with
-/// no implementation.
+/// [`RunError::SkippedUpstream`] for an errored dependency or
+/// [`RunError::MissingLambda`] for a func with no implementation.
 fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeMap<NodeOutcome>,

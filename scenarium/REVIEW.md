@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in cache identity and behavior: optional disk-cache failures can fail an otherwise valid run, function and codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
+Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in cache identity and behavior: function and codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
 
 The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, a wide positional lambda ABI, parallel compiled-data pools with distributed invariants, and large execution modules that own several distinct responsibilities. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
@@ -12,13 +12,11 @@ The main structural problems are late registry validation, mixed lifecycle state
 
 ## Critical
 
-- [ ] **A failed disk-cache read aborts a valid run once.** Resolution treats a matching header as a reusable value and removes its producer cone, but hydration later clears a corrupt, incompatible, or concurrently deleted blob and returns `false`. The consumer then receives `RunError::InputLoadFailed`; the producer is recomputed only on a later run, so enabling the optional cache changes whether the current execution succeeds (`src/execution/cache/mod.rs:464-570`, `src/execution/executor/mod.rs:186-202`, `src/execution/mod.rs:166-171`).
-
 - [ ] **Disk-cache presence checks block the async worker.** Blob coverage probes synchronously open, read, and inspect files during reuse resolution and before stores, while failed hydration also deletes files synchronously. Disk-backed graphs can therefore stall the worker once per cache probe despite body reads and writes using the blocking pool (`src/execution/disk_store/mod.rs:57-69`, `src/execution/disk_store/mod.rs:140-150`, `src/execution/disk_store/mod.rs:175-198`, `src/execution/cache/mod.rs:481-497`).
 
 - [ ] **Function implementations have no cache revision.** `Func` carries a stable `FuncId` and executable lambda but no implementation revision, while `node_digest` keys pure results by the global domain, `FuncId`, output signature, and inputs. Changing value logic under the same persisted identity and signature can silently reuse RAM or disk values produced by the old implementation (`src/node/definition.rs:186-212`, `src/execution/digest/mod.rs:15-21`, `src/execution/digest/mod.rs:234-288`).
 
-- [ ] **Custom codec revisions are absent from blob identity.** Type registration records only an optional codec, and disk-hit eligibility checks only whether a codec is present. A breaking codec change is discovered during lazy decoding rather than during cache lookup, which can select an incompatible blob and then fail the run through the cache-read path (`src/library.rs:44-55`, `src/execution/disk_store/mod.rs:103-112`, `src/execution/digest/mod.rs:35-36`, `../lens/src/image/codec/mod.rs:18-25`, `../lens/src/image/codec/mod.rs:82-91`).
+- [ ] **Custom codec revisions are absent from blob identity.** Type registration records only an optional codec, and disk-hit eligibility checks only whether a codec is present. A breaking codec change does not re-key existing blobs, so old bytes may be decoded under new semantics or rejected only during body verification (`src/library.rs:44-55`, `src/execution/disk_store/mod.rs:103-112`, `src/execution/digest/mod.rs:35-36`, `../lens/src/image/codec/mod.rs:18-25`, `../lens/src/image/codec/mod.rs:82-91`).
 
 - [ ] **Filesystem resource fingerprints can miss content changes.** Files are identified only by length and modification time; directories hash only immediate entry names and metadata. Same-size edits with an unchanged timestamp and nested-directory content edits can therefore reuse stale cached results, while the execution documentation claims an opt-in content hash that does not exist (`src/execution/resource/mod.rs:22-126`, `src/execution/digest/mod.rs:22-29`, `src/execution/README.md:199-203`).
 

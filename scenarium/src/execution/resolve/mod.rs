@@ -39,8 +39,8 @@ pub(crate) enum Disposition {
     /// the sweep never promotes stays cut.
     #[default]
     Cut,
-    /// An unchanged output is cached (resident in RAM, or a blob on disk) — serve it
-    /// without running the lambda.
+    /// An unchanged demanded output is verified and resident — serve it without running the
+    /// lambda.
     Reuse,
     /// The node must run.
     Run,
@@ -125,9 +125,9 @@ pub(crate) struct Resolver {
 
 impl Resolver {
     /// Stamp the structural schedule, then resolve exact liveness and cache reuse.
-    /// **Mutates `cache`**: stamps each runnable node's `current_digest` and may flag a
-    /// live reusable slot `OnDisk`.
-    pub(crate) fn resolve(
+    /// **Mutates `cache`**: stamps each runnable node's `current_digest` and hydrates each live
+    /// disk-cache frontier before declaring it reusable.
+    pub(crate) async fn resolve(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
@@ -135,7 +135,7 @@ impl Resolver {
         resource_stamps: &RunResourceStamps,
     ) {
         stamp_digests(program, cache, resource_stamps, plan);
-        resolve_run(program, plan, cache, &mut self.run);
+        resolve_run(program, plan, cache, &mut self.run).await;
     }
 }
 
@@ -161,7 +161,7 @@ fn stamp_digests(
 /// reuse and missing-input nodes stop the walk. Producer classification happens only after
 /// every downstream consumer has contributed, so cache coverage is checked against exact
 /// demand rather than the planner's former structural over-approximation.
-fn resolve_run(
+async fn resolve_run(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     cache: &mut RuntimeCache,
@@ -183,7 +183,7 @@ fn resolve_run(
         run.outputs.seed_external_demand(program, plan, e_node_id);
         let outputs = program.e_nodes[&e_node_id].outputs;
         let demand = run.outputs.demand.slice(outputs);
-        if cache.check_reuse(program, e_node_id, demand) {
+        if cache.check_reuse(program, e_node_id, demand).await {
             *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Reuse;
             continue;
         }

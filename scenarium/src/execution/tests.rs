@@ -410,9 +410,9 @@ mod cache_persistence {
     /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink
     /// (`print`). On reopen only the frontier `mult` — the cached value `print`
     /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
-    /// consumer `mult` is itself reused-from-disk, is never probed or loaded.
+    /// consumer `mult` is itself reused-from-disk, is never hydrated.
     #[tokio::test]
-    async fn chained_disk_cache_probes_only_the_frontier() {
+    async fn chained_disk_cache_hydrates_only_the_live_frontier() {
         let dir = TempDir::new("chain-frontier");
 
         let get_a_calls = Arc::new(AtomicUsize::new(0));
@@ -463,8 +463,8 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
 
-        // Only frontier `mult` is probed and reused. `sum` and `get_a` are behind that
-        // hit, so neither is probed or recomputed.
+        // Only frontier `mult` is verified and reused. `sum` and `get_a` are behind that
+        // hit, so neither is hydrated or recomputed.
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             1,
@@ -473,7 +473,7 @@ mod cache_persistence {
         assert!(
             !stats.cached_nodes.contains(&root_execution_node(sum_id))
                 && stats.cached_nodes.contains(&root_execution_node(mult_id)),
-            "only the live frontier cache is probed and reported"
+            "only the live frontier cache is hydrated and reported"
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
@@ -492,7 +492,7 @@ mod cache_persistence {
         );
         assert!(
             !sum_resident,
-            "a disk cache behind another is not loaded into RAM"
+            "an unneeded upstream disk cache is not hydrated"
         );
         assert!(
             sum_empty,
@@ -823,7 +823,14 @@ mod cache_persistence {
     #[tokio::test(flavor = "multi_thread")]
     async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
         let dir = TempDir::new("flip_back");
-        let lib = test_func_lib(default_hooks());
+        let printed = Arc::new(Mutex::new(Vec::new()));
+        let printed_for_hook = printed.clone();
+        let lib = test_func_lib(TestFuncHooks {
+            print: Arc::new(move |value| {
+                printed_for_hook.try_lock().unwrap().push(value);
+            }),
+            ..default_hooks()
+        });
 
         // mult read by print. Const binds detach mult from any upstream, so its
         // digest is a pure function of the two consts. Fixed node ids so the slot
@@ -871,20 +878,10 @@ mod cache_persistence {
             stats.executed_nodes
         );
 
-        // `mult` isn't RAM-caching (`Disk` mode) and nothing pins it, so it was
-        // reclaimed to its on-disk blob once `Print` finished reading it this
-        // run — hydrate it back to inspect the served bytes.
-        use crate::execution::query::test_support::resolve_e_node_id;
-        let e_node_id = resolve_e_node_id(&engine.compiled, &[mult_id]).unwrap();
-        engine
-            .cache
-            .hydrate_slot(&engine.compiled.program, e_node_id)
-            .await;
-        let vals = engine.get_argument_values(&mult_id).unwrap();
-        assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(6))),
-            "flip-back serves the disk blob (6), not the stale RAM value (35): {:?}",
-            vals.outputs
+        assert_eq!(
+            printed.lock().await.as_slice(),
+            &[6, 35, 6],
+            "flip-back serves the disk blob (6), not the stale RAM value (35)"
         );
         Ok(())
     }
@@ -1025,13 +1022,13 @@ mod cache_persistence {
         );
     }
 
-    /// A corrupt / incompatible cache blob must be *deleted* on a failed load, so the
-    /// recompute that follows writes a fresh one. Without the delete, `store_node`'s
+    /// A corrupt / incompatible cache blob must be *deleted* on a failed load so the
+    /// same run recomputes and writes a fresh one. Without the delete, `store_node`'s
     /// skip-if-exists keeps the broken file and the node recomputes on *every* run
     /// (the regression: an old-format blob rejected by `BLOB_FORMAT_VERSION` was never
     /// replaced). Each "session" is a fresh engine, so the disk cache is the only source.
     #[tokio::test]
-    async fn corrupt_blob_is_replaced_so_the_next_reopen_is_a_hit() {
+    async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
         let dir = TempDir::new("corrupt_replace");
         let get_a_calls = Arc::new(AtomicUsize::new(0));
         let lib = {
@@ -1077,10 +1074,11 @@ mod cache_persistence {
             let stats = engine.execute_sinks().await.unwrap();
             assert!(ran(&stats, mult_id), "cold run computes mult");
         }
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
         // Corrupt mult's blob *body* (a torn write / an old, version-mismatched format)
         // while keeping the leading 32-byte digest header intact — a garbled header
-        // would already fail the presence probe and never reach the on-demand load
+        // would already fail the presence probe and never reach body verification
         // this test is about.
         let blob = std::fs::read_dir(&dir.0)
             .unwrap()
@@ -1094,48 +1092,21 @@ mod cache_persistence {
         bytes.extend_from_slice(b"garbage");
         std::fs::write(&blob, &bytes).unwrap();
 
-        // Reopen: the corrupt blob still carries the current digest in its header, so
-        // mult is served from disk — but the read fails when `print` pulls it in on
-        // demand. `print` is dropped for the run
-        // (a node error, not a panic) and the bad blob is deleted, so the next reopen
-        // recomputes it fresh.
+        // Reopen: the corrupt blob still carries the current digest in its header. Body
+        // verification fails before the resolver cuts the producer cone, so the blob is
+        // deleted and mult recomputes successfully in this same run.
         {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
             let stats = engine.execute_sinks().await.unwrap();
-            // The consumer reports the real reason — a failed cache load on its input,
-            // not "an upstream dependency errored" (no upstream node holds an error).
-            let print_id = graph
-                .find_by_name("Print", NodeSearch::TopLevel)
-                .unwrap()
-                .id;
-            assert_eq!(stats.node_errors.len(), 1);
-            assert_eq!(
-                stats.node_errors[0].e_node_id,
-                root_execution_node(print_id)
-            );
-            assert!(
-                matches!(
-                    stats.node_errors[0].error,
-                    RunError::InputLoadFailed { input: 0, .. }
-                ),
-                "the skip carries the input-load reason, got: {:?}",
-                stats.node_errors[0].error
-            );
+            assert!(ran(&stats, mult_id), "the corrupt cache is a same-run miss");
+            assert!(stats.node_errors.is_empty(), "the recomputed run succeeds");
         }
-        assert!(!blob.exists(), "the corrupt blob was deleted");
-
-        // Reopen: mult's blob is gone → mult recomputes and re-stores; the run succeeds.
-        {
-            let mut engine = disk_engine(&dir);
-            engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_sinks().await.unwrap();
-            assert!(
-                ran(&stats, mult_id),
-                "mult recomputes once its bad blob is gone"
-            );
-            assert!(stats.node_errors.is_empty(), "the run now succeeds");
-        }
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
+        assert!(
+            blob.exists(),
+            "the corrupt blob is replaced by the same run"
+        );
 
         // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.
         {
@@ -1144,6 +1115,11 @@ mod cache_persistence {
             let stats = engine.execute_sinks().await.unwrap();
             assert!(!ran(&stats, mult_id), "the replaced blob is a clean hit");
         }
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "the clean replacement prunes its producer"
+        );
     }
 
     /// A `persist` node whose disk blob is gone by the time the run reaches it must
@@ -2080,14 +2056,14 @@ mod resource_binds {
 mod graph_structure {
     use super::*;
 
-    #[test]
-    fn basic_run() -> TestResult {
+    #[tokio::test]
+    async fn basic_run() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
@@ -2150,8 +2126,8 @@ mod graph_structure {
         Ok(())
     }
 
-    #[test]
-    fn updates_after_graph_change() -> TestResult {
+    #[tokio::test]
+    async fn updates_after_graph_change() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2177,7 +2153,7 @@ mod graph_structure {
         bind(&mut graph, "mult", 1, binding2);
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
@@ -2237,8 +2213,8 @@ mod graph_structure {
 mod missing_inputs {
     use super::*;
 
-    #[test]
-    fn required_missing_propagates_downstream() -> TestResult {
+    #[tokio::test]
+    async fn required_missing_propagates_downstream() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2247,7 +2223,7 @@ mod missing_inputs {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
@@ -2271,8 +2247,8 @@ mod missing_inputs {
     /// (and its consumers) are missing too. Optionality only excuses an
     /// *unbound* input (see `optional_unbound_does_not_propagate`), not a
     /// binding to a broken upstream.
-    #[test]
-    fn optional_bind_to_missing_propagates() -> TestResult {
+    #[tokio::test]
+    async fn optional_bind_to_missing_propagates() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2284,7 +2260,7 @@ mod missing_inputs {
         });
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
@@ -2303,8 +2279,8 @@ mod missing_inputs {
     /// The contrast to `optional_bind_to_missing_propagates`: an optional input
     /// left **unbound** is a deliberate no-value, so it does not flag the node
     /// missing — it runs with its default.
-    #[test]
-    fn optional_unbound_does_not_propagate() -> TestResult {
+    #[tokio::test]
+    async fn optional_unbound_does_not_propagate() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2316,7 +2292,7 @@ mod missing_inputs {
         });
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
@@ -2382,8 +2358,8 @@ mod disabled_nodes {
     /// Disabling `sum` retains it in the compiled program but excludes it from
     /// the plan. Its consumer `mult` sees the disabled producer as unavailable,
     /// so the missing-required-input flag propagates downstream.
-    #[test]
-    fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
+    #[tokio::test]
+    async fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2395,7 +2371,7 @@ mod disabled_nodes {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
@@ -2424,8 +2400,8 @@ mod disabled_nodes {
     /// breaks the chain: `sum` is skipped but `get_b → mult → print` still
     /// runs (mirrors `non_required_missing_does_not_propagate`, but via the
     /// disable flag rather than a cleared binding).
-    #[test]
-    fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
+    #[tokio::test]
+    async fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
@@ -2440,7 +2416,7 @@ mod disabled_nodes {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph, &graph, &library),
@@ -2999,8 +2975,8 @@ mod behavior {
         Ok(())
     }
 
-    #[test]
-    fn impure_node_always_invoked() -> TestResult {
+    #[tokio::test]
+    async fn impure_node_always_invoked() -> TestResult {
         let graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
@@ -3015,7 +2991,7 @@ mod behavior {
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         execution_graph.set_output_values(get_b, vec![DynamicValue::Static(StaticValue::Int(7))]);
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
+        execution_graph.prepare_execution(true, false, &[]).await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
@@ -3102,10 +3078,10 @@ mod composite_behavior {
 
     /// `(name in execute_order)` after a second prepare, with a cached
     /// output already present for that node — i.e. "would it re-run?".
-    fn reruns_with_cache(graph: &Graph, library: &Library, name: &str) -> bool {
+    async fn reruns_with_cache(graph: &Graph, library: &Library, name: &str) -> bool {
         let mut eg = ExecutionEngine::default();
         eg.update(graph, library).unwrap();
-        eg.prepare_execution(true, false, &[]).unwrap();
+        eg.prepare_execution(true, false, &[]).await.unwrap();
         assert!(
             execution_node_names_in_order(&eg, graph, library).contains(&name.to_string()),
             "{name} should run on the first prepare"
@@ -3113,12 +3089,12 @@ mod composite_behavior {
         let e_node_id = execution_node_id(&eg, graph, library, name).unwrap();
         eg.set_output_values(e_node_id, vec![DynamicValue::Static(StaticValue::Int(11))]);
         eg.update(graph, library).unwrap();
-        eg.prepare_execution(true, false, &[]).unwrap();
+        eg.prepare_execution(true, false, &[]).await.unwrap();
         execution_node_names_in_order(&eg, graph, library).contains(&name.to_string())
     }
 
-    #[test]
-    fn composite_reruns_impure_interior() {
+    #[tokio::test]
+    async fn composite_reruns_impure_interior() {
         // An impure interior recomputes across a composite boundary like any
         // impure node — flattening must preserve its impurity.
         let mut library = test_func_lib(TestFuncHooks::default());
@@ -3128,7 +3104,7 @@ mod composite_behavior {
         let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         assert!(
-            reruns_with_cache(&graph, &library, "inner"),
+            reruns_with_cache(&graph, &library, "inner").await,
             "impure interior recomputes through a composite"
         );
     }
@@ -3154,8 +3130,8 @@ mod composite_behavior {
         );
     }
 
-    #[test]
-    fn nested_impure_interior_reruns_when_local_graph_ids_repeat() {
+    #[tokio::test]
+    async fn nested_impure_interior_reruns_when_local_graph_ids_repeat() {
         // A doubly-nested impure node recomputes — flattening preserves its
         // impurity through two composite levels whose map-local ids coincide.
         let mut library = test_func_lib(TestFuncHooks::default());
@@ -3189,7 +3165,7 @@ mod composite_behavior {
             vec![deep_id, inner_inst, outer_inst]
         );
         assert!(
-            reruns_with_cache(&graph, &library, "deep"),
+            reruns_with_cache(&graph, &library, "deep").await,
             "doubly-nested impure interior recomputes"
         );
     }
@@ -3290,8 +3266,8 @@ mod composite_behavior {
 mod cycle_detection {
     use super::*;
 
-    #[test]
-    fn returns_error_with_node_id() {
+    #[tokio::test]
+    async fn returns_error_with_node_id() {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -3304,6 +3280,7 @@ mod cycle_detection {
 
         let err = execution_graph
             .prepare_execution(true, false, &[])
+            .await
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { e_node_id } => {

@@ -53,7 +53,7 @@ impl Fix {
         e_node_id
     }
 
-    fn resolve(
+    async fn resolve(
         &self,
         roots: &[ExecutionNodeId],
         pinned: &[ExecutionNodeId],
@@ -88,7 +88,9 @@ impl Fix {
             };
         }
         let mut resolver = Resolver::default();
-        resolver.resolve(&self.program, &plan, &mut cache, &resource_stamps);
+        resolver
+            .resolve(&self.program, &plan, &mut cache, &resource_stamps)
+            .await;
         resolver.run
     }
 }
@@ -119,22 +121,24 @@ fn reader_overflow_trips_the_debug_invariant() {
     );
 }
 
-#[test]
-fn reuse_hit_prunes_its_whole_upstream_cone() {
+#[tokio::test]
+async fn reuse_hit_prunes_its_whole_upstream_cone() {
     let mut fix = Fix::default();
     let source = fix.node(&[], 1);
     let cached = fix.node(&[(false, bind(source, 0))], 1);
     let sink = fix.node(&[(false, bind(cached, 0))], 0);
 
-    let run = fix.resolve(
-        &[sink],
-        &[],
-        &[],
-        vec![CachedNode {
-            e_node_id: cached,
-            values: vec![value(1)],
-        }],
-    );
+    let run = fix
+        .resolve(
+            &[sink],
+            &[],
+            &[],
+            vec![CachedNode {
+                e_node_id: cached,
+                values: vec![value(1)],
+            }],
+        )
+        .await;
 
     assert_eq!(run.disposition[&source], Disposition::Cut);
     assert_eq!(run.disposition[&cached], Disposition::Reuse);
@@ -147,29 +151,31 @@ fn reuse_hit_prunes_its_whole_upstream_cone() {
     );
 }
 
-#[test]
-fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
+#[tokio::test]
+async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
     let mut fix = Fix::default();
     let source = fix.node(&[], 2);
     let cached = fix.node(&[(false, bind(source, 1))], 1);
     let live = fix.node(&[(false, bind(source, 0))], 1);
     let sink = fix.node(&[(false, bind(cached, 0)), (false, bind(live, 0))], 0);
 
-    let run = fix.resolve(
-        &[sink],
-        &[],
-        &[],
-        vec![
-            CachedNode {
-                e_node_id: source,
-                values: vec![value(7), DynamicValue::Unbound],
-            },
-            CachedNode {
-                e_node_id: cached,
-                values: vec![value(8)],
-            },
-        ],
-    );
+    let run = fix
+        .resolve(
+            &[sink],
+            &[],
+            &[],
+            vec![
+                CachedNode {
+                    e_node_id: source,
+                    values: vec![value(7), DynamicValue::Unbound],
+                },
+                CachedNode {
+                    e_node_id: cached,
+                    values: vec![value(8)],
+                },
+            ],
+        )
+        .await;
 
     assert_eq!(run.disposition[&source], Disposition::Reuse);
     assert_eq!(run.disposition[&cached], Disposition::Reuse);
@@ -189,8 +195,8 @@ fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
     );
 }
 
-#[test]
-fn missing_input_stops_liveness_before_its_producer() {
+#[tokio::test]
+async fn missing_input_stops_liveness_before_its_producer() {
     let mut fix = Fix::default();
     let source = fix.node(&[], 1);
     let blocked = fix.node(
@@ -198,7 +204,7 @@ fn missing_input_stops_liveness_before_its_producer() {
         0,
     );
 
-    let run = fix.resolve(&[blocked], &[], &[blocked], Vec::new());
+    let run = fix.resolve(&[blocked], &[], &[blocked], Vec::new()).await;
 
     assert_eq!(run.disposition[&source], Disposition::Cut);
     assert_eq!(run.disposition[&blocked], Disposition::Cut);
@@ -216,20 +222,22 @@ fn missing_input_stops_liveness_before_its_producer() {
     );
 }
 
-#[test]
-fn graph_and_node_pins_seed_demand_without_readers() {
+#[tokio::test]
+async fn graph_and_node_pins_seed_demand_without_readers() {
     let mut fix = Fix::default();
     let graph_pinned = fix.node(&[], 2);
     let node_pinned = fix.node(&[], 2);
     let output_idx = fix.program.output_idx(graph_pinned, 1);
     fix.program.output_pinned[output_idx.idx()] = true;
 
-    let run = fix.resolve(
-        &[graph_pinned, node_pinned],
-        &[node_pinned],
-        &[],
-        Vec::new(),
-    );
+    let run = fix
+        .resolve(
+            &[graph_pinned, node_pinned],
+            &[node_pinned],
+            &[],
+            Vec::new(),
+        )
+        .await;
 
     assert_eq!(
         run.outputs
@@ -252,23 +260,25 @@ fn graph_and_node_pins_seed_demand_without_readers() {
     );
 }
 
-#[test]
-fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
+#[tokio::test]
+async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
     let mut fix = Fix::default();
     let deep = fix.node(&[], 1);
     let source = fix.node(&[(false, bind(deep, 0))], 1);
     let cached = fix.node(&[(false, bind(source, 0))], 1);
     let sink = fix.node(&[(false, bind(cached, 0))], 0);
 
-    let run = fix.resolve(
-        &[sink],
-        &[],
-        &[],
-        vec![CachedNode {
-            e_node_id: cached,
-            values: vec![value(1)],
-        }],
-    );
+    let run = fix
+        .resolve(
+            &[sink],
+            &[],
+            &[],
+            vec![CachedNode {
+                e_node_id: cached,
+                values: vec![value(1)],
+            }],
+        )
+        .await;
 
     assert_eq!(run.disposition[&deep], Disposition::Cut);
     assert_eq!(run.disposition[&source], Disposition::Cut);

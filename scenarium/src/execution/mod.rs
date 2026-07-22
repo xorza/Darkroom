@@ -166,12 +166,6 @@ pub enum RunError {
     MissingLambda { func_id: FuncId },
     #[error("skipped: an upstream dependency errored")]
     SkippedUpstream { func_id: FuncId },
-    /// A bound input's disk-cached value failed to load (corrupt/deleted blob).
-    /// Distinct from [`SkippedUpstream`](Self::SkippedUpstream): no upstream node
-    /// holds an error to point at. The bad blob is deleted on the failed read, so
-    /// the producer recomputes next run. `input` is the consumer's input position.
-    #[error("skipped: a cached input failed to load from disk (recomputes next run)")]
-    InputLoadFailed { func_id: FuncId, input: usize },
     #[error("demanded outputs {outputs:?} were left unbound")]
     OutputsNotProduced {
         func_id: FuncId,
@@ -319,12 +313,14 @@ impl ExecutionEngine {
         // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,
         // exact output demand, and live readers together. The resolved run is authoritative:
         // a cache-hit or blocked consumer contributes no upstream demand.
-        self.resolver.resolve(
-            &self.compiled.program,
-            &self.plan,
-            &mut self.cache,
-            &self.resource_stamps,
-        );
+        self.resolver
+            .resolve(
+                &self.compiled.program,
+                &self.plan,
+                &mut self.cache,
+                &self.resource_stamps,
+            )
+            .await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -455,7 +451,7 @@ pub(crate) mod test_support {
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-        pub(crate) fn prepare_execution(
+        pub(crate) async fn prepare_execution(
             &mut self,
             sinks: bool,
             event_triggers: bool,
@@ -469,12 +465,14 @@ pub(crate) mod test_support {
             };
             self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
             self.resource_stamps = RunResourceStamps::default();
-            self.resolver.resolve(
-                &self.compiled.program,
-                &self.plan,
-                &mut self.cache,
-                &self.resource_stamps,
-            );
+            self.resolver
+                .resolve(
+                    &self.compiled.program,
+                    &self.plan,
+                    &mut self.cache,
+                    &self.resource_stamps,
+                )
+                .await;
             Ok(())
         }
 

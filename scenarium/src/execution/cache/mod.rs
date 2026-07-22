@@ -1,6 +1,6 @@
 //! The cross-run runtime cache: the per-node RAM slots (output values + content digests +
 //! node state, keyed by `ExecutionNodeId`) **plus** the
-//! [`DiskStore`] backing them, and the caching policy over the two — reuse detection, on-demand
+//! [`DiskStore`] backing them, and the caching policy over the two — reuse detection, frontier
 //! hydration, persistence, and RAM eviction. Owned by the
 //! [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run loop drives it a
 //! node at a time. The [`DiskStore`] is pure blob I/O and knows nothing of the cache; this type
@@ -156,11 +156,9 @@ pub(crate) enum ValueState {
         snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
     },
-    /// Not in RAM, but a decodable blob exists on disk for the slot's *current* digest —
-    /// flagged during the run by [`mark_on_disk_if_present`](RuntimeCache::mark_on_disk_if_present)
-    /// (or demoted here from a resident value by `evict_unused`) without loading,
-    /// deserialized on demand by a running consumer's `collect_inputs`.
-    /// Lets a disk-cached value behind another disk-cached value never enter RAM.
+    /// Not in RAM, but a blob candidate exists on disk for the slot's *current* digest — either
+    /// found by [`mark_on_disk_if_present`](RuntimeCache::mark_on_disk_if_present) before body
+    /// verification or demoted from a resident value by `evict_unused`.
     OnDisk { coverage: CachedOutputCoverage },
 }
 
@@ -388,11 +386,10 @@ impl RuntimeCache {
     }
 
     /// Whether the slot currently holds a *usable* cached value for its digest — resident
-    /// under the current digest, or a disk blob already flagged [`ValueState::OnDisk`] this
-    /// run. Unlike [`is_resident_hit`](Self::is_resident_hit) (RAM only), this also counts a
-    /// stat'd-but-unloaded disk blob, so a node the executor's cut pruned (its consumers all
-    /// reused, so it never ran) is still reported as *cached* when its value can be served —
-    /// while a pruned memory-only node with no value reports `false`.
+    /// under the current digest, or a disk blob already represented by [`ValueState::OnDisk`]
+    /// after an earlier demotion. Unlike [`is_resident_hit`](Self::is_resident_hit) (RAM only),
+    /// this also counts that disk-only state, while a pruned memory-only node with no value
+    /// reports `false`.
     pub(crate) fn has_available_value(&self, e_node_id: ExecutionNodeId) -> bool {
         self.is_resident_current(e_node_id)
             || matches!(self.slots[&e_node_id].value, ValueState::OnDisk { .. })
@@ -403,7 +400,7 @@ impl RuntimeCache {
     /// executor's last-read fast path for a non-RAM producer: the RAM copy would be released
     /// right after anyway, and handing over the slot's copy leaves the consumer as the sole
     /// `Arc` holder so [`DynamicValue::into_custom`] can reuse the allocation in place.
-    /// `None` when the slot holds no resident values (a failed hydrate).
+    /// `None` when the slot holds no resident values.
     pub(crate) fn read_output_port(
         &mut self,
         program: &ExecutionProgram,
@@ -451,33 +448,35 @@ impl RuntimeCache {
         self.slots.get_mut(&e_node_id).unwrap().current_digest = digest;
     }
 
-    /// Whether an unchanged output can satisfy this run's exact demand — resident in RAM
-    /// ([`is_resident_hit`](Self::is_resident_hit)) or a blob on disk flagged now
-    /// ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)). A `None` digest
-    /// (an impure cone, or a bound resource not yet readable) never reuses.
+    /// Whether an unchanged output can satisfy this run's exact demand — already resident in
+    /// RAM ([`is_resident_hit`](Self::is_resident_hit)) or successfully hydrated from disk. A
+    /// `None` digest (an impure cone, or a bound resource not yet readable) never reuses.
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
     /// under it — however the value came to be resident (mode retention or a preview pin).
     /// Disk reuse stays gated on `persists_to_disk`
     /// (`Disk`/`Both`, enforced in [`DiskStore::blob_target`]).
-    pub(crate) fn check_reuse(
+    pub(crate) async fn check_reuse(
         &mut self,
         program: &ExecutionProgram,
         e_node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
-        self.slots[&e_node_id].current_digest.is_some()
-            && (self.is_resident_hit(e_node_id, demand)
-                || self.mark_on_disk_if_present(program, e_node_id, demand))
+        if self.slots[&e_node_id].current_digest.is_none() {
+            return false;
+        }
+        if self.is_resident_hit(e_node_id, demand) {
+            return true;
+        }
+        self.mark_on_disk_if_present(program, e_node_id, demand)
+            && self.hydrate_slot(program, e_node_id).await
     }
 
-    /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
-    /// decodable blob exists on disk for that digest, flag the slot `OnDisk` (dropping any stale
-    /// resident value produced under a superseded digest) and return `true` — the node is served
-    /// without running. The bytes stay on disk; they load lazily only when a running consumer
-    /// reads the value ([`hydrate_slot`](Self::hydrate_slot)), so a disk-cached value behind
-    /// another never enters RAM.
+    /// Probe whether a decodable blob exists for the current digest and exact demand. A match
+    /// flags the slot `OnDisk`, dropping any stale resident value produced under a superseded
+    /// digest, so [`check_reuse`](Self::check_reuse) can verify the body before cutting the
+    /// producer cone.
     pub(crate) fn mark_on_disk_if_present(
         &mut self,
         program: &ExecutionProgram,
@@ -508,11 +507,10 @@ impl RuntimeCache {
     /// Deserialize `e_node_id`'s disk blob into its slot. Returns whether the slot is resident
     /// afterward: `true` if already resident or the read succeeded. On a read failure (codec
     /// gone, corrupt, an incompatible format, a wrong output count, or deleted) the slot is
-    /// cleared, so the demanding consumer is dropped this run and the *next* reopen recomputes
-    /// the node. A broken blob is also deleted — without that, a blob whose header still
-    /// matches the current digest would be skipped by [`DiskStore::store`] as "already
-    /// current" and kept broken forever.
-    pub(crate) async fn hydrate_slot(
+    /// cleared, so the resolver treats it as a miss and recomputes it in the same run. A broken
+    /// blob is also deleted — without that, a blob whose header still matches the current digest
+    /// would be skipped by [`DiskStore::store`] as "already current" and kept broken forever.
+    async fn hydrate_slot(
         &mut self,
         program: &ExecutionProgram,
         e_node_id: ExecutionNodeId,

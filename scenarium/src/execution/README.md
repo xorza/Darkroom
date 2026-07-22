@@ -154,7 +154,7 @@ this Part) — copied onto the flat node as `ExecutionNode.cache`:
 |------|:-:|:-:|---|
 | `None` | ✗ | ✗ | value **dropped** — recomputes whenever next needed |
 | `Ram`  | ✓ | ✗ | value **kept resident**, reused across runs; lost on reopen |
-| `Disk` | ✗ | ✓ | RAM copy **demoted to disk-only** (`OnDisk`); reloads lazily |
+| `Disk` | ✗ | ✓ | RAM copy **demoted to disk-only** (`OnDisk`); reloads at the live frontier |
 | `Both` | ✓ | ✓ | value **kept resident** *and* on disk — hot reuse + survives reopen |
 
 This is **storage only** — the mode never feeds the content digest (§B.2). Purity alone
@@ -266,9 +266,10 @@ representable bad combos ("resident *and* flagged on disk", a stale RAM value ma
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
 `Resident`, its `produced_under` equals the current digest, and every demanded snapshot
 value is bound. A `None` `current_digest` (impure cone) never hits.
-`OnDisk` means a decodable frame exists for this digest and demand but is not yet
-loaded: a cheap header probe, so a disk-cached value behind another reused node is served
-without entering RAM (B.6).
+`OnDisk` means a slot was demoted to a disk blob or a header probe found a candidate for
+this digest and demand. It is not a reuse verdict: the resolver verifies the body and makes
+it resident before cutting its producer cone. A disk-cached value behind another reused node
+is never probed and therefore never enters RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`cache/` policy over `disk_store/` I/O)
 
@@ -285,28 +286,22 @@ isn't recomputed on reopen.
 
 A digest folding a Bind-delivered resource value it can't read yet (§B.2 wired resource
 inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop prepares that
-identity off-thread and re-stamps it at reach time, serving the cache on a hit. Then, as
-the executor reaches each surviving node:
+identity off-thread and re-stamps it at reach time, serving the cache on a hit. Cache
+resolution and execution then follow this lifecycle:
 
 1. **resident hit?** — reuse only when the digest matches and every demanded resident
    output is non-`Unbound`.
-2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest and a
+2. **else verify disk reuse.** If the node's blob carries the digest and a
    coverage containing current demand **and** the outputs are decodable (every custom output type has a codec —
-   predicted without reading), flag the slot `OnDisk` and reuse it — a 32-byte header
-   read + codec check, **no body bytes**. The value loads only if a running consumer
-   actually reads it.
+   predicted without reading), `mark_on_disk_if_present` flags the candidate `OnDisk` and
+   `hydrate_slot` decodes its body. Only a successful decode becomes `Reuse` and cuts the
+   producer cone. A corrupt, incompatible, or vanished body is deleted and treated as a miss;
+   the same reverse sweep continues through its producers, so the node recomputes this run.
 3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
    demanded output fails the node; skipped outputs may remain `Unbound`. Resident snapshots
    store only those values; `store_node` derives disk coverage from them and skips an existing
    frame only when both digest and coverage match. A broader result overwrites it.
-4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
-   producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
-   a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a
-   blob can't be the wrong type (the signature is in the digest, §B.2). The loader verifies
-   that decoded bound values exactly match the header coverage before admitting the values
-   into RAM; if the blob fails to *load* (corrupt/deleted) the bad file is deleted and the
-   demanding consumer is dropped for this run; the next reopen recomputes it.
-5. **mid-run release — `reclaim_slot`.** The executor seeds `RemainingOutputReads` from
+4. **mid-run release — `reclaim_slot`.** The executor seeds `RemainingOutputReads` from
    the resolver's exact, cache-aware reader counts and counts them *down* as each running
    consumer reads a bound producer (`ExecutionFrame::collect_inputs`). When an output
    reaches zero its value is cleared one output at a time, and once *every* output of a
@@ -316,8 +311,8 @@ the executor reaches each surviving node:
    This bounds a chain's peak RAM to its active frontier instead of every intermediate
    at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
    moment it finishes.
-6. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
-   leftovers step 5 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
+5. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
+   leftovers step 4 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
    never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
    run executed or read stays resident — as does a node-seeded preview root (`plan.pinned`),
    whose retained value is the point of its run; every other resident value goes through
@@ -330,11 +325,10 @@ the executor reaches each surviving node:
 ### Worked example
 
 `A → B → sink`, `A` and `B` both disk-backed (`Disk`/`Both`), after a cold run that
-stored both. On reopen the pre-run cut resolves `A` and `B` as disk hits; the sink runs
-and reads `B`, so `B`'s blob is pulled into RAM by `hydrate_slot` while `A` — read only by
-the reused `B` — is pruned (flagged `OnDisk`, still reported cached, its bytes never enter
-RAM). A `Ram` (memory-only) node feeding *only* `A` is cut too: it has no cross-session
-cache and the reused `A` ignores it, so it is **not** recomputed on reopen (the win the
+stored both. On reopen the pre-run cut verifies and hydrates `B`, then prunes `A` because its
+only consumer is reused. `A`'s blob is never probed or decoded. A `Ram` (memory-only) node
+feeding *only* `A` is cut too: it has no cross-session
+cache and the reused `B` makes `A` unnecessary, so it is **not** recomputed on reopen (the win the
 removed plan-time pass used to give). If a later edit invalidates `B`, `B` misses and
 recomputes, reading `A` from disk (`A` becomes the frontier) and re-needing that memory-only
 source, which then runs.
@@ -348,6 +342,6 @@ source, which then runs.
 - Impure cone → no digest → never cached.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
   (`mark_on_disk_if_present`'s codec check keeps a codec-less blob off the hot path; a
-  failed load deletes the bad blob and self-heals on the next reopen).
+  failed load deletes the bad blob and recomputes it in the same run).
 
 ---

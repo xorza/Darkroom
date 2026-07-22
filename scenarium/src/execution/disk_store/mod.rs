@@ -102,9 +102,9 @@ impl DiskStore {
 
     /// Whether every one of `types` could be decoded back from a blob: each `Custom` output
     /// type has a codec in this store's library. `types` are a node's resolved output types off
-    /// the program pool, so this predicts (without reading) whether [`read`](Self::read) would
-    /// succeed — the reuse policy never flags a node whose later on-demand load would fail. An
-    /// unresolved type (`Any`) imposes no constraint.
+    /// the program pool, so this rejects blobs that cannot be decoded with the current registry
+    /// before reading their bodies. [`read`](Self::read) still verifies the body. An unresolved
+    /// type (`Any`) imposes no constraint.
     pub(crate) fn outputs_decodable(&self, types: &[DataType]) -> bool {
         types.iter().all(|ty| match ty {
             DataType::Custom(type_id) => self.library.codec(type_id).is_some(),
