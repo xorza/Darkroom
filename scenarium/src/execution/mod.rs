@@ -18,6 +18,7 @@
 //! and `execute` (phases 2–3, run back-to-back).
 
 use std::ops::{Index, IndexMut};
+use std::sync::Arc;
 
 use common::{CancelToken, Span};
 use hashbrown::{HashMap, HashSet};
@@ -187,22 +188,37 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// are independent and combine: a run can target sink nodes, the event loop's
 /// triggerable events, a set of injected events, and/or specific nodes, all at once.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct RunSeeds {
+pub struct RunSeeds {
     /// Include all sink nodes — the ordinary "produce the outputs" trigger.
     pub sinks: bool,
     /// Include every node owning a subscribed event — drives the event loop.
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
     pub events: Vec<EventRef>,
-    /// Run the cones of these specific nodes (authoring ids) and deliver every output —
-    /// the on-demand "run to this node" / preview trigger. The
-    /// worker batches these with the graph they target. An explicitly seeded disabled
-    /// node is enabled for this run; an id that doesn't resolve against the compiled
-    /// program fails with [`Error::NodeSeedNotFound`].
+    /// Run the cones of these specific nodes (authoring addresses) and deliver every
+    /// output — the on-demand "run to this node" / preview trigger. An explicitly
+    /// seeded disabled node is enabled for this run; an address that doesn't resolve
+    /// against the installed program fails with [`Error::NodeSeedNotFound`].
     pub nodes: Vec<NodeAddress>,
 }
 
-/// The run-side pipeline container. Owns the installed `program` and its
+impl RunSeeds {
+    pub fn sinks() -> Self {
+        Self {
+            sinks: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn nodes(nodes: Vec<NodeAddress>) -> Self {
+        Self {
+            nodes,
+            ..Self::default()
+        }
+    }
+}
+
+/// The run-side pipeline container. Shares the installed `program` and its
 /// `flatten_map` (flat↔authoring ids), the reusable `plan` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
 /// owned `DiskStore` file persistence and the caching policy), and the `executor`
@@ -211,10 +227,10 @@ pub(crate) struct RunSeeds {
 /// persistent form is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
-    /// The installed compile artifact: the program plus its flatten map
+    /// The installed shared compile artifact: the program plus its flatten map
     /// (authoring↔execution id map, resolving node seeds at plan time).
     /// Replaced wholesale by [`Self::install`].
-    pub(crate) compiled: CompiledGraph,
+    pub(crate) compiled: Arc<CompiledGraph>,
     /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
     /// The RAM slots are reconciled to the node set at each `install`; the disk store is set
@@ -238,7 +254,7 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.compiled = CompiledGraph::default();
+        self.compiled = Arc::default();
         self.plan.clear();
         self.cache.clear();
         self.resource_stamps = RunResourceStamps::default();
@@ -261,7 +277,7 @@ impl ExecutionEngine {
     /// The plan isn't cleared here: every `execute` re-`plan`s from scratch (the
     /// planner `reset`s the buffer), and nothing reads the plan between an install
     /// and the next run. `clear()` is reserved for full teardown (`Self::clear`).
-    pub(crate) fn install(&mut self, compiled: CompiledGraph) {
+    pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
         self.compiled = compiled;
 
         // Realign the runtime cache to the new node set (preserve by id,
@@ -342,11 +358,9 @@ impl ExecutionEngine {
         Ok(stats)
     }
 
-    /// Persist to disk any **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
-    /// node that holds a resident value but isn't on disk yet — e.g. a node just toggled to
-    /// a disk-backed [`CacheMode`](crate::graph::CacheMode) whose value is still in RAM from
-    /// a prior run. The worker calls this on `SaveCaches`, since such a node is a cache hit
-    /// and so never re-executes to store itself.
+    /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
+    /// values when the worker attaches a new [`DiskStore`]. This makes values computed
+    /// while the store was memory-only durable once a document receives a cache root.
     ///
     /// Never rewrites identical content: a blob already stamped with the node's current
     /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
@@ -383,11 +397,7 @@ impl ExecutionEngine {
         graph: &crate::graph::Graph,
         library: &crate::library::Library,
     ) -> std::result::Result<(), compile::CompileError> {
-        self.install(
-            compile::Compiler::default()
-                .compile(graph, library)?
-                .compiled,
-        );
+        self.install(compile::Compiler::default().compile(graph, library)?.into());
         Ok(())
     }
 

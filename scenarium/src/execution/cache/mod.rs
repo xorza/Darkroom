@@ -575,8 +575,8 @@ impl RuntimeCache {
     /// Only writes a value that matches the node's *current* digest
     /// ([`is_resident_hit`](Self::is_resident_hit)): a resident value produced under a superseded
     /// digest must not be stamped with — and overwrite — the new digest's blob. In the run loop
-    /// the just-stamped value is always a current hit; this guards the deferred
-    /// [`store_resident_caches`](crate::execution::ExecutionEngine::store_resident_caches) flush.
+    /// the just-stamped value is always a current hit; this guards maintenance flushes when a
+    /// disk store is attached.
     pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,

@@ -4,13 +4,10 @@
 //! frontend orchestration on top, so worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
 use scenarium::DiskStore;
-use scenarium::FlattenMap;
-use scenarium::{Compilation, CompiledGraph, Compiler};
+use scenarium::{CompiledGraph, Compiler, WorkerReport};
 use scenarium::{Graph, NodeId};
+use std::path::{Path, PathBuf};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
@@ -19,7 +16,7 @@ use crate::core::runtime_library::{RuntimeLibrary, RuntimeLibraryChange};
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
-use crate::core::worker::{WorkerBridge, WorkerEvent};
+use crate::core::worker::WorkerBridge;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeHost {
@@ -33,10 +30,6 @@ pub(crate) struct RuntimeHost {
     /// Long-lived so the flatten scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
-    /// The flatten map of the last program sent to the worker — the worker's
-    /// stats are keyed by flat ids and carry no map of their own (the host
-    /// compiled, so it already has it). Frontends project stats through this.
-    pub(crate) flatten_map: Arc<FlattenMap>,
     /// The shared user-facing outcome log: compile failures report here
     /// (from [`Self::compile`]); frontends add their own outcomes (run
     /// results, file ops) and render it — the TUI as a rolling history, the
@@ -72,7 +65,6 @@ impl RuntimeHost {
             worker,
             disk_root: None,
             compiler: Compiler::default(),
-            flatten_map: Arc::default(),
             status,
             script,
         };
@@ -128,19 +120,12 @@ impl RuntimeHost {
         ));
     }
 
-    /// Compile `graph` against the current library and record the artifact's
-    /// flatten map as the host's current one — every send below installs its
-    /// artifact on the worker, so the map here always mirrors the program the
-    /// worker's next stats come from. A failure is reported to [`Self::status`]
-    /// and returns `None` (nothing sent, worker untouched); a success clears
-    /// the sticky error.
+    /// Compile `graph` against the current library. A failure is reported to
+    /// [`Self::status`] and returns `None` (nothing sent, worker untouched); a
+    /// success clears the sticky error.
     fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
         match self.compiler.compile(graph, &self.library.published.load()) {
-            Ok(Compilation {
-                compiled,
-                flatten_map,
-            }) => {
-                self.flatten_map = flatten_map;
+            Ok(compiled) => {
                 self.status.error = None;
                 Some(compiled)
             }
@@ -168,7 +153,8 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.run_once(compiled);
+        self.worker.install(compiled);
+        self.worker.run_sinks();
         true
     }
 
@@ -182,19 +168,9 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        let address = compiled.node_address(node_id);
-        self.worker.run_node(compiled, address);
+        self.worker.install(compiled);
+        self.worker.run_node(node_id);
         true
-    }
-
-    /// Persist resident caches to disk without running the graph — e.g. after a node's
-    /// disk-cache toggle, so its RAM value reaches disk immediately. The recompile
-    /// carries the just-toggled cache mode to the worker; a compile failure is
-    /// reported to [`Self::status`] and nothing is sent.
-    pub(crate) fn save_caches(&mut self, graph: &Graph) {
-        if let Some(compiled) = self.compile(graph) {
-            self.worker.save_caches(compiled);
-        }
     }
 
     /// Request cancellation of the in-flight run (coarse — the running node
@@ -211,7 +187,8 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.start_event_loop(compiled);
+        self.worker.install(compiled);
+        self.worker.start_event_loop();
         true
     }
 
@@ -221,7 +198,7 @@ impl RuntimeHost {
     }
 
     /// Non-blocking drain of worker results posted since the last frame.
-    pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerEvent> + '_ {
+    pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerReport> + '_ {
         self.worker.drain()
     }
 

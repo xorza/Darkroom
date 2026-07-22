@@ -30,3 +30,11 @@ blobs and serialization directly to file to avoid memallocs
 build masters chose array of files instead of directory
 
 remove anyhow
+
+Darkroom currently recompiles on every run, so each new compile still needs installation
+
+remove flattenmap from worker
+
+save caches on cache click
+
+make compiled graph all nodes have unique id to reduce nodeaddress paths

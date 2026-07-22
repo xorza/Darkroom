@@ -5,8 +5,6 @@
 //! compile is never sent, so the worker's install is infallible and a running
 //! event loop is never disturbed by a bad edit.
 
-use std::sync::Arc;
-
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
@@ -36,33 +34,26 @@ pub struct CompileError {
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
-    pub(crate) flatten_map: Arc<FlattenMap>,
+    pub(crate) flatten_map: FlattenMap,
 }
 
 impl CompiledGraph {
-    /// Choose an execution address when a host has only a bare authoring node id.
-    /// Interior ids use the map's stable representative; an unknown id remains a
-    /// root address so execution reports the inconsistent seed.
-    pub fn node_address(&self, node_id: NodeId) -> NodeAddress {
-        self.flatten_map
-            .representative(&node_id)
-            .cloned()
-            .unwrap_or_else(|| NodeAddress::root(node_id))
+    /// Resolve one flat execution id to its exact scoped authoring address.
+    pub fn authoring_address(&self, flat_id: NodeId) -> Option<&NodeAddress> {
+        self.flatten_map.address(flat_id)
     }
-}
 
-/// The two ownership handles produced by compilation: an opaque artifact to
-/// move to the worker and the same flatten map retained by the host for
-/// projecting worker reports back onto authoring nodes.
-#[derive(Debug)]
-pub struct Compilation {
-    pub compiled: CompiledGraph,
-    pub flatten_map: Arc<FlattenMap>,
+    /// Attribute one flat execution id to its authored node followed by every
+    /// enclosing graph instance, innermost first.
+    pub fn attribution(&self, flat_id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        self.flatten_map.attribution(flat_id)
+    }
 }
 
 /// The compile entry point, owning reusable [`Flattener`] traversal scratch.
 /// Hosts keep one per compile site (e.g. darkroom's `Engine`); the produced
-/// [`CompiledGraph`] is always fresh — it's moved to the worker.
+/// [`CompiledGraph`] is always fresh and can be shared with the worker in an
+/// [`Arc`](std::sync::Arc).
 #[derive(Debug, Default)]
 pub struct Compiler {
     flattener: Flattener,
@@ -78,7 +69,7 @@ impl Compiler {
         &mut self,
         graph: &Graph,
         library: &Library,
-    ) -> Result<Compilation, CompileError> {
+    ) -> Result<CompiledGraph, CompileError> {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the flatten pass resolve every
         // reference infallibly.
@@ -111,16 +102,61 @@ impl Compiler {
         // with no library at run time.
         program.resolve_output_types(library);
 
-        let flatten_map = Arc::new(flatten_map);
         let compiled = CompiledGraph {
             program,
-            flatten_map: flatten_map.clone(),
+            flatten_map,
         };
         compiled.validate_debug(library);
-        Ok(Compilation {
-            compiled,
-            flatten_map,
-        })
+        Ok(compiled)
+    }
+}
+
+#[cfg(any(test, feature = "internals"))]
+pub(crate) mod test_support {
+    use std::sync::Arc;
+
+    use crate::execution::compile::CompiledGraph;
+    use crate::execution::identity::FlattenMap;
+    use crate::execution::program::ExecutionProgram;
+    use crate::graph::NodeId;
+
+    #[derive(Debug)]
+    pub struct CompiledGraphBuilder {
+        flatten_map: FlattenMap,
+    }
+
+    impl CompiledGraphBuilder {
+        pub fn new() -> Self {
+            let mut flatten_map = FlattenMap::default();
+            flatten_map.reset();
+            Self { flatten_map }
+        }
+
+        pub fn insert_leaf(
+            &mut self,
+            flat_id: NodeId,
+            instances: impl IntoIterator<Item = NodeId>,
+            node_id: NodeId,
+        ) {
+            let mut scope = 0;
+            for instance in instances {
+                scope = self.flatten_map.push_scope(instance, scope);
+            }
+            self.flatten_map.set_leaf(flat_id, scope, node_id);
+        }
+
+        pub fn build(self) -> Arc<CompiledGraph> {
+            Arc::new(CompiledGraph {
+                program: ExecutionProgram::default(),
+                flatten_map: self.flatten_map,
+            })
+        }
+    }
+
+    impl Default for CompiledGraphBuilder {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 }
 
@@ -150,36 +186,16 @@ mod tests {
             .disabled = true;
         graph.insert_graph(nested_id, nested);
 
-        let compilation = Compiler::default().compile(&graph, &library).unwrap();
-        let address = compilation.compiled.node_address(interior_id);
-        let flat_id = compilation.flatten_map.flat_node(&address).unwrap();
+        let compiled = Compiler::default().compile(&graph, &library).unwrap();
+        let address = NodeAddress {
+            instances: vec![instance_id],
+            node_id: interior_id,
+        };
+        let flat_id = compiled.flatten_map.flat_node(&address).unwrap();
         assert!(
-            compilation.compiled.program.e_nodes[&flat_id].disabled,
+            compiled.program.e_nodes[&flat_id].disabled,
             "the disabled instance marks its compiled interior effectively disabled"
         );
-    }
-
-    #[test]
-    fn node_address_chooses_a_representative_and_preserves_unknown_ids() {
-        let instance = NodeId::from_u128(1);
-        let interior = NodeId::from_u128(2);
-        let flat = NodeId::from_u128(3);
-        let unknown = NodeId::from_u128(4);
-        let mut builder = FlattenMapBuilder::new();
-        builder.insert_leaf(flat, [instance], interior);
-        let compiled = CompiledGraph {
-            program: ExecutionProgram::default(),
-            flatten_map: Arc::new(builder.build()),
-        };
-
-        assert_eq!(
-            compiled.node_address(interior),
-            NodeAddress {
-                instances: vec![instance],
-                node_id: interior,
-            }
-        );
-        assert_eq!(compiled.node_address(unknown), NodeAddress::root(unknown));
     }
 
     #[test]
@@ -198,7 +214,7 @@ mod tests {
         );
         let compiled = CompiledGraph {
             program,
-            flatten_map: Arc::new(builder.build()),
+            flatten_map: builder.build(),
         };
 
         assert_eq!(

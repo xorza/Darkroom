@@ -3181,7 +3181,7 @@ mod composite_behavior {
             "execution leaves the nested authoring node disabled"
         );
         assert!(
-            eg.get_argument_values(&inner_id)
+            eg.get_argument_values_at(&target)
                 .unwrap()
                 .outputs
                 .is_empty()
@@ -3631,9 +3631,8 @@ mod node_seeds {
     }
 
     /// A seed that doesn't resolve against the compiled program (deleted or stale node)
-    /// fails the run — seeds are batched with the graph they target,
-    /// so a miss is inconsistent caller state, not something to silently skip. The
-    /// panicking default hooks prove no lambda fires.
+    /// fails the run because the miss is inconsistent caller state, not something to
+    /// silently skip. The panicking default hooks prove no lambda fires.
     #[tokio::test]
     async fn unresolvable_node_seed_fails_the_run() {
         let library = test_func_lib(TestFuncHooks::default());
@@ -4990,7 +4989,10 @@ mod graph {
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
 
         let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-        let interior_address = compiled.node_address(interior_sum_id);
+        let interior_address = NodeAddress {
+            instances: vec![c_id],
+            node_id: interior_sum_id,
+        };
         let retained_compiled = Arc::clone(&compiled);
         let retained_flat_id = retained_compiled
             .flatten_map
@@ -5790,7 +5792,10 @@ mod compile_regressions {
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );
         let values = eg
-            .get_argument_values(&sum_interior_id)
+            .get_argument_values_at(&NodeAddress {
+                instances: vec![inst_id],
+                node_id: sum_interior_id,
+            })
             .expect("the interior node resolves through the flatten map");
         assert_eq!(
             values.outputs[0].as_i64(),

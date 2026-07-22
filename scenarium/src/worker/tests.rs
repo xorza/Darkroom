@@ -998,7 +998,7 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn queued_run_batches_report_each_installed_program_in_order() {
+async fn queued_separate_install_and_run_commands_preserve_program_order() {
     let library = system_library();
     let (graph_a, print_a) = print_literal_graph(&library, "first");
     let (graph_b, print_b) = print_literal_graph(&library, "second");
@@ -1016,24 +1016,24 @@ async fn queued_run_batches_report_each_installed_program_in_order() {
         .into();
 
     worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Arc::clone(&compiled_a),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
+        .send(WorkerMessage::Update {
+            compiled: Arc::clone(&compiled_a),
+        })
         .unwrap();
     worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Arc::clone(&compiled_b),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        })
+        .unwrap();
+    worker
+        .send(WorkerMessage::Update {
+            compiled: Arc::clone(&compiled_b),
+        })
+        .unwrap();
+    worker
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        })
         .unwrap();
 
     let first = next_finished_run(&mut rx).await;

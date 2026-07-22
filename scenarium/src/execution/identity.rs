@@ -26,11 +26,10 @@ pub struct OutputAddress {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct FlattenMap {
+pub(crate) struct FlattenMap {
     scopes: Vec<Scope>,
     leaves: HashMap<NodeId, Leaf>,
     flat_nodes: HashMap<NodeAddress, NodeId>,
-    representatives: HashMap<NodeId, NodeAddress>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +49,6 @@ impl FlattenMap {
         self.scopes.clear();
         self.leaves.clear();
         self.flat_nodes.clear();
-        self.representatives.clear();
         self.scopes.push(Scope {
             instance: None,
             parent: 0,
@@ -87,7 +85,6 @@ impl FlattenMap {
             previous_flat.is_none(),
             "duplicate authoring node address {address:?}"
         );
-        self.representatives.entry(interior).or_insert(address);
     }
 
     pub(crate) fn validate(&self, flat_ids: impl IntoIterator<Item = NodeId>) -> Result<()> {
@@ -136,19 +133,15 @@ impl FlattenMap {
         instances
     }
 
-    pub fn address(&self, flat_id: NodeId) -> Option<&NodeAddress> {
+    pub(crate) fn address(&self, flat_id: NodeId) -> Option<&NodeAddress> {
         self.leaves.get(&flat_id).map(|leaf| &leaf.address)
     }
 
-    pub fn flat_node(&self, address: &NodeAddress) -> Option<NodeId> {
+    pub(crate) fn flat_node(&self, address: &NodeAddress) -> Option<NodeId> {
         self.flat_nodes.get(address).copied()
     }
 
-    pub fn representative(&self, node_id: &NodeId) -> Option<&NodeAddress> {
-        self.representatives.get(node_id)
-    }
-
-    pub fn attribution(&self, flat_id: NodeId) -> Attribution<'_> {
+    pub(crate) fn attribution(&self, flat_id: NodeId) -> Attribution<'_> {
         let leaf = self.leaves.get(&flat_id);
         Attribution {
             map: self,
@@ -159,7 +152,7 @@ impl FlattenMap {
 }
 
 #[derive(Debug)]
-pub struct Attribution<'a> {
+pub(crate) struct Attribution<'a> {
     map: &'a FlattenMap,
     interior: Option<NodeId>,
     scope: Option<u32>,
@@ -186,23 +179,23 @@ impl Iterator for Attribution<'_> {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
 
     #[derive(Debug)]
-    pub struct FlattenMapBuilder {
+    pub(crate) struct FlattenMapBuilder {
         map: FlattenMap,
     }
 
     impl FlattenMapBuilder {
-        pub fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let mut map = FlattenMap::default();
             map.reset();
             Self { map }
         }
 
-        pub fn insert_leaf(
+        pub(crate) fn insert_leaf(
             &mut self,
             flat_id: NodeId,
             instances: impl IntoIterator<Item = NodeId>,
@@ -215,7 +208,7 @@ pub(crate) mod test_support {
             self.map.set_leaf(flat_id, scope, node_id);
         }
 
-        pub fn build(self) -> FlattenMap {
+        pub(crate) fn build(self) -> FlattenMap {
             self.map
         }
     }
@@ -284,7 +277,6 @@ mod tests {
             }),
             Some(flat_b)
         );
-        assert_eq!(map.representative(&interior), map.address(flat_a));
         map.validate([flat_a, flat_b]).unwrap();
     }
 

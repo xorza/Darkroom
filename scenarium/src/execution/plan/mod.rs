@@ -251,8 +251,8 @@ fn collect_roots(
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
     // Node seeds (on-demand preview): roots like any other, plus pinned so every output is
-    // computed and delivered. Seeds are batched with the program they target, so an id
-    // that doesn't resolve is inconsistent caller state — fail the run rather than
+    // computed and delivered. An address that doesn't resolve against the installed
+    // program is inconsistent caller state — fail the run rather than
     // silently skip the seed. `pinned` also records the one-run disabled override.
     for address in &seeds.nodes {
         let node_id =

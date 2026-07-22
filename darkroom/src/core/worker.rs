@@ -5,34 +5,21 @@
 //! (`App::update` / `TerminalSession::tick`) drains the channel each frame and is
 //! woken from off-thread via the [`Wake`] callback.
 //!
-//! Outbound is one batched send per request (the worker scans a batch
-//! into a single commit); inbound is a plain `std::sync::mpsc` because
-//! the consumer is the synchronous frame loop on the main thread.
+//! Outbound commands retain FIFO order, with program installation separate
+//! from execution; inbound is a plain `std::sync::mpsc` because the consumer
+//! is the synchronous frame loop on the main thread.
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
-use scenarium::Error as ExecError;
 use scenarium::NodeAddress;
-use scenarium::{ExecutionStats, PinnedOutputs, RunProgress};
-use scenarium::{Worker, WorkerMessage, WorkerReport};
+use scenarium::NodeId;
+use scenarium::{RunSeeds, Worker, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
-
-/// A result delivered from the worker thread back to the frame loop.
-/// Mirrors the worker's callback surface.
-#[derive(Debug)]
-pub(crate) enum WorkerEvent {
-    ExecutionFinished(Result<ExecutionStats, ExecError>),
-    /// Live per-node progress during a run, ahead of `ExecutionFinished`.
-    NodeProgress(RunProgress),
-    /// A pinned output (or pinned-root node) just produced a fresh value,
-    /// pushed right after its node finished running — ahead of
-    /// `ExecutionFinished`, like `NodeProgress`.
-    PinnedOutputs(PinnedOutputs),
-}
 
 pub(crate) struct WorkerBridge {
     /// Kept alive so the worker's spawned tasks keep running; dropping it
@@ -40,7 +27,7 @@ pub(crate) struct WorkerBridge {
     #[allow(dead_code)]
     runtime: BackgroundRuntime,
     worker: Worker,
-    rx: Receiver<WorkerEvent>,
+    rx: Receiver<WorkerReport>,
 }
 
 impl std::fmt::Debug for WorkerBridge {
@@ -57,7 +44,7 @@ impl WorkerBridge {
     /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = BackgroundRuntime::new().expect("build worker runtime");
-        let (tx, rx) = channel::<WorkerEvent>();
+        let (tx, rx) = channel::<WorkerReport>();
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = runtime.enter(|| Worker::new(move |report| Self::deliver(&tx, &wake, report)));
         Self {
@@ -67,43 +54,32 @@ impl WorkerBridge {
         }
     }
 
-    fn deliver(tx: &Sender<WorkerEvent>, wake: &Wake, report: WorkerReport) {
-        let event = match report {
-            WorkerReport::Progress(progress) => WorkerEvent::NodeProgress(progress),
-            WorkerReport::PinnedOutputs(pinned) => WorkerEvent::PinnedOutputs(pinned),
-            WorkerReport::Finished(result) => WorkerEvent::ExecutionFinished(result),
-        };
-        let _ = tx.send(event);
+    fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
+        let _ = tx.send(report);
         (wake)();
     }
 
-    /// Run the compiled program once: install it on the worker, then
-    /// execute its sinks. One batched send so the worker commits
-    /// both as a unit. A dropped send (worker already exited) is a
-    /// harmless shutdown no-op.
-    pub(crate) fn run_once(&self, compiled: CompiledGraph) {
-        let _ = self.worker.send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::ExecuteSinks,
-        ]);
+    /// Install a compiled program. The worker acknowledges it with
+    /// `WorkerReport::Installed` before processing reports from later commands.
+    pub(crate) fn install(&self, compiled: CompiledGraph) {
+        let _ = self.worker.send(WorkerMessage::Update {
+            compiled: Arc::new(compiled),
+        });
     }
 
-    /// Run one node's upstream cone: install the compiled program, then
-    /// execute with the node as seed and deliver its outputs. One
-    /// batched send so the seed always targets the program it was compiled
-    /// against.
-    pub(crate) fn run_node(&self, compiled: CompiledGraph, node: NodeAddress) {
-        let _ = self.worker.send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::ExecuteNodes { nodes: vec![node] },
-        ]);
+    /// Execute every sink in the installed program.
+    pub(crate) fn run_sinks(&self) {
+        let _ = self.worker.send(WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        });
     }
 
-    /// Flush resident cache values to disk **without running the graph** — e.g. after
-    /// a node's disk-cache toggle, so its in-RAM value is persisted now rather than
-    /// waiting for the next run (a cache-hit node never re-executes to store itself).
-    pub(crate) fn save_caches(&self, compiled: CompiledGraph) {
-        let _ = self.worker.send(WorkerMessage::SaveCaches { compiled });
+    /// Execute one top-level node's upstream cone in the installed program and
+    /// deliver its outputs.
+    pub(crate) fn run_node(&self, node_id: NodeId) {
+        let _ = self.worker.send(WorkerMessage::Run {
+            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
+        });
     }
 
     /// Swap the engine's output cache (codec registry + store root) — e.g. to
@@ -120,14 +96,10 @@ impl WorkerBridge {
         self.worker.request_cancel();
     }
 
-    /// Start the event loop on the compiled program: install it, then run the
-    /// loop that fires each emitter's events and executes their subscribers.
-    /// One batched send so the `Update` and `StartEventLoop` commit as a unit.
-    pub(crate) fn start_event_loop(&self, compiled: CompiledGraph) {
-        let _ = self.worker.send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::StartEventLoop,
-        ]);
+    /// Start the installed program's event loop, firing each emitter's events
+    /// and executing their subscribers.
+    pub(crate) fn start_event_loop(&self) {
+        let _ = self.worker.send(WorkerMessage::StartEventLoop);
     }
 
     /// Stop the event loop (aborts the per-event tasks). A dropped send
@@ -138,7 +110,7 @@ impl WorkerBridge {
 
     /// Non-blocking drain of everything the worker has posted since the
     /// last frame.
-    pub(crate) fn drain(&self) -> impl Iterator<Item = WorkerEvent> + '_ {
+    pub(crate) fn drain(&self) -> impl Iterator<Item = WorkerReport> + '_ {
         self.rx.try_iter()
     }
 }

@@ -125,9 +125,6 @@ async fn worker_loop<ExecutionCallback>(
                     Some(batch) => cmd_batch = batch,
                     None => return,
                 }
-                while let Ok(more) = worker_message_rx.try_recv() {
-                    cmd_batch.extend(more);
-                }
             }
             count = async {
                 event_loop.as_mut().unwrap().events
@@ -164,16 +161,16 @@ async fn worker_loop<ExecutionCallback>(
         }
 
         match intent.graph_state.take() {
-            Some(GraphOp::Clear) => execution_engine.clear(),
+            Some(GraphOp::Clear) => {
+                execution_engine.clear();
+                execution_callback(WorkerReport::Cleared);
+            }
             Some(GraphOp::Replace(compiled)) => {
                 tracing::info!("Graph updated");
-                execution_engine.install(compiled);
+                execution_engine.install(Arc::clone(&compiled));
+                execution_callback(WorkerReport::Installed(compiled));
             }
             None => {}
-        }
-
-        if intent.save_caches && !execution_engine.is_empty() {
-            execution_engine.store_resident_caches().await;
         }
 
         let should_start_event_loop = match intent.loop_request {
@@ -183,6 +180,7 @@ async fn worker_loop<ExecutionCallback>(
         };
 
         let needs_execute = intent.execute_sinks
+            || intent.execute_event_triggers
             || !intent.execute_nodes.values.is_empty()
             || !intent.events.values.is_empty()
             || should_start_event_loop;
@@ -196,7 +194,7 @@ async fn worker_loop<ExecutionCallback>(
                 .expect("worker cancellation mutex poisoned") = Some(cancel.clone());
             let seeds = RunSeeds {
                 sinks: intent.execute_sinks,
-                event_triggers: in_loop,
+                event_triggers: in_loop || intent.execute_event_triggers,
                 events: intent.events.take(),
                 nodes: intent.execute_nodes.take(),
             };

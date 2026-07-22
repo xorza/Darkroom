@@ -280,11 +280,12 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   active graph against the library **on the UI thread**
   (`RuntimeHost::run_once` → the host-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the
-  `Arc<CompiledGraph>` in an `[Update, Run { RunSeeds::sinks() }]` batch to the
-  worker. A compile error surfaces synchronously — no run starts, `begin_run` is
-  skipped, and the worker's prior program is untouched. After installation the
-  worker first reports `WorkerReport::Installed` with that exact shared compile,
-  then streams its progress, pinned outputs, and final result in FIFO order.
+  `Arc<CompiledGraph>` to the worker, followed by a separate
+  `Run { RunSeeds::sinks() }` command. A compile error surfaces synchronously —
+  no run starts, `begin_run` is skipped, and the worker's prior program is
+  untouched. The FIFO worker first reports `WorkerReport::Installed` with that
+  exact shared compile, then streams its progress, pinned outputs, and final
+  result in order.
   `RunState` retains the acknowledged compile and uses it to project flat result
   ids onto authoring nodes. `WorkerBridge::deliver` forwards reports to its
   channel and pokes `host.request_repaint()`.
