@@ -121,9 +121,10 @@ impl<T> OutputColumn<T> {
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
-/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or the event loop's lambda panicked
-/// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the engine's
-/// `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
+/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), an event seed had no port
+/// ([`EventSeedNotFound`](Error::EventSeedNotFound)), or the event loop's lambda
+/// panicked ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the
+/// engine's `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
 /// (collected into [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats)),
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](compile::CompileError), produced on the host before anything
@@ -136,6 +137,8 @@ pub enum Error {
     /// identity fails the run rather than being silently skipped.
     #[error("node seed {e_node_id:?} not found in the compiled program")]
     NodeSeedNotFound { e_node_id: ExecutionNodeId },
+    #[error("event seed {event:?} not found in the compiled program")]
+    EventSeedNotFound { event: ExecutionEventPort },
     #[error("event lambda for node {e_node_id:?} panicked: {message}")]
     EventLambdaPanic {
         e_node_id: ExecutionNodeId,
@@ -189,7 +192,8 @@ pub struct RunSeeds {
     pub sinks: bool,
     /// Include every node owning a subscribed event — drives the event loop.
     pub event_triggers: bool,
-    /// Run the subscribers of these specific fired events.
+    /// Run the subscribers of these specific fired events. An event absent from the
+    /// installed program fails with [`Error::EventSeedNotFound`].
     pub events: Vec<ExecutionEventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for

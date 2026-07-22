@@ -1,8 +1,8 @@
 use crate::DataType;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::program::{ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode};
 use crate::execution::{Error, NodeSet, RunSeeds};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
@@ -286,4 +286,63 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
     assert!(matches!(err, Error::NodeSeedNotFound { e_node_id } if e_node_id == bogus));
+}
+
+#[test]
+fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
+    let mut f = Fix::default();
+    let emitter = f.node(false, &[], 0);
+    let subscriber = f.node(false, &[], 0);
+    let event_start = f.compiled.program.events.len() as u32;
+    f.compiled.program.events.push(ExecutionEvent {
+        subscribers: vec![subscriber],
+        ..Default::default()
+    });
+    f.compiled.program.e_nodes.get_mut(&emitter).unwrap().events = Span::new(event_start, 1);
+
+    let event = ExecutionEventPort {
+        e_node_id: emitter,
+        event_idx: 0,
+    };
+    let mut planner = Planner::default();
+    let mut plan = ExecutionPlan::default();
+    planner
+        .plan(
+            &f.compiled,
+            &RunSeeds {
+                events: vec![event],
+                ..Default::default()
+            },
+            &mut plan,
+        )
+        .unwrap();
+    assert_eq!(plan.roots, NodeSet::from([subscriber]));
+    assert_eq!(plan.process_order, vec![subscriber]);
+
+    let invalid = [
+        ExecutionEventPort {
+            e_node_id: ExecutionNodeId::from_u128(0xdead_beef),
+            event_idx: 0,
+        },
+        ExecutionEventPort {
+            e_node_id: emitter,
+            event_idx: 1,
+        },
+    ];
+    for event in invalid {
+        let error = planner
+            .plan(
+                &f.compiled,
+                &RunSeeds {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                &mut plan,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::EventSeedNotFound { event: actual } if actual == event),
+            "unexpected error for {event:?}: {error:?}"
+        );
+    }
 }

@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in event-seed validation and cache identity: malformed event seeds can panic the worker, optional disk-cache failures can fail an otherwise valid run, function and codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
+Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. The remaining correctness risks are concentrated in cache identity and behavior: optional disk-cache failures can fail an otherwise valid run, function and codec changes can reuse stale values, and filesystem fingerprints can miss content changes.
 
 The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, a wide positional lambda ABI, parallel compiled-data pools with distributed invariants, and large execution modules that own several distinct responsibilities. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
@@ -11,8 +11,6 @@ The main structural problems are late registry validation, mixed lifecycle state
 `Compiler` validates an authoring `Graph`, recursively flattens graph instances into an `ExecutionProgram`, resolves output types, and returns a self-contained `CompiledGraph`. `Worker` reduces batches of public `WorkerMessage`s into an intent, installs shared compiled state, acknowledges the installation through its ordered report stream, plans roots, prepares resource stamps, resolves digests and cache liveness, executes surviving nodes, and reports execution identities. `RuntimeCache` owns persistent node state, resident outputs, disk availability state, digest stamping, codec dispatch, hydration, persistence, reclamation, and RAM accounting.
 
 ## Critical
-
-- [ ] **Injected event seeds bypass program validation.** Exact node seeds return `Error::NodeSeedNotFound` when their `ExecutionNodeId` is absent, but public event seeds index the installed node map and event slice directly. A missing execution node or out-of-range event index can panic the worker task (`src/execution/plan/mod.rs:243-267`, `src/worker/protocol.rs:22-29`).
 
 - [ ] **A failed disk-cache read aborts a valid run once.** Resolution treats a matching header as a reusable value and removes its producer cone, but hydration later clears a corrupt, incompatible, or concurrently deleted blob and returns `false`. The consumer then receives `RunError::InputLoadFailed`; the producer is recomputed only on a later run, so enabling the optional cache changes whether the current execution succeeds (`src/execution/cache/mod.rs:464-570`, `src/execution/executor/mod.rs:186-202`, `src/execution/mod.rs:166-171`).
 

@@ -132,7 +132,7 @@ pub(crate) struct Planner {
 impl Planner {
     /// Build the per-run schedule into `plan` from the compiled artifact and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
-    /// directly. Errors on a dependency cycle or a seed absent from the program.
+    /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
     pub(crate) fn plan(
         &mut self,
         compiled: &CompiledGraph,
@@ -262,9 +262,14 @@ fn collect_roots(
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
     // promotes this run to run all sinks (below), so it's skipped as a root here.
     let mut run_sinks = seeds.sinks;
-    for event in &seeds.events {
-        let e_node = &program.e_nodes[&event.e_node_id];
-        let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
+    for &event in &seeds.events {
+        let Some(e_node) = program.e_nodes.get(&event.e_node_id) else {
+            return Err(Error::EventSeedNotFound { event });
+        };
+        let Some(e_event) = program.events[e_node.events.range()].get(event.event_idx) else {
+            return Err(Error::EventSeedNotFound { event });
+        };
+        let subs = &e_event.subscribers;
         for &sub in subs {
             if program.e_nodes[&sub].special == Some(SpecialNode::RunSinks) {
                 run_sinks = true;

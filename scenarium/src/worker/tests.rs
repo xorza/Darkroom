@@ -11,7 +11,7 @@ use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::report::RunPhase;
 use crate::execution::stats::ExecutionStats;
-use crate::execution::{Result as ExecResult, RunSeeds};
+use crate::execution::{Error, Result as ExecResult, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
@@ -1075,6 +1075,43 @@ async fn queued_separate_install_and_run_commands_preserve_program_order() {
     );
     assert_eq!(messages(&first.result.unwrap()), ["first"]);
     assert_eq!(messages(&second.result.unwrap()), ["second"]);
+}
+
+#[tokio::test]
+async fn replacement_rejects_stale_event_without_stopping_worker() {
+    let mut h = FrameHarness::new().await;
+    sync_after(&h.worker, [h.update_msg()]).await;
+
+    let stale_event = h.frame_event();
+    let (replacement, _) = print_literal_graph(&h.library, "replacement");
+    let replacement = Compiler::default()
+        .compile(&replacement, &h.library)
+        .unwrap()
+        .into();
+    h.worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: replacement,
+            },
+            WorkerMessage::InjectEvents {
+                events: vec![stale_event],
+            },
+        ])
+        .unwrap();
+
+    let error = h.compute_rx.recv().await.unwrap().unwrap_err();
+    assert!(
+        matches!(error, Error::EventSeedNotFound { event } if event == stale_event),
+        "unexpected stale-event error: {error:?}"
+    );
+
+    h.worker
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        })
+        .unwrap();
+    let stats = h.compute_rx.recv().await.unwrap().unwrap();
+    assert_eq!(messages(&stats), ["replacement"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
