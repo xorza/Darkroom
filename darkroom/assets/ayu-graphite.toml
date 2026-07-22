@@ -907,7 +907,7 @@ rail_thickness = 4.0
 
 [aperture_theme.spinner]
 color = "#9adbfb"
-size = 24.0
+diameter = 24.0
 
 [aperture_theme.splitter]
 thickness = 6.0

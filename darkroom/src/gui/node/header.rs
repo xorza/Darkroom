@@ -227,7 +227,10 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 // A comet spinner while computing, just left of the live time,
                 // so glow + spin + ticking time read as one "running" cue.
                 if matches!(node.exec_status, ExecStatus::Running(_)) {
-                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
+                    Spinner::new()
+                        .diameter(BADGE_FONT)
+                        .color(color)
+                        .show(ui);
                 }
                 Text::new(fmt_elapsed(secs))
                     .style(&TextStyle {

@@ -38,3 +38,5 @@ save caches on cache click
 subgraph to newnodeui
 
 subgraphs tabs movable
+
+element performance
