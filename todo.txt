@@ -36,3 +36,5 @@ remove flattenmap from worker
 save caches on cache click
 
 subgraph to newnodeui
+
+subgraphs tabs movable
