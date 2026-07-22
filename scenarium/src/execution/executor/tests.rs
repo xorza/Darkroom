@@ -14,7 +14,7 @@ use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
-use crate::node::lambda::{FuncLambda, OutputDemand};
+use crate::node::lambda::{FuncLambda, InvokeError, OutputDemand};
 use crate::{DataType, StaticValue};
 use common::Span;
 
@@ -327,7 +327,7 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
 async fn upstream_error_skips_dependents_and_clears_output() {
     let mut p = Prog::default();
     let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
-        Err(anyhow::anyhow!("boom").into())
+        Err(InvokeError::external("boom"))
     });
     let downstream = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
@@ -621,7 +621,7 @@ async fn non_pinned_node_pushes_nothing() {
 async fn failed_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
     let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, _outputs| {
-        Err(anyhow::anyhow!("boom").into())
+        Err(InvokeError::external("boom"))
     });
     let a = p.node(&[], 1, failing);
     p.set_output_pinned(a, 0, true);
@@ -806,7 +806,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         1,
         async_lambda!(|_ctx, state, _ev, _inputs, _demand, outputs| {
             if state.get::<bool>().is_some() {
-                return Err(anyhow::anyhow!("transient failure").into());
+                return Err(InvokeError::external("transient failure"));
             }
             state.set(true);
             outputs[0] = DynamicValue::Static(StaticValue::Int(5));

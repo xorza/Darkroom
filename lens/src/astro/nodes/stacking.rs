@@ -67,9 +67,9 @@ pub(crate) fn register(library: &mut Library) {
                         .map(PathBuf::from)
                         .expect("lights input type is validated at the compile boundary");
                     let lights =
-                        astro_io::raw_frame_files(&lights_dir).map_err(InvokeError::External)?;
+                        astro_io::raw_frame_files(&lights_dir).map_err(InvokeError::external)?;
                     if lights.is_empty() {
-                        return Err(InvokeError::External(anyhow::anyhow!(
+                        return Err(InvokeError::external(format!(
                             "no camera-RAW frames found in light-frame folder '{}'",
                             lights_dir.display()
                         )));

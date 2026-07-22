@@ -119,8 +119,7 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
                     .zip(inputs)
                     .map(|(kind, input)| field_value(kind, &input.value))
                     .collect();
-                let config =
-                    T::from_fields(&values).map_err(|error| InvokeError::External(error.into()))?;
+                let config = T::from_fields(&values).map_err(InvokeError::external)?;
                 outputs[0] = DynamicValue::from_custom(ConfigValue(config));
                 Ok(())
             })

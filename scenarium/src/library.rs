@@ -2,12 +2,12 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::error::{ValidationError, ensure_valid};
 use crate::graph::Graph;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
-use anyhow::{Result, ensure};
 use hashbrown::HashMap as GraphMap;
 
 /// The metadata of a registered nominal type — a `Custom`
@@ -56,10 +56,10 @@ pub struct TypeEntry {
 
 impl TypeEntry {
     /// Validates that this declaration's runtime attachments match its kind.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if matches!(&self.decl, TypeDecl::Enum { .. }) {
-            ensure!(self.codec.is_none(), "enum type cannot have a codec");
-            ensure!(self.stamper.is_none(), "enum type cannot have a stamper");
+            ensure_valid!(self.codec.is_none(), "enum type cannot have a codec");
+            ensure_valid!(self.stamper.is_none(), "enum type cannot have a stamper");
         }
         Ok(())
     }
@@ -246,7 +246,7 @@ mod tests {
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
     use crate::node::definition::{Func, FuncId, FuncInput};
-    use crate::node::lambda::{InvokeInput, OutputDemand};
+    use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invoke_by_id_and_index() -> anyhow::Result<()> {
+    async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
         let library = test_func_lib(TestFuncHooks::default());
         let sum_id = library.by_name("sum").unwrap().id;
 

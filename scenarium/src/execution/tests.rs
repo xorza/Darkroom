@@ -7,11 +7,13 @@ use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior};
-use crate::node::lambda::OutputDemand;
+use crate::node::lambda::{InvokeError, OutputDemand};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
 use tokio::sync::Mutex;
+
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
     ExecutionNodeId::from_node_id(node_id)
@@ -824,7 +826,7 @@ mod cache_persistence {
     /// The intervening run uses `Ram` mode so it can't overwrite the node's one
     /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
     #[tokio::test(flavor = "multi_thread")]
-    async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> anyhow::Result<()> {
+    async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
         let dir = TempDir::new("flip_back");
         let lib = test_func_lib(default_hooks());
 
@@ -1690,7 +1692,8 @@ mod resource_binds {
                     move |_, _, _, inputs, _, outputs| { loads = loads.clone() } => {
                         loads.fetch_add(1, Ordering::SeqCst);
                         let path = inputs[0].value.as_fs_path().unwrap().to_string();
-                        let text = std::fs::read_to_string(&path).map_err(anyhow::Error::from)?;
+                        let text =
+                            std::fs::read_to_string(&path).map_err(InvokeError::external)?;
                         outputs[0] = StaticValue::String(text).into();
                         Ok(())
                     }
@@ -2083,7 +2086,7 @@ mod graph_structure {
     use super::*;
 
     #[test]
-    fn basic_run() -> anyhow::Result<()> {
+    fn basic_run() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2153,7 +2156,7 @@ mod graph_structure {
     }
 
     #[test]
-    fn updates_after_graph_change() -> anyhow::Result<()> {
+    fn updates_after_graph_change() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2240,7 +2243,7 @@ mod missing_inputs {
     use super::*;
 
     #[test]
-    fn required_missing_propagates_downstream() -> anyhow::Result<()> {
+    fn required_missing_propagates_downstream() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2274,7 +2277,7 @@ mod missing_inputs {
     /// *unbound* input (see `optional_unbound_does_not_propagate`), not a
     /// binding to a broken upstream.
     #[test]
-    fn optional_bind_to_missing_propagates() -> anyhow::Result<()> {
+    fn optional_bind_to_missing_propagates() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2306,7 +2309,7 @@ mod missing_inputs {
     /// left **unbound** is a deliberate no-value, so it does not flag the node
     /// missing — it runs with its default.
     #[test]
-    fn optional_unbound_does_not_propagate() -> anyhow::Result<()> {
+    fn optional_unbound_does_not_propagate() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -2338,7 +2341,7 @@ mod missing_inputs {
     /// for the worker panicking in `collect_inputs` ("missing output values") —
     /// the planned-only siblings above can't catch it since they never execute.
     #[tokio::test(flavor = "multi_thread")]
-    async fn optional_bind_to_gated_upstream_is_gated() -> anyhow::Result<()> {
+    async fn optional_bind_to_gated_upstream_is_gated() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(default_hooks());
 
@@ -2385,7 +2388,7 @@ mod disabled_nodes {
     /// the plan. Its consumer `mult` sees the disabled producer as unavailable,
     /// so the missing-required-input flag propagates downstream.
     #[test]
-    fn disabled_node_stays_compiled_but_breaks_downstream() -> anyhow::Result<()> {
+    fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
@@ -2427,7 +2430,7 @@ mod disabled_nodes {
     /// runs (mirrors `non_required_missing_does_not_propagate`, but via the
     /// disable flag rather than a cleared binding).
     #[test]
-    fn disabled_upstream_with_optional_consumer_still_runs() -> anyhow::Result<()> {
+    fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
@@ -2457,7 +2460,7 @@ mod const_bindings {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn const_binding_tracks_changes() -> anyhow::Result<()> {
+    async fn const_binding_tracks_changes() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionEngine::default();
@@ -2499,7 +2502,7 @@ mod const_bindings {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn const_binding_invokes_only_once() -> anyhow::Result<()> {
+    async fn const_binding_invokes_only_once() -> TestResult {
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || unreachable!()),
             get_b: Arc::new(move || unreachable!()),
@@ -2553,7 +2556,7 @@ mod const_bindings {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn const_excludes_upstream_node() -> anyhow::Result<()> {
+    async fn const_excludes_upstream_node() -> TestResult {
         let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -2585,7 +2588,7 @@ mod const_bindings {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn change_from_const_to_bind_recomputes() -> anyhow::Result<()> {
+    async fn change_from_const_to_bind_recomputes() -> TestResult {
         let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -2620,7 +2623,7 @@ mod const_bindings {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn optional_input_binding_change_recomputes() -> anyhow::Result<()> {
+    async fn optional_input_binding_change_recomputes() -> TestResult {
         let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -2658,7 +2661,7 @@ mod behavior {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn pure_node_skips_on_rerun() -> anyhow::Result<()> {
+    async fn pure_node_skips_on_rerun() -> TestResult {
         // `get_b` is a pure source in the fixture, so once its output is cached its
         // digest is unchanged on a re-run and it reuses that value rather than running.
         let graph = test_graph();
@@ -2685,7 +2688,7 @@ mod behavior {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn default_node_skips_on_rerun() -> anyhow::Result<()> {
+    async fn default_node_skips_on_rerun() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionEngine::default();
@@ -2719,7 +2722,7 @@ mod behavior {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn execute_emits_started_then_finished_progress_per_node() -> anyhow::Result<()> {
+    async fn execute_emits_started_then_finished_progress_per_node() -> TestResult {
         use crate::execution::report::{RunEvent, RunPhase};
         use tokio::sync::mpsc::unbounded_channel;
 
@@ -2793,7 +2796,7 @@ mod behavior {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn execute_honors_cancel_flag_and_marks_cancelled() -> anyhow::Result<()> {
+    async fn execute_honors_cancel_flag_and_marks_cancelled() -> TestResult {
         use common::CancelToken;
 
         let graph = test_graph();
@@ -2849,7 +2852,7 @@ mod behavior {
     /// "start a run, immediately cancel it": the in-flight node bails with `Ok`
     /// but its result is bogus.
     #[tokio::test(flavor = "multi_thread")]
-    async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> anyhow::Result<()> {
+    async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> TestResult {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         use common::CancelToken;
@@ -2947,14 +2950,12 @@ mod behavior {
     /// executor's flag-check fallback covered above (asserted here without
     /// touching the flag, so only the error mapping can produce the verdict).
     #[tokio::test(flavor = "multi_thread")]
-    async fn lambda_cancelled_error_maps_to_error_cancelled() -> anyhow::Result<()> {
+    async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
         use crate::execution::stats::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
-        use crate::node::lambda::InvokeError;
-
         let library: Library = [
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
                 .category("Debug")
@@ -3004,7 +3005,7 @@ mod behavior {
     }
 
     #[test]
-    fn impure_node_always_invoked() -> anyhow::Result<()> {
+    fn impure_node_always_invoked() -> TestResult {
         let graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
@@ -3030,7 +3031,7 @@ mod behavior {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn impure_output_stays_resident_for_inspection_after_run() -> anyhow::Result<()> {
+    async fn impure_output_stays_resident_for_inspection_after_run() -> TestResult {
         // An impure node re-runs every time, but its output stays resident after a
         // run: outputs are never wiped or evicted, so the editor's on-demand
         // inspector can read the last value even though there's no disk fallback.
@@ -3329,7 +3330,7 @@ mod invalidation {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn clear_resets_graph() -> anyhow::Result<()> {
+    async fn clear_resets_graph() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(default_hooks());
 
@@ -3363,7 +3364,7 @@ mod execution {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn simple_compute() -> anyhow::Result<()> {
+    async fn simple_compute() -> TestResult {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -3412,7 +3413,7 @@ mod execution {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn required_none_binding_is_stable() -> anyhow::Result<()> {
+    async fn required_none_binding_is_stable() -> TestResult {
         let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -3441,7 +3442,7 @@ mod execution {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn schedule_stable_across_repeated_runs() -> anyhow::Result<()> {
+    async fn schedule_stable_across_repeated_runs() -> TestResult {
         let library = test_func_lib(default_hooks());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
@@ -3473,7 +3474,7 @@ mod execution {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cached_upstream_output_reused_after_rebinding() -> anyhow::Result<()> {
+    async fn cached_upstream_output_reused_after_rebinding() -> TestResult {
         let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -3516,7 +3517,7 @@ mod execution {
     /// output cannot retain a prior run's value. This sink has no demanded outputs,
     /// therefore leaving one port `Unbound` is valid.
     #[tokio::test(flavor = "multi_thread")]
-    async fn unwritten_output_port_is_cleared_before_reexecution() -> anyhow::Result<()> {
+    async fn unwritten_output_port_is_cleared_before_reexecution() -> TestResult {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
@@ -3783,7 +3784,7 @@ mod argument_values {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn with_const_bindings() -> anyhow::Result<()> {
+    async fn with_const_bindings() -> TestResult {
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || unreachable!()),
             get_b: Arc::new(move || unreachable!()),
@@ -3823,7 +3824,7 @@ mod argument_values {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn with_bound_outputs() -> anyhow::Result<()> {
+    async fn with_bound_outputs() -> TestResult {
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || Ok(2)),
             get_b: Arc::new(move || 5),
@@ -3889,7 +3890,7 @@ mod argument_values {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn with_none_binding() -> anyhow::Result<()> {
+    async fn with_none_binding() -> TestResult {
         let mut library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
@@ -3915,7 +3916,7 @@ mod argument_values {
     }
 
     #[test]
-    fn before_execution() -> anyhow::Result<()> {
+    fn before_execution() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
@@ -3939,10 +3940,10 @@ mod error_propagation {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn node_error_propagates_to_dependents() -> anyhow::Result<()> {
+    async fn node_error_propagates_to_dependents() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Err(anyhow::anyhow!("Intentional failure in get_a"))),
+            get_a: Arc::new(|| Err(InvokeError::external("Intentional failure in get_a"))),
             get_b: Arc::new(|| 42),
             print: Arc::new(|_| {}),
         });
@@ -4008,7 +4009,7 @@ mod stats {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn missing_inputs_reported() -> anyhow::Result<()> {
+    async fn missing_inputs_reported() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(default_hooks());
 
@@ -4034,7 +4035,7 @@ mod stats {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn executed_nodes_reported() -> anyhow::Result<()> {
+    async fn executed_nodes_reported() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(default_hooks());
 
@@ -4154,7 +4155,7 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn execute_events_runs_subscribers() -> anyhow::Result<()> {
+    async fn execute_events_runs_subscribers() -> TestResult {
         let f = build();
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
@@ -4186,7 +4187,7 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn event_triggers_collects_nodes_with_subscribers() -> anyhow::Result<()> {
+    async fn event_triggers_collects_nodes_with_subscribers() -> TestResult {
         let f = build();
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
@@ -4214,7 +4215,7 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn active_event_triggers_lists_live_events() -> anyhow::Result<()> {
+    async fn active_event_triggers_lists_live_events() -> TestResult {
         let f = build();
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
@@ -4241,7 +4242,7 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn active_event_triggers_empty_without_subscribers() -> anyhow::Result<()> {
+    async fn active_event_triggers_empty_without_subscribers() -> TestResult {
         let mut f = build();
         // Drop the subscriber but keep emit reachable by making it a sink.
         let emit_id = f.emit_id;
@@ -4280,7 +4281,7 @@ mod events {
     /// the independent `source → sink` cone runs, while `emit` (not a sink,
     /// not in that cone) does not.
     #[tokio::test(flavor = "multi_thread")]
-    async fn run_sinks_node_runs_all_sinks_on_event() -> anyhow::Result<()> {
+    async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
         use crate::graph::NodeKind;
         use crate::node::special::SpecialNode;
 
@@ -4380,7 +4381,7 @@ mod events {
     /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber, so
     /// the same sink cone is left untouched — isolating the sink as the cause.
     #[tokio::test(flavor = "multi_thread")]
-    async fn event_without_run_sinks_sink_runs_nothing() -> anyhow::Result<()> {
+    async fn event_without_run_sinks_sink_runs_nothing() -> TestResult {
         let source_calls = Arc::new(Mutex::new(0i64));
         let source_l = source_calls.clone();
 
@@ -4444,7 +4445,7 @@ mod output_demand {
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn unused_output_marked_skip() -> anyhow::Result<()> {
+    async fn unused_output_marked_skip() -> TestResult {
         let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_demand_l = seen_demand.clone();
 
@@ -4501,7 +4502,7 @@ mod output_demand {
     /// `unused_output_marked_skip`, output 1 still has no in-graph consumer, but
     /// is now flagged pinned.
     #[tokio::test(flavor = "multi_thread")]
-    async fn pinned_output_is_needed_with_no_consumer() -> anyhow::Result<()> {
+    async fn pinned_output_is_needed_with_no_consumer() -> TestResult {
         let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_demand_l = seen_demand.clone();
 
@@ -4563,8 +4564,7 @@ mod output_demand {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed()
-    -> anyhow::Result<()> {
+    async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() -> TestResult {
         let split_calls = Arc::new(Mutex::new(0));
         let received = Arc::new(Mutex::new(Vec::new()));
         let split_calls_l = split_calls.clone();
@@ -4633,7 +4633,7 @@ mod topology {
     use common::FloatExt;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn removing_node_rebuilds_id_keyed_edges() -> anyhow::Result<()> {
+    async fn removing_node_rebuilds_id_keyed_edges() -> TestResult {
         let printed = Arc::new(Mutex::new(0i64));
         let printed_l = printed.clone();
         let library = test_func_lib(TestFuncHooks {
@@ -4681,7 +4681,7 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn empty_graph_executes_cleanly() -> anyhow::Result<()> {
+    async fn empty_graph_executes_cleanly() -> TestResult {
         let graph = Graph::default();
         let library = Library::default();
 
@@ -4699,7 +4699,7 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn multiple_sinks_all_execute() -> anyhow::Result<()> {
+    async fn multiple_sinks_all_execute() -> TestResult {
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let printed_l = printed.clone();
         let library = test_func_lib(TestFuncHooks {
@@ -4737,7 +4737,7 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cached_output_survives_node_removal() -> anyhow::Result<()> {
+    async fn cached_output_survives_node_removal() -> TestResult {
         // Both sources are Pure, so their outputs are cached across runs.
         // Removing one chain must preserve the survivor's ID-keyed slot.
         let calls_a = Arc::new(Mutex::new(0));
@@ -4807,7 +4807,7 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn repeated_structural_churn_stays_correct() -> anyhow::Result<()> {
+    async fn repeated_structural_churn_stays_correct() -> TestResult {
         // Grow→shrink the graph repeatedly on ONE ExecutionEngine, re-executing
         // each step. Stresses the SoA pool and ID-keyed node-map rebuild across many
         // updates (pools grow 2→4 then shrink 4→2 each round).
@@ -4913,7 +4913,7 @@ mod graph {
 
     /// A composite computes through the flattened interior end to end.
     #[tokio::test(flavor = "multi_thread")]
-    async fn composite_computes_via_flattening() -> anyhow::Result<()> {
+    async fn composite_computes_via_flattening() -> TestResult {
         let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
         let hooks = TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
@@ -4951,7 +4951,7 @@ mod graph {
     /// An interior branch feeding an unconsumed composite output is pruned —
     /// its source func never runs (its hook would panic if it did).
     #[tokio::test(flavor = "multi_thread")]
-    async fn dead_interior_branch_is_pruned() -> anyhow::Result<()> {
+    async fn dead_interior_branch_is_pruned() -> TestResult {
         let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
         let hooks = TestFuncHooks {
             get_a: Arc::new(|| Ok(7)),
@@ -5276,7 +5276,7 @@ mod graph {
     /// Editing a shared (linked) def re-inlines every instance on the next
     /// update, and the interior leaves keep their flat ids (so caches persist).
     #[tokio::test(flavor = "multi_thread")]
-    async fn editing_linked_def_propagates_to_all_instances() -> anyhow::Result<()> {
+    async fn editing_linked_def_propagates_to_all_instances() -> TestResult {
         let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
         let hooks = TestFuncHooks {
             get_a: Arc::new(|| Ok(0)),
@@ -5367,7 +5367,7 @@ mod graph {
     /// An event fired at a parent emitter reaches, through the real execution
     /// path, the interior nodes wired to a subscribed composite's trigger.
     #[tokio::test(flavor = "multi_thread")]
-    async fn event_through_composite_triggers_interior_node() -> anyhow::Result<()> {
+    async fn event_through_composite_triggers_interior_node() -> TestResult {
         let ran = Arc::new(StdMutex::new(0i64));
         let hooks = TestFuncHooks {
             get_a: {

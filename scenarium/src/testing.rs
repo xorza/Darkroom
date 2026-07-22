@@ -9,9 +9,10 @@ use crate::async_lambda;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::lambda::InvokeResult;
 
 pub struct TestFuncHooks {
-    pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
+    pub get_a: Arc<dyn Fn() -> InvokeResult<i64> + Send + Sync + 'static>,
     pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
     pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
 }

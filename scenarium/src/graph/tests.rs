@@ -1,12 +1,15 @@
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    Binding, CacheMode, Graph, GraphDeserializeError, InputPort, Node, NodeId, NodeKind,
+    NodeSearch, OutputPort,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
+
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
@@ -17,7 +20,7 @@ fn passthrough_func() -> Func {
 }
 
 #[test]
-fn roundtrip_serialization() -> anyhow::Result<()> {
+fn roundtrip_serialization() -> TestResult {
     let graph = test_graph();
 
     for format in SerdeFormat::all_formats_for_testing() {
@@ -56,7 +59,7 @@ fn insert_graph_replaces_existing_graph() {
 }
 
 #[test]
-fn pinned_outputs_roundtrip_serialization() -> anyhow::Result<()> {
+fn pinned_outputs_roundtrip_serialization() -> TestResult {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
@@ -236,7 +239,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
     // valid — only the `const_only` flag decides whether validation accepts it.
-    let validate = |const_only: bool| -> anyhow::Result<()> {
+    let validate = |const_only: bool| -> Result<(), crate::error::ValidationError> {
         let port = FuncInput::required("locked", DataType::Int);
         let port = if const_only { port.const_only() } else { port };
         let func = Func::new(FuncId::unique(), "f")
@@ -638,14 +641,20 @@ fn deserialize_rejects_corrupt_graph() {
     // serialize doesn't validate; deserialize must reject the dangling bind
     // (the release-path structural guard, not a debug-only assert).
     let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
-    assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
+    assert!(matches!(
+        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
+        Err(GraphDeserializeError::Validation(_))
+    ));
 
     let mut nil_key = Graph::default();
     nil_key
         .nodes
         .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
     let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
-    assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
+    assert!(matches!(
+        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
+        Err(GraphDeserializeError::Validation(_))
+    ));
 
     let nil_origin = Graph {
         origin: Some(GraphId::nil()),
@@ -661,9 +670,12 @@ fn deserialize_rejects_corrupt_graph() {
     let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
     bindings.push(bindings[0].clone());
     let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
-    let error = Graph::deserialize(&bytes, SerdeFormat::Json)
-        .unwrap_err()
-        .to_string();
+    let decode_error = Graph::deserialize(&bytes, SerdeFormat::Json).unwrap_err();
+    assert!(matches!(
+        &decode_error,
+        GraphDeserializeError::Deserialize(_)
+    ));
+    let error = decode_error.to_string();
     assert!(
         error.contains("duplicate binding for input port"),
         "{error}"
@@ -671,7 +683,7 @@ fn deserialize_rejects_corrupt_graph() {
 }
 
 #[test]
-fn node_remove_test() -> anyhow::Result<()> {
+fn node_remove_test() -> TestResult {
     let mut graph = test_graph();
 
     let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
@@ -889,7 +901,7 @@ fn fresh_copy_remaps_pinned_outputs() {
 }
 
 #[test]
-fn wiring_snapshot_round_trips_through_serde_and_restore() -> anyhow::Result<()> {
+fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     let get_a_id = graph

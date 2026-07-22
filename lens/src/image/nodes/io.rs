@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use imaginarium::SUPPORTED_EXTENSIONS;
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library};
 
 use crate::config_node::enum_input;
 use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
@@ -38,11 +38,11 @@ fn register_load(library: &mut Library) {
                             .as_fs_path()
                             .expect("path input type is validated at the compile boundary"),
                     );
-                    let image = tokio::task::spawn_blocking(move || {
-                        imaginarium::Image::read_file(path).map_err(anyhow::Error::from)
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)??;
+                    let image =
+                        tokio::task::spawn_blocking(move || imaginarium::Image::read_file(path))
+                            .await
+                            .map_err(InvokeError::external)?
+                            .map_err(InvokeError::external)?;
                     outputs[0] = DynamicValue::from_custom(Image::from(image));
                     Ok(())
                 })
@@ -92,28 +92,25 @@ fn register_save(library: &mut Library) {
                             Ok(image) => image
                                 .buffer
                                 .to_cpu(&vision.processing_ctx)
-                                .map_err(anyhow::Error::from)?,
+                                .map_err(InvokeError::external)?,
                             Err(value) => value
                                 .as_custom::<Image>()
                                 .expect("image input type is validated at the compile boundary")
                                 .buffer
                                 .make_cpu(&vision.processing_ctx)
-                                .map_err(anyhow::Error::from)?
+                                .map_err(InvokeError::external)?
                                 .clone(),
                         }
                     };
                     tokio::task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {
-                            Some(target) => cpu_image
-                                .convert_to(target)
-                                .map_err(anyhow::Error::from)?
-                                .save_file(path),
+                            Some(target) => cpu_image.convert_to(target)?.save_file(path),
                             None => cpu_image.save_file(path),
                         }
-                        .map_err(anyhow::Error::from)
                     })
                     .await
-                    .map_err(anyhow::Error::from)??;
+                    .map_err(InvokeError::external)?
+                    .map_err(InvokeError::external)?;
                     Ok(())
                 })
             })),

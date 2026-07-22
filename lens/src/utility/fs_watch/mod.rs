@@ -11,7 +11,9 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 use scenarium::{DataType, FsPathConfig, FsPathMode, StaticValue};
-use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{
+    EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
+};
 
 const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
 
@@ -205,7 +207,7 @@ pub fn fs_watch_library() -> Library {
                                 .expect("filesystem watcher setup task panicked");
                                 let mut guard = event_state.lock().await;
                                 guard.clear();
-                                guard.set(replacement?);
+                                guard.set(replacement.map_err(InvokeError::external)?);
                             } else {
                                 // Debounce is consumer-side — retune without
                                 // tearing down the live OS watch.

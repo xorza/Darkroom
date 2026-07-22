@@ -3,10 +3,10 @@
 //! graph; [`NodeAddress`] identifies the authored node and enclosing instance
 //! path that produced one execution node.
 
-use anyhow::{Result, ensure};
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
+use crate::error::{ValidationError, ensure_valid};
 use crate::graph::NodeId;
 
 #[derive(
@@ -139,31 +139,35 @@ impl FlattenMap {
     pub(crate) fn validate(
         &self,
         e_node_ids: impl IntoIterator<Item = ExecutionNodeId>,
-    ) -> Result<()> {
+    ) -> Result<(), ValidationError> {
         let expected: HashSet<_> = e_node_ids.into_iter().collect();
-        ensure!(
+        ensure_valid!(
             self.leaves.len() == expected.len(),
             "flatten map must have exactly one leaf per execution node"
         );
-        ensure!(
+        ensure_valid!(
             self.execution_nodes.len() == self.leaves.len(),
             "flatten map must have one unique authoring address per execution node"
         );
 
         for e_node_id in expected {
             let Some(leaf) = self.leaves.get(&e_node_id) else {
-                anyhow::bail!("execution node {e_node_id:?} has no flatten-map leaf");
+                return Err(ValidationError::new(format!(
+                    "execution node {e_node_id:?} has no flatten-map leaf"
+                )));
             };
-            ensure!(
+            ensure_valid!(
                 self.execution_nodes.get(&leaf.address) == Some(&e_node_id),
                 "flatten-map address must point back to its execution node"
             );
         }
         for (address, e_node_id) in &self.execution_nodes {
             let Some(leaf) = self.leaves.get(e_node_id) else {
-                anyhow::bail!("flatten-map address {address:?} points to no leaf");
+                return Err(ValidationError::new(format!(
+                    "flatten-map address {address:?} points to no leaf"
+                )));
             };
-            ensure!(
+            ensure_valid!(
                 &leaf.address == address,
                 "flatten-map leaf must point back to its authoring address"
             );

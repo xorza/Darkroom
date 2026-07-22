@@ -2,20 +2,29 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
 use ::serde::{Deserialize, Serialize};
-use anyhow::Result;
+use common::{DeserializeError, SerdeFormat, SerializeError, deserialize, serialize};
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
+use thiserror::Error;
 
 use crate::StaticValue;
+use crate::error::ValidationError;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
 use crate::node::definition::{FuncInput, FuncOutput};
 use crate::node::special::SpecialNode;
 use common::id_type;
-use common::{SerdeFormat, deserialize, serialize};
 
 id_type!(NodeId);
+
+#[derive(Debug, Error)]
+pub enum GraphDeserializeError {
+    #[error(transparent)]
+    Deserialize(#[from] DeserializeError),
+    #[error(transparent)]
+    Validation(#[from] ValidationError),
+}
 
 pub(crate) mod clone;
 pub(crate) mod interface;
@@ -405,10 +414,13 @@ impl Graph {
         }
     }
 
-    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        Ok(serialize(self, format)?)
+    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>, SerializeError> {
+        serialize(self, format)
     }
-    pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
+    pub fn deserialize(
+        serialized: &[u8],
+        format: SerdeFormat,
+    ) -> Result<Graph, GraphDeserializeError> {
         let graph: Self = deserialize(serialized, format)?;
         graph.validate()?;
         Ok(graph)

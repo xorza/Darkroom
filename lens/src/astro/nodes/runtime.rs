@@ -7,10 +7,7 @@ use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
 use crate::image::Image;
 
-pub(crate) async fn run_frame_op<F>(
-    value: DynamicValue,
-    op: F,
-) -> Result<DynamicValue, anyhow::Error>
+pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<DynamicValue>
 where
     F: FnOnce(&mut RawImage) -> Result<(), OpError> + Send + 'static,
 {
@@ -21,12 +18,12 @@ where
         Ok::<_, OpError>(cpu)
     })
     .await
-    .map_err(anyhow::Error::from)?
-    .map_err(anyhow::Error::from)?;
+    .map_err(InvokeError::external)?
+    .map_err(InvokeError::external)?;
     Ok(DynamicValue::from_custom(Image::from(out)))
 }
 
-pub(crate) async fn run_ml<R, F>(value: DynamicValue, op: F) -> anyhow::Result<R>
+pub(crate) async fn run_ml<R, F>(value: DynamicValue, op: F) -> InvokeResult<R>
 where
     F: FnOnce(RawImage) -> Result<R, MlError> + Send + 'static,
     R: Send + 'static,
@@ -34,14 +31,14 @@ where
     let cpu = image_to_cpu(value)?;
     tokio::task::spawn_blocking(move || op(cpu))
         .await
-        .map_err(anyhow::Error::from)?
-        .map_err(anyhow::Error::from)
+        .map_err(InvokeError::external)?
+        .map_err(InvokeError::external)
 }
 
-pub(crate) fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
+pub(crate) fn image_to_cpu(value: DynamicValue) -> InvokeResult<RawImage> {
     let cpu = ProcessingContext::cpu_only();
     match value.into_custom::<Image>() {
-        Ok(image) => image.buffer.to_cpu(&cpu).map_err(anyhow::Error::from),
+        Ok(image) => image.buffer.to_cpu(&cpu).map_err(InvokeError::external),
         Err(value) => {
             let image = value
                 .as_custom::<Image>()
@@ -49,7 +46,7 @@ pub(crate) fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
             Ok(image
                 .buffer
                 .make_cpu(&cpu)
-                .map_err(anyhow::Error::from)?
+                .map_err(InvokeError::external)?
                 .clone())
         }
     }
@@ -63,10 +60,10 @@ where
     let cancel_for_op = cancel.clone();
     match tokio::task::spawn_blocking(move || op(cancel_for_op))
         .await
-        .map_err(anyhow::Error::from)?
+        .map_err(InvokeError::external)?
     {
         Ok(value) => Ok(value),
         Err(_) if cancel.is_cancelled() => Err(InvokeError::Cancelled),
-        Err(error) => Err(error.into()),
+        Err(error) => Err(InvokeError::external(error)),
     }
 }

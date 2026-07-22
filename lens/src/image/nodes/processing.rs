@@ -2,7 +2,7 @@
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
 use scenarium::{DataType, DynamicValue, StaticValue};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library};
 
 use crate::config_node::enum_input;
 use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
@@ -62,7 +62,8 @@ fn register_brightness(library: &mut Library) {
                         ContrastBrightness::new(contrast, brightness),
                         &mut vision.processing_ctx,
                         value,
-                    )?;
+                    )
+                    .map_err(InvokeError::external)?;
                     outputs[0] = DynamicValue::from_custom(image);
                     Ok(())
                 })
@@ -110,11 +111,11 @@ fn register_convert(library: &mut Library) {
                                     let cpu_image = image
                                         .buffer
                                         .make_cpu(&vision.processing_ctx)
-                                        .map_err(anyhow::Error::from)?;
+                                        .map_err(InvokeError::external)?;
                                     Some(
                                         cpu_image
                                             .convert_to(target)
-                                            .map_err(anyhow::Error::from)?,
+                                            .map_err(InvokeError::external)?,
                                     )
                                 }
                                 None => None,
@@ -186,7 +187,7 @@ fn register_blend(library: &mut Library) {
                                 &destination.buffer,
                                 &mut output,
                             )
-                            .map_err(anyhow::Error::from)?;
+                            .map_err(InvokeError::external)?;
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
                     })
@@ -260,7 +261,7 @@ fn register_transform(library: &mut Library) {
                             .rotate_around(scalar(3), center)
                             .translate(Vec2::new(scalar(4), scalar(5)))
                             .execute(&mut vision.processing_ctx, &image.buffer, &mut output)
-                            .map_err(anyhow::Error::from)?;
+                            .map_err(InvokeError::external)?;
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
                     })
@@ -273,14 +274,11 @@ pub(crate) fn adjust_image(
     op: ContrastBrightness,
     context: &mut imaginarium::ProcessingContext,
     value: DynamicValue,
-) -> anyhow::Result<Image> {
+) -> imaginarium::Result<Image> {
     match value.into_custom::<Image>() {
         Ok(mut image) if image.buffer.is_cpu() => {
             {
-                let mut cpu = image
-                    .buffer
-                    .make_cpu_mut(context)
-                    .map_err(anyhow::Error::from)?;
+                let mut cpu = image.buffer.make_cpu_mut(context)?;
                 op.apply_cpu(&mut cpu);
             }
             Ok(image)
@@ -299,9 +297,8 @@ fn adjust_into_fresh(
     op: ContrastBrightness,
     context: &mut imaginarium::ProcessingContext,
     input: &Image,
-) -> anyhow::Result<Image> {
+) -> imaginarium::Result<Image> {
     let mut output = imaginarium::ImageBuffer::new_empty(input.buffer.desc);
-    op.execute(context, &input.buffer, &mut output)
-        .map_err(anyhow::Error::from)?;
+    op.execute(context, &input.buffer, &mut output)?;
     Ok(Image::from(output))
 }

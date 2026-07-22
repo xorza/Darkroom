@@ -6,10 +6,9 @@ use scenarium::{
 
 fn float_input(inputs: &[InvokeInput], index: usize) -> Result<f64, InvokeError> {
     inputs[index].value.as_f64().ok_or_else(|| {
-        InvokeError::External(anyhow::anyhow!(
+        InvokeError::external(format!(
             "input {} is not a number: {:?}",
-            index,
-            inputs[index].value
+            index, inputs[index].value
         ))
     })
 }

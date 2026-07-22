@@ -3,10 +3,10 @@
 //! wrapper, so production call sites pay nothing while tests can inspect exact
 //! validation errors.
 
-use anyhow::{Context, Result, ensure};
 use common::is_debug;
 use hashbrown::HashSet;
 
+use crate::error::{ValidationError, ensure_valid};
 use crate::execution::cache::RuntimeCache;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
@@ -19,61 +19,63 @@ impl CompiledGraph {
     /// validates each `e_node` against its func and checks binding integrity.
     /// The debug wrapper runs at compile (where the library is in hand); the
     /// library-free install-side checks live in [`Self::validate_installed`].
-    pub(crate) fn validate(&self, library: &Library) -> Result<()> {
+    pub(crate) fn validate(&self, library: &Library) -> Result<(), ValidationError> {
         let program = &self.program;
         self.flatten_map.validate(program.e_nodes.keys().copied())?;
         for (e_node_id, e_node) in &program.e_nodes {
-            ensure!(
+            ensure_valid!(
                 !e_node.func_id.is_nil(),
                 "execution node {e_node_id:?} has a nil func id"
             );
             // A special node's interface is its hardcoded spec, not a library func.
             let func = match e_node.special {
                 Some(special) => special.func(),
-                None => library.by_id(&e_node.func_id).with_context(|| {
-                    format!(
+                None => library.by_id(&e_node.func_id).ok_or_else(|| {
+                    ValidationError::new(format!(
                         "execution node {e_node_id:?} references missing func {:?}",
                         e_node.func_id
-                    )
+                    ))
                 })?,
             };
-            ensure!(
+            ensure_valid!(
                 e_node.inputs.len as usize == func.inputs.len(),
                 "execution node {e_node_id:?} input arity does not match its function"
             );
-            ensure!(
+            ensure_valid!(
                 e_node.outputs.len as usize == func.outputs.len(),
                 "execution node {e_node_id:?} output arity does not match its function"
             );
-            ensure!(
+            ensure_valid!(
                 e_node.events.len as usize == func.events.len(),
                 "execution node {e_node_id:?} event arity does not match its function"
             );
-            let inputs = program.inputs.get(e_node.inputs.range()).with_context(|| {
-                format!("execution node {e_node_id:?} input span is out of range")
+            let inputs = program.inputs.get(e_node.inputs.range()).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "execution node {e_node_id:?} input span is out of range"
+                ))
             })?;
-            ensure!(
+            ensure_valid!(
                 program.output_types.get(e_node.outputs.range()).is_some(),
                 "execution node {e_node_id:?} output span is out of range"
             );
-            ensure!(
+            ensure_valid!(
                 program.output_pinned.get(e_node.outputs.range()).is_some(),
                 "execution node {e_node_id:?} pinned-output span is out of range"
             );
-            ensure!(
+            ensure_valid!(
                 program.events.get(e_node.events.range()).is_some(),
                 "execution node {e_node_id:?} event span is out of range"
             );
 
             for e_input in inputs {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    let target = program.e_nodes.get(&e_addr.e_node_id).with_context(|| {
-                        format!(
+                    let target = program.e_nodes.get(&e_addr.e_node_id).ok_or_else(|| {
+                        ValidationError::new(format!(
                             "execution node {e_node_id:?} binds to missing node {:?}",
                             e_addr.e_node_id
-                        )
+                        ))
                     })?;
-                    ensure!(
+                    ensure_valid!(
                         e_addr.port_idx < target.outputs.len as usize,
                         "execution node {e_node_id:?} binds to out-of-range output {} on {:?}",
                         e_addr.port_idx,
@@ -97,19 +99,18 @@ impl CompiledGraph {
     /// The engine's runtime `cache` has exactly this artifact's node ids after
     /// `reconcile` — the install-side half of the checks;
     /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
-    pub(crate) fn validate_installed(&self, cache: &RuntimeCache) -> Result<()> {
-        ensure!(
+    pub(crate) fn validate_installed(&self, cache: &RuntimeCache) -> Result<(), ValidationError> {
+        ensure_valid!(
             cache.slots.len() == self.program.e_nodes.len(),
             "runtime cache node set does not match the compiled program"
         );
 
         for (e_node_id, e_node) in &self.program.e_nodes {
-            let slot = cache
-                .slots
-                .get(e_node_id)
-                .with_context(|| format!("runtime cache is missing node {e_node_id:?}"))?;
+            let slot = cache.slots.get(e_node_id).ok_or_else(|| {
+                ValidationError::new(format!("runtime cache is missing node {e_node_id:?}"))
+            })?;
             if let Some(output_values) = slot.output_values() {
-                ensure!(
+                ensure_valid!(
                     output_values.len() == e_node.outputs.len as usize,
                     "runtime cache output arity does not match node {e_node_id:?}"
                 );
@@ -131,20 +132,23 @@ impl CompiledGraph {
 impl ExecutionPlan {
     /// A planned schedule is a unique post-order DFS whose bindings name valid outputs;
     /// disabled dependencies may remain outside the order.
-    pub(crate) fn validate(&self, program: &ExecutionProgram) -> Result<()> {
-        ensure!(
+    pub(crate) fn validate(&self, program: &ExecutionProgram) -> Result<(), ValidationError> {
+        ensure_valid!(
             self.process_order.len() <= program.e_nodes.len(),
             "execution order contains more entries than the program"
         );
 
         let mut seen_in_order = HashSet::with_capacity(self.process_order.len());
         for &e_node_id in &self.process_order {
-            let e_node = program
-                .e_nodes
-                .get(&e_node_id)
-                .with_context(|| format!("execution order contains missing node {e_node_id:?}"))?;
-            let inputs = program.inputs.get(e_node.inputs.range()).with_context(|| {
-                format!("execution node {e_node_id:?} input span is out of range")
+            let e_node = program.e_nodes.get(&e_node_id).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "execution order contains missing node {e_node_id:?}"
+                ))
+            })?;
+            let inputs = program.inputs.get(e_node.inputs.range()).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "execution node {e_node_id:?} input span is out of range"
+                ))
             })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
@@ -156,21 +160,21 @@ impl ExecutionPlan {
                             .verdicts
                             .get(&addr.e_node_id)
                             .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
-                    ensure!(
+                    ensure_valid!(
                         seen_in_order.contains(&addr.e_node_id) || disabled_dependency,
                         "execution node {e_node_id:?} appears before dependency {:?}",
                         addr.e_node_id
                     );
                 }
             }
-            ensure!(
+            ensure_valid!(
                 seen_in_order.insert(e_node_id),
                 "execution order contains duplicate node {e_node_id:?}"
             );
         }
 
         for e_node_id in &self.pinned {
-            ensure!(
+            ensure_valid!(
                 self.roots.contains(e_node_id),
                 "pinned node {e_node_id:?} is not an execution root"
             );

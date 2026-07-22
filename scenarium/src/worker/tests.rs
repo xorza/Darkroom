@@ -25,6 +25,8 @@ use crate::worker::event_loop::ActiveEventLoop;
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
     ExecutionNodeId::from_node_id(node_id)
 }
@@ -247,7 +249,7 @@ fn temp_dir(prefix: &str) -> TempDir {
 }
 
 #[tokio::test]
-async fn test_worker() -> anyhow::Result<()> {
+async fn test_worker() -> TestResult {
     let mut h = FrameHarness::new().await;
 
     h.worker

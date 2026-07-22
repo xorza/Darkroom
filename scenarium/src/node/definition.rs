@@ -4,9 +4,10 @@ use crate::graph::CacheMode;
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
 use crate::{DataType, StaticValue};
-use anyhow::{Result, ensure};
 use common::id_type;
 use serde::{Deserialize, Serialize};
+
+use crate::error::{ValidationError, ensure_valid};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -310,15 +311,15 @@ impl Func {
     }
 
     /// Validates this function declaration independently of a graph.
-    pub fn validate(&self) -> Result<()> {
-        ensure!(!self.id.is_nil(), "function id must not be nil");
-        ensure!(
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        ensure_valid!(!self.id.is_nil(), "function id must not be nil");
+        ensure_valid!(
             !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
             "Function with no outputs should be impure"
         );
         for (input_idx, input) in self.inputs.iter().enumerate() {
             if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type {
-                ensure!(
+                ensure_valid!(
                     !type_id.is_nil(),
                     "function {:?} input {input_idx} has a nil nominal type id",
                     self.id
@@ -328,14 +329,14 @@ impl Func {
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.ty {
                 OutputType::Fixed(DataType::Custom(type_id) | DataType::Enum(type_id)) => {
-                    ensure!(
+                    ensure_valid!(
                         !type_id.is_nil(),
                         "function {:?} output {output_idx} has a nil nominal type id",
                         self.id
                     );
                 }
                 OutputType::Wildcard { mirrors } => {
-                    ensure!(
+                    ensure_valid!(
                         *mirrors < self.inputs.len(),
                         "function {:?} output {output_idx} mirrors input {mirrors}, but has {} inputs",
                         self.id,
