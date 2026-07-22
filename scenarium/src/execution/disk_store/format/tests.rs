@@ -8,12 +8,11 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
 
-use crate::execution::cache::CachedOutputCoverage;
 use crate::execution::codec;
 use crate::execution::digest::Digest;
 use crate::execution::disk_store::format::{
     BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, MAGIC, PAYLOAD_LEN_OFFSET,
-    covers_outputs, header_len, probe, read, write,
+    covers_outputs, header_len, read, write,
 };
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextManager;
@@ -185,7 +184,7 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
 }
 
 #[tokio::test]
-async fn indexed_header_probes_without_body_and_all_values_round_trip() {
+async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     let calls = Arc::new(AtomicU64::new(0));
     let library = library(7, DecodeBehavior::ReadAll, calls.clone());
     let digest = Digest([3; 32]);
@@ -224,15 +223,16 @@ async fn indexed_header_probes_without_body_and_all_values_round_trip() {
     );
 
     let mut header_only = Cursor::new(&bytes[..header_len]);
-    assert_eq!(
-        probe(&mut header_only, bytes.len() as u64, digest, &library)
-            .await
-            .unwrap(),
-        Some(CachedOutputCoverage {
-            ports: vec![
-                false, true, true, true, true, true, true, true, true, true, true
-            ]
-        })
+    assert!(
+        covers_outputs(
+            &mut header_only,
+            bytes.len() as u64,
+            digest,
+            &outputs,
+            &library,
+        )
+        .await
+        .unwrap()
     );
     assert_eq!(header_only.position() as usize, header_len);
 
@@ -384,15 +384,15 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     let changed_calls = Arc::new(AtomicU64::new(0));
     let changed = library(3, DecodeBehavior::ReadAll, changed_calls.clone());
     assert!(
-        probe(
+        !covers_outputs(
             &mut Cursor::new(&bytes),
             bytes.len() as u64,
             digest,
+            &outputs,
             &changed,
         )
         .await
         .unwrap()
-        .is_none()
     );
     assert_eq!(changed_calls.load(Ordering::SeqCst), 0);
 }
@@ -431,10 +431,11 @@ async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
 
     for bytes in malformed {
         assert!(
-            probe(
+            covers_outputs(
                 &mut Cursor::new(&bytes),
                 bytes.len() as u64,
                 digest,
+                &outputs,
                 &library,
             )
             .await

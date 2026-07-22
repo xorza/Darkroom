@@ -235,10 +235,10 @@ A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. I
 header carries a magic value, format version, 32-byte content digest, body length, and one
 fixed descriptor per output. A descriptor records the value kind and payload length plus the
 type identity and codec version for custom values. Presence probes read only the header,
-require matching content and current codec versions, and derive exact output coverage from
-the descriptors. Invalidation is an **overwrite**. A write is skipped only when the existing
-blob already covers every value being stored. Writes stream into a temporary file and publish
-it atomically, so readers never see a partially encoded generation.
+require matching content and current codec versions, and compare the descriptor tags directly
+with the outputs that must be preserved. Invalidation is an **overwrite**. A write is skipped
+only when the existing blob already covers every value being stored. Writes stream into a
+temporary file and publish it atomically, so readers never see a partially encoded generation.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
