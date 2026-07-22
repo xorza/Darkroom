@@ -63,7 +63,14 @@ pub(crate) mod test_support {
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            let address = self.compiled.flatten_map.representative(node_id)?;
+            let node_id = resolve_node_id(&self.compiled, &NodeAddress::root(*node_id))?;
+            Some(self.argument_values_at(node_id))
+        }
+
+        pub(crate) fn get_argument_values_at(
+            &self,
+            address: &NodeAddress,
+        ) -> Option<ArgumentValues> {
             let node_id = resolve_node_id(&self.compiled, address)?;
             Some(self.argument_values_at(node_id))
         }
