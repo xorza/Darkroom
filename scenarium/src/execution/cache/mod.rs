@@ -1,5 +1,5 @@
 //! The cross-run runtime cache: the per-node RAM slots (output values + content digests +
-//! node state, keyed by `NodeId`) **plus** the
+//! node state, keyed by `ExecutionNodeId`) **plus** the
 //! [`DiskStore`] backing them, and the caching policy over the two — reuse detection, on-demand
 //! hydration, persistence, and RAM eviction. Owned by the
 //! [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run loop drives it a
@@ -17,11 +17,11 @@ use hashbrown::HashMap;
 use crate::execution::NodeMap;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::Disposition;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::stats::NodeRamUsage;
-use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::context::ContextManager;
@@ -283,7 +283,7 @@ impl RuntimeSlot {
 /// kept across graph updates (only `slots` is reconciled/cleared).
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
-    pub(crate) slots: HashMap<NodeId, RuntimeSlot>,
+    pub(crate) slots: HashMap<ExecutionNodeId, RuntimeSlot>,
     disk_store: DiskStore,
 }
 
@@ -356,7 +356,7 @@ impl RuntimeCache {
     /// digest (impure cone) never hits, and a value produced under a *different*
     /// digest (a changed input) misses too. The executor's input read and the
     /// disk-store rely on this being the true "bytes are here" predicate.
-    fn is_resident_current(&self, node_id: NodeId) -> bool {
+    fn is_resident_current(&self, node_id: ExecutionNodeId) -> bool {
         match (
             &self.slots[&node_id].value,
             self.slots[&node_id].current_digest,
@@ -366,7 +366,11 @@ impl RuntimeCache {
         }
     }
 
-    pub(crate) fn is_resident_hit(&self, node_id: NodeId, demand: &[OutputDemand]) -> bool {
+    pub(crate) fn is_resident_hit(
+        &self,
+        node_id: ExecutionNodeId,
+        demand: &[OutputDemand],
+    ) -> bool {
         match (
             &self.slots[&node_id].value,
             self.slots[&node_id].current_digest,
@@ -389,7 +393,7 @@ impl RuntimeCache {
     /// stat'd-but-unloaded disk blob, so a node the executor's cut pruned (its consumers all
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
-    pub(crate) fn has_available_value(&self, node_id: NodeId) -> bool {
+    pub(crate) fn has_available_value(&self, node_id: ExecutionNodeId) -> bool {
         self.is_resident_current(node_id)
             || matches!(self.slots[&node_id].value, ValueState::OnDisk { .. })
     }
@@ -403,7 +407,7 @@ impl RuntimeCache {
     pub(crate) fn read_output_port(
         &mut self,
         program: &ExecutionProgram,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         port: usize,
         take: bool,
     ) -> Option<DynamicValue> {
@@ -424,7 +428,7 @@ impl RuntimeCache {
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
     /// others are still owed to other consumers.
-    pub(crate) fn clear_output_port(&mut self, node_id: NodeId, port: usize) {
+    pub(crate) fn clear_output_port(&mut self, node_id: ExecutionNodeId, port: usize) {
         let ValueState::Resident { snapshot, .. } =
             &mut self.slots.get_mut(&node_id).unwrap().value
         else {
@@ -441,7 +445,7 @@ impl RuntimeCache {
         &mut self,
         program: &ExecutionProgram,
         resource_stamps: &RunResourceStamps,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) {
         let digest = node_digest(program, node_id, self, resource_stamps);
         self.slots.get_mut(&node_id).unwrap().current_digest = digest;
@@ -460,7 +464,7 @@ impl RuntimeCache {
     pub(crate) fn check_reuse(
         &mut self,
         program: &ExecutionProgram,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
         self.slots[&node_id].current_digest.is_some()
@@ -477,7 +481,7 @@ impl RuntimeCache {
     pub(crate) fn mark_on_disk_if_present(
         &mut self,
         program: &ExecutionProgram,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
         let Some(target) = self.disk_store.blob_target(
@@ -511,7 +515,7 @@ impl RuntimeCache {
     pub(crate) async fn hydrate_slot(
         &mut self,
         program: &ExecutionProgram,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) -> bool {
         // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
         // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
@@ -580,7 +584,7 @@ impl RuntimeCache {
     pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.disk_store.blob_target(
@@ -610,7 +614,7 @@ impl RuntimeCache {
     /// The single place the demote-or-drop decision lives, shared by the mid-run release (the
     /// executor, once a non-RAM node's every output is read) and the end-of-run
     /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
-    pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, node_id: NodeId) {
+    pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, node_id: ExecutionNodeId) {
         let values = match &self.slots[&node_id].value {
             ValueState::Resident { snapshot, .. } => &snapshot.values,
             _ => return,
@@ -660,7 +664,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn hydrate(
         cache: &mut RuntimeCache,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         snapshot: OutputSnapshot,
         digest: Digest,
     ) {

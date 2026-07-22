@@ -13,11 +13,11 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::digest::DigestHasher;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{
     ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper,
 };
-use crate::graph::NodeId;
 use crate::node::definition::FuncBehavior;
 use crate::{DynamicValue, ResourceStamp, ResourceStamper, StaticValue};
 
@@ -158,7 +158,10 @@ impl CustomResourceKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum CustomValueKey {
     Custom(usize),
-    Source { target: NodeId, port_idx: usize },
+    Source {
+        target: ExecutionNodeId,
+        port_idx: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -183,7 +186,7 @@ impl ResourceStampRequests {
         stamps: &RunResourceStamps,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) {
         let node = &program.e_nodes[&node_id];
         if node.behavior != FuncBehavior::Pure {
@@ -288,7 +291,7 @@ impl RunResourceStamps {
         &'a mut self,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         cancel: CancelToken,
     ) -> impl Future<Output = ()> + 'a {
         let requests = self.collect_node_requests(program, cache, node_id);
@@ -299,7 +302,7 @@ impl RunResourceStamps {
         &self,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) -> ResourceStampRequests {
         let mut requests = ResourceStampRequests::default();
         requests.collect_node(self, program, cache, node_id);
@@ -346,8 +349,8 @@ pub(crate) mod test_support {
     use common::CancelToken;
 
     use crate::execution::cache::RuntimeCache;
+    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
-    use crate::graph::NodeId;
 
     use crate::execution::resource::RunResourceStamps;
 
@@ -355,7 +358,7 @@ pub(crate) mod test_support {
         stamps: &mut RunResourceStamps,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) {
         let requests = stamps.collect_node_requests(program, cache, node_id);
         let prepared = requests.resolve(&CancelToken::never());

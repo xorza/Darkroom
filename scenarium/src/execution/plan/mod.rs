@@ -9,10 +9,9 @@
 //! unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
-use crate::execution::query::resolve_node_id;
 use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map};
-use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.
@@ -67,7 +66,7 @@ pub(crate) struct ExecutionPlan {
     /// seeded from the roots. Disabled dependencies stay outside the order unless they
     /// are explicit node seeds. The resolver refines it into the surviving run before
     /// execution.
-    pub(crate) process_order: Vec<NodeId>,
+    pub(crate) process_order: Vec<ExecutionNodeId>,
     /// Per-node verdict (execute / disabled / missing-inputs), keyed by node id.
     pub(crate) verdicts: NodeMap<NodeVerdict>,
     /// The nodes the backward walk started from — sinks, event subscribers,
@@ -116,8 +115,8 @@ enum Color {
 
 #[derive(Debug)]
 enum Visit {
-    Discover(NodeId),
-    Done(NodeId),
+    Discover(ExecutionNodeId),
+    Done(ExecutionNodeId),
 }
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
@@ -132,9 +131,8 @@ pub(crate) struct Planner {
 
 impl Planner {
     /// Build the per-run schedule into `plan` from the compiled artifact and the run's
-    /// `seeds` (the roots to walk back from); the artifact's flatten map resolves node
-    /// seeds (authoring ids) to flat roots. Errors on a dependency cycle or an
-    /// unresolvable node seed.
+    /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
+    /// directly. Errors on a dependency cycle or a seed absent from the program.
     pub(crate) fn plan(
         &mut self,
         compiled: &CompiledGraph,
@@ -235,7 +233,7 @@ impl Planner {
 }
 
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
-/// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
+/// the executor's cut: exact execution-node seeds, every
 /// event subscriber, every sink node, and (for the event loop) every node owning a
 /// subscribed event.
 ///
@@ -250,15 +248,13 @@ fn collect_roots(
     let program = &compiled.program;
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
-    // Node seeds (on-demand preview): roots like any other, plus pinned so every output is
-    // computed and delivered. An address that doesn't resolve against the installed
-    // program is inconsistent caller state — fail the run rather than
-    // silently skip the seed. `pinned` also records the one-run disabled override.
-    for address in &seeds.nodes {
-        let node_id =
-            resolve_node_id(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
-                address: address.clone(),
-            })?;
+    // Node seeds (on-demand preview): each exact execution node is a root and pinned so
+    // every output is computed and delivered. `pinned` also records the one-run disabled
+    // override. An id absent from the installed program is inconsistent caller state.
+    for &node_id in &seeds.nodes {
+        if !program.e_nodes.contains_key(&node_id) {
+            return Err(Error::NodeSeedNotFound { node_id });
+        }
         plan.roots.insert(node_id);
         plan.pinned.insert(node_id);
     }

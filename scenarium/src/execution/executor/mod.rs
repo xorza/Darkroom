@@ -24,9 +24,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use common::CancelToken;
 
 use crate::execution::identity::FlattenMap;
+use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::execution::stats::{ExecutedNodeStats, ExecutionStats, NodeError};
-use crate::graph::{InputPort, NodeId};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, RamUsage};
@@ -108,7 +108,7 @@ impl RemainingOutputReads {
         *remaining == 0
     }
 
-    fn node_drained(&self, program: &ExecutionProgram, node_id: NodeId) -> bool {
+    fn node_drained(&self, program: &ExecutionProgram, node_id: ExecutionNodeId) -> bool {
         self.counts
             .slice(program.e_nodes[&node_id].outputs)
             .iter()
@@ -128,7 +128,7 @@ struct ExecutionFrame<'a> {
 }
 
 impl ExecutionFrame<'_> {
-    async fn hydrate_resource_producers(&mut self, node_id: NodeId) {
+    async fn hydrate_resource_producers(&mut self, node_id: ExecutionNodeId) {
         for input in self.program.node_inputs(&self.program.e_nodes[&node_id]) {
             if input.stamper.is_some()
                 && let ExecutionBinding::Bind(addr) = &input.binding
@@ -140,7 +140,7 @@ impl ExecutionFrame<'_> {
 
     async fn emit_pinned_values(
         &mut self,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         events: Option<&UnboundedSender<RunEvent>>,
     ) {
         let Some(events) = events else { return };
@@ -183,7 +183,7 @@ impl ExecutionFrame<'_> {
             .expect(EVENTS_OUTLIVE_RUN);
     }
 
-    async fn collect_inputs(&mut self, node_id: NodeId) -> Result<(), RunError> {
+    async fn collect_inputs(&mut self, node_id: ExecutionNodeId) -> Result<(), RunError> {
         self.inputs.clear();
         let node_inputs = self.program.node_inputs(&self.program.e_nodes[&node_id]);
         for (input_idx, e_input) in node_inputs.iter().enumerate() {
@@ -215,7 +215,7 @@ impl ExecutionFrame<'_> {
         Ok(())
     }
 
-    fn cancel_input_reads(&mut self, node_id: NodeId) {
+    fn cancel_input_reads(&mut self, node_id: ExecutionNodeId) {
         for input in self.program.node_inputs(&self.program.e_nodes[&node_id]) {
             if let ExecutionBinding::Bind(address) = &input.binding {
                 let output_idx = self.program.output_idx(address.target, address.port_idx);
@@ -224,7 +224,7 @@ impl ExecutionFrame<'_> {
         }
     }
 
-    fn finish_read(&mut self, target: NodeId, port_idx: usize, output_idx: OutputIdx) {
+    fn finish_read(&mut self, target: ExecutionNodeId, port_idx: usize, output_idx: OutputIdx) {
         if !self.remaining_reads.consume(output_idx)
             || self.program.e_nodes[&target].cache.caches_in_ram()
             || self.cache.slots[&target].output_values().is_none()
@@ -257,7 +257,7 @@ impl Executor {
     /// reused from RAM/disk. Before any run (empty map) every node reads as "ran", so
     /// plan-only introspection still sees the full schedule. Test introspection only.
     #[cfg(test)]
-    pub(crate) fn ran(&self, node_id: NodeId) -> bool {
+    pub(crate) fn ran(&self, node_id: ExecutionNodeId) -> bool {
         self.outcomes.get(&node_id).is_none_or(|outcome| {
             matches!(
                 outcome,
@@ -550,7 +550,7 @@ impl Executor {
 fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeMap<NodeOutcome>,
-    node_id: NodeId,
+    node_id: ExecutionNodeId,
     error: RunError,
 ) {
     cache.slots.get_mut(&node_id).unwrap().clear_output();
@@ -560,7 +560,7 @@ fn mark_skipped(
 fn has_errored_dependency(
     program: &ExecutionProgram,
     outcomes: &NodeMap<NodeOutcome>,
-    node_id: NodeId,
+    node_id: ExecutionNodeId,
 ) -> bool {
     program.node_inputs(&program.e_nodes[&node_id]).iter().any(|input| {
         matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[&addr.target].error().is_some())
@@ -610,7 +610,7 @@ fn collect_execution_stats(
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.node_inputs(e).iter().enumerate() {
                 if input_missing(input, &plan.verdicts) {
-                    missing_inputs.push(InputPort::new(node_id, i));
+                    missing_inputs.push(ExecutionInputPort::new(node_id, i));
                 }
             }
         }

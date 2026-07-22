@@ -8,7 +8,9 @@
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
-use crate::execution::identity::{FlattenMap, NodeAddress};
+use crate::execution::identity::{
+    ExecutionIdentityError, ExecutionNodeId, FlattenMap, NodeAddress,
+};
 use crate::execution::program::ExecutionProgram;
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
@@ -27,8 +29,8 @@ pub struct CompileError {
 
 /// The compile artifact: the flattened, immutable program (lambdas, resolved
 /// output types, and input stampers attached) plus the [`FlattenMap`] that
-/// relates flat execution ids to authoring nodes (node-seed expansion, stats
-/// attribution). Self-contained — executing it needs neither the authoring
+/// relates execution identities to exact authoring addresses (seed resolution
+/// and stats attribution). Self-contained — executing it needs neither the authoring
 /// graph nor the library. `Default` is the empty program (the engine's
 /// pre-install / cleared state).
 #[derive(Debug, Default)]
@@ -38,15 +40,37 @@ pub struct CompiledGraph {
 }
 
 impl CompiledGraph {
+    /// Resolve an exact authoring address to this program's execution identity.
+    pub fn execution_node(
+        &self,
+        address: &NodeAddress,
+    ) -> Result<ExecutionNodeId, ExecutionIdentityError> {
+        self.flatten_map.execution_node(address).ok_or_else(|| {
+            ExecutionIdentityError::AddressNotFound {
+                address: address.clone(),
+            }
+        })
+    }
+
     /// Resolve one flat execution id to its exact scoped authoring address.
-    pub fn authoring_address(&self, flat_id: NodeId) -> Option<&NodeAddress> {
-        self.flatten_map.address(flat_id)
+    pub fn authoring_address(
+        &self,
+        flat_id: ExecutionNodeId,
+    ) -> Result<&NodeAddress, ExecutionIdentityError> {
+        self.flatten_map
+            .address(flat_id)
+            .ok_or(ExecutionIdentityError::NodeNotFound { node_id: flat_id })
     }
 
     /// Attribute one flat execution id to its authored node followed by every
     /// enclosing graph instance, innermost first.
-    pub fn attribution(&self, flat_id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
-        self.flatten_map.attribution(flat_id)
+    pub fn attribution(
+        &self,
+        flat_id: ExecutionNodeId,
+    ) -> Result<impl Iterator<Item = NodeId> + '_, ExecutionIdentityError> {
+        self.flatten_map
+            .attribution(flat_id)
+            .ok_or(ExecutionIdentityError::NodeNotFound { node_id: flat_id })
     }
 }
 
@@ -116,7 +140,7 @@ pub(crate) mod test_support {
     use std::sync::Arc;
 
     use crate::execution::compile::CompiledGraph;
-    use crate::execution::identity::FlattenMap;
+    use crate::execution::identity::{ExecutionNodeId, FlattenMap};
     use crate::execution::program::ExecutionProgram;
     use crate::graph::NodeId;
 
@@ -134,7 +158,7 @@ pub(crate) mod test_support {
 
         pub fn insert_leaf(
             &mut self,
-            flat_id: NodeId,
+            flat_id: ExecutionNodeId,
             instances: impl IntoIterator<Item = NodeId>,
             node_id: NodeId,
         ) {
@@ -200,10 +224,11 @@ mod tests {
 
     #[test]
     fn validation_returns_compiled_and_installed_mismatches() {
-        let flat = NodeId::unique();
+        let flat = ExecutionNodeId::unique();
+        let interior = NodeId::unique();
         let missing_func = FuncId::unique();
         let mut builder = FlattenMapBuilder::new();
-        builder.insert_leaf(flat, [], flat);
+        builder.insert_leaf(flat, [], interior);
         let mut program = ExecutionProgram::default();
         program.e_nodes.insert(
             flat,
@@ -231,5 +256,32 @@ mod tests {
                 .to_string(),
             "runtime cache node set does not match the compiled program"
         );
+
+        let address = NodeAddress::root(interior);
+        assert_eq!(compiled.execution_node(&address).unwrap(), flat);
+        assert_eq!(compiled.authoring_address(flat).unwrap(), &address);
+        assert_eq!(
+            compiled.attribution(flat).unwrap().collect::<Vec<_>>(),
+            vec![interior]
+        );
+
+        let missing_address = NodeAddress::root(NodeId::unique());
+        assert_eq!(
+            compiled.execution_node(&missing_address),
+            Err(ExecutionIdentityError::AddressNotFound {
+                address: missing_address,
+            })
+        );
+        let missing_node = ExecutionNodeId::unique();
+        assert_eq!(
+            compiled.authoring_address(missing_node),
+            Err(ExecutionIdentityError::NodeNotFound {
+                node_id: missing_node,
+            })
+        );
+        assert!(matches!(
+            compiled.attribution(missing_node),
+            Err(ExecutionIdentityError::NodeNotFound { node_id }) if node_id == missing_node
+        ));
     }
 }
