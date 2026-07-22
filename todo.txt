@@ -29,10 +29,4 @@ blobs and serialization directly to file to avoid memallocs
 
 build masters chose array of files instead of directory
 
-session and engine - one entity?
-
 remove anyhow
-
-current Import adds a graph to the document, not the persistent library
-
-refactor publish.rs
