@@ -4,10 +4,12 @@
 //! frontend orchestration on top, so worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use scenarium::DiskStore;
-use scenarium::{CompiledGraph, Compiler, WorkerReport};
-use scenarium::{Graph, NodeId};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use scenarium::DiskStore;
+use scenarium::{CompiledGraph, Compiler, NodeAddress, WorkerReport};
+use scenarium::{Graph, NodeId};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
@@ -123,11 +125,11 @@ impl RuntimeHost {
     /// Compile `graph` against the current library. A failure is reported to
     /// [`Self::status`] and returns `None` (nothing sent, worker untouched); a
     /// success clears the sticky error.
-    fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
+    fn compile(&mut self, graph: &Graph) -> Option<Arc<CompiledGraph>> {
         match self.compiler.compile(graph, &self.library.published.load()) {
             Ok(compiled) => {
                 self.status.error = None;
-                Some(compiled)
+                Some(Arc::new(compiled))
             }
             Err(e) => {
                 self.status.error(format!("compile failed: {e}"));
@@ -158,8 +160,8 @@ impl RuntimeHost {
         true
     }
 
-    /// Compile `graph` and evaluate every occurrence of authored `node_id`,
-    /// delivering their outputs for the preview fetch ("run to this node").
+    /// Compile `graph` and evaluate the root execution node for authored
+    /// `node_id`, delivering its outputs for the preview fetch ("run to this node").
     /// The explicit node seed overrides disabled occurrences during planning.
     /// Returns whether it was sent — a compile failure is reported to
     /// [`Self::status`] and nothing reaches the worker. Results arrive via
@@ -168,8 +170,11 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
+        let execution_node = compiled
+            .execution_node(&NodeAddress::root(node_id))
+            .expect("runnable root node must exist in the freshly compiled graph");
         self.worker.install(compiled);
-        self.worker.run_node(node_id);
+        self.worker.run_node(execution_node);
         true
     }
 

@@ -198,23 +198,30 @@ pub(crate) struct SceneNode {
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
     pub missing: bool,
+    /// Whether this editor target has an exact identity in the root compiled
+    /// program. Local definition tabs lack their enclosing instance path.
+    pub run_available: bool,
 }
 
 impl SceneNode {
+    fn executable_kind(&self) -> bool {
+        !self.boundary && !self.missing && self.graph.is_none()
+    }
+
     /// Whether this node can seed a "run to this node" — drives the header
     /// play chip and the context-menu item. Disabled func nodes remain valid
     /// because a targeted run overrides that flag temporarily. An instance/
-    /// boundary node has no flat identity, and a `missing` stub resolves to
+    /// boundary node has no execution identity, and a `missing` stub resolves to
     /// nothing.
     pub(crate) fn runnable(&self) -> bool {
-        !self.boundary && !self.missing && self.graph.is_none()
+        self.run_available && self.executable_kind()
     }
 
     /// Whether Darkroom exposes the disable toggle for this node. Limiting it
     /// to runnable sinks keeps disabled nodes directly runnable with their
     /// upstream cone intact.
     pub(crate) fn can_disable(&self) -> bool {
-        self.sink && self.runnable()
+        self.sink && self.executable_kind()
     }
 }
 
@@ -239,6 +246,7 @@ impl Scene {
         view: &GraphView,
         library: &Library,
         run_state: &RunState,
+        run_available: bool,
     ) {
         self.selected = view.selected.clone();
         // Mirror the persisted viewport. The gesture overwrites this
@@ -475,6 +483,7 @@ impl Scene {
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
                     missing,
+                    run_available,
                 },
             );
             self.z_order.push(*key);
@@ -653,6 +662,7 @@ pub(crate) mod test_support {
             exec_status: ExecStatus::None,
             ram: RamUsage::default(),
             missing: false,
+            run_available: true,
         }
     }
 }
@@ -682,6 +692,17 @@ mod tests {
         assert!(
             !node.can_disable(),
             "an unresolved sink cannot be disabled because it cannot be run explicitly"
+        );
+
+        node.missing = false;
+        node.run_available = false;
+        assert!(
+            !node.runnable(),
+            "a local definition tab has no exact root execution identity"
+        );
+        assert!(
+            node.can_disable(),
+            "run availability does not hide the authoring disable toggle"
         );
     }
 
@@ -721,6 +742,7 @@ mod tests {
             &view,
             &Library::default(),
             &RunState::default(),
+            true,
         );
 
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
@@ -777,7 +799,7 @@ mod tests {
         );
         assert!(
             !input_node.runnable() && !output_node.runnable(),
-            "boundary nodes offer no run affordance — they have no flat identity"
+            "boundary nodes offer no run affordance — they have no execution identity"
         );
 
         // GraphOutput: one input per graph *output* plus the "+"
@@ -823,7 +845,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
@@ -881,7 +903,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         let n = scene.nodes.get(&node_id).unwrap();
         let event_names: Vec<String> = scene
@@ -922,7 +944,7 @@ mod tests {
         *view.item_placements.get_mut(&pin_key).unwrap() = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         let n = scene.nodes.get(&node_id).unwrap();
         let pins: Vec<Option<Vec2>> = scene
@@ -946,7 +968,7 @@ mod tests {
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
         view.move_item_to_index(&pin_key, 0);
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
         assert_eq!(
             scene.z_order,
             vec![pin_key, ItemRef::Node(node_id)],
@@ -971,7 +993,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         assert_eq!(scene.subscriptions.len(), 1);
         let s = &scene.subscriptions[0];
@@ -1004,7 +1026,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         for (id, mode) in ids {
             let projected = scene.nodes.get(&id).unwrap();
@@ -1038,7 +1060,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
 
         let pure = scene.nodes.get(&pure_id).unwrap();
         let impure = scene.nodes.get(&impure_id).unwrap();

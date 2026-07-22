@@ -8,7 +8,7 @@ use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
-use crate::execution::identity::NodeAddress;
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, NodeAddress};
 use crate::execution::report::RunPhase;
 use crate::execution::stats::ExecutionStats;
 use crate::execution::{Result as ExecResult, RunSeeds};
@@ -23,6 +23,10 @@ use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::ActiveEventLoop;
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
+
+fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
+    ExecutionNodeId::from_node_id(node_id)
+}
 
 /// Print messages a run logged, in order — `print` now logs via
 /// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
@@ -82,7 +86,7 @@ impl FrameHarness {
 
     fn frame_event(&self) -> EventRef {
         EventRef {
-            node_id: self.frame_event_node_id,
+            node_id: root_execution_node(self.frame_event_node_id),
             event_idx: 0,
         }
     }
@@ -148,8 +152,8 @@ fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
 async fn start_single_event_loop(
     lambda: EventLambda,
     pause_gate: PauseGate,
-) -> (ActiveEventLoop, NodeId) {
-    let node_id = NodeId::unique();
+) -> (ActiveEventLoop, ExecutionNodeId) {
+    let node_id = ExecutionNodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
             event: EventRef {
@@ -521,10 +525,14 @@ async fn worker_streams_node_progress_before_finished() {
                 let compiled = installed
                     .as_ref()
                     .expect("Progress arrived before Installed");
-                assert_eq!(p.node_id, print_node_id, "progress maps to the node");
                 assert_eq!(
-                    compiled.authoring_address(p.node_id),
-                    Some(&NodeAddress::root(print_node_id)),
+                    p.node_id,
+                    root_execution_node(print_node_id),
+                    "progress maps to the node"
+                );
+                assert_eq!(
+                    compiled.authoring_address(p.node_id).unwrap(),
+                    &NodeAddress::root(print_node_id),
                 );
                 match p.phase {
                     RunPhase::Started { .. } => started += 1,
@@ -612,7 +620,7 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     let addresses: HashSet<_> = stats
         .executed_nodes
         .iter()
-        .filter_map(|stats| finished.compiled.authoring_address(stats.node_id))
+        .map(|stats| finished.compiled.authoring_address(stats.node_id).unwrap())
         .filter(|address| address.node_id == interior)
         .cloned()
         .collect();
@@ -723,7 +731,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
                     .into(),
             },
             WorkerMessage::Run {
-                seeds: RunSeeds::nodes(vec![sum_id]),
+                seeds: RunSeeds::nodes(vec![root_execution_node(sum_id)]),
             },
         ])
         .unwrap();
@@ -739,7 +747,11 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
         .map(|node| node.node_id)
         .collect::<Vec<_>>();
     executed.sort();
-    let mut expected = vec![get_a_id, get_b_id, sum_id];
+    let mut expected = vec![
+        root_execution_node(get_a_id),
+        root_execution_node(get_b_id),
+        root_execution_node(sum_id),
+    ];
     expected.sort();
     assert_eq!(executed, expected, "only the disabled sum's cone ran");
     assert!(
@@ -942,7 +954,7 @@ async fn event_on_empty_graph_is_silent_noop() {
     worker
         .send(WorkerMessage::InjectEvents {
             events: vec![EventRef {
-                node_id: NodeId::unique(),
+                node_id: ExecutionNodeId::unique(),
                 event_idx: 0,
             }],
         })
@@ -1041,12 +1053,18 @@ async fn queued_separate_install_and_run_commands_preserve_program_order() {
     assert!(Arc::ptr_eq(&first.compiled, &compiled_a));
     assert!(Arc::ptr_eq(&second.compiled, &compiled_b));
     assert_eq!(
-        first.compiled.authoring_address(print_a),
-        Some(&NodeAddress::root(print_a)),
+        first
+            .compiled
+            .authoring_address(root_execution_node(print_a))
+            .unwrap(),
+        &NodeAddress::root(print_a),
     );
     assert_eq!(
-        second.compiled.authoring_address(print_b),
-        Some(&NodeAddress::root(print_b)),
+        second
+            .compiled
+            .authoring_address(root_execution_node(print_b))
+            .unwrap(),
+        &NodeAddress::root(print_b),
     );
     assert_eq!(messages(&first.result.unwrap()), ["first"]);
     assert_eq!(messages(&second.result.unwrap()), ["second"]);
@@ -1124,18 +1142,27 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
     assert!(Arc::ptr_eq(&finished.compiled, &running_compiled));
     assert!(finished.result.is_ok());
     assert_eq!(
-        finished.compiled.authoring_address(source),
-        Some(&NodeAddress::root(source)),
-    );
-    assert_eq!(
-        finished.compiled.authoring_address(sink),
-        Some(&NodeAddress::root(sink)),
-    );
-    assert!(
         finished
             .compiled
-            .authoring_address(replacement_node)
-            .is_none()
+            .authoring_address(root_execution_node(source))
+            .unwrap(),
+        &NodeAddress::root(source),
+    );
+    assert_eq!(
+        finished
+            .compiled
+            .authoring_address(root_execution_node(sink))
+            .unwrap(),
+        &NodeAddress::root(sink),
+    );
+    let replacement_execution_node = root_execution_node(replacement_node);
+    assert_eq!(
+        finished
+            .compiled
+            .authoring_address(replacement_execution_node),
+        Err(ExecutionIdentityError::NodeNotFound {
+            node_id: replacement_execution_node,
+        })
     );
 
     let installed = timeout(Duration::from_secs(5), rx.recv())
@@ -1170,7 +1197,7 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 #[test]
 fn scan_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
-    let node_id = NodeId::unique();
+    let node_id = ExecutionNodeId::unique();
     let event = EventRef {
         node_id,
         event_idx: 0,
@@ -1211,7 +1238,7 @@ fn scan_accumulates_simple_flags() {
 
 #[test]
 fn scan_deduplicates_events() {
-    let node_id = NodeId::unique();
+    let node_id = ExecutionNodeId::unique();
     let event = EventRef {
         node_id,
         event_idx: 0,
@@ -1590,15 +1617,21 @@ async fn disk_cache_persists_node_across_worker_restart() {
         "the cut prunes the Memory input feeding only a disk-cache hit"
     );
     assert!(
-        !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+        !stats
+            .executed_nodes
+            .iter()
+            .any(|n| n.node_id == root_execution_node(get_a_id)),
         "get_a was cut, not recomputed"
     );
     assert!(
-        stats.cached_nodes.contains(&mult_id),
+        stats.cached_nodes.contains(&root_execution_node(mult_id)),
         "mult is served from the disk cache"
     );
     assert!(
-        !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+        !stats
+            .executed_nodes
+            .iter()
+            .any(|n| n.node_id == root_execution_node(mult_id)),
         "mult itself is not recomputed"
     );
 }

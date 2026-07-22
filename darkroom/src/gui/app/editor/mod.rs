@@ -383,8 +383,14 @@ impl Editor {
             .graph_for(target)
             .expect("active tab graph exists");
         let view = open.document.view(target).expect("active tab view exists");
-        self.scene
-            .rebuild(ui, graph, view, library, &self.run_state);
+        self.scene.rebuild(
+            ui,
+            graph,
+            view,
+            library,
+            &self.run_state,
+            target == GraphRef::Main,
+        );
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,

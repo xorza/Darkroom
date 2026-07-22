@@ -5155,7 +5155,7 @@ mod graph {
             root_execution_node(interior_sum_id),
             "flattened id is remapped"
         );
-        let attr: Vec<_> = retained_compiled.attribution(sum_flat).collect();
+        let attr: Vec<_> = retained_compiled.attribution(sum_flat).unwrap().collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.
@@ -5163,6 +5163,7 @@ mod graph {
             .compiled
             .flatten_map
             .attribution(root_execution_node(a_id))
+            .unwrap()
             .collect();
         assert_eq!(a_attr, vec![a_id]);
     }

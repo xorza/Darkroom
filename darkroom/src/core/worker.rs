@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
-use scenarium::NodeId;
+use scenarium::ExecutionNodeId;
 use scenarium::{RunSeeds, Worker, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
@@ -60,10 +60,8 @@ impl WorkerBridge {
 
     /// Install a compiled program. The worker acknowledges it with
     /// `WorkerReport::Installed` before processing reports from later commands.
-    pub(crate) fn install(&self, compiled: CompiledGraph) {
-        let _ = self.worker.send(WorkerMessage::Update {
-            compiled: Arc::new(compiled),
-        });
+    pub(crate) fn install(&self, compiled: Arc<CompiledGraph>) {
+        let _ = self.worker.send(WorkerMessage::Update { compiled });
     }
 
     /// Execute every sink in the installed program.
@@ -73,8 +71,8 @@ impl WorkerBridge {
         });
     }
 
-    /// Execute every compiled occurrence of one authoring node and deliver its outputs.
-    pub(crate) fn run_node(&self, node_id: NodeId) {
+    /// Execute one exact node in the installed program and deliver its outputs.
+    pub(crate) fn run_node(&self, node_id: ExecutionNodeId) {
         let _ = self.worker.send(WorkerMessage::Run {
             seeds: RunSeeds::nodes(vec![node_id]),
         });
