@@ -8,9 +8,7 @@
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
-use crate::execution::identity::{
-    ExecutionIdentityError, ExecutionNodeId, FlattenMap, NodeAddress,
-};
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
 use crate::execution::program::ExecutionProgram;
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
@@ -29,10 +27,9 @@ pub struct CompileError {
 
 /// The compile artifact: the flattened, immutable program (lambdas, resolved
 /// output types, and input stampers attached) plus the [`FlattenMap`] that
-/// relates execution identities to exact authoring addresses (seed resolution
-/// and stats attribution). Self-contained — executing it needs neither the authoring
-/// graph nor the library. `Default` is the empty program (the engine's
-/// pre-install / cleared state).
+/// attributes execution identities to authored nodes. Self-contained — executing
+/// it needs neither the authoring graph nor the library. `Default` is the empty
+/// program (the engine's pre-install / cleared state).
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
@@ -40,26 +37,12 @@ pub struct CompiledGraph {
 }
 
 impl CompiledGraph {
-    /// Resolve an exact authoring address to this program's execution identity.
-    pub fn execution_node(
-        &self,
-        address: &NodeAddress,
-    ) -> Result<ExecutionNodeId, ExecutionIdentityError> {
-        self.flatten_map.execution_node(address).ok_or_else(|| {
-            ExecutionIdentityError::AddressNotFound {
-                address: address.clone(),
-            }
-        })
-    }
-
-    /// Resolve one flat execution id to its exact scoped authoring address.
-    pub fn authoring_address(
-        &self,
-        e_node_id: ExecutionNodeId,
-    ) -> Result<&NodeAddress, ExecutionIdentityError> {
-        self.flatten_map
-            .address(e_node_id)
-            .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
+    /// Return the authored leaf node that produced one execution node.
+    pub fn leaf(&self, e_node_id: ExecutionNodeId) -> Result<NodeId, ExecutionIdentityError> {
+        Ok(self
+            .attribution(e_node_id)?
+            .next()
+            .expect("execution attribution must start with its authored leaf"))
     }
 
     /// Attribute one flat execution id to its authored node followed by every
@@ -211,11 +194,7 @@ mod tests {
         graph.insert_graph(nested_id, nested);
 
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let address = NodeAddress {
-            instances: vec![instance_id],
-            node_id: interior_id,
-        };
-        let e_node_id = compiled.flatten_map.flat_node(&address).unwrap();
+        let e_node_id = ExecutionNodeId::from_authoring(&[instance_id, interior_id]);
         assert!(
             compiled.program.e_nodes[&e_node_id].disabled,
             "the disabled instance marks its compiled interior effectively disabled"
@@ -224,14 +203,14 @@ mod tests {
 
     #[test]
     fn validation_returns_compiled_and_installed_mismatches() {
-        let flat = ExecutionNodeId::unique();
+        let e_node_id = ExecutionNodeId::unique();
         let interior = NodeId::unique();
         let missing_func = FuncId::unique();
         let mut builder = FlattenMapBuilder::new();
-        builder.insert_leaf(flat, [], interior);
+        builder.insert_leaf(e_node_id, [], interior);
         let mut program = ExecutionProgram::default();
         program.e_nodes.insert(
-            flat,
+            e_node_id,
             ExecutionNode {
                 func_id: missing_func,
                 ..Default::default()
@@ -247,7 +226,7 @@ mod tests {
                 .validate(&Library::default())
                 .unwrap_err()
                 .to_string(),
-            format!("execution node {flat:?} references missing func {missing_func:?}")
+            format!("execution node {e_node_id:?} references missing func {missing_func:?}")
         );
         assert_eq!(
             compiled
@@ -257,24 +236,15 @@ mod tests {
             "runtime cache node set does not match the compiled program"
         );
 
-        let address = NodeAddress::root(interior);
-        assert_eq!(compiled.execution_node(&address).unwrap(), flat);
-        assert_eq!(compiled.authoring_address(flat).unwrap(), &address);
         assert_eq!(
-            compiled.attribution(flat).unwrap().collect::<Vec<_>>(),
+            compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
             vec![interior]
         );
+        assert_eq!(compiled.leaf(e_node_id).unwrap(), interior);
 
-        let missing_address = NodeAddress::root(NodeId::unique());
-        assert_eq!(
-            compiled.execution_node(&missing_address),
-            Err(ExecutionIdentityError::AddressNotFound {
-                address: missing_address,
-            })
-        );
         let missing_node = ExecutionNodeId::unique();
         assert_eq!(
-            compiled.authoring_address(missing_node),
+            compiled.leaf(missing_node),
             Err(ExecutionIdentityError::NodeNotFound {
                 e_node_id: missing_node,
             })

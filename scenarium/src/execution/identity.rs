@@ -1,7 +1,5 @@
-//! Strongly typed execution identities and their mapping to scoped authoring
-//! addresses. Execution ports identify positions in one flattened compiled
-//! graph; [`NodeAddress`] identifies the authored node and enclosing instance
-//! path that produced one execution node.
+//! Strongly typed identities for one flattened compiled graph, plus the compact
+//! scope map used to attribute an execution node to authored nodes.
 
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
@@ -17,8 +15,26 @@ use crate::graph::NodeId;
 pub struct ExecutionNodeId(NodeId);
 
 impl ExecutionNodeId {
-    pub(crate) const fn from_node_id(node_id: NodeId) -> Self {
-        Self(node_id)
+    /// Derive an execution identity from a non-empty authoring path, ordered
+    /// from the outermost graph instance to the leaf node. A root node uses
+    /// `[node_id]`; a nested node uses `[outer_instance, ..., node_id]`.
+    pub fn from_authoring(path: &[NodeId]) -> Self {
+        let (&node_id, instances) = path
+            .split_last()
+            .expect("an authoring path must include its leaf node");
+        if instances.is_empty() {
+            return Self(node_id);
+        }
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"scenarium.flatten.v1");
+        for instance in instances {
+            hasher.update(&instance.as_u128().to_le_bytes());
+        }
+        hasher.update(&node_id.as_u128().to_le_bytes());
+        let digest = hasher.finalize();
+        Self(NodeId::from_u128(u128::from_le_bytes(
+            digest.as_bytes()[..16].try_into().unwrap(),
+        )))
     }
 
     pub(crate) fn as_uuid(self) -> uuid::Uuid {
@@ -49,28 +65,10 @@ pub struct ExecutionEventPort {
     pub event_idx: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-/// One authored node at an exact graph-instance path.
-pub struct NodeAddress {
-    pub instances: Vec<NodeId>,
-    pub node_id: NodeId,
-}
-
-impl NodeAddress {
-    pub fn root(node_id: NodeId) -> Self {
-        Self {
-            instances: Vec::new(),
-            node_id,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-/// A failed lookup between authoring and execution identity spaces.
+/// A failed lookup from an execution identity to its authoring attribution.
 pub enum ExecutionIdentityError {
-    #[error("authoring address {address:?} has no execution identity in this compiled graph")]
-    AddressNotFound { address: NodeAddress },
-    #[error("execution node {e_node_id:?} has no authoring address in this compiled graph")]
+    #[error("execution node {e_node_id:?} has no authoring attribution in this compiled graph")]
     NodeNotFound { e_node_id: ExecutionNodeId },
 }
 
@@ -78,7 +76,6 @@ pub enum ExecutionIdentityError {
 pub(crate) struct FlattenMap {
     scopes: Vec<Scope>,
     leaves: HashMap<ExecutionNodeId, Leaf>,
-    execution_nodes: HashMap<NodeAddress, ExecutionNodeId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,14 +87,13 @@ struct Scope {
 #[derive(Debug, Clone)]
 struct Leaf {
     scope: u32,
-    address: NodeAddress,
+    node_id: NodeId,
 }
 
 impl FlattenMap {
     pub(crate) fn reset(&mut self) {
         self.scopes.clear();
         self.leaves.clear();
-        self.execution_nodes.clear();
         self.scopes.push(Scope {
             instance: None,
             parent: 0,
@@ -114,25 +110,16 @@ impl FlattenMap {
     }
 
     pub(crate) fn set_leaf(&mut self, e_node_id: ExecutionNodeId, scope: u32, interior: NodeId) {
-        let address = NodeAddress {
-            instances: self.instance_path(scope),
-            node_id: interior,
-        };
         let previous_leaf = self.leaves.insert(
             e_node_id,
             Leaf {
                 scope,
-                address: address.clone(),
+                node_id: interior,
             },
         );
         debug_assert!(
             previous_leaf.is_none(),
             "flattened node id collision for {e_node_id:?}"
-        );
-        let previous_execution = self.execution_nodes.insert(address.clone(), e_node_id);
-        debug_assert!(
-            previous_execution.is_none(),
-            "duplicate authoring node address {address:?}"
         );
     }
 
@@ -145,63 +132,21 @@ impl FlattenMap {
             self.leaves.len() == expected.len(),
             "flatten map must have exactly one leaf per execution node"
         );
-        ensure_valid!(
-            self.execution_nodes.len() == self.leaves.len(),
-            "flatten map must have one unique authoring address per execution node"
-        );
-
         for e_node_id in expected {
-            let Some(leaf) = self.leaves.get(&e_node_id) else {
+            if !self.leaves.contains_key(&e_node_id) {
                 return Err(ValidationError::new(format!(
                     "execution node {e_node_id:?} has no flatten-map leaf"
                 )));
-            };
-            ensure_valid!(
-                self.execution_nodes.get(&leaf.address) == Some(&e_node_id),
-                "flatten-map address must point back to its execution node"
-            );
-        }
-        for (address, e_node_id) in &self.execution_nodes {
-            let Some(leaf) = self.leaves.get(e_node_id) else {
-                return Err(ValidationError::new(format!(
-                    "flatten-map address {address:?} points to no leaf"
-                )));
-            };
-            ensure_valid!(
-                &leaf.address == address,
-                "flatten-map leaf must point back to its authoring address"
-            );
+            }
         }
         Ok(())
-    }
-
-    fn instance_path(&self, mut scope: u32) -> Vec<NodeId> {
-        let mut instances = Vec::new();
-        loop {
-            let entry = self.scopes[scope as usize];
-            let Some(instance) = entry.instance else {
-                break;
-            };
-            instances.push(instance);
-            scope = entry.parent;
-        }
-        instances.reverse();
-        instances
-    }
-
-    pub(crate) fn address(&self, e_node_id: ExecutionNodeId) -> Option<&NodeAddress> {
-        self.leaves.get(&e_node_id).map(|leaf| &leaf.address)
-    }
-
-    pub(crate) fn execution_node(&self, address: &NodeAddress) -> Option<ExecutionNodeId> {
-        self.execution_nodes.get(address).copied()
     }
 
     pub(crate) fn attribution(&self, e_node_id: ExecutionNodeId) -> Option<Attribution<'_>> {
         let leaf = self.leaves.get(&e_node_id)?;
         Some(Attribution {
             map: self,
-            interior: Some(leaf.address.node_id),
+            interior: Some(leaf.node_id),
             scope: Some(leaf.scope),
         })
     }
@@ -251,14 +196,7 @@ pub(crate) mod test_support {
     }
 
     #[cfg(test)]
-    use crate::execution::identity::{FlattenMap, NodeAddress};
-
-    #[cfg(test)]
-    impl FlattenMap {
-        pub(crate) fn flat_node(&self, address: &NodeAddress) -> Option<ExecutionNodeId> {
-            self.execution_nodes.get(address).copied()
-        }
-    }
+    use crate::execution::identity::FlattenMap;
 
     #[cfg(test)]
     #[derive(Debug)]
@@ -302,93 +240,64 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::identity::{ExecutionNodeId, FlattenMap, NodeAddress};
+    use crate::execution::identity::{ExecutionNodeId, FlattenMap};
     use crate::graph::NodeId;
 
     #[test]
-    fn maps_exact_nested_addresses_in_both_directions() {
+    fn attributes_nested_execution_nodes_without_materializing_paths() {
         let outer = NodeId::from_u128(1);
         let inner = NodeId::from_u128(2);
         let interior = NodeId::from_u128(3);
-        let flat = ExecutionNodeId::from_u128(4);
+        let e_node_id = ExecutionNodeId::from_u128(4);
         let mut map = FlattenMap::default();
         map.reset();
         let outer_scope = map.push_scope(outer, 0);
         let inner_scope = map.push_scope(inner, outer_scope);
-        map.set_leaf(flat, inner_scope, interior);
+        map.set_leaf(e_node_id, inner_scope, interior);
 
-        let address = NodeAddress {
-            instances: vec![outer, inner],
-            node_id: interior,
-        };
-        assert_eq!(map.address(flat), Some(&address));
-        assert_eq!(map.flat_node(&address), Some(flat));
         assert_eq!(
-            map.attribution(flat).unwrap().collect::<Vec<_>>(),
+            map.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
             vec![interior, inner, outer]
         );
-        map.validate([flat]).unwrap();
+        map.validate([e_node_id]).unwrap();
     }
 
     #[test]
-    fn keeps_distinct_instances_of_the_same_definition_node() {
+    fn keeps_distinct_execution_nodes_for_instances_of_one_definition_node() {
         let instance_a = NodeId::from_u128(1);
         let instance_b = NodeId::from_u128(2);
         let interior = NodeId::from_u128(3);
-        let flat_a = ExecutionNodeId::from_u128(4);
-        let flat_b = ExecutionNodeId::from_u128(5);
+        let e_node_id_a = ExecutionNodeId::from_u128(4);
+        let e_node_id_b = ExecutionNodeId::from_u128(5);
         let mut map = FlattenMap::default();
         map.reset();
         let scope_a = map.push_scope(instance_a, 0);
         let scope_b = map.push_scope(instance_b, 0);
-        map.set_leaf(flat_a, scope_a, interior);
-        map.set_leaf(flat_b, scope_b, interior);
+        map.set_leaf(e_node_id_a, scope_a, interior);
+        map.set_leaf(e_node_id_b, scope_b, interior);
 
         assert_eq!(
-            map.flat_node(&NodeAddress {
-                instances: vec![instance_a],
-                node_id: interior,
-            }),
-            Some(flat_a)
+            map.attribution(e_node_id_a).unwrap().collect::<Vec<_>>(),
+            vec![interior, instance_a]
         );
         assert_eq!(
-            map.flat_node(&NodeAddress {
-                instances: vec![instance_b],
-                node_id: interior,
-            }),
-            Some(flat_b)
+            map.attribution(e_node_id_b).unwrap().collect::<Vec<_>>(),
+            vec![interior, instance_b]
         );
-        map.validate([flat_a, flat_b]).unwrap();
+        map.validate([e_node_id_a, e_node_id_b]).unwrap();
     }
 
     #[test]
     fn rejects_execution_node_and_leaf_key_mismatch() {
-        let flat = ExecutionNodeId::unique();
+        let e_node_id = ExecutionNodeId::unique();
         let interior = NodeId::unique();
         let mut map = FlattenMap::default();
         map.reset();
-        map.set_leaf(flat, 0, interior);
+        map.set_leaf(e_node_id, 0, interior);
 
         assert_eq!(
             map.validate([]).unwrap_err().to_string(),
             "flatten map must have exactly one leaf per execution node"
-        );
-    }
-
-    #[test]
-    fn rejects_reverse_identity_mismatch() {
-        let flat = ExecutionNodeId::unique();
-        let wrong_flat = ExecutionNodeId::unique();
-        let interior = NodeId::unique();
-        let mut map = FlattenMap::default();
-        map.reset();
-        map.set_leaf(flat, 0, interior);
-        map.execution_nodes
-            .insert(NodeAddress::root(interior), wrong_flat);
-
-        assert_eq!(
-            map.validate([flat]).unwrap_err().to_string(),
-            "flatten-map address must point back to its execution node"
         );
     }
 }

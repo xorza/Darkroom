@@ -11,7 +11,7 @@ use aperture::{Image as AptImage, ImageHandle, Ui};
 use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
-use scenarium::{DynamicValue, OutputPort, PinnedOutputs};
+use scenarium::{DynamicValue, NodeId, OutputPort, PinnedOutput};
 
 use crate::core::document::Document;
 
@@ -54,12 +54,18 @@ struct PreparedImage {
 }
 
 impl PinnedOutputStore {
-    pub(crate) fn ingest(&mut self, ui: &Ui, pushed: PinnedOutputs, document: &Document) {
-        if pushed.values.is_empty() {
+    pub(crate) fn ingest(
+        &mut self,
+        ui: &Ui,
+        node_id: NodeId,
+        values: Vec<PinnedOutput>,
+        document: &Document,
+    ) {
+        if values.is_empty() {
             return;
         }
-        for output in pushed.values {
-            let port = OutputPort::new(pushed.node.node_id, output.port_idx);
+        for output in values {
+            let port = OutputPort::new(node_id, output.port_idx);
             if !document.retains_output_resource(port) {
                 continue;
             }
@@ -161,7 +167,7 @@ mod tests {
     use super::*;
 
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
-    use scenarium::{NodeAddress, NodeId, PinnedOutput, StaticValue};
+    use scenarium::StaticValue;
 
     use crate::core::document::{PortKind, PortRef, TabRef};
 
@@ -170,13 +176,6 @@ mod tests {
         let bytes = vec![128; desc.row_bytes() * height];
         let raw = RawImage::new_with_data(desc, bytes).unwrap();
         DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
-    }
-
-    fn push(node: NodeId, values: Vec<PinnedOutput>) -> PinnedOutputs {
-        PinnedOutputs {
-            node: NodeAddress::root(node),
-            values,
-        }
     }
 
     fn demanding_document(port: OutputPort, pinned: bool, viewer: bool) -> Document {
@@ -250,19 +249,17 @@ mod tests {
         let document = demanding_document(first_port, true, false);
         store.ingest(
             &ui,
-            push(
-                node,
-                vec![
-                    PinnedOutput {
-                        port_idx: 0,
-                        value: DynamicValue::Static(StaticValue::Int(7)),
-                    },
-                    PinnedOutput {
-                        port_idx: 1,
-                        value: DynamicValue::Static(StaticValue::Int(9)),
-                    },
-                ],
-            ),
+            node,
+            vec![
+                PinnedOutput {
+                    port_idx: 0,
+                    value: DynamicValue::Static(StaticValue::Int(7)),
+                },
+                PinnedOutput {
+                    port_idx: 1,
+                    value: DynamicValue::Static(StaticValue::Int(9)),
+                },
+            ],
             &document,
         );
         assert_eq!(store.entries.len(), 1);
@@ -270,16 +267,11 @@ mod tests {
 
         store.ingest(
             &ui,
-            PinnedOutputs {
-                node: NodeAddress {
-                    instances: vec![NodeId::unique()],
-                    node_id: node,
-                },
-                values: vec![PinnedOutput {
-                    port_idx: 0,
-                    value: DynamicValue::Static(StaticValue::Int(8)),
-                }],
-            },
+            node,
+            vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(8)),
+            }],
             &document,
         );
         assert_eq!(store.entries.len(), 1);
@@ -295,13 +287,11 @@ mod tests {
         let pinned = demanding_document(first_port, true, false);
         store.ingest(
             &ui,
-            push(
-                node,
-                vec![PinnedOutput {
-                    port_idx: 0,
-                    value: image_value(512, 256, ColorFormat::RGBA_U8),
-                }],
-            ),
+            node,
+            vec![PinnedOutput {
+                port_idx: 0,
+                value: image_value(512, 256, ColorFormat::RGBA_U8),
+            }],
             &pinned,
         );
         let StoredContent::Image(image) = &store.entries[&first_port] else {

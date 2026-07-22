@@ -43,15 +43,15 @@ pub(crate) mod test_support {
     use crate::DynamicValue;
     use crate::execution::ExecutionEngine;
     use crate::execution::compile::CompiledGraph;
-    use crate::execution::identity::{ExecutionNodeId, NodeAddress};
+    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionBinding;
     use crate::graph::NodeId;
 
     pub(crate) fn resolve_e_node_id(
         compiled: &CompiledGraph,
-        address: &NodeAddress,
+        path: &[NodeId],
     ) -> Option<ExecutionNodeId> {
-        let e_node_id = compiled.flatten_map.flat_node(address)?;
+        let e_node_id = ExecutionNodeId::from_authoring(path);
         compiled
             .program
             .e_nodes
@@ -69,15 +69,15 @@ pub(crate) mod test_support {
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            let e_node_id = resolve_e_node_id(&self.compiled, &NodeAddress::root(*node_id))?;
+            let e_node_id = resolve_e_node_id(&self.compiled, &[*node_id])?;
             Some(self.argument_values_at(e_node_id))
         }
 
         pub(crate) fn get_argument_values_at(
             &self,
-            address: &NodeAddress,
+            e_node_id: ExecutionNodeId,
         ) -> Option<ArgumentValues> {
-            let e_node_id = resolve_e_node_id(&self.compiled, address)?;
+            self.compiled.program.e_nodes.get(&e_node_id)?;
             Some(self.argument_values_at(e_node_id))
         }
 

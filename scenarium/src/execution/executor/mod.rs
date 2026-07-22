@@ -23,7 +23,6 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use common::CancelToken;
 
-use crate::execution::identity::FlattenMap;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::execution::stats::{ExecutedNodeStats, ExecutionStats, NodeError};
@@ -122,7 +121,6 @@ struct ExecutionFrame<'a> {
     plan: &'a ExecutionPlan,
     cache: &'a mut RuntimeCache,
     resource_stamps: &'a mut RunResourceStamps,
-    flatten: &'a FlattenMap,
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<InvokeInput>,
 }
@@ -173,13 +171,8 @@ impl ExecutionFrame<'_> {
                 PinnedOutput { port_idx, value }
             })
             .collect();
-        let node = self
-            .flatten
-            .address(e_node_id)
-            .expect("a node that just ran must have an authoring address")
-            .clone();
         events
-            .send(RunEvent::PinnedOutputs(PinnedOutputs { node, values }))
+            .send(RunEvent::PinnedOutputs(PinnedOutputs { e_node_id, values }))
             .expect(EVENTS_OUTLIVE_RUN);
     }
 
@@ -271,7 +264,7 @@ impl Executor {
     /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
     /// away (so a long run's earlier caches survive a later failure or cancel). The
     /// `program`, `plan`, and `resolved` run are read-only. Returns per-run stats.
-    #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
+    #[allow(clippy::too_many_arguments)] // Each argument is a distinct run collaborator.
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
@@ -279,7 +272,6 @@ impl Executor {
         resolved: &ResolvedRun,
         cache: &mut RuntimeCache,
         resource_stamps: &mut RunResourceStamps,
-        flatten: &FlattenMap,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
     ) -> ExecutionStats {
@@ -303,7 +295,6 @@ impl Executor {
                 plan,
                 cache,
                 resource_stamps,
-                flatten,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
             };

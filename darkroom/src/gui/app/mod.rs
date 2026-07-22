@@ -155,7 +155,7 @@ impl App {
                     self.editor.run_state.apply_progress(&progress);
                 }
                 WorkerReport::PinnedOutputs(outputs) => {
-                    self.editor.run_state.pinned_outputs.ingest(
+                    self.editor.run_state.ingest_pinned_outputs(
                         ui,
                         outputs,
                         &self.workspace.open.document,

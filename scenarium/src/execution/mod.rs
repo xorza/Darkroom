@@ -214,8 +214,8 @@ impl RunSeeds {
     }
 }
 
-/// The run-side pipeline container. Shares the installed `program` and its
-/// `flatten_map` (flat↔authoring ids), the reusable `plan` buffer, the `planner`
+/// The run-side pipeline container. Shares the installed program and its
+/// execution-attribution map, the reusable `plan` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
 /// owned `DiskStore` file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
@@ -223,8 +223,8 @@ impl RunSeeds {
 /// persistent form is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
-    /// The installed shared compile artifact: the program plus its flatten map
-    /// (authoring↔execution id map, resolving node seeds at plan time).
+    /// The installed shared compile artifact: the program plus its compact
+    /// execution-to-authoring attribution map.
     /// Replaced wholesale by [`Self::install`].
     pub(crate) compiled: Arc<CompiledGraph>,
     /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
@@ -333,7 +333,6 @@ impl ExecutionEngine {
                 &self.resolver.run,
                 &mut self.cache,
                 &mut self.resource_stamps,
-                &self.compiled.flatten_map,
                 events,
                 cancel,
             )

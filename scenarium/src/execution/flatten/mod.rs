@@ -166,26 +166,6 @@ fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a G
     graph
 }
 
-/// Deterministic flattened identity for an interior node reached via `path`
-/// (the chain of composite-instance ids descended through). Top-level nodes
-/// (`path` empty) keep their own id, so caches survive and func-only graphs
-/// map to themselves.
-fn flatten_id(path: &[NodeId], interior: NodeId) -> ExecutionNodeId {
-    if path.is_empty() {
-        return ExecutionNodeId::from_node_id(interior);
-    }
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"scenarium.flatten.v1");
-    for id in path {
-        hasher.update(&id.as_u128().to_le_bytes());
-    }
-    hasher.update(&interior.as_u128().to_le_bytes());
-    let digest = hasher.finalize();
-    ExecutionNodeId::from_node_id(NodeId::from_u128(u128::from_le_bytes(
-        digest.as_bytes()[..16].try_into().unwrap(),
-    )))
-}
-
 /// Where an output reference resolves once boundaries are followed through.
 enum Source {
     Producer(ExecutionOutputPort),
@@ -240,6 +220,13 @@ impl<'a> Run<'a> {
         self.path.push(instance_id);
     }
 
+    fn execution_node_id(&mut self, node_id: NodeId) -> ExecutionNodeId {
+        self.path.push(node_id);
+        let e_node_id = ExecutionNodeId::from_authoring(self.path);
+        self.path.pop();
+        e_node_id
+    }
+
     /// Emit execution nodes for the current level's graph, recursing into
     /// composite instances.
     fn emit(&mut self, ancestor_disabled: bool) {
@@ -287,7 +274,7 @@ impl<'a> Run<'a> {
                 NodeKind::GraphInput | NodeKind::GraphOutput => continue,
             };
 
-            let e_node_id = flatten_id(self.path.as_slice(), node.id);
+            let e_node_id = self.execution_node_id(node.id);
             let input_count = func.inputs.len();
 
             let outputs_start = self.n_outputs;
@@ -384,7 +371,7 @@ impl<'a> Run<'a> {
         }
         match &node.kind {
             NodeKind::Func(_) | NodeKind::Special(_) => Some(ExecutionEventPort {
-                e_node_id: flatten_id(self.path.as_slice(), node_id),
+                e_node_id: self.execution_node_id(node_id),
                 event_idx,
             }),
             NodeKind::Graph(r) => {
@@ -418,10 +405,10 @@ impl<'a> Run<'a> {
             // becomes the flat subscriber. `RunSinks` in particular relies on
             // this edge so the planner sees it among a fired event's subscribers.
             Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
-                let flat = flatten_id(self.path.as_slice(), node_id);
+                let e_node_id = self.execution_node_id(node_id);
                 self.subs.push(ExecutionSubscription {
                     event,
-                    subscriber: flat,
+                    subscriber: e_node_id,
                 });
             }
             Some(NodeKind::Graph(r)) => {
@@ -479,7 +466,7 @@ impl<'a> Run<'a> {
             .expect("binding to a missing node");
         match &node.kind {
             NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(ExecutionOutputPort {
-                e_node_id: flatten_id(self.path.as_slice(), node_id),
+                e_node_id: self.execution_node_id(node_id),
                 port_idx,
             }),
             // Follow into the composite: its output `port_idx` is wired by the

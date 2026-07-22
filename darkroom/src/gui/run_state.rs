@@ -16,14 +16,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use aperture::Ui;
 use scenarium::CompiledGraph;
 use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::RamUsage;
 use scenarium::RunError;
-use scenarium::{ExecutionStats, RunPhase, RunProgress};
+use scenarium::{ExecutionStats, PinnedOutputs, RunPhase, RunProgress};
 
+use crate::core::document::Document;
 use crate::gui::pinned_output::PinnedOutputStore;
 
 fn attributed_nodes(
@@ -272,6 +274,23 @@ impl RunState {
         }
     }
 
+    pub(crate) fn ingest_pinned_outputs(
+        &mut self,
+        ui: &Ui,
+        pushed: PinnedOutputs,
+        document: &Document,
+    ) {
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("worker pushed outputs before installing a compiled graph");
+        let node_id = compiled
+            .leaf(pushed.e_node_id)
+            .expect("pinned output identity must belong to the installed compile");
+        self.pinned_outputs
+            .ingest(ui, node_id, pushed.values, document);
+    }
+
     /// Drop everything visible from a failed run: no glow, logs, or pinned
     /// values.
     pub(crate) fn clear(&mut self) {
@@ -296,13 +315,16 @@ mod tests {
 
     use scenarium::CompiledGraphBuilder;
     use scenarium::FuncId;
-    use scenarium::{ExecutedNodeStats, LogEntry, LogLevel, NodeError};
+    use scenarium::{DynamicValue, ExecutedNodeStats, LogEntry, LogLevel, NodeError};
+    use scenarium::{OutputPort, PinnedOutput, StaticValue};
+
+    use crate::gui::pinned_output::StoredContent;
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
     }
 
-    fn fid(n: u128) -> ExecutionNodeId {
+    fn eid(n: u128) -> ExecutionNodeId {
         ExecutionNodeId::from_u128(n)
     }
 
@@ -355,12 +377,12 @@ mod tests {
     #[test]
     fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
         let (interior, instance) = (nid(1), nid(2));
-        let flat = fid(100);
-        let mut rs = run_state([(flat, vec![instance], interior)]);
+        let e_node_id = eid(100);
+        let mut rs = run_state([(e_node_id, vec![instance], interior)]);
 
         // Started → every attributed node turns Running.
         rs.apply_progress(&RunProgress {
-            e_node_id: flat,
+            e_node_id,
             phase: RunPhase::Started { at: Instant::now() },
         });
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
@@ -368,7 +390,7 @@ mod tests {
 
         // Finished → Executed with the reported time (overwrites Running).
         rs.apply_progress(&RunProgress {
-            e_node_id: flat,
+            e_node_id,
             phase: RunPhase::Finished { elapsed_secs: 0.5 },
         });
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
@@ -385,13 +407,13 @@ mod tests {
     fn aggregates_interior_across_instances_and_per_instance_subtree() {
         let interior = nid(1);
         let (inst_a, inst_b) = (nid(10), nid(20));
-        let (flat_a, flat_b) = (fid(101), fid(102));
+        let (e_node_id_a, e_node_id_b) = (eid(101), eid(102));
 
         let mut rs = run_state([
-            (flat_a, vec![inst_a], interior),
-            (flat_b, vec![inst_b], interior),
+            (e_node_id_a, vec![inst_a], interior),
+            (e_node_id_b, vec![inst_b], interior),
         ]);
-        rs.set_results(&stats(&[(flat_a, 2.0), (flat_b, 3.0)], &[]));
+        rs.set_results(&stats(&[(e_node_id_a, 2.0), (e_node_id_b, 3.0)], &[]));
 
         // Shared interior view: both instances' times sum (2 + 3).
         assert_eq!(rs.status(interior), ExecStatus::Executed(5.0));
@@ -400,16 +422,51 @@ mod tests {
         assert_eq!(rs.status(inst_b), ExecStatus::Executed(3.0));
     }
 
+    #[test]
+    fn pinned_outputs_project_execution_occurrences_to_the_authored_port() {
+        let interior = nid(1);
+        let (instance_a, instance_b) = (nid(10), nid(20));
+        let (e_node_id_a, e_node_id_b) = (eid(101), eid(102));
+        let mut run_state = run_state([
+            (e_node_id_a, vec![instance_a], interior),
+            (e_node_id_b, vec![instance_b], interior),
+        ]);
+        let port = OutputPort::new(interior, 0);
+        let mut document = Document::default();
+        document.graph.set_output_pinned(port, true);
+        let ui = Ui::default();
+
+        for (e_node_id, value) in [(e_node_id_a, 7), (e_node_id_b, 8)] {
+            run_state.ingest_pinned_outputs(
+                &ui,
+                PinnedOutputs {
+                    e_node_id,
+                    values: vec![PinnedOutput {
+                        port_idx: 0,
+                        value: DynamicValue::Static(StaticValue::Int(value)),
+                    }],
+                },
+                &document,
+            );
+        }
+
+        assert_eq!(run_state.pinned_outputs.entries.len(), 1);
+        assert!(matches!(
+            &run_state.pinned_outputs.entries[&port],
+            StoredContent::Text(text) if text == "8"
+        ));
+    }
+
     /// A node nested two levels deep accumulates onto *both* enclosing
     /// instances — the outer instance's total includes nested cost.
     #[test]
     fn outer_instance_total_includes_nested() {
         let interior = nid(1);
         let (outer, inner) = (nid(10), nid(20));
-        let flat = fid(100);
+        let e_node_id = eid(100);
 
-        let mut rs = run_state([(flat, vec![outer, inner], interior)]);
-        rs.set_results(&stats(&[(flat, 4.0)], &[]));
+        let mut rs = run_state([(e_node_id, vec![outer, inner], interior)]);
+        rs.set_results(&stats(&[(e_node_id, 4.0)], &[]));
 
         assert_eq!(rs.status(interior), ExecStatus::Executed(4.0));
         assert_eq!(rs.status(inner), ExecStatus::Executed(4.0));
@@ -421,9 +478,9 @@ mod tests {
     #[test]
     fn errored_beats_executed_on_same_node() {
         let interior = nid(1);
-        let flat = fid(1);
-        let mut rs = run_state([(flat, vec![], interior)]);
-        rs.set_results(&stats(&[(flat, 1.0)], &[flat]));
+        let e_node_id = eid(1);
+        let mut rs = run_state([(e_node_id, vec![], interior)]);
+        rs.set_results(&stats(&[(e_node_id, 1.0)], &[e_node_id]));
         assert_eq!(rs.status(interior), ExecStatus::Errored);
         // The failure message rides along with the status — the inspector
         // shows it instead of a bare "errored".
@@ -439,24 +496,24 @@ mod tests {
         let interior = nid(1);
         let cancelled_interior = nid(2);
         let inst = nid(10);
-        let (fail_flat, cancel_flat) = (fid(100), fid(101));
+        let (fail_e_node_id, cancel_e_node_id) = (eid(100), eid(101));
         let mut rs = run_state([
-            (fail_flat, vec![inst], interior),
-            (cancel_flat, vec![inst], cancelled_interior),
+            (fail_e_node_id, vec![inst], interior),
+            (cancel_e_node_id, vec![inst], cancelled_interior),
         ]);
 
         let node_err = |e_node_id, error| NodeError { e_node_id, error };
         let mut s = stats(&[], &[]);
         s.node_errors = vec![
             node_err(
-                fail_flat,
+                fail_e_node_id,
                 RunError::Invoke {
                     func_id: FuncId::from_u128(0),
                     message: "no light frames provided".into(),
                 },
             ),
             node_err(
-                cancel_flat,
+                cancel_e_node_id,
                 RunError::Cancelled {
                     func_id: FuncId::from_u128(0),
                 },
@@ -484,12 +541,12 @@ mod tests {
     fn set_results_attributes_logs_to_interior_and_instance() {
         let interior = nid(1);
         let inst = nid(10);
-        let flat = fid(100);
-        let mut rs = run_state([(flat, vec![inst], interior)]);
+        let e_node_id = eid(100);
+        let mut rs = run_state([(e_node_id, vec![inst], interior)]);
 
         let mut s = stats(&[], &[]);
         s.logs.push(LogEntry {
-            e_node_id: flat,
+            e_node_id,
             level: LogLevel::Warn,
             message: "hi".into(),
         });
@@ -509,9 +566,9 @@ mod tests {
     #[test]
     fn begin_run_keeps_status() {
         let node = nid(1);
-        let flat = fid(1);
-        let mut rs = run_state([(flat, vec![], node)]);
-        rs.set_results(&stats(&[(flat, 1.0)], &[]));
+        let e_node_id = eid(1);
+        let mut rs = run_state([(e_node_id, vec![], node)]);
+        rs.set_results(&stats(&[(e_node_id, 1.0)], &[]));
 
         assert!(!rs.is_running(), "not running after a finished run");
         rs.begin_run();

@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use crate::DynamicValue;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::identity::NodeAddress;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunPhase {
@@ -24,7 +23,7 @@ pub struct PinnedOutput {
 
 #[derive(Debug, Clone)]
 pub struct PinnedOutputs {
-    pub node: NodeAddress,
+    pub e_node_id: ExecutionNodeId,
     pub values: Vec<PinnedOutput>,
 }
 
