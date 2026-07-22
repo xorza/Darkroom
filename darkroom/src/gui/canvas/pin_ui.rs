@@ -100,7 +100,14 @@ pub(crate) fn seed_pin_position_intent(port: OutputPort, position: Vec2) -> Inte
 pub(crate) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .pinned_outputs()
-        .find(|pin| ui.response_for(refresh_badge_wid(pin.port)).left.clicked())
+        .find(|pin| {
+            scene
+                .nodes
+                .get(&pin.port.node_id)
+                .expect("pinned output owner must exist in the scene")
+                .runnable()
+                && ui.response_for(refresh_badge_wid(pin.port)).left.clicked()
+        })
         .map(|pin| pin.port.node_id)
 }
 
@@ -446,6 +453,7 @@ fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Port
     let keys = scene
         .nodes
         .values()
+        .filter(|node| node.run_available)
         .flat_map(|n| node_ports(n, PortKind::Output));
     geometry.ports.first_drag_started(keys)
 }

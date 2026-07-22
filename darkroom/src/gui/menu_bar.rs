@@ -18,7 +18,12 @@ pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            command = file_menu(ui);
+            if let Some(file_command) = file_menu(ui) {
+                command = Some(file_command);
+            }
+            if let Some(graph_command) = graph_menu(ui) {
+                command = Some(graph_command);
+            }
         });
     command
 }
@@ -77,9 +82,7 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     })
 }
 
-/// Graph-template import/export actions. Hidden from the menu bar for
-/// now — kept intact so it can be re-enabled without rebuilding it.
-#[allow(dead_code)]
+/// Graph-template import/export actions.
 fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "Graph", |ui, popup| {
         let mut command = None;

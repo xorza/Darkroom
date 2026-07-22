@@ -83,8 +83,7 @@ pub(crate) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
 
-/// Stable id for the trailing "+" new-graph chip (currently hidden —
-/// see [`new_tab_chip`]).
+/// Stable id for the trailing "+" new-graph chip.
 pub(crate) fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("dock.tab_new")
 }
@@ -97,10 +96,6 @@ const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
 /// The trailing "+" chip that creates and opens a fresh graph. A square,
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
 /// reads as an inactive tab; the click is consumed in [`DockUi::scan`](super::DockUi::scan).
-///
-/// Hidden from the strip for now — kept intact (and its click still
-/// wired in `DockUi::scan`) so it can be re-enabled without rebuilding it.
-#[allow(dead_code)]
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     let r = theme.tab_corner_radius;
     let bg = hover_bg(
@@ -180,6 +175,9 @@ pub(crate) fn show(
         .show(ui, |ui| {
             for (i, label) in labels.iter().enumerate() {
                 tab_chip(ui, &mut strip, label, i, i == group.active);
+            }
+            if group.tabs.contains(&TabRef::Graph(GraphRef::Main)) {
+                new_tab_chip(ui, theme);
             }
         });
 }

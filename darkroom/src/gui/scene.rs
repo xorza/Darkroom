@@ -886,6 +886,19 @@ mod tests {
             !ghost_func_node.runnable() && !ghost_graph_node.runnable(),
             "stubs offer no run affordance — they resolve to nothing"
         );
+
+        scene.rebuild(
+            &mut ui,
+            &graph,
+            &view,
+            &library,
+            &RunState::default(),
+            false,
+        );
+        assert!(
+            !scene.nodes.get(&known_id).unwrap().runnable(),
+            "a local-definition projection hides the run affordance from resolved functions"
+        );
     }
 
     #[test]

@@ -136,7 +136,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
         // A `GraphInput` boundary node's output ports are the graph's
         // *inputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
-        output_cell(ui, rcx, port, output, rename, out);
+        output_cell(ui, rcx, port, output, rename, node.run_available, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
@@ -349,6 +349,7 @@ fn output_cell(
     port: PortRef,
     output: &SceneOutput,
     rename: Option<BoundarySide>,
+    pinning_available: bool,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
@@ -401,7 +402,12 @@ fn output_cell(
         .show(ui, |ui, popup| {
             let pinned = output.pin_position.is_some();
             let label = if pinned { "Unpin output" } else { "Pin output" };
-            if MenuItem::new(label).show(ui, popup).left.clicked() {
+            if MenuItem::new(label)
+                .enabled(pinned || pinning_available)
+                .show(ui, popup)
+                .left
+                .clicked()
+            {
                 let pinning = !pinned;
                 out.push(set_output_pinned(port, pinning));
                 // Unlike Cmd+drag (which places a fresh pin via its own
