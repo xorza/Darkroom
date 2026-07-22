@@ -97,12 +97,15 @@ cache support.
 
 One `Vec<WorkerMessage>` is one commit unit. `BatchIntent` preserves first-seen
 order while deduplicating node seeds and events; conflicting state slots are
-last-write-wins and `Exit` dominates its batch. `ActiveEventLoop` owns both its
-tasks and event receiver, so the lifecycle invariant is represented by one
-type. Event tasks rendezvous through Tokio's `Barrier`; the worker's counted
-pause gate uses Tokio `watch` so overlapping close guards reopen it only after
-the last guard drops. Worker reports stream progress and exact scoped pinned
-outputs before the matching finished result.
+last-write-wins and `Exit` dominates its batch. Compiled programs are shared as
+`Arc<CompiledGraph>` values. After applying a graph-state change, the worker
+emits `Installed` or `Cleared` before any report belonging to the resulting
+state; its single execution loop and callback preserve that FIFO stream.
+`ActiveEventLoop` owns both its tasks and event receiver, so the lifecycle
+invariant is represented by one type. Event tasks rendezvous through Tokio's
+`Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping
+close guards reopen it only after the last guard drops. Worker reports stream
+progress and exact scoped pinned outputs before the matching finished result.
 
 ## Tests
 

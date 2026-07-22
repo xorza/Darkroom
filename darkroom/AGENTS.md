@@ -280,15 +280,16 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   active graph against the library **on the UI thread**
   (`RuntimeHost::run_once` → the host-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the
-  `CompiledGraph` in an `[Update, ExecuteSinks]` batch to the worker. A
-  compile error surfaces synchronously — no run starts, `begin_run` is skipped,
-  and the worker's prior program is untouched. The worker evaluates on its
-  runtime and replies via callback with a `scenarium::WorkerReport`: a live
-  `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
-  `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
-  `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
+  `Arc<CompiledGraph>` in an `[Update, Run { RunSeeds::sinks() }]` batch to the
+  worker. A compile error surfaces synchronously — no run starts, `begin_run` is
+  skipped, and the worker's prior program is untouched. After installation the
+  worker first reports `WorkerReport::Installed` with that exact shared compile,
+  then streams its progress, pinned outputs, and final result in FIFO order.
+  `RunState` retains the acknowledged compile and uses it to project flat result
+  ids onto authoring nodes. `WorkerBridge::deliver` forwards reports to its
+  channel and pokes `host.request_repaint()`.
 - **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
-  `ExecuteNodes` seeding one node's cone, its outputs pinned resident for the
+  `RunSeeds::nodes` seeding one node's cone, its outputs pinned resident for the
   preview fetch. Two triggers, both gated on `SceneNode::runnable` (instance/
   boundary/missing nodes don't resolve as seeds; Darkroom exposes the disable
   toggle only on runnable sinks, and Scenarium treats an explicitly seeded
@@ -302,11 +303,11 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
   reloads its output across sessions from a store beside the project file.
 - On-thread, `App::update` drains the channel (`worker.drain()`, non-blocking).
-  `NodeProgress` → `RunState::apply_progress` marks the active node
+  `WorkerReport::Progress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
   so the node header shows a `aperture::Spinner` + live elapsed-so-far
   (`App::record` repaints ~20fps while `run_state.is_running()`);
-  `ExecutionFinished` → `set_results`
+  `WorkerReport::Finished` → `set_results`
   folds the final `ExecutionStats` (including nested-graph attribution) onto
   authoring nodes: per-node `ExecStatus`
   (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.

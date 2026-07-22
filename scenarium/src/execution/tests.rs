@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::execution::compile::{Compilation, CompileError, Compiler};
+use crate::execution::compile::{CompileError, Compiler};
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
@@ -884,9 +884,8 @@ mod cache_persistence {
         );
     }
 
-    /// Toggling a node to disk caching persists its *existing* resident value
-    /// immediately — via `store_resident_caches`, which the worker runs after every
-    /// graph update — without waiting for a re-execution (a cache hit never re-runs).
+    /// An explicit resident-cache flush persists a value after its node becomes
+    /// disk-backed without waiting for a re-execution (a cache hit never re-runs).
     #[tokio::test]
     async fn toggling_persist_stores_resident_value_without_a_rerun() {
         let dir = TempDir::new("toggle_persist");
@@ -3089,17 +3088,14 @@ mod composite_behavior {
             .find(|node| matches!(node.kind, NodeKind::Graph(_)))
             .unwrap()
             .id;
-        let Compilation {
-            compiled,
-            flatten_map,
-        } = Compiler::default().compile(&graph, &library).unwrap();
+        let compiled = Compiler::default().compile(&graph, &library).unwrap();
         let address = NodeAddress {
             instances: vec![outer_inst, inner_inst],
             node_id: deep_id,
         };
-        let flat_id = flatten_map.flat_node(&address).unwrap();
+        let flat_id = compiled.flatten_map.flat_node(&address).unwrap();
         assert!(compiled.program.e_nodes.contains_key(&flat_id));
-        assert_eq!(flatten_map.address(flat_id), Some(&address));
+        assert_eq!(compiled.flatten_map.address(flat_id), Some(&address));
         assert!(
             reruns_with_cache(&graph, &library, "deep"),
             "doubly-nested impure interior recomputes"
@@ -4993,12 +4989,13 @@ mod graph {
         let c_id = graph.add(c);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
 
-        let Compilation {
-            compiled,
-            flatten_map: retained_flatten_map,
-        } = Compiler::default().compile(&graph, &library).unwrap();
+        let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
         let interior_address = compiled.node_address(interior_sum_id);
-        let retained_flat_id = retained_flatten_map.flat_node(&interior_address).unwrap();
+        let retained_compiled = Arc::clone(&compiled);
+        let retained_flat_id = retained_compiled
+            .flatten_map
+            .flat_node(&interior_address)
+            .unwrap();
         let mut eg = ExecutionEngine::default();
         eg.install(compiled);
 
@@ -5007,7 +5004,7 @@ mod graph {
         let sum_flat = execution_node_id(&eg, &graph, &library, "sum").unwrap();
         assert_eq!(sum_flat, retained_flat_id);
         assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
-        let attr: Vec<_> = retained_flatten_map.attribution(sum_flat).collect();
+        let attr: Vec<_> = retained_compiled.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.

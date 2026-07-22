@@ -7,11 +7,11 @@ use tokio::time::{Duration, timeout};
 use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
-use crate::execution::Result as ExecResult;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::NodeAddress;
 use crate::execution::report::RunPhase;
 use crate::execution::stats::ExecutionStats;
+use crate::execution::{Result as ExecResult, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
@@ -76,7 +76,7 @@ impl FrameHarness {
             compiled: Compiler::default()
                 .compile(&self.graph, &self.library)
                 .unwrap()
-                .compiled,
+                .into(),
         }
     }
 
@@ -176,6 +176,33 @@ fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionSt
         }
     });
     (worker, rx)
+}
+
+#[derive(Debug)]
+struct FinishedRun {
+    compiled: Arc<CompiledGraph>,
+    result: ExecResult<ExecutionStats>,
+}
+
+async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun {
+    let mut compiled = None;
+    loop {
+        let report = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        match report {
+            WorkerReport::Installed(installed) => compiled = Some(installed),
+            WorkerReport::Cleared => compiled = None,
+            WorkerReport::Finished(result) => {
+                return FinishedRun {
+                    compiled: compiled.expect("Finished arrived before Installed"),
+                    result,
+                };
+            }
+            WorkerReport::Progress(_) | WorkerReport::PinnedOutputs(_) => {}
+        }
+    }
 }
 
 /// Send `msgs` plus a trailing `Sync`, and block until the batch has fully
@@ -432,9 +459,11 @@ async fn execute_sinks_triggers_sink_nodes() {
                 compiled: Compiler::default()
                     .compile(&graph, &library)
                     .unwrap()
-                    .compiled,
+                    .into(),
             },
-            WorkerMessage::ExecuteSinks,
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
         ])
         .unwrap();
 
@@ -458,15 +487,17 @@ async fn worker_streams_node_progress_before_finished() {
     let worker = Worker::new(move |report| {
         tx.try_send(report).ok();
     });
+    let compiled: Arc<CompiledGraph> = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    let expected_compiled = Arc::clone(&compiled);
     worker
         .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .compiled,
+            WorkerMessage::Update { compiled },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
             },
-            WorkerMessage::ExecuteSinks,
         ])
         .unwrap();
 
@@ -474,30 +505,129 @@ async fn worker_streams_node_progress_before_finished() {
     // authoring id) ahead of the sink `Finished` report.
     let mut started = 0;
     let mut node_finished = 0;
+    let mut installed = None;
     loop {
         let report = timeout(Duration::from_secs(5), rx.recv())
             .await
             .expect("worker timed out")
             .expect("worker channel closed");
         match report {
+            WorkerReport::Installed(compiled) => {
+                assert!(installed.is_none(), "one update installed more than once");
+                assert!(Arc::ptr_eq(&compiled, &expected_compiled));
+                installed = Some(compiled);
+            }
             WorkerReport::Progress(p) => {
+                let compiled = installed
+                    .as_ref()
+                    .expect("Progress arrived before Installed");
                 assert_eq!(p.node_id, print_node_id, "progress maps to the node");
+                assert_eq!(
+                    compiled.authoring_address(p.node_id),
+                    Some(&NodeAddress::root(print_node_id)),
+                );
                 match p.phase {
                     RunPhase::Started { .. } => started += 1,
                     RunPhase::Finished { .. } => node_finished += 1,
                 }
             }
-            WorkerReport::PinnedOutputs(_) => {}
+            WorkerReport::PinnedOutputs(_) => {
+                assert!(
+                    installed.is_some(),
+                    "PinnedOutputs arrived before Installed"
+                );
+            }
             WorkerReport::Finished(result) => {
+                assert!(installed.is_some(), "Finished arrived before Installed");
                 assert_eq!(result.expect("compute ok").executed_nodes.len(), 1);
                 break;
             }
+            WorkerReport::Cleared => panic!("unexpected clear"),
         }
     }
     assert_eq!(started, 1, "one Started before the final report");
     assert_eq!(
         node_finished, 1,
         "one Finished progress before the final report"
+    );
+
+    worker.send(WorkerMessage::Clear).unwrap();
+    let cleared = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("worker timed out")
+        .expect("worker channel closed");
+    assert!(matches!(cleared, WorkerReport::Cleared));
+}
+
+#[tokio::test]
+async fn installed_program_distinguishes_repeated_definition_instances() {
+    use std::collections::HashSet;
+
+    use crate::DataType;
+    use crate::graph::NodeKind;
+    use crate::graph::interface::{GraphId, GraphLink};
+    use crate::node::definition::FuncOutput;
+    use crate::testing::{TestFuncHooks, test_func_lib};
+
+    let library = test_func_lib(TestFuncHooks {
+        get_a: Arc::new(|| Ok(1)),
+        get_b: Arc::new(|| 7),
+        print: Arc::new(|_| {}),
+    });
+    let mut definition = Graph::new("Repeated").output(FuncOutput::new("Out", DataType::Int));
+    let interior = definition.add(library.by_name("get_b").unwrap().into());
+    let output = definition.add(Node::new(NodeKind::GraphOutput));
+    definition.set_input_binding(InputPort::new(output, 0), Binding::bind(interior, 0));
+
+    let definition_id = GraphId::unique();
+    let mut graph = Graph::default();
+    graph.insert_graph(definition_id, definition.clone());
+    let instance_a = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
+    let instance_b = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
+    for instance in [instance_a, instance_b] {
+        let print = graph.add(library.by_name("Print").unwrap().into());
+        graph.set_input_binding(InputPort::new(print, 0), Binding::bind(instance, 0));
+    }
+
+    let (tx, mut rx) = mpsc::channel::<WorkerReport>(32);
+    let worker = Worker::new(move |report| {
+        tx.try_send(report).unwrap();
+    });
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .into(),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
+        .unwrap();
+
+    let finished = next_finished_run(&mut rx).await;
+    let stats = finished.result.unwrap();
+    let addresses: HashSet<_> = stats
+        .executed_nodes
+        .iter()
+        .filter_map(|stats| finished.compiled.authoring_address(stats.node_id))
+        .filter(|address| address.node_id == interior)
+        .cloned()
+        .collect();
+    assert_eq!(
+        addresses,
+        HashSet::from([
+            NodeAddress {
+                instances: vec![instance_a],
+                node_id: interior,
+            },
+            NodeAddress {
+                instances: vec![instance_b],
+                node_id: interior,
+            },
+        ])
     );
 }
 
@@ -515,9 +645,11 @@ async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
                 compiled: Compiler::default()
                     .compile(&graph, &library)
                     .unwrap()
-                    .compiled,
+                    .into(),
             },
-            WorkerMessage::ExecuteSinks,
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
         ])
         .unwrap();
 
@@ -551,7 +683,7 @@ async fn start_stop_event_loop() {
     assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
 
-/// `ExecuteNodes` end-to-end: the run seed overrides a compiled disabled node and the
+/// Node seeds end-to-end: the run seed overrides a compiled disabled node and the
 /// worker runs only its cone (the sink `Print` panics if reached).
 #[tokio::test]
 async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
@@ -588,10 +720,10 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
                 compiled: Compiler::default()
                     .compile(&graph, &library)
                     .unwrap()
-                    .compiled,
+                    .into(),
             },
-            WorkerMessage::ExecuteNodes {
-                nodes: vec![NodeAddress::root(sum_id)],
+            WorkerMessage::Run {
+                seeds: RunSeeds::nodes(vec![NodeAddress::root(sum_id)]),
             },
         ])
         .unwrap();
@@ -640,9 +772,11 @@ async fn disabled_sink_stays_out_of_sink_runs() {
                 compiled: Compiler::default()
                     .compile(&graph, &library)
                     .unwrap()
-                    .compiled,
+                    .into(),
             },
-            WorkerMessage::ExecuteSinks,
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
         ])
         .unwrap();
 
@@ -794,7 +928,11 @@ async fn assert_no_callback_within(
 #[tokio::test]
 async fn execute_sinks_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = finished_worker(8);
-    worker.send(WorkerMessage::ExecuteSinks).unwrap();
+    worker
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        })
+        .unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
 
@@ -820,7 +958,7 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 }
 
 // F4 regression: when a batch triggers both an execution
-// (ExecuteSinks or InjectEvents) and StartEventLoop, the commit
+// (sink seeds or InjectEvents) and StartEventLoop, the commit
 // phase must run execute() once and fire the callback once — not twice.
 
 #[tokio::test]
@@ -840,9 +978,11 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
                 compiled: Compiler::default()
                     .compile(&graph, &library)
                     .unwrap()
-                    .compiled,
+                    .into(),
             },
-            WorkerMessage::ExecuteSinks,
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
             WorkerMessage::StartEventLoop,
         ])
         .unwrap();
@@ -857,65 +997,171 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
     assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
 }
 
-// F2: when two separate send_many calls queue messages before the
-// worker wakes, the worker's drain-on-wake pulls both into a single
-// BatchIntent — reducing per-slot. Under current_thread scheduling,
-// the test task's synchronous sends all land in the channel before
-// the worker task is polled, so this tests the drain path
-// deterministically.
 #[tokio::test(flavor = "current_thread")]
-async fn drain_on_wake_folds_queued_batches_into_one_commit() {
+async fn queued_run_batches_report_each_installed_program_in_order() {
     let library = system_library();
+    let (graph_a, print_a) = print_literal_graph(&library, "first");
+    let (graph_b, print_b) = print_literal_graph(&library, "second");
+    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
+    let worker = Worker::new(move |report| {
+        tx.try_send(report).unwrap();
+    });
+    let compiled_a: Arc<CompiledGraph> = Compiler::default()
+        .compile(&graph_a, &library)
+        .unwrap()
+        .into();
+    let compiled_b: Arc<CompiledGraph> = Compiler::default()
+        .compile(&graph_b, &library)
+        .unwrap()
+        .into();
 
-    // Sink-only graph — one execute produces one line of output.
-    let (graph, _print_node_id) = print_literal_graph(&library, "once");
-
-    let (worker, mut compute_finish_rx) = finished_worker(8);
-
-    // Three separate send_many calls, all synchronous — they all
-    // land in the channel before the worker task is polled.
     worker
-        .send_many([WorkerMessage::Update {
-            compiled: Compiler::default()
-                .compile(&graph, &library)
-                .unwrap()
-                .compiled,
-        }])
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Arc::clone(&compiled_a),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
         .unwrap();
-    worker.send_many([WorkerMessage::ExecuteSinks]).unwrap();
-    let (reply, sync_rx) = oneshot::channel();
     worker
-        .send_many([WorkerMessage::ExecuteSinks, WorkerMessage::Sync { reply }])
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Arc::clone(&compiled_b),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
         .unwrap();
 
-    // Sync barrier: fires after the commit covering everything above.
-    timeout(Duration::from_millis(500), sync_rx)
-        .await
-        .expect("Sync timeout")
-        .expect("Sync sender dropped");
-
-    // Two ExecuteSinks across the drained batch reduce to one
-    // idempotent flag → one execute → one callback.
-    let first = compute_finish_rx
-        .try_recv()
-        .expect("batch must fire callback");
-    assert!(first.is_ok(), "{first:?}");
-    assert!(
-        compute_finish_rx.try_recv().is_err(),
-        "two ExecuteSinks across batches must reduce to one callback"
+    let first = next_finished_run(&mut rx).await;
+    let second = next_finished_run(&mut rx).await;
+    assert!(Arc::ptr_eq(&first.compiled, &compiled_a));
+    assert!(Arc::ptr_eq(&second.compiled, &compiled_b));
+    assert_eq!(
+        first.compiled.authoring_address(print_a),
+        Some(&NodeAddress::root(print_a)),
     );
-    assert_eq!(messages(first.as_ref().unwrap()), ["once"]);
+    assert_eq!(
+        second.compiled.authoring_address(print_b),
+        Some(&NodeAddress::root(print_b)),
+    );
+    assert_eq!(messages(&first.result.unwrap()), ["first"]);
+    assert_eq!(messages(&second.result.unwrap()), ["second"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replacement_queued_during_a_run_is_reported_after_the_running_program() {
+    use std::sync::{Condvar, Mutex};
+
+    use crate::testing::{TestFuncHooks, test_func_lib};
+
+    let started = Arc::new(Notify::new());
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let library = test_func_lib(TestFuncHooks {
+        get_a: {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            Arc::new(move || {
+                started.notify_one();
+                let (lock, wake) = &*release;
+                let released = lock.lock().unwrap();
+                drop(wake.wait_while(released, |released| !*released).unwrap());
+                Ok(7)
+            })
+        },
+        get_b: Arc::new(|| 11),
+        print: Arc::new(|_| {}),
+    });
+    let mut running_graph = Graph::default();
+    let source = running_graph.add(library.by_name("get_a").unwrap().into());
+    let sink = running_graph.add(library.by_name("Print").unwrap().into());
+    running_graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(source, 0));
+    let (replacement_graph, replacement_node) = print_literal_graph(&system_library(), "next");
+
+    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
+    let worker = Worker::new(move |report| {
+        tx.try_send(report).unwrap();
+    });
+    let running_compiled: Arc<CompiledGraph> = Compiler::default()
+        .compile(&running_graph, &library)
+        .unwrap()
+        .into();
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Arc::clone(&running_compiled),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
+        .unwrap();
+    timeout(Duration::from_secs(5), started.notified())
+        .await
+        .expect("run did not start");
+
+    let replacement_library = system_library();
+    let replacement_compiled: Arc<CompiledGraph> = Compiler::default()
+        .compile(&replacement_graph, &replacement_library)
+        .unwrap()
+        .into();
+    worker
+        .send(WorkerMessage::Update {
+            compiled: Arc::clone(&replacement_compiled),
+        })
+        .unwrap();
+    {
+        let (lock, wake) = &*release;
+        *lock.lock().unwrap() = true;
+        wake.notify_one();
+    }
+    sync_after(&worker, std::iter::empty()).await;
+
+    let finished = next_finished_run(&mut rx).await;
+    assert!(Arc::ptr_eq(&finished.compiled, &running_compiled));
+    assert!(finished.result.is_ok());
+    assert_eq!(
+        finished.compiled.authoring_address(source),
+        Some(&NodeAddress::root(source)),
+    );
+    assert_eq!(
+        finished.compiled.authoring_address(sink),
+        Some(&NodeAddress::root(sink)),
+    );
+    assert!(
+        finished
+            .compiled
+            .authoring_address(replacement_node)
+            .is_none()
+    );
+
+    let installed = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("worker timed out")
+        .expect("worker channel closed");
+    let WorkerReport::Installed(installed) = installed else {
+        panic!("replacement installed before the running program finished");
+    };
+    assert!(Arc::ptr_eq(&installed, &replacement_compiled));
 }
 
 #[tokio::test]
 async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
-    // F5 + F4: a batch with ExecuteSinks + StartEventLoop on an
+    // F5 + F4: a batch with sink seeds + StartEventLoop on an
     // empty graph must fire no callback at all.
     let (worker, mut rx) = finished_worker(8);
 
     sync_after(
         &worker,
-        [WorkerMessage::ExecuteSinks, WorkerMessage::StartEventLoop],
+        [
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+            WorkerMessage::StartEventLoop,
+        ],
     )
     .await;
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
@@ -933,15 +1179,17 @@ fn scan_accumulates_simple_flags() {
     let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
-        WorkerMessage::ExecuteSinks,
+        WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        },
         WorkerMessage::InjectEvents {
             events: vec![event],
         },
-        WorkerMessage::ExecuteNodes {
-            nodes: vec![NodeAddress::root(node_id)],
+        WorkerMessage::Run {
+            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
         },
-        WorkerMessage::ExecuteNodes {
-            nodes: vec![NodeAddress::root(node_id)],
+        WorkerMessage::Run {
+            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -995,11 +1243,11 @@ fn scan_deduplicates_events() {
 
 /// A trivially-valid `Update` payload for scan tests, which only inspect the
 /// reduced intent — the program's content is irrelevant.
-fn empty_compiled() -> CompiledGraph {
+fn empty_compiled() -> Arc<CompiledGraph> {
     Compiler::default()
         .compile(&Graph::default(), &Library::default())
         .unwrap()
-        .compiled
+        .into()
 }
 
 #[test]
@@ -1008,7 +1256,9 @@ fn scan_exit_dominates_entire_batch() {
     // in the batch is discarded, whether sent before or after.
     let intent = scan(vec![
         WorkerMessage::Clear,
-        WorkerMessage::ExecuteSinks,
+        WorkerMessage::Run {
+            seeds: RunSeeds::sinks(),
+        },
         WorkerMessage::Exit,
         WorkerMessage::StartEventLoop, // post-Exit: dropped
         WorkerMessage::Update {
@@ -1313,9 +1563,11 @@ async fn disk_cache_persists_node_across_worker_restart() {
                     compiled: Compiler::default()
                         .compile(&graph, &library)
                         .unwrap()
-                        .compiled,
+                        .into(),
                 },
-                WorkerMessage::ExecuteSinks,
+                WorkerMessage::Run {
+                    seeds: RunSeeds::sinks(),
+                },
             ])
             .unwrap();
         rx.recv()
@@ -1401,9 +1653,11 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     worker
         .send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &lib).unwrap().compiled,
+                compiled: Compiler::default().compile(&graph, &lib).unwrap().into(),
             },
-            WorkerMessage::ExecuteSinks,
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
         ])
         .unwrap();
     rx.recv().await.unwrap().unwrap();

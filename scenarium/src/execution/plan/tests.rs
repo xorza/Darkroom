@@ -5,7 +5,6 @@ use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddr
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
-use std::sync::Arc;
 
 /// Hand-built compile artifact for planner tests (an empty flatten map — every
 /// node is "top-level", so seed ids resolve directly). Inputs are
@@ -19,9 +18,7 @@ impl Fix {
     fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
         let program = &mut self.compiled.program;
         if program.e_nodes.is_empty() {
-            Arc::get_mut(&mut self.compiled.flatten_map)
-                .unwrap()
-                .reset();
+            self.compiled.flatten_map.reset();
         }
         let inputs_start = program.inputs.len() as u32;
         for (required, binding) in inputs {
@@ -54,9 +51,7 @@ impl Fix {
                 ..Default::default()
             },
         );
-        Arc::get_mut(&mut self.compiled.flatten_map)
-            .unwrap()
-            .set_leaf(id, 0, id);
+        self.compiled.flatten_map.set_leaf(id, 0, id);
         id
     }
 }
