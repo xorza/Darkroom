@@ -8,7 +8,6 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
-use scenarium::Graph;
 use scenarium::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
@@ -175,17 +174,6 @@ impl Editor {
             self.action_stack.push_current(target, &batch);
         }
         applied
-    }
-
-    /// Add an imported graph to the document, flagging the reconcile
-    /// the import needs: an imported graph's stored interface may not match
-    /// its interior wiring (hand-edited / older file), so it's re-derived
-    /// on the next rebuild. Keeps the "import ⇒ reconcile" invariant here
-    /// rather than on the caller.
-    pub(crate) fn import_graph(&mut self, open: &mut OpenDocument, graph: Graph) {
-        open.document.import_graph(graph);
-        open.normalization_pending = true;
-        self.dirty = true;
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime

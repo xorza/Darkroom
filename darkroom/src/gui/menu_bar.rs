@@ -90,15 +90,6 @@ fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
         {
             command = Some(AppCommand::Graph(GraphCommand::ExportGraphTemplate));
         }
-        if MenuItem::new("Import Graph Template into Document…")
-            .show(ui, popup)
-            .left
-            .clicked()
-        {
-            command = Some(AppCommand::Graph(
-                GraphCommand::ImportGraphTemplateIntoDocument,
-            ));
-        }
         if MenuItem::new("Import Graph Template into Library…")
             .show(ui, popup)
             .left

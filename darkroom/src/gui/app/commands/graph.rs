@@ -14,8 +14,6 @@ pub(crate) enum GraphCommand {
     /// Export the active graph (plus its local-graph dependencies) to a
     /// file. No-op when the active tab isn't a graph.
     ExportGraphTemplate,
-    /// Import a graph bundle from a file into the current document.
-    ImportGraphTemplateIntoDocument,
     /// Import a graph template as a new persistent graph-library entry.
     ImportGraphTemplateIntoLibrary,
     /// Publish a node's local graph to the library (the G-badge
@@ -27,9 +25,6 @@ impl App {
     pub(crate) fn handle_graph(&mut self, command: GraphCommand) {
         match command {
             GraphCommand::ExportGraphTemplate => self.export_active_graph_template(),
-            GraphCommand::ImportGraphTemplateIntoDocument => {
-                self.import_graph_template_into_document();
-            }
             GraphCommand::ImportGraphTemplateIntoLibrary => {
                 self.import_graph_template_into_library();
             }
@@ -65,29 +60,6 @@ impl App {
                     .status
                     .error(format!("graph export failed: {err:#}")),
             }
-        }
-    }
-
-    /// Import a graph from a file as a local graph in the current
-    /// document. The import is a copy with a fresh id; nothing is
-    /// instantiated and the undo stack is untouched (existing history
-    /// references no imported graph, so it stays valid).
-    fn import_graph_template_into_document(&mut self) {
-        let Some(path) =
-            dialogs::pick_graph_template_open_path(self.workspace.open.path.as_deref())
-        else {
-            return;
-        };
-        match graph_template::load(&path) {
-            Ok(graph) => {
-                self.editor.import_graph(&mut self.workspace.open, graph);
-                self.workspace.runtime.status.error = None;
-            }
-            Err(err) => self
-                .workspace
-                .runtime
-                .status
-                .error(format!("graph import failed: {err:#}")),
         }
     }
 

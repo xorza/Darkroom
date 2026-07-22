@@ -451,21 +451,6 @@ impl Document {
         }
     }
 
-    /// Add an imported graph to this document's local graph map.
-    /// [`Graph::fresh_copy`] gives every copied node fresh identity so
-    /// repeated imports preserve document-wide node-id uniqueness.
-    /// `origin` is carried over so a re-imported asset keeps its library
-    /// lineage for Publish. The undo stack is unaffected: no existing
-    /// history references the freshly added graph.
-    pub(crate) fn import_graph(&mut self, graph: CoreGraph) -> GraphId {
-        let id = GraphId::unique();
-        let origin = graph.origin;
-        let mut copy = graph.fresh_copy();
-        copy.origin = origin;
-        self.graph.insert_graph(id, copy);
-        id
-    }
-
     /// Create a fresh, empty local graph with its two boundary nodes.
     pub(crate) fn create_graph(&mut self) -> GraphId {
         let id = GraphId::unique();
@@ -569,58 +554,6 @@ mod tests {
     }
 
     #[test]
-    fn import_regenerates_ids_and_keeps_nested_def_ids() {
-        // Real storage shape: a child def lives in its *parent's* interior
-        // `graph.graphs`, instanced by an interior node — not in a flat
-        // root table. Importing the parent carries the child with it.
-        let child_id = GraphId::unique();
-        let parent_id = GraphId::unique();
-        let origin_id = GraphId::unique();
-        let mut parent = CoreGraph::new("parent").origin(origin_id);
-        parent.insert_graph(child_id, leaf_graph("child"));
-        parent.add(Node::new(NodeKind::Graph(GraphLink::Local(child_id))));
-        let source_ids: Vec<NodeId> = parent.iter().map(|n| n.id).collect();
-
-        let mut doc = Document::default();
-        let id_a = doc.import_graph(parent.clone());
-        let id_b = doc.import_graph(parent);
-
-        assert_ne!(id_a, parent_id, "top-level id is regenerated");
-        assert_ne!(id_a, id_b, "each import is its own def");
-        assert!(
-            doc.graph.graphs.get(&parent_id).is_none(),
-            "original top id is not reused"
-        );
-        let interior_ids = |id: GraphId| -> Vec<NodeId> {
-            let def = doc.graph.graphs.get(&id).expect("def resolves");
-            assert_eq!(
-                def.origin,
-                Some(origin_id),
-                "library lineage is carried over"
-            );
-            // The nested child def rides along under its (level-scoped) id.
-            assert_eq!(def.graphs.len(), 1);
-            assert!(
-                def.graphs.contains_key(&child_id),
-                "nested child def is preserved with its original id"
-            );
-            def.iter().map(|n| n.id).collect()
-        };
-        // Interior node ids are freshly generated per import: the copies
-        // share none with the source file or each other, so the
-        // document-wide uniqueness gate holds after a double import.
-        let (ids_a, ids_b) = (interior_ids(id_a), interior_ids(id_b));
-        assert_eq!(ids_a.len(), source_ids.len());
-        for id in &ids_a {
-            assert!(
-                !source_ids.contains(id) && !ids_b.contains(id),
-                "interior ids are fresh per import"
-            );
-        }
-        doc.validate().unwrap();
-    }
-
-    #[test]
     fn validate_rejects_duplicate_node_ids_across_graphs() {
         // The same node id planted in the root graph and a def interior —
         // unreachable through the editor (import/localize/detach sever
@@ -640,15 +573,6 @@ mod tests {
             format!("{err:#}").contains("occurs in more than one authoring graph"),
             "unexpected validation error: {err:#}"
         );
-    }
-
-    #[test]
-    fn importing_same_def_twice_makes_two_copies() {
-        let mut doc = Document::default();
-        let a = doc.import_graph(leaf_graph("x"));
-        let b = doc.import_graph(leaf_graph("x"));
-        assert_ne!(a, b, "each import gets its own id");
-        assert_eq!(doc.graph.graphs.len(), 2, "no silent overwrite");
     }
 
     #[test]
