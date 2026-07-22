@@ -5,7 +5,7 @@
 //! [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run loop drives it a
 //! node at a time. The [`DiskStore`] is pure blob I/O and knows nothing of the cache; this type
 //! reads a node's digest/value-state off its slot and the blob off disk, and pushes the result
-//! back — so RAM eviction (demote-or-drop) lives here, on the cache that owns both stores.
+//! back — so RAM eviction lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
 use std::collections::HashSet;
@@ -60,11 +60,8 @@ impl OutputSnapshot {
     }
 }
 
-/// One node's cached output as an explicit three-state machine. The states are mutually
-/// exclusive, so the bad combinations — "resident *and* flagged on disk", "value present
-/// but no digest tracked", a stale resident value masking a fresh disk blob — can't be
-/// built. The node's *identity* digest is a separate axis
-/// ([`RuntimeSlot::current_digest`]); this models only the value.
+/// Whether one node's cached output is resident. Disk availability is discovered on demand
+/// from the node's digest rather than mirrored in runtime state.
 #[derive(Default, Debug)]
 pub(crate) enum ValueState {
     /// No cached output — never produced, evicted, or cleared for re-execution.
@@ -76,9 +73,6 @@ pub(crate) enum ValueState {
         snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
     },
-    /// Not in RAM, but a validated blob exists on disk for the slot's current digest after a
-    /// resident value was demoted by [`RuntimeCache::reclaim_slot`].
-    OnDisk,
 }
 
 /// One node's cross-run runtime state: the [`value`](RuntimeSlot::value) cache and
@@ -195,13 +189,12 @@ impl RuntimeSlot {
 /// The per-node cross-run cache plus its disk backing. `slots` is keyed like
 /// `program.e_nodes`; the resolver stamps each node's digest and decides cache reuse,
 /// while the executor mutates outputs/state and consumes that decision. `disk_store`
-/// persists outputs and serves them back — set via
-/// [`ExecutionEngine::set_disk_store`](crate::execution::ExecutionEngine::set_disk_store) and
-/// kept across graph updates (only `slots` is reconciled/cleared).
+/// persists outputs and serves them back; it is kept across graph updates while only `slots`
+/// is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
     pub(crate) slots: HashMap<ExecutionNodeId, RuntimeSlot>,
-    disk_store: DiskStore,
+    pub(crate) disk_store: DiskStore,
 }
 
 #[derive(Debug)]
@@ -215,20 +208,9 @@ impl RuntimeCache {
         self.slots.clear();
     }
 
-    /// Replace the disk backing without retaining availability claims from the
-    /// previous store. Resident values are independent of the store and stay warm.
-    pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
-        for slot in self.slots.values_mut() {
-            if matches!(&slot.value, ValueState::OnDisk) {
-                slot.clear_output();
-            }
-        }
-        self.disk_store = disk_store;
-    }
-
     /// The total and per-node RAM held by resident values. The global total deduplicates
     /// shared custom values by pointer identity, while each node reports the full size of
-    /// every value it holds. `OnDisk`/`Empty` slots and zero-byte nodes are omitted.
+    /// every value it holds. `Empty` slots and zero-byte nodes are omitted.
     pub(crate) fn resident_ram_stats(&self) -> CacheRamStats {
         let mut seen: HashSet<*const ()> = HashSet::new();
         let mut total = RamUsage::default();
@@ -273,7 +255,7 @@ impl RuntimeCache {
     /// digest (impure cone) never hits, and a value produced under a *different*
     /// digest (a changed input) misses too. The executor's input read and the
     /// disk-store rely on this being the true "bytes are here" predicate.
-    fn is_resident_current(&self, e_node_id: ExecutionNodeId) -> bool {
+    pub(crate) fn is_resident_current(&self, e_node_id: ExecutionNodeId) -> bool {
         match (
             &self.slots[&e_node_id].value,
             self.slots[&e_node_id].current_digest,
@@ -302,16 +284,6 @@ impl RuntimeCache {
             ) => *produced_under == Some(d) && snapshot.covers_demand(demand),
             _ => false,
         }
-    }
-
-    /// Whether the slot currently holds a *usable* cached value for its digest — resident
-    /// under the current digest, or a disk blob already represented by [`ValueState::OnDisk`]
-    /// after an earlier demotion. Unlike [`is_resident_hit`](Self::is_resident_hit) (RAM only),
-    /// this also counts that disk-only state, while a pruned memory-only node with no value
-    /// reports `false`.
-    pub(crate) fn has_available_value(&self, e_node_id: ExecutionNodeId) -> bool {
-        self.is_resident_current(e_node_id)
-            || matches!(self.slots[&e_node_id].value, ValueState::OnDisk)
     }
 
     /// Read producer `e_node_id`'s output `port` for a consumer: a clone of the value, or — with
@@ -442,45 +414,9 @@ impl RuntimeCache {
         }
     }
 
-    /// Reclaim `e_node_id`'s spent RAM value: demote to `OnDisk` if a blob for its current digest
-    /// can serve it again (lossless, reloads on demand), else drop a **non-RAM** value with no
-    /// such blob (`None`, or a `Disk` value whose blob is missing) so it recomputes when next
-    /// needed; a `Ram`/`Both` value with no blob is left resident — its mode promised to hold it.
-    /// The single place the demote-or-drop decision lives, shared by the mid-run release (the
-    /// executor, once a non-RAM node's every output is read) and the end-of-run
-    /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
-    pub(crate) async fn reclaim_slot(
-        &mut self,
-        program: &ExecutionProgram,
-        e_node_id: ExecutionNodeId,
-    ) {
-        let values = match &self.slots[&e_node_id].value {
-            ValueState::Resident { snapshot, .. } => &snapshot.values,
-            _ => return,
-        };
-        let target = self.disk_store.blob_target(
-            e_node_id,
-            &program.e_nodes[&e_node_id],
-            self.slots[&e_node_id].current_digest,
-        );
-        let stored = if let Some(target) = target {
-            self.disk_store.covers(&target, values).await
-        } else {
-            false
-        };
-        if stored {
-            self.slots.get_mut(&e_node_id).unwrap().value = ValueState::OnDisk;
-        } else if !program.e_nodes[&e_node_id].cache.caches_in_ram() {
-            self.slots.get_mut(&e_node_id).unwrap().clear_output();
-        }
-    }
-
     /// After a run, sweep resident values that are not both on the active frontier and in a
     /// RAM-caching mode. Values whose consumers all ran were already handled after their last
     /// read; this covers prior-run leftovers and values whose consumers did not run.
-    ///
-    /// [`reclaim_slot`](Self::reclaim_slot) demotes reloadable values, drops non-RAM values,
-    /// and preserves RAM-mode values that have no recoverable disk copy.
     pub(crate) async fn evict_unused(
         &mut self,
         program: &ExecutionProgram,
@@ -490,11 +426,30 @@ impl RuntimeCache {
             if self.slots[&e_node_id].output_values().is_none() {
                 continue;
             }
-            if program.e_nodes[&e_node_id].cache.caches_in_ram() && disposition[&e_node_id].needed()
-            {
+            let cache_mode = program.e_nodes[&e_node_id].cache;
+            if cache_mode.caches_in_ram() && disposition[&e_node_id].needed() {
                 continue;
             }
-            self.reclaim_slot(program, e_node_id).await;
+            if !cache_mode.caches_in_ram() {
+                self.slots.get_mut(&e_node_id).unwrap().clear_output();
+                continue;
+            }
+            if !cache_mode.persists_to_disk() {
+                continue;
+            }
+            let ValueState::Resident { snapshot, .. } = &self.slots[&e_node_id].value else {
+                unreachable!("a resident slot was checked above")
+            };
+            let target = self.disk_store.blob_target(
+                e_node_id,
+                &program.e_nodes[&e_node_id],
+                self.slots[&e_node_id].current_digest,
+            );
+            if let Some(target) = target
+                && self.disk_store.covers(&target, &snapshot.values).await
+            {
+                self.slots.get_mut(&e_node_id).unwrap().clear_output();
+            }
         }
     }
 }
