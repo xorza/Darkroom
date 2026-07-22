@@ -298,7 +298,7 @@ pub(crate) fn node_digest(
 /// reference re-keys its consumer exactly like a const path does. The producer's value
 /// must exist first: an unreadable value (producer not resident) is `None`, tainting the
 /// node's digest — the pre-run sweep stamps it "uncacheable, must run", and the run loop
-/// then *re-stamps* at reach time, when the producers have settled and any `OnDisk`
+/// then *re-stamps* at reach time, when the producers have settled and any disk-backed
 /// resource producer was hydrated (`executor.rs`). A value the built-in path stamper
 /// can't read as a path (a mis-typed wire) folds a distinct marker instead.
 fn hash_bound_resource(

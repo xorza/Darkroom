@@ -53,7 +53,6 @@ mod tests;
 pub(crate) mod validate;
 
 use cache::RuntimeCache;
-use disk_store::DiskStore;
 use executor::Executor;
 use identity::ExecutionEventPort;
 use plan::{ExecutionPlan, Planner};
@@ -215,7 +214,7 @@ impl RunSeeds {
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `plan` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
-/// owned `DiskStore` file persistence and the caching policy), and the `executor`
+/// owned [`disk_store::DiskStore`] file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
 /// persistent form is the [`ExecutionProgram`] alone.
@@ -225,11 +224,12 @@ pub(crate) struct ExecutionEngine {
     /// execution-to-authoring attribution map.
     /// Replaced wholesale by [`Self::install`].
     pub(crate) compiled: Arc<CompiledGraph>,
-    /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
+    /// Per-node cross-run cache (output values, digests, node state) plus the
+    /// [`disk_store::DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
     /// The RAM slots are reconciled to the node set at each `install`; the disk store is set
-    /// via [`Self::set_disk_store`] and kept across installs.
-    cache: RuntimeCache,
+    /// by the worker and kept across installs.
+    pub(crate) cache: RuntimeCache,
     executor: Executor,
     planner: Planner,
     /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
@@ -252,16 +252,6 @@ impl ExecutionEngine {
         self.plan.clear();
         self.cache.clear();
         self.resource_stamps = RunResourceStamps::default();
-    }
-
-    /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
-    /// the custom-value codecs) plus the optional
-    /// store root. At the next `install`, `persist` outputs hydrate
-    /// from their blobs on a hit (skipping recompute), and freshly-computed ones are
-    /// stored after a run. The RAM cache is keyed by node id + digest, independent of the
-    /// root, so swapping keeps any warm in-memory outputs.
-    pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
-        self.cache.set_disk_store(disk_store);
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program.
@@ -355,11 +345,11 @@ impl ExecutionEngine {
     }
 
     /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
-    /// values when the worker attaches a new [`DiskStore`]. This makes values computed
+    /// values when the worker attaches a new [`disk_store::DiskStore`]. This makes values computed
     /// while the store was memory-only durable once a document receives a cache root.
     ///
     /// Never rewrites identical content: a blob already stamped with the node's current
-    /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
+    /// digest is the same bytes, so [`disk_store::DiskStore::store`] skips it. Also a no-op for a
     /// node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
         for e_node_id in self.compiled.program.e_nodes.keys().copied() {
