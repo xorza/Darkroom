@@ -73,36 +73,25 @@ fn streaming_validation_compares_coverage_without_owned_header_fields() {
         })
     );
     let mut reader = Cursor::new(&blob);
-    assert!(covers_outputs(
-        &mut reader,
-        blob.len() as u64,
-        digest,
-        &outputs,
-        &library
-    )
-    .unwrap());
+    assert!(covers_outputs(&mut reader, blob.len() as u64, digest, &outputs, &library).unwrap());
     let required_more = vec![
         DynamicValue::Static(StaticValue::Int(4)),
         DynamicValue::Static(StaticValue::Int(5)),
         DynamicValue::Static(StaticValue::Bool(true)),
     ];
     let mut reader = Cursor::new(&blob);
-    assert!(!covers_outputs(
-        &mut reader,
-        blob.len() as u64,
-        digest,
-        &required_more,
-        &library
-    )
-    .unwrap());
+    assert!(
+        !covers_outputs(
+            &mut reader,
+            blob.len() as u64,
+            digest,
+            &required_more,
+            &library
+        )
+        .unwrap()
+    );
     let mut reader = Cursor::new(&blob);
-    assert!(covers_header(
-        &mut reader,
-        blob.len() as u64,
-        &header,
-        &library
-    )
-    .unwrap());
+    assert!(covers_header(&mut reader, blob.len() as u64, &header, &library).unwrap());
 }
 
 #[test]
