@@ -6,8 +6,6 @@ file name as argument clap
 
 autoupdate image review and autorun node
 
-features = ["builtin-fs-watch", "builtin-random"] - move from scenarium
-
 [dev-dependencies]
 scenarium = { workspace = true, features = ["internals"] }
 
@@ -23,15 +21,11 @@ invert removed retain logic to optimize
 
 mesh once registrations
 
-blobs and serialization directly to file to avoid memallocs
-
 build masters chose array of files instead of directory
 
 remove anyhow
 
 Darkroom currently recompiles on every run, so each new compile still needs installation
-
-remove flattenmap from worker
 
 save caches on cache click
 

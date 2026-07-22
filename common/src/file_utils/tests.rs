@@ -4,8 +4,10 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
+use tokio::io::AsyncWriteExt as _;
+
 use crate::file_utils::{
-    PendingPublication, PublicationMode, files_with_extensions, publish, publish_bytes,
+    AtomicFile, PublicationMode, files_with_extensions, publish, publish_bytes,
     publish_with_replacement,
 };
 use crate::test_utils::test_output_path;
@@ -180,23 +182,24 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     );
 }
 
-#[test]
-fn two_phase_publication_commits_or_cleans_up() {
+#[tokio::test]
+async fn two_phase_publication_commits_or_cleans_up() {
     let path = test_output_path("common/file_utils/publication/two-phase.bin");
     fs::write(&path, b"previous").unwrap();
 
-    let mut pending = PendingPublication::new(&path, PublicationMode::Cache).unwrap();
-    let mut file = pending.take_file();
-    file.write_all(b"complete").unwrap();
-    pending.commit(file).unwrap();
+    let mut file = AtomicFile::new(&path, PublicationMode::Cache)
+        .await
+        .unwrap();
+    file.write_all(b"complete").await.unwrap();
+    file.commit().await.unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"complete");
     assert!(publication_temp_files(&path).is_empty());
 
-    let mut pending = PendingPublication::new(&path, PublicationMode::Cache).unwrap();
-    let mut file = pending.take_file();
-    file.write_all(b"incomplete").unwrap();
+    let mut file = AtomicFile::new(&path, PublicationMode::Cache)
+        .await
+        .unwrap();
+    file.write_all(b"incomplete").await.unwrap();
     drop(file);
-    drop(pending);
     assert_eq!(fs::read(&path).unwrap(), b"complete");
     assert!(publication_temp_files(&path).is_empty());
 }
