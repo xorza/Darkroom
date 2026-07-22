@@ -67,7 +67,7 @@ fn streaming_validation_compares_coverage_without_owned_header_fields() {
 
     let mut reader = Cursor::new(&blob);
     assert_eq!(
-        read_coverage(&mut reader, blob.len() as u64, digest, &library),
+        read_coverage(&mut reader, blob.len() as u64, digest, &library).unwrap(),
         Some(CachedOutputCoverage {
             ports: vec![true, false, true]
         })
@@ -79,7 +79,8 @@ fn streaming_validation_compares_coverage_without_owned_header_fields() {
         digest,
         &outputs,
         &library
-    ));
+    )
+    .unwrap());
     let required_more = vec![
         DynamicValue::Static(StaticValue::Int(4)),
         DynamicValue::Static(StaticValue::Int(5)),
@@ -92,14 +93,16 @@ fn streaming_validation_compares_coverage_without_owned_header_fields() {
         digest,
         &required_more,
         &library
-    ));
+    )
+    .unwrap());
     let mut reader = Cursor::new(&blob);
     assert!(covers_header(
         &mut reader,
         blob.len() as u64,
         &header,
         &library
-    ));
+    )
+    .unwrap());
 }
 
 #[test]
@@ -129,7 +132,6 @@ fn rejects_wrong_identity_version_counts_coverage_manifest_order_and_truncation(
 
     let mut oversized_outputs = original.clone();
     oversized_outputs[44..48].copy_from_slice(&u32::MAX.to_le_bytes());
-    cases.push(oversized_outputs);
 
     let mut invalid_coverage = original.clone();
     invalid_coverage[FIXED_LEN] = 2;
@@ -149,9 +151,19 @@ fn rejects_wrong_identity_version_counts_coverage_manifest_order_and_truncation(
     cases.push(descending_codecs);
 
     for bytes in cases {
-        assert!(parse(&bytes).is_none());
+        assert_eq!(
+            parse(&bytes).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
+    assert_eq!(
+        parse(&oversized_outputs).unwrap_err().kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
     for len in 0..original.len() {
-        assert!(parse(&original[..len]).is_none());
+        assert_eq!(
+            parse(&original[..len]).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
     }
 }
