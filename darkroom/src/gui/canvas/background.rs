@@ -93,7 +93,9 @@ impl CanvasBackground {
         }
         // A changed `key` means a theme swap: register a fresh tile and
         // drop the old handle, freeing the previous tile's GPU texture.
-        let handle = ui.register_image(build_tile(ctx));
+        let handle = ui
+            .register_image(build_tile(ctx))
+            .expect("canvas tile fits every supported GPU");
         self.tile = Some((key, handle.clone()));
         handle
     }

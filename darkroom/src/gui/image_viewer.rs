@@ -215,7 +215,10 @@ impl ImageViewer {
     fn draw_checker(&mut self, ui: &mut Ui, pane: Vec2) {
         let handle = self
             .checker
-            .get_or_insert_with(|| ui.register_image(checker_image()))
+            .get_or_insert_with(|| {
+                ui.register_image(checker_image())
+                    .expect("checker image fits every supported GPU")
+            })
             .clone();
         ui.add_shape(
             Shape::image(handle)

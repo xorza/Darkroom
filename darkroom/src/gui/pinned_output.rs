@@ -100,7 +100,10 @@ impl PinnedImage {
     fn materialize_full(self, ui: &Ui) -> Self {
         let full = match self.full {
             FullImage::Deferred(value) => match prepare_image(&value, FULL_TEXTURE_DIM) {
-                Ok(prepared) => FullImage::Resident(ui.register_image(prepared.raster)),
+                Ok(prepared) => match ui.register_image(prepared.raster) {
+                    Ok(handle) => FullImage::Resident(handle),
+                    Err(error) => FullImage::Failed(error.to_string()),
+                },
                 Err(message) => FullImage::Failed(message),
             },
             full => full,
@@ -114,16 +117,19 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
         return StoredContent::Text(value.to_string());
     }
     match prepare_image(&value, PREVIEW_TEXTURE_DIM) {
-        Ok(prepared) => {
-            let source_bytes = value.ram_usage().total();
-            StoredContent::Image(PinnedImage {
-                preview: ui.register_image(prepared.raster),
-                full: FullImage::Deferred(value),
-                native_size: prepared.native_size,
-                native_format: prepared.native_format,
-                source_bytes,
-            })
-        }
+        Ok(prepared) => match ui.register_image(prepared.raster) {
+            Ok(preview) => {
+                let source_bytes = value.ram_usage().total();
+                StoredContent::Image(PinnedImage {
+                    preview,
+                    full: FullImage::Deferred(value),
+                    native_size: prepared.native_size,
+                    native_format: prepared.native_format,
+                    source_bytes,
+                })
+            }
+            Err(error) => StoredContent::Error(error.to_string()),
+        },
         Err(message) => StoredContent::Error(message),
     }
 }
