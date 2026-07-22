@@ -1,9 +1,13 @@
 //! File discovery and atomic same-directory publication.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write as _};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
+
+use tokio::io::{AsyncSeek, AsyncWrite, AsyncWriteExt as _};
 
 /// Whether publishing a file must survive an abrupt system shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,22 +17,199 @@ pub enum PublicationMode {
 }
 
 #[derive(Debug)]
-struct PendingPublication {
-    path: PathBuf,
-    file: Option<File>,
+struct Publication {
+    destination: PathBuf,
+    temporary: PathBuf,
+    mode: PublicationMode,
 }
 
-impl PendingPublication {
-    fn close(&mut self) {
-        drop(self.file.take());
+impl Publication {
+    fn commit_with_replacement(
+        mut self,
+        mut file: File,
+        replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let parent = self
+            .destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+
+        if let Err(error) = file.flush() {
+            drop(file);
+            return Err(error);
+        }
+        if let Err(error) = prepare_destination(&file, &self.destination) {
+            drop(file);
+            return Err(error);
+        }
+        if self.mode == PublicationMode::Durable
+            && let Err(error) = file.sync_all()
+        {
+            drop(file);
+            return Err(error);
+        }
+        drop(file);
+
+        replacement(&self.temporary, &self.destination, self.mode)?;
+        if self.mode == PublicationMode::Durable {
+            sync_parent(parent)?;
+        }
+        self.temporary.clear();
+        Ok(())
     }
 }
 
-impl Drop for PendingPublication {
+impl Drop for Publication {
     fn drop(&mut self) {
-        self.close();
-        let _ = fs::remove_file(&self.path);
+        if !self.temporary.as_os_str().is_empty() {
+            let _ = fs::remove_file(&self.temporary);
+        }
     }
+}
+
+#[derive(Debug)]
+struct SyncAtomicFile {
+    // The handle must close before `Publication` removes the path on Windows.
+    file: File,
+    publication: Publication,
+}
+
+impl SyncAtomicFile {
+    fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
+        loop {
+            let temporary = temporary_path(destination)?;
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        file,
+                        publication: Publication {
+                            destination: destination.to_path_buf(),
+                            temporary,
+                            mode,
+                        },
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn commit_with_replacement(
+        self,
+        replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let Self { file, publication } = self;
+        publication.commit_with_replacement(file, replacement)
+    }
+}
+
+impl Write for SyncAtomicFile {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.file.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Seek for SyncAtomicFile {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file.seek(position)
+    }
+}
+
+/// A Tokio file that atomically replaces its destination only when [`commit`](Self::commit)
+/// succeeds. Dropping it removes the temporary file and preserves the existing destination.
+#[derive(Debug)]
+pub struct AtomicFile {
+    // The handle must close before `Publication` removes the path on Windows.
+    file: tokio::fs::File,
+    publication: Publication,
+}
+
+impl AtomicFile {
+    /// Create a writable same-directory temporary file for later atomic commit.
+    pub async fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
+        loop {
+            let temporary = temporary_path(destination)?;
+            match tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .await
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        file,
+                        publication: Publication {
+                            destination: destination.to_path_buf(),
+                            temporary,
+                            mode,
+                        },
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Atomically publish the completed file at its destination.
+    pub async fn commit(mut self) -> io::Result<()> {
+        self.file.flush().await?;
+        let Self { file, publication } = self;
+        let file = file.into_std().await;
+        tokio::task::spawn_blocking(move || publication.commit_with_replacement(file, replace))
+            .await
+            .expect("atomic-file commit task panicked")
+    }
+}
+
+impl AsyncWrite for AtomicFile {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.file).poll_write(cx, bytes)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.file).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.file).poll_shutdown(cx)
+    }
+}
+
+impl AsyncSeek for AtomicFile {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
+        Pin::new(&mut self.file).start_seek(position)
+    }
+
+    fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        Pin::new(&mut self.file).poll_complete(cx)
+    }
+}
+
+fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut temp_name = file_name.to_os_string();
+    temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+    Ok(destination.with_file_name(temp_name))
 }
 
 /// Returns sorted paths to all files in a directory matching the given extensions.
@@ -102,56 +283,9 @@ fn publish_with_replacement(
     write: impl FnOnce(&mut File) -> io::Result<()>,
     replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
 ) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-
-    let mut pending = create_pending(path)?;
-    write(pending.file.as_mut().expect("pending file is open"))?;
-    prepare_destination(pending.file.as_ref().expect("pending file is open"), path)?;
-    if mode == PublicationMode::Durable {
-        pending
-            .file
-            .as_ref()
-            .expect("pending file is open")
-            .sync_all()?;
-    }
-    pending.close();
-
-    replacement(&pending.path, path, mode)?;
-    if mode == PublicationMode::Durable {
-        sync_parent(parent)?;
-    }
-    Ok(())
-}
-
-fn create_pending(path: &Path) -> io::Result<PendingPublication> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    loop {
-        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut temp_name = file_name.to_os_string();
-        temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
-        let temp_path = path.with_file_name(temp_name);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
-        {
-            Ok(file) => {
-                return Ok(PendingPublication {
-                    path: temp_path,
-                    file: Some(file),
-                });
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
+    let mut file = SyncAtomicFile::new(path, mode)?;
+    write(&mut file.file)?;
+    file.commit_with_replacement(replacement)
 }
 
 fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {

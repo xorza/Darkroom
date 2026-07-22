@@ -1,14 +1,14 @@
 use std::fs;
 use std::io;
-use std::io::Write as _;
+use std::io::{Seek as _, SeekFrom, Write as _};
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
 use tokio::io::AsyncWriteExt as _;
 
 use crate::file_utils::{
-    AtomicFile, PublicationMode, files_with_extensions, publish, publish_bytes,
-    publish_with_replacement,
+    AtomicFile, PublicationMode, SyncAtomicFile, files_with_extensions, publish, publish_bytes,
+    publish_with_replacement, replace,
 };
 use crate::test_utils::test_output_path;
 
@@ -180,6 +180,14 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         !missing_parent.exists(),
         "publication does not silently create a missing destination directory"
     );
+
+    let seek_target = test_output_path("common/file_utils/publication/seek.bin");
+    let mut file = SyncAtomicFile::new(&seek_target, PublicationMode::Cache).unwrap();
+    file.write_all(b"header____body").unwrap();
+    assert_eq!(file.seek(SeekFrom::Start(6)).unwrap(), 6);
+    file.write_all(b"data").unwrap();
+    file.commit_with_replacement(replace).unwrap();
+    assert_eq!(fs::read(seek_target).unwrap(), b"headerdatabody");
 }
 
 #[tokio::test]
