@@ -14,7 +14,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
-use scenarium::NodeAddress;
 use scenarium::NodeId;
 use scenarium::{RunSeeds, Worker, WorkerMessage, WorkerReport};
 
@@ -74,11 +73,10 @@ impl WorkerBridge {
         });
     }
 
-    /// Execute one top-level node's upstream cone in the installed program and
-    /// deliver its outputs.
+    /// Execute every compiled occurrence of one authoring node and deliver its outputs.
     pub(crate) fn run_node(&self, node_id: NodeId) {
         let _ = self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         });
     }
 

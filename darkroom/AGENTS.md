@@ -289,9 +289,10 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `RunState` retains the acknowledged compile and uses it to project flat result
   ids onto authoring nodes. `WorkerBridge::deliver` forwards reports to its
   channel and pokes `host.request_repaint()`.
-- **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
-  `RunSeeds::nodes` seeding one node's cone, its outputs pinned resident for the
-  preview fetch. Two triggers, both gated on `SceneNode::runnable` (instance/
+- **Run to a node** (`App::run_node`, `RunCommand::Node`): after installation,
+  a separate `RunSeeds::nodes` command seeds every compiled occurrence of the
+  authored node, with their outputs delivered for the preview fetch. Two
+  triggers, both gated on `SceneNode::runnable` (instance/
   boundary/missing nodes don't resolve as seeds; Darkroom exposes the disable
   toggle only on runnable sinks, and Scenarium treats an explicitly seeded
   disabled sink as enabled for that run): the header's play chip left of the
