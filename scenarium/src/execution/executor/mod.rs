@@ -49,9 +49,8 @@ enum NodeOutcome {
     /// Served from a RAM/disk cache under an unchanged digest — counted as cached.
     Reused,
     /// Pruned by the pre-run cut: every consumer that would read this node reused a cache,
-    /// so its output is never read and its lambda is skipped. `cached` is whether it still
-    /// holds a usable value (a deeper disk cache) — reported cached — vs. a memory-only
-    /// upstream with nothing resident, which is simply not computed this run.
+    /// so its output is never read and its lambda is skipped. `cached` is whether its output
+    /// remains resident; unprobed disk blobs are not runtime cache state.
     Cut { cached: bool },
     /// Its lambda ran and succeeded, taking `secs`.
     Ran { secs: f64 },
@@ -162,9 +161,10 @@ impl ExecutionFrame<'_> {
 
     fn collect_inputs(&mut self, e_node_id: ExecutionNodeId) {
         self.inputs.clear();
-        let node_inputs = self.program.node_inputs(&self.program.e_nodes[&e_node_id]);
-        for e_input in node_inputs {
-            let value = match &e_input.binding {
+        let input_range = self.program.e_nodes[&e_node_id].inputs.range();
+        for input_index in input_range {
+            let binding = &self.program.inputs[input_index].binding;
+            let value = match binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) => {
@@ -185,15 +185,22 @@ impl ExecutionFrame<'_> {
         }
     }
 
+    /// Retires every bound input read skipped when a late cache hit avoids invoking a node.
     fn cancel_input_reads(&mut self, e_node_id: ExecutionNodeId) {
-        for input in self.program.node_inputs(&self.program.e_nodes[&e_node_id]) {
-            if let ExecutionBinding::Bind(address) = &input.binding {
+        let input_range = self.program.e_nodes[&e_node_id].inputs.range();
+        for input_index in input_range {
+            let address = match &self.program.inputs[input_index].binding {
+                ExecutionBinding::Bind(address) => Some(*address),
+                ExecutionBinding::None | ExecutionBinding::Const(_) => None,
+            };
+            if let Some(address) = address {
                 let output_idx = self.program.output_idx(address.e_node_id, address.port_idx);
                 self.finish_read(address.e_node_id, address.port_idx, output_idx);
             }
         }
     }
 
+    /// Completes one planned output read and releases its non-RAM value once it is no longer live.
     fn finish_read(&mut self, target: ExecutionNodeId, port_idx: usize, output_idx: OutputIdx) {
         if !self.remaining_reads.consume(output_idx)
             || self.program.e_nodes[&target].cache.caches_in_ram()
@@ -202,7 +209,7 @@ impl ExecutionFrame<'_> {
             return;
         }
         if self.remaining_reads.node_drained(self.program, target) {
-            self.cache.reclaim_slot(self.program, target);
+            self.cache.slots.get_mut(&target).unwrap().clear_output();
         } else {
             self.cache.clear_output_port(target, port_idx);
         }
@@ -292,10 +299,10 @@ impl Executor {
                 }
                 if resolved.disposition[&e_node_id] == Disposition::Cut {
                     // Pruned by the pre-run cut: every consumer that would read this node reused
-                    // a cache, so its output is never read. Report it cached iff it still holds a
-                    // usable value (a deeper disk cache), else it's simply not computed this run.
+                    // a cache, so its output is never read. Report only a current resident value;
+                    // unneeded disk blobs remain unprobed.
                     *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Cut {
-                        cached: frame.cache.has_available_value(e_node_id),
+                        cached: frame.cache.is_resident_current(e_node_id),
                     };
                     continue;
                 }
@@ -483,13 +490,18 @@ impl Executor {
                         .store_node(program, e_node_id, &mut self.ctx_manager)
                         .await;
                     // A node no consumer reads (a sink, or every output already `Skip`) is
-                    // spent the instant it's stored — reclaim its non-retained slot now rather
+                    // spent the instant it's stored — drop its non-retained slot now rather
                     // than holding it to end-of-run eviction. A node that still owes reads is
-                    // reclaimed later, in `collect_inputs`, when its last consumer lands.
+                    // released later, in `collect_inputs`, when its last consumer lands.
                     if !program.e_nodes[&e_node_id].cache.caches_in_ram()
                         && frame.remaining_reads.node_drained(program, e_node_id)
                     {
-                        frame.cache.reclaim_slot(program, e_node_id);
+                        frame
+                            .cache
+                            .slots
+                            .get_mut(&e_node_id)
+                            .unwrap()
+                            .clear_output();
                     }
                 }
             }
@@ -544,8 +556,8 @@ fn collect_execution_stats(
     for &e_node_id in &plan.process_order {
         let e = &program.e_nodes[&e_node_id];
         match &outcomes[&e_node_id] {
-            // A reuse hit, or a node the cut pruned that still holds a value, are both
-            // "available, not recomputed" — reported cached. A pruned memory-only node
+            // A reuse hit, or a node the cut pruned that still holds a resident value, are
+            // both "available, not recomputed" — reported cached. A pruned node
             // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
             NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
                 cached_nodes.push(e_node_id);
