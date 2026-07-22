@@ -118,8 +118,9 @@ backs up boundary-resolution walks.
 - disabled function and special nodes remain in the program with an effective
   disabled bit inherited through composite ancestors.
 
-Top-level nodes keep their authoring `NodeId`. Nested ids are deterministic hashes
-of the descent path and interior id, so stable instances retain cache identity.
+Top-level nodes keep the UUID value of their authoring `NodeId` behind the distinct
+`ExecutionNodeId` type. Nested ids are deterministic hashes of the descent path and
+interior id, so stable instances retain cache identity.
 
 Data bindings cross boundaries as follows:
 
@@ -132,7 +133,7 @@ Data bindings cross boundaries as follows:
 Event resolution similarly maps `GraphEvent` inward to a concrete emitter and
 expands composite subscribers through `GraphInput`. The resulting execution program
 contains only flat func-to-func data and event edges. Nodes, binding targets, and
-event subscribers are all addressed directly by flat `NodeId`. The planner derives
+event subscribers are all addressed directly by `ExecutionNodeId`. The planner derives
 dependency order for each run; independent roots have no ordering contract. Disk and RAM
 caching therefore need no composite-specific behavior.
 
@@ -252,7 +253,7 @@ never yields a half-real output set.
 
 ## B.5 The RAM tier (`cache/`)
 
-Each flat `NodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
+Each `ExecutionNodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the resolver

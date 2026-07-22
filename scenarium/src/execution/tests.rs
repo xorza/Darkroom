@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use super::*;
 use crate::execution::compile::{CompileError, Compiler};
-use crate::execution::identity::NodeAddress;
+use crate::execution::identity::{ExecutionNodeId, NodeAddress};
 use crate::execution::program::ExecutionBinding;
-use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
+use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior};
 use crate::node::lambda::OutputDemand;
@@ -13,11 +13,15 @@ use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
 use tokio::sync::Mutex;
 
+fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
+    ExecutionNodeId::from_node_id(node_id)
+}
+
 fn execution_node_name<'a>(
     execution_graph: &ExecutionEngine,
     graph: &'a Graph,
     library: &'a Library,
-    node_id: NodeId,
+    node_id: ExecutionNodeId,
 ) -> &'a str {
     let address = execution_graph
         .compiled
@@ -45,7 +49,7 @@ fn execution_node_id(
     graph: &Graph,
     library: &Library,
     name: &str,
-) -> Option<NodeId> {
+) -> Option<ExecutionNodeId> {
     execution_graph
         .compiled
         .program
@@ -60,7 +64,7 @@ fn execution_node_ids(
     graph: &Graph,
     library: &Library,
     name: &str,
-) -> Vec<NodeId> {
+) -> Vec<ExecutionNodeId> {
     execution_graph
         .compiled
         .program
@@ -245,15 +249,21 @@ mod cache_persistence {
             "the cut prunes the Memory source upstream of a disk-cache hit on reopen"
         );
         assert!(
-            !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            !stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(get_a_id)),
             "get_a was cut, not executed"
         );
         assert!(
-            stats.cached_nodes.contains(&mult_id),
+            stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "mult reused from disk"
         );
         assert!(
-            !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            !stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(mult_id)),
             "mult did not recompute"
         );
         let pinned = receive_pinned(&mut rx);
@@ -262,7 +272,10 @@ mod cache_persistence {
         assert_eq!(pinned.values[0].port_idx, 0);
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
         assert!(
-            !stats.node_ram.iter().any(|usage| usage.node_id == mult_id),
+            !stats
+                .node_ram
+                .iter()
+                .any(|usage| usage.node_id == root_execution_node(mult_id)),
             "a full run does not retain the Disk node after delivering its pin"
         );
 
@@ -272,7 +285,7 @@ mod cache_persistence {
         let refreshed = engine
             .execute(
                 RunSeeds {
-                    nodes: vec![mult_id],
+                    nodes: vec![root_execution_node(mult_id)],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -280,12 +293,16 @@ mod cache_persistence {
             )
             .await
             .unwrap();
-        assert!(refreshed.cached_nodes.contains(&mult_id));
+        assert!(
+            refreshed
+                .cached_nodes
+                .contains(&root_execution_node(mult_id))
+        );
         assert!(
             !refreshed
                 .node_ram
                 .iter()
-                .any(|usage| usage.node_id == mult_id),
+                .any(|usage| usage.node_id == root_execution_node(mult_id)),
             "targeted refresh releases the hydrated Disk value after delivery"
         );
         let pinned = receive_pinned(&mut rx);
@@ -304,7 +321,7 @@ mod cache_persistence {
             "input change makes mult miss and recompute from get_a"
         );
         assert!(
-            !stats.cached_nodes.contains(&mult_id),
+            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "mult should not be cached after a digest change"
         );
         // The blob is keyed by node id, so the recompute replaced the superseded
@@ -377,11 +394,14 @@ mod cache_persistence {
             "get_a is still read by print_direct, so the cut must keep it"
         );
         assert!(
-            stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(get_a_id)),
             "the shared producer runs for its executing consumer"
         );
         assert!(
-            stats.cached_nodes.contains(&mult_id),
+            stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "mult still reuses from disk"
         );
     }
@@ -450,17 +470,25 @@ mod cache_persistence {
             "the cut prunes the Memory source feeding only disk-cache hits"
         );
         assert!(
-            !stats.cached_nodes.contains(&sum_id) && stats.cached_nodes.contains(&mult_id),
+            !stats.cached_nodes.contains(&root_execution_node(sum_id))
+                && stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "only the live frontier cache is probed and reported"
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
-        let mult_resident = engine.cache.slots[&mult_id].output_values().is_some();
+        let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
+            .output_values()
+            .is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
         // ...but the deeper `sum` is not even flagged: the blob stays in the store,
         // outside the runtime slot, until a later run actually needs it.
-        let sum_resident = engine.cache.slots[&sum_id].output_values().is_some();
-        let sum_empty = matches!(engine.cache.slots[&sum_id].value, ValueState::Empty);
+        let sum_resident = engine.cache.slots[&root_execution_node(sum_id)]
+            .output_values()
+            .is_some();
+        let sum_empty = matches!(
+            engine.cache.slots[&root_execution_node(sum_id)].value,
+            ValueState::Empty
+        );
         assert!(
             !sum_resident,
             "a disk cache behind another is not loaded into RAM"
@@ -476,7 +504,9 @@ mod cache_persistence {
             Some(empty_dir.0.clone()),
         ));
         assert!(
-            engine.cache.slots[&mult_id].output_values().is_some(),
+            engine.cache.slots[&root_execution_node(mult_id)]
+                .output_values()
+                .is_some(),
             "switching stores preserves resident values"
         );
 
@@ -487,7 +517,7 @@ mod cache_persistence {
             stats
                 .executed_nodes
                 .iter()
-                .any(|node| node.node_id == sum_id),
+                .any(|node| node.node_id == root_execution_node(sum_id)),
             "a value absent from the new store recomputes when needed"
         );
         assert_eq!(
@@ -539,7 +569,9 @@ mod cache_persistence {
         // (all of it is this run's own output).
         engine.execute_sinks().await.unwrap();
         assert!(
-            engine.cache.slots[&sum_id].output_values().is_some(),
+            engine.cache.slots[&root_execution_node(sum_id)]
+                .output_values()
+                .is_some(),
             "sum is resident after the run that computed it"
         );
 
@@ -552,10 +584,19 @@ mod cache_persistence {
             "only print runs the second time"
         );
 
-        let sum_resident = engine.cache.slots[&sum_id].output_values().is_some();
-        let sum_disk = matches!(engine.cache.slots[&sum_id].value, ValueState::OnDisk { .. });
-        let mult_resident = engine.cache.slots[&mult_id].output_values().is_some();
-        let get_a_resident = engine.cache.slots[&get_a_id].output_values().is_some();
+        let sum_resident = engine.cache.slots[&root_execution_node(sum_id)]
+            .output_values()
+            .is_some();
+        let sum_disk = matches!(
+            engine.cache.slots[&root_execution_node(sum_id)].value,
+            ValueState::OnDisk { .. }
+        );
+        let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
+            .output_values()
+            .is_some();
+        let get_a_resident = engine.cache.slots[&root_execution_node(get_a_id)]
+            .output_values()
+            .is_some();
         assert!(
             !sum_resident,
             "the unused prior-run value is evicted from RAM"
@@ -576,11 +617,14 @@ mod cache_persistence {
 
     /// A top-level node recomputed (rather than reused) in the last run.
     fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
-        stats.executed_nodes.iter().any(|e| e.node_id == id)
+        stats
+            .executed_nodes
+            .iter()
+            .any(|e| e.node_id == root_execution_node(id))
     }
     /// A top-level node reused a cache (RAM hit, disk hit, or a still-available cut) last run.
     fn cached(stats: &ExecutionStats, id: NodeId) -> bool {
-        stats.cached_nodes.contains(&id)
+        stats.cached_nodes.contains(&root_execution_node(id))
     }
     /// Count of blobs in the store — one per persisted node.
     fn blob_count(dir: &TempDir) -> usize {
@@ -636,7 +680,7 @@ mod cache_persistence {
         }
 
         // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
-        let slot = &engine.cache.slots[&mult_id];
+        let slot = &engine.cache.slots[&root_execution_node(mult_id)];
         assert_eq!(
             slot.output_values().is_some(),
             mode.caches_in_ram(),
@@ -818,7 +862,10 @@ mod cache_persistence {
         // mult is served from its disk blob, not recomputed — without this, a recompute
         // would yield 6 regardless and the stale-RAM path would go untested.
         assert!(
-            !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            !stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(mult_id)),
             "mult is a disk cache hit on flip-back, not recomputed: {:?}",
             stats.executed_nodes
         );
@@ -1016,7 +1063,11 @@ mod cache_persistence {
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-        let ran = |s: &ExecutionStats, id| s.executed_nodes.iter().any(|n| n.node_id == id);
+        let ran = |s: &ExecutionStats, id: NodeId| {
+            s.executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(id))
+        };
 
         // Cold run: mult computes and stores its blob.
         {
@@ -1058,7 +1109,7 @@ mod cache_persistence {
                 .unwrap()
                 .id;
             assert_eq!(stats.node_errors.len(), 1);
-            assert_eq!(stats.node_errors[0].node_id, print_id);
+            assert_eq!(stats.node_errors[0].node_id, root_execution_node(print_id));
             assert!(
                 matches!(
                     stats.node_errors[0].error,
@@ -1144,11 +1195,14 @@ mod cache_persistence {
 
         // The run completes (no panic): the missing blob just misses, so sum recomputes.
         assert!(
-            stats.executed_nodes.iter().any(|n| n.node_id == sum_id),
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(sum_id)),
             "sum recomputes when its blob is gone"
         );
         assert!(
-            !stats.cached_nodes.contains(&sum_id),
+            !stats.cached_nodes.contains(&root_execution_node(sum_id)),
             "a vanished blob is not served as a cache hit"
         );
         assert!(
@@ -1302,11 +1356,14 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached_nodes.contains(&mult_id),
+            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "impure-cone node must not be disk-cached"
         );
         assert!(
-            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(mult_id)),
             "mult recomputes on reopen"
         );
     }
@@ -1341,11 +1398,14 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached_nodes.contains(&mult_id),
+            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
             "a Memory-persistence node must not be disk-cached"
         );
         assert!(
-            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(mult_id)),
             "mult recomputes on reopen"
         );
     }
@@ -1474,7 +1534,7 @@ mod cache_persistence {
             "codec present ⇒ served"
         );
         assert!(
-            stats.cached_nodes.contains(&blob_id),
+            stats.cached_nodes.contains(&root_execution_node(blob_id)),
             "blob node disk-cached"
         );
 
@@ -1491,11 +1551,14 @@ mod cache_persistence {
             "missing codec ⇒ recompute"
         );
         assert!(
-            !stats.cached_nodes.contains(&blob_id),
+            !stats.cached_nodes.contains(&root_execution_node(blob_id)),
             "an undecodable blob is not a cache hit"
         );
         assert!(
-            stats.executed_nodes.iter().any(|n| n.node_id == blob_id),
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(blob_id)),
             "the node recomputes instead of tripping a failed frontier load"
         );
     }
@@ -1697,7 +1760,10 @@ mod resource_binds {
     }
 
     fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
-        stats.executed_nodes.iter().any(|n| n.node_id == id)
+        stats
+            .executed_nodes
+            .iter()
+            .any(|n| n.node_id == root_execution_node(id))
     }
 
     /// The core regression: a path arriving over a **Bind** edge keys the loader on the
@@ -1734,13 +1800,21 @@ mod resource_binds {
             1,
             "unchanged file ⇒ the wired-path loader stays cached"
         );
-        assert!(stats.cached_nodes.contains(&fx.load_id));
+        assert!(
+            stats
+                .cached_nodes
+                .contains(&root_execution_node(fx.load_id))
+        );
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader skips compute on its hit"
         );
-        assert!(stats.cached_nodes.contains(&fx.annotate_id));
+        assert!(
+            stats
+                .cached_nodes
+                .contains(&root_execution_node(fx.annotate_id))
+        );
 
         // Edit the file (different length ⇒ unambiguous identity change). The loader
         // re-keys off the delivered value's file identity and the change propagates to its
@@ -1804,14 +1878,22 @@ mod resource_binds {
             1,
             "reopen with an unchanged file serves the loader from disk"
         );
-        assert!(stats.cached_nodes.contains(&fx.load_id));
+        assert!(
+            stats
+                .cached_nodes
+                .contains(&root_execution_node(fx.load_id))
+        );
         assert!(!ran(&stats, fx.load_id));
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader is a disk hit too"
         );
-        assert!(stats.cached_nodes.contains(&fx.annotate_id));
+        assert!(
+            stats
+                .cached_nodes
+                .contains(&root_execution_node(fx.annotate_id))
+        );
         assert_eq!(
             *captured.lock().unwrap(),
             "[v1]",
@@ -1971,7 +2053,7 @@ mod resource_binds {
             1,
             "unchanged referent ⇒ the reader stays cached"
         );
-        assert!(stats.cached_nodes.contains(&read_id));
+        assert!(stats.cached_nodes.contains(&root_execution_node(read_id)));
 
         // Mutate the referent: version bump + new content. Nothing structural changed —
         // only the stamper sees it — and the reader recomputes while the handle producer
@@ -2649,7 +2731,7 @@ mod behavior {
             .await?;
         drop(tx);
 
-        let mut events: Vec<(NodeId, RunPhase)> = Vec::new();
+        let mut events: Vec<(ExecutionNodeId, RunPhase)> = Vec::new();
         while let Ok(e) = rx.try_recv() {
             let RunEvent::Progress(p) = e else {
                 continue;
@@ -2657,12 +2739,14 @@ mod behavior {
             events.push((p.node_id, p.phase));
         }
 
-        let name_of: std::collections::HashMap<NodeId, String> =
+        let name_of: std::collections::HashMap<ExecutionNodeId, String> =
             ["get_a", "get_b", "sum", "mult", "Print"]
                 .iter()
                 .map(|n| {
                     (
-                        graph.find_by_name(n, NodeSearch::TopLevel).unwrap().id,
+                        root_execution_node(
+                            graph.find_by_name(n, NodeSearch::TopLevel).unwrap().id,
+                        ),
                         n.to_string(),
                     )
                 })
@@ -2814,7 +2898,8 @@ mod behavior {
         assert!(
             matches!(
                 stats.node_errors.as_slice(),
-                [NodeError { node_id: n, error: RunError::Cancelled { .. } }] if *n == node_id
+                [NodeError { node_id: n, error: RunError::Cancelled { .. } }]
+                    if *n == root_execution_node(node_id)
             ),
             "the node is reported truthfully as Cancelled, not a fake success: {:?}",
             stats.node_errors
@@ -2898,7 +2983,8 @@ mod behavior {
         assert!(
             matches!(
                 stats.node_errors.as_slice(),
-                [NodeError { node_id: n, error: RunError::Cancelled { .. } }] if *n == node_id
+                [NodeError { node_id: n, error: RunError::Cancelled { .. } }]
+                    if *n == root_execution_node(node_id)
             ),
             "InvokeError::Cancelled maps to RunError::Cancelled, not Invoke: {:?}",
             stats.node_errors
@@ -3103,10 +3189,10 @@ mod composite_behavior {
         );
     }
 
-    /// An authoring node seed expands to every compiled instance, overrides the disabled
-    /// occurrences for this run, and delivers each value under its exact address.
+    /// An exact execution seed selects one repeated definition occurrence, overrides
+    /// that occurrence's disabled flag for the run, and delivers its addressed value.
     #[tokio::test]
-    async fn seeding_a_disabled_definition_node_runs_every_instance() {
+    async fn seeding_a_disabled_definition_node_runs_one_exact_instance() {
         use crate::execution::report::RunEvent;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::sync::mpsc::unbounded_channel;
@@ -3145,12 +3231,17 @@ mod composite_behavior {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
+        let first_address = NodeAddress {
+            instances: vec![first_instance],
+            node_id: inner_id,
+        };
+        let first_execution = eg.compiled.execution_node(&first_address).unwrap();
 
         let (tx, mut rx) = unbounded_channel();
         let stats = eg
             .execute(
                 RunSeeds {
-                    nodes: vec![inner_id],
+                    nodes: vec![first_execution],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -3159,8 +3250,8 @@ mod composite_behavior {
             .await
             .unwrap();
         drop(tx);
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
-        assert_eq!(stats.executed_nodes.len(), 2);
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(stats.executed_nodes.len(), 1);
 
         let mut pushed = Vec::new();
         while let Ok(event) = rx.try_recv() {
@@ -3170,17 +3261,7 @@ mod composite_behavior {
             }
         }
         pushed.sort();
-        let mut expected = vec![
-            NodeAddress {
-                instances: vec![first_instance],
-                node_id: inner_id,
-            },
-            NodeAddress {
-                instances: vec![second_instance],
-                node_id: inner_id,
-            },
-        ];
-        expected.sort();
+        let expected = vec![first_address];
         assert_eq!(pushed, expected);
         assert!(
             graph
@@ -3189,14 +3270,21 @@ mod composite_behavior {
                 .disabled,
             "execution leaves the nested authoring node disabled"
         );
-        for address in &expected {
-            assert!(
-                eg.get_argument_values_at(address)
-                    .unwrap()
-                    .outputs
-                    .is_empty()
-            );
-        }
+        assert!(
+            eg.get_argument_values_at(&expected[0])
+                .unwrap()
+                .outputs
+                .is_empty()
+        );
+        assert!(
+            eg.get_argument_values_at(&NodeAddress {
+                instances: vec![second_instance],
+                node_id: inner_id,
+            })
+            .unwrap()
+            .outputs
+            .is_empty()
+        );
     }
 }
 
@@ -3220,7 +3308,7 @@ mod cycle_detection {
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
-                assert_eq!(node_id, mult_node_id);
+                assert_eq!(node_id, root_execution_node(mult_node_id));
             }
             _ => panic!("Unexpected error: {err:?}"),
         }
@@ -3522,7 +3610,10 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        let stats = eg
+            .execute_nodes([root_execution_node(sum_id)])
+            .await
+            .unwrap();
         assert_eq!(stats.executed_nodes.len(), 3);
 
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
@@ -3575,15 +3666,20 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        eg.execute_nodes([sum_id]).await.unwrap();
+        eg.execute_nodes([root_execution_node(sum_id)])
+            .await
+            .unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
 
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        let stats = eg
+            .execute_nodes([root_execution_node(sum_id)])
+            .await
+            .unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
         assert_eq!(stats.executed_nodes.len(), 3);
-        assert!(!stats.cached_nodes.contains(&sum_id));
+        assert!(!stats.cached_nodes.contains(&root_execution_node(sum_id)));
         assert!(stats.node_ram.is_empty());
     }
 
@@ -3612,7 +3708,7 @@ mod node_seeds {
             .execute(
                 RunSeeds {
                     sinks: true,
-                    nodes: vec![sum_id],
+                    nodes: vec![root_execution_node(sum_id)],
                     ..Default::default()
                 },
                 None,
@@ -3651,7 +3747,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let bogus: NodeId = NodeId::from_u128(0xdead_beef);
+        let bogus = ExecutionNodeId::from_u128(0xdead_beef);
         let err = eg.execute_nodes([bogus]).await.unwrap_err();
         assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
@@ -3919,7 +4015,7 @@ mod stats {
             stats
                 .missing_inputs
                 .iter()
-                .any(|p| p.node_id == sum_id && p.port_idx == 0),
+                .any(|p| p.node_id == root_execution_node(sum_id) && p.port_idx == 0),
             "Expected sum input 0 in missing_inputs, got: {:?}",
             stats.missing_inputs
         );
@@ -3954,8 +4050,18 @@ mod stats {
             .find_by_name("Print", NodeSearch::TopLevel)
             .unwrap()
             .id;
-        assert!(stats.executed_nodes.iter().any(|n| n.node_id == sum_id));
-        assert!(stats.executed_nodes.iter().any(|n| n.node_id == print_id));
+        assert!(
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(sum_id))
+        );
+        assert!(
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(print_id))
+        );
 
         // No errors on first clean run
         assert!(stats.node_errors.is_empty());
@@ -4045,7 +4151,7 @@ mod events {
 
         let stats = eg
             .execute_events([EventRef {
-                node_id: f.emit_id,
+                node_id: root_execution_node(f.emit_id),
                 event_idx: 0,
             }])
             .await?;
@@ -4060,7 +4166,10 @@ mod events {
 
         // The triggering event is echoed back in the stats
         assert_eq!(stats.triggered_events.len(), 1);
-        assert_eq!(stats.triggered_events[0].node_id, f.emit_id);
+        assert_eq!(
+            stats.triggered_events[0].node_id,
+            root_execution_node(f.emit_id)
+        );
         assert_eq!(stats.triggered_events[0].event_idx, 0);
 
         Ok(())
@@ -4115,7 +4224,7 @@ mod events {
         // emit executed and has a populated lambda + a subscriber → one trigger.
         // recv has no events → contributes nothing.
         assert_eq!(triggers.len(), 1);
-        assert_eq!(triggers[0].event.node_id, f.emit_id);
+        assert_eq!(triggers[0].event.node_id, root_execution_node(f.emit_id));
         assert_eq!(triggers[0].event.event_idx, 0);
 
         Ok(())
@@ -4141,7 +4250,12 @@ mod events {
         let stats = eg.execute_sinks().await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
-        assert!(stats.executed_nodes.iter().any(|n| n.node_id == f.emit_id));
+        assert!(
+            stats
+                .executed_nodes
+                .iter()
+                .any(|n| n.node_id == root_execution_node(f.emit_id))
+        );
         assert!(eg.active_event_triggers(&stats).is_empty());
 
         Ok(())
@@ -4226,7 +4340,7 @@ mod events {
 
         let stats = eg
             .execute_events([EventRef {
-                node_id: emit_id,
+                node_id: root_execution_node(emit_id),
                 event_idx: 0,
             }])
             .await?;
@@ -4244,7 +4358,9 @@ mod events {
         // alongside the promoted sinks — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
         assert!(
-            eg.plan.process_order.contains(&trigger_id),
+            eg.plan
+                .process_order
+                .contains(&root_execution_node(trigger_id)),
             "the RunSinks sink runs as a sink"
         );
 
@@ -4296,7 +4412,7 @@ mod events {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
         eg.execute_events([EventRef {
-            node_id: emit_id,
+            node_id: root_execution_node(emit_id),
             event_idx: 0,
         }])
         .await?;
@@ -4667,7 +4783,11 @@ mod topology {
             1,
             "survivor recomputed after unrelated node removal"
         );
-        assert!(stats.cached_nodes.contains(&survivor_id));
+        assert!(
+            stats
+                .cached_nodes
+                .contains(&root_execution_node(survivor_id))
+        );
         let vals = eg.get_argument_values(&survivor_id).unwrap();
         assert!(
             matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))
@@ -4890,7 +5010,11 @@ mod graph {
         );
     }
 
-    fn bind_target(eg: &ExecutionEngine, node_id: NodeId, input_idx: usize) -> NodeId {
+    fn bind_target(
+        eg: &ExecutionEngine,
+        node_id: ExecutionNodeId,
+        input_idx: usize,
+    ) -> ExecutionNodeId {
         match &eg.node_inputs(node_id)[input_idx].binding {
             ExecutionBinding::Bind(addr) => addr.target,
             other => panic!("expected Bind, got {other:?}"),
@@ -4925,8 +5049,8 @@ mod graph {
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
         let sum = execution_node_id(&eg, &graph, &library, "sum").unwrap();
-        assert_eq!(bind_target(&eg, sum, 0), a_id);
-        assert_eq!(bind_target(&eg, sum, 1), b_id);
+        assert_eq!(bind_target(&eg, sum, 0), root_execution_node(a_id));
+        assert_eq!(bind_target(&eg, sum, 1), root_execution_node(b_id));
         assert_eq!(
             bind_target(
                 &eg,
@@ -4949,11 +5073,22 @@ mod graph {
         for node in graph.iter() {
             let address = NodeAddress::root(node.id);
             assert!(
-                eg.compiled.program.e_nodes.contains_key(&node.id),
+                eg.compiled
+                    .program
+                    .e_nodes
+                    .contains_key(&root_execution_node(node.id)),
                 "id preserved"
             );
-            assert_eq!(eg.compiled.flatten_map.address(node.id), Some(&address));
-            assert_eq!(eg.compiled.flatten_map.flat_node(&address), Some(node.id));
+            assert_eq!(
+                eg.compiled
+                    .flatten_map
+                    .address(root_execution_node(node.id)),
+                Some(&address)
+            );
+            assert_eq!(
+                eg.compiled.flatten_map.flat_node(&address),
+                Some(root_execution_node(node.id))
+            );
         }
     }
 
@@ -5015,12 +5150,20 @@ mod graph {
         // back to the authoring interior id then the enclosing instance.
         let sum_flat = execution_node_id(&eg, &graph, &library, "sum").unwrap();
         assert_eq!(sum_flat, retained_flat_id);
-        assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
+        assert_ne!(
+            sum_flat,
+            root_execution_node(interior_sum_id),
+            "flattened id is remapped"
+        );
         let attr: Vec<_> = retained_compiled.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.
-        let a_attr: Vec<_> = eg.compiled.flatten_map.attribution(a_id).collect();
+        let a_attr: Vec<_> = eg
+            .compiled
+            .flatten_map
+            .attribution(root_execution_node(a_id))
+            .collect();
         assert_eq!(a_attr, vec![a_id]);
     }
 
@@ -5041,7 +5184,11 @@ mod graph {
         library
     }
 
-    fn subscriber_ids(eg: &ExecutionEngine, node_id: NodeId, event_idx: usize) -> Vec<NodeId> {
+    fn subscriber_ids(
+        eg: &ExecutionEngine,
+        node_id: ExecutionNodeId,
+        event_idx: usize,
+    ) -> Vec<ExecutionNodeId> {
         eg.node_events(node_id)[event_idx].subscribers.clone()
     }
 
@@ -5076,7 +5223,10 @@ mod graph {
 
         // The flattened interior `ticker` carries the rewired subscriber.
         let ticker_node = execution_node_id(&eg, &graph, &library, "ticker").unwrap();
-        assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![listener_id]);
+        assert_eq!(
+            subscriber_ids(&eg, ticker_node, 0),
+            vec![root_execution_node(listener_id)]
+        );
     }
 
     /// Triggering a composite (as a subscriber) reaches the interior nodes
@@ -5106,7 +5256,10 @@ mod graph {
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
         let reactor_flat = execution_node_id(&eg, &graph, &library, "Print").unwrap();
-        assert_eq!(subscriber_ids(&eg, emitter_id, 0), vec![reactor_flat]);
+        assert_eq!(
+            subscriber_ids(&eg, root_execution_node(emitter_id), 0),
+            vec![reactor_flat]
+        );
     }
 
     /// Editing a shared (linked) def re-inlines every instance on the next
@@ -5240,7 +5393,7 @@ mod graph {
 
         // Fire E's event (as the worker does) — the interior `get_a` runs.
         eg.execute_events([EventRef {
-            node_id: emitter_id,
+            node_id: root_execution_node(emitter_id),
             event_idx: 0,
         }])
         .await?;
@@ -5641,7 +5794,7 @@ mod compile_regressions {
                 "authoring resolution for {node_id}"
             );
             assert_eq!(
-                program.node_output_types(&program.e_nodes[&node_id]),
+                program.node_output_types(&program.e_nodes[&root_execution_node(node_id)]),
                 std::slice::from_ref(&expected),
                 "compiled resolution for {node_id}"
             );
@@ -5664,16 +5817,17 @@ mod compile_regressions {
         );
 
         let mut program = ExecutionProgram::default();
+        let execution_node_id = root_execution_node(node_id);
         program.inputs.push(ExecutionInput {
             required: true,
             stamper: None,
             binding: ExecutionBinding::Bind(ExecutionPortAddress {
-                target: node_id,
+                target: execution_node_id,
                 port_idx: 0,
             }),
         });
         program.e_nodes.insert(
-            node_id,
+            execution_node_id,
             ExecutionNode {
                 func_id: passthrough.id,
                 inputs: Span::new(0, 1),
@@ -5683,7 +5837,7 @@ mod compile_regressions {
         );
         program.resolve_output_types(&library);
         assert_eq!(
-            program.node_output_types(&program.e_nodes[&node_id]),
+            program.node_output_types(&program.e_nodes[&execution_node_id]),
             &[DataType::Any]
         );
     }
@@ -5739,7 +5893,7 @@ mod compile_regressions {
         let lib_v2 = make_lib(2, true);
         engine.update(&graph, &lib_v2).unwrap();
         assert_eq!(
-            engine.node_inputs(generate_id).len(),
+            engine.node_inputs(root_execution_node(generate_id)).len(),
             1,
             "the reused flat node picked up the grown input list"
         );
@@ -5798,7 +5952,10 @@ mod compile_regressions {
         eg.execute_sinks().await.unwrap();
 
         assert!(
-            !eg.compiled.program.e_nodes.contains_key(&sum_interior_id),
+            !eg.compiled
+                .program
+                .e_nodes
+                .contains_key(&root_execution_node(sum_interior_id)),
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );
         let values = eg

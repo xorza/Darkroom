@@ -290,12 +290,15 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   ids onto authoring nodes. `WorkerBridge::deliver` forwards reports to its
   channel and pokes `host.request_repaint()`.
 - **Run to a node** (`App::run_node`, `RunCommand::Node`): after installation,
-  a separate `RunSeeds::nodes` command seeds every compiled occurrence of the
-  authored node, with their outputs delivered for the preview fetch. Two
-  triggers, both gated on `SceneNode::runnable` (instance/
-  boundary/missing nodes don't resolve as seeds; Darkroom exposes the disable
-  toggle only on runnable sinks, and Scenarium treats an explicitly seeded
-  disabled sink as enabled for that run): the header's play chip left of the
+  the host resolves the root node's `NodeAddress` through that compile, then a
+  separate `RunSeeds::nodes` command seeds the exact `ExecutionNodeId`, with its
+  outputs delivered for the preview fetch. Local definition tabs cannot supply
+  an enclosing instance path, so they expose no Run Node action. Two
+  triggers, both gated on `SceneNode::runnable` (instance/boundary/missing nodes
+  don't resolve as seeds; local tabs lack an execution address). The disable
+  toggle remains available on executable sink kinds independently, and
+  Scenarium treats an explicitly seeded disabled sink as enabled for that run:
+  the header's play chip left of the
   title (drawn in `gui/node/header.rs`, click scanned by `emit_play_clicks` and
   translated at canvas level) and the node context menu's "Run to this node".
 - **Per-document disk cache.** `Workspace` binds `RuntimeHost` to the

@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use crate::DynamicValue;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeAddress;
-use crate::graph::NodeId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunPhase {
@@ -12,7 +12,7 @@ pub enum RunPhase {
 
 #[derive(Debug, Clone)]
 pub struct RunProgress {
-    pub node_id: NodeId,
+    pub node_id: ExecutionNodeId,
     pub phase: RunPhase,
 }
 

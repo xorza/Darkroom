@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::identity::ExecutionNodeId;
 
 /// A top-level node (empty descent path) keeps its own id verbatim — this is
 /// what lets a func-only graph map to itself and per-node caches survive an
@@ -6,7 +7,7 @@ use super::*;
 #[test]
 fn flatten_id_is_identity_at_top_level() {
     let id = NodeId::from_u128(0xABCD);
-    assert_eq!(flatten_id(&[], id), id);
+    assert_eq!(flatten_id(&[], id), ExecutionNodeId::from_node_id(id));
 }
 
 /// A nested node's id is a deterministic hash of (descent path, interior id):
@@ -20,10 +21,7 @@ fn flatten_id_nested_is_deterministic_and_path_sensitive() {
 
     let id = flatten_id(&path, interior);
     assert_eq!(id, flatten_id(&path, interior), "deterministic");
-    assert_ne!(
-        id, interior,
-        "a nested id is remapped, not the bare interior id"
-    );
+    assert_ne!(id, ExecutionNodeId::from_node_id(interior));
 
     let other_path = [NodeId::from_u128(1), NodeId::from_u128(3)];
     assert_ne!(

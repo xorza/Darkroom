@@ -1,17 +1,17 @@
 use crate::RamUsage;
 use crate::execution::RunError;
 use crate::execution::event::EventRef;
-use crate::graph::{InputPort, NodeId};
+use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 
 #[derive(Debug, Clone)]
 pub struct ExecutedNodeStats {
-    pub node_id: NodeId,
+    pub node_id: ExecutionNodeId,
     pub elapsed_secs: f64,
 }
 
 #[derive(Debug, Clone)]
 pub struct NodeError {
-    pub node_id: NodeId,
+    pub node_id: ExecutionNodeId,
     pub error: RunError,
 }
 
@@ -24,14 +24,14 @@ pub enum LogLevel {
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
-    pub node_id: NodeId,
+    pub node_id: ExecutionNodeId,
     pub level: LogLevel,
     pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeRamUsage {
-    pub node_id: NodeId,
+    pub node_id: ExecutionNodeId,
     pub usage: RamUsage,
 }
 
@@ -39,8 +39,8 @@ pub struct NodeRamUsage {
 pub struct ExecutionStats {
     pub elapsed_secs: f64,
     pub executed_nodes: Vec<ExecutedNodeStats>,
-    pub missing_inputs: Vec<InputPort>,
-    pub cached_nodes: Vec<NodeId>,
+    pub missing_inputs: Vec<ExecutionInputPort>,
+    pub cached_nodes: Vec<ExecutionNodeId>,
     pub triggered_events: Vec<EventRef>,
     pub node_errors: Vec<NodeError>,
     pub logs: Vec<LogEntry>,

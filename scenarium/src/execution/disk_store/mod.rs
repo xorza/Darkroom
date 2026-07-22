@@ -20,8 +20,8 @@ use crate::DataType;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::codec::{self, deserialize_outputs, serialize_outputs};
 use crate::execution::digest::Digest;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
-use crate::graph::NodeId;
 use crate::library::Library;
 use crate::runtime::context::ContextManager;
 use common::file_utils;
@@ -84,7 +84,7 @@ impl DiskStore {
     /// rather than reading it off the cache, so this layer stays free of `RuntimeCache`.
     pub(crate) fn blob_target(
         &self,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
         e_node: &ExecutionNode,
         digest: Option<Digest>,
     ) -> Option<BlobTarget> {

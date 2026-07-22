@@ -1,5 +1,6 @@
 use crate::DataType;
 use crate::execution::compile::CompiledGraph;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
@@ -18,7 +19,12 @@ struct Fix {
 }
 
 impl Fix {
-    fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
+    fn node(
+        &mut self,
+        sink: bool,
+        inputs: &[(bool, ExecutionBinding)],
+        outputs: u32,
+    ) -> ExecutionNodeId {
         let program = &mut self.compiled.program;
         if program.e_nodes.is_empty() {
             self.compiled.flatten_map.reset();
@@ -43,7 +49,7 @@ impl Fix {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
-        let id = NodeId::from_u128(idx as u128 + 1);
+        let id = ExecutionNodeId::from_u128(idx as u128 + 1);
         program.e_nodes.insert(
             id,
             ExecutionNode {
@@ -54,12 +60,14 @@ impl Fix {
                 ..Default::default()
             },
         );
-        self.compiled.flatten_map.set_leaf(id, 0, id);
+        self.compiled
+            .flatten_map
+            .set_leaf(id, 0, NodeId::from(id.as_uuid()));
         id
     }
 }
 
-fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
+fn bind(node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
         target: node_id,
         port_idx: port,
@@ -222,8 +230,8 @@ fn node_seed_is_both_a_root_and_pinned() {
 fn dependency_cycle_is_rejected() {
     // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();
-    f.node(true, &[(false, bind(NodeId::from_u128(2), 0))], 1);
-    f.node(false, &[(false, bind(NodeId::from_u128(1), 0))], 1);
+    f.node(true, &[(false, bind(ExecutionNodeId::from_u128(2), 0))], 1);
+    f.node(false, &[(false, bind(ExecutionNodeId::from_u128(1), 0))], 1);
 
     let mut planner = Planner::default();
     let mut plan = ExecutionPlan::default();
@@ -274,7 +282,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.
-    let bogus = NodeId::from_u128(0xdead_beef);
+    let bogus = ExecutionNodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds {
         nodes: vec![bogus],
         ..Default::default()

@@ -1,5 +1,6 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
 use crate::node::lambda::OutputDemand;
 use common::Span;
@@ -14,8 +15,8 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
     OutputSnapshot::new(values)
 }
 
-fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> NodeId {
-    let node_id = NodeId::from_u128(id);
+fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> ExecutionNodeId {
+    let node_id = ExecutionNodeId::from_u128(id);
     assert!(cache.slots.insert(node_id, slot).is_none());
     node_id
 }
@@ -224,7 +225,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
         "resident values and output demand require equal arity"
     );
 
-    let node_id = NodeId::from_u128(1);
+    let node_id = ExecutionNodeId::from_u128(1);
     let mut program = ExecutionProgram::default();
     program.e_nodes.insert(
         node_id,
@@ -364,11 +365,11 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     // the OnDisk slot C is omitted.
     assert_eq!(stats.by_node.len(), 2);
     assert!(stats.by_node.contains(&NodeRamUsage {
-        node_id: NodeId::from_u128(1),
+        node_id: ExecutionNodeId::from_u128(1),
         usage: RamUsage { cpu: 105, gpu: 10 },
     }));
     assert!(stats.by_node.contains(&NodeRamUsage {
-        node_id: NodeId::from_u128(2),
+        node_id: ExecutionNodeId::from_u128(2),
         usage: RamUsage { cpu: 100, gpu: 10 },
     }));
     assert_eq!(shared_calls.load(Ordering::Relaxed), 2);

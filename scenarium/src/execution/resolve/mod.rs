@@ -19,11 +19,11 @@
 //! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::RuntimeCache;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::{NodeMap, OutputColumn, reset_node_map};
-use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
@@ -72,7 +72,7 @@ impl ResolvedOutputs {
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
-        node_id: NodeId,
+        node_id: ExecutionNodeId,
     ) {
         let outputs = program.e_nodes[&node_id].outputs;
         if plan.pinned.contains(&node_id) {

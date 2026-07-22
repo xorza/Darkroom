@@ -1,29 +1,29 @@
 use super::*;
 use crate::DataType;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx,
 };
-use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DynamicValue, StaticValue};
 use common::Span;
 
 #[derive(Debug)]
 struct CachedNode {
-    node_id: NodeId,
+    node_id: ExecutionNodeId,
     values: Vec<DynamicValue>,
 }
 
 #[derive(Default)]
 struct Fix {
     program: ExecutionProgram,
-    order: Vec<NodeId>,
+    order: Vec<ExecutionNodeId>,
 }
 
 impl Fix {
-    fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
+    fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
         let inputs_start = self.program.inputs.len() as u32;
         for (required, binding) in inputs {
             self.program.inputs.push(ExecutionInput {
@@ -40,7 +40,7 @@ impl Fix {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
-        let node_id = NodeId::from_u128(idx as u128 + 1);
+        let node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
         self.order.push(node_id);
         self.program.e_nodes.insert(
             node_id,
@@ -57,9 +57,9 @@ impl Fix {
 
     fn resolve(
         &self,
-        roots: &[NodeId],
-        pinned: &[NodeId],
-        missing: &[NodeId],
+        roots: &[ExecutionNodeId],
+        pinned: &[ExecutionNodeId],
+        missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
     ) -> ResolvedRun {
         let mut verdicts: NodeMap<NodeVerdict> = self
@@ -95,7 +95,7 @@ impl Fix {
     }
 }
 
-fn bind(node_id: NodeId, port_idx: usize) -> ExecutionBinding {
+fn bind(node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
         target: node_id,
         port_idx,

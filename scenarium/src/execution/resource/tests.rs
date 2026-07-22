@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 use crate::execution::cache::test_support::hydrate;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache};
 use crate::execution::digest::{Digest, DigestHasher};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, ExecutionProgram,
@@ -17,7 +18,6 @@ use crate::execution::program::{
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
 use crate::execution::{NodeMap, NodeSet};
-use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{
     CustomValue, DataType, DynamicValue, ResourceStamp, ResourceStamper, StaticValue, TypeId,
@@ -91,13 +91,13 @@ fn directory_identity_tracks_entry_changes() {
 struct ConstPathFixture {
     program: ExecutionProgram,
     plan: ExecutionPlan,
-    first: NodeId,
-    second: NodeId,
+    first: ExecutionNodeId,
+    second: ExecutionNodeId,
 }
 
 fn const_path_fixture(path: &str) -> ConstPathFixture {
-    let first = NodeId::from_u128(1);
-    let second = NodeId::from_u128(2);
+    let first = ExecutionNodeId::from_u128(1);
+    let second = ExecutionNodeId::from_u128(2);
     let mut program = ExecutionProgram {
         inputs: vec![
             ExecutionInput {
@@ -219,7 +219,7 @@ struct BoundResourceFixture {
     program: ExecutionProgram,
     plan: ExecutionPlan,
     cache: RuntimeCache,
-    first_consumer: NodeId,
+    first_consumer: ExecutionNodeId,
 }
 
 #[derive(Debug)]
@@ -246,9 +246,9 @@ impl CustomValue for TestHandle {
 }
 
 fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFixture {
-    let producer = NodeId::from_u128(1);
-    let first_consumer = NodeId::from_u128(2);
-    let second_consumer = NodeId::from_u128(3);
+    let producer = ExecutionNodeId::from_u128(1);
+    let first_consumer = ExecutionNodeId::from_u128(2);
+    let second_consumer = ExecutionNodeId::from_u128(3);
     let address = ExecutionPortAddress {
         target: producer,
         port_idx: 0,

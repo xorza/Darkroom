@@ -2,10 +2,10 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::cache::OutputSnapshot;
 use crate::execution::cache::test_support::hydrate;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::resource::test_support::prepare_node;
-use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
 
@@ -96,8 +96,8 @@ fn bind(idx: usize, port: usize) -> ExecutionBinding {
     })
 }
 
-fn node_id(idx: usize) -> NodeId {
-    NodeId::from_u128(idx as u128 + 1)
+fn node_id(idx: usize) -> ExecutionNodeId {
+    ExecutionNodeId::from_u128(idx as u128 + 1)
 }
 
 fn konst(value: StaticValue) -> ExecutionBinding {
