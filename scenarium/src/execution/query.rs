@@ -16,16 +16,19 @@ impl ExecutionEngine {
             .cached_nodes
             .iter()
             .copied()
-            .chain(stats.executed_nodes.iter().map(|n| n.node_id))
-            .flat_map(|node_id| {
-                let e_node = &self.compiled.program.e_nodes[&node_id];
-                let event_state = self.cache.slots[&node_id].event_state.clone();
+            .chain(stats.executed_nodes.iter().map(|n| n.e_node_id))
+            .flat_map(|e_node_id| {
+                let e_node = &self.compiled.program.e_nodes[&e_node_id];
+                let event_state = self.cache.slots[&e_node_id].event_state.clone();
                 self.compiled.program.events[e_node.events.range()]
                     .iter()
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
                     .map(move |(event_idx, event)| EventTrigger {
-                        event: EventRef { node_id, event_idx },
+                        event: EventRef {
+                            e_node_id,
+                            event_idx,
+                        },
                         lambda: event.lambda.clone(),
                         state: event_state.clone(),
                     })
@@ -43,16 +46,16 @@ pub(crate) mod test_support {
     use crate::execution::program::ExecutionBinding;
     use crate::graph::NodeId;
 
-    pub(crate) fn resolve_node_id(
+    pub(crate) fn resolve_e_node_id(
         compiled: &CompiledGraph,
         address: &NodeAddress,
     ) -> Option<ExecutionNodeId> {
-        let flat_id = compiled.flatten_map.flat_node(address)?;
+        let e_node_id = compiled.flatten_map.flat_node(address)?;
         compiled
             .program
             .e_nodes
-            .contains_key(&flat_id)
-            .then_some(flat_id)
+            .contains_key(&e_node_id)
+            .then_some(e_node_id)
     }
 
     #[derive(Debug, Default)]
@@ -65,20 +68,20 @@ pub(crate) mod test_support {
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            let node_id = resolve_node_id(&self.compiled, &NodeAddress::root(*node_id))?;
-            Some(self.argument_values_at(node_id))
+            let e_node_id = resolve_e_node_id(&self.compiled, &NodeAddress::root(*node_id))?;
+            Some(self.argument_values_at(e_node_id))
         }
 
         pub(crate) fn get_argument_values_at(
             &self,
             address: &NodeAddress,
         ) -> Option<ArgumentValues> {
-            let node_id = resolve_node_id(&self.compiled, address)?;
-            Some(self.argument_values_at(node_id))
+            let e_node_id = resolve_e_node_id(&self.compiled, address)?;
+            Some(self.argument_values_at(e_node_id))
         }
 
-        fn argument_values_at(&self, node_id: ExecutionNodeId) -> ArgumentValues {
-            let e_node = &self.compiled.program.e_nodes[&node_id];
+        fn argument_values_at(&self, e_node_id: ExecutionNodeId) -> ArgumentValues {
+            let e_node = &self.compiled.program.e_nodes[&e_node_id];
 
             let inputs = self.compiled.program.inputs[e_node.inputs.range()]
                 .iter()
@@ -92,7 +95,7 @@ pub(crate) mod test_support {
                 })
                 .collect();
 
-            let outputs = self.cache.slots[&node_id]
+            let outputs = self.cache.slots[&e_node_id]
                 .output_values()
                 .map(|o| o.to_vec())
                 .unwrap_or_default();

@@ -84,7 +84,7 @@ impl DiskStore {
     /// rather than reading it off the cache, so this layer stays free of `RuntimeCache`.
     pub(crate) fn blob_target(
         &self,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         e_node: &ExecutionNode,
         digest: Option<Digest>,
     ) -> Option<BlobTarget> {
@@ -93,7 +93,7 @@ impl DiskStore {
         }
         let digest = digest?;
         let mut buf = [0u8; 32];
-        let name = node_id.as_uuid().simple().encode_lower(&mut buf);
+        let name = e_node_id.as_uuid().simple().encode_lower(&mut buf);
         Some(BlobTarget {
             path: self.disk_root.as_ref()?.join(name),
             digest,

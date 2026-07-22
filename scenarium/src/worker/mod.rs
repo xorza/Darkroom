@@ -96,7 +96,7 @@ where
 {
     for panic in panics {
         callback(WorkerReport::Finished(Err(Error::EventLambdaPanic {
-            node_id: panic.node_id,
+            e_node_id: panic.e_node_id,
             message: panic.message,
         })));
     }

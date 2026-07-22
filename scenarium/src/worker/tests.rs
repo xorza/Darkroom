@@ -86,7 +86,7 @@ impl FrameHarness {
 
     fn frame_event(&self) -> EventRef {
         EventRef {
-            node_id: root_execution_node(self.frame_event_node_id),
+            e_node_id: root_execution_node(self.frame_event_node_id),
             event_idx: 0,
         }
     }
@@ -153,11 +153,11 @@ async fn start_single_event_loop(
     lambda: EventLambda,
     pause_gate: PauseGate,
 ) -> (ActiveEventLoop, ExecutionNodeId) {
-    let node_id = ExecutionNodeId::unique();
+    let e_node_id = ExecutionNodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
             event: EventRef {
-                node_id,
+                e_node_id,
                 event_idx: 0,
             },
             lambda,
@@ -166,7 +166,7 @@ async fn start_single_event_loop(
         pause_gate,
     )
     .await;
-    (active, node_id)
+    (active, e_node_id)
 }
 
 /// A worker whose callback forwards only `Finished` reports into a fresh
@@ -273,7 +273,7 @@ async fn test_worker() -> anyhow::Result<()> {
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     let event = active
         .events
@@ -283,7 +283,7 @@ async fn start_event_loop_forwards_events() {
     assert_eq!(
         event,
         EventRef {
-            node_id,
+            e_node_id,
             event_idx: 0
         }
     );
@@ -304,7 +304,7 @@ async fn start_event_loop_waits_for_callback() {
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     notify_for_callback.notify_waiters();
 
@@ -315,7 +315,7 @@ async fn start_event_loop_waits_for_callback() {
     assert_eq!(
         event,
         EventRef {
-            node_id,
+            e_node_id,
             event_idx: 0
         }
     );
@@ -388,7 +388,7 @@ async fn lambda_panic_is_captured_not_unwound() {
     // (attributed to its node) and returns it, rather than unwinding into the
     // worker loop — which would kill the worker.
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     // The lambda panics on its first invoke and never sends; its sole sender
     // drops, closing the channel. Awaiting that close ensures the panic has
@@ -400,7 +400,10 @@ async fn lambda_panic_is_captured_not_unwound() {
 
     let panics = active.stop().await;
     assert_eq!(panics.len(), 1, "the lambda panic should be captured");
-    assert_eq!(panics[0].node_id, node_id, "panic attributed to its node");
+    assert_eq!(
+        panics[0].e_node_id, e_node_id,
+        "panic attributed to its node"
+    );
     assert!(
         panics[0].message.contains("boom in lambda"),
         "panic message preserved: {}",
@@ -526,12 +529,12 @@ async fn worker_streams_node_progress_before_finished() {
                     .as_ref()
                     .expect("Progress arrived before Installed");
                 assert_eq!(
-                    p.node_id,
+                    p.e_node_id,
                     root_execution_node(print_node_id),
                     "progress maps to the node"
                 );
                 assert_eq!(
-                    compiled.authoring_address(p.node_id).unwrap(),
+                    compiled.authoring_address(p.e_node_id).unwrap(),
                     &NodeAddress::root(print_node_id),
                 );
                 match p.phase {
@@ -620,7 +623,12 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     let addresses: HashSet<_> = stats
         .executed_nodes
         .iter()
-        .map(|stats| finished.compiled.authoring_address(stats.node_id).unwrap())
+        .map(|stats| {
+            finished
+                .compiled
+                .authoring_address(stats.e_node_id)
+                .unwrap()
+        })
         .filter(|address| address.node_id == interior)
         .cloned()
         .collect();
@@ -744,7 +752,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     let mut executed = stats
         .executed_nodes
         .iter()
-        .map(|node| node.node_id)
+        .map(|node| node.e_node_id)
         .collect::<Vec<_>>();
     executed.sort();
     let mut expected = vec![
@@ -954,7 +962,7 @@ async fn event_on_empty_graph_is_silent_noop() {
     worker
         .send(WorkerMessage::InjectEvents {
             events: vec![EventRef {
-                node_id: ExecutionNodeId::unique(),
+                e_node_id: ExecutionNodeId::unique(),
                 event_idx: 0,
             }],
         })
@@ -1161,7 +1169,7 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
             .compiled
             .authoring_address(replacement_execution_node),
         Err(ExecutionIdentityError::NodeNotFound {
-            node_id: replacement_execution_node,
+            e_node_id: replacement_execution_node,
         })
     );
 
@@ -1197,9 +1205,9 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 #[test]
 fn scan_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
-    let node_id = ExecutionNodeId::unique();
+    let e_node_id = ExecutionNodeId::unique();
     let event = EventRef {
-        node_id,
+        e_node_id,
         event_idx: 0,
     };
 
@@ -1213,10 +1221,10 @@ fn scan_accumulates_simple_flags() {
             events: vec![event],
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+            seeds: RunSeeds::nodes(vec![e_node_id]),
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+            seeds: RunSeeds::nodes(vec![e_node_id]),
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -1232,15 +1240,15 @@ fn scan_accumulates_simple_flags() {
         1,
         "duplicate node seeds union to one"
     );
-    assert!(intent.execute_nodes.seen.contains(&node_id));
+    assert!(intent.execute_nodes.seen.contains(&e_node_id));
     assert_eq!(intent.syncs.len(), 1);
 }
 
 #[test]
 fn scan_deduplicates_events() {
-    let node_id = ExecutionNodeId::unique();
+    let e_node_id = ExecutionNodeId::unique();
     let event = EventRef {
-        node_id,
+        e_node_id,
         event_idx: 0,
     };
 
@@ -1620,7 +1628,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         !stats
             .executed_nodes
             .iter()
-            .any(|n| n.node_id == root_execution_node(get_a_id)),
+            .any(|n| n.e_node_id == root_execution_node(get_a_id)),
         "get_a was cut, not recomputed"
     );
     assert!(
@@ -1631,7 +1639,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         !stats
             .executed_nodes
             .iter()
-            .any(|n| n.node_id == root_execution_node(mult_id)),
+            .any(|n| n.e_node_id == root_execution_node(mult_id)),
         "mult itself is not recomputed"
     );
 }

@@ -113,9 +113,9 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         output_pinned: vec![false, false],
         ..Default::default()
     };
-    for (node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
+    for (e_node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
         program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(10),
@@ -127,7 +127,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     }
     let verdicts: NodeMap<NodeVerdict> = [first, second]
         .into_iter()
-        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
         .collect();
     ConstPathFixture {
         program,
@@ -279,9 +279,10 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
             ..Default::default()
         },
     );
-    for (node_id, input_start, output_start) in [(first_consumer, 0, 1), (second_consumer, 1, 2)] {
+    for (e_node_id, input_start, output_start) in [(first_consumer, 0, 1), (second_consumer, 1, 2)]
+    {
         program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(2),
@@ -295,7 +296,7 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         .e_nodes
         .keys()
         .copied()
-        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
         .collect();
     let plan = ExecutionPlan {
         process_order: vec![producer, first_consumer, second_consumer],

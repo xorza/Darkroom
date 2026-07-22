@@ -50,17 +50,17 @@ impl ContextManager {
     /// still surface output. No-op when called outside a node invoke
     /// (`current_node` unset).
     pub fn log(&mut self, level: LogLevel, msg: impl Into<String>) {
-        let Some(node_id) = self.current_node else {
+        let Some(e_node_id) = self.current_node else {
             return;
         };
         let message = msg.into();
         match level {
-            LogLevel::Info => tracing::info!(?node_id, "{message}"),
-            LogLevel::Warn => tracing::warn!(?node_id, "{message}"),
-            LogLevel::Error => tracing::error!(?node_id, "{message}"),
+            LogLevel::Info => tracing::info!(?e_node_id, "{message}"),
+            LogLevel::Warn => tracing::warn!(?e_node_id, "{message}"),
+            LogLevel::Error => tracing::error!(?e_node_id, "{message}"),
         }
         self.logs.push(LogEntry {
-            node_id,
+            e_node_id,
             level,
             message,
         });

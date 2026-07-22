@@ -72,9 +72,9 @@ impl WorkerBridge {
     }
 
     /// Execute one exact node in the installed program and deliver its outputs.
-    pub(crate) fn run_node(&self, node_id: ExecutionNodeId) {
+    pub(crate) fn run_node(&self, e_node_id: ExecutionNodeId) {
         let _ = self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+            seeds: RunSeeds::nodes(vec![e_node_id]),
         });
     }
 

@@ -235,11 +235,11 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 ///   `None`, and the run loop re-stamps such a node at reach time, once its producers settled.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
-    node_id: ExecutionNodeId,
+    e_node_id: ExecutionNodeId,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
 ) -> Option<Digest> {
-    let e_node = &program.e_nodes[&node_id];
+    let e_node = &program.e_nodes[&e_node_id];
 
     // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
     // digest and always recomputes.

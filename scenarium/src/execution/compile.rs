@@ -55,22 +55,22 @@ impl CompiledGraph {
     /// Resolve one flat execution id to its exact scoped authoring address.
     pub fn authoring_address(
         &self,
-        flat_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) -> Result<&NodeAddress, ExecutionIdentityError> {
         self.flatten_map
-            .address(flat_id)
-            .ok_or(ExecutionIdentityError::NodeNotFound { node_id: flat_id })
+            .address(e_node_id)
+            .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
     }
 
     /// Attribute one flat execution id to its authored node followed by every
     /// enclosing graph instance, innermost first.
     pub fn attribution(
         &self,
-        flat_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) -> Result<impl Iterator<Item = NodeId> + '_, ExecutionIdentityError> {
         self.flatten_map
-            .attribution(flat_id)
-            .ok_or(ExecutionIdentityError::NodeNotFound { node_id: flat_id })
+            .attribution(e_node_id)
+            .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
     }
 }
 
@@ -158,7 +158,7 @@ pub(crate) mod test_support {
 
         pub fn insert_leaf(
             &mut self,
-            flat_id: ExecutionNodeId,
+            e_node_id: ExecutionNodeId,
             instances: impl IntoIterator<Item = NodeId>,
             node_id: NodeId,
         ) {
@@ -166,7 +166,7 @@ pub(crate) mod test_support {
             for instance in instances {
                 scope = self.flatten_map.push_scope(instance, scope);
             }
-            self.flatten_map.set_leaf(flat_id, scope, node_id);
+            self.flatten_map.set_leaf(e_node_id, scope, node_id);
         }
 
         pub fn build(self) -> Arc<CompiledGraph> {
@@ -215,9 +215,9 @@ mod tests {
             instances: vec![instance_id],
             node_id: interior_id,
         };
-        let flat_id = compiled.flatten_map.flat_node(&address).unwrap();
+        let e_node_id = compiled.flatten_map.flat_node(&address).unwrap();
         assert!(
-            compiled.program.e_nodes[&flat_id].disabled,
+            compiled.program.e_nodes[&e_node_id].disabled,
             "the disabled instance marks its compiled interior effectively disabled"
         );
     }
@@ -276,12 +276,12 @@ mod tests {
         assert_eq!(
             compiled.authoring_address(missing_node),
             Err(ExecutionIdentityError::NodeNotFound {
-                node_id: missing_node,
+                e_node_id: missing_node,
             })
         );
         assert!(matches!(
             compiled.attribution(missing_node),
-            Err(ExecutionIdentityError::NodeNotFound { node_id }) if node_id == missing_node
+            Err(ExecutionIdentityError::NodeNotFound { e_node_id }) if e_node_id == missing_node
         ));
     }
 }

@@ -12,7 +12,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventRef {
-    pub node_id: ExecutionNodeId,
+    pub e_node_id: ExecutionNodeId,
     pub event_idx: usize,
 }
 

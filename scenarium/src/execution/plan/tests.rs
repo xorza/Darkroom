@@ -67,9 +67,9 @@ impl Fix {
     }
 }
 
-fn bind(node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target: node_id,
+        target: e_node_id,
         port_idx: port,
     })
 }
@@ -191,9 +191,9 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &mut plan,
         )
         .unwrap();
-    for node_id in [producer, required, optional] {
+    for e_node_id in [producer, required, optional] {
         assert_eq!(
-            plan.verdicts[&node_id],
+            plan.verdicts[&e_node_id],
             NodeVerdict::Execute,
             "the explicit producer seed makes every consumer runnable"
         );
@@ -288,5 +288,5 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
         ..Default::default()
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
-    assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(matches!(err, Error::NodeSeedNotFound { e_node_id } if e_node_id == bogus));
 }

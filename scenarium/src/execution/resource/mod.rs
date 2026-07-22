@@ -186,9 +186,9 @@ impl ResourceStampRequests {
         stamps: &RunResourceStamps,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) {
-        let node = &program.e_nodes[&node_id];
+        let node = &program.e_nodes[&e_node_id];
         if node.behavior != FuncBehavior::Pure {
             return;
         }
@@ -279,9 +279,9 @@ impl RunResourceStamps {
         self.fs_paths.clear();
         self.custom.clear();
         let mut requests = ResourceStampRequests::default();
-        for &node_id in &plan.process_order {
-            if plan.verdicts[&node_id].wants_execute() {
-                requests.collect_node(self, program, cache, node_id);
+        for &e_node_id in &plan.process_order {
+            if plan.verdicts[&e_node_id].wants_execute() {
+                requests.collect_node(self, program, cache, e_node_id);
             }
         }
         self.prepare(requests, cancel)
@@ -291,10 +291,10 @@ impl RunResourceStamps {
         &'a mut self,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         cancel: CancelToken,
     ) -> impl Future<Output = ()> + 'a {
-        let requests = self.collect_node_requests(program, cache, node_id);
+        let requests = self.collect_node_requests(program, cache, e_node_id);
         self.prepare(requests, cancel)
     }
 
@@ -302,10 +302,10 @@ impl RunResourceStamps {
         &self,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) -> ResourceStampRequests {
         let mut requests = ResourceStampRequests::default();
-        requests.collect_node(self, program, cache, node_id);
+        requests.collect_node(self, program, cache, e_node_id);
         requests
     }
 
@@ -358,9 +358,9 @@ pub(crate) mod test_support {
         stamps: &mut RunResourceStamps,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) {
-        let requests = stamps.collect_node_requests(program, cache, node_id);
+        let requests = stamps.collect_node_requests(program, cache, e_node_id);
         let prepared = requests.resolve(&CancelToken::never());
         stamps.fs_paths.extend(prepared.fs_paths);
         stamps.custom.extend(prepared.custom);

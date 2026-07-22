@@ -49,9 +49,9 @@ impl Prog {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
-        let node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
+        let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
         self.program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs: Span::new(inputs_start, inputs.len() as u32),
@@ -63,18 +63,18 @@ impl Prog {
                 ..Default::default()
             },
         );
-        node_id
+        e_node_id
     }
 
     /// Override a node's [`CacheMode`] (nodes default to `Ram`). Drives the mid-run
     /// output-release tests, which turn on the non-RAM modes.
-    fn set_cache(&mut self, node_id: ExecutionNodeId, cache: CacheMode) {
-        self.program.e_nodes.get_mut(&node_id).unwrap().cache = cache;
+    fn set_cache(&mut self, e_node_id: ExecutionNodeId, cache: CacheMode) {
+        self.program.e_nodes.get_mut(&e_node_id).unwrap().cache = cache;
     }
 
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
-    fn set_output_pinned(&mut self, node_id: ExecutionNodeId, port: usize, pinned: bool) {
-        let start = self.program.e_nodes[&node_id].outputs.start as usize;
+    fn set_output_pinned(&mut self, e_node_id: ExecutionNodeId, port: usize, pinned: bool) {
+        let start = self.program.e_nodes[&e_node_id].outputs.start as usize;
         self.program.output_pinned[start + port] = pinned;
     }
 }
@@ -92,8 +92,8 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
     // `RunProgress` Started/Finished sends, not just the pinned-output push)
     // indexes out of bounds.
     flatten.reset();
-    for node_id in program.e_nodes.keys().copied() {
-        flatten.set_leaf(node_id, 0, NodeId::from(node_id.as_uuid()));
+    for e_node_id in program.e_nodes.keys().copied() {
+        flatten.set_leaf(e_node_id, 0, NodeId::from(e_node_id.as_uuid()));
     }
     flatten
 }
@@ -127,7 +127,7 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
                 .e_nodes
                 .keys()
                 .copied()
-                .map(|node_id| (node_id, Disposition::Run))
+                .map(|e_node_id| (e_node_id, Disposition::Run))
                 .collect(),
             outputs: ResolvedOutputs {
                 demand: OutputColumn::from(demand),
@@ -140,16 +140,16 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
 fn demand_output(
     program: &ExecutionProgram,
     run: &mut TestRun,
-    node_id: ExecutionNodeId,
+    e_node_id: ExecutionNodeId,
     port_idx: usize,
 ) {
-    let output_idx = program.output_idx(node_id, port_idx);
+    let output_idx = program.output_idx(e_node_id, port_idx);
     run.resolved.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
-fn bind(node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target: node_id,
+        target: e_node_id,
         port_idx: port,
     })
 }
@@ -168,7 +168,7 @@ fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
     let verdicts = process_order
         .iter()
         .copied()
-        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
         .collect();
     ExecutionPlan {
         process_order: process_order.clone(),
@@ -184,9 +184,9 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let mut p = Prog::default();
-    let node_id = p.node(&[], 1, FuncLambda::default());
+    let e_node_id = p.node(&[], 1, FuncLambda::default());
     assert!(
-        catch_unwind(AssertUnwindSafe(|| p.program.output_idx(node_id, 1))).is_err(),
+        catch_unwind(AssertUnwindSafe(|| p.program.output_idx(e_node_id, 1))).is_err(),
         "a node-local output outside its compiled span must trip in debug"
     );
 
@@ -347,11 +347,11 @@ async fn upstream_error_skips_dependents_and_clears_output() {
         cache.slots[&b].output_values().is_none(),
         "the dependent is skipped, producing nothing"
     );
-    let error_of = |node_id: ExecutionNodeId| {
+    let error_of = |e_node_id: ExecutionNodeId| {
         stats
             .node_errors
             .iter()
-            .find(|e| e.node_id == node_id)
+            .find(|e| e.e_node_id == e_node_id)
             .map(|e| e.error.to_string())
     };
     assert!(error_of(a).unwrap().contains("boom"));
@@ -371,11 +371,11 @@ async fn unbound_output_errors_only_when_demanded() {
 
     let plan = run_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
-    let error_of = |node_id: ExecutionNodeId| {
+    let error_of = |e_node_id: ExecutionNodeId| {
         stats
             .node_errors
             .iter()
-            .find(|error| error.node_id == node_id)
+            .find(|error| error.e_node_id == e_node_id)
             .map(|error| &error.error)
     };
 
@@ -697,11 +697,11 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
         "the pure RAM consumer reuses its first-run result"
     );
     assert!(
-        second.executed_nodes.iter().any(|node| node.node_id == a)
+        second.executed_nodes.iter().any(|node| node.e_node_id == a)
             && second
                 .executed_nodes
                 .iter()
-                .any(|node| node.node_id == live),
+                .any(|node| node.e_node_id == live),
         "the producer and impure consumer still run"
     );
     assert!(
@@ -774,11 +774,11 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
         cache.slots[&a].output_values().is_none(),
         "A's stale value is dropped, not served"
     );
-    let error_of = |node_id: ExecutionNodeId| {
+    let error_of = |e_node_id: ExecutionNodeId| {
         stats
             .node_errors
             .iter()
-            .find(|e| e.node_id == node_id)
+            .find(|e| e.e_node_id == e_node_id)
             .map(|e| &e.error)
     };
     assert!(
@@ -823,8 +823,8 @@ async fn reuse_survives_failed_upstream_rerun() {
     let b = p.node(&[bind(a, 0)], 1, consumer());
     let c = p.node(&[bind(a, 0)], 1, consumer());
     // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
-    for node_id in [a, b, c] {
-        p.program.e_nodes.get_mut(&node_id).unwrap().behavior = FuncBehavior::Pure;
+    for e_node_id in [a, b, c] {
+        p.program.e_nodes.get_mut(&e_node_id).unwrap().behavior = FuncBehavior::Pure;
     }
     // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
     p.set_cache(a, CacheMode::None);
@@ -861,7 +861,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         Some(6),
         "B's valid cached value survives the sibling failure"
     );
-    let errored: Vec<ExecutionNodeId> = stats2.node_errors.iter().map(|e| e.node_id).collect();
+    let errored: Vec<ExecutionNodeId> = stats2.node_errors.iter().map(|e| e.e_node_id).collect();
     assert!(errored.contains(&a_id), "A's own failure is reported");
     assert!(
         errored.contains(&c_id),

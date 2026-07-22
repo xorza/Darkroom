@@ -28,10 +28,10 @@ use crate::gui::pinned_output::PinnedOutputStore;
 
 fn attributed_nodes(
     compiled: &CompiledGraph,
-    node_id: ExecutionNodeId,
+    e_node_id: ExecutionNodeId,
 ) -> impl Iterator<Item = NodeId> + '_ {
     compiled
-        .attribution(node_id)
+        .attribution(e_node_id)
         .expect("worker report identity must belong to the acknowledged compiled graph")
 }
 
@@ -176,13 +176,13 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         for e in &stats.executed_nodes {
-            self.record_status(&compiled, e.node_id, ExecStatus::Executed(e.elapsed_secs));
+            self.record_status(&compiled, e.e_node_id, ExecStatus::Executed(e.elapsed_secs));
         }
         for id in &stats.cached_nodes {
             self.record_status(&compiled, *id, ExecStatus::Cached);
         }
         for port in &stats.missing_inputs {
-            self.record_status(&compiled, port.node_id, ExecStatus::MissingInputs);
+            self.record_status(&compiled, port.e_node_id, ExecStatus::MissingInputs);
         }
         for e in &stats.node_errors {
             // A node cancelled mid-run didn't fail — it was interrupted and
@@ -191,11 +191,11 @@ impl RunState {
             if matches!(e.error, RunError::Cancelled { .. }) {
                 continue;
             }
-            self.record_status(&compiled, e.node_id, ExecStatus::Errored);
-            self.record_error(&compiled, e.node_id, &e.error);
+            self.record_status(&compiled, e.e_node_id, ExecStatus::Errored);
+            self.record_error(&compiled, e.e_node_id, &e.error);
         }
         for entry in &stats.logs {
-            for node_id in attributed_nodes(&compiled, entry.node_id) {
+            for node_id in attributed_nodes(&compiled, entry.e_node_id) {
                 self.nodes.entry(node_id).or_default().logs.push(NodeLog {
                     level: entry.level,
                     message: entry.message.clone(),
@@ -206,7 +206,7 @@ impl RunState {
         // onto its authoring node and every enclosing composite instance, so an
         // instance aggregates its interior's memory.
         for node_ram in &stats.node_ram {
-            for node_id in attributed_nodes(&compiled, node_ram.node_id) {
+            for node_id in attributed_nodes(&compiled, node_ram.e_node_id) {
                 self.nodes.entry(node_id).or_default().ram += node_ram.usage;
             }
         }
@@ -219,10 +219,10 @@ impl RunState {
     fn record_status(
         &mut self,
         compiled: &CompiledGraph,
-        flat_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         status: ExecStatus,
     ) {
-        for node_id in attributed_nodes(compiled, flat_id) {
+        for node_id in attributed_nodes(compiled, e_node_id) {
             let slot = self.nodes.entry(node_id).or_default();
             slot.status = slot.status.merged(status);
         }
@@ -235,11 +235,11 @@ impl RunState {
     fn record_error(
         &mut self,
         compiled: &CompiledGraph,
-        flat_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         error: &RunError,
     ) {
         let message = error.to_string();
-        for node_id in attributed_nodes(compiled, flat_id) {
+        for node_id in attributed_nodes(compiled, e_node_id) {
             self.nodes
                 .entry(node_id)
                 .or_default()
@@ -255,7 +255,7 @@ impl RunState {
     /// `record_status`'s `merged`, since `Running` is live-only and must
     /// always win over a stale `Errored`/`MissingInputs` from the last run.
     /// The installed compile is the program the event came from (like
-    /// [`set_results`](Self::set_results)); `progress.node_id` is a flattened
+    /// [`set_results`](Self::set_results)); `progress.e_node_id` is a flattened
     /// id projected onto authoring nodes here.
     pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
         let compiled = Arc::clone(
@@ -267,7 +267,7 @@ impl RunState {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
         };
-        for node_id in attributed_nodes(&compiled, progress.node_id) {
+        for node_id in attributed_nodes(&compiled, progress.e_node_id) {
             self.nodes.entry(node_id).or_default().status = status;
         }
     }
@@ -306,16 +306,16 @@ mod tests {
         ExecutionNodeId::from_u128(n)
     }
 
-    /// Build an `ExecutionStats` with the given executed `(flat_id, secs)`
-    /// and errored `flat_id`s. The installed compiled graph isn't part of the
+    /// Build an `ExecutionStats` with the given executed `(e_node_id, secs)`
+    /// and errored `e_node_id`s. The installed compiled graph isn't part of the
     /// stats; `RunState` retains it from the preceding worker report.
     fn stats(executed: &[(ExecutionNodeId, f64)], errored: &[ExecutionNodeId]) -> ExecutionStats {
         ExecutionStats {
             elapsed_secs: 0.0,
             executed_nodes: executed
                 .iter()
-                .map(|&(node_id, elapsed_secs)| ExecutedNodeStats {
-                    node_id,
+                .map(|&(e_node_id, elapsed_secs)| ExecutedNodeStats {
+                    e_node_id,
                     elapsed_secs,
                 })
                 .collect(),
@@ -324,8 +324,8 @@ mod tests {
             triggered_events: vec![],
             node_errors: errored
                 .iter()
-                .map(|&node_id| NodeError {
-                    node_id,
+                .map(|&e_node_id| NodeError {
+                    e_node_id,
                     error: RunError::Invoke {
                         func_id: FuncId::from_u128(0),
                         message: "test error".into(),
@@ -343,8 +343,8 @@ mod tests {
         leaves: impl IntoIterator<Item = (ExecutionNodeId, Vec<NodeId>, NodeId)>,
     ) -> RunState {
         let mut builder = CompiledGraphBuilder::new();
-        for (flat_id, instances, node_id) in leaves {
-            builder.insert_leaf(flat_id, instances, node_id);
+        for (e_node_id, instances, node_id) in leaves {
+            builder.insert_leaf(e_node_id, instances, node_id);
         }
         RunState {
             compiled: Some(builder.build()),
@@ -360,7 +360,7 @@ mod tests {
 
         // Started → every attributed node turns Running.
         rs.apply_progress(&RunProgress {
-            node_id: flat,
+            e_node_id: flat,
             phase: RunPhase::Started { at: Instant::now() },
         });
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
@@ -368,7 +368,7 @@ mod tests {
 
         // Finished → Executed with the reported time (overwrites Running).
         rs.apply_progress(&RunProgress {
-            node_id: flat,
+            e_node_id: flat,
             phase: RunPhase::Finished { elapsed_secs: 0.5 },
         });
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
@@ -445,7 +445,7 @@ mod tests {
             (cancel_flat, vec![inst], cancelled_interior),
         ]);
 
-        let node_err = |node_id, error| NodeError { node_id, error };
+        let node_err = |e_node_id, error| NodeError { e_node_id, error };
         let mut s = stats(&[], &[]);
         s.node_errors = vec![
             node_err(
@@ -489,7 +489,7 @@ mod tests {
 
         let mut s = stats(&[], &[]);
         s.logs.push(LogEntry {
-            node_id: flat,
+            e_node_id: flat,
             level: LogLevel::Warn,
             message: "hi".into(),
         });

@@ -102,11 +102,11 @@ pub(crate) type NodeSet = HashSet<ExecutionNodeId>;
 
 fn reset_node_map<T: Clone>(
     map: &mut NodeMap<T>,
-    node_ids: impl Iterator<Item = ExecutionNodeId>,
+    e_node_ids: impl Iterator<Item = ExecutionNodeId>,
     value: T,
 ) {
     map.clear();
-    map.extend(node_ids.map(|node_id| (node_id, value.clone())));
+    map.extend(e_node_ids.map(|e_node_id| (e_node_id, value.clone())));
 }
 
 impl<T> OutputColumn<T> {
@@ -130,15 +130,15 @@ impl<T> OutputColumn<T> {
 /// reaches the engine — the phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
-    #[error("Cycle detected while building execution graph at node {node_id:?}")]
-    CycleDetected { node_id: ExecutionNodeId },
+    #[error("Cycle detected while building execution graph at node {e_node_id:?}")]
+    CycleDetected { e_node_id: ExecutionNodeId },
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
-    #[error("node seed {node_id:?} not found in the compiled program")]
-    NodeSeedNotFound { node_id: ExecutionNodeId },
-    #[error("event lambda for node {node_id:?} panicked: {message}")]
+    #[error("node seed {e_node_id:?} not found in the compiled program")]
+    NodeSeedNotFound { e_node_id: ExecutionNodeId },
+    #[error("event lambda for node {e_node_id:?} panicked: {message}")]
     EventLambdaPanic {
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         message: String,
     },
 }
@@ -362,8 +362,8 @@ impl ExecutionEngine {
     /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
     /// node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for node_id in self.compiled.program.e_nodes.keys().copied() {
-            if !self.compiled.program.e_nodes[&node_id]
+        for e_node_id in self.compiled.program.e_nodes.keys().copied() {
+            if !self.compiled.program.e_nodes[&e_node_id]
                 .cache
                 .persists_to_disk()
             {
@@ -372,7 +372,7 @@ impl ExecutionEngine {
             self.cache
                 .store_node(
                     &self.compiled.program,
-                    node_id,
+                    e_node_id,
                     &mut self.executor.ctx_manager,
                 )
                 .await;
@@ -475,46 +475,46 @@ pub(crate) mod test_support {
             Ok(())
         }
 
-        pub(crate) fn node_inputs(&self, node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
+        pub(crate) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
             self.compiled
                 .program
-                .node_inputs(&self.compiled.program.e_nodes[&node_id])
+                .node_inputs(&self.compiled.program.e_nodes[&e_node_id])
         }
 
-        pub(crate) fn node_events(&self, node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
-            let events = self.compiled.program.e_nodes[&node_id].events;
+        pub(crate) fn node_events(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
+            let events = self.compiled.program.e_nodes[&e_node_id].events;
             &self.compiled.program.events[events.range()]
         }
 
-        pub(crate) fn node_output_demand(&self, node_id: ExecutionNodeId) -> &[OutputDemand] {
+        pub(crate) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
             self.resolver
                 .run
                 .outputs
                 .demand
-                .slice(self.compiled.program.e_nodes[&node_id].outputs)
+                .slice(self.compiled.program.e_nodes[&e_node_id].outputs)
         }
 
-        pub(crate) fn node_output_readers(&self, node_id: ExecutionNodeId) -> &[u32] {
+        pub(crate) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
             self.resolver
                 .run
                 .outputs
                 .readers
-                .slice(self.compiled.program.e_nodes[&node_id].outputs)
+                .slice(self.compiled.program.e_nodes[&e_node_id].outputs)
         }
 
-        /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
-        pub(crate) fn node_ran(&self, node_id: ExecutionNodeId) -> bool {
-            self.executor.ran(node_id)
+        /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.
+        pub(crate) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
+            self.executor.ran(e_node_id)
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
         pub(crate) fn set_output_values(
             &mut self,
-            node_id: ExecutionNodeId,
+            e_node_id: ExecutionNodeId,
             values: Vec<DynamicValue>,
         ) {
-            let slot = self.cache.slots.get_mut(&node_id).unwrap();
+            let slot = self.cache.slots.get_mut(&e_node_id).unwrap();
             slot.value = cache::ValueState::Resident {
                 snapshot: cache::OutputSnapshot::new(values),
                 produced_under: slot.current_digest,

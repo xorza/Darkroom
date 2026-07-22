@@ -148,8 +148,8 @@ impl ExecutionProgram {
         self.output_types.len()
     }
 
-    pub(crate) fn output_idx(&self, node_id: ExecutionNodeId, port_idx: usize) -> OutputIdx {
-        let outputs = self.e_nodes[&node_id].outputs;
+    pub(crate) fn output_idx(&self, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputIdx {
+        let outputs = self.e_nodes[&e_node_id].outputs;
         debug_assert!(
             port_idx < outputs.len as usize,
             "output port is out of range"
@@ -183,19 +183,19 @@ impl ExecutionProgram {
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
         let mut owners = vec![None; total];
-        for node_id in self.e_nodes.keys().copied() {
-            let span = self.e_nodes[&node_id].outputs;
+        for e_node_id in self.e_nodes.keys().copied() {
+            let span = self.e_nodes[&e_node_id].outputs;
             for output_idx in span.range() {
-                owners[output_idx] = Some(node_id);
+                owners[output_idx] = Some(e_node_id);
             }
         }
         let types = {
             let source = |output_idx: OutputIdx| {
-                let node_id =
+                let e_node_id =
                     owners[output_idx.idx()].expect("every output pool entry must have an owner");
-                let e_node = &self.e_nodes[&node_id];
+                let e_node = &self.e_nodes[&e_node_id];
                 let port = (output_idx.0 - e_node.outputs.start) as usize;
-                let func = node_func(self, library, node_id).expect(
+                let func = node_func(self, library, e_node_id).expect(
                     "a compiled node's func is registered in the library \
                      (validated at validate_for_execution)",
                 );
@@ -226,16 +226,16 @@ impl ExecutionProgram {
     }
 }
 
-/// The func backing `node_id`: a special node's hardcoded spec, else the library
+/// The func backing `e_node_id`: a special node's hardcoded spec, else the library
 /// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
 /// for the program's own (`validate_for_execution`-validated) library, never happens.
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,
-    node_id: ExecutionNodeId,
+    e_node_id: ExecutionNodeId,
 ) -> Option<&'a Func> {
-    match program.e_nodes[&node_id].special {
+    match program.e_nodes[&e_node_id].special {
         Some(special) => Some(special.func()),
-        None => library.by_id(&program.e_nodes[&node_id].func_id),
+        None => library.by_id(&program.e_nodes[&e_node_id].func_id),
     }
 }

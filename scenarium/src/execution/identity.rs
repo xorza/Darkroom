@@ -22,13 +22,16 @@ impl ExecutionNodeId {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ExecutionInputPort {
-    pub node_id: ExecutionNodeId,
+    pub e_node_id: ExecutionNodeId,
     pub port_idx: usize,
 }
 
 impl ExecutionInputPort {
-    pub(crate) fn new(node_id: ExecutionNodeId, port_idx: usize) -> Self {
-        Self { node_id, port_idx }
+    pub(crate) fn new(e_node_id: ExecutionNodeId, port_idx: usize) -> Self {
+        Self {
+            e_node_id,
+            port_idx,
+        }
     }
 }
 
@@ -51,8 +54,8 @@ impl NodeAddress {
 pub enum ExecutionIdentityError {
     #[error("authoring address {address:?} has no execution identity in this compiled graph")]
     AddressNotFound { address: NodeAddress },
-    #[error("execution node {node_id:?} has no authoring address in this compiled graph")]
-    NodeNotFound { node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} has no authoring address in this compiled graph")]
+    NodeNotFound { e_node_id: ExecutionNodeId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -100,13 +103,13 @@ impl FlattenMap {
         idx
     }
 
-    pub(crate) fn set_leaf(&mut self, flat_id: ExecutionNodeId, scope: u32, interior: NodeId) {
+    pub(crate) fn set_leaf(&mut self, e_node_id: ExecutionNodeId, scope: u32, interior: NodeId) {
         let address = NodeAddress {
             instances: self.instance_path(scope),
             node_id: interior,
         };
         let previous_leaf = self.leaves.insert(
-            flat_id,
+            e_node_id,
             Leaf {
                 scope,
                 address: address.clone(),
@@ -114,9 +117,9 @@ impl FlattenMap {
         );
         debug_assert!(
             previous_leaf.is_none(),
-            "flattened node id collision for {flat_id:?}"
+            "flattened node id collision for {e_node_id:?}"
         );
-        let previous_execution = self.execution_nodes.insert(address.clone(), flat_id);
+        let previous_execution = self.execution_nodes.insert(address.clone(), e_node_id);
         debug_assert!(
             previous_execution.is_none(),
             "duplicate authoring node address {address:?}"
@@ -125,9 +128,9 @@ impl FlattenMap {
 
     pub(crate) fn validate(
         &self,
-        flat_ids: impl IntoIterator<Item = ExecutionNodeId>,
+        e_node_ids: impl IntoIterator<Item = ExecutionNodeId>,
     ) -> Result<()> {
-        let expected: HashSet<_> = flat_ids.into_iter().collect();
+        let expected: HashSet<_> = e_node_ids.into_iter().collect();
         ensure!(
             self.leaves.len() == expected.len(),
             "flatten map must have exactly one leaf per execution node"
@@ -137,17 +140,17 @@ impl FlattenMap {
             "flatten map must have one unique authoring address per execution node"
         );
 
-        for flat_id in expected {
-            let Some(leaf) = self.leaves.get(&flat_id) else {
-                anyhow::bail!("execution node {flat_id:?} has no flatten-map leaf");
+        for e_node_id in expected {
+            let Some(leaf) = self.leaves.get(&e_node_id) else {
+                anyhow::bail!("execution node {e_node_id:?} has no flatten-map leaf");
             };
             ensure!(
-                self.execution_nodes.get(&leaf.address) == Some(&flat_id),
+                self.execution_nodes.get(&leaf.address) == Some(&e_node_id),
                 "flatten-map address must point back to its execution node"
             );
         }
-        for (address, flat_id) in &self.execution_nodes {
-            let Some(leaf) = self.leaves.get(flat_id) else {
+        for (address, e_node_id) in &self.execution_nodes {
+            let Some(leaf) = self.leaves.get(e_node_id) else {
                 anyhow::bail!("flatten-map address {address:?} points to no leaf");
             };
             ensure!(
@@ -172,16 +175,16 @@ impl FlattenMap {
         instances
     }
 
-    pub(crate) fn address(&self, flat_id: ExecutionNodeId) -> Option<&NodeAddress> {
-        self.leaves.get(&flat_id).map(|leaf| &leaf.address)
+    pub(crate) fn address(&self, e_node_id: ExecutionNodeId) -> Option<&NodeAddress> {
+        self.leaves.get(&e_node_id).map(|leaf| &leaf.address)
     }
 
     pub(crate) fn execution_node(&self, address: &NodeAddress) -> Option<ExecutionNodeId> {
         self.execution_nodes.get(address).copied()
     }
 
-    pub(crate) fn attribution(&self, flat_id: ExecutionNodeId) -> Option<Attribution<'_>> {
-        let leaf = self.leaves.get(&flat_id)?;
+    pub(crate) fn attribution(&self, e_node_id: ExecutionNodeId) -> Option<Attribution<'_>> {
+        let leaf = self.leaves.get(&e_node_id)?;
         Some(Attribution {
             map: self,
             interior: Some(leaf.address.node_id),
@@ -259,7 +262,7 @@ pub(crate) mod test_support {
 
         pub(crate) fn insert_leaf(
             &mut self,
-            flat_id: ExecutionNodeId,
+            e_node_id: ExecutionNodeId,
             instances: impl IntoIterator<Item = NodeId>,
             node_id: NodeId,
         ) {
@@ -267,7 +270,7 @@ pub(crate) mod test_support {
             for instance in instances {
                 scope = self.map.push_scope(instance, scope);
             }
-            self.map.set_leaf(flat_id, scope, node_id);
+            self.map.set_leaf(e_node_id, scope, node_id);
         }
 
         pub(crate) fn build(self) -> FlattenMap {

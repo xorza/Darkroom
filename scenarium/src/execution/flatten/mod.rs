@@ -287,7 +287,7 @@ impl<'a> Run<'a> {
                 NodeKind::GraphInput | NodeKind::GraphOutput => continue,
             };
 
-            let flat_id = flatten_id(self.path.as_slice(), node.id);
+            let e_node_id = flatten_id(self.path.as_slice(), node.id);
             let input_count = func.inputs.len();
 
             let outputs_start = self.n_outputs;
@@ -318,7 +318,7 @@ impl<'a> Run<'a> {
             }
 
             let previous = self.e_nodes.insert(
-                flat_id,
+                e_node_id,
                 ExecutionNode {
                     sink: func.sink,
                     disabled,
@@ -337,9 +337,9 @@ impl<'a> Run<'a> {
             // Record where this flat node came from (current scope + authoring
             // id) so stats map back to editor nodes.
             let scope = *self.scope_stack.last().unwrap();
-            self.flatten.set_leaf(flat_id, scope, node.id);
+            self.flatten.set_leaf(e_node_id, scope, node.id);
 
-            self.cur_id = flat_id;
+            self.cur_id = e_node_id;
 
             for port_idx in 0..input_count {
                 let port = InputPort::new(node.id, port_idx);

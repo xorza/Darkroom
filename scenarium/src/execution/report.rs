@@ -12,7 +12,7 @@ pub enum RunPhase {
 
 #[derive(Debug, Clone)]
 pub struct RunProgress {
-    pub node_id: ExecutionNodeId,
+    pub e_node_id: ExecutionNodeId,
     pub phase: RunPhase,
 }
 

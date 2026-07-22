@@ -316,7 +316,7 @@ impl RuntimeCache {
         let mut seen: HashSet<*const ()> = HashSet::new();
         let mut total = RamUsage::default();
         let mut by_node = Vec::new();
-        for (node_id, slot) in &self.slots {
+        for (e_node_id, slot) in &self.slots {
             let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
@@ -334,7 +334,7 @@ impl RuntimeCache {
             }
             if node_usage.total() > 0 {
                 by_node.push(NodeRamUsage {
-                    node_id: *node_id,
+                    e_node_id: *e_node_id,
                     usage: node_usage,
                 });
             }
@@ -345,21 +345,21 @@ impl RuntimeCache {
     /// Preserve surviving slots by id, default new nodes, and trim removed ones.
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
-            .retain(|node_id, _| program.e_nodes.contains_key(node_id));
-        for node_id in program.e_nodes.keys().copied() {
-            self.slots.entry(node_id).or_default();
+            .retain(|e_node_id, _| program.e_nodes.contains_key(e_node_id));
+        for e_node_id in program.e_nodes.keys().copied() {
+            self.slots.entry(e_node_id).or_default();
         }
     }
 
-    /// Whether `node_id` holds a *resident* output valid for its current digest:
+    /// Whether `e_node_id` holds a *resident* output valid for its current digest:
     /// the value is in RAM and was produced under this digest. A `None` current
     /// digest (impure cone) never hits, and a value produced under a *different*
     /// digest (a changed input) misses too. The executor's input read and the
     /// disk-store rely on this being the true "bytes are here" predicate.
-    fn is_resident_current(&self, node_id: ExecutionNodeId) -> bool {
+    fn is_resident_current(&self, e_node_id: ExecutionNodeId) -> bool {
         match (
-            &self.slots[&node_id].value,
-            self.slots[&node_id].current_digest,
+            &self.slots[&e_node_id].value,
+            self.slots[&e_node_id].current_digest,
         ) {
             (ValueState::Resident { produced_under, .. }, Some(d)) => *produced_under == Some(d),
             _ => false,
@@ -368,12 +368,12 @@ impl RuntimeCache {
 
     pub(crate) fn is_resident_hit(
         &self,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
         match (
-            &self.slots[&node_id].value,
-            self.slots[&node_id].current_digest,
+            &self.slots[&e_node_id].value,
+            self.slots[&e_node_id].current_digest,
         ) {
             (
                 ValueState::Resident {
@@ -393,12 +393,12 @@ impl RuntimeCache {
     /// stat'd-but-unloaded disk blob, so a node the executor's cut pruned (its consumers all
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
-    pub(crate) fn has_available_value(&self, node_id: ExecutionNodeId) -> bool {
-        self.is_resident_current(node_id)
-            || matches!(self.slots[&node_id].value, ValueState::OnDisk { .. })
+    pub(crate) fn has_available_value(&self, e_node_id: ExecutionNodeId) -> bool {
+        self.is_resident_current(e_node_id)
+            || matches!(self.slots[&e_node_id].value, ValueState::OnDisk { .. })
     }
 
-    /// Read producer `node_id`'s output `port` for a consumer: a clone of the value, or — with
+    /// Read producer `e_node_id`'s output `port` for a consumer: a clone of the value, or — with
     /// `take` — the value itself, moved out of the slot (leaving `Unbound`). The move is the
     /// executor's last-read fast path for a non-RAM producer: the RAM copy would be released
     /// right after anyway, and handing over the slot's copy leaves the consumer as the sole
@@ -407,13 +407,13 @@ impl RuntimeCache {
     pub(crate) fn read_output_port(
         &mut self,
         program: &ExecutionProgram,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         port: usize,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = program.e_nodes[&node_id].outputs.len as usize;
+        let arity = program.e_nodes[&e_node_id].outputs.len as usize;
         let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&node_id).unwrap().value
+            &mut self.slots.get_mut(&e_node_id).unwrap().value
         else {
             return None;
         };
@@ -428,9 +428,9 @@ impl RuntimeCache {
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
     /// others are still owed to other consumers.
-    pub(crate) fn clear_output_port(&mut self, node_id: ExecutionNodeId, port: usize) {
+    pub(crate) fn clear_output_port(&mut self, e_node_id: ExecutionNodeId, port: usize) {
         let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&node_id).unwrap().value
+            &mut self.slots.get_mut(&e_node_id).unwrap().value
         else {
             panic!("an output can only be released from a resident slot");
         };
@@ -438,17 +438,17 @@ impl RuntimeCache {
         snapshot.values[port] = DynamicValue::Unbound;
     }
 
-    /// Stamp `node_id`'s structural content digest into its slot. The producer-first resolver
+    /// Stamp `e_node_id`'s structural content digest into its slot. The producer-first resolver
     /// pass calls this before exact output demand is known; cache coverage is probed later by
     /// [`check_reuse`](Self::check_reuse).
     pub(crate) fn stamp_digest(
         &mut self,
         program: &ExecutionProgram,
         resource_stamps: &RunResourceStamps,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) {
-        let digest = node_digest(program, node_id, self, resource_stamps);
-        self.slots.get_mut(&node_id).unwrap().current_digest = digest;
+        let digest = node_digest(program, e_node_id, self, resource_stamps);
+        self.slots.get_mut(&e_node_id).unwrap().current_digest = digest;
     }
 
     /// Whether an unchanged output can satisfy this run's exact demand — resident in RAM
@@ -464,12 +464,12 @@ impl RuntimeCache {
     pub(crate) fn check_reuse(
         &mut self,
         program: &ExecutionProgram,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
-        self.slots[&node_id].current_digest.is_some()
-            && (self.is_resident_hit(node_id, demand)
-                || self.mark_on_disk_if_present(program, node_id, demand))
+        self.slots[&e_node_id].current_digest.is_some()
+            && (self.is_resident_hit(e_node_id, demand)
+                || self.mark_on_disk_if_present(program, e_node_id, demand))
     }
 
     /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
@@ -481,31 +481,31 @@ impl RuntimeCache {
     pub(crate) fn mark_on_disk_if_present(
         &mut self,
         program: &ExecutionProgram,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         demand: &[OutputDemand],
     ) -> bool {
         let Some(target) = self.disk_store.blob_target(
-            node_id,
-            &program.e_nodes[&node_id],
-            self.slots[&node_id].current_digest,
+            e_node_id,
+            &program.e_nodes[&e_node_id],
+            self.slots[&e_node_id].current_digest,
         ) else {
             return false;
         };
         if self
             .disk_store
-            .outputs_decodable(program.node_output_types(&program.e_nodes[&node_id]))
+            .outputs_decodable(program.node_output_types(&program.e_nodes[&e_node_id]))
             && let Some(coverage) = target.coverage()
             && coverage.ports.len() == demand.len()
             && coverage.covers_demand(demand)
         {
-            self.slots.get_mut(&node_id).unwrap().value = ValueState::OnDisk { coverage };
+            self.slots.get_mut(&e_node_id).unwrap().value = ValueState::OnDisk { coverage };
             true
         } else {
             false
         }
     }
 
-    /// Deserialize `node_id`'s disk blob into its slot. Returns whether the slot is resident
+    /// Deserialize `e_node_id`'s disk blob into its slot. Returns whether the slot is resident
     /// afterward: `true` if already resident or the read succeeded. On a read failure (codec
     /// gone, corrupt, an incompatible format, a wrong output count, or deleted) the slot is
     /// cleared, so the demanding consumer is dropped this run and the *next* reopen recomputes
@@ -515,28 +515,28 @@ impl RuntimeCache {
     pub(crate) async fn hydrate_slot(
         &mut self,
         program: &ExecutionProgram,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
     ) -> bool {
         // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
         // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
         // stale value) before a consumer would read it.
-        if self.is_resident_current(node_id) {
+        if self.is_resident_current(e_node_id) {
             return true;
         }
-        let required = match &self.slots[&node_id].value {
+        let required = match &self.slots[&e_node_id].value {
             ValueState::OnDisk { coverage } => coverage.clone(),
             _ => return false,
         };
         // The slot claimed an on-disk blob. Load it; on success it's resident.
         if let Some(target) = self.disk_store.blob_target(
-            node_id,
-            &program.e_nodes[&node_id],
-            self.slots[&node_id].current_digest,
+            e_node_id,
+            &program.e_nodes[&e_node_id],
+            self.slots[&e_node_id].current_digest,
         ) {
             // A blob folds the output signature into its digest, so its count matches unless
             // the file is damaged. Reject a mismatch here as a miss rather than letting a
             // consumer's arity assert panic.
-            let arity = program.e_nodes[&node_id].outputs.len as usize;
+            let arity = program.e_nodes[&e_node_id].outputs.len as usize;
             match self.disk_store.read(&target).await {
                 Some(snapshot) if snapshot.values.len() == arity => {
                     if !required.is_satisfied_by(&snapshot.values) {
@@ -545,10 +545,10 @@ impl RuntimeCache {
                             "cached outputs no longer cover the probed outputs; ignoring blob"
                         );
                         target.delete();
-                        self.slots.get_mut(&node_id).unwrap().clear_output();
+                        self.slots.get_mut(&e_node_id).unwrap().clear_output();
                         return false;
                     }
-                    self.slots.get_mut(&node_id).unwrap().value = ValueState::Resident {
+                    self.slots.get_mut(&e_node_id).unwrap().value = ValueState::Resident {
                         snapshot,
                         produced_under: Some(target.digest),
                     };
@@ -566,11 +566,11 @@ impl RuntimeCache {
             }
             target.delete();
         }
-        self.slots.get_mut(&node_id).unwrap().clear_output();
+        self.slots.get_mut(&e_node_id).unwrap().clear_output();
         false
     }
 
-    /// Write `node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
+    /// Write `e_node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
     /// calls this right after a successful invoke), so a long run's earlier caches are durable
     /// even if a later node errors or the run is cancelled. The target and output slice are
     /// snapshotted **synchronously**; only [`DiskStore::store`]'s write awaits, so the borrow
@@ -584,16 +584,16 @@ impl RuntimeCache {
     pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.disk_store.blob_target(
-            node_id,
-            &program.e_nodes[&node_id],
-            self.slots[&node_id].current_digest,
+            e_node_id,
+            &program.e_nodes[&e_node_id],
+            self.slots[&e_node_id].current_digest,
         );
-        let resident = self.is_resident_current(node_id).then(|| {
-            let ValueState::Resident { snapshot, .. } = &self.slots[&node_id].value else {
+        let resident = self.is_resident_current(e_node_id).then(|| {
+            let ValueState::Resident { snapshot, .. } = &self.slots[&e_node_id].value else {
                 unreachable!("a current resident slot must contain resident values")
             };
             snapshot
@@ -607,31 +607,31 @@ impl RuntimeCache {
         }
     }
 
-    /// Reclaim `node_id`'s spent RAM value: demote to `OnDisk` if a blob for its current digest
+    /// Reclaim `e_node_id`'s spent RAM value: demote to `OnDisk` if a blob for its current digest
     /// can serve it again (lossless, reloads on demand), else drop a **non-RAM** value with no
     /// such blob (`None`, or a `Disk` value whose blob is missing) so it recomputes when next
     /// needed; a `Ram`/`Both` value with no blob is left resident — its mode promised to hold it.
     /// The single place the demote-or-drop decision lives, shared by the mid-run release (the
     /// executor, once a non-RAM node's every output is read) and the end-of-run
     /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
-    pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, node_id: ExecutionNodeId) {
-        let values = match &self.slots[&node_id].value {
+    pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) {
+        let values = match &self.slots[&e_node_id].value {
             ValueState::Resident { snapshot, .. } => &snapshot.values,
             _ => return,
         };
         let stored = self
             .disk_store
             .blob_target(
-                node_id,
-                &program.e_nodes[&node_id],
-                self.slots[&node_id].current_digest,
+                e_node_id,
+                &program.e_nodes[&e_node_id],
+                self.slots[&e_node_id].current_digest,
             )
             .and_then(|target| target.coverage())
             .filter(|coverage| coverage.covers_values(values));
         if let Some(coverage) = stored {
-            self.slots.get_mut(&node_id).unwrap().value = ValueState::OnDisk { coverage };
-        } else if !program.e_nodes[&node_id].cache.caches_in_ram() {
-            self.slots.get_mut(&node_id).unwrap().clear_output();
+            self.slots.get_mut(&e_node_id).unwrap().value = ValueState::OnDisk { coverage };
+        } else if !program.e_nodes[&e_node_id].cache.caches_in_ram() {
+            self.slots.get_mut(&e_node_id).unwrap().clear_output();
         }
     }
 
@@ -646,14 +646,15 @@ impl RuntimeCache {
         program: &ExecutionProgram,
         disposition: &NodeMap<Disposition>,
     ) {
-        for node_id in program.e_nodes.keys().copied() {
-            if self.slots[&node_id].output_values().is_none() {
+        for e_node_id in program.e_nodes.keys().copied() {
+            if self.slots[&e_node_id].output_values().is_none() {
                 continue;
             }
-            if program.e_nodes[&node_id].cache.caches_in_ram() && disposition[&node_id].needed() {
+            if program.e_nodes[&e_node_id].cache.caches_in_ram() && disposition[&e_node_id].needed()
+            {
                 continue;
             }
-            self.reclaim_slot(program, node_id);
+            self.reclaim_slot(program, e_node_id);
         }
     }
 }
@@ -664,11 +665,11 @@ pub(crate) mod test_support {
 
     pub(crate) fn hydrate(
         cache: &mut RuntimeCache,
-        node_id: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
         snapshot: OutputSnapshot,
         digest: Digest,
     ) {
-        cache.slots.get_mut(&node_id).unwrap().value = ValueState::Resident {
+        cache.slots.get_mut(&e_node_id).unwrap().value = ValueState::Resident {
             snapshot,
             produced_under: Some(digest),
         };
