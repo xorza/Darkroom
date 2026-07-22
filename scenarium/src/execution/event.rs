@@ -6,13 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::NodeId;
+use crate::execution::identity::ExecutionNodeId;
 use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventRef {
-    pub node_id: NodeId,
+    pub e_node_id: ExecutionNodeId,
     pub event_idx: usize,
 }
 

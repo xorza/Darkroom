@@ -2,12 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::Library;
+use scenarium::{Library, WorkerReport};
 
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
-use crate::core::worker::WorkerEvent;
 use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
@@ -120,41 +119,45 @@ impl App {
     fn drain_worker_events(&mut self, ui: &Ui) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.workspace.runtime`).
-        let events: Vec<WorkerEvent> = self.workspace.runtime.drain_worker().collect();
-        for event in events {
-            match event {
-                WorkerEvent::ExecutionFinished(Ok(stats)) => {
-                    if stats.cancelled {
-                        tracing::info!(
-                            "run cancelled after {} node(s)",
-                            stats.executed_nodes.len()
-                        );
-                    }
-                    // The stats' flat ids project through the compile-phase
-                    // flatten map the engine kept when it sent this run.
-                    self.editor
-                        .run_state
-                        .set_results(&stats, &self.workspace.runtime.flatten_map);
-                    // A finished run supersedes any lingering failure message
-                    // (e.g. an earlier event-loop tick's), so the loop
-                    // self-heals in the status bar too.
-                    self.workspace.runtime.status.error = None;
+        let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
+        for report in events {
+            match report {
+                WorkerReport::Installed(compiled) => {
+                    self.editor.run_state.compiled = Some(compiled);
                 }
-                WorkerEvent::ExecutionFinished(Err(err)) => {
+                WorkerReport::Cleared => {
+                    self.editor.run_state.compiled = None;
                     self.editor.run_state.clear();
-                    self.workspace
-                        .runtime
-                        .status
-                        .error(format!("run failed: {err}"));
                 }
-                WorkerEvent::NodeProgress(progress) => self
-                    .editor
-                    .run_state
-                    .apply_progress(&progress, &self.workspace.runtime.flatten_map),
-                WorkerEvent::PinnedOutputs(pinned) => {
+                WorkerReport::Finished(result) => match result {
+                    Ok(stats) => {
+                        if stats.cancelled {
+                            tracing::info!(
+                                "run cancelled after {} node(s)",
+                                stats.executed_nodes.len()
+                            );
+                        }
+                        self.editor.run_state.set_results(&stats);
+                        // A finished run supersedes any lingering failure message
+                        // (e.g. an earlier event-loop tick's), so the loop
+                        // self-heals in the status bar too.
+                        self.workspace.runtime.status.error = None;
+                    }
+                    Err(err) => {
+                        self.editor.run_state.clear();
+                        self.workspace
+                            .runtime
+                            .status
+                            .error(format!("run failed: {err}"));
+                    }
+                },
+                WorkerReport::Progress(progress) => {
+                    self.editor.run_state.apply_progress(&progress);
+                }
+                WorkerReport::PinnedOutputs(outputs) => {
                     self.editor.run_state.pinned_outputs.ingest(
                         ui,
-                        pinned,
+                        outputs,
                         &self.workspace.open.document,
                     );
                 }
@@ -335,10 +338,6 @@ impl aperture::App for App {
             self.events_running,
             self.workspace.runtime.status.error.as_deref(),
         );
-
-        if self.editor.take_caches_dirty() {
-            self.workspace.save_caches();
-        }
 
         if let Some(command) = command {
             self.handle_command(ui, command);

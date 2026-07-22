@@ -1,15 +1,18 @@
+use std::sync::Arc;
+
 use tokio::sync::oneshot;
 
-use crate::execution::Result;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::event::EventRef;
-use crate::execution::identity::NodeAddress;
 use crate::execution::report::{PinnedOutputs, RunProgress};
 use crate::execution::stats::ExecutionStats;
+use crate::execution::{Result, RunSeeds};
 
 #[derive(Debug)]
 pub enum WorkerReport {
+    Installed(Arc<CompiledGraph>),
+    Cleared,
     Progress(RunProgress),
     PinnedOutputs(PinnedOutputs),
     Finished(Result<ExecutionStats>),
@@ -19,12 +22,10 @@ pub enum WorkerReport {
 pub enum WorkerMessage {
     Exit,
     InjectEvents { events: Vec<EventRef> },
-    Update { compiled: CompiledGraph },
-    SaveCaches { compiled: CompiledGraph },
+    Update { compiled: Arc<CompiledGraph> },
     Clear,
     SetDiskStore(DiskStore),
-    ExecuteSinks,
-    ExecuteNodes { nodes: Vec<NodeAddress> },
+    Run { seeds: RunSeeds },
     StartEventLoop,
     StopEventLoop,
     Sync { reply: oneshot::Sender<()> },

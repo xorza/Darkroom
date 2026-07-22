@@ -5,14 +5,14 @@ use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::JoinHandle;
 
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::graph::NodeId;
+use crate::execution::identity::ExecutionNodeId;
 use crate::worker::pause_gate::PauseGate;
 
 pub(crate) const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
 #[derive(Debug)]
 pub(crate) struct LambdaPanic {
-    pub(crate) node_id: NodeId,
+    pub(crate) e_node_id: ExecutionNodeId,
     pub(crate) message: String,
 }
 
@@ -76,7 +76,7 @@ impl ActiveEventLoop {
             if let Err(error) = handle.await {
                 if error.is_panic() {
                     panics.push(LambdaPanic {
-                        node_id: event.node_id,
+                        e_node_id: event.e_node_id,
                         message: panic_message(error.into_panic()),
                     });
                 } else {

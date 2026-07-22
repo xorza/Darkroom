@@ -15,15 +15,13 @@
 use common::Span;
 use hashbrown::{HashMap, HashSet};
 
-use crate::execution::identity::FlattenMap;
+use crate::execution::identity::{ExecutionNodeId, FlattenMap};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
     InputStamper,
 };
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{
-    Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
-};
+use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
@@ -47,7 +45,7 @@ pub(crate) struct Flattener {
     /// Resolved flat event edges (with flattened ids), collected during the
     /// walk and applied after the node pass (when `e_nodes` is final and
     /// addressable by key). Reused across builds.
-    subs: Vec<Subscription>,
+    subs: Vec<ExecutionSubscription>,
 }
 
 /// The graph's SoA pools, rebuilt each `build`. Each node's output span is
@@ -69,7 +67,7 @@ impl Flattener {
     /// is then `output_types.len()`, resolved separately.
     pub(crate) fn build(
         &mut self,
-        e_nodes: &mut HashMap<NodeId, ExecutionNode>,
+        e_nodes: &mut HashMap<ExecutionNodeId, ExecutionNode>,
         pools: Pools<'_>,
         root: &Graph,
         library: &Library,
@@ -98,7 +96,7 @@ impl Flattener {
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 e_nodes,
-                cur_id: NodeId::default(),
+                cur_id: ExecutionNodeId::default(),
                 inputs: pools.inputs,
                 n_outputs: 0,
                 events: pools.events,
@@ -171,9 +169,9 @@ fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a G
 /// (the chain of composite-instance ids descended through). Top-level nodes
 /// (`path` empty) keep their own id, so caches survive and func-only graphs
 /// map to themselves.
-fn flatten_id(path: &[NodeId], interior: NodeId) -> NodeId {
+fn flatten_id(path: &[NodeId], interior: NodeId) -> ExecutionNodeId {
     if path.is_empty() {
-        return interior;
+        return ExecutionNodeId::from_node_id(interior);
     }
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"scenarium.flatten.v1");
@@ -182,16 +180,23 @@ fn flatten_id(path: &[NodeId], interior: NodeId) -> NodeId {
     }
     hasher.update(&interior.as_u128().to_le_bytes());
     let digest = hasher.finalize();
-    NodeId::from_u128(u128::from_le_bytes(
+    ExecutionNodeId::from_node_id(NodeId::from_u128(u128::from_le_bytes(
         digest.as_bytes()[..16].try_into().unwrap(),
-    ))
+    )))
 }
 
 /// Where an output reference resolves once boundaries are followed through.
 enum Source {
-    Producer(OutputPort),
+    Producer(ExecutionPortAddress),
     Const(StaticValue),
     None,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExecutionSubscription {
+    emitter: ExecutionNodeId,
+    event_idx: usize,
+    subscriber: ExecutionNodeId,
 }
 
 /// One flattening pass. Borrows the reusable `path` buffer from `Flattener`;
@@ -208,9 +213,9 @@ struct Run<'a> {
     /// pushed per composite descent.
     flatten: &'a mut FlattenMap,
     seen_shared: &'a mut HashSet<GraphId>,
-    subs: &'a mut Vec<Subscription>,
-    e_nodes: &'a mut HashMap<NodeId, ExecutionNode>,
-    cur_id: NodeId,
+    subs: &'a mut Vec<ExecutionSubscription>,
+    e_nodes: &'a mut HashMap<ExecutionNodeId, ExecutionNode>,
+    cur_id: ExecutionNodeId,
     /// The inputs pool being built this update; `cur_id`'s span is its tail.
     inputs: &'a mut Vec<ExecutionInput>,
     /// Running total of outputs emitted so far; also the next output span start.
@@ -282,7 +287,7 @@ impl<'a> Run<'a> {
                 NodeKind::GraphInput | NodeKind::GraphOutput => continue,
             };
 
-            let flat_id = flatten_id(self.path.as_slice(), node.id);
+            let e_node_id = flatten_id(self.path.as_slice(), node.id);
             let input_count = func.inputs.len();
 
             let outputs_start = self.n_outputs;
@@ -313,7 +318,7 @@ impl<'a> Run<'a> {
             }
 
             let previous = self.e_nodes.insert(
-                flat_id,
+                e_node_id,
                 ExecutionNode {
                     sink: func.sink,
                     disabled,
@@ -332,9 +337,9 @@ impl<'a> Run<'a> {
             // Record where this flat node came from (current scope + authoring
             // id) so stats map back to editor nodes.
             let scope = *self.scope_stack.last().unwrap();
-            self.flatten.set_leaf(flat_id, scope, node.id);
+            self.flatten.set_leaf(e_node_id, scope, node.id);
 
-            self.cur_id = flat_id;
+            self.cur_id = e_node_id;
 
             for port_idx in 0..input_count {
                 let port = InputPort::new(node.id, port_idx);
@@ -371,17 +376,13 @@ impl<'a> Run<'a> {
     }
 
     /// Record one resolved flat event edge.
-    fn push_edge(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {
-        self.subs.push(Subscription {
-            emitter,
-            event_idx,
-            subscriber,
-        });
-    }
-
     /// Resolve an emitter `(node, event_idx)` to the concrete flat func event
     /// it ultimately fires, following composite exposed-event mappings inward.
-    fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<(NodeId, usize)> {
+    fn resolve_emitter(
+        &mut self,
+        node_id: NodeId,
+        event_idx: usize,
+    ) -> Option<(ExecutionNodeId, usize)> {
         let graph = self.current();
         let node = graph.find(&node_id, NodeSearch::TopLevel)?;
         if node.disabled {
@@ -408,7 +409,7 @@ impl<'a> Run<'a> {
     /// pushing `(emitter, event_idx, flat_subscriber)` for each. A composite
     /// subscriber expands to the interior nodes wired to its `GraphInput`
     /// trigger.
-    fn resolve_subscriber(&mut self, node_id: NodeId, emitter: NodeId, event_idx: usize) {
+    fn resolve_subscriber(&mut self, node_id: NodeId, emitter: ExecutionNodeId, event_idx: usize) {
         let graph = self.current();
         // A disabled node runs nothing, so it receives no events.
         if graph
@@ -423,7 +424,11 @@ impl<'a> Run<'a> {
             // this edge so the planner sees it among a fired event's subscribers.
             Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
                 let flat = flatten_id(self.path.as_slice(), node_id);
-                self.push_edge(emitter, event_idx, flat);
+                self.subs.push(ExecutionSubscription {
+                    emitter,
+                    event_idx,
+                    subscriber: flat,
+                });
             }
             Some(NodeKind::Graph(r)) => {
                 let Some(nested) = graph.resolve_graph(*r, self.library) else {
@@ -464,10 +469,7 @@ impl<'a> Run<'a> {
         let binding = match source {
             Source::None => ExecutionBinding::None,
             Source::Const(v) => ExecutionBinding::Const(v),
-            Source::Producer(port) => ExecutionBinding::Bind(ExecutionPortAddress {
-                target: port.node_id,
-                port_idx: port.port_idx,
-            }),
+            Source::Producer(address) => ExecutionBinding::Bind(address),
         };
         self.inputs[pool_idx].binding = binding;
     }
@@ -482,10 +484,10 @@ impl<'a> Run<'a> {
             .find(&node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(OutputPort::new(
-                flatten_id(self.path.as_slice(), node_id),
+            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(ExecutionPortAddress {
+                target: flatten_id(self.path.as_slice(), node_id),
                 port_idx,
-            )),
+            }),
             // Follow into the composite: its output `port_idx` is wired by the
             // GraphOutput node's input `port_idx`.
             NodeKind::Graph(r) => {

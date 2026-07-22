@@ -1,29 +1,29 @@
 use super::*;
 use crate::DataType;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx,
 };
-use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DynamicValue, StaticValue};
 use common::Span;
 
 #[derive(Debug)]
 struct CachedNode {
-    node_id: NodeId,
+    e_node_id: ExecutionNodeId,
     values: Vec<DynamicValue>,
 }
 
 #[derive(Default)]
 struct Fix {
     program: ExecutionProgram,
-    order: Vec<NodeId>,
+    order: Vec<ExecutionNodeId>,
 }
 
 impl Fix {
-    fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
+    fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
         let inputs_start = self.program.inputs.len() as u32;
         for (required, binding) in inputs {
             self.program.inputs.push(ExecutionInput {
@@ -40,10 +40,10 @@ impl Fix {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
-        let node_id = NodeId::from_u128(idx as u128 + 1);
-        self.order.push(node_id);
+        let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
+        self.order.push(e_node_id);
         self.program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(idx as u128 + 1),
@@ -52,14 +52,14 @@ impl Fix {
                 ..Default::default()
             },
         );
-        node_id
+        e_node_id
     }
 
     fn resolve(
         &self,
-        roots: &[NodeId],
-        pinned: &[NodeId],
-        missing: &[NodeId],
+        roots: &[ExecutionNodeId],
+        pinned: &[ExecutionNodeId],
+        missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
     ) -> ResolvedRun {
         let mut verdicts: NodeMap<NodeVerdict> = self
@@ -67,10 +67,10 @@ impl Fix {
             .e_nodes
             .keys()
             .copied()
-            .map(|node_id| (node_id, NodeVerdict::Execute))
+            .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
             .collect();
-        for node_id in missing {
-            *verdicts.get_mut(node_id).unwrap() = NodeVerdict::MissingInputs;
+        for e_node_id in missing {
+            *verdicts.get_mut(e_node_id).unwrap() = NodeVerdict::MissingInputs;
         }
         let plan = ExecutionPlan {
             process_order: self.order.clone(),
@@ -83,8 +83,8 @@ impl Fix {
         let resource_stamps = RunResourceStamps::default();
         stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
         for cached in cached {
-            let digest = cache.slots[&cached.node_id].current_digest.unwrap();
-            cache.slots.get_mut(&cached.node_id).unwrap().value = ValueState::Resident {
+            let digest = cache.slots[&cached.e_node_id].current_digest.unwrap();
+            cache.slots.get_mut(&cached.e_node_id).unwrap().value = ValueState::Resident {
                 snapshot: OutputSnapshot::new(cached.values),
                 produced_under: Some(digest),
             };
@@ -95,9 +95,9 @@ impl Fix {
     }
 }
 
-fn bind(node_id: NodeId, port_idx: usize) -> ExecutionBinding {
+fn bind(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target: node_id,
+        target: e_node_id,
         port_idx,
     })
 }
@@ -133,7 +133,7 @@ fn reuse_hit_prunes_its_whole_upstream_cone() {
         &[],
         &[],
         vec![CachedNode {
-            node_id: cached,
+            e_node_id: cached,
             values: vec![value(1)],
         }],
     );
@@ -163,11 +163,11 @@ fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
         &[],
         vec![
             CachedNode {
-                node_id: source,
+                e_node_id: source,
                 values: vec![value(7), DynamicValue::Unbound],
             },
             CachedNode {
-                node_id: cached,
+                e_node_id: cached,
                 values: vec![value(8)],
             },
         ],
@@ -267,7 +267,7 @@ fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         &[],
         &[],
         vec![CachedNode {
-            node_id: cached,
+            e_node_id: cached,
             values: vec![value(1)],
         }],
     );

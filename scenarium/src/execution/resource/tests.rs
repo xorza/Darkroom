@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 use crate::execution::cache::test_support::hydrate;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache};
 use crate::execution::digest::{Digest, DigestHasher};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, ExecutionProgram,
@@ -17,7 +18,6 @@ use crate::execution::program::{
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
 use crate::execution::{NodeMap, NodeSet};
-use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{
     CustomValue, DataType, DynamicValue, ResourceStamp, ResourceStamper, StaticValue, TypeId,
@@ -91,13 +91,13 @@ fn directory_identity_tracks_entry_changes() {
 struct ConstPathFixture {
     program: ExecutionProgram,
     plan: ExecutionPlan,
-    first: NodeId,
-    second: NodeId,
+    first: ExecutionNodeId,
+    second: ExecutionNodeId,
 }
 
 fn const_path_fixture(path: &str) -> ConstPathFixture {
-    let first = NodeId::from_u128(1);
-    let second = NodeId::from_u128(2);
+    let first = ExecutionNodeId::from_u128(1);
+    let second = ExecutionNodeId::from_u128(2);
     let mut program = ExecutionProgram {
         inputs: vec![
             ExecutionInput {
@@ -113,9 +113,9 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         output_pinned: vec![false, false],
         ..Default::default()
     };
-    for (node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
+    for (e_node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
         program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(10),
@@ -127,7 +127,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     }
     let verdicts: NodeMap<NodeVerdict> = [first, second]
         .into_iter()
-        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
         .collect();
     ConstPathFixture {
         program,
@@ -219,7 +219,7 @@ struct BoundResourceFixture {
     program: ExecutionProgram,
     plan: ExecutionPlan,
     cache: RuntimeCache,
-    first_consumer: NodeId,
+    first_consumer: ExecutionNodeId,
 }
 
 #[derive(Debug)]
@@ -246,9 +246,9 @@ impl CustomValue for TestHandle {
 }
 
 fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFixture {
-    let producer = NodeId::from_u128(1);
-    let first_consumer = NodeId::from_u128(2);
-    let second_consumer = NodeId::from_u128(3);
+    let producer = ExecutionNodeId::from_u128(1);
+    let first_consumer = ExecutionNodeId::from_u128(2);
+    let second_consumer = ExecutionNodeId::from_u128(3);
     let address = ExecutionPortAddress {
         target: producer,
         port_idx: 0,
@@ -279,9 +279,10 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
             ..Default::default()
         },
     );
-    for (node_id, input_start, output_start) in [(first_consumer, 0, 1), (second_consumer, 1, 2)] {
+    for (e_node_id, input_start, output_start) in [(first_consumer, 0, 1), (second_consumer, 1, 2)]
+    {
         program.e_nodes.insert(
-            node_id,
+            e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(2),
@@ -295,7 +296,7 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         .e_nodes
         .keys()
         .copied()
-        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
         .collect();
     let plan = ExecutionPlan {
         process_order: vec![producer, first_consumer, second_consumer],

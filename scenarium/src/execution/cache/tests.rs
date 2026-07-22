@@ -1,5 +1,6 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
 use crate::node::lambda::OutputDemand;
 use common::Span;
@@ -14,10 +15,10 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
     OutputSnapshot::new(values)
 }
 
-fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> NodeId {
-    let node_id = NodeId::from_u128(id);
-    assert!(cache.slots.insert(node_id, slot).is_none());
-    node_id
+fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> ExecutionNodeId {
+    let e_node_id = ExecutionNodeId::from_u128(id);
+    assert!(cache.slots.insert(e_node_id, slot).is_none());
+    e_node_id
 }
 
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
@@ -100,7 +101,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
 fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
     let mut cache = RuntimeCache::default();
-    let node_id = insert_slot(
+    let e_node_id = insert_slot(
         &mut cache,
         1,
         RuntimeSlot {
@@ -109,20 +110,20 @@ fn hydrate_turns_a_miss_into_a_hit() {
         },
     );
     assert!(
-        !cache.is_resident_hit(node_id, DEMANDED),
+        !cache.is_resident_hit(e_node_id, DEMANDED),
         "empty slot misses"
     );
 
-    test_support::hydrate(&mut cache, node_id, complete_snapshot(out()), d);
+    test_support::hydrate(&mut cache, e_node_id, complete_snapshot(out()), d);
     assert!(
-        cache.is_resident_hit(node_id, DEMANDED),
+        cache.is_resident_hit(e_node_id, DEMANDED),
         "a slot hydrated under its current digest hits"
     );
 
     // Hydrating under a digest that is no longer current does not hit.
-    cache.slots.get_mut(&node_id).unwrap().current_digest = Some(Digest([9u8; 32]));
+    cache.slots.get_mut(&e_node_id).unwrap().current_digest = Some(Digest([9u8; 32]));
     assert!(
-        !cache.is_resident_hit(node_id, DEMANDED),
+        !cache.is_resident_hit(e_node_id, DEMANDED),
         "current digest moved on ⇒ miss"
     );
 }
@@ -172,19 +173,19 @@ fn resident_hit_derives_coverage_from_values() {
     };
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
-    let node_id = insert_slot(&mut cache, 1, slot);
+    let e_node_id = insert_slot(&mut cache, 1, slot);
 
-    let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
+    let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
         panic!("the invocation result was stamped resident");
     };
     assert_eq!(snapshot.values[0].as_i64(), Some(10));
     assert!(matches!(snapshot.values[1], DynamicValue::Unbound));
 
-    assert!(cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
-    assert!(!cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
+    assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache.clear_output_port(node_id, 0);
-    let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
+    cache.clear_output_port(e_node_id, 0);
+    let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
     assert!(matches!(
@@ -224,10 +225,10 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
         "resident values and output demand require equal arity"
     );
 
-    let node_id = NodeId::from_u128(1);
+    let e_node_id = ExecutionNodeId::from_u128(1);
     let mut program = ExecutionProgram::default();
     program.e_nodes.insert(
-        node_id,
+        e_node_id,
         ExecutionNode {
             outputs: Span::new(0, 2),
             ..Default::default()
@@ -247,13 +248,13 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            cache.read_output_port(&program, node_id, 0, false);
+            cache.read_output_port(&program, e_node_id, 0, false);
         }))
         .is_err(),
         "resident values must match the compiled output arity"
     );
     assert!(
-        catch_unwind(AssertUnwindSafe(|| cache.clear_output_port(node_id, 1))).is_err(),
+        catch_unwind(AssertUnwindSafe(|| cache.clear_output_port(e_node_id, 1))).is_err(),
         "a released output port must be in range"
     );
 }
@@ -364,11 +365,11 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     // the OnDisk slot C is omitted.
     assert_eq!(stats.by_node.len(), 2);
     assert!(stats.by_node.contains(&NodeRamUsage {
-        node_id: NodeId::from_u128(1),
+        e_node_id: ExecutionNodeId::from_u128(1),
         usage: RamUsage { cpu: 105, gpu: 10 },
     }));
     assert!(stats.by_node.contains(&NodeRamUsage {
-        node_id: NodeId::from_u128(2),
+        e_node_id: ExecutionNodeId::from_u128(2),
         usage: RamUsage { cpu: 100, gpu: 10 },
     }));
     assert_eq!(shared_calls.load(Ordering::Relaxed), 2);

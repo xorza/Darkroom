@@ -18,11 +18,12 @@ subscriptions, and pins together.
 
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain
-their `NodeId`; nested flat ids are derived with domain-separated BLAKE3.
-`FlattenMap` maps both directions between flat ids and exact `NodeAddress`
-values. A `NodeAddress` contains the graph-instance path plus the interior
-node id; targeted runs and pinned-output delivery must use this scoped identity.
-Choosing a representative instance is an explicit host-side policy.
+the UUID value of their authoring `NodeId` behind the distinct
+`ExecutionNodeId` type; nested execution ids are derived with domain-separated
+BLAKE3. `FlattenMap` maps each execution id to an exact `NodeAddress` and back.
+A `NodeAddress` contains the graph-instance path plus the interior node id.
+Targeted runs seed exact `ExecutionNodeId`s; pinned-output delivery uses exact
+authoring addresses.
 
 ## Source layout
 
@@ -69,8 +70,9 @@ Choosing a representative instance is an explicit host-side policy.
 `CompiledGraph`; compilation is independent of run seeds. Disabled leaves stay
 in the program with an effective disabled bit inherited from composite
 ancestors. Compile errors never enter the worker. Planning is structural: it
-selects roots, treats explicit node seeds as one-run disable overrides, orders
-dependencies before consumers, and detects missing inputs. Resolution stamps
+selects exact execution-node roots, treats those seeds as one-run disable
+overrides, orders dependencies before consumers, and detects missing inputs.
+Resolution stamps
 content digests, then derives cache-aware liveness, exact `OutputDemand`, and
 binding-reader counts together. Execution invokes the surviving nodes in plan
 order.
@@ -97,12 +99,15 @@ cache support.
 
 One `Vec<WorkerMessage>` is one commit unit. `BatchIntent` preserves first-seen
 order while deduplicating node seeds and events; conflicting state slots are
-last-write-wins and `Exit` dominates its batch. `ActiveEventLoop` owns both its
-tasks and event receiver, so the lifecycle invariant is represented by one
-type. Event tasks rendezvous through Tokio's `Barrier`; the worker's counted
-pause gate uses Tokio `watch` so overlapping close guards reopen it only after
-the last guard drops. Worker reports stream progress and exact scoped pinned
-outputs before the matching finished result.
+last-write-wins and `Exit` dominates its batch. Compiled programs are shared as
+`Arc<CompiledGraph>` values. After applying a graph-state change, the worker
+emits `Installed` or `Cleared` before any report belonging to the resulting
+state; its single execution loop and callback preserve that FIFO stream.
+`ActiveEventLoop` owns both its tasks and event receiver, so the lifecycle
+invariant is represented by one type. Event tasks rendezvous through Tokio's
+`Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping
+close guards reopen it only after the last guard drops. Worker reports stream
+progress and exact scoped pinned outputs before the matching finished result.
 
 ## Tests
 

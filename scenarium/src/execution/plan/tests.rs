@@ -1,11 +1,14 @@
-use super::*;
 use crate::DataType;
-use crate::execution::identity::NodeAddress;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+use crate::execution::compile::CompiledGraph;
+use crate::execution::identity::ExecutionNodeId;
+use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
+use crate::execution::program::{
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
+};
+use crate::execution::{Error, NodeSet, RunSeeds};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
-use std::sync::Arc;
 
 /// Hand-built compile artifact for planner tests (an empty flatten map — every
 /// node is "top-level", so seed ids resolve directly). Inputs are
@@ -16,12 +19,15 @@ struct Fix {
 }
 
 impl Fix {
-    fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
+    fn node(
+        &mut self,
+        sink: bool,
+        inputs: &[(bool, ExecutionBinding)],
+        outputs: u32,
+    ) -> ExecutionNodeId {
         let program = &mut self.compiled.program;
         if program.e_nodes.is_empty() {
-            Arc::get_mut(&mut self.compiled.flatten_map)
-                .unwrap()
-                .reset();
+            self.compiled.flatten_map.reset();
         }
         let inputs_start = program.inputs.len() as u32;
         for (required, binding) in inputs {
@@ -43,7 +49,7 @@ impl Fix {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
-        let id = NodeId::from_u128(idx as u128 + 1);
+        let id = ExecutionNodeId::from_u128(idx as u128 + 1);
         program.e_nodes.insert(
             id,
             ExecutionNode {
@@ -54,16 +60,16 @@ impl Fix {
                 ..Default::default()
             },
         );
-        Arc::get_mut(&mut self.compiled.flatten_map)
-            .unwrap()
-            .set_leaf(id, 0, id);
+        self.compiled
+            .flatten_map
+            .set_leaf(id, 0, NodeId::from(id.as_uuid()));
         id
     }
 }
 
-fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
+fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target: node_id,
+        target: e_node_id,
         port_idx: port,
     })
 }
@@ -179,15 +185,15 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &f.compiled,
             &RunSeeds {
                 sinks: true,
-                nodes: vec![NodeAddress::root(producer)],
+                nodes: vec![producer],
                 ..Default::default()
             },
             &mut plan,
         )
         .unwrap();
-    for node_id in [producer, required, optional] {
+    for e_node_id in [producer, required, optional] {
         assert_eq!(
-            plan.verdicts[&node_id],
+            plan.verdicts[&e_node_id],
             NodeVerdict::Execute,
             "the explicit producer seed makes every consumer runnable"
         );
@@ -203,7 +209,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(a)],
+        nodes: vec![a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -212,7 +218,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     assert_eq!(p.roots, NodeSet::from([a]));
 
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(a), NodeAddress::root(a)],
+        nodes: vec![a, a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -224,8 +230,8 @@ fn node_seed_is_both_a_root_and_pinned() {
 fn dependency_cycle_is_rejected() {
     // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();
-    f.node(true, &[(false, bind(NodeId::from_u128(2), 0))], 1);
-    f.node(false, &[(false, bind(NodeId::from_u128(1), 0))], 1);
+    f.node(true, &[(false, bind(ExecutionNodeId::from_u128(2), 0))], 1);
+    f.node(false, &[(false, bind(ExecutionNodeId::from_u128(1), 0))], 1);
 
     let mut planner = Planner::default();
     let mut plan = ExecutionPlan::default();
@@ -251,7 +257,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(b)],
+        nodes: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -267,7 +273,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         sinks: true,
-        nodes: vec![NodeAddress::root(b)],
+        nodes: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -276,13 +282,11 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.
-    let bogus = NodeId::from_u128(0xdead_beef);
+    let bogus = ExecutionNodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(bogus)],
+        nodes: vec![bogus],
         ..Default::default()
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
-    assert!(
-        matches!(err, Error::NodeSeedNotFound { address } if address == NodeAddress::root(bogus))
-    );
+    assert!(matches!(err, Error::NodeSeedNotFound { e_node_id } if e_node_id == bogus));
 }

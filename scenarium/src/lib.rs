@@ -18,17 +18,19 @@ pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::codec::{CodecError, CustomValueCodec};
-pub use execution::compile::{Compilation, CompileError, CompiledGraph, Compiler};
+#[cfg(any(test, feature = "internals"))]
+pub use execution::compile::test_support::CompiledGraphBuilder;
+pub use execution::compile::{CompileError, CompiledGraph, Compiler};
 pub use execution::disk_store::DiskStore;
 pub use execution::event::{EventRef, EventTrigger};
-#[cfg(any(test, feature = "internals"))]
-pub use execution::identity::test_support::FlattenMapBuilder;
-pub use execution::identity::{Attribution, FlattenMap, NodeAddress, OutputAddress};
+pub use execution::identity::{
+    ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId, NodeAddress, OutputAddress,
+};
 pub use execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 pub use execution::stats::{
     ExecutedNodeStats, ExecutionStats, LogEntry, LogLevel, NodeError, NodeRamUsage,
 };
-pub use execution::{Error, Result, RunError};
+pub use execution::{Error, Result, RunError, RunSeeds};
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{

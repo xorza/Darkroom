@@ -5,6 +5,7 @@
 
 use scenarium::NodeId;
 
+use crate::core::document::GraphRef;
 use crate::gui::app::App;
 
 /// Graph execution + the worker event loop. Handled by [`App::handle_run`].
@@ -50,6 +51,9 @@ impl App {
     /// upstream cone executes and its outputs are delivered. Same run-state
     /// and event-loop bookkeeping as a full run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
+        if self.workspace.open.document.active_target() != Some(GraphRef::Main) {
+            unimplemented!("run-node commands are only implemented for the main graph");
+        }
         if !self.workspace.run_node(node_id) {
             return;
         }

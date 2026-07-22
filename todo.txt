@@ -30,3 +30,11 @@ blobs and serialization directly to file to avoid memallocs
 build masters chose array of files instead of directory
 
 remove anyhow
+
+Darkroom currently recompiles on every run, so each new compile still needs installation
+
+remove flattenmap from worker
+
+save caches on cache click
+
+One unresolved UI issue remains: Darkroom’s local-definition tabs currently know the definition node but not which graph instance is being inspected. If a definition has two instances, Darkroom cannot choose one ExecutionNodeId.

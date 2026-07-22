@@ -4,9 +4,8 @@
 //!
 //! Execution dissolves graphs and remaps interior node ids, so a run's
 //! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
-//! projects them through the compile-phase `FlattenMap` (kept by the engine
-//! when it sent the run — the worker doesn't echo it back) to fold each
-//! outcome onto the authoring nodes: onto the node itself (unique per editor
+//! projects them through the worker-confirmed [`CompiledGraph`] to fold each outcome
+//! onto the authoring nodes: onto the node itself (unique per editor
 //! node — a graph's interior aggregates across its instances) and onto every
 //! ancestor composite instance, so an instance node reflects its whole
 //! subtree. Logs attribute the same way.
@@ -14,14 +13,28 @@
 //! [`Editor`]: crate::gui::app::editor::Editor
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
+use scenarium::CompiledGraph;
+use scenarium::ExecutionNodeId;
+use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::RamUsage;
 use scenarium::RunError;
-use scenarium::{ExecutionStats, FlattenMap, LogEntry, RunPhase, RunProgress};
+use scenarium::{ExecutionStats, RunPhase, RunProgress};
 
 use crate::gui::pinned_output::PinnedOutputStore;
+
+fn attributed_nodes(
+    compiled: &CompiledGraph,
+    e_node_id: ExecutionNodeId,
+) -> impl Iterator<Item = NodeId> + '_ {
+    compiled
+        .attribution(e_node_id)
+        .expect("worker report identity must belong to the acknowledged compiled graph")
+}
+
 /// Per-node execution outcome of the last run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node
 /// (`Errored` > `MissingInputs` > `Executed` > `Cached`). `Executed`
@@ -72,7 +85,7 @@ impl ExecStatus {
 #[derive(Default, Debug)]
 pub(crate) struct NodeRunState {
     pub(crate) status: ExecStatus,
-    pub(crate) logs: Vec<LogEntry>,
+    pub(crate) logs: Vec<NodeLog>,
     /// Human-readable messages for this run's failures, folded on the same
     /// attribution as `status` (a graph instance collects its subtree's).
     /// Empty unless the node errored; drives the inspector's error detail so
@@ -85,12 +98,21 @@ pub(crate) struct NodeRunState {
     pub(crate) ram: RamUsage,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NodeLog {
+    pub(crate) level: LogLevel,
+    pub(crate) message: String,
+}
+
 /// Central runtime state for the current editor. Off the serialized state.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
     pub(crate) pinned_outputs: PinnedOutputStore,
-    /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
+    /// The program acknowledged by the worker's ordered report stream. Every
+    /// subsequent flat progress/result payload belongs to this exact compile.
+    pub(crate) compiled: Option<Arc<CompiledGraph>>,
+    /// A run is in flight (`begin_run` → `WorkerReport::Finished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
     /// RAM held by the worker's runtime cache after the last finished run
@@ -112,7 +134,7 @@ impl RunState {
         self.running
     }
 
-    pub(crate) fn logs(&self, id: NodeId) -> &[LogEntry] {
+    pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
         self.nodes
             .get(&id)
             .map(|n| n.logs.as_slice())
@@ -137,10 +159,14 @@ impl RunState {
 
     /// Reproject a finished run's status + logs onto the per-node map.
     /// Status/logs are reset and rebuilt. Entries left carrying nothing are
-    /// dropped. `flatten` is the compile-phase map of the program the stats
-    /// came from (the host compiled, so the worker doesn't echo it back) —
-    /// it projects the stats' flattened ids onto authoring nodes.
-    pub(crate) fn set_results(&mut self, stats: &ExecutionStats, flatten: &FlattenMap) {
+    /// dropped. The worker-confirmed compiled graph projects the stats' flat
+    /// ids onto authoring nodes.
+    pub(crate) fn set_results(&mut self, stats: &ExecutionStats) {
+        let compiled = Arc::clone(
+            self.compiled
+                .as_ref()
+                .expect("worker reported results before installing a compiled graph"),
+        );
         self.running = false;
         self.cache_ram = stats.cache_ram;
         for node in self.nodes.values_mut() {
@@ -150,13 +176,13 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         for e in &stats.executed_nodes {
-            self.record_status(flatten, e.node_id, ExecStatus::Executed(e.elapsed_secs));
+            self.record_status(&compiled, e.e_node_id, ExecStatus::Executed(e.elapsed_secs));
         }
         for id in &stats.cached_nodes {
-            self.record_status(flatten, *id, ExecStatus::Cached);
+            self.record_status(&compiled, *id, ExecStatus::Cached);
         }
         for port in &stats.missing_inputs {
-            self.record_status(flatten, port.node_id, ExecStatus::MissingInputs);
+            self.record_status(&compiled, port.e_node_id, ExecStatus::MissingInputs);
         }
         for e in &stats.node_errors {
             // A node cancelled mid-run didn't fail — it was interrupted and
@@ -165,13 +191,12 @@ impl RunState {
             if matches!(e.error, RunError::Cancelled { .. }) {
                 continue;
             }
-            self.record_status(flatten, e.node_id, ExecStatus::Errored);
-            self.record_error(flatten, e.node_id, &e.error);
+            self.record_status(&compiled, e.e_node_id, ExecStatus::Errored);
+            self.record_error(&compiled, e.e_node_id, &e.error);
         }
         for entry in &stats.logs {
-            for node_id in flatten.attribution(entry.node_id) {
-                self.nodes.entry(node_id).or_default().logs.push(LogEntry {
-                    node_id,
+            for node_id in attributed_nodes(&compiled, entry.e_node_id) {
+                self.nodes.entry(node_id).or_default().logs.push(NodeLog {
                     level: entry.level,
                     message: entry.message.clone(),
                 });
@@ -181,7 +206,7 @@ impl RunState {
         // onto its authoring node and every enclosing composite instance, so an
         // instance aggregates its interior's memory.
         for node_ram in &stats.node_ram {
-            for node_id in flatten.attribution(node_ram.node_id) {
+            for node_id in attributed_nodes(&compiled, node_ram.e_node_id) {
                 self.nodes.entry(node_id).or_default().ram += node_ram.usage;
             }
         }
@@ -191,8 +216,13 @@ impl RunState {
 
     /// Fold one flattened stat's `status` onto the node itself and every
     /// enclosing composite instance (via the flatten map's attribution).
-    fn record_status(&mut self, flatten: &FlattenMap, flat_id: NodeId, status: ExecStatus) {
-        for node_id in flatten.attribution(flat_id) {
+    fn record_status(
+        &mut self,
+        compiled: &CompiledGraph,
+        e_node_id: ExecutionNodeId,
+        status: ExecStatus,
+    ) {
+        for node_id in attributed_nodes(compiled, e_node_id) {
             let slot = self.nodes.entry(node_id).or_default();
             slot.status = slot.status.merged(status);
         }
@@ -202,9 +232,14 @@ impl RunState {
     /// composite instance (same attribution as `record_status`), so the
     /// inspector can show the actual failure cause instead of a bare "errored".
     /// A graph instance accumulates its whole subtree's failures.
-    fn record_error(&mut self, flatten: &FlattenMap, flat_id: NodeId, error: &RunError) {
+    fn record_error(
+        &mut self,
+        compiled: &CompiledGraph,
+        e_node_id: ExecutionNodeId,
+        error: &RunError,
+    ) {
         let message = error.to_string();
-        for node_id in flatten.attribution(flat_id) {
+        for node_id in attributed_nodes(compiled, e_node_id) {
             self.nodes
                 .entry(node_id)
                 .or_default()
@@ -219,15 +254,20 @@ impl RunState {
     /// instance subtree's times) — deliberately *not* folded through
     /// `record_status`'s `merged`, since `Running` is live-only and must
     /// always win over a stale `Errored`/`MissingInputs` from the last run.
-    /// `flatten` is the compile-phase map of the program the event came
-    /// from (like [`set_results`](Self::set_results)) — `progress.node_id`
-    /// is a flattened id, projected onto authoring nodes here.
-    pub(crate) fn apply_progress(&mut self, progress: &RunProgress, flatten: &FlattenMap) {
+    /// The installed compile is the program the event came from (like
+    /// [`set_results`](Self::set_results)); `progress.e_node_id` is a flattened
+    /// id projected onto authoring nodes here.
+    pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
+        let compiled = Arc::clone(
+            self.compiled
+                .as_ref()
+                .expect("worker reported progress before installing a compiled graph"),
+        );
         let status = match progress.phase {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
         };
-        for node_id in flatten.attribution(progress.node_id) {
+        for node_id in attributed_nodes(&compiled, progress.e_node_id) {
             self.nodes.entry(node_id).or_default().status = status;
         }
     }
@@ -254,24 +294,28 @@ impl RunState {
 mod tests {
     use super::*;
 
-    use scenarium::FlattenMapBuilder;
+    use scenarium::CompiledGraphBuilder;
     use scenarium::FuncId;
-    use scenarium::{ExecutedNodeStats, LogLevel, NodeError};
+    use scenarium::{ExecutedNodeStats, LogEntry, LogLevel, NodeError};
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
     }
 
-    /// Build an `ExecutionStats` with the given executed `(flat_id, secs)`
-    /// and errored `flat_id`s. The flatten map isn't part of the stats —
-    /// it's passed alongside to `set_results`, as in production.
-    fn stats(executed: &[(NodeId, f64)], errored: &[NodeId]) -> ExecutionStats {
+    fn fid(n: u128) -> ExecutionNodeId {
+        ExecutionNodeId::from_u128(n)
+    }
+
+    /// Build an `ExecutionStats` with the given executed `(e_node_id, secs)`
+    /// and errored `e_node_id`s. The installed compiled graph isn't part of the
+    /// stats; `RunState` retains it from the preceding worker report.
+    fn stats(executed: &[(ExecutionNodeId, f64)], errored: &[ExecutionNodeId]) -> ExecutionStats {
         ExecutionStats {
             elapsed_secs: 0.0,
             executed_nodes: executed
                 .iter()
-                .map(|&(node_id, elapsed_secs)| ExecutedNodeStats {
-                    node_id,
+                .map(|&(e_node_id, elapsed_secs)| ExecutedNodeStats {
+                    e_node_id,
                     elapsed_secs,
                 })
                 .collect(),
@@ -280,8 +324,8 @@ mod tests {
             triggered_events: vec![],
             node_errors: errored
                 .iter()
-                .map(|&node_id| NodeError {
-                    node_id,
+                .map(|&e_node_id| NodeError {
+                    e_node_id,
                     error: RunError::Invoke {
                         func_id: FuncId::from_u128(0),
                         message: "test error".into(),
@@ -295,41 +339,38 @@ mod tests {
         }
     }
 
-    fn flatten_map(leaves: impl IntoIterator<Item = (NodeId, Vec<NodeId>, NodeId)>) -> FlattenMap {
-        let mut builder = FlattenMapBuilder::new();
-        for (flat_id, instances, node_id) in leaves {
-            builder.insert_leaf(flat_id, instances, node_id);
+    fn run_state(
+        leaves: impl IntoIterator<Item = (ExecutionNodeId, Vec<NodeId>, NodeId)>,
+    ) -> RunState {
+        let mut builder = CompiledGraphBuilder::new();
+        for (e_node_id, instances, node_id) in leaves {
+            builder.insert_leaf(e_node_id, instances, node_id);
         }
-        builder.build()
+        RunState {
+            compiled: Some(builder.build()),
+            ..RunState::default()
+        }
     }
 
     #[test]
     fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
         let (interior, instance) = (nid(1), nid(2));
-        let flat = nid(100);
-        let map = flatten_map([(flat, vec![instance], interior)]);
-
-        let mut rs = RunState::default();
+        let flat = fid(100);
+        let mut rs = run_state([(flat, vec![instance], interior)]);
 
         // Started → every attributed node turns Running.
-        rs.apply_progress(
-            &RunProgress {
-                node_id: flat,
-                phase: RunPhase::Started { at: Instant::now() },
-            },
-            &map,
-        );
+        rs.apply_progress(&RunProgress {
+            e_node_id: flat,
+            phase: RunPhase::Started { at: Instant::now() },
+        });
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
         assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
 
         // Finished → Executed with the reported time (overwrites Running).
-        rs.apply_progress(
-            &RunProgress {
-                node_id: flat,
-                phase: RunPhase::Finished { elapsed_secs: 0.5 },
-            },
-            &map,
-        );
+        rs.apply_progress(&RunProgress {
+            e_node_id: flat,
+            phase: RunPhase::Finished { elapsed_secs: 0.5 },
+        });
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
         assert_eq!(rs.status(instance), ExecStatus::Executed(0.5));
 
@@ -344,15 +385,13 @@ mod tests {
     fn aggregates_interior_across_instances_and_per_instance_subtree() {
         let interior = nid(1);
         let (inst_a, inst_b) = (nid(10), nid(20));
-        let (flat_a, flat_b) = (nid(101), nid(102));
+        let (flat_a, flat_b) = (fid(101), fid(102));
 
-        let map = flatten_map([
+        let mut rs = run_state([
             (flat_a, vec![inst_a], interior),
             (flat_b, vec![inst_b], interior),
         ]);
-
-        let mut rs = RunState::default();
-        rs.set_results(&stats(&[(flat_a, 2.0), (flat_b, 3.0)], &[]), &map);
+        rs.set_results(&stats(&[(flat_a, 2.0), (flat_b, 3.0)], &[]));
 
         // Shared interior view: both instances' times sum (2 + 3).
         assert_eq!(rs.status(interior), ExecStatus::Executed(5.0));
@@ -367,12 +406,10 @@ mod tests {
     fn outer_instance_total_includes_nested() {
         let interior = nid(1);
         let (outer, inner) = (nid(10), nid(20));
-        let flat = nid(100);
+        let flat = fid(100);
 
-        let map = flatten_map([(flat, vec![outer, inner], interior)]);
-
-        let mut rs = RunState::default();
-        rs.set_results(&stats(&[(flat, 4.0)], &[]), &map);
+        let mut rs = run_state([(flat, vec![outer, inner], interior)]);
+        rs.set_results(&stats(&[(flat, 4.0)], &[]));
 
         assert_eq!(rs.status(interior), ExecStatus::Executed(4.0));
         assert_eq!(rs.status(inner), ExecStatus::Executed(4.0));
@@ -383,11 +420,10 @@ mod tests {
     /// errored node is in both lists); time is dropped with the upgrade.
     #[test]
     fn errored_beats_executed_on_same_node() {
-        let interior = nid(1); // top-level: flattened id == interior
-        let map = flatten_map([(interior, vec![], interior)]);
-
-        let mut rs = RunState::default();
-        rs.set_results(&stats(&[(interior, 1.0)], &[interior]), &map);
+        let interior = nid(1);
+        let flat = fid(1);
+        let mut rs = run_state([(flat, vec![], interior)]);
+        rs.set_results(&stats(&[(flat, 1.0)], &[flat]));
         assert_eq!(rs.status(interior), ExecStatus::Errored);
         // The failure message rides along with the status — the inspector
         // shows it instead of a bare "errored".
@@ -403,13 +439,13 @@ mod tests {
         let interior = nid(1);
         let cancelled_interior = nid(2);
         let inst = nid(10);
-        let (fail_flat, cancel_flat) = (nid(100), nid(101));
-        let map = flatten_map([
+        let (fail_flat, cancel_flat) = (fid(100), fid(101));
+        let mut rs = run_state([
             (fail_flat, vec![inst], interior),
             (cancel_flat, vec![inst], cancelled_interior),
         ]);
 
-        let node_err = |node_id, error| NodeError { node_id, error };
+        let node_err = |e_node_id, error| NodeError { e_node_id, error };
         let mut s = stats(&[], &[]);
         s.node_errors = vec![
             node_err(
@@ -427,8 +463,7 @@ mod tests {
             ),
         ];
 
-        let mut rs = RunState::default();
-        rs.set_results(&s, &map);
+        rs.set_results(&s);
 
         // The real failure paints both the interior and the enclosing instance.
         assert_eq!(rs.status(interior), ExecStatus::Errored);
@@ -444,42 +479,39 @@ mod tests {
 
     /// A log line emitted inside a graph instance attributes to both
     /// the interior node and the enclosing instance, preserving level +
-    /// message, re-keyed to each editor node.
+    /// message in each editor node's own state.
     #[test]
     fn set_results_attributes_logs_to_interior_and_instance() {
         let interior = nid(1);
         let inst = nid(10);
-        let flat = nid(100);
-        let map = flatten_map([(flat, vec![inst], interior)]);
+        let flat = fid(100);
+        let mut rs = run_state([(flat, vec![inst], interior)]);
 
         let mut s = stats(&[], &[]);
         s.logs.push(LogEntry {
-            node_id: flat,
+            e_node_id: flat,
             level: LogLevel::Warn,
             message: "hi".into(),
         });
 
-        let mut rs = RunState::default();
-        rs.set_results(&s, &map);
+        rs.set_results(&s);
 
         let i = rs.logs(interior);
         assert_eq!(i.len(), 1, "interior carries the line");
         assert_eq!(i[0].message, "hi");
         assert_eq!(i[0].level, LogLevel::Warn);
-        assert_eq!(i[0].node_id, interior);
         let n = rs.logs(inst);
         assert_eq!(n.len(), 1);
-        assert_eq!(n[0].node_id, inst, "re-keyed to the instance");
+        assert_eq!(n[0], i[0], "both attributed nodes carry the same line");
     }
 
     /// A fresh run keeps status/logs so the glow survives a recompute.
     #[test]
     fn begin_run_keeps_status() {
         let node = nid(1);
-        let map = flatten_map([(node, vec![], node)]);
-
-        let mut rs = RunState::default();
-        rs.set_results(&stats(&[(node, 1.0)], &[]), &map);
+        let flat = fid(1);
+        let mut rs = run_state([(flat, vec![], node)]);
+        rs.set_results(&stats(&[(flat, 1.0)], &[]));
 
         assert!(!rs.is_running(), "not running after a finished run");
         rs.begin_run();
@@ -488,7 +520,7 @@ mod tests {
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
 
         // The finishing run clears the in-flight flag.
-        rs.set_results(&stats(&[], &[]), &FlattenMap::default());
+        rs.set_results(&stats(&[], &[]));
         assert!(!rs.is_running(), "not running after results land");
     }
 }

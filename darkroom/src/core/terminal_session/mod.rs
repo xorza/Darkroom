@@ -4,7 +4,7 @@
 //! and tracks script-requested shutdown. Document/runtime invariants live in
 //! [`Workspace`], while the GUI owns its independent editing and undo policy.
 
-use scenarium::Library;
+use scenarium::{Library, WorkerReport};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent_cascading;
@@ -12,7 +12,6 @@ use crate::core::edit::intent::types::Intent;
 use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
-use crate::core::worker::WorkerEvent;
 use crate::core::workspace::Workspace;
 
 #[cfg(test)]
@@ -75,10 +74,10 @@ impl TerminalSession {
     }
 
     fn drain_worker(&mut self) {
-        let events: Vec<WorkerEvent> = self.workspace.runtime.drain_worker().collect();
-        for event in events {
-            match event {
-                WorkerEvent::ExecutionFinished(Ok(stats)) => {
+        let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
+        for report in events {
+            match report {
+                WorkerReport::Finished(Ok(stats)) => {
                     self.workspace.runtime.status.error = None;
                     self.workspace.runtime.status.info(format!(
                         "run finished: {} node(s), {:.3}s",
@@ -92,12 +91,15 @@ impl TerminalSession {
                             .info(format!("  [{:?}] {}", log.level, log.message));
                     }
                 }
-                WorkerEvent::ExecutionFinished(Err(error)) => self
+                WorkerReport::Finished(Err(error)) => self
                     .workspace
                     .runtime
                     .status
                     .error(format!("run failed: {error}")),
-                WorkerEvent::NodeProgress(_) | WorkerEvent::PinnedOutputs(_) => {}
+                WorkerReport::Installed(_)
+                | WorkerReport::Cleared
+                | WorkerReport::Progress(_)
+                | WorkerReport::PinnedOutputs(_) => {}
             }
         }
     }

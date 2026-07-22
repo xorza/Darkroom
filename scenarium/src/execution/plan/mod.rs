@@ -9,10 +9,9 @@
 //! unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
-use crate::execution::query::resolve_node_id;
 use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map};
-use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.
@@ -67,7 +66,7 @@ pub(crate) struct ExecutionPlan {
     /// seeded from the roots. Disabled dependencies stay outside the order unless they
     /// are explicit node seeds. The resolver refines it into the surviving run before
     /// execution.
-    pub(crate) process_order: Vec<NodeId>,
+    pub(crate) process_order: Vec<ExecutionNodeId>,
     /// Per-node verdict (execute / disabled / missing-inputs), keyed by node id.
     pub(crate) verdicts: NodeMap<NodeVerdict>,
     /// The nodes the backward walk started from — sinks, event subscribers,
@@ -116,8 +115,8 @@ enum Color {
 
 #[derive(Debug)]
 enum Visit {
-    Discover(NodeId),
-    Done(NodeId),
+    Discover(ExecutionNodeId),
+    Done(ExecutionNodeId),
 }
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
@@ -132,9 +131,8 @@ pub(crate) struct Planner {
 
 impl Planner {
     /// Build the per-run schedule into `plan` from the compiled artifact and the run's
-    /// `seeds` (the roots to walk back from); the artifact's flatten map resolves node
-    /// seeds (authoring ids) to flat roots. Errors on a dependency cycle or an
-    /// unresolvable node seed.
+    /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
+    /// directly. Errors on a dependency cycle or a seed absent from the program.
     pub(crate) fn plan(
         &mut self,
         compiled: &CompiledGraph,
@@ -175,26 +173,26 @@ impl Planner {
             Color::White,
         );
 
-        for node_id in plan.roots.iter().copied() {
-            self.stack.push(Visit::Discover(node_id));
+        for e_node_id in plan.roots.iter().copied() {
+            self.stack.push(Visit::Discover(e_node_id));
         }
 
         while let Some(visit) = self.stack.pop() {
-            let node_id = match visit {
-                Visit::Discover(node_id) => node_id,
-                Visit::Done(node_id) => {
-                    debug_assert_eq!(self.color[&node_id], Color::Gray);
-                    *self.color.get_mut(&node_id).unwrap() = Color::Black;
-                    plan.process_order.push(node_id);
+            let e_node_id = match visit {
+                Visit::Discover(e_node_id) => e_node_id,
+                Visit::Done(e_node_id) => {
+                    debug_assert_eq!(self.color[&e_node_id], Color::Gray);
+                    *self.color.get_mut(&e_node_id).unwrap() = Color::Black;
+                    plan.process_order.push(e_node_id);
                     // Runnable unless a required input is unbound or fed by a
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
                     let missing = program
-                        .node_inputs(&program.e_nodes[&node_id])
+                        .node_inputs(&program.e_nodes[&e_node_id])
                         .iter()
                         .any(|e_input| input_missing(e_input, &plan.verdicts));
-                    *plan.verdicts.get_mut(&node_id).unwrap() = if missing {
+                    *plan.verdicts.get_mut(&e_node_id).unwrap() = if missing {
                         NodeVerdict::MissingInputs
                     } else {
                         NodeVerdict::Execute
@@ -203,25 +201,25 @@ impl Planner {
                 }
             };
 
-            match self.color[&node_id] {
+            match self.color[&e_node_id] {
                 Color::Gray => {
-                    return Err(Error::CycleDetected { node_id });
+                    return Err(Error::CycleDetected { e_node_id });
                 }
                 Color::Black => continue,
                 Color::White => {}
             }
 
-            let e_node = &program.e_nodes[&node_id];
+            let e_node = &program.e_nodes[&e_node_id];
             // Disabled nodes block dependency traversal, but an explicit node
             // seed is pinned before this walk and overrides disable for this run.
-            if e_node.disabled && !plan.pinned.contains(&node_id) {
-                *self.color.get_mut(&node_id).unwrap() = Color::Black;
-                *plan.verdicts.get_mut(&node_id).unwrap() = NodeVerdict::Disabled;
+            if e_node.disabled && !plan.pinned.contains(&e_node_id) {
+                *self.color.get_mut(&e_node_id).unwrap() = Color::Black;
+                *plan.verdicts.get_mut(&e_node_id).unwrap() = NodeVerdict::Disabled;
                 continue;
             }
 
-            *self.color.get_mut(&node_id).unwrap() = Color::Gray;
-            self.stack.push(Visit::Done(node_id));
+            *self.color.get_mut(&e_node_id).unwrap() = Color::Gray;
+            self.stack.push(Visit::Done(e_node_id));
 
             for e_input in program.node_inputs(e_node) {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
@@ -235,7 +233,7 @@ impl Planner {
 }
 
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
-/// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
+/// the executor's cut: exact execution-node seeds, every
 /// event subscriber, every sink node, and (for the event loop) every node owning a
 /// subscribed event.
 ///
@@ -250,24 +248,22 @@ fn collect_roots(
     let program = &compiled.program;
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
-    // Node seeds (on-demand preview): roots like any other, plus pinned so every output is
-    // computed and delivered. Seeds are batched with the program they target, so an id
-    // that doesn't resolve is inconsistent caller state — fail the run rather than
-    // silently skip the seed. `pinned` also records the one-run disabled override.
-    for address in &seeds.nodes {
-        let node_id =
-            resolve_node_id(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
-                address: address.clone(),
-            })?;
-        plan.roots.insert(node_id);
-        plan.pinned.insert(node_id);
+    // Node seeds (on-demand preview): each exact execution node is a root and pinned so
+    // every output is computed and delivered. `pinned` also records the one-run disabled
+    // override. An id absent from the installed program is inconsistent caller state.
+    for &e_node_id in &seeds.nodes {
+        if !program.e_nodes.contains_key(&e_node_id) {
+            return Err(Error::NodeSeedNotFound { e_node_id });
+        }
+        plan.roots.insert(e_node_id);
+        plan.pinned.insert(e_node_id);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
     // promotes this run to run all sinks (below), so it's skipped as a root here.
     let mut run_sinks = seeds.sinks;
     for event in &seeds.events {
-        let e_node = &program.e_nodes[&event.node_id];
+        let e_node = &program.e_nodes[&event.e_node_id];
         let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
         for &sub in subs {
             if program.e_nodes[&sub].special == Some(SpecialNode::RunSinks) {
@@ -284,8 +280,8 @@ fn collect_roots(
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
     // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
-    for node_id in program.e_nodes.keys().copied() {
-        let e_node = &program.e_nodes[&node_id];
+    for e_node_id in program.e_nodes.keys().copied() {
+        let e_node = &program.e_nodes[&e_node_id];
         if !e_node.disabled
             && ((run_sinks && e_node.sink)
                 || (seeds.event_triggers
@@ -293,7 +289,7 @@ fn collect_roots(
                         .iter()
                         .any(|ev| !ev.subscribers.is_empty())))
         {
-            plan.roots.insert(node_id);
+            plan.roots.insert(e_node_id);
         }
     }
     Ok(())

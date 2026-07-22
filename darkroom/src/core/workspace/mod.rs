@@ -82,11 +82,6 @@ impl Workspace {
         self.runtime.start_event_loop(&self.open.document.graph)
     }
 
-    pub(crate) fn save_caches(&mut self) {
-        self.normalize_document();
-        self.runtime.save_caches(&self.open.document.graph);
-    }
-
     pub(crate) fn save_to(&mut self, path: &Path) -> anyhow::Result<()> {
         let library = self.runtime.library.published.load();
         self.open.save_to(path, &library)?;
