@@ -1104,7 +1104,7 @@ mod cache_persistence {
     /// A corrupt / incompatible cache blob must be *deleted* on a failed load so the
     /// same run recomputes and writes a fresh one. Without the delete, `store_node`'s
     /// skip-if-exists keeps the broken file and the node recomputes on *every* run
-    /// (the regression: an old-format blob rejected by `BLOB_FORMAT_VERSION` was never
+    /// (the regression: an old-format blob rejected by the outer format version was never
     /// replaced). Each "session" is a fresh engine, so the disk cache is the only source.
     #[tokio::test]
     async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
@@ -1515,6 +1515,10 @@ mod cache_persistence {
         struct BlobCodec;
         #[async_trait]
         impl CustomValueCodec for BlobCodec {
+            fn version(&self) -> u32 {
+                0
+            }
+
             async fn encode(
                 &self,
                 value: &dyn CustomValue,

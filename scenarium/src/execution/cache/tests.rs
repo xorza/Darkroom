@@ -183,6 +183,16 @@ fn resident_hit_derives_coverage_from_values() {
 
     assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
+    let coverage = CachedOutputCoverage {
+        ports: vec![true, false],
+    };
+    assert!(coverage.covers_demand(&[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!coverage.covers_demand(&[OutputDemand::Produce]));
+    assert!(!coverage.covers_demand(&[
+        OutputDemand::Produce,
+        OutputDemand::Skip,
+        OutputDemand::Skip,
+    ]));
 
     cache.clear_output_port(e_node_id, 0);
     let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
@@ -206,15 +216,6 @@ fn resident_hit_derives_coverage_from_values() {
 #[cfg(debug_assertions)]
 fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    let coverage = CachedOutputCoverage { ports: vec![true] };
-    let required = CachedOutputCoverage {
-        ports: vec![true, false],
-    };
-    assert!(
-        catch_unwind(|| coverage.covers(&required)).is_err(),
-        "coverage comparisons require equal output arity"
-    );
 
     let snapshot = OutputSnapshot::new(vec![DynamicValue::Unbound]);
     assert!(

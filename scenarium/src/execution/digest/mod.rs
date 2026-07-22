@@ -32,8 +32,9 @@
 //!   only where the consumer's input is declared `FsPath` (or a stamper-registered custom
 //!   type) — a lambda that reads a file through an `Any`/`String` input keys nothing and
 //!   can serve stale content. Declare the type.
-//! - **Custom-value blob format** is the codec's responsibility, not the digest's — see
-//!   `CustomValueCodec::decode`; a breaking codec change needs a `DOMAIN` bump.
+//! - **Custom-value blob format** is disk identity, not value identity. Each blob separately
+//!   stamps the versions of the codecs its values use; changing one invalidates only relevant
+//!   disk blobs without discarding semantically unchanged RAM values or downstream digests.
 
 use blake3::Hasher;
 

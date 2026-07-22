@@ -103,10 +103,7 @@ impl Compiler {
             &mut flatten_map,
         );
 
-        // Resolve the program's output-type pool from the full library (every func
-        // is present — `validate_for_execution` validated them), making the compiled program
-        // self-describing: the digest and the disk cache's codec check read it
-        // with no library at run time.
+        // Resolve types here so runtime digesting does not retain the function library.
         program.resolve_output_types(library);
 
         let compiled = CompiledGraph {

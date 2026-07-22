@@ -261,6 +261,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CustomValueCodec for StubCodec {
+        fn version(&self) -> u32 {
+            0
+        }
+
         async fn encode(
             &self,
             _value: &dyn CustomValue,

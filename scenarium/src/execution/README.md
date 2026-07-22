@@ -232,14 +232,14 @@ touches digests.
 
 ## B.3 Storage (`disk_store/`)
 
-A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its outer
-header is the 32-byte content digest, a format version, the output count, and one
-materialization byte per output; the codec body follows. Presence probes read only this
-header and require both a matching digest and a mask that covers the current run's
-demanded outputs. Invalidation is an **overwrite**. A same-digest frame is skipped only
-when its coverage already contains the new result; if a later run covers more outputs,
-the frame is replaced. Writes are atomic (temp file + rename), so readers never see a
-half-written frame.
+A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its embedded
+header carries a magic value, format version, 32-byte content digest, output coverage, and a
+sorted manifest of `(TypeId, codec version)` entries for the custom values actually present;
+the codec body follows. Presence probes read only this header and require matching content,
+current versions for every listed codec, and coverage of the current demand. Invalidation is
+an **overwrite**. A frame is skipped only when its manifest exactly matches the values being
+stored and its coverage already contains the new result. Writes publish header and body
+atomically (temp file + rename), so readers never see mismatched generations.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
@@ -247,8 +247,12 @@ half-written frame.
 `Custom(Arc<dyn CustomValue>)` is an opaque runtime payload. Each custom *type*
 registers a `CustomValueCodec` on its `Library` type-table entry; that one entry drives
 `encode` (async + context-aware, so a GPU-resident value can read back) and `decode`
-(bytes + type id → value). The envelope (`CachedValue`) carries each custom value's
-`type_id` so the loader picks the right codec. **Caching is all-or-nothing per node:** a
+(bytes + type id → value). Every codec also declares a `version`; `DiskStore` records only
+the codecs used by that blob, derived from the actual values so custom values flowing through
+an `Any` output are covered too. Adding or changing an unrelated codec leaves the blob valid.
+Before invoking a decoder, the loader verifies that the body names exactly the codec manifest
+declared by the header. The envelope (`CachedValue`) carries each custom value's `type_id` so
+the loader picks the right codec. **Caching is all-or-nothing per node:** a
 custom output whose type has no codec makes the whole node uncacheable, so a reload
 never yields a half-real output set.
 
@@ -292,9 +296,9 @@ resolution and execution then follow this lifecycle:
 
 1. **resident hit?** — reuse only when the digest matches and every demanded resident
    output is non-`Unbound`.
-2. **else verify disk reuse.** If the node's blob carries the digest and a
-   coverage containing current demand **and** the outputs are decodable (every custom output type has a codec —
-   predicted without reading), `mark_on_disk_if_present` flags the candidate `OnDisk` and
+2. **else verify disk reuse.** If the node's blob carries the content digest, has current
+   versions for every codec in its manifest, and has coverage containing current demand,
+   `mark_on_disk_if_present` flags the candidate `OnDisk` and
    `hydrate_slot` decodes its body. Only a successful decode becomes `Reuse` and cuts the
    producer cone. A corrupt, incompatible, or vanished body is deleted and treated as a miss;
    the same reverse sweep continues through its producers, so the node recomputes this run.
@@ -340,9 +344,11 @@ source, which then runs.
 - **Output-type change** — a redefined output signature (type or arity) re-keys the
   digest (§B.2), so a stale blob of the wrong type is never even looked up. No runtime
   type check is needed: wrong-type-for-key is impossible by construction.
+- **Used codec-version change** — a blob naming that codec is rejected before decoding and
+  overwritten without invalidating RAM values, downstream nodes, or blobs using other codecs.
 - Impure cone → no digest → never cached.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
-  (`mark_on_disk_if_present`'s codec check keeps a codec-less blob off the hot path; a
+  (the header manifest keeps a codec-less blob off the hot path; a
   failed load deletes the bad blob and recomputes it in the same run).
 
 ---

@@ -124,7 +124,7 @@ pub(crate) struct ExecutionProgram {
     /// the node's slice. Resolved once at flatten by [`Self::resolve_output_types`]
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
-    /// re-keys) and the disk cache's codec check. An unresolved wildcard port is
+    /// re-keys). An unresolved wildcard port is
     /// `DataType::Any`. Its `len()` is the program's total output count
     /// ([`Self::n_outputs`]).
     pub(crate) output_types: Vec<DataType>,
