@@ -4,26 +4,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use common::test_utils;
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::digest::Digest;
-use crate::execution::disk_store::header;
 use crate::execution::disk_store::{BlobTarget, DiskStore};
 use crate::library::{Library, TypeEntry};
+use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextManager;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
 
-/// A unique temp file path removed on drop.
+#[derive(Debug)]
 struct TempFile(PathBuf);
+
 impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
 }
+
 fn temp_file(tag: &str) -> TempFile {
-    static C: AtomicU64 = AtomicU64::new(0);
-    let n = C.fetch_add(1, Ordering::Relaxed);
-    TempFile(std::env::temp_dir().join(format!(
-        "scenarium-diskstore-{tag}-{}-{n}.bin",
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    TempFile(test_utils::test_output_path(&format!(
+        "scenarium/disk-store/{tag}-{}-{sequence}.bin",
         std::process::id()
     )))
 }
@@ -35,151 +40,47 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
     }
 }
 
-fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    OutputSnapshot::new(values)
+async fn read_snapshot(
+    store: &DiskStore,
+    target: &BlobTarget,
+    output_count: usize,
+) -> Option<OutputSnapshot> {
+    let demand = vec![OutputDemand::Skip; output_count];
+    store.read(target, &demand).await
 }
 
-/// The full store↔read contract on one file: a stored blob round-trips under the
-/// digest it was stamped with, every probe/read under any *other* digest is a miss
-/// (never a stale hit), and a store under a new digest *overwrites* the node's one
-/// blob — the old configuration's bytes are replaced, not orphaned.
-#[tokio::test]
-async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
-    let file = temp_file("roundtrip");
-    let store = DiskStore::default();
-    let d_a = Digest([7u8; 32]);
-    let d_b = Digest([8u8; 32]);
-
-    // Config A: three plain values, stamped D_A.
-    let snapshot_a = OutputSnapshot::new(vec![
-        DynamicValue::Unbound,
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::Static(StaticValue::String("x".into())),
-    ]);
-    store
-        .store(
-            &target(&file.0, d_a),
-            &snapshot_a,
-            &mut ContextManager::default(),
-        )
-        .await;
-
-    // The stamped digest is probed off the header alone; any other digest — or a
-    // missing file — is not a hit.
-    assert_eq!(
-        store.coverage(&target(&file.0, d_a)),
-        Some(CachedOutputCoverage {
-            ports: vec![false, true, true]
+fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
+    let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
+    std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|candidate| {
+            let name = candidate.file_name().unwrap().to_string_lossy();
+            name.starts_with(&prefix) && name.ends_with(".tmp")
         })
-    );
-    assert!(
-        store.coverage(&target(&file.0, d_b)).is_none(),
-        "another digest means the blob is superseded, not present"
-    );
-    let absent = temp_file("absent");
-    assert!(store.coverage(&target(&absent.0, d_a)).is_none());
-    assert!(store.read(&target(&absent.0, d_a)).await.is_none());
-
-    let back = store.read(&target(&file.0, d_a)).await.expect("hit");
-    assert_eq!(back.values.len(), 3);
-    assert!(matches!(back.values[0], DynamicValue::Unbound));
-    assert_eq!(back.values[1].as_i64(), Some(7));
-    assert_eq!(back.values[2].as_string(), Some("x"));
-    assert!(
-        store.read(&target(&file.0, d_b)).await.is_none(),
-        "a blob carrying a different digest is a miss"
-    );
-
-    // Config B supersedes A: same node file, new digest — overwritten in place.
-    let snapshot_b = complete_snapshot(vec![DynamicValue::Static(StaticValue::Int(35))]);
-    store
-        .store(
-            &target(&file.0, d_b),
-            &snapshot_b,
-            &mut ContextManager::default(),
-        )
-        .await;
-    assert_eq!(
-        store.coverage(&target(&file.0, d_b)),
-        Some(CachedOutputCoverage { ports: vec![true] }),
-        "blob re-stamped D_B"
-    );
-    let back = store.read(&target(&file.0, d_b)).await.expect("hit");
-    assert_eq!(back.values.len(), 1);
-    assert_eq!(back.values[0].as_i64(), Some(35));
-    assert!(
-        store.read(&target(&file.0, d_a)).await.is_none(),
-        "config A's bytes were overwritten, not kept beside B's"
-    );
+        .collect()
 }
 
-#[tokio::test]
-async fn store_replaces_same_digest_blob_when_coverage_and_manifest_expand() {
-    let file = temp_file("expanded-materialization");
-    let decode_calls = Arc::new(AtomicU64::new(0));
-    let store = versioned_store(1, decode_calls.clone());
-    let digest = Digest([11; 32]);
-    let target = target(&file.0, digest);
-    let partial = OutputSnapshot::new(vec![
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::Unbound,
-    ]);
-    store
-        .store(&target, &partial, &mut ContextManager::default())
-        .await;
-    let partial_blob = std::fs::read(&file.0).unwrap();
-    assert!(
-        header::parse(&partial_blob)
-            .unwrap()
-            .codecs
-            .bytes
-            .is_empty()
-    );
+const BLOB_TYPE: &str = "78391861-24da-4368-a3a5-2a6b7a47f112";
 
-    let complete = complete_snapshot(vec![
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::from_custom(Opaque),
-    ]);
-    store
-        .store(&target, &complete, &mut ContextManager::default())
-        .await;
+#[derive(Debug, PartialEq, Eq)]
+struct Blob(Vec<u8>);
 
-    let cached = store.read(&target).await.expect("expanded blob");
-    assert_eq!(
-        store.coverage(&target),
-        Some(CachedOutputCoverage {
-            ports: vec![true, true]
-        })
-    );
-    assert_eq!(cached.values[0].as_i64(), Some(7));
-    assert!(cached.values[1].as_custom::<Opaque>().is_some());
-    assert_eq!(decode_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        header::parse(&std::fs::read(&file.0).unwrap())
-            .unwrap()
-            .codecs
-            .entry_count,
-        1
-    );
-}
-
-/// A custom value with no registered codec — never cacheable.
-const OPAQUE_TYPE: &str = "78391861-24da-4368-a3a5-2a6b7a47f112";
-
-#[derive(Debug)]
-struct Opaque;
-impl fmt::Display for Opaque {
+impl fmt::Display for Blob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Opaque")
+        write!(f, "Blob({} bytes)", self.0.len())
     }
 }
-impl CustomValue for Opaque {
+
+impl CustomValue for Blob {
     fn type_id(&self) -> TypeId {
-        OPAQUE_TYPE.into()
+        BLOB_TYPE.into()
     }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
+
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
     }
@@ -189,6 +90,7 @@ impl CustomValue for Opaque {
 struct VersionedCodec {
     version: u32,
     decode_calls: Arc<AtomicU64>,
+    fail_encode: bool,
 }
 
 #[async_trait::async_trait]
@@ -200,31 +102,42 @@ impl CustomValueCodec for VersionedCodec {
     async fn encode(
         &self,
         value: &dyn CustomValue,
+        writer: &mut (dyn AsyncWrite + Unpin + Send),
         _ctx: &mut ContextManager,
-    ) -> std::result::Result<Vec<u8>, CodecError> {
-        value
+    ) -> std::result::Result<(), CodecError> {
+        let blob = value
             .as_any()
-            .downcast_ref::<Opaque>()
-            .expect("VersionedCodec is only registered for Opaque");
-        Ok(Vec::new())
+            .downcast_ref::<Blob>()
+            .expect("VersionedCodec is only registered for Blob");
+        writer.write_all(&blob.0).await?;
+        if self.fail_encode {
+            return Err("injected encode failure".into());
+        }
+        Ok(())
     }
 
-    fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
-        assert!(bytes.is_empty());
+    async fn decode(
+        &self,
+        reader: &mut (dyn AsyncRead + Unpin + Send),
+        byte_len: u64,
+    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+        let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
+        reader.read_to_end(&mut bytes).await?;
         self.decode_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Arc::new(Opaque))
+        Ok(Arc::new(Blob(bytes)))
     }
 }
 
-fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>) -> Library {
+fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bool) -> Library {
     let mut library = Library::default();
     library.register_type(
-        OPAQUE_TYPE,
+        BLOB_TYPE,
         TypeEntry::custom_with_codec(
-            "Opaque",
+            "Blob",
             Arc::new(VersionedCodec {
                 version,
                 decode_calls,
+                fail_encode,
             }),
         ),
     );
@@ -232,162 +145,204 @@ fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>) -> Library {
 }
 
 fn versioned_store(version: u32, decode_calls: Arc<AtomicU64>) -> DiskStore {
-    DiskStore::new(Arc::new(versioned_library(version, decode_calls)), None)
+    DiskStore::new(
+        Arc::new(versioned_library(version, decode_calls, false)),
+        None,
+    )
 }
 
 #[tokio::test]
-async fn non_codecable_custom_is_skipped_not_written() {
-    let file = temp_file("noncodec");
-    let snapshot = complete_snapshot(vec![
-        DynamicValue::Static(StaticValue::Int(1)),
-        DynamicValue::from_custom(Opaque),
+async fn store_read_probe_and_digest_replacement_round_trip() {
+    let file = temp_file("roundtrip");
+    let store = DiskStore::default();
+    let first_digest = Digest([7; 32]);
+    let second_digest = Digest([8; 32]);
+    let first_target = target(&file.0, first_digest);
+    let second_target = target(&file.0, second_digest);
+    let first = OutputSnapshot::new(vec![
+        DynamicValue::Unbound,
+        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Static(StaticValue::String("x".into())),
     ]);
-    DiskStore::default()
-        .store(
-            &target(&file.0, Digest([1u8; 32])),
-            &snapshot,
-            &mut ContextManager::default(),
-        )
+
+    store
+        .store(&first_target, &first, &mut ContextManager::default())
         .await;
-    assert!(!file.0.exists(), "no codec ⇒ silent skip, no blob created");
+    assert_eq!(
+        store.coverage(&first_target).await,
+        Some(CachedOutputCoverage {
+            ports: vec![false, true, true]
+        })
+    );
+    assert!(store.coverage(&second_target).await.is_none());
+    let restored = read_snapshot(&store, &first_target, 3).await.unwrap();
+    assert!(matches!(restored.values[0], DynamicValue::Unbound));
+    assert_eq!(restored.values[1].as_i64(), Some(7));
+    assert_eq!(restored.values[2].as_string(), Some("x"));
+
+    let second = OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(35))]);
+    store
+        .store(&second_target, &second, &mut ContextManager::default())
+        .await;
+    assert!(read_snapshot(&store, &first_target, 3).await.is_none());
+    assert_eq!(
+        read_snapshot(&store, &second_target, 1)
+            .await
+            .unwrap()
+            .values[0]
+            .as_i64(),
+        Some(35)
+    );
 }
 
 #[tokio::test]
-async fn codec_manifest_is_selective_and_rejects_used_version_before_decode() {
+async fn broader_same_digest_blob_is_preserved() {
+    let file = temp_file("coverage");
+    let decode_calls = Arc::new(AtomicU64::new(0));
+    let store = versioned_store(1, decode_calls.clone());
+    let target = target(&file.0, Digest([11; 32]));
+    let partial = OutputSnapshot::new(vec![
+        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Unbound,
+    ]);
+    store
+        .store(&target, &partial, &mut ContextManager::default())
+        .await;
+    let second_output = [OutputDemand::Skip, OutputDemand::Produce];
+    assert!(store.read(&target, &second_output).await.is_none());
+    assert!(
+        file.0.exists(),
+        "an insufficient but valid blob is retained"
+    );
+
+    let complete = OutputSnapshot::new(vec![
+        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::from_custom(Blob(vec![1, 2, 3])),
+    ]);
+    store
+        .store(&target, &complete, &mut ContextManager::default())
+        .await;
+    let complete_bytes = std::fs::read(&file.0).unwrap();
+
+    store
+        .store(&target, &partial, &mut ContextManager::default())
+        .await;
+    assert_eq!(std::fs::read(&file.0).unwrap(), complete_bytes);
+    assert_eq!(
+        store.coverage(&target).await,
+        Some(CachedOutputCoverage {
+            ports: vec![true, true]
+        })
+    );
+    let restored = read_snapshot(&store, &target, 2).await.unwrap();
+    assert_eq!(restored.values[0].as_i64(), Some(7));
+    assert_eq!(
+        restored.values[1].as_custom::<Blob>(),
+        Some(&Blob(vec![1, 2, 3]))
+    );
+    assert_eq!(decode_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn missing_and_changed_codecs_miss_before_decode() {
     let file = temp_file("codec-version");
-    let digest = Digest([12; 32]);
-    let target = target(&file.0, digest);
-    let snapshot = complete_snapshot(vec![DynamicValue::from_custom(Opaque)]);
-    let old_decode_calls = Arc::new(AtomicU64::new(0));
-    let old_store = versioned_store(1, old_decode_calls.clone());
+    let target = target(&file.0, Digest([12; 32]));
+    let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
+    let old_calls = Arc::new(AtomicU64::new(0));
+    let old_store = versioned_store(1, old_calls.clone());
     old_store
         .store(&target, &snapshot, &mut ContextManager::default())
         .await;
-    assert_eq!(
-        old_store.coverage(&target),
-        Some(CachedOutputCoverage { ports: vec![true] })
-    );
 
-    let original = std::fs::read(&file.0).unwrap();
-    let parsed = header::parse(&original).unwrap();
-    let body = parsed.body.to_vec();
-    let mut mismatched = header::encode(
-        digest,
-        &[DynamicValue::Static(StaticValue::Int(0))],
-        &Library::default(),
-    )
-    .unwrap();
-    mismatched.extend_from_slice(&body);
-    std::fs::write(&file.0, mismatched).unwrap();
-    assert!(old_store.read(&target).await.is_none());
-    assert_eq!(
-        old_decode_calls.load(Ordering::SeqCst),
-        0,
-        "a header/body manifest mismatch is rejected before decoding"
-    );
-    std::fs::write(&file.0, original).unwrap();
-
-    let unrelated_type = TypeId::unique();
-    let unchanged_decode_calls = Arc::new(AtomicU64::new(0));
-    for unrelated_version in [1, 2] {
-        let mut library = versioned_library(1, unchanged_decode_calls.clone());
-        library.register_type(
-            unrelated_type,
-            TypeEntry::custom_with_codec(
-                "Unused",
-                Arc::new(VersionedCodec {
-                    version: unrelated_version,
-                    decode_calls: Arc::new(AtomicU64::new(0)),
-                }),
-            ),
-        );
-        let store = DiskStore::new(Arc::new(library), None);
-        assert_eq!(
-            store.coverage(&target),
-            Some(CachedOutputCoverage { ports: vec![true] }),
-            "adding or changing an unused codec preserves this blob"
-        );
-        assert!(store.read(&target).await.is_some());
-    }
-    assert_eq!(unchanged_decode_calls.load(Ordering::SeqCst), 2);
-
-    let missing_store = DiskStore::default();
-    assert!(missing_store.coverage(&target).is_none());
-    assert!(missing_store.read(&target).await.is_none());
-
-    let new_decode_calls = Arc::new(AtomicU64::new(0));
-    let new_store = versioned_store(2, new_decode_calls.clone());
+    assert!(DiskStore::default().coverage(&target).await.is_none());
     assert!(
-        new_store.coverage(&target).is_none(),
-        "the same content digest under another codec version is a miss"
+        read_snapshot(&DiskStore::default(), &target, 1)
+            .await
+            .is_none()
     );
-    assert!(new_store.read(&target).await.is_none());
-    assert_eq!(
-        new_decode_calls.load(Ordering::SeqCst),
-        0,
-        "old bytes are rejected before invoking the new decoder"
-    );
+
+    let new_calls = Arc::new(AtomicU64::new(0));
+    let new_store = versioned_store(2, new_calls.clone());
+    assert!(new_store.coverage(&target).await.is_none());
+    assert!(read_snapshot(&new_store, &target, 1).await.is_none());
+    assert_eq!(new_calls.load(Ordering::SeqCst), 0);
 
     new_store
         .store(&target, &snapshot, &mut ContextManager::default())
         .await;
-    assert!(old_store.coverage(&target).is_none());
-    assert_eq!(
-        new_store.coverage(&target),
-        Some(CachedOutputCoverage { ports: vec![true] })
-    );
-    let restored = new_store.read(&target).await.expect("new-version blob");
-    assert!(restored.values[0].as_custom::<Opaque>().is_some());
-    assert_eq!(new_decode_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(old_decode_calls.load(Ordering::SeqCst), 0);
+    assert!(old_store.coverage(&target).await.is_none());
+    assert!(read_snapshot(&new_store, &target, 1).await.is_some());
+    assert_eq!(new_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(old_calls.load(Ordering::SeqCst), 0);
 }
 
-/// Coverage metadata must agree exactly with the decoded output materialization.
 #[tokio::test]
-async fn read_rejects_coverage_body_disagreement() {
-    let file = temp_file("bad-coverage");
-    let store = DiskStore::default();
-    let digest = Digest([2u8; 32]);
-    let snapshot = OutputSnapshot::new(vec![
-        DynamicValue::Static(StaticValue::Int(1)),
-        DynamicValue::Unbound,
-    ]);
-    store
+async fn unregistered_custom_value_is_not_written() {
+    let file = temp_file("unregistered");
+    let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1]))]);
+    DiskStore::default()
         .store(
-            &target(&file.0, digest),
+            &target(&file.0, Digest([1; 32])),
             &snapshot,
             &mut ContextManager::default(),
         )
         .await;
-    let original = std::fs::read(&file.0).unwrap();
-    let parsed = header::parse(&original).unwrap();
-    let body = parsed.body.to_vec();
-    let mut bytes = header::encode(
-        digest,
-        &[DynamicValue::Unbound, DynamicValue::Unbound],
-        &Library::default(),
-    )
-    .unwrap();
-    bytes.extend_from_slice(&body);
-    std::fs::write(&file.0, &bytes).unwrap();
-    assert!(
-        store.read(&target(&file.0, digest)).await.is_none(),
-        "coverage metadata cannot omit a decoded bound value"
-    );
+    assert!(!file.0.exists());
+}
 
-    let mut bytes = header::encode(
-        digest,
-        &[
-            DynamicValue::Static(StaticValue::Int(0)),
-            DynamicValue::Static(StaticValue::Int(0)),
-        ],
-        &Library::default(),
-    )
-    .unwrap();
-    bytes.extend_from_slice(&body);
-    std::fs::write(&file.0, &bytes).unwrap();
-    assert!(
-        store.read(&target(&file.0, digest)).await.is_none(),
-        "coverage metadata cannot claim a decoded unbound value"
+#[tokio::test]
+async fn failed_streaming_encode_preserves_previous_blob() {
+    let file = temp_file("encode-failure");
+    let calls = Arc::new(AtomicU64::new(0));
+    let good_store = versioned_store(1, calls.clone());
+    let original_target = target(&file.0, Digest([4; 32]));
+    good_store
+        .store(
+            &original_target,
+            &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
+            &mut ContextManager::default(),
+        )
+        .await;
+    let original = std::fs::read(&file.0).unwrap();
+
+    let failing_store = DiskStore::new(
+        Arc::new(versioned_library(1, Arc::new(AtomicU64::new(0)), true)),
+        None,
     );
+    failing_store
+        .store(
+            &target(&file.0, Digest([5; 32])),
+            &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
+            &mut ContextManager::default(),
+        )
+        .await;
+    assert_eq!(std::fs::read(&file.0).unwrap(), original);
+    assert!(publication_temp_files(&file.0).is_empty());
+    assert!(
+        read_snapshot(&good_store, &original_target, 1)
+            .await
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn truncated_blob_is_rejected_by_probe_and_read() {
+    let file = temp_file("truncated");
+    let store = DiskStore::default();
+    let target = target(&file.0, Digest([6; 32]));
+    store
+        .store(
+            &target,
+            &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::String(
+                "payload".into(),
+            ))]),
+            &mut ContextManager::default(),
+        )
+        .await;
+    let mut bytes = std::fs::read(&file.0).unwrap();
+    bytes.pop();
+    std::fs::write(&file.0, bytes).unwrap();
+    assert!(store.coverage(&target).await.is_none());
+    assert!(read_snapshot(&store, &target, 1).await.is_none());
+    assert!(!file.0.exists(), "a corrupt cache blob is removed");
 }

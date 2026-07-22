@@ -13,7 +13,7 @@ nothing in-tree.
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures and private consuming TOML text normalization. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
-| `file_utils/` | Generic fallible, sorted directory scanning by file extension plus atomic same-directory file publication with durable and rebuildable-cache modes. |
+| `file_utils/` | Generic fallible, sorted directory scanning by file extension plus one-shot and two-phase atomic same-directory publication with durable and rebuildable-cache modes. |
 | `span.rs` | `Span`: compact serde `(start, len)` u32 range into a flat SoA pool; 8 bytes vs 16 for `Range<usize>`. Used by `scenarium`'s execution program. |
 | `introspect/` | Generic struct introspection: the traits and value types are always available; the nested `common-derive` proc-macro and its `#[derive(Introspect)]` / `#[derive(IntrospectEnum)]` re-exports require the `introspect-derive` feature. `fields()` reports `FieldDesc` name/label/concrete numeric `FieldKind`/default/required, and checked `from_fields` rebuilds the value. Signed and unsigned integer defaults remain lossless; out-of-range authored values error instead of casting. Enum derives require an explicit stable `#[config(type_id = "…")]` UUID and delegate the string round-trip to `Display`/`FromStr`. |
 | `float_ext.rs` | `FloatExt::approximately_eq` for `f32`/`f64`/`Vec2` (within `EPSILON`). |

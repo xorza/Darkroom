@@ -54,8 +54,8 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
 | `execution/executor/` | Invocation, delivery, reclamation, and stats |
 | `execution/cache/` | Cross-run values and output coverage |
-| `execution/codec.rs` | Cache framing plus downstream custom-value codec API |
-| `execution/disk_store/` | On-disk cache persistence |
+| `execution/codec.rs` | Streaming downstream custom-value codec API |
+| `execution/disk_store/` | Indexed on-disk cache format and atomic persistence |
 | `execution/report.rs` | Live progress and pinned-output transport |
 | `execution/resource/` | Off-thread, memoized per-run external-resource stamps |
 | `execution/stats.rs` | Completed-run results |

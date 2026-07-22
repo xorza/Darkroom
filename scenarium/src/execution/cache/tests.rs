@@ -135,9 +135,7 @@ fn replacing_disk_store_clears_only_disk_availability() {
         &mut cache,
         1,
         RuntimeSlot {
-            value: ValueState::OnDisk {
-                coverage: CachedOutputCoverage { ports: vec![true] },
-            },
+            value: ValueState::OnDisk,
             ..Default::default()
         },
     );
@@ -183,16 +181,6 @@ fn resident_hit_derives_coverage_from_values() {
 
     assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
-    let coverage = CachedOutputCoverage {
-        ports: vec![true, false],
-    };
-    assert!(coverage.covers_demand(&[OutputDemand::Produce, OutputDemand::Skip]));
-    assert!(!coverage.covers_demand(&[OutputDemand::Produce]));
-    assert!(!coverage.covers_demand(&[
-        OutputDemand::Produce,
-        OutputDemand::Skip,
-        OutputDemand::Skip,
-    ]));
 
     cache.clear_output_port(e_node_id, 0);
     let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
@@ -349,9 +337,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
         3,
         RuntimeSlot {
             current_digest: Some(d),
-            value: ValueState::OnDisk {
-                coverage: CachedOutputCoverage { ports: vec![true] },
-            },
+            value: ValueState::OnDisk,
             ..Default::default()
         },
     );

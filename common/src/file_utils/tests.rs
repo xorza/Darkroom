@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
 use crate::file_utils::{
-    PublicationMode, files_with_extensions, publish, publish_bytes, publish_with_replacement,
+    PendingPublication, PublicationMode, files_with_extensions, publish, publish_bytes,
+    publish_with_replacement,
 };
 use crate::test_utils::test_output_path;
 
@@ -177,6 +178,27 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         !missing_parent.exists(),
         "publication does not silently create a missing destination directory"
     );
+}
+
+#[test]
+fn two_phase_publication_commits_or_cleans_up() {
+    let path = test_output_path("common/file_utils/publication/two-phase.bin");
+    fs::write(&path, b"previous").unwrap();
+
+    let mut pending = PendingPublication::new(&path, PublicationMode::Cache).unwrap();
+    let mut file = pending.take_file();
+    file.write_all(b"complete").unwrap();
+    pending.commit(file).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"complete");
+    assert!(publication_temp_files(&path).is_empty());
+
+    let mut pending = PendingPublication::new(&path, PublicationMode::Cache).unwrap();
+    let mut file = pending.take_file();
+    file.write_all(b"incomplete").unwrap();
+    drop(file);
+    drop(pending);
+    assert_eq!(fs::read(&path).unwrap(), b"complete");
+    assert!(publication_temp_files(&path).is_empty());
 }
 
 #[test]

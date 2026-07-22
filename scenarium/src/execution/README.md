@@ -164,10 +164,9 @@ consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomp
 value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
 a content digest attests the value produced under it, however it came to be resident; the
 RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`evict_unused`, §B.6). Disk reuse
-(`mark_on_disk_if_present`) is gated on `persists_to_disk`. `evict_unused` reclaims RAM the
-mode doesn't call to hold — demoting to a disk blob when one exists (lossless), else
-dropping only a non-RAM mode's value.
+`evict_unused`, §B.6). Disk reuse is gated on `persists_to_disk`. `evict_unused` reclaims
+RAM the mode doesn't call to hold — demoting to a disk blob when one exists (lossless),
+else dropping only a non-RAM mode's value.
 
 ## B.1 What opts into disk
 
@@ -232,29 +231,27 @@ touches digests.
 
 ## B.3 Storage (`disk_store/`)
 
-A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its embedded
-header carries a magic value, format version, 32-byte content digest, output coverage, and a
-sorted manifest of `(TypeId, codec version)` entries for the custom values actually present;
-the codec body follows. Presence probes read only this header and require matching content,
-current versions for every listed codec, and coverage of the current demand. Invalidation is
-an **overwrite**. A frame is skipped only when its manifest exactly matches the values being
-stored and its coverage already contains the new result. Writes publish header and body
-atomically (temp file + rename), so readers never see mismatched generations.
+A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its indexed
+header carries a magic value, format version, 32-byte content digest, body length, and one
+fixed descriptor per output. A descriptor records the value kind and payload length plus the
+type identity and codec version for custom values. Presence probes read only the header,
+require matching content and current codec versions, and derive exact output coverage from
+the descriptors. Invalidation is an **overwrite**. A write is skipped only when the existing
+blob already covers every value being stored. Writes stream into a temporary file and publish
+it atomically, so readers never see a partially encoded generation.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
 `DynamicValue` isn't `Serialize`: `Unbound`/`Static` are trivial, but
 `Custom(Arc<dyn CustomValue>)` is an opaque runtime payload. Each custom *type*
 registers a `CustomValueCodec` on its `Library` type-table entry; that one entry drives
-`encode` (async + context-aware, so a GPU-resident value can read back) and `decode`
-(bytes + type id → value). Every codec also declares a `version`; `DiskStore` records only
-the codecs used by that blob, derived from the actual values so custom values flowing through
-an `Any` output are covered too. Adding or changing an unrelated codec leaves the blob valid.
-Before invoking a decoder, the loader verifies that the body names exactly the codec manifest
-declared by the header. The envelope (`CachedValue`) carries each custom value's `type_id` so
-the loader picks the right codec. **Caching is all-or-nothing per node:** a
-custom output whose type has no codec makes the whole node uncacheable, so a reload
-never yields a half-real output set.
+async, context-aware `encode` and async `decode` over bounded Tokio I/O streams. Every codec
+also declares a `version`; each custom output descriptor records its actual type and version,
+so custom values flowing through an `Any` output are covered while unrelated codec changes
+leave the blob valid. The loader verifies every descriptor before decoding, then restricts
+each decoder to exactly its declared payload region and requires it to consume that region.
+**Caching is all-or-nothing per node:** a custom output whose type has no codec makes the
+whole node uncacheable, so a reload never yields a half-real output set.
 
 ## B.5 The RAM tier (`cache/`)
 
@@ -263,7 +260,7 @@ Each `ExecutionNodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the resolver
 value:          ValueState        // Empty | Resident { snapshot, produced_under }
-                                  //       | OnDisk { coverage }
+                                  //       | OnDisk
 ```
 
 `ValueState` is one enum, not the old three loosely-coupled fields — so the previously
@@ -271,10 +268,10 @@ representable bad combos ("resident *and* flagged on disk", a stale RAM value ma
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
 `Resident`, its `produced_under` equals the current digest, and every demanded snapshot
 value is bound. A `None` `current_digest` (impure cone) never hits.
-`OnDisk` means a slot was demoted to a disk blob or a header probe found a candidate for
-this digest and demand. It is not a reuse verdict: the resolver verifies the body and makes
-it resident before cutting its producer cone. A disk-cached value behind another reused node
-is never probed and therefore never enters RAM (B.6).
+`OnDisk` means a resident slot was demoted after its current disk blob was validated. It is
+not a reuse verdict: the resolver still verifies and decodes the body before cutting its
+producer cone. A disk-cached value behind another reused node is never opened and therefore
+never enters RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`cache/` policy over `disk_store/` I/O)
 
@@ -296,12 +293,13 @@ resolution and execution then follow this lifecycle:
 
 1. **resident hit?** — reuse only when the digest matches and every demanded resident
    output is non-`Unbound`.
-2. **else verify disk reuse.** If the node's blob carries the content digest, has current
-   versions for every codec in its manifest, and has coverage containing current demand,
-   `mark_on_disk_if_present` flags the candidate `OnDisk` and
-   `hydrate_slot` decodes its body. Only a successful decode becomes `Reuse` and cuts the
-   producer cone. A corrupt, incompatible, or vanished body is deleted and treated as a miss;
-   the same reverse sweep continues through its producers, so the node recomputes this run.
+2. **else verify disk reuse.** The loader opens the blob once, checks its digest, output
+   count, codec versions, and demanded coverage while scanning the header, then continues
+   through the same file to decode its body. Insufficient coverage is rejected before any
+   payload is read, while a valid partial blob remains available for a narrower future run.
+   Only a successful decode becomes `Reuse` and cuts the producer cone. A corrupt body is
+   deleted and treated as a miss; the same reverse sweep continues through its producers, so
+   the node recomputes this run.
 3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
    demanded output fails the node; skipped outputs may remain `Unbound`. Resident snapshots
    store only those values; `store_node` derives disk coverage from them and skips an existing

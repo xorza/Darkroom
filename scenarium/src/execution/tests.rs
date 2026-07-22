@@ -669,7 +669,7 @@ mod cache_persistence {
             .is_some();
         let sum_disk = matches!(
             engine.cache.slots[&root_execution_node(sum_id)].value,
-            ValueState::OnDisk { .. }
+            ValueState::OnDisk
         );
         let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
             .output_values()
@@ -773,7 +773,7 @@ mod cache_persistence {
                 slot.value
             ),
             CacheMode::Disk => assert!(
-                matches!(slot.value, ValueState::OnDisk { .. }),
+                matches!(slot.value, ValueState::OnDisk),
                 "Disk demotes its RAM copy to disk-only after the run: {:?}",
                 slot.value
             ),
@@ -892,10 +892,8 @@ mod cache_persistence {
 
     /// A valid disk blob for a node's *current* digest must be served even when the
     /// slot still holds a RAM value produced under a superseded digest — the stale
-    /// resident value must not mask the fresh blob. The old three-field slot had
-    /// exactly that bug (`hydrate_slot` short-circuited on "values present"); the
-    /// `ValueState` enum drops the stale value when `mark_on_disk_if_present` flags
-    /// the blob, so the reuse loads the correct bytes.
+    /// resident value must not mask the fresh blob. Disk reuse must load the current
+    /// blob before deciding that an older resident value is reusable.
     ///
     /// The intervening run uses `Ram` mode so it can't overwrite the node's one
     /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
@@ -1202,9 +1200,8 @@ mod cache_persistence {
     }
 
     /// A `persist` node whose disk blob is gone by the time the run reaches it must
-    /// recompute, not panic. The executor stats for the blob when it processes the node
-    /// (`mark_on_disk_if_present`); a missing blob simply misses, so the node runs and
-    /// rewrites it — never pruned behind an absent value.
+    /// recompute, not panic. A missing blob simply misses, so the node runs and rewrites
+    /// it — never pruned behind an absent value.
     #[tokio::test]
     async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
         let dir = TempDir::new("vanish");
@@ -1469,17 +1466,17 @@ mod cache_persistence {
         );
     }
 
-    /// The codec guard on `mark_on_disk_if_present`: a `persist` node whose blob is on
-    /// disk but whose custom output type has *no registered codec* (a value written by a
-    /// build that had the codec, reopened by one that doesn't) is not reused from disk —
-    /// it recomputes, rather than being served and then panicking on a failed load. With
-    /// the codec it's served from disk instead.
+    /// A `persist` node whose blob is on disk but whose custom output type has *no
+    /// registered codec* (a value written by a build that had the codec, reopened by one
+    /// that doesn't) is not reused from disk. It recomputes rather than panicking during
+    /// loading; with the codec it is served from disk instead.
     #[tokio::test]
     async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         use std::any::Any;
         use std::fmt;
 
         use async_trait::async_trait;
+        use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
         use crate::CustomValueCodec;
         use crate::async_lambda;
@@ -1522,14 +1519,21 @@ mod cache_persistence {
             async fn encode(
                 &self,
                 value: &dyn CustomValue,
+                writer: &mut (dyn AsyncWrite + Unpin + Send),
                 _ctx: &mut ContextManager,
-            ) -> std::result::Result<Vec<u8>, CodecError> {
-                Ok(value.as_any().downcast_ref::<Blob>().unwrap().0.clone())
+            ) -> std::result::Result<(), CodecError> {
+                writer
+                    .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
+                    .await?;
+                Ok(())
             }
-            fn decode(
+            async fn decode(
                 &self,
-                bytes: Vec<u8>,
+                reader: &mut (dyn AsyncRead + Unpin + Send),
+                byte_len: u64,
             ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+                let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
+                reader.read_to_end(&mut bytes).await?;
                 Ok(Arc::new(Blob(bytes)))
             }
         }
