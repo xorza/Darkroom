@@ -1,6 +1,6 @@
 use crate::RamUsage;
 use crate::execution::RunError;
-use crate::execution::event::EventRef;
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ pub struct ExecutionStats {
     pub executed_nodes: Vec<ExecutedNodeStats>,
     pub missing_inputs: Vec<ExecutionInputPort>,
     pub cached_nodes: Vec<ExecutionNodeId>,
-    pub triggered_events: Vec<EventRef>,
+    pub triggered_events: Vec<ExecutionEventPort>,
     pub node_errors: Vec<NodeError>,
     pub logs: Vec<LogEntry>,
     pub cancelled: bool,

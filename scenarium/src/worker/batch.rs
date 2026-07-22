@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 use crate::execution::RunSeeds;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
-use crate::execution::event::EventRef;
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::worker::protocol::WorkerMessage;
 
@@ -32,7 +32,7 @@ pub(crate) struct BatchIntent {
     pub(crate) execute_event_triggers: bool,
     pub(crate) execute_nodes: OrderedUnique<ExecutionNodeId>,
     pub(crate) exit: bool,
-    pub(crate) events: OrderedUnique<EventRef>,
+    pub(crate) events: OrderedUnique<ExecutionEventPort>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 

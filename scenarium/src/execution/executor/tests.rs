@@ -6,9 +6,9 @@ use super::*;
 use crate::async_lambda;
 use crate::execution::NodeSet;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx};
+use crate::execution::program::{ExecutionInput, ExecutionNode, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
@@ -148,8 +148,8 @@ fn demand_output(
 }
 
 fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionPortAddress {
-        target: e_node_id,
+    ExecutionBinding::Bind(ExecutionOutputPort {
+        e_node_id,
         port_idx: port,
     })
 }

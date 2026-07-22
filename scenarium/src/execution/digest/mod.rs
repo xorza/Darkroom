@@ -38,10 +38,8 @@
 use blake3::Hasher;
 
 use crate::execution::cache::RuntimeCache;
-use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::{
-    ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper,
-};
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, InputStamper};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
@@ -272,7 +270,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
                 // is set; a `None` taints this node.
-                let node = cache.slots[&addr.target].current_digest?;
+                let node = cache.slots[&addr.e_node_id].current_digest?;
                 hasher
                     .write_bytes(&[2])
                     .write_digest(&port_digest_of(node, addr.port_idx));
@@ -305,10 +303,10 @@ fn hash_bound_resource(
     hasher: &mut DigestHasher,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
-    addr: &ExecutionPortAddress,
+    addr: &ExecutionOutputPort,
     stamper: &InputStamper,
 ) -> Option<()> {
-    let value = cache.slots[&addr.target]
+    let value = cache.slots[&addr.e_node_id]
         .current_output_values()?
         .get(addr.port_idx)?;
     match stamper {

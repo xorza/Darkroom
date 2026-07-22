@@ -15,10 +15,11 @@
 use common::Span;
 use hashbrown::{HashMap, HashSet};
 
-use crate::execution::identity::{ExecutionNodeId, FlattenMap};
+use crate::execution::identity::{
+    ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
+};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
-    InputStamper,
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, InputStamper,
 };
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
@@ -118,15 +119,15 @@ impl Flattener {
 
         // Apply resolved event edges now that every flat emitter/subscriber exists and
         // is addressable by key. Subscribers were cleared while rebuilding events.
-        for s in &self.subs {
-            if !e_nodes.contains_key(&s.subscriber) {
+        for subscription in &self.subs {
+            if !e_nodes.contains_key(&subscription.subscriber) {
                 continue;
             }
-            if let Some(e_node) = e_nodes.get_mut(&s.emitter) {
+            if let Some(e_node) = e_nodes.get_mut(&subscription.event.e_node_id) {
                 let span = e_node.events.range();
-                pools.events[span][s.event_idx]
+                pools.events[span][subscription.event.event_idx]
                     .subscribers
-                    .push(s.subscriber);
+                    .push(subscription.subscriber);
             }
         }
     }
@@ -187,15 +188,14 @@ fn flatten_id(path: &[NodeId], interior: NodeId) -> ExecutionNodeId {
 
 /// Where an output reference resolves once boundaries are followed through.
 enum Source {
-    Producer(ExecutionPortAddress),
+    Producer(ExecutionOutputPort),
     Const(StaticValue),
     None,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ExecutionSubscription {
-    emitter: ExecutionNodeId,
-    event_idx: usize,
+    event: ExecutionEventPort,
     subscriber: ExecutionNodeId,
 }
 
@@ -367,31 +367,26 @@ impl<'a> Run<'a> {
             if Some(sub.emitter) == trigger {
                 continue;
             }
-            let Some((emitter, event_idx)) = self.resolve_emitter(sub.emitter, sub.event_idx)
-            else {
+            let Some(event) = self.resolve_emitter(sub.emitter, sub.event_idx) else {
                 continue;
             };
-            self.resolve_subscriber(sub.subscriber, emitter, event_idx);
+            self.resolve_subscriber(sub.subscriber, event);
         }
     }
 
-    /// Record one resolved flat event edge.
     /// Resolve an emitter `(node, event_idx)` to the concrete flat func event
     /// it ultimately fires, following composite exposed-event mappings inward.
-    fn resolve_emitter(
-        &mut self,
-        node_id: NodeId,
-        event_idx: usize,
-    ) -> Option<(ExecutionNodeId, usize)> {
+    fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<ExecutionEventPort> {
         let graph = self.current();
         let node = graph.find(&node_id, NodeSearch::TopLevel)?;
         if node.disabled {
             return None; // a disabled node fires no events
         }
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => {
-                Some((flatten_id(self.path.as_slice(), node_id), event_idx))
-            }
+            NodeKind::Func(_) | NodeKind::Special(_) => Some(ExecutionEventPort {
+                e_node_id: flatten_id(self.path.as_slice(), node_id),
+                event_idx,
+            }),
             NodeKind::Graph(r) => {
                 let nested = graph.resolve_graph(*r, self.library)?;
                 let exposed = nested.events.get(event_idx)?;
@@ -409,7 +404,7 @@ impl<'a> Run<'a> {
     /// pushing `(emitter, event_idx, flat_subscriber)` for each. A composite
     /// subscriber expands to the interior nodes wired to its `GraphInput`
     /// trigger.
-    fn resolve_subscriber(&mut self, node_id: NodeId, emitter: ExecutionNodeId, event_idx: usize) {
+    fn resolve_subscriber(&mut self, node_id: NodeId, event: ExecutionEventPort) {
         let graph = self.current();
         // A disabled node runs nothing, so it receives no events.
         if graph
@@ -425,8 +420,7 @@ impl<'a> Run<'a> {
             Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
                 let flat = flatten_id(self.path.as_slice(), node_id);
                 self.subs.push(ExecutionSubscription {
-                    emitter,
-                    event_idx,
+                    event,
                     subscriber: flat,
                 });
             }
@@ -448,7 +442,7 @@ impl<'a> Run<'a> {
                     .collect();
                 self.push_level(node_id);
                 for sub in interior {
-                    self.resolve_subscriber(sub, emitter, event_idx);
+                    self.resolve_subscriber(sub, event);
                 }
                 self.path.pop();
             }
@@ -484,8 +478,8 @@ impl<'a> Run<'a> {
             .find(&node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(ExecutionPortAddress {
-                target: flatten_id(self.path.as_slice(), node_id),
+            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(ExecutionOutputPort {
+                e_node_id: flatten_id(self.path.as_slice(), node_id),
                 port_idx,
             }),
             // Follow into the composite: its output `port_idx` is wired by the

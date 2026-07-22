@@ -4084,7 +4084,7 @@ mod stats {
 mod events {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::event::EventRef;
+    use crate::execution::identity::ExecutionEventPort;
     use crate::node::definition::{Func, FuncInput, FuncOutput};
     use crate::node::event::EventLambda;
 
@@ -4160,7 +4160,7 @@ mod events {
         eg.update(&f.graph, &f.library).unwrap();
 
         let stats = eg
-            .execute_events([EventRef {
+            .execute_events([ExecutionEventPort {
                 e_node_id: root_execution_node(f.emit_id),
                 event_idx: 0,
             }])
@@ -4349,7 +4349,7 @@ mod events {
         eg.update(&graph, &library)?;
 
         let stats = eg
-            .execute_events([EventRef {
+            .execute_events([ExecutionEventPort {
                 e_node_id: root_execution_node(emit_id),
                 event_idx: 0,
             }])
@@ -4421,7 +4421,7 @@ mod events {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
-        eg.execute_events([EventRef {
+        eg.execute_events([ExecutionEventPort {
             e_node_id: root_execution_node(emit_id),
             event_idx: 0,
         }])
@@ -5026,7 +5026,7 @@ mod graph {
         input_idx: usize,
     ) -> ExecutionNodeId {
         match &eg.node_inputs(e_node_id)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => addr.target,
+            ExecutionBinding::Bind(addr) => addr.e_node_id,
             other => panic!("expected Bind, got {other:?}"),
         }
     }
@@ -5403,7 +5403,7 @@ mod graph {
         eg.update(&graph, &library).unwrap();
 
         // Fire E's event (as the worker does) — the interior `get_a` runs.
-        eg.execute_events([EventRef {
+        eg.execute_events([ExecutionEventPort {
             e_node_id: root_execution_node(emitter_id),
             event_idx: 0,
         }])
@@ -5668,7 +5668,8 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::program::{ExecutionInput, ExecutionPortAddress, ExecutionProgram};
+    use crate::execution::identity::ExecutionOutputPort;
+    use crate::execution::program::{ExecutionInput, ExecutionProgram};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
@@ -5832,8 +5833,8 @@ mod compile_regressions {
         program.inputs.push(ExecutionInput {
             required: true,
             stamper: None,
-            binding: ExecutionBinding::Bind(ExecutionPortAddress {
-                target: execution_node_id,
+            binding: ExecutionBinding::Bind(ExecutionOutputPort {
+                e_node_id: execution_node_id,
                 port_idx: 0,
             }),
         });

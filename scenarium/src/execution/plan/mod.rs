@@ -52,7 +52,7 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdi
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => match verdicts[&addr.target] {
+        ExecutionBinding::Bind(addr) => match verdicts[&addr.e_node_id] {
             NodeVerdict::Execute => false,
             NodeVerdict::Disabled => input.required,
             NodeVerdict::MissingInputs => true,
@@ -223,7 +223,7 @@ impl Planner {
 
             for e_input in program.node_inputs(e_node) {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    self.stack.push(Visit::Discover(addr.target));
+                    self.stack.push(Visit::Discover(addr.e_node_id));
                 }
             }
         }

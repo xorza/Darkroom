@@ -22,9 +22,8 @@ pub use execution::codec::{CodecError, CustomValueCodec};
 pub use execution::compile::test_support::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
 pub use execution::disk_store::DiskStore;
-pub use execution::event::{EventRef, EventTrigger};
 pub use execution::identity::{
-    ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId, NodeAddress, OutputAddress,
+    ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId, NodeAddress,
 };
 pub use execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 pub use execution::stats::{

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use common::Span;
 use hashbrown::HashMap;
 
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::graph::CacheMode;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
@@ -39,19 +39,12 @@ impl From<usize> for OutputIdx {
     }
 }
 
-/// A flat output address: producer node id and output port.
-#[derive(Clone, Default, Debug)]
-pub(crate) struct ExecutionPortAddress {
-    pub target: ExecutionNodeId,
-    pub port_idx: usize,
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
     #[default]
     None,
     Const(StaticValue),
-    Bind(ExecutionPortAddress),
+    Bind(ExecutionOutputPort),
 }
 
 /// How an input's delivered value folds its **referent's** identity into the consumer's
@@ -206,7 +199,7 @@ impl ExecutionProgram {
                         let declared = &func.inputs[*mirrors].data_type;
                         match &input.binding {
                             ExecutionBinding::Bind(address) => OutputTypeSource::Bind(
-                                self.output_idx(address.target, address.port_idx),
+                                self.output_idx(address.e_node_id, address.port_idx),
                             ),
                             ExecutionBinding::Const(value) => OutputTypeSource::Const {
                                 declared: declared.clone(),

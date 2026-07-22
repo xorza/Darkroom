@@ -1,3 +1,8 @@
+//! Strongly typed execution identities and their mapping to scoped authoring
+//! addresses. Execution ports identify positions in one flattened compiled
+//! graph; [`NodeAddress`] identifies the authored node and enclosing instance
+//! path that produced one execution node.
+
 use anyhow::{Result, ensure};
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
@@ -8,6 +13,7 @@ use crate::graph::NodeId;
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[repr(transparent)]
+/// One node in a flattened compiled graph.
 pub struct ExecutionNodeId(NodeId);
 
 impl ExecutionNodeId {
@@ -21,21 +27,30 @@ impl ExecutionNodeId {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// One input port of one flattened execution node.
 pub struct ExecutionInputPort {
     pub e_node_id: ExecutionNodeId,
     pub port_idx: usize,
 }
 
-impl ExecutionInputPort {
-    pub(crate) fn new(e_node_id: ExecutionNodeId, port_idx: usize) -> Self {
-        Self {
-            e_node_id,
-            port_idx,
-        }
-    }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// One output port of one flattened execution node.
+pub(crate) struct ExecutionOutputPort {
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) port_idx: usize,
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+/// One event port of one flattened execution node.
+pub struct ExecutionEventPort {
+    pub e_node_id: ExecutionNodeId,
+    pub event_idx: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// One authored node at an exact graph-instance path.
 pub struct NodeAddress {
     pub instances: Vec<NodeId>,
     pub node_id: NodeId,
@@ -51,17 +66,12 @@ impl NodeAddress {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+/// A failed lookup between authoring and execution identity spaces.
 pub enum ExecutionIdentityError {
     #[error("authoring address {address:?} has no execution identity in this compiled graph")]
     AddressNotFound { address: NodeAddress },
     #[error("execution node {e_node_id:?} has no authoring address in this compiled graph")]
     NodeNotFound { e_node_id: ExecutionNodeId },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct OutputAddress {
-    pub node: NodeAddress,
-    pub port_idx: usize,
 }
 
 #[derive(Debug, Clone, Default)]

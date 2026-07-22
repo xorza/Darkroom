@@ -190,9 +190,9 @@ fn resolve_run(
         *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Run;
         for input in &program.inputs[program.e_nodes[&e_node_id].inputs.range()] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                *run.disposition.get_mut(&addr.target).unwrap() = Disposition::Run;
+                *run.disposition.get_mut(&addr.e_node_id).unwrap() = Disposition::Run;
                 run.outputs
-                    .add_reader(program.output_idx(addr.target, addr.port_idx));
+                    .add_reader(program.output_idx(addr.e_node_id, addr.port_idx));
             }
         }
     }

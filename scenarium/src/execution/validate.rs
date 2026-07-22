@@ -67,17 +67,17 @@ impl CompiledGraph {
 
             for e_input in inputs {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    let target = program.e_nodes.get(&e_addr.target).with_context(|| {
+                    let target = program.e_nodes.get(&e_addr.e_node_id).with_context(|| {
                         format!(
                             "execution node {e_node_id:?} binds to missing node {:?}",
-                            e_addr.target
+                            e_addr.e_node_id
                         )
                     })?;
                     ensure!(
                         e_addr.port_idx < target.outputs.len as usize,
                         "execution node {e_node_id:?} binds to out-of-range output {} on {:?}",
                         e_addr.port_idx,
-                        e_addr.target
+                        e_addr.e_node_id
                     );
                 }
             }
@@ -150,16 +150,16 @@ impl ExecutionPlan {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     let disabled_dependency = program
                         .e_nodes
-                        .get(&addr.target)
+                        .get(&addr.e_node_id)
                         .is_some_and(|node| node.disabled)
                         && self
                             .verdicts
-                            .get(&addr.target)
+                            .get(&addr.e_node_id)
                             .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
                     ensure!(
-                        seen_in_order.contains(&addr.target) || disabled_dependency,
+                        seen_in_order.contains(&addr.e_node_id) || disabled_dependency,
                         "execution node {e_node_id:?} appears before dependency {:?}",
-                        addr.target
+                        addr.e_node_id
                     );
                 }
             }

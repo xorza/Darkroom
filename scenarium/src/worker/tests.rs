@@ -17,7 +17,8 @@ use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
-use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::event::EventTrigger;
+use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::ActiveEventLoop;
@@ -39,7 +40,7 @@ fn messages(stats: &ExecutionStats) -> Vec<String> {
 /// the standard 3-node graph, and a worker whose callback forwards
 /// results into an mpsc; exposes helpers for the two messages used
 /// most often (`Update` with the fixture graph; a frame-event
-/// `EventRef`).
+/// `ExecutionEventPort`).
 struct FrameHarness {
     worker: Worker,
     library: Arc<Library>,
@@ -84,8 +85,8 @@ impl FrameHarness {
         }
     }
 
-    fn frame_event(&self) -> EventRef {
-        EventRef {
+    fn frame_event(&self) -> ExecutionEventPort {
+        ExecutionEventPort {
             e_node_id: root_execution_node(self.frame_event_node_id),
             event_idx: 0,
         }
@@ -156,7 +157,7 @@ async fn start_single_event_loop(
     let e_node_id = ExecutionNodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
-            event: EventRef {
+            event: ExecutionEventPort {
                 e_node_id,
                 event_idx: 0,
             },
@@ -282,7 +283,7 @@ async fn start_event_loop_forwards_events() {
         .expect("Expected event loop event");
     assert_eq!(
         event,
-        EventRef {
+        ExecutionEventPort {
             e_node_id,
             event_idx: 0
         }
@@ -314,7 +315,7 @@ async fn start_event_loop_waits_for_callback() {
         .expect("Event channel closed");
     assert_eq!(
         event,
-        EventRef {
+        ExecutionEventPort {
             e_node_id,
             event_idx: 0
         }
@@ -961,7 +962,7 @@ async fn event_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = finished_worker(8);
     worker
         .send(WorkerMessage::InjectEvents {
-            events: vec![EventRef {
+            events: vec![ExecutionEventPort {
                 e_node_id: ExecutionNodeId::unique(),
                 event_idx: 0,
             }],
@@ -1206,7 +1207,7 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 fn scan_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
     let e_node_id = ExecutionNodeId::unique();
-    let event = EventRef {
+    let event = ExecutionEventPort {
         e_node_id,
         event_idx: 0,
     };
@@ -1247,7 +1248,7 @@ fn scan_accumulates_simple_flags() {
 #[test]
 fn scan_deduplicates_events() {
     let e_node_id = ExecutionNodeId::unique();
-    let event = EventRef {
+    let event = ExecutionEventPort {
         e_node_id,
         event_idx: 0,
     };

@@ -13,11 +13,9 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::digest::DigestHasher;
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{
-    ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper,
-};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, InputStamper};
 use crate::node::definition::FuncBehavior;
 use crate::{DynamicValue, ResourceStamp, ResourceStamper, StaticValue};
 
@@ -136,7 +134,7 @@ struct CustomResourceKey {
 
 impl CustomResourceKey {
     fn new(
-        address: &ExecutionPortAddress,
+        address: &ExecutionOutputPort,
         stamper: &Arc<dyn ResourceStamper>,
         value: &DynamicValue,
     ) -> Self {
@@ -146,10 +144,7 @@ impl CustomResourceKey {
                 DynamicValue::Custom(value) => {
                     CustomValueKey::Custom(Arc::as_ptr(value) as *const () as usize)
                 }
-                _ => CustomValueKey::Source {
-                    target: address.target,
-                    port_idx: address.port_idx,
-                },
+                _ => CustomValueKey::Source(*address),
             },
         }
     }
@@ -158,10 +153,7 @@ impl CustomResourceKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum CustomValueKey {
     Custom(usize),
-    Source {
-        target: ExecutionNodeId,
-        port_idx: usize,
-    },
+    Source(ExecutionOutputPort),
 }
 
 #[derive(Debug)]
@@ -203,7 +195,7 @@ impl ResourceStampRequests {
                     let Some(stamper) = &input.stamper else {
                         continue;
                     };
-                    let Some(value) = cache.slots[&address.target]
+                    let Some(value) = cache.slots[&address.e_node_id]
                         .output_values()
                         .and_then(|values| values.get(address.port_idx))
                     else {
@@ -332,7 +324,7 @@ impl RunResourceStamps {
     pub(crate) fn hash_custom(
         &self,
         hasher: &mut DigestHasher,
-        address: &ExecutionPortAddress,
+        address: &ExecutionOutputPort,
         stamper: &Arc<dyn ResourceStamper>,
         value: &DynamicValue,
     ) -> Option<()> {

@@ -133,7 +133,7 @@ impl ExecutionFrame<'_> {
             if input.stamper.is_some()
                 && let ExecutionBinding::Bind(addr) = &input.binding
             {
-                self.cache.hydrate_slot(self.program, addr.target).await;
+                self.cache.hydrate_slot(self.program, addr.e_node_id).await;
             }
         }
     }
@@ -191,7 +191,7 @@ impl ExecutionFrame<'_> {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) => {
-                    let target = addr.target;
+                    let target = addr.e_node_id;
                     let port_idx = addr.port_idx;
                     self.cache.hydrate_slot(self.program, target).await;
                     let output_idx = self.program.output_idx(target, port_idx);
@@ -218,8 +218,8 @@ impl ExecutionFrame<'_> {
     fn cancel_input_reads(&mut self, e_node_id: ExecutionNodeId) {
         for input in self.program.node_inputs(&self.program.e_nodes[&e_node_id]) {
             if let ExecutionBinding::Bind(address) = &input.binding {
-                let output_idx = self.program.output_idx(address.target, address.port_idx);
-                self.finish_read(address.target, address.port_idx, output_idx);
+                let output_idx = self.program.output_idx(address.e_node_id, address.port_idx);
+                self.finish_read(address.e_node_id, address.port_idx, output_idx);
             }
         }
     }
@@ -563,7 +563,7 @@ fn has_errored_dependency(
     e_node_id: ExecutionNodeId,
 ) -> bool {
     program.node_inputs(&program.e_nodes[&e_node_id]).iter().any(|input| {
-        matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[&addr.target].error().is_some())
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[&addr.e_node_id].error().is_some())
     })
 }
 
@@ -610,7 +610,10 @@ fn collect_execution_stats(
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.node_inputs(e).iter().enumerate() {
                 if input_missing(input, &plan.verdicts) {
-                    missing_inputs.push(ExecutionInputPort::new(e_node_id, i));
+                    missing_inputs.push(ExecutionInputPort {
+                        e_node_id,
+                        port_idx: i,
+                    });
                 }
             }
         }

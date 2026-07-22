@@ -2,8 +2,8 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::cache::OutputSnapshot;
 use crate::execution::cache::test_support::hydrate;
-use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::program::{ExecutionInput, ExecutionNode};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::resource::test_support::prepare_node;
 use crate::node::definition::FuncId;
@@ -90,8 +90,8 @@ impl Prog {
 }
 
 fn bind(idx: usize, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionPortAddress {
-        target: e_node_id(idx),
+    ExecutionBinding::Bind(ExecutionOutputPort {
+        e_node_id: e_node_id(idx),
         port_idx: port,
     })
 }

@@ -4,7 +4,8 @@ use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::JoinHandle;
 
-use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::event::EventTrigger;
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::worker::pause_gate::PauseGate;
 
@@ -18,15 +19,15 @@ pub(crate) struct LambdaPanic {
 
 #[derive(Debug)]
 pub(crate) struct ActiveEventLoop {
-    join_handles: Vec<(EventRef, JoinHandle<()>)>,
-    pub(crate) events: Receiver<EventRef>,
+    join_handles: Vec<(ExecutionEventPort, JoinHandle<()>)>,
+    pub(crate) events: Receiver<ExecutionEventPort>,
 }
 
 impl ActiveEventLoop {
     pub(crate) async fn start(event_triggers: Vec<EventTrigger>, pause_gate: PauseGate) -> Self {
         assert!(!event_triggers.is_empty());
 
-        let (event_tx, events) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
+        let (event_tx, events) = channel::<ExecutionEventPort>(EVENT_LOOP_BACKPRESSURE);
         let participants = event_triggers
             .len()
             .checked_add(1)

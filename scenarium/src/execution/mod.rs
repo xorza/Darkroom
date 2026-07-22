@@ -54,8 +54,8 @@ pub(crate) mod validate;
 
 use cache::RuntimeCache;
 use disk_store::DiskStore;
-use event::EventRef;
 use executor::Executor;
+use identity::ExecutionEventPort;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
@@ -190,7 +190,7 @@ pub struct RunSeeds {
     /// Include every node owning a subscribed event — drives the event loop.
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
-    pub events: Vec<EventRef>,
+    pub events: Vec<ExecutionEventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
@@ -387,7 +387,7 @@ pub(crate) mod test_support {
     use crate::DynamicValue;
     use crate::execution::cache;
     use crate::execution::compile;
-    use crate::execution::event::EventRef;
+    use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program;
     use crate::execution::resource::RunResourceStamps;
@@ -421,7 +421,7 @@ pub(crate) mod test_support {
             .await
         }
 
-        pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
+        pub(crate) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
             &mut self,
             events: T,
         ) -> Result<ExecutionStats> {
@@ -456,7 +456,7 @@ pub(crate) mod test_support {
             &mut self,
             sinks: bool,
             event_triggers: bool,
-            events: &[EventRef],
+            events: &[ExecutionEventPort],
         ) -> Result<()> {
             let seeds = RunSeeds {
                 sinks,

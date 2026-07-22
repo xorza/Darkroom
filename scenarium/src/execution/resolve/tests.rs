@@ -1,11 +1,9 @@
 use super::*;
 use crate::DataType;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx,
-};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, OutputIdx};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DynamicValue, StaticValue};
 use common::Span;
@@ -96,8 +94,8 @@ impl Fix {
 }
 
 fn bind(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionPortAddress {
-        target: e_node_id,
+    ExecutionBinding::Bind(ExecutionOutputPort {
+        e_node_id,
         port_idx,
     })
 }

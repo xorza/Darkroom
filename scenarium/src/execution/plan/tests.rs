@@ -1,10 +1,8 @@
 use crate::DataType;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
-use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
-};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::{Error, NodeSet, RunSeeds};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
@@ -68,8 +66,8 @@ impl Fix {
 }
 
 fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionPortAddress {
-        target: e_node_id,
+    ExecutionBinding::Bind(ExecutionOutputPort {
+        e_node_id,
         port_idx: port,
     })
 }

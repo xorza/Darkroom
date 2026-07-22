@@ -10,11 +10,10 @@ use tokio::sync::Notify;
 use crate::execution::cache::test_support::hydrate;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache};
 use crate::execution::digest::{Digest, DigestHasher};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, ExecutionProgram,
-    InputStamper,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionProgram, InputStamper,
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
 use crate::execution::{NodeMap, NodeSet};
@@ -249,8 +248,8 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
     let producer = ExecutionNodeId::from_u128(1);
     let first_consumer = ExecutionNodeId::from_u128(2);
     let second_consumer = ExecutionNodeId::from_u128(3);
-    let address = ExecutionPortAddress {
-        target: producer,
+    let address = ExecutionOutputPort {
+        e_node_id: producer,
         port_idx: 0,
     };
     let mut program = ExecutionProgram {

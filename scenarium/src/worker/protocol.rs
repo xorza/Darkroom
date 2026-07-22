@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
-use crate::execution::event::EventRef;
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::report::{PinnedOutputs, RunProgress};
 use crate::execution::stats::ExecutionStats;
 use crate::execution::{Result, RunSeeds};
@@ -21,7 +21,7 @@ pub enum WorkerReport {
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    InjectEvents { events: Vec<EventRef> },
+    InjectEvents { events: Vec<ExecutionEventPort> },
     Update { compiled: Arc<CompiledGraph> },
     Clear,
     SetDiskStore(DiskStore),

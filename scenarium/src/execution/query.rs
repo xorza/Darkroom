@@ -3,7 +3,8 @@
 //! loop. These read the program and cache only; they never schedule or run.
 
 use crate::execution::ExecutionEngine;
-use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::event::EventTrigger;
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::stats::ExecutionStats;
 
 impl ExecutionEngine {
@@ -25,7 +26,7 @@ impl ExecutionEngine {
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
                     .map(move |(event_idx, event)| EventTrigger {
-                        event: EventRef {
+                        event: ExecutionEventPort {
                             e_node_id,
                             event_idx,
                         },
@@ -88,7 +89,7 @@ pub(crate) mod test_support {
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                    ExecutionBinding::Bind(addr) => self.cache.slots[&addr.target]
+                    ExecutionBinding::Bind(addr) => self.cache.slots[&addr.e_node_id]
                         .output_values()
                         .and_then(|o| o.get(addr.port_idx))
                         .cloned(),
