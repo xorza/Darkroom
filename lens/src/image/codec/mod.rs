@@ -32,6 +32,10 @@ struct ImageCodec;
 
 #[async_trait]
 impl CustomValueCodec for ImageCodec {
+    fn version(&self) -> u32 {
+        u32::from(VERSION)
+    }
+
     async fn encode(
         &self,
         value: &dyn CustomValue,
