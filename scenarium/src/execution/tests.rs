@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::execution::compile::{CompileError, Compiler};
+use crate::execution::identity::NodeAddress;
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
@@ -271,7 +272,7 @@ mod cache_persistence {
         let refreshed = engine
             .execute(
                 RunSeeds {
-                    nodes: vec![NodeAddress::root(mult_id)],
+                    nodes: vec![mult_id],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -825,7 +826,7 @@ mod cache_persistence {
         // `mult` isn't RAM-caching (`Disk` mode) and nothing pins it, so it was
         // reclaimed to its on-disk blob once `Print` finished reading it this
         // run — hydrate it back to inspect the served bytes.
-        use crate::execution::query::resolve_node_id;
+        use crate::execution::query::test_support::resolve_node_id;
         let node_id = resolve_node_id(&engine.compiled, &NodeAddress::root(mult_id)).unwrap();
         engine
             .cache
@@ -3102,12 +3103,10 @@ mod composite_behavior {
         );
     }
 
-    /// A node seed can override a disabled *graph-interior* node by its scoped authoring
-    /// address: the seed resolves through the seed-agnostic compiled graph, and the run
-    /// delivers the value under the same address. The sink `print` (panicking hook) never
-    /// fires.
+    /// An authoring node seed expands to every compiled instance, overrides the disabled
+    /// occurrences for this run, and delivers each value under its exact address.
     #[tokio::test]
-    async fn seeding_a_disabled_graph_interior_node_runs_only_it() {
+    async fn seeding_a_disabled_definition_node_runs_every_instance() {
         use crate::execution::report::RunEvent;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::sync::mpsc::unbounded_channel;
@@ -3132,29 +3131,26 @@ mod composite_behavior {
         let inner_id = interior.add(inner);
         let so_id = interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        let mut graph = main_with(&library, interior);
-        let instance_id = graph
-            .iter()
-            .find(|node| matches!(node.kind, NodeKind::Graph(_)))
-            .unwrap()
-            .id;
-        graph
-            .find_mut(&instance_id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled = true;
+        let graph_id = GraphId::unique();
+        let mut graph = Graph::default();
+        graph.insert_graph(graph_id, interior.clone());
+        let first_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
+        let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
+        for instance_id in [first_instance, second_instance] {
+            graph
+                .find_mut(&instance_id, NodeSearch::TopLevel)
+                .unwrap()
+                .disabled = true;
+        }
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let target = NodeAddress {
-            instances: vec![instance_id],
-            node_id: inner_id,
-        };
         let (tx, mut rx) = unbounded_channel();
         let stats = eg
             .execute(
                 RunSeeds {
-                    nodes: vec![target.clone()],
+                    nodes: vec![inner_id],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -3163,16 +3159,29 @@ mod composite_behavior {
             .await
             .unwrap();
         drop(tx);
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.executed_nodes.len(), 1);
-        let pushed = loop {
-            match rx.try_recv().expect("targeted run delivers its output") {
-                RunEvent::PinnedOutputs(outputs) => break outputs,
-                RunEvent::Progress(_) => {}
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(stats.executed_nodes.len(), 2);
+
+        let mut pushed = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let RunEvent::PinnedOutputs(outputs) = event {
+                assert_eq!(outputs.values[0].value.as_i64(), Some(11));
+                pushed.push(outputs.node);
             }
-        };
-        assert_eq!(pushed.node, target);
-        assert_eq!(pushed.values[0].value.as_i64(), Some(11));
+        }
+        pushed.sort();
+        let mut expected = vec![
+            NodeAddress {
+                instances: vec![first_instance],
+                node_id: inner_id,
+            },
+            NodeAddress {
+                instances: vec![second_instance],
+                node_id: inner_id,
+            },
+        ];
+        expected.sort();
+        assert_eq!(pushed, expected);
         assert!(
             graph
                 .find(&inner_id, NodeSearch::Recursive)
@@ -3180,12 +3189,14 @@ mod composite_behavior {
                 .disabled,
             "execution leaves the nested authoring node disabled"
         );
-        assert!(
-            eg.get_argument_values_at(&target)
-                .unwrap()
-                .outputs
-                .is_empty()
-        );
+        for address in &expected {
+            assert!(
+                eg.get_argument_values_at(address)
+                    .unwrap()
+                    .outputs
+                    .is_empty()
+            );
+        }
     }
 }
 
@@ -3511,7 +3522,7 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(stats.executed_nodes.len(), 3);
 
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
@@ -3564,11 +3575,11 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
+        eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
 
-        let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
         assert_eq!(stats.executed_nodes.len(), 3);
@@ -3601,7 +3612,7 @@ mod node_seeds {
             .execute(
                 RunSeeds {
                     sinks: true,
-                    nodes: vec![NodeAddress::root(sum_id)],
+                    nodes: vec![sum_id],
                     ..Default::default()
                 },
                 None,
@@ -3641,9 +3652,8 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let bogus: NodeId = NodeId::from_u128(0xdead_beef);
-        let address = NodeAddress::root(bogus);
-        let err = eg.execute_nodes([address.clone()]).await.unwrap_err();
-        assert!(matches!(err, Error::NodeSeedNotFound { address: missing } if missing == address));
+        let err = eg.execute_nodes([bogus]).await.unwrap_err();
+        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
 }
 

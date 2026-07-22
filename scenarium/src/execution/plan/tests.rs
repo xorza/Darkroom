@@ -1,7 +1,10 @@
-use super::*;
 use crate::DataType;
-use crate::execution::identity::NodeAddress;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+use crate::execution::compile::CompiledGraph;
+use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
+use crate::execution::program::{
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
+};
+use crate::execution::{Error, NodeSet, RunSeeds};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
@@ -174,7 +177,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &f.compiled,
             &RunSeeds {
                 sinks: true,
-                nodes: vec![NodeAddress::root(producer)],
+                nodes: vec![producer],
                 ..Default::default()
             },
             &mut plan,
@@ -198,7 +201,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(a)],
+        nodes: vec![a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -207,7 +210,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     assert_eq!(p.roots, NodeSet::from([a]));
 
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(a), NodeAddress::root(a)],
+        nodes: vec![a, a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -246,7 +249,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(b)],
+        nodes: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -262,7 +265,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         sinks: true,
-        nodes: vec![NodeAddress::root(b)],
+        nodes: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -273,11 +276,9 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // not a silent skip.
     let bogus = NodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(bogus)],
+        nodes: vec![bogus],
         ..Default::default()
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
-    assert!(
-        matches!(err, Error::NodeSeedNotFound { address } if address == NodeAddress::root(bogus))
-    );
+    assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
 }

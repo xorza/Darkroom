@@ -8,7 +8,7 @@ use crate::execution::RunSeeds;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::event::EventRef;
-use crate::execution::identity::NodeAddress;
+use crate::graph::NodeId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]
@@ -30,7 +30,7 @@ pub(crate) struct BatchIntent {
     pub(crate) loop_request: Option<LoopCommand>,
     pub(crate) execute_sinks: bool,
     pub(crate) execute_event_triggers: bool,
-    pub(crate) execute_nodes: OrderedUnique<NodeAddress>,
+    pub(crate) execute_nodes: OrderedUnique<NodeId>,
     pub(crate) exit: bool,
     pub(crate) events: OrderedUnique<EventRef>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,

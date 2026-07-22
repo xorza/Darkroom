@@ -723,7 +723,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
                     .into(),
             },
             WorkerMessage::Run {
-                seeds: RunSeeds::nodes(vec![NodeAddress::root(sum_id)]),
+                seeds: RunSeeds::nodes(vec![sum_id]),
             },
         ])
         .unwrap();
@@ -1186,10 +1186,10 @@ fn scan_accumulates_simple_flags() {
             events: vec![event],
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![NodeAddress::root(node_id)]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -1205,12 +1205,7 @@ fn scan_accumulates_simple_flags() {
         1,
         "duplicate node seeds union to one"
     );
-    assert!(
-        intent
-            .execute_nodes
-            .seen
-            .contains(&NodeAddress::root(node_id))
-    );
+    assert!(intent.execute_nodes.seen.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
 }
 

@@ -27,7 +27,7 @@ pub struct CompileError {
 
 /// The compile artifact: the flattened, immutable program (lambdas, resolved
 /// output types, and input stampers attached) plus the [`FlattenMap`] that
-/// projects flat ids back onto authoring nodes (node-seed resolution, stats
+/// relates flat execution ids to authoring nodes (node-seed expansion, stats
 /// attribution). Self-contained — executing it needs neither the authoring
 /// graph nor the library. `Default` is the empty program (the engine's
 /// pre-install / cleared state).

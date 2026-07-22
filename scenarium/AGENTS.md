@@ -19,10 +19,10 @@ subscriptions, and pins together.
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain
 their `NodeId`; nested flat ids are derived with domain-separated BLAKE3.
-`FlattenMap` maps both directions between flat ids and exact `NodeAddress`
-values. A `NodeAddress` contains the graph-instance path plus the interior
-node id; targeted runs and pinned-output delivery must use this scoped identity.
-Choosing a representative instance is an explicit host-side policy.
+`FlattenMap` maps each flat id to an exact `NodeAddress` and expands an authored
+node id to every compiled occurrence. A `NodeAddress` contains the
+graph-instance path plus the interior node id. Targeted runs seed authored node
+ids and execute every occurrence; pinned-output delivery uses exact addresses.
 
 ## Source layout
 
@@ -69,8 +69,9 @@ Choosing a representative instance is an explicit host-side policy.
 `CompiledGraph`; compilation is independent of run seeds. Disabled leaves stay
 in the program with an effective disabled bit inherited from composite
 ancestors. Compile errors never enter the worker. Planning is structural: it
-selects roots, treats explicit node seeds as one-run disable overrides, orders
-dependencies before consumers, and detects missing inputs. Resolution stamps
+expands authored node seeds to every flat occurrence, selects roots, treats
+those occurrences as one-run disable overrides, orders dependencies before
+consumers, and detects missing inputs. Resolution stamps
 content digests, then derives cache-aware liveness, exact `OutputDemand`, and
 binding-reader counts together. Execution invokes the surviving nodes in plan
 order.
