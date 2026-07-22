@@ -12,8 +12,7 @@ use scenarium::FlattenMap;
 use scenarium::{Compilation, CompiledGraph, Compiler};
 use scenarium::{Graph, NodeId};
 
-use crate::core::document::Document;
-use crate::core::edit::publish::GraphPublicationTarget;
+use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_library::{RuntimeLibrary, RuntimeLibraryChange};
@@ -90,17 +89,18 @@ impl RuntimeHost {
         }
     }
 
-    pub(crate) fn import_graph_template(&mut self, graph: Graph) -> bool {
-        let change = self.library.import_graph_template(graph);
+    pub(crate) fn import_template(&mut self, graph: Graph) -> bool {
+        let change = self.library.import_template(graph);
         self.apply_library_change(change)
     }
 
     pub(crate) fn publish_graph_to_library(
         &mut self,
         document: &mut Document,
-        target: GraphPublicationTarget,
+        target: GraphRef,
+        node_id: NodeId,
     ) -> bool {
-        let change = self.library.publish_graph_to_library(document, target);
+        let change = self.library.publish_graph(document, target, node_id);
         self.apply_library_change(change)
     }
 

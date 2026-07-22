@@ -62,7 +62,9 @@ impl GraphMenuUi {
         {
             match choice {
                 MenuChoice::Publish => {
-                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishNode { node_id }));
+                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishGraphToLibrary {
+                        node_id,
+                    }));
                 }
                 MenuChoice::Detach => out.push(Intent::DetachGraph { node_id }),
             }

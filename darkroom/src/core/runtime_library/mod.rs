@@ -4,10 +4,10 @@ use std::sync::{Arc, RwLock};
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
-use scenarium::{Graph, GraphId, math_library, system_library, worker_events_library};
+use scenarium::{Graph, GraphId, NodeId, math_library, system_library, worker_events_library};
 
-use crate::core::document::Document;
-use crate::core::edit::publish::{self, GraphPublicationTarget};
+use crate::core::document::{Document, GraphRef};
+use crate::core::edit::publish;
 use crate::core::graph_library::GraphLibrary;
 use crate::core::io::graph_library as graph_library_io;
 use crate::core::io::graph_library::{GraphLibraryLoadError, GraphLibrarySaveError};
@@ -67,7 +67,7 @@ impl RuntimeLibrary {
         }
     }
 
-    pub(crate) fn import_graph_template(&mut self, graph: Graph) -> RuntimeLibraryChange {
+    pub(crate) fn import_template(&mut self, graph: Graph) -> RuntimeLibraryChange {
         let graph_id = GraphId::unique();
         self.graph_library
             .graphs
@@ -75,12 +75,13 @@ impl RuntimeLibrary {
         self.finish_graph_library_change(true)
     }
 
-    pub(crate) fn publish_graph_to_library(
+    pub(crate) fn publish_graph(
         &mut self,
         document: &mut Document,
-        target: GraphPublicationTarget,
+        target: GraphRef,
+        node_id: NodeId,
     ) -> RuntimeLibraryChange {
-        let changed = publish::publish_graph_to_library(document, &mut self.graph_library, target);
+        let changed = publish::publish_graph(document, &mut self.graph_library, target, node_id);
         self.finish_graph_library_change(changed)
     }
 

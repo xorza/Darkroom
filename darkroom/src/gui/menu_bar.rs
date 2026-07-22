@@ -77,7 +77,7 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     })
 }
 
-/// Graph import/export/promote actions. Hidden from the menu bar for
+/// Graph-template import/export actions. Hidden from the menu bar for
 /// now — kept intact so it can be re-enabled without rebuilding it.
 #[allow(dead_code)]
 fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
@@ -88,28 +88,25 @@ fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
             .left
             .clicked()
         {
-            command = Some(AppCommand::Graph(GraphCommand::ExportTemplate));
+            command = Some(AppCommand::Graph(GraphCommand::ExportGraphTemplate));
         }
-        if MenuItem::new("Import into Document…")
+        if MenuItem::new("Import Graph Template into Document…")
             .show(ui, popup)
             .left
             .clicked()
         {
-            command = Some(AppCommand::Graph(GraphCommand::ImportIntoDocument));
+            command = Some(AppCommand::Graph(
+                GraphCommand::ImportGraphTemplateIntoDocument,
+            ));
         }
-        if MenuItem::new("Add to Graph Library…")
+        if MenuItem::new("Import Graph Template into Library…")
             .show(ui, popup)
             .left
             .clicked()
         {
-            command = Some(AppCommand::Graph(GraphCommand::AddToGraphLibrary));
-        }
-        if MenuItem::new("Promote to Graph Library…")
-            .show(ui, popup)
-            .left
-            .clicked()
-        {
-            command = Some(AppCommand::Graph(GraphCommand::PromoteToGraphLibrary));
+            command = Some(AppCommand::Graph(
+                GraphCommand::ImportGraphTemplateIntoLibrary,
+            ));
         }
         command
     })
