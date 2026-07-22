@@ -340,7 +340,8 @@ impl ExecutionEngine {
 
         // Phase 3b: sweep values outside the active RAM-retention frontier.
         self.cache
-            .evict_unused(&self.compiled.program, &self.resolver.run.disposition);
+            .evict_unused(&self.compiled.program, &self.resolver.run.disposition)
+            .await;
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.

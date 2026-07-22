@@ -242,6 +242,8 @@ where
 mod tests {
     use std::sync::Arc;
 
+    use tokio::io::{AsyncRead, AsyncWrite};
+
     use crate::graph::Graph;
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
@@ -268,12 +270,17 @@ mod tests {
         async fn encode(
             &self,
             _value: &dyn CustomValue,
+            _writer: &mut (dyn AsyncWrite + Unpin + Send),
             _ctx: &mut ContextManager,
-        ) -> std::result::Result<Vec<u8>, CodecError> {
+        ) -> std::result::Result<(), CodecError> {
             unreachable!()
         }
 
-        fn decode(&self, _bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+        async fn decode(
+            &self,
+            _reader: &mut (dyn AsyncRead + Unpin + Send),
+            _byte_len: u64,
+        ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
             unreachable!()
         }
     }
