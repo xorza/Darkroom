@@ -26,16 +26,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-#[cfg(test)]
-use crate::DynamicValue;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::identity::NodeAddress;
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::RunEvent;
 use crate::execution::stats::ExecutionStats;
-use crate::graph::NodeId;
 use crate::node::definition::FuncId;
-#[cfg(test)]
-use crate::node::lambda::OutputDemand;
 
 pub(crate) mod cache;
 pub(crate) mod codec;
@@ -102,12 +97,12 @@ impl<T> IndexMut<OutputIdx> for OutputColumn<T> {
     }
 }
 
-pub(crate) type NodeMap<T> = HashMap<NodeId, T>;
-pub(crate) type NodeSet = HashSet<NodeId>;
+pub(crate) type NodeMap<T> = HashMap<ExecutionNodeId, T>;
+pub(crate) type NodeSet = HashSet<ExecutionNodeId>;
 
 fn reset_node_map<T: Clone>(
     map: &mut NodeMap<T>,
-    node_ids: impl Iterator<Item = NodeId>,
+    node_ids: impl Iterator<Item = ExecutionNodeId>,
     value: T,
 ) {
     map.clear();
@@ -125,7 +120,7 @@ impl<T> OutputColumn<T> {
 }
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
-/// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed didn't resolve
+/// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
 /// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or the event loop's lambda panicked
 /// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the engine's
 /// `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
@@ -136,15 +131,16 @@ impl<T> OutputColumn<T> {
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
-    CycleDetected { node_id: NodeId },
-    /// A node seed didn't resolve against the compiled program. Seeds are batched with
-    /// the graph they target, so a miss means inconsistent caller state (a deleted,
-    /// stale, composite, or boundary target) — the run fails rather than silently
-    /// skipping the seed.
-    #[error("node seed {address:?} not found in the compiled program")]
-    NodeSeedNotFound { address: NodeAddress },
+    CycleDetected { node_id: ExecutionNodeId },
+    /// An execution-node seed is absent from the installed compiled program. A stale
+    /// identity fails the run rather than being silently skipped.
+    #[error("node seed {node_id:?} not found in the compiled program")]
+    NodeSeedNotFound { node_id: ExecutionNodeId },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
-    EventLambdaPanic { node_id: NodeId, message: String },
+    EventLambdaPanic {
+        node_id: ExecutionNodeId,
+        message: String,
+    },
 }
 
 /// A **single node's** run-time failure, collected per-node into
@@ -157,7 +153,7 @@ pub enum RunError {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
     // The messages omit `func_id` (kept as machine-readable data): a `RunError`
-    // is already paired with its `NodeId` in `node_errors`, so these surface to
+    // is already paired with its `ExecutionNodeId` in `node_errors`, so these surface to
     // the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
     /// ([`FuncLambda::None`](crate::node::lambda::FuncLambda)), so the node
@@ -195,11 +191,11 @@ pub struct RunSeeds {
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
     pub events: Vec<EventRef>,
-    /// Run the cones of these specific nodes (authoring addresses) and deliver every
-    /// output — the on-demand "run to this node" / preview trigger. An explicitly
-    /// seeded disabled node is enabled for this run; an address that doesn't resolve
-    /// against the installed program fails with [`Error::NodeSeedNotFound`].
-    pub nodes: Vec<NodeAddress>,
+    /// Run these exact compiled nodes and deliver every output — the on-demand "run to
+    /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
+    /// this run; an identity absent from the installed program fails with
+    /// [`Error::NodeSeedNotFound`].
+    pub nodes: Vec<ExecutionNodeId>,
 }
 
 impl RunSeeds {
@@ -210,7 +206,7 @@ impl RunSeeds {
         }
     }
 
-    pub fn nodes(nodes: Vec<NodeAddress>) -> Self {
+    pub fn nodes(nodes: Vec<ExecutionNodeId>) -> Self {
         Self {
             nodes,
             ..Self::default()
@@ -302,7 +298,7 @@ impl ExecutionEngine {
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
-        // cache/digest state. The flatten map resolves authoring node seeds to flat roots.
+        // cache/digest state. Node seeds already identify exact compiled roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
         // Phase 2a: prepare external identities away from the async worker. The stamps are
@@ -384,128 +380,145 @@ impl ExecutionEngine {
     }
 }
 
-/// Test-only inspection of the last plan's per-run flags and the runtime
-/// slots. Nothing in production reads per-run state off the engine — the
-/// executor reads it straight from the live `ExecutionPlan`.
 #[cfg(test)]
-impl ExecutionEngine {
-    /// Compile + install in one step — the pre-split `update` shape the
-    /// in-tree tests are written against. Production compiles on the host
-    /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
-    pub(crate) fn update(
-        &mut self,
-        graph: &crate::graph::Graph,
-        library: &crate::library::Library,
-    ) -> std::result::Result<(), compile::CompileError> {
-        self.install(compile::Compiler::default().compile(graph, library)?.into());
-        Ok(())
-    }
+pub(crate) mod test_support {
+    use common::CancelToken;
 
-    pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionStats> {
-        self.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-        )
-        .await
-    }
+    use crate::DynamicValue;
+    use crate::execution::cache;
+    use crate::execution::compile;
+    use crate::execution::event::EventRef;
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program;
+    use crate::execution::resource::RunResourceStamps;
+    use crate::execution::stats::ExecutionStats;
+    use crate::execution::{ExecutionEngine, Result, RunSeeds};
+    use crate::node::lambda::OutputDemand;
 
-    pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
-        &mut self,
-        events: T,
-    ) -> Result<ExecutionStats> {
-        self.execute(
-            RunSeeds {
-                events: events.into_iter().collect(),
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-        )
-        .await
-    }
+    /// Test-only inspection of the last plan's per-run flags and runtime slots.
+    impl ExecutionEngine {
+        /// Compile + install in one step — the pre-split `update` shape the
+        /// in-tree tests are written against. Production compiles on the host
+        /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
+        pub(crate) fn update(
+            &mut self,
+            graph: &crate::graph::Graph,
+            library: &crate::library::Library,
+        ) -> std::result::Result<(), compile::CompileError> {
+            self.install(compile::Compiler::default().compile(graph, library)?.into());
+            Ok(())
+        }
 
-    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeAddress>>(
-        &mut self,
-        nodes: T,
-    ) -> Result<ExecutionStats> {
-        self.execute(
-            RunSeeds {
-                nodes: nodes.into_iter().collect(),
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-        )
-        .await
-    }
+        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionStats> {
+            self.execute(
+                RunSeeds {
+                    sinks: true,
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+            )
+            .await
+        }
 
-    /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-    pub(crate) fn prepare_execution(
-        &mut self,
-        sinks: bool,
-        event_triggers: bool,
-        events: &[EventRef],
-    ) -> Result<()> {
-        let seeds = RunSeeds {
-            sinks,
-            event_triggers,
-            events: events.to_vec(),
-            nodes: Vec::new(),
-        };
-        self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
-        self.resource_stamps = RunResourceStamps::default();
-        self.resolver.resolve(
-            &self.compiled.program,
-            &self.plan,
-            &mut self.cache,
-            &self.resource_stamps,
-        );
-        Ok(())
-    }
+        pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
+            &mut self,
+            events: T,
+        ) -> Result<ExecutionStats> {
+            self.execute(
+                RunSeeds {
+                    events: events.into_iter().collect(),
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+            )
+            .await
+        }
 
-    pub(crate) fn node_inputs(&self, node_id: NodeId) -> &[program::ExecutionInput] {
-        self.compiled
-            .program
-            .node_inputs(&self.compiled.program.e_nodes[&node_id])
-    }
+        pub(crate) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
+            &mut self,
+            nodes: T,
+        ) -> Result<ExecutionStats> {
+            self.execute(
+                RunSeeds {
+                    nodes: nodes.into_iter().collect(),
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+            )
+            .await
+        }
 
-    pub(crate) fn node_events(&self, node_id: NodeId) -> &[program::ExecutionEvent] {
-        let events = self.compiled.program.e_nodes[&node_id].events;
-        &self.compiled.program.events[events.range()]
-    }
+        /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
+        pub(crate) fn prepare_execution(
+            &mut self,
+            sinks: bool,
+            event_triggers: bool,
+            events: &[EventRef],
+        ) -> Result<()> {
+            let seeds = RunSeeds {
+                sinks,
+                event_triggers,
+                events: events.to_vec(),
+                nodes: Vec::new(),
+            };
+            self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
+            self.resource_stamps = RunResourceStamps::default();
+            self.resolver.resolve(
+                &self.compiled.program,
+                &self.plan,
+                &mut self.cache,
+                &self.resource_stamps,
+            );
+            Ok(())
+        }
 
-    pub(crate) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
-        self.resolver
-            .run
-            .outputs
-            .demand
-            .slice(self.compiled.program.e_nodes[&node_id].outputs)
-    }
+        pub(crate) fn node_inputs(&self, node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
+            self.compiled
+                .program
+                .node_inputs(&self.compiled.program.e_nodes[&node_id])
+        }
 
-    pub(crate) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
-        self.resolver
-            .run
-            .outputs
-            .readers
-            .slice(self.compiled.program.e_nodes[&node_id].outputs)
-    }
+        pub(crate) fn node_events(&self, node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
+            let events = self.compiled.program.e_nodes[&node_id].events;
+            &self.compiled.program.events[events.range()]
+        }
 
-    /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
-    pub(crate) fn node_ran(&self, node_id: NodeId) -> bool {
-        self.executor.ran(node_id)
-    }
+        pub(crate) fn node_output_demand(&self, node_id: ExecutionNodeId) -> &[OutputDemand] {
+            self.resolver
+                .run
+                .outputs
+                .demand
+                .slice(self.compiled.program.e_nodes[&node_id].outputs)
+        }
 
-    /// Seed a node's cached output (simulating a prior run): set the value and
-    /// stamp `produced_under` from the current digest, so the planner sees a hit.
-    pub(crate) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
-        let slot = self.cache.slots.get_mut(&node_id).unwrap();
-        slot.value = cache::ValueState::Resident {
-            snapshot: cache::OutputSnapshot::new(values),
-            produced_under: slot.current_digest,
-        };
+        pub(crate) fn node_output_readers(&self, node_id: ExecutionNodeId) -> &[u32] {
+            self.resolver
+                .run
+                .outputs
+                .readers
+                .slice(self.compiled.program.e_nodes[&node_id].outputs)
+        }
+
+        /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
+        pub(crate) fn node_ran(&self, node_id: ExecutionNodeId) -> bool {
+            self.executor.ran(node_id)
+        }
+
+        /// Seed a node's cached output (simulating a prior run): set the value and
+        /// stamp `produced_under` from the current digest, so the planner sees a hit.
+        pub(crate) fn set_output_values(
+            &mut self,
+            node_id: ExecutionNodeId,
+            values: Vec<DynamicValue>,
+        ) {
+            let slot = self.cache.slots.get_mut(&node_id).unwrap();
+            slot.value = cache::ValueState::Resident {
+                snapshot: cache::OutputSnapshot::new(values),
+                produced_under: slot.current_digest,
+            };
+        }
     }
 }

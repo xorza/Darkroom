@@ -8,7 +8,8 @@ use std::sync::Arc;
 use common::Span;
 use hashbrown::HashMap;
 
-use crate::graph::{CacheMode, NodeId};
+use crate::execution::identity::ExecutionNodeId;
+use crate::graph::CacheMode;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
 use crate::node::event::EventLambda;
@@ -41,7 +42,7 @@ impl From<usize> for OutputIdx {
 /// A flat output address: producer node id and output port.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ExecutionPortAddress {
-    pub target: NodeId,
+    pub target: ExecutionNodeId,
     pub port_idx: usize,
 }
 
@@ -76,7 +77,7 @@ pub(crate) struct ExecutionInput {
 
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionEvent {
-    pub subscribers: Vec<NodeId>,
+    pub subscribers: Vec<ExecutionNodeId>,
     pub lambda: EventLambda,
 }
 
@@ -120,7 +121,7 @@ pub(crate) struct ExecutionNode {
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
-    pub(crate) e_nodes: HashMap<NodeId, ExecutionNode>,
+    pub(crate) e_nodes: HashMap<ExecutionNodeId, ExecutionNode>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
     /// The output pool: each node's resolved declared output types (wildcards
@@ -147,7 +148,7 @@ impl ExecutionProgram {
         self.output_types.len()
     }
 
-    pub(crate) fn output_idx(&self, node_id: NodeId, port_idx: usize) -> OutputIdx {
+    pub(crate) fn output_idx(&self, node_id: ExecutionNodeId, port_idx: usize) -> OutputIdx {
         let outputs = self.e_nodes[&node_id].outputs;
         debug_assert!(
             port_idx < outputs.len as usize,
@@ -231,7 +232,7 @@ impl ExecutionProgram {
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,
-    node_id: NodeId,
+    node_id: ExecutionNodeId,
 ) -> Option<&'a Func> {
     match program.e_nodes[&node_id].special {
         Some(special) => Some(special.func()),

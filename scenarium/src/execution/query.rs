@@ -3,20 +3,8 @@
 //! loop. These read the program and cache only; they never schedule or run.
 
 use crate::execution::ExecutionEngine;
-use crate::execution::compile::CompiledGraph;
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::identity::NodeAddress;
 use crate::execution::stats::ExecutionStats;
-use crate::graph::NodeId;
-
-pub(crate) fn resolve_node_id(compiled: &CompiledGraph, address: &NodeAddress) -> Option<NodeId> {
-    let flat_id = compiled.flatten_map.flat_node(address)?;
-    compiled
-        .program
-        .e_nodes
-        .contains_key(&flat_id)
-        .then_some(flat_id)
-}
 
 impl ExecutionEngine {
     /// Collect every (event → lambda → state) triple that is currently "live" —
@@ -48,10 +36,24 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
     use crate::DynamicValue;
+    use crate::execution::ExecutionEngine;
+    use crate::execution::compile::CompiledGraph;
+    use crate::execution::identity::{ExecutionNodeId, NodeAddress};
     use crate::execution::program::ExecutionBinding;
     use crate::graph::NodeId;
+
+    pub(crate) fn resolve_node_id(
+        compiled: &CompiledGraph,
+        address: &NodeAddress,
+    ) -> Option<ExecutionNodeId> {
+        let flat_id = compiled.flatten_map.flat_node(address)?;
+        compiled
+            .program
+            .e_nodes
+            .contains_key(&flat_id)
+            .then_some(flat_id)
+    }
 
     #[derive(Debug, Default)]
     pub(crate) struct ArgumentValues {
@@ -75,7 +77,7 @@ pub(crate) mod test_support {
             Some(self.argument_values_at(node_id))
         }
 
-        fn argument_values_at(&self, node_id: NodeId) -> ArgumentValues {
+        fn argument_values_at(&self, node_id: ExecutionNodeId) -> ArgumentValues {
             let e_node = &self.compiled.program.e_nodes[&node_id];
 
             let inputs = self.compiled.program.inputs[e_node.inputs.range()]

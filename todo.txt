@@ -40,3 +40,5 @@ save caches on cache click
 make compiled graph all nodes have unique id to reduce nodeaddress paths
 
 One unresolved UI issue remains: Darkroom’s local-definition tabs currently know the definition node but not which graph instance is being inspected. If a definition has two instances, Darkroom cannot choose one ExecutionNodeId.
+
+e_node_id
