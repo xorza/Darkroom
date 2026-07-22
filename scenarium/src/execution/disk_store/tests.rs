@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use common::test_utils;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
+use crate::execution::cache::OutputSnapshot;
 use crate::execution::digest::Digest;
 use crate::execution::disk_store::{BlobTarget, DiskStore};
 use crate::library::{Library, TypeEntry};
@@ -152,7 +152,7 @@ fn versioned_store(version: u32, decode_calls: Arc<AtomicU64>) -> DiskStore {
 }
 
 #[tokio::test]
-async fn store_read_probe_and_digest_replacement_round_trip() {
+async fn store_read_header_check_and_digest_replacement_round_trip() {
     let file = temp_file("roundtrip");
     let store = DiskStore::default();
     let first_digest = Digest([7; 32]);
@@ -168,13 +168,8 @@ async fn store_read_probe_and_digest_replacement_round_trip() {
     store
         .store(&first_target, &first, &mut ContextManager::default())
         .await;
-    assert_eq!(
-        store.coverage(&first_target).await,
-        Some(CachedOutputCoverage {
-            ports: vec![false, true, true]
-        })
-    );
-    assert!(store.coverage(&second_target).await.is_none());
+    assert!(store.covers(&first_target, &first.values).await);
+    assert!(!store.covers(&second_target, &first.values).await);
     let restored = read_snapshot(&store, &first_target, 3).await.unwrap();
     assert!(matches!(restored.values[0], DynamicValue::Unbound));
     assert_eq!(restored.values[1].as_i64(), Some(7));
@@ -228,12 +223,8 @@ async fn broader_same_digest_blob_is_preserved() {
         .store(&target, &partial, &mut ContextManager::default())
         .await;
     assert_eq!(std::fs::read(&file.0).unwrap(), complete_bytes);
-    assert_eq!(
-        store.coverage(&target).await,
-        Some(CachedOutputCoverage {
-            ports: vec![true, true]
-        })
-    );
+    assert!(store.covers(&target, &complete.values).await);
+    assert!(store.covers(&target, &partial.values).await);
     let restored = read_snapshot(&store, &target, 2).await.unwrap();
     assert_eq!(restored.values[0].as_i64(), Some(7));
     assert_eq!(
@@ -254,7 +245,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
         .store(&target, &snapshot, &mut ContextManager::default())
         .await;
 
-    assert!(DiskStore::default().coverage(&target).await.is_none());
+    assert!(!DiskStore::default().covers(&target, &snapshot.values).await);
     assert!(
         read_snapshot(&DiskStore::default(), &target, 1)
             .await
@@ -263,14 +254,14 @@ async fn missing_and_changed_codecs_miss_before_decode() {
 
     let new_calls = Arc::new(AtomicU64::new(0));
     let new_store = versioned_store(2, new_calls.clone());
-    assert!(new_store.coverage(&target).await.is_none());
+    assert!(!new_store.covers(&target, &snapshot.values).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_none());
     assert_eq!(new_calls.load(Ordering::SeqCst), 0);
 
     new_store
         .store(&target, &snapshot, &mut ContextManager::default())
         .await;
-    assert!(old_store.coverage(&target).await.is_none());
+    assert!(!old_store.covers(&target, &snapshot.values).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_some());
     assert_eq!(new_calls.load(Ordering::SeqCst), 1);
     assert_eq!(old_calls.load(Ordering::SeqCst), 0);
@@ -326,7 +317,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
 }
 
 #[tokio::test]
-async fn truncated_blob_is_rejected_by_probe_and_read() {
+async fn truncated_blob_is_rejected_by_header_check_and_read() {
     let file = temp_file("truncated");
     let store = DiskStore::default();
     let target = target(&file.0, Digest([6; 32]));
@@ -342,7 +333,8 @@ async fn truncated_blob_is_rejected_by_probe_and_read() {
     let mut bytes = std::fs::read(&file.0).unwrap();
     bytes.pop();
     std::fs::write(&file.0, bytes).unwrap();
-    assert!(store.coverage(&target).await.is_none());
+    let expected = [DynamicValue::Static(StaticValue::String("payload".into()))];
+    assert!(!store.covers(&target, &expected).await);
     assert!(read_snapshot(&store, &target, 1).await.is_none());
     assert!(!file.0.exists(), "a corrupt cache blob is removed");
 }
