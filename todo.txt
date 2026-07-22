@@ -23,8 +23,6 @@ invert removed retain logic to optimize
 
 mesh once registrations
 
-project - json file in zip file
-
 blobs and serialization directly to file to avoid memallocs
 
 build masters chose array of files instead of directory
