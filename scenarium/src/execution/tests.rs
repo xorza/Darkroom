@@ -603,20 +603,13 @@ mod cache_persistence {
         );
     }
 
-    /// Eviction reclaims carried-over RAM: a value a prior run computed and left
-    /// resident, that a later run neither executes nor reads as a frontier input, is
-    /// dropped from RAM once the disk store can serve it again. In one engine across
-    /// two runs, run 1 computes `sum` (disk-cached); run 2 only needs the downstream
-    /// `mult` (frontier), so `sum` falls behind the frontier and is reclaimed — while
-    /// the still-read `mult` and the non-reloadable `get_a` are kept.
+    /// A `Both` value remains resident even when a later run neither executes nor reads it.
     #[tokio::test]
-    async fn prior_run_value_evicted_once_unused_and_reloadable() {
-        let dir = TempDir::new("evict");
+    async fn both_value_stays_resident_outside_the_active_frontier() {
+        let dir = TempDir::new("both-retained");
         let lib = test_func_lib(default_hooks());
 
-        // get_a(1) → sum(Both) = 2 → mult(Both) = 2 → print, one engine. `Both`
-        // (RAM + disk) keeps a used value resident and drops an unused reloadable leftover —
-        // the retain-vs-evict split this test asserts (pure `Disk` would drop both RAM copies).
+        // get_a(1) → sum(Both) = 2 → mult(Both) = 2 → print.
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a"));
         let mut sum = node(&lib, "sum");
@@ -641,8 +634,6 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
 
-        // Run 1 (cold): everything computes and stays resident; nothing evicted yet
-        // (all of it is this run's own output).
         engine.execute_sinks().await.unwrap();
         assert!(
             engine.cache.slots[&root_execution_node(sum_id)]
@@ -651,8 +642,6 @@ mod cache_persistence {
             "sum is resident after the run that computed it"
         );
 
-        // Run 2: only `print` runs, reading cached `mult` (frontier). `sum` is now
-        // an untouched, reloadable leftover.
         let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             stats.executed_nodes.len(),
@@ -660,13 +649,7 @@ mod cache_persistence {
             "only print runs the second time"
         );
 
-        let sum_resident = engine.cache.slots[&root_execution_node(sum_id)]
-            .output_values()
-            .is_some();
-        let sum_empty = matches!(
-            engine.cache.slots[&root_execution_node(sum_id)].value,
-            ValueState::Empty
-        );
+        let sum_slot = &engine.cache.slots[&root_execution_node(sum_id)];
         let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
             .output_values()
             .is_some();
@@ -674,12 +657,11 @@ mod cache_persistence {
             .output_values()
             .is_some();
         assert!(
-            !sum_resident,
-            "the unused prior-run value is evicted from RAM"
-        );
-        assert!(
-            sum_empty,
-            "the evicted value leaves no mirrored disk state in RAM"
+            matches!(
+                sum_slot.output_values().map(|values| &values[0]),
+                Some(DynamicValue::Static(StaticValue::Int(2)))
+            ),
+            "Both keeps the exact prior-run value resident outside the active frontier"
         );
         assert!(
             mult_resident,
@@ -690,11 +672,14 @@ mod cache_persistence {
             "a non-reloadable (Memory) value is kept, never force-recomputed"
         );
 
-        // Changing only mult makes demand reach sum's empty slot without changing sum's disk key.
+        // An empty replacement store proves the later hit comes from retained RAM, not disk.
+        let empty_dir = TempDir::new("both-retained-empty");
+        engine.cache.disk_store =
+            DiskStore::new(Arc::new(Library::default()), Some(empty_dir.0.clone()));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         engine.update(&graph, &lib).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
-        assert!(cached(&stats, sum_id), "sum reloads from disk on demand");
+        assert!(cached(&stats, sum_id), "sum is reused from retained RAM");
         assert!(!ran(&stats, sum_id), "sum does not recompute");
         assert!(
             ran(&stats, mult_id),
@@ -704,7 +689,7 @@ mod cache_persistence {
             engine.cache.slots[&root_execution_node(sum_id)]
                 .output_values()
                 .is_some(),
-            "the demanded Both value is resident again"
+            "the reused Both value remains resident"
         );
     }
 

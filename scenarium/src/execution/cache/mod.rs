@@ -14,12 +14,10 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 
-use crate::execution::NodeMap;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionProgram;
-use crate::execution::resolve::Disposition;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::stats::NodeRamUsage;
 use crate::node::lambda::OutputDemand;
@@ -414,42 +412,15 @@ impl RuntimeCache {
         }
     }
 
-    /// After a run, sweep resident values that are not both on the active frontier and in a
-    /// RAM-caching mode. Values whose consumers all ran were already handled after their last
-    /// read; this covers prior-run leftovers and values whose consumers did not run.
-    pub(crate) async fn evict_unused(
-        &mut self,
-        program: &ExecutionProgram,
-        disposition: &NodeMap<Disposition>,
-    ) {
-        for e_node_id in program.e_nodes.keys().copied() {
-            if self.slots[&e_node_id].output_values().is_none() {
-                continue;
-            }
-            let cache_mode = program.e_nodes[&e_node_id].cache;
-            if cache_mode.caches_in_ram() && disposition[&e_node_id].needed() {
-                continue;
-            }
-            if !cache_mode.caches_in_ram() {
-                self.slots.get_mut(&e_node_id).unwrap().clear_output();
-                continue;
-            }
-            if !cache_mode.persists_to_disk() {
-                continue;
-            }
-            let ValueState::Resident { snapshot, .. } = &self.slots[&e_node_id].value else {
-                unreachable!("a resident slot was checked above")
-            };
-            let target = self.disk_store.blob_target(
-                e_node_id,
-                &program.e_nodes[&e_node_id],
-                self.slots[&e_node_id].current_digest,
-            );
-            if let Some(target) = target
-                && self.disk_store.covers(&target, &snapshot.values).await
+    /// After a run, release any non-RAM outputs that were not spent during execution.
+    pub(crate) fn release_non_ram_outputs(&mut self, program: &ExecutionProgram) {
+        for e_node_id in program.e_nodes.keys() {
+            if program.e_nodes[e_node_id].cache.caches_in_ram()
+                || self.slots[e_node_id].output_values().is_none()
             {
-                self.slots.get_mut(&e_node_id).unwrap().clear_output();
+                continue;
             }
+            self.slots.get_mut(e_node_id).unwrap().clear_output();
         }
     }
 }

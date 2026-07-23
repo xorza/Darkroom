@@ -46,14 +46,6 @@ pub(crate) enum Disposition {
     Run,
 }
 
-impl Disposition {
-    /// Whether some running node will read this node — the active frontier; [`Cut`
-    /// ](Disposition::Cut) is the only state off it.
-    pub(crate) fn needed(self) -> bool {
-        self != Disposition::Cut
-    }
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct ResolvedOutputs {
     /// Whether each output must be produced for a live reader or a host pin.

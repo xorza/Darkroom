@@ -164,10 +164,11 @@ consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomp
 value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
 a content digest attests the value produced under it, however it came to be resident; the
 RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`evict_unused`, §B.6). Disk reuse is gated on `persists_to_disk`. Disk availability is not
-mirrored in RAM: the resolver derives the target from the current digest and probes it only
-when demand reaches the node. `evict_unused` drops non-RAM values directly; an unused `Both`
-value is dropped only after its disk header proves the blob can replace it.
+`release_non_ram_outputs`, §B.6). Disk reuse is gated on `persists_to_disk`. Disk
+availability is not mirrored in RAM: the resolver derives the target from the current digest
+and probes it only when demand reaches the node. `release_non_ram_outputs` drops non-RAM
+values directly; `Ram` and `Both` values stay resident regardless of whether the current run
+used them.
 
 ## B.1 What opts into disk
 
@@ -311,14 +312,10 @@ resolution and execution then follow this lifecycle:
    This bounds a chain's peak RAM to its active frontier instead of every intermediate
    at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
    moment it finishes.
-5. **after the run → `evict_unused`.** Sweep the leftovers step 4 didn't reach — a prior
-   run's untouched value, or a non-RAM value a consumer
-   never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
-   run executed or read stays resident — as does a node-seeded preview root (`plan.pinned`),
-   whose retained value is the point of its run. Every non-RAM leftover is dropped outright.
-   An unused `Both` value is dropped only when its blob header covers the resident outputs;
-   otherwise it remains in RAM, so eviction never forces a recompute of a value the RAM mode
-   promised to retain.
+5. **after the run → `release_non_ram_outputs`.** Sweep the leftovers step 4 didn't reach —
+   a prior run's untouched value, or a non-RAM value a consumer never read (so its outputs
+   never all went spent). Every non-RAM leftover is dropped outright. Every `Ram`/`Both`
+   output stays resident, including values outside the current run's active frontier.
 
 ### Worked example
 
