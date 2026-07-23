@@ -193,7 +193,8 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
     cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
-    let stats = executor
+    let mut stats = ExecutionOutcome::default();
+    executor
         .run(
             program,
             &run.plan,
@@ -202,6 +203,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
             &mut resource_stamps,
             None,
             CancelToken::never(),
+            &mut stats,
         )
         .await;
     (cache, stats)
@@ -222,6 +224,7 @@ async fn run_with(
     resolver
         .resolve(program, plan, cache, &resource_stamps)
         .await;
+    let mut outcome = ExecutionOutcome::default();
     executor
         .run(
             program,
@@ -231,8 +234,10 @@ async fn run_with(
             &mut resource_stamps,
             None,
             CancelToken::never(),
+            &mut outcome,
         )
-        .await
+        .await;
+    outcome
 }
 
 /// Like [`run`] but wires a live [`RunEvent`] channel through the executor and
@@ -246,7 +251,8 @@ async fn run_with_pinned(
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
-    let stats = executor
+    let mut stats = ExecutionOutcome::default();
+    executor
         .run(
             program,
             &run.plan,
@@ -255,6 +261,7 @@ async fn run_with_pinned(
             &mut resource_stamps,
             Some(&tx),
             CancelToken::never(),
+            &mut stats,
         )
         .await;
     drop(tx);
@@ -378,7 +385,8 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     cache.reconcile(&p.program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
-    let stats = executor
+    let mut stats = ExecutionOutcome::default();
+    executor
         .run(
             &p.program,
             &run.plan,
@@ -387,6 +395,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
             &mut resource_stamps,
             None,
             CancelToken::new(),
+            &mut stats,
         )
         .await;
 
@@ -631,7 +640,8 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
-    let stats = executor
+    let mut stats = ExecutionOutcome::default();
+    executor
         .run(
             &p.program,
             &run.plan,
@@ -640,6 +650,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
             &mut resource_stamps,
             Some(&tx),
             CancelToken::never(),
+            &mut stats,
         )
         .await;
     drop(tx);

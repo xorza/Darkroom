@@ -504,7 +504,8 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let stats = engine
+        let mut stats = ExecutionOutcome::default();
+        engine
             .execute(
                 RunSeeds {
                     sinks: true,
@@ -512,6 +513,7 @@ mod cache_persistence {
                 },
                 Some(&tx),
                 CancelToken::never(),
+                &mut stats,
             )
             .await
             .unwrap();
@@ -551,11 +553,14 @@ mod cache_persistence {
                 .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
             "a full run does not retain the Disk node after delivering its pin"
         );
+        let executed_allocation = stats.executed_nodes.as_ptr();
+        let executed_capacity = stats.executed_nodes.capacity();
+        assert!(executed_capacity > 0);
 
         // Refreshing that preview targets `mult` directly. Delivery hydrates the disk hit,
         // but targeting must not turn it into an implicit RAM cache.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let refreshed = engine
+        engine
             .execute(
                 RunSeeds {
                     nodes: vec![root_execution_node(mult_id)],
@@ -563,21 +568,20 @@ mod cache_persistence {
                 },
                 Some(&tx),
                 CancelToken::never(),
+                &mut stats,
             )
             .await
             .unwrap();
+        assert!(stats.cached_nodes.contains(&root_execution_node(mult_id)));
         assert!(
-            refreshed
-                .cached_nodes
-                .contains(&root_execution_node(mult_id))
-        );
-        assert!(
-            !refreshed
+            !stats
                 .node_ram
                 .iter()
                 .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
             "targeted refresh releases the hydrated Disk value after delivery"
         );
+        assert_eq!(stats.executed_nodes.as_ptr(), executed_allocation);
+        assert_eq!(stats.executed_nodes.capacity(), executed_capacity);
         let pinned = receive_pinned(&mut rx);
         assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
@@ -2983,16 +2987,17 @@ mod behavior {
         eg.update(&graph, &library).unwrap();
 
         let (tx, mut rx) = unbounded_channel::<RunEvent>();
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                Some(&tx),
-                CancelToken::never(),
-            )
-            .await?;
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            Some(&tx),
+            CancelToken::never(),
+            &mut stats,
+        )
+        .await?;
         drop(tx);
 
         let mut events: Vec<(ExecutionNodeId, RunPhase)> = Vec::new();
@@ -3059,16 +3064,17 @@ mod behavior {
         // node runs and the run is flagged cancelled.
         let tripped = CancelToken::new();
         tripped.cancel();
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                None,
-                tripped,
-            )
-            .await?;
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            None,
+            tripped,
+            &mut stats,
+        )
+        .await?;
         assert!(stats.cancelled, "pre-tripped run is cancelled");
         assert!(
             stats.executed_nodes.is_empty(),
@@ -3077,16 +3083,16 @@ mod behavior {
 
         // A fresh, un-cancelled token runs the whole graph (nothing cached from
         // the aborted run above).
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                None,
-                CancelToken::new(),
-            )
-            .await?;
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::new(),
+            &mut stats,
+        )
+        .await?;
         assert!(!stats.cancelled);
         assert_eq!(
             stats.executed_nodes.len(),
@@ -3144,16 +3150,17 @@ mod behavior {
 
         // Run 1: the node trips the cancel mid-invoke — it must not appear as
         // executed (it didn't complete), and the run is flagged cancelled.
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                None,
-                CancelToken::new(),
-            )
-            .await?;
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::new(),
+            &mut stats,
+        )
+        .await?;
         assert!(stats.cancelled, "the node cancelled the run mid-invoke");
         assert!(
             stats.executed_nodes.is_empty(),
@@ -3171,16 +3178,16 @@ mod behavior {
 
         // Run 2: a fresh token. The node's partial output was dropped, so it
         // re-executes rather than being served from a bogus cache.
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                None,
-                CancelToken::new(),
-            )
-            .await?;
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::new(),
+            &mut stats,
+        )
+        .await?;
         assert!(!stats.cancelled);
         assert_eq!(
             stats.executed_nodes.len(),
@@ -3227,16 +3234,17 @@ mod behavior {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                None,
-                common::CancelToken::new(),
-            )
-            .await?;
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            None,
+            common::CancelToken::new(),
+            &mut stats,
+        )
+        .await?;
 
         assert!(
             stats.executed_nodes.is_empty(),
@@ -3488,17 +3496,18 @@ mod composite_behavior {
         let second_e_node_id = ExecutionNodeId::from_authoring(&[second_instance, inner_id]);
 
         let (tx, mut rx) = unbounded_channel();
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    nodes: vec![first_e_node_id],
-                    ..Default::default()
-                },
-                Some(&tx),
-                CancelToken::never(),
-            )
-            .await
-            .unwrap();
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                nodes: vec![first_e_node_id],
+                ..Default::default()
+            },
+            Some(&tx),
+            CancelToken::never(),
+            &mut stats,
+        )
+        .await
+        .unwrap();
         drop(tx);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
         assert_eq!(stats.executed_nodes.len(), 1);
@@ -3957,18 +3966,19 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    nodes: vec![root_execution_node(sum_id)],
-                    ..Default::default()
-                },
-                None,
-                CancelToken::never(),
-            )
-            .await
-            .unwrap();
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                sinks: true,
+                nodes: vec![root_execution_node(sum_id)],
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+            &mut stats,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(*printed.lock().unwrap(), [132], "(1 + 11) * 11");
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
@@ -4436,6 +4446,7 @@ mod events {
 
         // sinks=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
+        let mut outcome = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
                 event_triggers: true,
@@ -4443,6 +4454,7 @@ mod events {
             },
             None,
             CancelToken::never(),
+            &mut outcome,
         )
         .await?;
 
@@ -4462,16 +4474,17 @@ mod events {
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
 
-        let stats = eg
-            .execute(
-                RunSeeds {
-                    event_triggers: true,
-                    ..Default::default()
-                },
-                None,
-                CancelToken::never(),
-            )
-            .await?;
+        let mut stats = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                event_triggers: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+            &mut stats,
+        )
+        .await?;
         let triggers = eg.active_event_triggers(&stats);
 
         // emit executed and has a populated lambda + a subscriber → one trigger.

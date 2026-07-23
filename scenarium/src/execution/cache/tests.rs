@@ -486,22 +486,36 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     insert_slot(&mut cache, 3, RuntimeSlot::default());
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
-    let stats = cache.resident_ram_stats();
-    assert_eq!(stats.total, RamUsage { cpu: 105, gpu: 10 });
-    assert_eq!(stats.total.total(), 115);
+    let mut by_node = Vec::new();
+    let total = cache.resident_ram_stats(&mut by_node);
+    assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
+    assert_eq!(total.total(), 115);
 
     // Per-node: no cross-slot dedup — each node reports what it holds. Slot A holds
     // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
     // the empty slot C is omitted.
-    assert_eq!(stats.by_node.len(), 2);
-    assert!(stats.by_node.contains(&NodeRamUsage {
+    assert_eq!(by_node.len(), 2);
+    assert!(by_node.contains(&NodeRamUsage {
         e_node_id: ExecutionNodeId::from_u128(1),
         usage: RamUsage { cpu: 105, gpu: 10 },
     }));
-    assert!(stats.by_node.contains(&NodeRamUsage {
+    assert!(by_node.contains(&NodeRamUsage {
         e_node_id: ExecutionNodeId::from_u128(2),
         usage: RamUsage { cpu: 100, gpu: 10 },
     }));
     assert_eq!(shared_calls.load(Ordering::Relaxed), 2);
     assert_eq!(distinct_calls.load(Ordering::Relaxed), 1);
+
+    let allocation = by_node.as_ptr();
+    let capacity = by_node.capacity();
+    let seen_capacity = cache.ram_seen.capacity();
+    assert_eq!(
+        cache.resident_ram_stats(&mut by_node),
+        RamUsage { cpu: 105, gpu: 10 }
+    );
+    assert_eq!(by_node.as_ptr(), allocation);
+    assert_eq!(by_node.capacity(), capacity);
+    assert_eq!(cache.ram_seen.capacity(), seen_capacity);
+    assert_eq!(shared_calls.load(Ordering::Relaxed), 4);
+    assert_eq!(distinct_calls.load(Ordering::Relaxed), 2);
 }

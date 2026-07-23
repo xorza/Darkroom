@@ -504,7 +504,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
     let failed = ExecutionNodeId::unique();
     let cancelled = ExecutionNodeId::unique();
     let resident = ExecutionNodeId::unique();
-    let outcome = ExecutionOutcome {
+    let mut outcome = ExecutionOutcome {
         elapsed_secs: 1.25,
         executed_nodes: vec![ExecutedNodeOutcome {
             e_node_id: executed,
@@ -544,7 +544,13 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
     };
     let mut publisher = WorkerStatusPublisher::default();
-    let status = publisher.completed(WorkerActivity::EventLoop, outcome);
+    let executed_capacity = outcome.executed_nodes.capacity();
+    let logs_capacity = outcome.logs.capacity();
+    let status = publisher.completed(WorkerActivity::EventLoop, &mut outcome);
+    assert!(outcome.executed_nodes.is_empty());
+    assert_eq!(outcome.executed_nodes.capacity(), executed_capacity);
+    assert!(outcome.logs.is_empty());
+    assert_eq!(outcome.logs.capacity(), logs_capacity);
     assert_eq!(status.activity, WorkerActivity::EventLoop);
     assert_eq!(
         status.kind,

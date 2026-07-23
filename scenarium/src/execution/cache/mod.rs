@@ -194,12 +194,7 @@ impl RuntimeSlot {
 pub(crate) struct RuntimeCache {
     pub(crate) slots: HashMap<ExecutionNodeId, RuntimeSlot>,
     pub(crate) disk_store: DiskStore,
-}
-
-#[derive(Debug)]
-pub(crate) struct CacheRamStats {
-    pub(crate) total: RamUsage,
-    pub(crate) by_node: Vec<NodeRamUsage>,
+    ram_seen: HashSet<usize>,
 }
 
 #[derive(Debug)]
@@ -238,10 +233,10 @@ impl RuntimeCache {
     /// The total and per-node RAM held by resident values. The global total deduplicates
     /// shared custom values by pointer identity, while each node reports the full size of
     /// every value it holds. `Empty` slots and zero-byte nodes are omitted.
-    pub(crate) fn resident_ram_stats(&self) -> CacheRamStats {
-        let mut seen: HashSet<*const ()> = HashSet::new();
+    pub(crate) fn resident_ram_stats(&mut self, by_node: &mut Vec<NodeRamUsage>) -> RamUsage {
+        self.ram_seen.clear();
+        by_node.clear();
         let mut total = RamUsage::default();
-        let mut by_node = Vec::new();
         for (e_node_id, slot) in &self.slots {
             let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
@@ -251,7 +246,9 @@ impl RuntimeCache {
                 let usage = value.ram_usage();
                 node_usage += usage;
                 let counts_toward_total = match value {
-                    DynamicValue::Custom(arc) => seen.insert(Arc::as_ptr(arc) as *const ()),
+                    DynamicValue::Custom(arc) => {
+                        self.ram_seen.insert(Arc::as_ptr(arc) as *const () as usize)
+                    }
                     _ => true,
                 };
                 if counts_toward_total {
@@ -265,7 +262,7 @@ impl RuntimeCache {
                 });
             }
         }
-        CacheRamStats { total, by_node }
+        total
     }
 
     /// Preserve surviving slots by id, default new nodes, trim removed ones, and apply the

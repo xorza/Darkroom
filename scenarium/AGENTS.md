@@ -117,6 +117,9 @@ batched live node patches, or an authoritative completed-run snapshot. The
 `WorkerStatusPublisher` retains one status allocation and updates it through `Arc::make_mut`;
 the GUI consumes and drops published snapshots, allowing subsequent reports to
 reuse their vectors when no older snapshot is still queued.
+`WorkerTask` likewise retains one `ExecutionOutcome`; the engine clears and
+repopulates its buffers for each run, then completion drains them into the
+status publisher without discarding their capacities.
 `ActiveEventLoop` owns both its tasks and event receiver, so the activity
 invariant is represented by one type. Event tasks rendezvous through Tokio's
 `Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping

@@ -29,4 +29,6 @@ subgraph to newnodeui
 
 subgraphs tabs movable
 
-execution stats persist
+what is resourcestamps
+
+refactor      let triggers = self.engine.active_event_triggers(&self.outcome);

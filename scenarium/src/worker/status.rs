@@ -101,7 +101,7 @@ impl WorkerStatusPublisher {
     pub(crate) fn completed(
         &mut self,
         activity: WorkerActivity,
-        mut outcome: ExecutionOutcome,
+        outcome: &mut ExecutionOutcome,
     ) -> Arc<WorkerStatus> {
         let kind = WorkerStatusKind::Completed {
             elapsed_secs: outcome.elapsed_secs,

@@ -25,6 +25,7 @@ struct WorkerTask {
     event_loop_pause_gate: PauseGate,
     status: WorkerStatusPublisher,
     cancel: CancelToken,
+    outcome: ExecutionOutcome,
     event_loop_events: Vec<ExecutionEventPort>,
     run_events: Vec<RunEvent>,
 }
@@ -37,6 +38,7 @@ impl WorkerTask {
             event_loop_pause_gate: PauseGate::default(),
             status: WorkerStatusPublisher::default(),
             cancel,
+            outcome: ExecutionOutcome::default(),
             event_loop_events: Vec::with_capacity(EVENT_LOOP_BACKPRESSURE),
             run_events: Vec::with_capacity(RUN_EVENT_BATCH_SIZE),
         }
@@ -231,13 +233,13 @@ impl WorkerTask {
         let result = self.run_and_forward(seeds, cancel, callback).await;
 
         match result {
-            Ok(outcome) => {
+            Ok(()) => {
                 if start_event_loop {
-                    self.start_event_loop(&outcome).await;
+                    self.start_event_loop().await;
                 }
                 let activity = self.activity(false);
                 callback(WorkerReport::Status(
-                    self.status.completed(activity, outcome),
+                    self.status.completed(activity, &mut self.outcome),
                 ));
             }
             Err(error) => {
@@ -273,9 +275,9 @@ impl WorkerTask {
         callback(WorkerReport::Status(self.status.activity(activity)));
     }
 
-    async fn start_event_loop(&mut self, outcome: &ExecutionOutcome) {
+    async fn start_event_loop(&mut self) {
         assert!(self.event_loop.is_none());
-        let triggers = self.engine.active_event_triggers(outcome);
+        let triggers = self.engine.active_event_triggers(&self.outcome);
         if triggers.is_empty() {
             return;
         }
@@ -289,7 +291,7 @@ impl WorkerTask {
         seeds: RunSeeds,
         cancel: CancelToken,
         callback: &C,
-    ) -> Result<ExecutionOutcome>
+    ) -> Result<()>
     where
         C: Fn(WorkerReport) + Sync,
     {
@@ -297,9 +299,10 @@ impl WorkerTask {
         let (event_tx, mut event_rx) = unbounded_channel::<RunEvent>();
         let engine = &mut self.engine;
         let status = &mut self.status;
+        let outcome = &mut self.outcome;
         let events = &mut self.run_events;
         let result = {
-            let run = engine.execute(seeds, Some(&event_tx), cancel);
+            let run = engine.execute(seeds, Some(&event_tx), cancel, outcome);
             tokio::pin!(run);
             loop {
                 tokio::select! {

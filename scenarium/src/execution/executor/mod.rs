@@ -24,12 +24,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use common::CancelToken;
 
+use crate::DynamicValue;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
-use crate::{DynamicValue, RamUsage};
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::disk_store::StorePolicy;
@@ -274,7 +274,9 @@ impl Executor {
         resource_stamps: &mut RunResourceStamps,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
-    ) -> ExecutionOutcome {
+        outcome: &mut ExecutionOutcome,
+    ) {
+        outcome.clear();
         let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
         // off-thread work, and so the loop-top / post-loop checks below read
@@ -527,10 +529,9 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        let mut outcome = collect_execution_outcome(program, plan, &self.outcomes, start);
-        outcome.logs = std::mem::take(&mut self.ctx_manager.logs);
+        collect_execution_outcome(program, plan, &self.outcomes, start, outcome);
+        outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
-        outcome
     }
 }
 
@@ -563,12 +564,8 @@ fn collect_execution_outcome(
     plan: &ExecutionPlan,
     outcomes: &NodeMap<NodeOutcome>,
     start: Instant,
-) -> ExecutionOutcome {
-    let mut executed_nodes = Vec::new();
-    let mut missing_inputs = Vec::new();
-    let mut cached_nodes = Vec::new();
-    let mut node_errors = Vec::new();
-
+    outcome: &mut ExecutionOutcome,
+) {
     // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
     // the sole source of truth; a node the run never reached (a cancelled run's tail, or
     // skipped for missing inputs) is `Pending` and contributes to no list here.
@@ -579,9 +576,9 @@ fn collect_execution_outcome(
             // both "available, not recomputed" — reported cached. A pruned node
             // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
             NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
-                cached_nodes.push(e_node_id);
+                outcome.cached_nodes.push(e_node_id);
             }
-            NodeOutcome::Ran { secs } => executed_nodes.push(ExecutedNodeOutcome {
+            NodeOutcome::Ran { secs } => outcome.executed_nodes.push(ExecutedNodeOutcome {
                 e_node_id,
                 elapsed_secs: *secs,
             }),
@@ -589,7 +586,7 @@ fn collect_execution_outcome(
             // consumer doesn't paint it as executed (its error still lands below). A
             // genuine failure did run; it appears in both lists.
             NodeOutcome::Failed { secs, error } if !matches!(error, RunError::Cancelled { .. }) => {
-                executed_nodes.push(ExecutedNodeOutcome {
+                outcome.executed_nodes.push(ExecutedNodeOutcome {
                     e_node_id,
                     elapsed_secs: *secs,
                 });
@@ -601,7 +598,7 @@ fn collect_execution_outcome(
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.node_inputs(e).iter().enumerate() {
                 if input_missing(input, &plan.verdicts) {
-                    missing_inputs.push(ExecutionInputPort {
+                    outcome.missing_inputs.push(ExecutionInputPort {
                         e_node_id,
                         port_idx: i,
                     });
@@ -609,29 +606,13 @@ fn collect_execution_outcome(
             }
         }
         if let Some(err) = outcomes[&e_node_id].error() {
-            node_errors.push(NodeError {
+            outcome.node_errors.push(NodeError {
                 e_node_id,
                 error: err.clone(),
             });
         }
     }
-
-    ExecutionOutcome {
-        elapsed_secs: start.elapsed().as_secs_f64(),
-        executed_nodes,
-        missing_inputs,
-        cached_nodes,
-        triggered_events: Vec::default(),
-        node_errors,
-        // Filled by `run` from the context manager's per-run buffer.
-        logs: Vec::new(),
-        // Set by `run` from the cancel flag after the loop.
-        cancelled: false,
-        // Stamped by `ExecutionEngine::execute` after end-of-run eviction, when
-        // the cache's resident set is final.
-        cache_ram: RamUsage::default(),
-        node_ram: Vec::new(),
-    }
+    outcome.elapsed_secs = start.elapsed().as_secs_f64();
 }
 
 #[cfg(test)]

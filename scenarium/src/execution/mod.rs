@@ -282,15 +282,18 @@ impl ExecutionEngine {
     /// feedback ahead of the final outcome: a `RunEvent::Progress` before and
     /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` when a
     /// node with a pinned output (or that is itself a pinned root) produces or
-    /// reuses its value, so a GUI preview updates without polling. When
-    /// `cancel` is `Some` and gets set mid-run, scheduling stops after the
-    /// in-flight node and the returned outcome is marked `cancelled`.
+    /// reuses its value, so a GUI preview updates without polling. When `cancel`
+    /// is set mid-run, scheduling stops after the in-flight node and the
+    /// caller-owned outcome is marked `cancelled`.
     pub(crate) async fn execute(
         &mut self,
-        seeds: RunSeeds,
+        mut seeds: RunSeeds,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
-    ) -> Result<ExecutionOutcome> {
+        outcome: &mut ExecutionOutcome,
+    ) -> Result<()> {
+        outcome.clear();
+
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
@@ -322,8 +325,7 @@ impl ExecutionEngine {
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
         // caches are durable even if a later node fails or the run is cancelled.
-        let mut outcome = self
-            .executor
+        self.executor
             .run(
                 &self.compiled.program,
                 &self.plan,
@@ -332,6 +334,7 @@ impl ExecutionEngine {
                 &mut self.resource_stamps,
                 events,
                 cancel,
+                outcome,
             )
             .await;
 
@@ -339,13 +342,11 @@ impl ExecutionEngine {
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
-        let ram = self.cache.resident_ram_stats();
-        outcome.cache_ram = ram.total;
-        outcome.node_ram = ram.by_node;
+        outcome.cache_ram = self.cache.resident_ram_stats(&mut outcome.node_ram);
 
-        outcome.triggered_events = seeds.events;
+        outcome.triggered_events.append(&mut seeds.events);
 
-        Ok(outcome)
+        Ok(())
     }
 
     /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
@@ -405,6 +406,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
+            let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
                     sinks: true,
@@ -412,14 +414,17 @@ pub(crate) mod test_support {
                 },
                 None,
                 CancelToken::never(),
+                &mut outcome,
             )
-            .await
+            .await?;
+            Ok(outcome)
         }
 
         pub(crate) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
             &mut self,
             events: T,
         ) -> Result<ExecutionOutcome> {
+            let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
                     events: events.into_iter().collect(),
@@ -427,14 +432,17 @@ pub(crate) mod test_support {
                 },
                 None,
                 CancelToken::never(),
+                &mut outcome,
             )
-            .await
+            .await?;
+            Ok(outcome)
         }
 
         pub(crate) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
             &mut self,
             nodes: T,
         ) -> Result<ExecutionOutcome> {
+            let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
                     nodes: nodes.into_iter().collect(),
@@ -442,8 +450,10 @@ pub(crate) mod test_support {
                 },
                 None,
                 CancelToken::never(),
+                &mut outcome,
             )
-            .await
+            .await?;
+            Ok(outcome)
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.

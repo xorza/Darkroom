@@ -35,7 +35,7 @@ pub(crate) struct NodeRamUsage {
     pub usage: RamUsage,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ExecutionOutcome {
     pub(crate) elapsed_secs: f64,
     pub(crate) executed_nodes: Vec<ExecutedNodeOutcome>,
@@ -47,4 +47,19 @@ pub(crate) struct ExecutionOutcome {
     pub(crate) cancelled: bool,
     pub(crate) cache_ram: RamUsage,
     pub(crate) node_ram: Vec<NodeRamUsage>,
+}
+
+impl ExecutionOutcome {
+    pub(crate) fn clear(&mut self) {
+        self.elapsed_secs = 0.0;
+        self.executed_nodes.clear();
+        self.missing_inputs.clear();
+        self.cached_nodes.clear();
+        self.triggered_events.clear();
+        self.node_errors.clear();
+        self.logs.clear();
+        self.cancelled = false;
+        self.cache_ram = RamUsage::default();
+        self.node_ram.clear();
+    }
 }
