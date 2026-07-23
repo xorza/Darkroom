@@ -2,19 +2,19 @@
 
 ## Executive summary
 
-Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Its remaining critical cache risk is that filesystem fingerprints can miss content changes.
+Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Its remaining critical cache risk is that filesystem fingerprints can miss content changes, while eager hydration and pin delivery make disk-backed reuse consume more RAM and I/O than the live schedule requires.
 
 The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, a wide positional lambda ABI, parallel compiled-data pools with distributed invariants, and large execution modules that own several distinct responsibilities. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
 ## Current flow
 
-`Compiler` validates an authoring `Graph`, recursively flattens graph instances into an `ExecutionProgram`, resolves output types, and returns a self-contained `CompiledGraph`. `Worker` reduces batches of public `WorkerMessage`s into an intent, installs shared compiled state, acknowledges the installation through its ordered report stream, plans roots, prepares resource stamps, resolves digests and cache liveness, executes surviving nodes, and reports execution identities. `RuntimeCache` owns persistent node state, resident outputs, disk availability state, digest stamping, codec dispatch, hydration, persistence, reclamation, and RAM accounting.
+`Compiler` validates an authoring `Graph`, recursively flattens graph instances into an `ExecutionProgram`, resolves output types, and returns a self-contained `CompiledGraph`. `Worker` reduces batches of public `WorkerMessage`s into an intent, installs shared compiled state, acknowledges the installation through its ordered report stream, plans roots, prepares resource stamps, resolves digests and cache liveness, executes surviving nodes, and reports execution identities. `RuntimeCache` owns persistent node state, resident outputs, disk availability state, digest stamping, codec dispatch, hydration, persistence, reclamation, and RAM accounting. Cache demand tests whether a blob's coverage is sufficient but does not select payloads, so an accepted blob hydrates as a complete snapshot. A node with a complete digest can hydrate during resolution; a node waiting on a bound resource can instead hydrate after its producers settle. Those paths are mutually exclusive, so one node's blob is read at most once per run.
 
-## Critical
+## Critical: Cache correctness
 
 - [ ] **Filesystem resource fingerprints can miss content changes.** Files are identified only by length and modification time; directories hash only immediate entry names and metadata. Same-size edits with an unchanged timestamp and nested-directory content edits can therefore reuse stale cached results, while the execution documentation claims an opt-in content hash that does not exist (`src/execution/resource/mod.rs:22-126`, `src/execution/digest/mod.rs:22-29`, `src/execution/README.md:199-203`).
 
-## High
+## High: Registry and runtime validity
 
 - [ ] **`Library` admits functions without implementations.** `Func` defaults to `FuncLambda::None`, and `Func::validate` does not reject that state. The invalid registration survives compilation and becomes a per-node `RunError::MissingLambda`, leaving a host configuration error on the execution hot path (`src/node/definition.rs:186-224`, `src/node/definition.rs:313-349`, `src/node/lambda.rs:93-124`, `src/execution/mod.rs:146-171`).
 
@@ -26,7 +26,15 @@ The main structural problems are late registry validation, mixed lifecycle state
 
 - [ ] **`ContextManager` combines state with different lifetimes.** It owns persistent typed resources together with the current execution node, per-run logs, and cancellation state. Codecs receive this full run-management object merely to access persistent resources, coupling cache serialization to execution attribution and cancellation state (`src/runtime/context.rs:23-79`, `src/runtime/context.rs:120-137`, `src/execution/codec.rs:31-39`).
 
-## Medium
+## Medium: Cache lifecycle
+
+- [ ] **Resolution hydrates every reusable disk frontier before execution starts.** The reverse resolution sweep awaits `check_reuse` for each live node, and a disk hit immediately installs the complete snapshot as resident. Values needed only by late consumers therefore occupy RAM throughout the earlier execution prefix, making peak memory scale with all disk hits selected for the run rather than with the executor's active working set (`src/execution/resolve/mod.rs:121-134`, `src/execution/resolve/mod.rs:159-195`, `src/execution/cache/mod.rs:352-378`, `src/execution/mod.rs:304-330`).
+
+- [ ] **Unchanged disk-backed pins are rehydrated and redelivered on every run.** Pinned roots and ports always seed output demand without tracking whether the host already received the same digest, so a `Disk`-mode hit is read, cloned into a `PinnedOutputs` event, and released once it has no readers on every matching run. Eventless execution retains the same pin demand and disk read even though delivery returns immediately, creating wholly unused I/O for that call path (`src/execution/resolve/mod.rs:66-83`, `src/execution/resolve/mod.rs:182-187`, `src/execution/cache/mod.rs:352-378`, `src/execution/executor/mod.rs:129-162`, `src/execution/executor/mod.rs:206-210`, `src/execution/mod.rs:282-332`).
+
+- [ ] **Late cache reuse can obsolete an upstream cone only after that cone has executed.** A node whose digest depends on an unreadable bound resource remains `Run` during resolution and keeps every producer live; the producer-first executor runs that cone before re-stamping the consumer, discovering its disk hit, and abandoning the now-unused reads. A legitimate late hit can therefore spend the full CPU and memory cost of inputs that the cached consumer never reads (`src/execution/resolve/mod.rs:137-152`, `src/execution/resolve/mod.rs:159-195`, `src/execution/executor/mod.rs:344-386`).
+
+## Medium: Runtime APIs
 
 - [ ] **The lambda ABI is wide, positional, and wrapper-heavy.** Every async function receives six ordered borrows, including a mutable slice of one-field `InvokeInput` wrappers. The ABI couples all lambdas, macros, and executor frame mechanics to the same argument order and requires an additional input representation that carries no behavior (`src/node/lambda.rs:50-89`, `src/node/macros.rs:1-25`, `src/execution/executor/mod.rs:119-128`, `src/execution/executor/mod.rs:186-215`, `src/execution/executor/mod.rs:430-448`).
 
@@ -34,13 +42,15 @@ The main structural problems are late registry validation, mixed lifecycle state
 
 - [ ] **`Func::uncacheable` advertises execution semantics that Scenarium does not enforce.** No execution path reads the flag; its only current core producer is `RunSinks`, and Darkroom alone interprets it to hide cache controls. Function metadata and actual cache behavior can therefore disagree (`src/node/definition.rs:193-202`, `src/node/definition.rs:248-253`, `src/elements/run_sinks.rs:25-45`, `../darkroom/src/gui/scene.rs:268-316`).
 
+## Medium: Execution structure
+
 - [ ] **The compiled program's parallel pools distribute structural invariants across the pipeline.** Each `ExecutionNode` stores spans into shared input, event, output-type, and pin vectors. Flattening maintains running offsets, output ownership is reconstructed later, and validation must cross-check every range, so a local node-shape change affects flattening, type resolution, planning, caching, and execution (`src/execution/program.rs:21-39`, `src/execution/program.rs:77-168`, `src/execution/flatten/mod.rs:52-110`, `src/execution/flatten/mod.rs:280-327`, `src/execution/validate.rs:16-68`).
 
 - [ ] **`execution/mod.rs` owns unrelated execution layers.** The module root defines shared pool containers and aliases, public execution errors, run seeds, engine installation, orchestration, cache reporting, and resident-cache persistence. These responsibilities obscure the boundaries already represented by the execution submodules (`src/execution/mod.rs:20-120`, `src/execution/mod.rs:122-215`, `src/execution/mod.rs:217-379`).
 
 - [ ] **Cache and executor modules each contain several independent state machines.** `cache/mod.rs` combines coverage encoding, snapshots, slot state, invocation mutation, disk policy, digest state, hydration, persistence, reclamation, and RAM reporting in 680 lines. `executor/mod.rs` combines frame hydration, reclamation, run scheduling, invocation, outcome classification, event reporting, and statistics projection in 638 lines, making local changes depend on distant invariants (`src/execution/cache/mod.rs:31-680`, `src/execution/executor/mod.rs:41-638`).
 
-## Low
+## Low: Public surface and dependency boundaries
 
 - [ ] **The public worker API exposes its raw coordination protocol.** Callers construct `Update`, `Run`, event-loop, synchronization, storage, clear, and exit messages directly, while batching silently coalesces and orders them. Correct sequencing and installed-program assumptions therefore remain obligations of every caller rather than properties of the `Worker` API (`src/worker/mod.rs:23-85`, `src/worker/protocol.rs:12-32`, `src/worker/batch.rs:69-100`).
 
