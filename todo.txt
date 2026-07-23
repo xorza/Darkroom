@@ -21,8 +21,6 @@ invert removed retain logic to optimize
 
 mesh once registrations
 
-build masters chose array of files instead of directory
-
 Darkroom currently recompiles on every run, so each new compile still needs installation
 
 save caches on cache click
@@ -32,5 +30,3 @@ subgraph to newnodeui
 subgraphs tabs movable
 
 ram usage on node status update from worker
-
-do not evice ram if disk cache exists
