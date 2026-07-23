@@ -27,8 +27,8 @@ pub use execution::disk_store::DiskStore;
 pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
 };
-pub use execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 pub use execution::outcome::{LogEntry, LogLevel};
+pub use execution::report::{PinnedOutput, PinnedOutputs};
 pub use execution::{Error, Result, RunError, RunSeeds};
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};

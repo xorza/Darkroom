@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -11,6 +12,7 @@ use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{
     ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
 };
+use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::outcome::{
     ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage,
 };
@@ -23,6 +25,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
+use crate::worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
@@ -509,7 +512,7 @@ fn event_loop_stop_reports_idle_status_before_lambda_errors() {
         ..WorkerStatus::default()
     });
 
-    crate::worker::report_event_loop_stop(
+    worker::report_event_loop_stop(
         StopOutcome {
             was_running: true,
             panics: vec![LambdaPanic {
@@ -537,6 +540,68 @@ fn event_loop_stop_reports_idle_status_before_lambda_errors() {
         } if actual == e_node_id && message == "boom"
     ));
     assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn worker_status_batches_nodes_and_preserves_published_snapshots() {
+    let first_node = ExecutionNodeId::unique();
+    let second_node = ExecutionNodeId::unique();
+    let mut events = vec![
+        RunEvent::Progress(RunProgress {
+            e_node_id: first_node,
+            phase: RunPhase::Started { at: Instant::now() },
+        }),
+        RunEvent::Progress(RunProgress {
+            e_node_id: second_node,
+            phase: RunPhase::Finished { elapsed_secs: 0.25 },
+        }),
+    ];
+    let mut status = Arc::new(WorkerStatus {
+        activity: WorkerActivity::Executing,
+        ..WorkerStatus::default()
+    });
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let callback = |report| tx.send(report).unwrap();
+
+    worker::forward_run_events(&mut events, &mut status, &callback);
+    let WorkerReport::Status(patch) = rx.try_recv().unwrap() else {
+        panic!("progress must produce a status patch");
+    };
+    assert_eq!(patch.kind, WorkerStatusKind::Patch);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(patch.nodes[0].e_node_id, first_node);
+    assert!(matches!(
+        patch.nodes[0].status,
+        Some(NodeExecutionStatus::Running { .. })
+    ));
+    assert_eq!(patch.nodes[1].e_node_id, second_node);
+    assert!(matches!(
+        patch.nodes[1].status,
+        Some(NodeExecutionStatus::Executed {
+            elapsed_secs: 0.25
+        })
+    ));
+    assert!(Arc::ptr_eq(&patch, &status));
+
+    worker::report_activity(&mut status, WorkerActivity::Idle, &callback);
+    let WorkerReport::Status(idle) = rx.try_recv().unwrap() else {
+        panic!("activity change must produce a status");
+    };
+    assert!(!Arc::ptr_eq(&patch, &idle));
+    assert_eq!(patch.activity, WorkerActivity::Executing);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(idle.activity, WorkerActivity::Idle);
+    assert!(idle.nodes.is_empty());
+
+    drop(patch);
+    drop(idle);
+    let allocation = Arc::as_ptr(&status);
+    worker::prepare_status(
+        &mut status,
+        WorkerActivity::Executing,
+        WorkerStatusKind::Patch,
+    );
+    assert_eq!(Arc::as_ptr(&status), allocation);
 }
 
 #[tokio::test]

@@ -4,15 +4,15 @@ use crate::DynamicValue;
 use crate::execution::identity::ExecutionNodeId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RunPhase {
+pub(crate) enum RunPhase {
     Started { at: Instant },
     Finished { elapsed_secs: f64 },
 }
 
 #[derive(Debug, Clone)]
-pub struct RunProgress {
-    pub e_node_id: ExecutionNodeId,
-    pub phase: RunPhase,
+pub(crate) struct RunProgress {
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) phase: RunPhase,
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct PinnedOutputs {
 }
 
 #[derive(Debug, Clone)]
-pub enum RunEvent {
+pub(crate) enum RunEvent {
     Progress(RunProgress),
     PinnedOutputs(PinnedOutputs),
 }
