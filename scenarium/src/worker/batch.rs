@@ -37,6 +37,19 @@ pub(crate) struct BatchIntent {
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
+impl BatchIntent {
+    pub(crate) fn take_run_seeds(&mut self) -> RunSeeds {
+        RunSeeds {
+            sinks: std::mem::take(&mut self.execute_sinks),
+            event_triggers: std::mem::take(&mut self.execute_event_triggers),
+            events: std::mem::take(&mut self.events).into_iter().collect(),
+            nodes: std::mem::take(&mut self.execute_nodes)
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
 pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
     for msg in msgs {

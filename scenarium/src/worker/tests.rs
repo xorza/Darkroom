@@ -1568,7 +1568,7 @@ fn scan_accumulates_simple_flags() {
         event_idx: 0,
     };
 
-    let intent = scan(vec![
+    let mut intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::Run {
@@ -1599,6 +1599,16 @@ fn scan_accumulates_simple_flags() {
     );
     assert!(intent.execute_nodes.contains(&e_node_id));
     assert_eq!(intent.syncs.len(), 1);
+
+    let seeds = intent.take_run_seeds();
+    assert!(seeds.sinks);
+    assert!(!seeds.event_triggers);
+    assert_eq!(seeds.events, vec![event]);
+    assert_eq!(seeds.nodes, vec![e_node_id]);
+    assert!(!intent.execute_sinks);
+    assert!(!intent.execute_event_triggers);
+    assert!(intent.events.is_empty());
+    assert!(intent.execute_nodes.is_empty());
 }
 
 #[test]
