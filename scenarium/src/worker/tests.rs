@@ -22,8 +22,8 @@ use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker;
 use crate::worker::Worker;
-use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
-use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
+use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
+use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{
@@ -473,31 +473,22 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
 #[tokio::test]
 async fn lambda_panic_is_captured_not_unwound() {
-    // A panicking event lambda must be isolated: `stop()` captures the panic
-    // (attributed to its node) and returns it, rather than unwinding into the
-    // worker loop — which would kill the worker.
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
     let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let mut events = Vec::new();
 
-    // The lambda panics on its first invoke and never sends; its sole sender
-    // drops, closing the channel. Awaiting that close ensures the panic has
-    // landed before we stop.
+    let wake = active.recv(&mut events).await;
+    let EventLoopWake::TaskPanicked(panic) = wake else {
+        panic!("panicking lambda must wake the event loop");
+    };
+    assert!(events.is_empty());
+    assert_eq!(panic.e_node_id, e_node_id, "panic attributed to its node");
     assert!(
-        active.events.recv().await.is_none(),
-        "panicking lambda should close the event channel without sending"
-    );
-
-    let panics = active.stop().await;
-    assert_eq!(panics.len(), 1, "the lambda panic should be captured");
-    assert_eq!(
-        panics[0].e_node_id, e_node_id,
-        "panic attributed to its node"
-    );
-    assert!(
-        panics[0].message.contains("boom in lambda"),
+        panic.message.contains("boom in lambda"),
         "panic message preserved: {}",
-        panics[0].message
+        panic.message
     );
+    assert!(active.stop().await.is_empty());
 }
 
 #[test]
@@ -1040,14 +1031,26 @@ async fn worker_reports_absolute_activity_in_order() {
 }
 
 #[tokio::test]
-async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
+async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
     let mut library = system_library();
     library.merge(worker_events_library());
     let mut frame_event = library.by_name("Frame Event").unwrap().clone();
     frame_event.events[0].event_lambda =
         EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
+    frame_event.events[1].event_lambda =
+        EventLambda::new(|_state| Box::pin(std::future::pending()));
     library.add(frame_event);
-    let graph = log_frame_no_graph(&library);
+    let mut graph = log_frame_no_graph(&library);
+    let frame_event_node_id = graph
+        .find_by_name("Frame Event", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let print_node_id = graph
+        .find_by_name("Print", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    graph.subscribe(frame_event_node_id, 1, print_node_id);
+    let expected_e_node_id = root_execution_node(frame_event_node_id);
     let compiled = Compiler::default()
         .compile(&graph, &library)
         .unwrap()
@@ -1076,12 +1079,9 @@ async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
                 }
             }
             WorkerReport::Error(WorkerError::Execution {
-                error:
-                    Error::EventLambdaPanic {
-                        e_node_id: _,
-                        message,
-                    },
+                error: Error::EventLambdaPanic { e_node_id, message },
             }) => {
+                assert_eq!(e_node_id, expected_e_node_id);
                 assert!(message.contains("event loop stopped"));
                 break;
             }
@@ -1100,6 +1100,7 @@ async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
             WorkerActivity::Idle,
         ]
     );
+    sync_after(&worker, std::iter::empty()).await;
 }
 
 /// Node seeds end-to-end: the run seed overrides a compiled disabled node and the
@@ -1647,7 +1648,7 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 }
 
 #[test]
-fn scan_accumulates_simple_flags() {
+fn batch_intent_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
     let e_node_id = ExecutionNodeId::unique();
     let event = ExecutionEventPort {
@@ -1655,7 +1656,7 @@ fn scan_accumulates_simple_flags() {
         event_idx: 0,
     };
 
-    let intent = scan(vec![
+    let intent = BatchIntent::new([
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::Run {
@@ -1689,14 +1690,14 @@ fn scan_accumulates_simple_flags() {
 }
 
 #[test]
-fn scan_deduplicates_events() {
+fn batch_intent_deduplicates_events() {
     let e_node_id = ExecutionNodeId::unique();
     let event = ExecutionEventPort {
         e_node_id,
         event_idx: 0,
     };
 
-    let intent = scan(vec![
+    let intent = BatchIntent::new([
         WorkerMessage::Run {
             seeds: RunSeeds::events(vec![event]),
         },
@@ -1715,7 +1716,7 @@ fn scan_deduplicates_events() {
     );
 }
 
-/// A trivially-valid `Update` payload for scan tests, which only inspect the
+/// A trivially-valid `Update` payload for batch reduction tests, which only inspect the
 /// reduced intent — the program's content is irrelevant.
 fn empty_compiled() -> Arc<CompiledGraph> {
     Compiler::default()
@@ -1725,10 +1726,10 @@ fn empty_compiled() -> Arc<CompiledGraph> {
 }
 
 #[test]
-fn scan_exit_dominates_entire_batch() {
+fn batch_intent_exit_dominates_entire_batch() {
     // Exit is sticky across the whole batch: every other command
     // in the batch is discarded, whether sent before or after.
-    let intent = scan(vec![
+    let intent = BatchIntent::new([
         WorkerMessage::Clear,
         WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
@@ -1759,10 +1760,10 @@ fn scan_exit_dominates_entire_batch() {
 }
 
 #[test]
-fn scan_accumulates_unique_cache_evictions_in_order() {
+fn batch_intent_accumulates_unique_cache_evictions_in_order() {
     let first = NodeId::from_u128(1);
     let second = NodeId::from_u128(2);
-    let intent = scan(vec![
+    let intent = BatchIntent::new([
         WorkerMessage::EvictCache {
             nodes: vec![first, second],
         },
@@ -1873,11 +1874,11 @@ async fn cache_eviction_failure_uses_general_worker_error_report() {
 }
 
 #[test]
-fn scan_update_overwrites_earlier_update_in_same_batch() {
+fn batch_intent_update_overwrites_earlier_update_in_same_batch() {
     // Two Updates in one batch: the last one wins. This is
     // implicit today (Option::replace) but worth pinning since
     // callers do send [Update(A), Update(B)] during rapid edits.
-    let intent = scan(vec![
+    let intent = BatchIntent::new([
         WorkerMessage::Update {
             compiled: empty_compiled(),
         },
@@ -1892,12 +1893,12 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
 // Slot reduction: last-write-wins for graph_state and loop_request.
 
 #[test]
-fn scan_last_write_wins_per_slot() {
+fn batch_intent_last_write_wins_per_slot() {
     type Expect = fn(&BatchIntent) -> bool;
-    let cases: [(&str, Vec<WorkerMessage>, Expect); 4] = [
+    let cases: [(&str, [WorkerMessage; 2], Expect); 4] = [
         (
             "Clear then Update -> last write (Update) wins",
-            vec![
+            [
                 WorkerMessage::Clear,
                 WorkerMessage::Update {
                     compiled: empty_compiled(),
@@ -1907,7 +1908,7 @@ fn scan_last_write_wins_per_slot() {
         ),
         (
             "Update then Clear -> last write (Clear) wins",
-            vec![
+            [
                 WorkerMessage::Update {
                     compiled: empty_compiled(),
                 },
@@ -1917,18 +1918,18 @@ fn scan_last_write_wins_per_slot() {
         ),
         (
             "Start then Stop -> last write (Stop) wins",
-            vec![WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
+            [WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
             |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
         ),
         (
             "Stop then Start -> last write (Start) wins",
-            vec![WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
+            [WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
             |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
         ),
     ];
 
     for (label, msgs, expected) in cases {
-        let intent = scan(msgs);
+        let intent = BatchIntent::new(msgs);
         assert!(expected(&intent), "{label}");
     }
 }
@@ -2108,8 +2109,8 @@ async fn fired_event_does_not_reinitialize_event_sources() {
 
 // F4: Exit dominates the batch at the runtime level — any pre-Exit
 // Sync reply sender must drop (waiter observes RecvError), not fire
-// with `Ok(())`. `scan_exit_dominates_entire_batch` pins the pure
-// scan side; this pins the end-to-end contract.
+// with `Ok(())`. `batch_intent_exit_dominates_entire_batch` pins the pure
+// reduction side; this pins the end-to-end contract.
 #[tokio::test]
 async fn exit_in_batch_closes_pending_sync() {
     let (worker, _rx) = completed_worker(8);

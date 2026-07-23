@@ -8,9 +8,9 @@ use common::CancelToken;
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::report::RunEvent;
 use crate::execution::{Error, ExecutionEngine, Result, RunSeeds};
-use crate::worker::batch::{GraphOp, LoopCommand, scan};
+use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::event_loop::{
-    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, StopOutcome, stop_event_loop,
+    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, EventLoopWake, StopOutcome, stop_event_loop,
 };
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
@@ -131,23 +131,26 @@ async fn worker_loop<ExecutionCallback>(
                     None => return,
                 }
             }
-            count = async {
-                event_loop.as_mut().unwrap().events
-                    .recv_many(&mut event_buffer, EVENT_LOOP_BACKPRESSURE).await
+            wake = async {
+                event_loop.as_mut().unwrap().recv(&mut event_buffer).await
             }, if event_loop.is_some() => {
-                if count == 0 {
-                    let stop_outcome = stop_event_loop(&mut event_loop).await;
-                    report_event_loop_stop(
-                        stop_outcome,
-                        &mut status,
-                        &execution_callback,
-                    );
-                    continue;
+                match wake {
+                    EventLoopWake::Events => {}
+                    EventLoopWake::TaskPanicked(panic) => {
+                        let mut stop_outcome = stop_event_loop(&mut event_loop).await;
+                        stop_outcome.panics.insert(0, panic);
+                        report_event_loop_stop(
+                            stop_outcome,
+                            &mut status,
+                            &execution_callback,
+                        );
+                        continue;
+                    }
                 }
             }
         }
 
-        let mut intent = scan(std::mem::take(&mut cmd_batch));
+        let mut intent = BatchIntent::new(std::mem::take(&mut cmd_batch));
         intent.events.extend(event_buffer.drain(..));
 
         let needs_stop =

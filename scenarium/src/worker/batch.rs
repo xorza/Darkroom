@@ -37,38 +37,40 @@ pub(crate) struct BatchIntent {
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
-pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
-    let mut intent = BatchIntent::default();
-    for msg in msgs {
-        match msg {
-            WorkerMessage::Exit => {
-                return BatchIntent {
-                    exit: true,
-                    ..BatchIntent::default()
-                };
+impl BatchIntent {
+    pub(crate) fn new(msgs: impl IntoIterator<Item = WorkerMessage>) -> Self {
+        let mut intent = Self::default();
+        for msg in msgs {
+            match msg {
+                WorkerMessage::Exit => {
+                    return Self {
+                        exit: true,
+                        ..Self::default()
+                    };
+                }
+                WorkerMessage::Update { compiled } => {
+                    intent.graph_state = Some(GraphOp::Replace(compiled));
+                }
+                WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
+                WorkerMessage::EvictCache { nodes } => intent.evict_cache.extend(nodes),
+                WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
+                WorkerMessage::Run { seeds } => {
+                    let RunSeeds {
+                        sinks,
+                        event_sources,
+                        events,
+                        nodes,
+                    } = seeds;
+                    intent.execute_sinks |= sinks;
+                    intent.execute_event_sources |= event_sources;
+                    intent.events.extend(events);
+                    intent.execute_nodes.extend(nodes);
+                }
+                WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
+                WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
+                WorkerMessage::Sync { reply } => intent.syncs.push(reply),
             }
-            WorkerMessage::Update { compiled } => {
-                intent.graph_state = Some(GraphOp::Replace(compiled));
-            }
-            WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
-            WorkerMessage::EvictCache { nodes } => intent.evict_cache.extend(nodes),
-            WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
-            WorkerMessage::Run { seeds } => {
-                let RunSeeds {
-                    sinks,
-                    event_sources,
-                    events,
-                    nodes,
-                } = seeds;
-                intent.execute_sinks |= sinks;
-                intent.execute_event_sources |= event_sources;
-                intent.events.extend(events);
-                intent.execute_nodes.extend(nodes);
-            }
-            WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
-            WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
-            WorkerMessage::Sync { reply } => intent.syncs.push(reply),
         }
+        intent
     }
-    intent
 }

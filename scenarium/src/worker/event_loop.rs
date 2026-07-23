@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use hashbrown::HashMap;
 use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
-use tokio::task::JoinHandle;
+use tokio::task::{Id, JoinSet};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
@@ -18,8 +19,15 @@ pub(crate) struct LambdaPanic {
 }
 
 #[derive(Debug)]
+pub(crate) enum EventLoopWake {
+    Events,
+    TaskPanicked(LambdaPanic),
+}
+
+#[derive(Debug)]
 pub(crate) struct ActiveEventLoop {
-    join_handles: Vec<(ExecutionEventPort, JoinHandle<()>)>,
+    tasks: JoinSet<()>,
+    task_nodes: HashMap<Id, ExecutionNodeId>,
     pub(crate) events: Receiver<ExecutionEventPort>,
 }
 
@@ -33,7 +41,8 @@ impl ActiveEventLoop {
             .checked_add(1)
             .expect("event trigger count overflow");
         let ready = Arc::new(Barrier::new(participants));
-        let mut join_handles = Vec::with_capacity(event_triggers.len());
+        let mut tasks = JoinSet::new();
+        let mut task_nodes = HashMap::with_capacity(event_triggers.len());
 
         for EventTrigger {
             event,
@@ -41,7 +50,8 @@ impl ActiveEventLoop {
             state,
         } in event_triggers
         {
-            let join_handle = tokio::spawn({
+            let e_node_id = event.e_node_id;
+            let task = tasks.spawn({
                 let event_tx = event_tx.clone();
                 let ready = ready.clone();
                 let pause_gate = pause_gate.clone();
@@ -58,34 +68,86 @@ impl ActiveEventLoop {
                     }
                 }
             });
-            join_handles.push((event, join_handle));
+            let previous = task_nodes.insert(task.id(), e_node_id);
+            debug_assert!(previous.is_none(), "duplicate event task id");
         }
 
         ready.wait().await;
         tokio::task::yield_now().await;
 
         Self {
-            join_handles,
+            tasks,
+            task_nodes,
             events,
         }
     }
 
+    pub(crate) async fn recv(&mut self, events: &mut Vec<ExecutionEventPort>) -> EventLoopWake {
+        // Observe failures even when another task keeps the event stream continuously ready.
+        let task_result = tokio::select! {
+            biased;
+            result = self.tasks.join_next_with_id() => result,
+            count = self.events.recv_many(events, EVENT_LOOP_BACKPRESSURE) => {
+                if count > 0 {
+                    return EventLoopWake::Events;
+                }
+                self.tasks.join_next_with_id().await
+            }
+        }
+        .expect("active event loop must contain a task");
+
+        match task_result {
+            Ok((task_id, ())) => {
+                let e_node_id = self.remove_task(task_id);
+                panic!("event task for {e_node_id:?} exited while the event loop was active");
+            }
+            Err(error) => {
+                let e_node_id = self.remove_task(error.id());
+                assert!(
+                    error.is_panic(),
+                    "event task for {e_node_id:?} was cancelled while the event loop was active"
+                );
+                EventLoopWake::TaskPanicked(LambdaPanic {
+                    e_node_id,
+                    message: panic_message(error.into_panic()),
+                })
+            }
+        }
+    }
+
     pub(crate) async fn stop(&mut self) -> Vec<LambdaPanic> {
+        self.tasks.abort_all();
         let mut panics = Vec::new();
-        for (event, handle) in self.join_handles.drain(..) {
-            handle.abort();
-            if let Err(error) = handle.await {
-                if error.is_panic() {
-                    panics.push(LambdaPanic {
-                        e_node_id: event.e_node_id,
-                        message: panic_message(error.into_panic()),
-                    });
-                } else {
-                    assert!(error.is_cancelled(), "event task join error: {error}");
+        while let Some(result) = self.tasks.join_next_with_id().await {
+            match result {
+                Ok((task_id, ())) => {
+                    let e_node_id = self.remove_task(task_id);
+                    panic!("event task for {e_node_id:?} exited before shutdown");
+                }
+                Err(error) => {
+                    let e_node_id = self.remove_task(error.id());
+                    if error.is_panic() {
+                        panics.push(LambdaPanic {
+                            e_node_id,
+                            message: panic_message(error.into_panic()),
+                        });
+                    } else {
+                        assert!(
+                            error.is_cancelled(),
+                            "event task for {e_node_id:?} failed during shutdown: {error}"
+                        );
+                    }
                 }
             }
         }
+        debug_assert!(self.task_nodes.is_empty());
         panics
+    }
+
+    fn remove_task(&mut self, task_id: Id) -> ExecutionNodeId {
+        self.task_nodes
+            .remove(&task_id)
+            .unwrap_or_else(|| panic!("event task {task_id} has no node attribution"))
     }
 }
 
