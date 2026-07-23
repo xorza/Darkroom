@@ -188,6 +188,7 @@ dependencies = [
  "glam 0.33.2",
  "half",
  "image",
+ "memchr",
  "padding-struct",
  "pollster 1.0.1",
  "profiling",
