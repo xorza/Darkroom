@@ -2,8 +2,8 @@
 //! and the node-keyed disk cache.
 //!
 //! A node's output is a pure function of its function identity and version, its resolved input
-//! values, the outputs of its upstream producers, and the content of
-//! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
+//! values, the outputs of its upstream producers, and the prepared identities of
+//! external resources it reads. [`node_digest`] folds that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
 //! needed). External identities come from one memoized per-run
@@ -22,8 +22,8 @@
 //! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's entries',
 //!   prepared by [`RunResourceStamps`](crate::execution::resource::RunResourceStamps), so a
 //!   folder-reading node can be `Pure` and still re-key when its contents change. A
-//!   same-size edit within mtime granularity
-//!   can slip through; a full content hash is the opt-in resolver. The same tier holds
+//!   same-size edit within mtime granularity can slip through; explicit runtime cache
+//!   eviction removes the affected node and downstream blobs. The same tier holds
 //!   for any registered [`ResourceStamper`](crate::ResourceStamper): a stamp is
 //!   cheap referent *metadata*, and stamps are machine-local (mtimes, local versions),
 //!   so resource-keyed blobs don't transfer across machines.

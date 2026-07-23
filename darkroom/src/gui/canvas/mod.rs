@@ -43,7 +43,9 @@ use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::WireEmphasis;
-use crate::gui::node::prepass::{emit_path_picks, emit_play_clicks, emit_port_dblclicks};
+use crate::gui::node::prepass::{
+    emit_cache_evictions, emit_path_picks, emit_play_clicks, emit_port_dblclicks,
+};
 use crate::gui::node::{NodeUI, RecordCtx};
 use crate::gui::scene::{Scene, SceneNode};
 
@@ -230,6 +232,11 @@ impl GraphUI {
             && let Some(node_id) = emit_play_clicks(ui, scene)
         {
             *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
+        }
+        if cmd.is_none()
+            && let Some(node_id) = emit_cache_evictions(ui, scene)
+        {
+            *cmd = Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
         }
         // A pin's own header refresh-chip click re-runs the node its output
         // came from, refreshing the value the card is showing — same

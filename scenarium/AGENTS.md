@@ -11,10 +11,11 @@ crate-private, so downstream crates import public concepts directly from
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
 bindings, event subscriptions, pinned outputs, and local graphs.
 Identity exists only in the map key; `Node` is authored data and does not store
-its id. `Graph` is the persisted model. `Graph::validate` enforces node-id
-uniqueness across the whole reachable authoring tree. Node removal and
-restoration use `DetachedNode`, which keeps the id, node, all touching wiring,
-subscriptions, and pins together.
+its id. Its cache mode is storage policy, not cache validity. `Graph` is the
+persisted model. `Graph::validate` enforces node-id
+uniqueness across the whole reachable authoring tree. Node removal and restoration
+use `DetachedNode`, which keeps the id, node, all touching wiring, subscriptions,
+and pins together.
 
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain
@@ -91,8 +92,11 @@ an older frame when the new result covers more outputs.
 
 Only `FuncBehavior::Pure` cones receive reusable content digests. Resource
 inputs fold the current referent identity through `ResourceStamper`; filesystem
-paths have built-in stamping. Stampers receive the run's cooperative
-`CancelToken`. Custom runtime values are not serializable.
+paths have built-in stamping. Explicit cache eviction is a worker operation:
+authored ids resolve through `CompiledGraph`, expand through transitive data
+consumers, release resident outputs, and delete their node-keyed disk blobs.
+Stampers receive the run's cooperative `CancelToken`. Custom runtime values are
+not serializable.
 Downstream types attach a `CustomValueCodec` explicitly when they want disk
 cache support.
 
@@ -104,6 +108,9 @@ last-write-wins and `Exit` dominates its batch. Compiled programs are shared as
 `Arc<CompiledGraph>` values. After applying a graph-state change, the worker
 emits `Installed` or `Cleared` before any report belonging to the resulting
 state; its single execution loop and callback preserve that FIFO stream.
+Successful cache eviction is fire-and-forget. Operation-level execution and
+cache-eviction failures both arrive as `WorkerReport::Error`; `Finished`
+contains only successful execution stats.
 `ActiveEventLoop` owns both its tasks and event receiver, so the lifecycle
 invariant is represented by one type. Event tasks rendezvous through Tokio's
 `Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::{Library, WorkerReport};
+use scenarium::{Library, WorkerError, WorkerReport};
 
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::script::{ScriptConfig, ScriptMessage};
@@ -129,28 +129,25 @@ impl App {
                     self.editor.run_state.compiled = None;
                     self.editor.run_state.clear();
                 }
-                WorkerReport::Finished(result) => match result {
-                    Ok(stats) => {
-                        if stats.cancelled {
-                            tracing::info!(
-                                "run cancelled after {} node(s)",
-                                stats.executed_nodes.len()
-                            );
-                        }
-                        self.editor.run_state.set_results(&stats);
-                        // A finished run supersedes any lingering failure message
-                        // (e.g. an earlier event-loop tick's), so the loop
-                        // self-heals in the status bar too.
-                        self.workspace.runtime.status.error = None;
-                    }
-                    Err(err) => {
+                WorkerReport::Error(error) => {
+                    if matches!(&error, WorkerError::Execution { .. }) {
                         self.editor.run_state.clear();
-                        self.workspace
-                            .runtime
-                            .status
-                            .error(format!("run failed: {err}"));
                     }
-                },
+                    self.workspace.runtime.status.error(error.to_string());
+                }
+                WorkerReport::Finished(stats) => {
+                    if stats.cancelled {
+                        tracing::info!(
+                            "run cancelled after {} node(s)",
+                            stats.executed_nodes.len()
+                        );
+                    }
+                    self.editor.run_state.set_results(&stats);
+                    // A finished run supersedes any lingering failure message
+                    // (e.g. an earlier event-loop tick's), so the loop
+                    // self-heals in the status bar too.
+                    self.workspace.runtime.status.error = None;
+                }
                 WorkerReport::Progress(progress) => {
                     self.editor.run_state.apply_progress(&progress);
                 }

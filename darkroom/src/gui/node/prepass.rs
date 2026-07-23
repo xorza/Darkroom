@@ -19,7 +19,7 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::node_ports;
-use crate::gui::node::header::{graph_badge_wid, play_badge_wid};
+use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
 use crate::gui::scene::{InputBindingView, Scene};
@@ -53,6 +53,22 @@ pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
         .values()
         .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).left.clicked())
         .map(|n| n.id)
+}
+
+/// Scan for a click on a node's runtime-cache eviction chip. The canvas
+/// translates the returned authored node into a worker command.
+pub(crate) fn emit_cache_evictions(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+    scene
+        .nodes
+        .values()
+        .find(|node| {
+            node.can_evict_cache
+                && ui
+                    .response_for(cache_eviction_badge_wid(node.id))
+                    .left
+                    .clicked()
+        })
+        .map(|node| node.id)
 }
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the

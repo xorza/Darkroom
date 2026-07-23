@@ -114,12 +114,13 @@ pub(crate) struct RunState {
     /// The program acknowledged by the worker's ordered report stream. Every
     /// subsequent flat progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
-    /// A run is in flight (`begin_run` → `WorkerReport::Finished`). Drives the
-    /// live repaint tick and whether the Cancel affordance shows.
+    /// A run is in flight (`begin_run` → `WorkerReport::Finished` or
+    /// `WorkerReport::Error`). Drives the live repaint tick and whether the
+    /// Cancel affordance shows.
     running: bool,
-    /// RAM held by the worker's runtime cache after the last finished run
-    /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
-    /// status bar's memory readout.
+    /// RAM held by the worker's runtime cache after its latest run (system RAM
+    /// vs GPU VRAM). Explicit eviction clears this projection until the next
+    /// run because successful eviction is fire-and-forget.
     pub(crate) cache_ram: RamUsage,
 }
 
@@ -152,9 +153,8 @@ impl RunState {
             .unwrap_or(&[])
     }
 
-    /// RAM this node's cached output holds after the last run (zero if it holds
-    /// nothing). Read into the scene each rebuild to drive the node body's
-    /// memory readout.
+    /// RAM this node's cached output currently holds (zero if it holds nothing).
+    /// Read into the scene each rebuild to drive the node body's memory readout.
     pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
         self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
     }
@@ -214,6 +214,19 @@ impl RunState {
         }
         self.nodes
             .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
+    }
+
+    /// Successful eviction has no reply, so its affected cache residency cannot
+    /// be projected exactly until the next run reports fresh stats and pins.
+    pub(crate) fn clear_cache_projections(&mut self) {
+        self.cache_ram = RamUsage::default();
+        for node in self.nodes.values_mut() {
+            node.ram = RamUsage::default();
+        }
+        self.pinned_outputs.entries.clear();
+        self.nodes.retain(|_, node| {
+            node.status != ExecStatus::None || !node.logs.is_empty() || node.ram.total() > 0
+        });
     }
 
     /// Fold one flattened stat's `status` onto the node itself and every
@@ -372,6 +385,49 @@ mod tests {
             compiled: Some(builder.build()),
             ..RunState::default()
         }
+    }
+
+    #[test]
+    fn clearing_cache_projections_drops_ram_and_pins_but_keeps_run_results() {
+        let evicted_node = nid(1);
+        let remaining_node = nid(2);
+        let mut state = run_state([
+            (eid(101), vec![], evicted_node),
+            (eid(102), vec![], remaining_node),
+        ]);
+        state.nodes.entry(evicted_node).or_default().status = ExecStatus::Cached;
+        state.nodes.entry(evicted_node).or_default().ram = RamUsage { cpu: 11, gpu: 0 };
+        state
+            .nodes
+            .entry(remaining_node)
+            .or_default()
+            .logs
+            .push(NodeLog {
+                level: LogLevel::Info,
+                message: "kept".into(),
+            });
+        state.nodes.entry(remaining_node).or_default().ram = RamUsage { cpu: 13, gpu: 0 };
+        state.cache_ram = RamUsage { cpu: 24, gpu: 0 };
+        let evicted_port = OutputPort::new(evicted_node, 0);
+        let remaining_port = OutputPort::new(remaining_node, 0);
+        state
+            .pinned_outputs
+            .entries
+            .insert(evicted_port, StoredContent::Text("old".into()));
+        state
+            .pinned_outputs
+            .entries
+            .insert(remaining_port, StoredContent::Text("kept".into()));
+
+        state.clear_cache_projections();
+
+        assert_eq!(state.cache_ram, RamUsage::default());
+        assert_eq!(state.ram(evicted_node), RamUsage::default());
+        assert_eq!(state.ram(remaining_node), RamUsage::default());
+        assert_eq!(state.status(evicted_node), ExecStatus::Cached);
+        assert_eq!(state.nodes[&remaining_node].logs[0].message, "kept");
+        assert!(!state.pinned_outputs.entries.contains_key(&evicted_port));
+        assert!(!state.pinned_outputs.entries.contains_key(&remaining_port));
     }
 
     #[test]

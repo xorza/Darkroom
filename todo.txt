@@ -33,3 +33,4 @@ ram usage on node status update from worker
 
 self.events_running = false; lets change this value  only  by callbacks from worker
 
+status request from worker. reused entity for status

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::test_utils::test_output_path;
-use scenarium::StaticValue;
+use scenarium::{NodeId, StaticValue};
 
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
@@ -14,7 +14,7 @@ use crate::core::status::StatusLog;
 use crate::core::workspace::{self as workspace_module, Workspace};
 
 #[test]
-fn normalization_is_shared_across_run_and_replacement_boundaries() {
+fn normalization_is_shared_across_run_eviction_and_replacement_boundaries() {
     let mut preferences = Preferences::default();
     let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
@@ -27,7 +27,10 @@ fn normalization_is_shared_across_run_and_replacement_boundaries() {
 
     workspace.replace_document(OpenDocument::default());
     assert!(workspace.open.normalization_pending);
-    workspace.normalize_document();
+    assert!(
+        workspace.evict_cache(NodeId::unique()),
+        "the empty graph compiles and queues an eviction"
+    );
     assert!(!workspace.open.normalization_pending);
 }
 

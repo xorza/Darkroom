@@ -76,12 +76,28 @@ impl DiskStore {
             return None;
         }
         let digest = digest?;
+        let path = self.node_path(e_node_id)?;
+        Some(BlobTarget { path, digest })
+    }
+
+    fn node_path(&self, e_node_id: ExecutionNodeId) -> Option<PathBuf> {
         let mut buf = [0u8; 32];
         let name = e_node_id.as_uuid().simple().encode_lower(&mut buf);
-        Some(BlobTarget {
-            path: self.disk_root.as_ref()?.join(name),
-            digest,
-        })
+        Some(self.disk_root.as_ref()?.join(name))
+    }
+
+    pub(crate) async fn remove_node(&self, e_node_id: ExecutionNodeId) -> io::Result<()> {
+        let Some(path) = self.node_path(e_node_id) else {
+            return Ok(());
+        };
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io::Error::new(
+                error.kind(),
+                format!("failed to remove {}: {error}", path.display()),
+            )),
+        }
     }
 
     pub(crate) async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {

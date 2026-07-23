@@ -23,6 +23,31 @@ fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> Executi
     e_node_id
 }
 
+#[tokio::test]
+async fn eviction_clears_only_the_output_cache() {
+    let digest = Digest([7u8; 32]);
+    let mut slot = RuntimeSlot {
+        current_digest: Some(digest),
+        value: ValueState::Resident {
+            snapshot: complete_snapshot(out()),
+            produced_under: Some(digest),
+        },
+        ..Default::default()
+    };
+    slot.state.set(17_u32);
+    slot.event_state.lock().await.set(23_u32);
+
+    let mut cache = RuntimeCache::default();
+    let e_node_id = insert_slot(&mut cache, 1, slot);
+    let failures = cache.evict(&[e_node_id]).await;
+
+    assert!(failures.is_empty());
+    assert!(matches!(cache.slots[&e_node_id].value, ValueState::Empty));
+    assert_eq!(cache.slots[&e_node_id].state.get::<u32>(), Some(&17));
+    let event_state = cache.slots[&e_node_id].event_state.lock().await;
+    assert_eq!(event_state.get::<u32>(), Some(&23));
+}
+
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
 /// current digest, holds values, and those values were produced under that
 /// exact digest. The four cases below are the full truth table.

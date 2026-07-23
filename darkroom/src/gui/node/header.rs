@@ -1,7 +1,7 @@
 //! Node header bar: the title plus the node's indicator chips, split into two
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
 //! bordered, hover-lifting chips you act on — `G` graph-open, `D` sink-disable,
-//! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
+//! `↻` evict, `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
 //! that only describe the node — `■` sink and `~` impure. The markers ride
 //! in the [`header`] band beside the title; the run-time label (left) and the
 //! interactive controls (right) share the [`status_row`] below it. Drawn as
@@ -199,7 +199,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 
 /// The strip under the header: the run-time label left-aligned, a `FILL`
 /// spacer, then the interactive chips right-aligned — `G` graph-open, `D`
-/// sink-disable, `R`/`↓` cache. The controls group apart from the title's
+/// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
@@ -280,6 +280,16 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     });
                 }
             }
+            if node.can_evict_cache {
+                Badge::control(
+                    "↻",
+                    theme.colors.badge_cache,
+                    false,
+                    cache_eviction_badge_wid(node.id),
+                    "Drop this node and downstream caches from RAM and disk",
+                )
+                .show(ui);
+            }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and
             // a `↓` chip (persist it to the on-disk store, surviving a reopen). Each
@@ -290,10 +300,10 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // monochrome and only an active cache carries color — the type-colored
             // ports and the status glow keep the stage.
             //
-            // Shown only where caching can apply — see `SceneNode::cacheable`,
-            // which folds out boundary/self-caching/output-less/impure nodes.
+            // Shown only where direct storage controls can apply — see
+            // `SceneNode::cache_controls`.
             // (An impure node still paints the `~` marker below to say why.)
-            if node.cacheable {
+            if node.cache_controls {
                 let ram = node.cache.caches_in_ram();
                 let disk = node.cache.persists_to_disk();
                 let ram_color = if ram {
@@ -435,6 +445,10 @@ fn ram_badge_wid(node_id: NodeId) -> WidgetId {
 /// Stable id for a node's clickable disk-cache chip.
 fn disk_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.disk_badge", node_id))
+}
+
+pub(crate) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.cache_eviction_badge", node_id))
 }
 
 /// Stable id for a graph node's clickable open-in-tab chip.

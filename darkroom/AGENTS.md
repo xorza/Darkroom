@@ -303,10 +303,10 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   translated at canvas level) and the node context menu's "Run to this node".
 - **Per-document disk cache.** `Workspace` binds `RuntimeHost` to the
   `OpenDocument` path during construction, replacement, and save. The host
-  sends `WorkerMessage::SetDiskCache` pointing it at `io::cache`'s
-  `<stem>.darkroom-cache/` store. An unsaved doc stays
-  memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
-  reloads its output across sessions from a store beside the project file.
+  sends `WorkerMessage::SetDiskStore` with `io::cache`'s
+  `<stem>.darkroom-cache/` root. An unsaved doc stays memory-only. A node whose
+  `CacheMode` includes disk persistence (header `↓` chip) reloads its output
+  across sessions from a store beside the project file.
 - On-thread, `App::update` drains the channel (`worker.drain()`, non-blocking).
   `WorkerReport::Progress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
@@ -373,11 +373,14 @@ gesture state + the pure pointer→drop-zone classification. The rest:
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, graph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (play chip + title +
-  `G`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / sink-disable /
-  RAM-cache / disk-cache / inspect; the `D` control appears only on runnable
+  `G`/`■`/`D`/`↻`/`R`/`↓`/`i` badges: run-to-node / graph / sink / sink-disable /
+  cache eviction / RAM-cache / disk-cache / inspect; the `D` control appears only on runnable
   sinks, and the
-  `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
-  `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port
+  `↻` chip sends a runtime `RunCommand::EvictCache` without editing the document and
+  discards the frontend's cache RAM and pinned-output projections until the next run,
+  while `R` and `↓` flip the two bits of
+  `Node::cache` (`CacheMode`
+  `None`/`Ram`/`Disk`/`Both`) via `NodeProperty::RuntimeCache`), `port_row` (the two port
   columns + circles + binding menu; a required input's port paints in the
   missing/warning color only once a run flagged its node `MissingInputs` —
   `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the

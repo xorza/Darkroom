@@ -15,6 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::ExecutionNodeId;
+use scenarium::NodeId;
 use scenarium::{RunSeeds, Worker, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
@@ -62,6 +63,19 @@ impl WorkerBridge {
     /// `WorkerReport::Installed` before processing reports from later commands.
     pub(crate) fn install(&self, compiled: Arc<CompiledGraph>) {
         let _ = self.worker.send(WorkerMessage::Update { compiled });
+    }
+
+    /// Install the current program and evict an authored node's cache cone as
+    /// one worker commit. Stopping the event loop keeps it from immediately
+    /// repopulating the entries being removed.
+    pub(crate) fn install_and_evict_cache(&self, compiled: Arc<CompiledGraph>, node_id: NodeId) {
+        let _ = self.worker.send_many([
+            WorkerMessage::Update { compiled },
+            WorkerMessage::EvictCache {
+                nodes: vec![node_id],
+            },
+            WorkerMessage::StopEventLoop,
+        ]);
     }
 
     /// Execute every sink in the installed program.

@@ -174,6 +174,14 @@ impure, and superseded values; current `Ram` and `Both` values stay resident eve
 current run did not use them. Installing a mode that disables RAM retention applies the same
 sweep immediately.
 
+Explicit cache eviction is runtime state, not authored graph data. The worker resolves an
+authored node or graph instance through the installed `CompiledGraph`, expands it to every
+transitive data consumer, clears those resident outputs, and deletes each node-keyed disk
+blob. It preserves function and event state, does not change `CacheMode`, and requires no
+document save to remain deleted across a restart. A blob-deletion failure leaves that
+node's resident output intact and is reported through the worker's general error report;
+other nodes in the cone still evict. Successful eviction emits no report.
+
 ## B.1 What opts into disk
 
 The disk store serves a node whose mode is `persists_to_disk` (`Disk`/`Both`, `graph.rs`),
@@ -188,8 +196,8 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 ## B.2 The content digest is the cache key (`digest.rs`)
 
 A node's output is a pure function of its `func_id`, function `version`, resolved input
-values, upstream outputs, and the content of any external files it reads. `node_digest` (`digest.rs`)
-folds exactly that into a 256-bit BLAKE3 `Digest`. Before the fold,
+values, upstream outputs, and the identity of any external resources it reads.
+`node_digest` (`digest.rs`) folds that into a 256-bit BLAKE3 `Digest`. Before the fold,
 `RunResourceStamps` (`resource.rs`) resolves filesystem identities and custom resource
 stamps on Tokio's blocking pool, memoizing each identity for the run. The resolver then
 computes node digests producer-first from prepared resource identities and each `Bind`
@@ -203,10 +211,11 @@ inside `node_digest`.
   with a non-reproducible producer, has digest `None` = "always recompute, never cache",
   for RAM and disk alike (a `None` producer folds to a `None` consumer).
 - **File inputs.** An `FsPath` const folds its path and referent identity (`FileId`,
-  default `(len, mtime)`; opt-in content hash), or — for a **directory** — a sorted
-  fingerprint of its entries. An `FsPaths` const folds its ordered path list and each
-  referent identity. A multi-file input therefore invalidates only for selected files,
-  while a directory input invalidates when any direct entry changes.
+  `(len, mtime)`), or — for a **directory** — a sorted fingerprint of its entries. An
+  `FsPaths` const folds its ordered path list and each referent identity. A multi-file
+  input therefore invalidates only for selected files, while a directory input invalidates
+  when any direct entry changes. A same-size edit hidden by mtime granularity requires
+  explicit runtime cache eviction.
 - **Wired resource inputs.** A **resource reference** arriving over a `Bind` edge — an
   `FsPath`/`FsPaths` value, or a value of a custom type with a registered
   `ResourceStamper` (`TypeEntry::with_stamper`) — folds the *referent's* live identity,

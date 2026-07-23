@@ -164,19 +164,19 @@ pub(crate) struct SceneNode {
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
     /// toggle; the body paints any authored disabled node dimmed.
     pub disabled: bool,
-    /// Where this node's output is cached ([`CacheMode`]). The header's two cache
-    /// chips (RAM + disk) toggle its bits via `Intent::SetCacheMode`.
+    /// Where this node's output is cached ([`CacheMode`]). The header's two storage
+    /// chips toggle its RAM and disk bits.
     pub cache: CacheMode,
-    /// The header shows its cache chips (RAM + disk toggles) for this node: it
-    /// has an output worth persisting and honors a content digest. Folds the
-    /// func-derived reasons caching can't apply — self-caching (`uncacheable`),
-    /// no outputs (most sinks / boundary stubs), or [`impure`](Self::impure) (no
-    /// digest, so no mode is honored). A sink *with* an output stays
-    /// `cacheable` — its stored value is the point.
-    pub cacheable: bool,
+    /// Whether this node has an executable slot whose RAM/disk storage policy can
+    /// be changed directly.
+    pub cache_controls: bool,
+    /// Whether the header offers runtime cache eviction for this node. A graph
+    /// instance evicts its flattened interior; a func needs a reproducible
+    /// output. Boundary and impure nodes have no reusable output to evict.
+    pub can_evict_cache: bool,
     /// The node's func is `Impure`. An impure node has no content digest, so no
-    /// cache mode is ever honored (folded into `cacheable`); the header also
-    /// paints the `~` marker off this flag to say *why* it has no cache chips.
+    /// cache mode is ever honored (folded into the cache controls); the header also
+    /// paints the `~` marker off this flag to say *why* it has no cache controls.
     /// `false` for composites and boundary nodes.
     pub impure: bool,
     /// A `GraphInput`/`GraphOutput` interface boundary node. Its
@@ -189,9 +189,9 @@ pub(crate) struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,
-    /// RAM this node's cached output holds after the last run (system vs GPU),
-    /// mirrored from `run_state`. Non-zero only for nodes that retain a value;
-    /// drives the node body's memory readout, hidden when zero.
+    /// RAM this node's cached output currently holds (system vs GPU), mirrored
+    /// from `run_state`. Non-zero only for nodes that retain a value; drives the
+    /// node body's memory readout, hidden when zero.
     pub ram: RamUsage,
     /// The node's func/graph is absent from the library (e.g. a
     /// document saved against an older library), so its interface can't be
@@ -475,9 +475,14 @@ impl Scene {
                     sink: interface.sink,
                     disabled: node.disabled,
                     cache: node.cache,
-                    cacheable: !interface.uncacheable
+                    cache_controls: interface.graph.is_none()
+                        && !interface.uncacheable
                         && !interface.outputs.is_empty()
                         && !interface.impure,
+                    can_evict_cache: interface.graph.is_some()
+                        || (!interface.outputs.is_empty()
+                            && !interface.impure
+                            && !matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput)),
                     impure: interface.impure,
                     boundary: matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput),
                     exec_status: run_state.status(id),
@@ -656,7 +661,8 @@ pub(crate) mod test_support {
             sink: false,
             disabled: false,
             cache: CacheMode::None,
-            cacheable: false,
+            cache_controls: false,
+            can_evict_cache: false,
             impure: false,
             boundary: false,
             exec_status: ExecStatus::None,
@@ -673,7 +679,7 @@ mod tests {
     use crate::gui::scene::test_support::scene_node_stub;
     use scenarium::DataType;
     use scenarium::Graph;
-    use scenarium::{InputPort, Node, OutputPort};
+    use scenarium::{GraphId, InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
@@ -1044,16 +1050,44 @@ mod tests {
         for (id, mode) in ids {
             let projected = scene.nodes.get(&id).unwrap();
             assert_eq!(projected.cache, mode, "{mode:?} projects verbatim");
+            assert!(projected.cache_controls);
         }
     }
 
     #[test]
+    fn graph_instances_can_evict_but_have_no_direct_cache_storage_controls() {
+        use scenarium::math_library;
+
+        let library = math_library();
+        let nested = Graph::new("Nested").output(FuncOutput::new("Out", DataType::Int));
+        let nested_id = GraphId::unique();
+        let mut graph = Graph::default();
+        let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        graph.insert_graph(nested_id, nested);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+
+        let instance = &scene.nodes[&instance_id];
+        assert!(
+            instance.can_evict_cache,
+            "an instance can evict its flattened interior"
+        );
+        assert!(
+            !instance.cache_controls,
+            "an instance has no runtime slot on which to store an output"
+        );
+    }
+
+    #[test]
     fn impure_flag_projects_from_func_behavior() {
-        use scenarium::Func;
+        use scenarium::{Func, FuncId};
 
         // Two funcs identical but for behavior: a `Pure` one (offers the disk-cache
         // toggle) and an `Impure` one (has no content digest, so the toggle is hidden).
-        // Both have an output and are non-sink/cacheable, so `impure` is the sole
+        // Both have an output, so `impure` is the sole
         // differentiator the header gate reads.
         let mut library = Library::default();
         library.add(
@@ -1065,10 +1099,17 @@ mod tests {
             Func::new("9a97bb06-2c2e-443a-a836-6a11e29cbea7", "impure_src")
                 .output(FuncOutput::new("out", DataType::Int)),
         );
+        library.add(
+            Func::new(FuncId::unique(), "self_cached")
+                .pure()
+                .uncacheable()
+                .output(FuncOutput::new("out", DataType::Int)),
+        );
 
         let mut graph = Graph::default();
         let pure_id = graph.add_func_node(library.by_name("pure_src").unwrap());
         let impure_id = graph.add_func_node(library.by_name("impure_src").unwrap());
+        let self_cached_id = graph.add_func_node(library.by_name("self_cached").unwrap());
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
@@ -1077,16 +1118,26 @@ mod tests {
 
         let pure = scene.nodes.get(&pure_id).unwrap();
         let impure = scene.nodes.get(&impure_id).unwrap();
+        let self_cached = scene.nodes.get(&self_cached_id).unwrap();
 
         assert!(!pure.impure, "a Pure func keeps its cache chips");
         assert!(impure.impure, "an Impure func hides its cache chips");
-        // The header's cache-chip gate is `cacheable`. Both have an output and
-        // aren't sinks, so `impure` is the sole differentiator.
+        // Both have an output, so `impure` is the sole eviction differentiator.
         assert!(
-            pure.cacheable,
-            "a Pure func with an output shows cache chips"
+            pure.can_evict_cache,
+            "a Pure func with an output can be evicted"
         );
-        assert!(!impure.cacheable, "an Impure func hides cache chips");
+        assert!(!impure.can_evict_cache, "an Impure func cannot be evicted");
+        assert!(pure.cache_controls);
+        assert!(!impure.cache_controls);
+        assert!(
+            self_cached.can_evict_cache,
+            "self-caching funcs can still have cached downstream consumers"
+        );
+        assert!(
+            !self_cached.cache_controls,
+            "self-caching funcs hide Scenarium storage controls"
+        );
         assert!(!pure.sink && !impure.sink);
     }
 }

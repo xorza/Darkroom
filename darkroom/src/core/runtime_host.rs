@@ -176,6 +176,16 @@ impl RuntimeHost {
         true
     }
 
+    /// Compile the current graph and atomically install it with a runtime-cache
+    /// eviction for `node_id` and its flattened downstream cone.
+    pub(crate) fn evict_cache(&mut self, graph: &Graph, node_id: NodeId) -> bool {
+        let Some(compiled) = self.compile(graph) else {
+            return false;
+        };
+        self.worker.install_and_evict_cache(compiled, node_id);
+        true
+    }
+
     /// Request cancellation of the in-flight run (coarse — the running node
     /// finishes, nothing further is scheduled).
     pub(crate) fn cancel_run(&self) {

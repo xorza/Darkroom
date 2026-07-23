@@ -202,9 +202,37 @@ pub(crate) struct CacheRamStats {
     pub(crate) by_node: Vec<NodeRamUsage>,
 }
 
+#[derive(Debug)]
+pub(crate) struct CacheEvictionFailure {
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) message: String,
+}
+
 impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+    }
+
+    pub(crate) async fn evict(
+        &mut self,
+        e_node_ids: &[ExecutionNodeId],
+    ) -> Vec<CacheEvictionFailure> {
+        let mut failures = Vec::new();
+        for e_node_id in e_node_ids {
+            match self.disk_store.remove_node(*e_node_id).await {
+                Ok(()) => {
+                    self.slots
+                        .get_mut(e_node_id)
+                        .expect("an eviction target belongs to the installed program")
+                        .clear_output();
+                }
+                Err(error) => failures.push(CacheEvictionFailure {
+                    e_node_id: *e_node_id,
+                    message: error.to_string(),
+                }),
+            }
+        }
+        failures
     }
 
     /// The total and per-node RAM held by resident values. The global total deduplicates

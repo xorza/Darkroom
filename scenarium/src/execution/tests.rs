@@ -134,6 +134,7 @@ mod cache_persistence {
     use crate::execution::disk_store::DiskStore;
     use crate::execution::report::{PinnedOutputs, RunEvent};
     use crate::node::definition::{FuncId, FuncOutput};
+    use std::collections::HashSet;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
@@ -316,6 +317,140 @@ mod cache_persistence {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(*printed.lock().unwrap(), vec![1, 2, 2]);
+    }
+
+    #[tokio::test]
+    async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
+        let dir = TempDir::new("explicit-eviction");
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let get_b_calls = Arc::new(AtomicUsize::new(0));
+        let printed = Arc::new(StdMutex::new(Vec::new()));
+        let library = test_func_lib(TestFuncHooks {
+            get_a: {
+                let calls = get_a_calls.clone();
+                Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(1)
+                })
+            },
+            get_b: {
+                let calls = get_b_calls.clone();
+                Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    11
+                })
+            },
+            print: {
+                let values = printed.clone();
+                Arc::new(move |value| values.lock().unwrap().push(value))
+            },
+        });
+        let mut graph = test_graph();
+        for name in ["get_a", "get_b", "sum", "mult"] {
+            let node_id = graph.find_by_name(name, NodeSearch::TopLevel).unwrap().id;
+            graph
+                .find_mut(&node_id, NodeSearch::TopLevel)
+                .unwrap()
+                .cache = CacheMode::Both;
+        }
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let expected_names = ["get_a", "sum", "mult", "Print"];
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &library).unwrap();
+        engine.execute_sinks().await.unwrap();
+        engine.execute_sinks().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(*printed.lock().unwrap(), vec![132, 132]);
+        assert_eq!(blob_count(&dir), 4);
+
+        let failures = engine.evict_cache(&[get_a_id]).await;
+        let mut expected: Vec<_> = expected_names
+            .iter()
+            .map(|name| execution_node_id(&engine, &graph, &library, name).unwrap())
+            .collect();
+        expected.sort_unstable();
+        assert!(
+            failures.is_empty(),
+            "the selected source and its data consumers must all evict"
+        );
+        for e_node_id in &expected {
+            assert!(
+                matches!(engine.cache.slots[e_node_id].value, ValueState::Empty),
+                "{e_node_id:?} must release its resident output"
+            );
+        }
+        let get_b_eid = root_execution_node(get_b_id);
+        assert!(
+            matches!(
+                engine.cache.slots[&get_b_eid].value,
+                ValueState::Resident { .. }
+            ),
+            "an upstream sibling outside the consumer cone stays resident"
+        );
+        assert_eq!(blob_count(&dir), 1, "only get_b's disk blob remains");
+
+        drop(engine);
+        let mut reopened = disk_engine(&dir);
+        reopened.update(&graph, &library).unwrap();
+        let rerun = reopened.execute_sinks().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(*printed.lock().unwrap(), vec![132, 132, 132]);
+        let reran: HashSet<_> = rerun
+            .executed_nodes
+            .iter()
+            .map(|node| node.e_node_id)
+            .collect();
+        for e_node_id in expected {
+            assert!(
+                reran.contains(&e_node_id),
+                "every evicted node must recompute after reopening"
+            );
+        }
+        assert!(
+            !reran.contains(&get_b_eid),
+            "the retained sibling blob must still be reusable after reopening"
+        );
+
+        let blocked_eid = root_execution_node(get_a_id);
+        let blocked_path = dir.0.join(blocked_eid.as_uuid().simple().to_string());
+        std::fs::remove_file(&blocked_path).unwrap();
+        std::fs::create_dir(&blocked_path).unwrap();
+
+        let partial_failures = reopened.evict_cache(&[get_a_id]).await;
+        let [failure] = partial_failures.as_slice() else {
+            panic!("the undeletable get_a path must be the only eviction failure");
+        };
+        assert_eq!(failure.e_node_id, blocked_eid);
+        assert!(
+            failure
+                .message
+                .starts_with(&format!("failed to remove {}:", blocked_path.display()))
+        );
+        let mut expected_successes = reopened.compiled.cache_eviction_cone(&[get_a_id]);
+        expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
+        assert!(
+            matches!(
+                reopened.cache.slots[&blocked_eid].value,
+                ValueState::Resident { .. }
+            ),
+            "a failed disk deletion must leave the matching RAM value resident"
+        );
+        for e_node_id in &expected_successes {
+            assert!(
+                matches!(reopened.cache.slots[e_node_id].value, ValueState::Empty),
+                "{e_node_id:?} must still evict when another target fails"
+            );
+        }
     }
 
     /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer

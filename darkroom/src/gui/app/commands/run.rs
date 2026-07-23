@@ -15,6 +15,8 @@ pub(crate) enum RunCommand {
     Once,
     /// Evaluate one node's upstream cone and deliver its outputs.
     Node(NodeId),
+    /// Remove one authored node's flattened runtime-cache cone from RAM and disk.
+    EvictCache(NodeId),
     /// Request cancellation of the in-flight run.
     Cancel,
     /// Start the worker's event loop (emitter events → run subscribers).
@@ -28,6 +30,7 @@ impl App {
         match command {
             RunCommand::Once => self.run_graph(),
             RunCommand::Node(node_id) => self.run_node(node_id),
+            RunCommand::EvictCache(node_id) => self.evict_cache(node_id),
             RunCommand::Cancel => self.workspace.runtime.cancel_run(),
             RunCommand::StartEvents => self.start_events(),
             RunCommand::StopEvents => self.stop_events(),
@@ -59,6 +62,13 @@ impl App {
         }
         self.editor.run_state.begin_run();
         self.events_running = false;
+    }
+
+    fn evict_cache(&mut self, node_id: NodeId) {
+        if self.workspace.evict_cache(node_id) {
+            self.editor.run_state.clear_cache_projections();
+            self.events_running = false;
+        }
     }
 
     /// Start the worker's event loop on the current graph: emitter events

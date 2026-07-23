@@ -77,7 +77,7 @@ impl TerminalSession {
         let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
         for report in events {
             match report {
-                WorkerReport::Finished(Ok(stats)) => {
+                WorkerReport::Finished(stats) => {
                     self.workspace.runtime.status.error = None;
                     self.workspace.runtime.status.info(format!(
                         "run finished: {} node(s), {:.3}s",
@@ -91,11 +91,9 @@ impl TerminalSession {
                             .info(format!("  [{:?}] {}", log.level, log.message));
                     }
                 }
-                WorkerReport::Finished(Err(error)) => self
-                    .workspace
-                    .runtime
-                    .status
-                    .error(format!("run failed: {error}")),
+                WorkerReport::Error(error) => {
+                    self.workspace.runtime.status.error(error.to_string())
+                }
                 WorkerReport::Installed(_)
                 | WorkerReport::Cleared
                 | WorkerReport::Progress(_)

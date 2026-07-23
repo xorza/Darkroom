@@ -21,9 +21,9 @@ use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
-use crate::worker::event_loop::ActiveEventLoop;
+use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic};
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -178,7 +178,16 @@ async fn start_single_event_loop(
 fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
     let (tx, rx) = mpsc::channel(cap);
     let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
+        let result = match report {
+            WorkerReport::Finished(stats) => Some(Ok(stats)),
+            WorkerReport::Error(WorkerError::Execution { error }) => Some(Err(error)),
+            WorkerReport::Installed(_)
+            | WorkerReport::Cleared
+            | WorkerReport::Error(WorkerError::CacheEviction { .. })
+            | WorkerReport::Progress(_)
+            | WorkerReport::PinnedOutputs(_) => None,
+        };
+        if let Some(result) = result {
             tx.try_send(result).ok();
         }
     });
@@ -201,13 +210,21 @@ async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun
         match report {
             WorkerReport::Installed(installed) => compiled = Some(installed),
             WorkerReport::Cleared => compiled = None,
-            WorkerReport::Finished(result) => {
+            WorkerReport::Finished(stats) => {
                 return FinishedRun {
                     compiled: compiled.expect("Finished arrived before Installed"),
-                    result,
+                    result: Ok(stats),
                 };
             }
-            WorkerReport::Progress(_) | WorkerReport::PinnedOutputs(_) => {}
+            WorkerReport::Error(WorkerError::Execution { error }) => {
+                return FinishedRun {
+                    compiled: compiled.expect("Error arrived before Installed"),
+                    result: Err(error),
+                };
+            }
+            WorkerReport::Error(WorkerError::CacheEviction { .. })
+            | WorkerReport::Progress(_)
+            | WorkerReport::PinnedOutputs(_) => {}
         }
     }
 }
@@ -414,6 +431,32 @@ async fn lambda_panic_is_captured_not_unwound() {
     );
 }
 
+#[test]
+fn lambda_panics_use_general_worker_error_report() {
+    let e_node_id = ExecutionNodeId::unique();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    crate::worker::report_lambda_panics(
+        vec![LambdaPanic {
+            e_node_id,
+            message: "boom".into(),
+        }],
+        &|report| tx.send(report).unwrap(),
+    );
+
+    let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
+        panic!("event-lambda panic must use the general worker error report");
+    };
+    assert!(matches!(
+        error,
+        Error::EventLambdaPanic {
+            e_node_id: actual,
+            message
+        } if actual == e_node_id && message == "boom"
+    ));
+    assert!(rx.try_recv().is_err());
+}
+
 #[tokio::test]
 async fn clear_resets_execution_graph() {
     let mut h = FrameHarness::new().await;
@@ -554,12 +597,13 @@ async fn worker_streams_node_progress_before_finished() {
                     "PinnedOutputs arrived before Installed"
                 );
             }
-            WorkerReport::Finished(result) => {
+            WorkerReport::Finished(stats) => {
                 assert!(installed.is_some(), "Finished arrived before Installed");
-                assert_eq!(result.expect("compute ok").executed_nodes.len(), 1);
+                assert_eq!(stats.executed_nodes.len(), 1);
                 break;
             }
             WorkerReport::Cleared => panic!("unexpected clear"),
+            WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
         }
     }
     assert_eq!(started, 1, "one Started before the final report");
@@ -1348,7 +1392,119 @@ fn scan_exit_dominates_entire_batch() {
         "pre-Exit execute_sinks must be discarded"
     );
     assert!(intent.events.values.is_empty());
+    assert!(intent.evict_cache.values.is_empty());
     assert!(intent.syncs.is_empty());
+}
+
+#[test]
+fn scan_accumulates_unique_cache_evictions_in_order() {
+    let first = NodeId::from_u128(1);
+    let second = NodeId::from_u128(2);
+    let intent = scan(vec![
+        WorkerMessage::EvictCache {
+            nodes: vec![first, second],
+        },
+        WorkerMessage::EvictCache {
+            nodes: vec![second, first],
+        },
+    ]);
+
+    assert_eq!(intent.evict_cache.values, vec![first, second]);
+}
+
+#[tokio::test]
+async fn successful_cache_eviction_is_fire_and_forget_before_batch_acknowledgement() {
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+    let library = test_func_lib(TestFuncHooks::default());
+    let graph = test_graph();
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let worker = Worker::new(move |report| {
+        report_tx.send(report).unwrap();
+    });
+    let (reply, ack) = oneshot::channel();
+
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Arc::clone(&compiled),
+            },
+            WorkerMessage::EvictCache {
+                nodes: vec![get_a_id],
+            },
+            WorkerMessage::Sync { reply },
+        ])
+        .unwrap();
+    timeout(Duration::from_secs(5), ack)
+        .await
+        .expect("worker timed out")
+        .expect("worker dropped the acknowledgement");
+
+    let WorkerReport::Installed(installed) = report_rx.recv().await.unwrap() else {
+        panic!("installation must be reported before cache eviction");
+    };
+    assert!(Arc::ptr_eq(&installed, &compiled));
+    assert!(report_rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn cache_eviction_failure_uses_general_worker_error_report() {
+    use crate::execution::disk_store::DiskStore;
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+    let dir = temp_dir("eviction-error");
+    let library = test_func_lib(TestFuncHooks::default());
+    let graph = test_graph();
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let blocked_e_node_id = root_execution_node(get_a_id);
+    let blocked_path = dir.0.join(blocked_e_node_id.as_uuid().simple().to_string());
+    std::fs::create_dir(&blocked_path).unwrap();
+    let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
+    let store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let worker = Worker::new(move |report| {
+        report_tx.send(report).unwrap();
+    });
+    let (reply, ack) = oneshot::channel();
+
+    worker
+        .send_many([
+            WorkerMessage::SetDiskStore(store),
+            WorkerMessage::Update { compiled },
+            WorkerMessage::EvictCache {
+                nodes: vec![get_a_id],
+            },
+            WorkerMessage::Sync { reply },
+        ])
+        .unwrap();
+    timeout(Duration::from_secs(5), ack)
+        .await
+        .expect("worker timed out")
+        .expect("worker dropped the acknowledgement");
+
+    assert!(matches!(
+        report_rx.recv().await.unwrap(),
+        WorkerReport::Installed(_)
+    ));
+    let WorkerReport::Error(WorkerError::CacheEviction {
+        failure_count,
+        details,
+    }) = report_rx.recv().await.unwrap()
+    else {
+        panic!("cache deletion failure must use the general worker error report");
+    };
+    assert_eq!(failure_count, 1);
+    assert!(details.contains(&format!("{blocked_e_node_id:?}")));
+    assert!(details.contains(&format!("failed to remove {}", blocked_path.display())));
+    assert!(report_rx.try_recv().is_err());
 }
 
 #[test]
