@@ -16,7 +16,7 @@ use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
-use crate::execution::event::{EventTrigger, PreparedEventLoop};
+use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
@@ -159,17 +159,15 @@ async fn start_single_event_loop(
     pause_gate: PauseGate,
 ) -> (ActiveEventLoop, ExecutionNodeId) {
     let e_node_id = ExecutionNodeId::unique();
-    let prepared = PreparedEventLoop {
-        triggers: vec![EventTrigger {
-            event: ExecutionEventPort {
-                e_node_id,
-                event_idx: 0,
-            },
-            lambda,
-            state: SharedAnyState::default(),
-        }],
-    };
-    let active = ActiveEventLoop::spawn(prepared, pause_gate).await;
+    let event_triggers = vec![EventTrigger {
+        event: ExecutionEventPort {
+            e_node_id,
+            event_idx: 0,
+        },
+        lambda,
+        state: SharedAnyState::default(),
+    }];
+    let active = ActiveEventLoop::spawn(event_triggers, pause_gate).await;
     (active, e_node_id)
 }
 
@@ -188,6 +186,7 @@ fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
         missing_inputs: Vec::new(),
         cached_nodes: Vec::new(),
         triggered_events: Vec::new(),
+        event_triggers: Vec::new(),
         node_errors: Vec::new(),
         logs: status.logs.clone(),
         cancelled,
@@ -515,6 +514,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
         cached_nodes: vec![cached],
         triggered_events: Vec::new(),
+        event_triggers: Vec::new(),
         node_errors: vec![
             NodeError {
                 e_node_id: failed,
