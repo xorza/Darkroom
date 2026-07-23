@@ -28,7 +28,7 @@ tracing = { version = "0.1" }
 rayon = { version = "1.12" }
 hashbrown = { version = "0.17", features = ["serde"] }
 tiff = { version = "0.11" }
-image = { version = "0.25" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 paste = { version = "1.0" }
 parking_lot = { version = "0.12", features = ["send_guard"] }
 arc-swap = { version = "1.9" }
@@ -89,8 +89,4 @@ opt-level = 3
 [profile.dev.package.png]
 opt-level = 3
 [profile.dev.package.zune-jpeg]
-opt-level = 3
-[profile.dev.package.ravif]
-opt-level = 3
-[profile.dev.package.rav1e]
 opt-level = 3
