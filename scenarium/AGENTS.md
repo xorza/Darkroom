@@ -65,7 +65,8 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `worker/batch.rs` | Ordered batch reduction |
 | `worker/event_loop.rs` | Active event-task lifecycle |
 | `worker/pause_gate/` | Counted RAII pause gate for worker execution |
-| `worker/mod.rs` | Worker handle and task orchestration |
+| `worker/mod.rs` | Worker handle |
+| `worker/task.rs` | Linear worker-task orchestration |
 
 ## Compile, plan, execute
 
