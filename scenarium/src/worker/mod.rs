@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
@@ -18,7 +16,7 @@ mod task;
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<Vec<WorkerMessage>>,
-    active_cancel: Arc<Mutex<Option<CancelToken>>>,
+    cancel: CancelToken,
 }
 
 impl Worker {
@@ -27,30 +25,23 @@ impl Worker {
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
-        let active_cancel = Arc::new(Mutex::new(None));
+        let cancel = CancelToken::new();
         let thread_handle = tokio::spawn({
-            let active_cancel = Arc::clone(&active_cancel);
+            let cancel = cancel.clone();
             async move {
-                task::run(rx, callback, active_cancel).await;
+                task::run(rx, callback, cancel).await;
             }
         });
 
         Self {
             thread_handle: Some(thread_handle),
             tx,
-            active_cancel,
+            cancel,
         }
     }
 
     pub fn request_cancel(&self) {
-        if let Some(cancel) = self
-            .active_cancel
-            .lock()
-            .expect("worker cancellation mutex poisoned")
-            .as_ref()
-        {
-            cancel.cancel();
-        }
+        self.cancel.cancel();
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {

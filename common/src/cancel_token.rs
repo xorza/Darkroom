@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// and bails — exactly what a `spawn_blocking` / rayon hot loop can afford. For
 /// an awaitable cancel, reach for `tokio_util`'s token instead.
 ///
-/// A live token is one-shot: once cancelled, it and all of its clones remain
-/// cancelled. Each operation that needs independent cancellation must create a
-/// fresh token. Ordering is `Relaxed`: the flag is standalone (it publishes no
-/// other data), so it needs no synchronization beyond the atomic.
+/// A live token remains cancelled until [`reset`](Self::reset) is called.
+/// Resetting rearms every clone and is only safe once all work from the previous
+/// operation has joined. Ordering is `Relaxed`: the flag is standalone (it
+/// publishes no other data), so it needs no synchronization beyond the atomic.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(State);
 
@@ -50,6 +50,13 @@ impl CancelToken {
         }
     }
 
+    /// Rearm a live token and all of its clones for a new operation.
+    pub fn reset(&self) {
+        if let State::Live(flag) = &self.0 {
+            flag.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Whether cancellation has been requested. Always `false` for a never-token.
     pub fn is_cancelled(&self) -> bool {
         matches!(&self.0, State::Live(flag) if flag.load(Ordering::Relaxed))
@@ -61,7 +68,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cancellation_is_permanent_across_clones() {
+    fn cancellation_and_reset_are_shared_across_clones() {
         let token = CancelToken::new();
         let clone = token.clone();
         assert!(!token.is_cancelled());
@@ -71,16 +78,16 @@ mod tests {
         assert!(token.is_cancelled());
         assert!(clone.is_cancelled());
 
-        let fresh = CancelToken::new();
-        assert!(!fresh.is_cancelled());
-        assert!(token.is_cancelled());
-        assert!(clone.is_cancelled());
+        clone.reset();
+        assert!(!token.is_cancelled());
+        assert!(!clone.is_cancelled());
     }
 
     #[test]
     fn never_token_ignores_cancel() {
         let token = CancelToken::never();
         token.cancel();
+        token.reset();
         assert!(!token.is_cancelled(), "a never-token can't be cancelled");
         // Default is a never-token.
         assert!(!CancelToken::default().is_cancelled());

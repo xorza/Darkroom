@@ -9,7 +9,7 @@ nothing in-tree.
 
 | Module | Role |
 |--------|------|
-| `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. Live tokens are one-shot: `cancel()` permanently trips every clone, and each independent operation creates a fresh token. For cooperative bail-out in hot loops (`spawn_blocking`/rayon). No async wait — use `tokio_util`'s token for that. |
+| `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. `cancel()` trips every clone; `reset()` rearms them after the prior operation has joined. For cooperative bail-out in hot loops (`spawn_blocking`/rayon). No async wait — use `tokio_util`'s token for that. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures and private consuming TOML text normalization. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
