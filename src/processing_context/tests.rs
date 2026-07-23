@@ -204,7 +204,7 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
     let mut output = ImageBuffer::new_empty(input_cpu.desc());
 
     // Upload to GPU first
-    input.make_gpu(&ctx).unwrap();
+    let _ = input.make_gpu(&ctx).unwrap();
     assert!(input.is_gpu());
 
     // apply() should auto-select GPU since data is on GPU

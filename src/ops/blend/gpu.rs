@@ -95,14 +95,14 @@ impl Blend {
     ) -> Result<()> {
         let src_gpu = src.make_gpu(ctx)?;
         let dst_gpu = dst.make_gpu(ctx)?;
-        let mut output_gpu = output.make_gpu_mut(ctx)?;
+        let output_gpu = output.make_gpu_mut(ctx)?;
 
         let gpu_processing_ctx = ctx.gpu_context().expect("GPU context required for blend");
 
         let gpu_ctx = gpu_processing_ctx.gpu.clone();
         let pipeline = gpu_processing_ctx.get_or_create(GpuBlendPipeline::new)?;
 
-        self.apply_gpu(&gpu_ctx, pipeline, &src_gpu, &dst_gpu, &mut output_gpu)
+        self.apply_gpu(&gpu_ctx, pipeline, &src_gpu, &dst_gpu, output_gpu)
     }
 }
 

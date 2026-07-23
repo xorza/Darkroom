@@ -86,7 +86,7 @@ impl ContrastBrightness {
         output: &mut ImageBuffer,
     ) -> Result<()> {
         let input_gpu = input.make_gpu(ctx)?;
-        let mut output_gpu = output.make_gpu_mut(ctx)?;
+        let output_gpu = output.make_gpu_mut(ctx)?;
 
         let gpu_processing_ctx = ctx
             .gpu_context()
@@ -95,7 +95,7 @@ impl ContrastBrightness {
         let gpu_ctx = gpu_processing_ctx.gpu.clone();
         let pipeline = gpu_processing_ctx.get_or_create(GpuContrastBrightnessPipeline::new)?;
 
-        self.apply_gpu(&gpu_ctx, pipeline, &input_gpu, &mut output_gpu)
+        self.apply_gpu(&gpu_ctx, pipeline, &input_gpu, output_gpu)
     }
 }
 

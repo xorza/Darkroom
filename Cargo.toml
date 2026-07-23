@@ -30,7 +30,7 @@ hashbrown = { version = "0.17", features = ["serde"] }
 tiff = { version = "0.11" }
 image = { version = "0.25" }
 paste = { version = "1.0" }
-atomic_refcell = { version = "0.1" }
+parking_lot = { version = "0.12", features = ["send_guard"] }
 arc-swap = { version = "1.9" }
 aligned-vec = { version = "0.6" }
 serde = { version = "1.0", features = ["derive"] }

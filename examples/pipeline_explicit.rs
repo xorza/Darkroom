@@ -34,7 +34,6 @@ fn main() {
     std::mem::swap(&mut main_buffer, &mut temp_buffer);
 
     // Save intermediate result
-    main_buffer.make_cpu(&ctx).unwrap();
     save_image(
         &main_buffer.make_cpu(&ctx).unwrap(),
         "pipeline_step1_rotate.png",
@@ -63,7 +62,6 @@ fn main() {
         .unwrap();
     std::mem::swap(&mut main_buffer, &mut temp_buffer);
 
-    main_buffer.make_cpu(&ctx).unwrap();
     save_image(
         &main_buffer.make_cpu(&ctx).unwrap(),
         "pipeline_step3_scale.png",
@@ -93,15 +91,12 @@ fn main() {
         .execute_gpu(&mut ctx, &overlay_buffer, &mut overlay_temp)
         .unwrap();
     std::mem::swap(&mut overlay_buffer, &mut overlay_temp);
-    overlay_buffer.make_cpu(&ctx).unwrap();
-
     let mut blend_output = ImageBuffer::new_empty(input_cpu.desc());
     let blend = Blend::default().mode(BlendMode::Screen).alpha(0.4);
     blend
         .execute_gpu(&mut ctx, &overlay_buffer, &main_buffer, &mut blend_output)
         .unwrap();
 
-    blend_output.make_cpu(&ctx).unwrap();
     save_image(
         &blend_output.make_cpu(&ctx).unwrap(),
         "pipeline_step5_blend.png",

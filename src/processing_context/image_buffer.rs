@@ -1,4 +1,4 @@
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::ProcessingContext;
 #[cfg(feature = "wgpu")]
@@ -32,11 +32,12 @@ pub(crate) enum Storage {
 /// Transfers data between CPU and GPU in place as needed.
 /// Can also be empty (no storage) while still having a descriptor.
 /// Uses interior mutability to allow conversion between CPU/GPU storage
-/// through shared references. Thread-safe via AtomicRefCell.
+/// through shared references. Concurrent readers share resident storage;
+/// residency changes wait until those reads finish.
 #[derive(Debug)]
 pub struct ImageBuffer {
     pub desc: ImageDesc,
-    storage: AtomicRefCell<Option<Storage>>,
+    storage: RwLock<Option<Storage>>,
 }
 
 impl ImageBuffer {
@@ -48,7 +49,7 @@ impl ImageBuffer {
     pub fn from_cpu(image: Image) -> Self {
         Self {
             desc: image.desc(),
-            storage: AtomicRefCell::new(Some(Storage::Cpu(image))),
+            storage: RwLock::new(Some(Storage::Cpu(image))),
         }
     }
 
@@ -59,7 +60,7 @@ impl ImageBuffer {
         let d = image.desc;
         Self {
             desc: ImageDesc::new(d.width, d.height, d.color_format),
-            storage: AtomicRefCell::new(Some(Storage::Gpu(image))),
+            storage: RwLock::new(Some(Storage::Gpu(image))),
         }
     }
 
@@ -67,24 +68,24 @@ impl ImageBuffer {
     pub fn new_empty(desc: ImageDesc) -> Self {
         Self {
             desc: ImageDesc::new(desc.width, desc.height, desc.color_format),
-            storage: AtomicRefCell::new(None),
+            storage: RwLock::new(None),
         }
     }
 
     /// Returns true if the image is currently on the GPU.
     #[cfg(feature = "wgpu")]
     pub fn is_gpu(&self) -> bool {
-        matches!(*self.storage.borrow(), Some(Storage::Gpu(_)))
+        matches!(*self.storage.read(), Some(Storage::Gpu(_)))
     }
 
     /// Returns true if the image is currently on the CPU.
     pub fn is_cpu(&self) -> bool {
-        matches!(*self.storage.borrow(), Some(Storage::Cpu(_)))
+        matches!(*self.storage.read(), Some(Storage::Cpu(_)))
     }
 
     /// Returns true if the buffer has no storage allocated.
     pub fn is_empty(&self) -> bool {
-        self.storage.borrow().is_none()
+        self.storage.read().is_none()
     }
 
     /// The bytes this buffer currently holds, split into CPU RAM vs GPU VRAM by
@@ -93,7 +94,7 @@ impl ImageBuffer {
     /// (round-to-4) buffer bytes. A buffer counts on one side only — the two are
     /// never resident at once.
     pub fn memory_usage(&self) -> ImageMemory {
-        match &*self.storage.borrow() {
+        match &*self.storage.read() {
             None => ImageMemory::default(),
             Some(Storage::Cpu(img)) => ImageMemory {
                 cpu: img.bytes().len(),
@@ -111,10 +112,23 @@ impl ImageBuffer {
     /// Allocates GPU storage if empty.
     /// Returns an immutable reference to the GPU image.
     #[cfg(feature = "wgpu")]
-    pub(crate) fn make_gpu(&self, ctx: &ProcessingContext) -> Result<AtomicRef<'_, GpuImage>> {
-        self.ensure_gpu(ctx)?;
-        let storage = self.storage.borrow();
-        Ok(AtomicRef::map(storage, |s| match s {
+    pub(crate) fn make_gpu(
+        &self,
+        ctx: &ProcessingContext,
+    ) -> Result<MappedRwLockReadGuard<'_, GpuImage>> {
+        let storage = self.storage.read();
+        if matches!(*storage, Some(Storage::Gpu(_))) {
+            return Ok(RwLockReadGuard::map(storage, |s| match s {
+                Some(Storage::Gpu(img)) => img,
+                _ => unreachable!(),
+            }));
+        }
+        drop(storage);
+
+        let mut storage = self.storage.write();
+        Self::ensure_gpu_storage(&mut storage, self.desc, ctx)?;
+        let storage = RwLockWriteGuard::downgrade(storage);
+        Ok(RwLockReadGuard::map(storage, |s| match s {
             Some(Storage::Gpu(img)) => img,
             _ => unreachable!(),
         }))
@@ -126,25 +140,32 @@ impl ImageBuffer {
     ///
     /// Note: `&mut self` is intentional to prevent accidental writes to non-mutable buffers.
     #[cfg(feature = "wgpu")]
-    pub(crate) fn make_gpu_mut(
-        &mut self,
-        ctx: &ProcessingContext,
-    ) -> Result<AtomicRefMut<'_, GpuImage>> {
-        self.ensure_gpu(ctx)?;
-        let storage = self.storage.borrow_mut();
-        Ok(AtomicRefMut::map(storage, |s| match s {
+    pub(crate) fn make_gpu_mut(&mut self, ctx: &ProcessingContext) -> Result<&mut GpuImage> {
+        let storage = self.storage.get_mut();
+        Self::ensure_gpu_storage(storage, self.desc, ctx)?;
+        Ok(match storage {
             Some(Storage::Gpu(img)) => img,
             _ => unreachable!(),
-        }))
+        })
     }
 
     /// Converts to CPU storage in place, downloading from GPU if needed.
     /// Allocates CPU storage if empty.
     /// Returns an immutable reference to the CPU image.
-    pub fn make_cpu(&self, ctx: &ProcessingContext) -> Result<AtomicRef<'_, Image>> {
-        self.ensure_cpu(ctx)?;
-        let storage = self.storage.borrow();
-        Ok(AtomicRef::map(storage, |s| match s {
+    pub fn make_cpu(&self, ctx: &ProcessingContext) -> Result<MappedRwLockReadGuard<'_, Image>> {
+        let storage = self.storage.read();
+        if matches!(*storage, Some(Storage::Cpu(_))) {
+            return Ok(RwLockReadGuard::map(storage, |s| match s {
+                Some(Storage::Cpu(img)) => img,
+                _ => unreachable!(),
+            }));
+        }
+        drop(storage);
+
+        let mut storage = self.storage.write();
+        Self::ensure_cpu_storage(&mut storage, self.desc, ctx)?;
+        let storage = RwLockWriteGuard::downgrade(storage);
+        Ok(RwLockReadGuard::map(storage, |s| match s {
             Some(Storage::Cpu(img)) => img,
             _ => unreachable!(),
         }))
@@ -155,43 +176,55 @@ impl ImageBuffer {
     /// Returns a mutable reference to the CPU image.
     ///
     /// Note: `&mut self` is intentional to prevent accidental writes to non-mutable buffers.
-    pub fn make_cpu_mut(&mut self, ctx: &ProcessingContext) -> Result<AtomicRefMut<'_, Image>> {
-        self.ensure_cpu(ctx)?;
-        let storage = self.storage.borrow_mut();
-        Ok(AtomicRefMut::map(storage, |s| match s {
+    pub fn make_cpu_mut(&mut self, ctx: &ProcessingContext) -> Result<&mut Image> {
+        let storage = self.storage.get_mut();
+        Self::ensure_cpu_storage(storage, self.desc, ctx)?;
+        Ok(match storage {
             Some(Storage::Cpu(img)) => img,
             _ => unreachable!(),
-        }))
+        })
     }
 
-    /// Internal helper to ensure storage is GPU.
     #[cfg(feature = "wgpu")]
-    fn ensure_gpu(&self, ctx: &ProcessingContext) -> Result<()> {
-        let mut storage = self.storage.borrow_mut();
-        if !matches!(*storage, Some(Storage::Gpu(_))) {
-            let gpu_ctx = ctx.gpu().ok_or(Error::NoGpuContext)?;
-            *storage = Some(match storage.take() {
-                Some(Storage::Cpu(img)) => Storage::Gpu(GpuImage::from_image(gpu_ctx, &img)),
-                Some(Storage::Gpu(_)) => unreachable!(),
-                None => Storage::Gpu(GpuImage::new_empty(gpu_ctx, self.desc)),
-            });
+    fn ensure_gpu_storage(
+        storage: &mut Option<Storage>,
+        desc: ImageDesc,
+        ctx: &ProcessingContext,
+    ) -> Result<()> {
+        if matches!(*storage, Some(Storage::Gpu(_))) {
+            return Ok(());
         }
+        let gpu_ctx = ctx.gpu().ok_or(Error::NoGpuContext)?;
+        *storage = Some(match storage.take() {
+            Some(Storage::Cpu(img)) => Storage::Gpu(GpuImage::from_image(gpu_ctx, &img)),
+            Some(Storage::Gpu(_)) => unreachable!(),
+            None => Storage::Gpu(GpuImage::new_empty(gpu_ctx, desc)),
+        });
         Ok(())
     }
 
-    /// Internal helper to ensure storage is CPU.
-    fn ensure_cpu(&self, ctx: &ProcessingContext) -> Result<()> {
-        let mut storage = self.storage.borrow_mut();
-        if !matches!(*storage, Some(Storage::Cpu(_))) {
-            *storage = Some(match storage.take() {
-                #[cfg(feature = "wgpu")]
-                Some(Storage::Gpu(gpu_img)) => {
-                    let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
-                    Storage::Cpu(gpu_img.to_image(gpu_ctx)?)
+    fn ensure_cpu_storage(
+        storage: &mut Option<Storage>,
+        desc: ImageDesc,
+        ctx: &ProcessingContext,
+    ) -> Result<()> {
+        if matches!(*storage, Some(Storage::Cpu(_))) {
+            return Ok(());
+        }
+        match storage.take() {
+            #[cfg(feature = "wgpu")]
+            Some(Storage::Gpu(gpu_img)) => {
+                let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
+                match gpu_img.to_image(gpu_ctx) {
+                    Ok(image) => *storage = Some(Storage::Cpu(image)),
+                    Err(error) => {
+                        *storage = Some(Storage::Gpu(gpu_img));
+                        return Err(error);
+                    }
                 }
-                Some(Storage::Cpu(_)) => unreachable!(),
-                None => Storage::Cpu(Image::new_black(self.desc)?),
-            });
+            }
+            Some(Storage::Cpu(_)) => unreachable!(),
+            None => *storage = Some(Storage::Cpu(Image::new_black(desc)?)),
         }
         #[cfg(not(feature = "wgpu"))]
         let _ = ctx;
@@ -201,8 +234,9 @@ impl ImageBuffer {
     /// Consumes self and returns the CPU image, downloading from GPU if needed.
     /// Allocates CPU storage if empty.
     pub fn to_cpu(self, ctx: &ProcessingContext) -> Result<Image> {
-        self.ensure_cpu(ctx)?;
-        match self.storage.into_inner() {
+        let mut storage = self.storage.into_inner();
+        Self::ensure_cpu_storage(&mut storage, self.desc, ctx)?;
+        match storage {
             Some(Storage::Cpu(img)) => Ok(img),
             _ => unreachable!(),
         }
@@ -231,8 +265,9 @@ impl ImageBuffer {
     /// Allocates GPU storage if empty.
     #[cfg(feature = "wgpu")]
     pub fn to_gpu(self, ctx: &ProcessingContext) -> Result<GpuImage> {
-        self.ensure_gpu(ctx)?;
-        match self.storage.into_inner() {
+        let mut storage = self.storage.into_inner();
+        Self::ensure_gpu_storage(&mut storage, self.desc, ctx)?;
+        match storage {
             Some(Storage::Gpu(img)) => Ok(img),
             _ => unreachable!(),
         }
@@ -262,6 +297,9 @@ impl From<GpuImage> for ImageBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
     use super::*;
     use crate::common::color_format::ColorFormat;
 
@@ -278,5 +316,30 @@ mod tests {
         // CPU-resident: every byte is system RAM, none on the GPU.
         let cpu = ImageBuffer::from_cpu(Image::new_black(desc).unwrap());
         assert_eq!(cpu.memory_usage(), ImageMemory { cpu: 48, gpu: 0 });
+    }
+
+    #[test]
+    fn cpu_readers_share_resident_storage_without_reallocation() {
+        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
+        let pixels = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let buffer = ImageBuffer::from_cpu(Image::new_with_data(desc, pixels).unwrap());
+        let context = ProcessingContext::cpu_only();
+        let first = buffer.make_cpu(&context).unwrap();
+        let first_address = std::ptr::from_ref(&*first) as usize;
+
+        std::thread::scope(|scope| {
+            let (tx, rx) = mpsc::channel();
+            let shared = &buffer;
+            let handle = scope.spawn(move || {
+                let context = ProcessingContext::cpu_only();
+                let second = shared.make_cpu(&context).unwrap();
+                assert_eq!(second.bytes(), [1, 2, 3, 4, 5, 6, 7, 8]);
+                tx.send(std::ptr::from_ref(&*second) as usize).unwrap();
+            });
+            let second_address = rx.recv_timeout(Duration::from_secs(1));
+            drop(first);
+            handle.join().unwrap();
+            assert_eq!(second_address.unwrap(), first_address);
+        });
     }
 }

@@ -133,9 +133,9 @@ impl Transform {
         output: &mut ImageBuffer,
     ) -> Result<()> {
         let input_cpu = input.make_cpu(ctx)?;
-        let mut output_cpu = output.make_cpu_mut(ctx)?;
+        let output_cpu = output.make_cpu_mut(ctx)?;
 
-        self.apply_cpu(&input_cpu, &mut output_cpu);
+        self.apply_cpu(&input_cpu, output_cpu);
 
         Ok(())
     }

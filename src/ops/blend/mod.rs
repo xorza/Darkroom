@@ -118,9 +118,9 @@ impl Blend {
     ) -> Result<()> {
         let src_cpu = src.make_cpu(ctx)?;
         let dst_cpu = dst.make_cpu(ctx)?;
-        let mut output_cpu = output.make_cpu_mut(ctx)?;
+        let output_cpu = output.make_cpu_mut(ctx)?;
 
-        self.apply_cpu(&src_cpu, &dst_cpu, &mut output_cpu);
+        self.apply_cpu(&src_cpu, &dst_cpu, output_cpu);
 
         Ok(())
     }
