@@ -1,5 +1,6 @@
 use crate::RamUsage;
 use crate::execution::RunError;
+use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 
@@ -42,6 +43,7 @@ pub(crate) struct ExecutionOutcome {
     pub(crate) missing_inputs: Vec<ExecutionInputPort>,
     pub(crate) cached_nodes: Vec<ExecutionNodeId>,
     pub(crate) triggered_events: Vec<ExecutionEventPort>,
+    pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) node_errors: Vec<NodeError>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
@@ -56,6 +58,7 @@ impl ExecutionOutcome {
         self.missing_inputs.clear();
         self.cached_nodes.clear();
         self.triggered_events.clear();
+        self.event_triggers.clear();
         self.node_errors.clear();
         self.logs.clear();
         self.cancelled = false;
