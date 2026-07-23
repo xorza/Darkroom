@@ -91,14 +91,14 @@ pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
 
 /// A filled rounded rect — the fill sibling of [`stroked_rect`].
 pub(crate) fn filled_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color) {
-    ui.add_shape(Shape::rect(rect).corners(Corners::all(radius)).fill(color));
+    ui.add_shape(Shape::rect(rect).corners(radius).fill(color));
 }
 
 /// A rounded-rect outline (transparent fill, `color` stroke of `width`).
 pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, width: f32) {
     ui.add_shape(
         Shape::rect(rect)
-            .corners(Corners::all(radius))
+            .corners(radius)
             .stroke(Stroke::solid(color, width)),
     );
 }
