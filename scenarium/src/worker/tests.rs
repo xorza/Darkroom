@@ -9,7 +9,7 @@ use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
-use crate::execution::outcome::{ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage};
+use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError, NodeRamUsage};
 use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
@@ -203,7 +203,7 @@ fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
             }
             Some(NodeExecutionStatus::Cached) => outcome.cached_nodes.push(node.e_node_id),
             Some(NodeExecutionStatus::Executed { elapsed_secs }) => {
-                outcome.executed_nodes.push(ExecutedNodeStats {
+                outcome.executed_nodes.push(ExecutedNodeOutcome {
                     e_node_id: node.e_node_id,
                     elapsed_secs: *elapsed_secs,
                 });
@@ -606,7 +606,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
     let resident = ExecutionNodeId::unique();
     let outcome = ExecutionOutcome {
         elapsed_secs: 1.25,
-        executed_nodes: vec![ExecutedNodeStats {
+        executed_nodes: vec![ExecutedNodeOutcome {
             e_node_id: executed,
             elapsed_secs: 0.5,
         }],

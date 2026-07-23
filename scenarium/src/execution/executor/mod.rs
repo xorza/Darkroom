@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use common::CancelToken;
 
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
-use crate::execution::outcome::{ExecutedNodeStats, ExecutionOutcome, NodeError};
+use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
@@ -581,7 +581,7 @@ fn collect_execution_outcome(
             NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
                 cached_nodes.push(e_node_id);
             }
-            NodeOutcome::Ran { secs } => executed_nodes.push(ExecutedNodeStats {
+            NodeOutcome::Ran { secs } => executed_nodes.push(ExecutedNodeOutcome {
                 e_node_id,
                 elapsed_secs: *secs,
             }),
@@ -589,7 +589,7 @@ fn collect_execution_outcome(
             // consumer doesn't paint it as executed (its error still lands below). A
             // genuine failure did run; it appears in both lists.
             NodeOutcome::Failed { secs, error } if !matches!(error, RunError::Cancelled { .. }) => {
-                executed_nodes.push(ExecutedNodeStats {
+                executed_nodes.push(ExecutedNodeOutcome {
                     e_node_id,
                     elapsed_secs: *secs,
                 });

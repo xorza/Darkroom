@@ -133,9 +133,7 @@ impl App {
                     } = status.kind
                     {
                         if cancelled {
-                            tracing::info!(
-                                "run cancelled after {executed_node_count} node(s)"
-                            );
+                            tracing::info!("run cancelled after {executed_node_count} node(s)");
                         }
                         // A completed run supersedes any lingering failure message
                         // from an earlier event-loop tick.

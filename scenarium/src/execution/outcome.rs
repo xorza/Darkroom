@@ -4,7 +4,7 @@ use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExecutedNodeStats {
+pub(crate) struct ExecutedNodeOutcome {
     pub e_node_id: ExecutionNodeId,
     pub elapsed_secs: f64,
 }
@@ -38,7 +38,7 @@ pub(crate) struct NodeRamUsage {
 #[derive(Debug)]
 pub(crate) struct ExecutionOutcome {
     pub(crate) elapsed_secs: f64,
-    pub(crate) executed_nodes: Vec<ExecutedNodeStats>,
+    pub(crate) executed_nodes: Vec<ExecutedNodeOutcome>,
     pub(crate) missing_inputs: Vec<ExecutionInputPort>,
     pub(crate) cached_nodes: Vec<ExecutionNodeId>,
     pub(crate) triggered_events: Vec<ExecutionEventPort>,
