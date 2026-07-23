@@ -24,7 +24,7 @@ pub(crate) struct ActiveEventLoop {
 }
 
 impl ActiveEventLoop {
-    pub(crate) async fn spawn(event_triggers: Vec<EventTrigger>, pause_gate: PauseGate) -> Self {
+    pub(crate) async fn start(event_triggers: Vec<EventTrigger>, pause_gate: PauseGate) -> Self {
         assert!(!event_triggers.is_empty());
 
         let (event_tx, events) = channel::<ExecutionEventPort>(EVENT_LOOP_BACKPRESSURE);

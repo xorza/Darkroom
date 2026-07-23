@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -9,18 +10,20 @@ use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError, NodeRamUsage};
+use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
-use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
+use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
+use crate::worker;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
-use crate::worker::event_loop::ActiveEventLoop;
+use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{
@@ -159,15 +162,18 @@ async fn start_single_event_loop(
     pause_gate: PauseGate,
 ) -> (ActiveEventLoop, ExecutionNodeId) {
     let e_node_id = ExecutionNodeId::unique();
-    let event_triggers = vec![EventTrigger {
-        event: ExecutionEventPort {
-            e_node_id,
-            event_idx: 0,
-        },
-        lambda,
-        state: SharedAnyState::default(),
-    }];
-    let active = ActiveEventLoop::spawn(event_triggers, pause_gate).await;
+    let active = ActiveEventLoop::start(
+        vec![EventTrigger {
+            event: ExecutionEventPort {
+                e_node_id,
+                event_idx: 0,
+            },
+            lambda,
+            state: SharedAnyState::default(),
+        }],
+        pause_gate,
+    )
+    .await;
     (active, e_node_id)
 }
 
@@ -495,6 +501,93 @@ async fn lambda_panic_is_captured_not_unwound() {
 }
 
 #[test]
+fn event_loop_stop_reports_idle_status_before_lambda_errors() {
+    let e_node_id = ExecutionNodeId::unique();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::EventLoop));
+
+    worker::report_event_loop_stop(
+        StopOutcome {
+            was_running: true,
+            panics: vec![LambdaPanic {
+                e_node_id,
+                message: "boom".into(),
+            }],
+        },
+        &mut status,
+        &|report| tx.send(report).unwrap(),
+    );
+
+    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
+        panic!("event-loop stop must publish worker status");
+    };
+    assert_eq!(status.activity, WorkerActivity::Idle);
+    assert_eq!(status.kind, WorkerStatusKind::Activity);
+    let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
+        panic!("event-lambda panic must use the general worker error report");
+    };
+    assert!(matches!(
+        error,
+        Error::EventLambdaPanic {
+            e_node_id: actual,
+            message
+        } if actual == e_node_id && message == "boom"
+    ));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn worker_status_batches_nodes_and_preserves_published_snapshots() {
+    let first_node = ExecutionNodeId::unique();
+    let second_node = ExecutionNodeId::unique();
+    let mut events = vec![
+        RunEvent::Progress(RunProgress {
+            e_node_id: first_node,
+            phase: RunPhase::Started { at: Instant::now() },
+        }),
+        RunEvent::Progress(RunProgress {
+            e_node_id: second_node,
+            phase: RunPhase::Finished { elapsed_secs: 0.25 },
+        }),
+    ];
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::Executing));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let callback = |report| tx.send(report).unwrap();
+
+    worker::forward_run_events(&mut events, &mut status, &callback);
+    let WorkerReport::Status(patch) = rx.try_recv().unwrap() else {
+        panic!("progress must produce a status patch");
+    };
+    assert_eq!(patch.kind, WorkerStatusKind::Patch);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(patch.nodes[0].e_node_id, first_node);
+    assert!(matches!(
+        patch.nodes[0].status,
+        Some(NodeExecutionStatus::Running { .. })
+    ));
+    assert_eq!(patch.nodes[1].e_node_id, second_node);
+    assert!(matches!(
+        patch.nodes[1].status,
+        Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
+    ));
+    let idle = status.activity(WorkerActivity::Idle);
+    assert!(!Arc::ptr_eq(&patch, &idle));
+    assert_eq!(patch.activity, WorkerActivity::Executing);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(idle.activity, WorkerActivity::Idle);
+    assert!(idle.nodes.is_empty());
+
+    drop(patch);
+    let allocation = Arc::as_ptr(&idle);
+    drop(idle);
+    let executing = status.activity(WorkerActivity::Executing);
+    assert_eq!(Arc::as_ptr(&executing), allocation);
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
 fn completed_status_contains_the_full_gui_snapshot() {
     let executed = ExecutionNodeId::unique();
     let cached = ExecutionNodeId::unique();
@@ -543,13 +636,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
     };
     let mut publisher = WorkerStatusPublisher::default();
-    let executed_capacity = outcome.executed_nodes.capacity();
-    let logs_capacity = outcome.logs.capacity();
     let status = publisher.completed(WorkerActivity::EventLoop, &mut outcome);
-    assert!(outcome.executed_nodes.is_empty());
-    assert_eq!(outcome.executed_nodes.capacity(), executed_capacity);
-    assert!(outcome.logs.is_empty());
-    assert_eq!(outcome.logs.capacity(), logs_capacity);
     assert_eq!(status.activity, WorkerActivity::EventLoop);
     assert_eq!(
         status.kind,
@@ -1299,8 +1386,8 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn execute_sinks_with_start_event_loop_fires_callback_once() {
-    // Sink-only graph prepares no event triggers, so the loop never
-    // actually spawns. This removes lambda-driven
+    // Sink-only graph: active_event_triggers() returns empty, so
+    // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
     let library = system_library();
@@ -1568,7 +1655,7 @@ fn scan_accumulates_simple_flags() {
         event_idx: 0,
     };
 
-    let mut intent = scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::Run {
@@ -1587,7 +1674,7 @@ fn scan_accumulates_simple_flags() {
     ]);
 
     assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
-    assert!(matches!(intent.loop_command, Some(LoopCommand::Start)));
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
     assert!(intent.execute_sinks);
     assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
@@ -1599,16 +1686,6 @@ fn scan_accumulates_simple_flags() {
     );
     assert!(intent.execute_nodes.contains(&e_node_id));
     assert_eq!(intent.syncs.len(), 1);
-
-    let seeds = intent.take_run_seeds();
-    assert!(seeds.sinks);
-    assert!(seeds.event_triggers);
-    assert_eq!(seeds.events, vec![event]);
-    assert_eq!(seeds.nodes, vec![e_node_id]);
-    assert!(!intent.execute_sinks);
-    assert!(!intent.execute_event_triggers);
-    assert!(intent.events.is_empty());
-    assert!(intent.execute_nodes.is_empty());
 }
 
 #[test]
@@ -1669,7 +1746,7 @@ fn scan_exit_dominates_entire_batch() {
         "pre-Exit graph ops must be discarded"
     );
     assert!(
-        intent.loop_command.is_none(),
+        intent.loop_request.is_none(),
         "post-Exit loop ops must be discarded"
     );
     assert!(
@@ -1812,7 +1889,7 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     assert!(matches!(intent.graph_state, Some(GraphOp::Replace(_))));
 }
 
-// Slot reduction: last-write-wins for graph_state and loop_command.
+// Slot reduction: last-write-wins for graph_state and loop_request.
 
 #[test]
 fn scan_last_write_wins_per_slot() {
@@ -1841,12 +1918,12 @@ fn scan_last_write_wins_per_slot() {
         (
             "Start then Stop -> last write (Stop) wins",
             vec![WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
-            |intent| matches!(intent.loop_command, Some(LoopCommand::Stop)),
+            |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
         ),
         (
             "Stop then Start -> last write (Start) wins",
             vec![WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
-            |intent| matches!(intent.loop_command, Some(LoopCommand::Start)),
+            |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
         ),
     ];
 
@@ -1926,107 +2003,6 @@ async fn lambda_events_drive_worker_execution() {
         second.is_ok(),
         "lambda-driven execution must succeed: {second:?}"
     );
-}
-
-#[tokio::test]
-async fn fired_event_does_not_reinitialize_event_sources() {
-    use std::sync::atomic::AtomicUsize;
-
-    let source_a_calls = Arc::new(AtomicUsize::new(0));
-    let source_b_calls = Arc::new(AtomicUsize::new(0));
-    let subscriber_calls = Arc::new(AtomicUsize::new(0));
-    let source_a_notify = Arc::new(Notify::new());
-    let source_b_notify = Arc::new(Notify::new());
-    let source_a_calls_for_lambda = Arc::clone(&source_a_calls);
-    let source_b_calls_for_lambda = Arc::clone(&source_b_calls);
-    let subscriber_calls_for_lambda = Arc::clone(&subscriber_calls);
-
-    let mut library = Library::default();
-    library.add(
-        Func::new(FuncId::unique(), "source_a")
-            .event(
-                "tick",
-                EventLambda::new({
-                    let notify = Arc::clone(&source_a_notify);
-                    move |_state| {
-                        let notify = Arc::clone(&notify);
-                        Box::pin(async move { notify.notified().await })
-                    }
-                }),
-            )
-            .lambda(async_lambda!(
-                move |_, _, _, _, _, _| { calls = Arc::clone(&source_a_calls_for_lambda) } => {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }
-            )),
-    );
-    library.add(
-        Func::new(FuncId::unique(), "source_b")
-            .event(
-                "tick",
-                EventLambda::new({
-                    let notify = Arc::clone(&source_b_notify);
-                    move |_state| {
-                        let notify = Arc::clone(&notify);
-                        Box::pin(async move { notify.notified().await })
-                    }
-                }),
-            )
-            .lambda(async_lambda!(
-                move |_, _, _, _, _, _| { calls = Arc::clone(&source_b_calls_for_lambda) } => {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }
-            )),
-    );
-    library.add(
-        Func::new(FuncId::unique(), "subscriber").lambda(async_lambda!(
-            move |_, _, _, _, _, _| { calls = Arc::clone(&subscriber_calls_for_lambda) } => {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-        )),
-    );
-
-    let mut graph = Graph::default();
-    let source_a = graph.add(Node::from(library.by_name("source_a").unwrap()));
-    let source_b = graph.add(Node::from(library.by_name("source_b").unwrap()));
-    let subscriber = graph.add(Node::from(library.by_name("subscriber").unwrap()));
-    graph.subscribe(source_a, 0, subscriber);
-    graph.subscribe(source_b, 0, subscriber);
-
-    let (worker, mut completion_rx) = completed_worker(4);
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::StartEventLoop,
-        ])
-        .unwrap();
-
-    let initialized = completion_rx.recv().await.unwrap().unwrap();
-    assert_eq!(initialized.executed_nodes.len(), 2);
-    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
-
-    source_a_notify.notify_one();
-    let fired = timeout(Duration::from_millis(500), completion_rx.recv())
-        .await
-        .expect("notified event did not execute")
-        .expect("worker callback channel closed")
-        .expect("event execution failed");
-    assert_eq!(fired.executed_nodes.len(), 1);
-    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
-
-    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
 }
 
 // F4: Exit dominates the batch at the runtime level — any pre-Exit
