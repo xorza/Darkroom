@@ -2,6 +2,8 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
+use crate::graph::CacheMode;
+use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use common::Span;
 
@@ -95,6 +97,163 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         cache.is_resident_hit(current, DEMANDED),
         "values under the current digest is a hit"
     );
+}
+
+#[test]
+fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
+    let current = Digest([7u8; 32]);
+    let superseded = Digest([8u8; 32]);
+    let cases = [
+        (
+            "current Ram",
+            CacheMode::Ram,
+            FuncBehavior::Pure,
+            Some(current),
+            Some(current),
+            true,
+        ),
+        (
+            "current Both",
+            CacheMode::Both,
+            FuncBehavior::Pure,
+            Some(current),
+            Some(current),
+            true,
+        ),
+        (
+            "impure Ram",
+            CacheMode::Ram,
+            FuncBehavior::Impure,
+            None,
+            None,
+            false,
+        ),
+        (
+            "newly impure Ram",
+            CacheMode::Ram,
+            FuncBehavior::Impure,
+            Some(current),
+            Some(current),
+            false,
+        ),
+        (
+            "superseded Both",
+            CacheMode::Both,
+            FuncBehavior::Pure,
+            Some(current),
+            Some(superseded),
+            false,
+        ),
+        (
+            "current None",
+            CacheMode::None,
+            FuncBehavior::Pure,
+            Some(current),
+            Some(current),
+            false,
+        ),
+        (
+            "current Disk",
+            CacheMode::Disk,
+            FuncBehavior::Pure,
+            Some(current),
+            Some(current),
+            false,
+        ),
+    ];
+    let mut cache = RuntimeCache::default();
+    let mut program = ExecutionProgram::default();
+
+    for (index, (_, mode, behavior, current_digest, produced_under, _)) in cases.iter().enumerate()
+    {
+        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        program.e_nodes.insert(
+            e_node_id,
+            ExecutionNode {
+                cache: *mode,
+                behavior: *behavior,
+                ..Default::default()
+            },
+        );
+        insert_slot(
+            &mut cache,
+            index as u128 + 1,
+            RuntimeSlot {
+                current_digest: *current_digest,
+                value: ValueState::Resident {
+                    snapshot: complete_snapshot(out()),
+                    produced_under: *produced_under,
+                },
+                ..Default::default()
+            },
+        );
+    }
+
+    cache.release_dead_outputs(&program);
+
+    for (index, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
+        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        assert_eq!(
+            cache.slots[&e_node_id].output_values().is_some(),
+            *expected_resident,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
+    let digest = Digest([9u8; 32]);
+    let cases = [
+        (CacheMode::None, false),
+        (CacheMode::Disk, false),
+        (CacheMode::Ram, true),
+        (CacheMode::Both, true),
+    ];
+    let mut cache = RuntimeCache::default();
+    let mut program = ExecutionProgram::default();
+
+    for (index, _) in cases.iter().enumerate() {
+        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        program.e_nodes.insert(
+            e_node_id,
+            ExecutionNode {
+                cache: CacheMode::Ram,
+                behavior: FuncBehavior::Pure,
+                ..Default::default()
+            },
+        );
+        insert_slot(
+            &mut cache,
+            index as u128 + 1,
+            RuntimeSlot {
+                current_digest: Some(digest),
+                value: ValueState::Resident {
+                    snapshot: complete_snapshot(out()),
+                    produced_under: Some(digest),
+                },
+                ..Default::default()
+            },
+        );
+    }
+    for (index, (mode, _)) in cases.iter().enumerate() {
+        program
+            .e_nodes
+            .get_mut(&ExecutionNodeId::from_u128(index as u128 + 1))
+            .unwrap()
+            .cache = *mode;
+    }
+
+    cache.reconcile(&program);
+
+    for (index, (mode, expected_resident)) in cases.iter().enumerate() {
+        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        assert_eq!(
+            cache.slots[&e_node_id].output_values().is_some(),
+            *expected_resident,
+            "{mode:?}"
+        );
+    }
 }
 
 #[test]

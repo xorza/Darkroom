@@ -20,6 +20,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::stats::NodeRamUsage;
+use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::context::ContextManager;
@@ -239,13 +240,15 @@ impl RuntimeCache {
         CacheRamStats { total, by_node }
     }
 
-    /// Preserve surviving slots by id, default new nodes, and trim removed ones.
+    /// Preserve surviving slots by id, default new nodes, trim removed ones, and apply the
+    /// installed program's RAM-retention policy immediately.
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
             .retain(|e_node_id, _| program.e_nodes.contains_key(e_node_id));
         for e_node_id in program.e_nodes.keys().copied() {
             self.slots.entry(e_node_id).or_default();
         }
+        self.release_dead_outputs(program);
     }
 
     /// Whether `e_node_id` holds a *resident* output valid for its current digest:
@@ -412,12 +415,16 @@ impl RuntimeCache {
         }
     }
 
-    /// After a run, release any non-RAM outputs that were not spent during execution.
-    pub(crate) fn release_non_ram_outputs(&mut self, program: &ExecutionProgram) {
+    /// Release resident values that cannot be a future RAM hit under the installed program.
+    /// Called both when a program is installed and after each run, so cache-mode downgrades,
+    /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
+    pub(crate) fn release_dead_outputs(&mut self, program: &ExecutionProgram) {
         for e_node_id in program.e_nodes.keys() {
-            if program.e_nodes[e_node_id].cache.caches_in_ram()
-                || self.slots[e_node_id].output_values().is_none()
-            {
+            let e_node = &program.e_nodes[e_node_id];
+            let retained = e_node.cache.caches_in_ram()
+                && e_node.behavior == FuncBehavior::Pure
+                && self.is_resident_current(*e_node_id);
+            if retained || self.slots[e_node_id].output_values().is_none() {
                 continue;
             }
             self.slots.get_mut(e_node_id).unwrap().clear_output();

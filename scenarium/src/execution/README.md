@@ -157,6 +157,9 @@ this Part) — copied onto the flat node as `ExecutionNode.cache`:
 | `Disk` | ✗ | ✓ | RAM copy **dropped**; disk is probed when demand reaches the node |
 | `Both` | ✓ | ✓ | value **kept resident** *and* on disk — hot reuse + survives reopen |
 
+`Ram`/`Both` retain only a current reproducible snapshot. An impure output or a snapshot
+whose digest has been superseded cannot hit again under the current program and is dropped.
+
 This is **storage only** — the mode never feeds the content digest (§B.2). Purity alone
 decides reproducibility; the mode decides where a reproducible value is stored. So a `None`
 node still has a digest: a downstream `Disk`/`Both` consumer caches normally and, when that
@@ -164,11 +167,12 @@ consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomp
 value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
 a content digest attests the value produced under it, however it came to be resident; the
 RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`release_non_ram_outputs`, §B.6). Disk reuse is gated on `persists_to_disk`. Disk
+`release_dead_outputs`, §B.6). Disk reuse is gated on `persists_to_disk`. Disk
 availability is not mirrored in RAM: the resolver derives the target from the current digest
-and probes it only when demand reaches the node. `release_non_ram_outputs` drops non-RAM
-values directly; `Ram` and `Both` values stay resident regardless of whether the current run
-used them.
+and probes it only when demand reaches the node. `release_dead_outputs` drops non-RAM,
+impure, and superseded values; current `Ram` and `Both` values stay resident even when the
+current run did not use them. Installing a mode that disables RAM retention applies the same
+sweep immediately.
 
 ## B.1 What opts into disk
 
@@ -176,8 +180,8 @@ The disk store serves a node whose mode is `persists_to_disk` (`Disk`/`Both`, `g
 surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honored only when:
 
 1. The node has a **content digest** — its whole upstream cone is reproducible (§B.2).
-   An impure node, or anything downstream of one, has no digest and is silently kept
-   memory-only — it can never risk serving a stale value.
+   An impure node, or anything downstream of one, has no digest and is neither persisted
+   nor retained after the run — it can never risk serving a stale value.
 2. A **disk root** is configured on the worker's `DiskStore`. Until then `Disk`/`Both`
    degrade to memory-only.
 
@@ -312,10 +316,13 @@ resolution and execution then follow this lifecycle:
    This bounds a chain's peak RAM to its active frontier instead of every intermediate
    at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
    moment it finishes.
-5. **after the run → `release_non_ram_outputs`.** Sweep the leftovers step 4 didn't reach —
+5. **after the run → `release_dead_outputs`.** Sweep the leftovers step 4 didn't reach —
    a prior run's untouched value, or a non-RAM value a consumer never read (so its outputs
-   never all went spent). Every non-RAM leftover is dropped outright. Every `Ram`/`Both`
-   output stays resident, including values outside the current run's active frontier.
+   never all went spent). A value remains resident only when its mode retains RAM and its
+   produced digest still matches the node's current digest. Non-RAM, impure, and superseded
+   values are dropped; an exact input flip-back therefore recomputes or hydrates instead of
+   relying on a stale snapshot. The same sweep runs during install, so disabling RAM
+   retention frees the slot without waiting for another execution.
 
 ### Worked example
 

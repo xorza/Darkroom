@@ -935,11 +935,17 @@ mod cache_persistence {
         engine.update(&build(5, 7, CacheMode::Ram), &lib)?;
         engine.execute_sinks().await?;
 
-        // Flip back to A (Disk): the blob matches the current digest again, but the
-        // slot holds 35 in RAM under B's (now superseded) digest. mult is pruned
-        // (disk hit) and read as print's frontier — it must serve 6 from disk, not
-        // the stale 35.
-        engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
+        // Flip back to A with Both so install preserves the current B snapshot in RAM.
+        // Resolution then stamps A's digest, making 35 superseded before disk reuse probes
+        // the matching A blob — it must serve 6 from disk, not the stale 35.
+        engine.update(&build(2, 3, CacheMode::Both), &lib)?;
+        assert_eq!(
+            engine.cache.slots[&root_execution_node(mult_id)]
+                .output_values()
+                .and_then(|values| values[0].as_i64()),
+            Some(35),
+            "the stale B snapshot remains resident when the flip-back run begins"
+        );
         let stats = engine.execute_sinks().await?;
 
         // mult is served from its disk blob, not recomputed — without this, a recompute
@@ -1005,19 +1011,16 @@ mod cache_persistence {
         );
     }
 
-    /// An explicit resident-cache flush persists a value after its node becomes
-    /// disk-backed without waiting for a re-execution (a cache hit never re-runs).
+    /// Disabling RAM retention releases a surviving slot during install rather than waiting
+    /// for the end of a later run.
     #[tokio::test]
-    async fn toggling_persist_stores_resident_value_without_a_rerun() {
-        let dir = TempDir::new("toggle_persist");
+    async fn disabling_ram_retention_releases_resident_value_on_install() {
         let lib = test_func_lib(default_hooks());
 
-        // mult(const 2, const 3) = 6 → print, with mult's persistence configurable.
-        // Fixed node ids so the slot (and its resident value) survives each update.
-        let build = |persist: CacheMode| {
+        let build = |mode: CacheMode| {
             let mut graph = Graph::default();
             let mut mult = node(&lib, "mult");
-            mult.cache = persist;
+            mult.cache = mode;
             graph.insert(NodeId::from_u128(1), mult);
             graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
             let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
@@ -1026,25 +1029,24 @@ mod cache_persistence {
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
             graph
         };
+        let mult_id = root_execution_node(NodeId::from_u128(1));
 
-        let mut engine = disk_engine(&dir);
+        for mode in [CacheMode::None, CacheMode::Disk] {
+            let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
+            let mut engine = disk_engine(&dir);
+            engine.update(&build(CacheMode::Ram), &lib).unwrap();
+            engine.execute_sinks().await.unwrap();
+            assert!(
+                engine.cache.slots[&mult_id].output_values().is_some(),
+                "Ram retains the current pure value"
+            );
 
-        // Run with Memory caching: mult computes (6) and stays resident, nothing on disk.
-        engine.update(&build(CacheMode::Ram), &lib).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert!(
-            std::fs::read_dir(&dir.0).unwrap().next().is_none(),
-            "Memory caching writes nothing to disk"
-        );
-
-        // Toggle the node to Disk (a graph edit → update), but do NOT re-run. The
-        // resident value must reach disk now, not on some later execution.
-        engine.update(&build(CacheMode::Disk), &lib).unwrap();
-        engine.store_resident_caches().await;
-        assert!(
-            std::fs::read_dir(&dir.0).unwrap().next().is_some(),
-            "toggling Disk persists the resident value without a re-execution"
-        );
+            engine.update(&build(mode), &lib).unwrap();
+            assert!(
+                matches!(engine.cache.slots[&mult_id].value, ValueState::Empty),
+                "{mode:?} releases the old RAM value during install"
+            );
+        }
     }
 
     /// `store_resident_caches` must not write a value under a digest it wasn't produced
@@ -2712,6 +2714,7 @@ mod const_bindings {
 
 mod behavior {
     use super::*;
+    use crate::execution::cache::ValueState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pure_node_skips_on_rerun() -> TestResult {
@@ -3084,10 +3087,7 @@ mod behavior {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn impure_output_stays_resident_for_inspection_after_run() -> TestResult {
-        // An impure node re-runs every time, but its output stays resident after a
-        // run: outputs are never wiped or evicted, so the editor's on-demand
-        // inspector can read the last value even though there's no disk fallback.
+    async fn impure_output_is_released_after_run() -> TestResult {
         let graph = test_graph();
         let mut library = test_func_lib(default_hooks());
         mutate_func(&mut library, "get_b", |func| {
@@ -3099,14 +3099,9 @@ mod behavior {
         execution_graph.execute_sinks().await?;
 
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        let slot = &execution_graph.cache.slots[&get_b];
-        let outputs = slot
-            .output_values()
-            .expect("impure node's output stays resident after the run");
-        assert_eq!(
-            outputs[0].as_f64(),
-            Some(11.0),
-            "the last-run output is readable for inspection (get_b returns 11)"
+        assert!(
+            matches!(execution_graph.cache.slots[&get_b].value, ValueState::Empty),
+            "an impure value cannot hit on a future run, so the end sweep releases it"
         );
 
         Ok(())
@@ -3573,11 +3568,12 @@ mod execution {
         use crate::node::definition::{Func, FuncOutput};
 
         let invocations = Arc::new(AtomicUsize::new(0));
-        let library: Library = [Func::new(
+        let mut library: Library = [Func::new(
             "4df6d99f-cb0c-479c-9b94-6549c406d9ab",
             "partial_writer",
         )
         .category("Debug")
+        .pure()
         .sink()
         .output(FuncOutput::new("a", DataType::Int))
         .output(FuncOutput::new("b", DataType::Int))
@@ -3619,14 +3615,18 @@ mod execution {
             "run 1 writes both ports: {outputs:?}"
         );
 
-        // Run 2: only port 0 is written. The reused buffer is cleared before invoke,
-        // so port 1 cannot masquerade as a value produced by this run.
+        // Invalidate the pure node while keeping its resident buffer available for the next
+        // invocation. Run 2 writes only port 0, so port 1 must not retain run 1's value.
+        mutate_func(&mut library, "partial_writer", |func| {
+            func.version += 1;
+        });
+        eg.update(&graph, &library).unwrap();
         let stats = eg.execute_sinks().await?;
         assert!(stats.node_errors.is_empty());
         let outputs = eg.cache.slots[&e_node_id]
             .output_values()
             .cloned()
-            .expect("the node re-ran (it is impure)");
+            .expect("the invalidated pure node re-ran");
         assert!(
             matches!(outputs[0], DynamicValue::Static(StaticValue::Int(101))),
             "run 2 rewrites port 0: {outputs:?}"

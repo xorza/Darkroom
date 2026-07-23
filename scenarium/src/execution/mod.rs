@@ -328,7 +328,7 @@ impl ExecutionEngine {
             )
             .await;
 
-        self.cache.release_non_ram_outputs(&self.compiled.program);
+        self.cache.release_dead_outputs(&self.compiled.program);
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.

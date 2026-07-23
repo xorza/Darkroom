@@ -85,17 +85,18 @@ pub struct Subscription {
 ///
 /// - `None` — cache nowhere: never reused across runs, recomputed whenever its value
 ///   is needed, and dropped after the run to free RAM.
-/// - `Ram` — resident in the live engine and reused across runs, but lost on reload.
+/// - `Ram` — current reproducible values stay resident in the live engine and are reused
+///   across runs, but are lost on reload.
 /// - `Disk` — persisted to the disk store (survives reload); its RAM copy
 ///   is dropped after the run and reloaded lazily when demanded.
-/// - `Both` — resident in RAM *and* on disk: hot reuse this session plus survival across
-///   reloads.
+/// - `Both` — current reproducible values stay resident in RAM *and* on disk: hot reuse
+///   this session plus survival across reloads.
 ///
 /// This is a *storage* choice only — it never affects reproducibility. Disk/RAM reuse is
 /// honored only for a node with a content digest (a reproducible cone); a node with an
-/// impure node anywhere upstream has no digest, so it's silently kept memory-only and
-/// never risks serving a stale value, whatever its mode. The on-disk backend is wired only
-/// once a caller attaches a `DiskStore` with a disk root; until
+/// impure node anywhere upstream has no digest, so its output is released after the run
+/// and never risks serving a stale value, whatever its mode. The on-disk backend is wired
+/// only once a caller attaches a `DiskStore` with a disk root; until
 /// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {
@@ -107,8 +108,8 @@ pub enum CacheMode {
 }
 
 impl CacheMode {
-    /// Whether the node's value is retained in RAM and reused across runs (`Ram`/`Both`).
-    /// The other modes drop the RAM copy after each run.
+    /// Whether a current reproducible value is retained in RAM and reused across runs
+    /// (`Ram`/`Both`). The other modes drop the RAM copy after each run.
     pub fn caches_in_ram(self) -> bool {
         matches!(self, CacheMode::Ram | CacheMode::Both)
     }
