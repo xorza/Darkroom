@@ -20,14 +20,14 @@ use aperture::Ui;
 use scenarium::CompiledGraph;
 use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
-use scenarium::NodeId;
 use scenarium::NodeExecutionStatus;
+use scenarium::NodeId;
+use scenarium::PinnedOutputs;
 use scenarium::RamUsage;
 use scenarium::RunError;
 use scenarium::WorkerActivity;
 use scenarium::WorkerStatus;
 use scenarium::WorkerStatusKind;
-use scenarium::PinnedOutputs;
 
 use crate::core::document::Document;
 use crate::gui::pinned_output::PinnedOutputStore;
@@ -152,14 +152,7 @@ impl RunState {
     }
 
     pub(crate) fn apply_worker_status(&mut self, update: &WorkerStatus) {
-        let entering_execution =
-            !self.activity.is_executing() && update.activity.is_executing();
         self.activity = update.activity;
-        if entering_execution {
-            self.nodes
-                .retain(|_, node| node.status != ExecStatus::None || !node.logs.is_empty());
-        }
-
         match update.kind {
             WorkerStatusKind::Activity => {}
             WorkerStatusKind::Patch => self.apply_node_patch(update),
@@ -348,20 +341,16 @@ mod tests {
                 ram: None,
             })
             .collect::<Vec<_>>();
-        nodes.extend(
-            errored
-                .iter()
-                .map(|&e_node_id| NodeStatus {
-                    e_node_id,
-                    status: Some(NodeExecutionStatus::Errored {
-                        error: RunError::Invoke {
-                            func_id: FuncId::from_u128(0),
-                            message: "test error".into(),
-                        },
-                    }),
-                    ram: None,
-                }),
-        );
+        nodes.extend(errored.iter().map(|&e_node_id| NodeStatus {
+            e_node_id,
+            status: Some(NodeExecutionStatus::Errored {
+                error: RunError::Invoke {
+                    func_id: FuncId::from_u128(0),
+                    message: "test error".into(),
+                },
+            }),
+            ram: None,
+        }));
         WorkerStatus {
             kind: WorkerStatusKind::Completed {
                 elapsed_secs: 0.0,
@@ -492,7 +481,10 @@ mod tests {
             (e_node_id_a, vec![inst_a], interior),
             (e_node_id_b, vec![inst_b], interior),
         ]);
-        rs.apply_worker_status(&completed_status(&[(e_node_id_a, 2.0), (e_node_id_b, 3.0)], &[]));
+        rs.apply_worker_status(&completed_status(
+            &[(e_node_id_a, 2.0), (e_node_id_b, 3.0)],
+            &[],
+        ));
 
         // Shared interior view: both instances' times sum (2 + 3).
         assert_eq!(rs.status(interior), ExecStatus::Executed(5.0));
