@@ -300,28 +300,48 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
 }
 
 #[tokio::test]
-async fn upstream_error_skips_dependents_and_clears_output() {
+async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
     let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
     let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
         Err(test_support::failure("boom"))
     });
-    let downstream = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let skipped = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         Ok(())
     });
-    let a = p.node(&[], 1, failing);
-    let b = p.node(&[bind(a, 0)], 1, downstream);
+    let live = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+        Ok(())
+    });
+    let healthy = p.node(&[], 1, producer);
+    let failed = p.node(&[], 1, failing);
+    let blocked = p.node(&[bind(healthy, 0), bind(failed, 0)], 1, skipped);
+    let surviving = p.node(&[bind(healthy, 0)], 1, live);
+    p.set_cache(healthy, CacheMode::None);
 
-    let plan = straight_run(&p.program);
+    let plan = run_with_readers(&p.program, vec![2, 1, 0, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert!(
-        cache.slots[&a].output_values().is_none(),
+        cache.slots[&failed].output_values().is_none(),
         "an errored node's output is dropped (so it re-runs)"
     );
     assert!(
-        cache.slots[&b].output_values().is_none(),
+        cache.slots[&blocked].output_values().is_none(),
         "the dependent is skipped, producing nothing"
+    );
+    assert_eq!(
+        cache.slots[&surviving].output_values().unwrap()[0].as_i64(),
+        Some(7),
+        "retiring the blocked read leaves the healthy value for its live reader"
+    );
+    assert!(
+        matches!(cache.slots[&healthy].value, ValueState::Empty),
+        "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
     let error_of = |e_node_id: ExecutionNodeId| {
         stats
@@ -330,8 +350,56 @@ async fn upstream_error_skips_dependents_and_clears_output() {
             .find(|e| e.e_node_id == e_node_id)
             .map(|e| e.error.to_string())
     };
-    assert!(error_of(a).unwrap().contains("boom"));
-    assert!(error_of(b).unwrap().contains("upstream"));
+    assert!(error_of(failed).unwrap().contains("boom"));
+    assert!(error_of(blocked).unwrap().contains("upstream"));
+}
+
+#[tokio::test]
+async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    let cancel = async_lambda!(|ctx, _state, _ev, _inputs, _demand, _outputs| {
+        ctx.cancel_flag().cancel();
+        Ok(())
+    });
+    let pending = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
+        panic!("a cancelled tail consumer must not run")
+    });
+    let source = p.node(&[], 1, producer);
+    p.node(&[], 0, cancel);
+    p.node(&[bind(source, 0)], 0, pending);
+    p.set_cache(source, CacheMode::None);
+
+    let run = run_with_readers(&p.program, vec![1]);
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program);
+    let mut executor = Executor::default();
+    let mut resource_stamps = RunResourceStamps::default();
+    let stats = executor
+        .run(
+            &p.program,
+            &run.plan,
+            &run.resolved,
+            &mut cache,
+            &mut resource_stamps,
+            None,
+            CancelToken::new(),
+        )
+        .await;
+
+    assert!(stats.cancelled);
+    assert_eq!(
+        executor.remaining_reads.counts[p.program.output_idx(source, 0)],
+        0,
+        "the pending consumer's read was retired"
+    );
+    assert!(
+        matches!(cache.slots[&source].value, ValueState::Empty),
+        "tail retirement reclaims the source before the engine's final sweep"
+    );
 }
 
 #[tokio::test]
@@ -540,6 +608,57 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     );
 }
 
+#[tokio::test]
+async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
+        panic!("a reused node must not invoke its lambda")
+    });
+    let a = p.node(&[], 1, producer);
+    p.set_cache(a, CacheMode::Disk);
+    p.set_output_pinned(a, 0, true);
+
+    let mut run = run_with_readers(&p.program, vec![0]);
+    demand_output(&p.program, &mut run, a, 0);
+    *run.resolved.disposition.get_mut(&a).unwrap() = Disposition::Reuse;
+
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program);
+    cache.slots.get_mut(&a).unwrap().value = ValueState::Resident {
+        snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
+        produced_under: None,
+    };
+    let mut executor = Executor::default();
+    let mut resource_stamps = RunResourceStamps::default();
+    let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
+    let stats = executor
+        .run(
+            &p.program,
+            &run.plan,
+            &run.resolved,
+            &mut cache,
+            &mut resource_stamps,
+            Some(&tx),
+            CancelToken::never(),
+        )
+        .await;
+    drop(tx);
+    let pushes: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            RunEvent::PinnedOutputs(outputs) => Some(outputs),
+            RunEvent::Progress(_) => None,
+        })
+        .collect();
+
+    assert_eq!(stats.cached_nodes, vec![a]);
+    assert_eq!(pushes.len(), 1);
+    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
+    assert!(
+        matches!(cache.slots[&a].value, ValueState::Empty),
+        "the reused value is released immediately after delivery"
+    );
+}
+
 /// A pinned-root node (a node-seeded on-demand preview target) pushes *every*
 /// output, not just an individually-pinned one — `run.plan.pinned` alone is
 /// enough to qualify the whole node.
@@ -725,30 +844,36 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
 #[tokio::test]
 async fn missing_lambda_reports_error_and_skips_consumers() {
     let mut p = Prog::default();
-    let a = p.node(&[], 1, FuncLambda::None);
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    let source = p.node(&[], 1, producer);
+    let missing = p.node(&[bind(source, 0)], 1, FuncLambda::None);
     let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
         Ok(())
     });
-    let b = p.node(&[bind(a, 0)], 1, consumer);
+    let downstream = p.node(&[bind(missing, 0)], 1, consumer);
 
-    let plan = straight_run(&p.program);
+    let mut plan = structural_plan(&p.program);
+    plan.roots.clear();
+    plan.roots.insert(downstream);
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    // A stale prior value on the lambda-less node must not be served as this run's result.
-    cache.slots.get_mut(&a).unwrap().value = ValueState::Resident {
+    cache.slots.get_mut(&missing).unwrap().value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         produced_under: None,
     };
-    let stats = run_with(&p.program, &plan.plan, &mut cache).await;
+    let stats = run_with(&p.program, &plan, &mut cache).await;
 
     assert!(
         stats.executed_nodes.is_empty(),
-        "neither node ran: A has no lambda, B skips on the errored upstream"
+        "the source is cut, the missing implementation errors, and its consumer skips"
     );
     assert!(
-        cache.slots[&a].output_values().is_none(),
-        "A's stale value is dropped, not served"
+        cache.slots[&missing].output_values().is_none(),
+        "the missing node's stale value is dropped, not served"
     );
     let error_of = |e_node_id: ExecutionNodeId| {
         stats
@@ -758,14 +883,14 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
             .map(|e| &e.error)
     };
     assert!(
-        matches!(error_of(a), Some(RunError::MissingLambda { .. })),
-        "A reports its missing implementation: {:?}",
-        error_of(a)
+        matches!(error_of(missing), Some(RunError::MissingLambda { .. })),
+        "the node reports its missing implementation: {:?}",
+        error_of(missing)
     );
     assert!(
-        matches!(error_of(b), Some(RunError::SkippedUpstream { .. })),
-        "B skips as errored-upstream: {:?}",
-        error_of(b)
+        matches!(error_of(downstream), Some(RunError::SkippedUpstream { .. })),
+        "the consumer skips as errored-upstream: {:?}",
+        error_of(downstream)
     );
 }
 

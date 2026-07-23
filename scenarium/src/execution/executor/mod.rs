@@ -12,9 +12,10 @@
 //! and reader counts derived together and authoritative for the whole run. A
 //! [`Disposition::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
-//! recomputed on reopen) gets [`NodeOutcome::Cut`]. The one verdict the loop *improves* is a
-//! `Run` whose stamped digest is `None` because a Bind-delivered resource value exists only
-//! once its producers settle: the loop prepares that identity off-thread, re-stamps at
+//! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported
+//! without probing its cache or retaining its input cone. The one verdict the loop *improves*
+//! is a `Run` whose stamped digest is `None` because a Bind-delivered resource value exists
+//! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
 use std::time::Instant;
@@ -177,7 +178,7 @@ impl ExecutionFrame<'_> {
                         .cache
                         .read_output_port(self.program, target, port_idx, take)
                         .expect("a resolved producer output must be resident when consumed");
-                    self.finish_read(target, port_idx, output_idx);
+                    self.complete_planned_read(target, port_idx, output_idx);
                     value
                 }
             };
@@ -185,9 +186,10 @@ impl ExecutionFrame<'_> {
         }
     }
 
-    /// Retires every bound input read skipped when a late cache hit avoids invoking a node.
-    fn cancel_input_reads(&mut self, e_node_id: ExecutionNodeId) {
-        let input_range = self.program.e_nodes[&e_node_id].inputs.range();
+    /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
+    /// non-RAM producer values to be released as soon as their remaining readers disappear.
+    fn abandon_input_reads(&mut self, consumer_id: ExecutionNodeId) {
+        let input_range = self.program.e_nodes[&consumer_id].inputs.range();
         for input_index in input_range {
             let address = match &self.program.inputs[input_index].binding {
                 ExecutionBinding::Bind(address) => Some(*address),
@@ -195,23 +197,36 @@ impl ExecutionFrame<'_> {
             };
             if let Some(address) = address {
                 let output_idx = self.program.output_idx(address.e_node_id, address.port_idx);
-                self.finish_read(address.e_node_id, address.port_idx, output_idx);
+                self.complete_planned_read(address.e_node_id, address.port_idx, output_idx);
             }
         }
     }
 
-    /// Completes one planned output read and releases its non-RAM value once it is no longer live.
-    fn finish_read(&mut self, target: ExecutionNodeId, port_idx: usize, output_idx: OutputIdx) {
+    fn release_drained_outputs(&mut self, e_node_id: ExecutionNodeId) {
+        if !self.program.e_nodes[&e_node_id].cache.caches_in_ram()
+            && self.remaining_reads.node_drained(self.program, e_node_id)
+        {
+            self.cache.slots.get_mut(&e_node_id).unwrap().clear_output();
+        }
+    }
+
+    /// Completes one resolver-counted read and releases its producer port or slot when no
+    /// planned reader can still use it.
+    fn complete_planned_read(
+        &mut self,
+        producer_id: ExecutionNodeId,
+        producer_port_idx: usize,
+        output_idx: OutputIdx,
+    ) {
         if !self.remaining_reads.consume(output_idx)
-            || self.program.e_nodes[&target].cache.caches_in_ram()
-            || self.cache.slots[&target].output_values().is_none()
+            || self.cache.slots[&producer_id].output_values().is_none()
         {
             return;
         }
-        if self.remaining_reads.node_drained(self.program, target) {
-            self.cache.slots.get_mut(&target).unwrap().clear_output();
-        } else {
-            self.cache.clear_output_port(target, port_idx);
+        if self.remaining_reads.node_drained(self.program, producer_id) {
+            self.release_drained_outputs(producer_id);
+        } else if !self.program.e_nodes[&producer_id].cache.caches_in_ram() {
+            self.cache.clear_output_port(producer_id, producer_port_idx);
         }
     }
 }
@@ -221,8 +236,8 @@ pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<InvokeInput>,
-    /// The run's mutable copy of the resolver's live binding counts. Only real bound
-    /// input reads decrement it; production demand and host pins remain immutable.
+    /// The run's mutable copy of the resolver's live binding counts. Input consumption or
+    /// retirement decrements it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
     /// Per-run outcome per node (see [`NodeOutcome`]), keyed by node id. Reused
     /// across runs and rebuilt each run.
@@ -244,10 +259,10 @@ impl Executor {
     }
 
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
-    /// [`NodeOutcome::Cut`] if the resolver pruned its cone, serve it from RAM/disk on
-    /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
-    /// away (so a long run's earlier caches survive a later failure or cancel). The
-    /// `program`, `plan`, and `resolved` run are read-only. Returns per-run stats.
+    /// [`NodeOutcome::Cut`] if the resolver pruned its cone, report a missing implementation,
+    /// serve it from RAM/disk on [`Disposition::Reuse`], or invoke its lambda and persist the
+    /// result to disk right away (so a long run's earlier caches survive a later failure or
+    /// cancel). The `program`, `plan`, and `resolved` run are read-only. Returns per-run stats.
     #[allow(clippy::too_many_arguments)] // Each argument is a distinct run collaborator.
     pub(crate) async fn run(
         &mut self,
@@ -285,40 +300,44 @@ impl Executor {
 
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
-            for &e_node_id in &plan.process_order {
-                // Coarse cancel: stop scheduling further nodes. A node already
-                // mid-invoke isn't interrupted (it finishes), but nothing after
-                // it starts. The unreached tail stays `Pending`, which the stats
-                // ignore.
+            for (process_idx, &e_node_id) in plan.process_order.iter().enumerate() {
+                // Coarse cancel: stop scheduling further nodes and retire the tail's reads. A
+                // node already mid-invoke isn't interrupted, while unreached outcomes stay
+                // `Pending` and are omitted from stats.
                 if self.ctx_manager.cancel.is_cancelled() {
+                    for &pending_id in &plan.process_order[process_idx..] {
+                        if resolved.disposition[&pending_id] == Disposition::Run {
+                            frame.abandon_input_reads(pending_id);
+                        }
+                    }
                     break;
                 }
                 let e_node = &program.e_nodes[&e_node_id];
                 if !plan.verdicts[&e_node_id].wants_execute() {
                     continue;
                 }
-                if resolved.disposition[&e_node_id] == Disposition::Cut {
-                    // Pruned by the pre-run cut: every consumer that would read this node reused
-                    // a cache, so its output is never read. Report only a current resident value;
-                    // unneeded disk blobs remain unprobed.
-                    *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Cut {
-                        cached: frame.cache.is_resident_current(e_node_id),
-                    };
-                    continue;
-                }
-                // A func registered without an implementation can't execute — a host/library
-                // configuration error, reported on the node every run (before the reuse check,
-                // so it can't flicker with cache state); its consumers skip as errored-upstream.
-                if e_node.lambda.is_none() {
-                    mark_skipped(
-                        frame.cache,
-                        &mut self.outcomes,
-                        e_node_id,
-                        RunError::MissingLambda {
-                            func_id: e_node.func_id,
-                        },
-                    );
-                    continue;
+                match resolved.disposition[&e_node_id] {
+                    Disposition::Cut => {
+                        // Pruned by the pre-run cut: every consumer that would read this node reused
+                        // a cache, so its output is never read. Report only a current resident value;
+                        // unneeded disk blobs remain unprobed.
+                        *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Cut {
+                            cached: frame.cache.is_resident_current(e_node_id),
+                        };
+                        continue;
+                    }
+                    Disposition::MissingLambda => {
+                        mark_skipped(
+                            frame.cache,
+                            &mut self.outcomes,
+                            e_node_id,
+                            RunError::MissingLambda {
+                                func_id: e_node.func_id,
+                            },
+                        );
+                        continue;
+                    }
+                    Disposition::Reuse | Disposition::Run => {}
                 }
 
                 // The resolver's pre-run verdict is authoritative — a `Reuse` is never
@@ -350,21 +369,27 @@ impl Executor {
                         let demand = resolved.outputs.demand.slice(e_node.outputs);
                         let reused = frame.cache.check_reuse(program, e_node_id, demand).await;
                         if reused {
-                            frame.cancel_input_reads(e_node_id);
+                            frame.abandon_input_reads(e_node_id);
                         }
                         reused
                     }
-                    _ => false,
+                    Disposition::Run => false,
+                    Disposition::Cut | Disposition::MissingLambda => {
+                        unreachable!("cut and missing-lambda dispositions were handled above")
+                    }
                 };
                 if reused {
                     *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Reused;
                     frame.emit_pinned_values(e_node_id, events);
+                    frame.release_drained_outputs(e_node_id);
                     continue;
                 }
 
+                debug_assert!(!e_node.lambda.is_none());
                 let func_id = e_node.func_id;
 
                 if has_errored_dependency(program, &self.outcomes, e_node_id) {
+                    frame.abandon_input_reads(e_node_id);
                     mark_skipped(
                         frame.cache,
                         &mut self.outcomes,
@@ -489,20 +514,7 @@ impl Executor {
                         .cache
                         .store_node(program, e_node_id, &mut self.ctx_manager)
                         .await;
-                    // A node no consumer reads (a sink, or every output already `Skip`) is
-                    // spent the instant it's stored — drop its non-retained slot now rather
-                    // than holding it to end-of-run eviction. A node that still owes reads is
-                    // released later, in `collect_inputs`, when its last consumer lands.
-                    if !program.e_nodes[&e_node_id].cache.caches_in_ram()
-                        && frame.remaining_reads.node_drained(program, e_node_id)
-                    {
-                        frame
-                            .cache
-                            .slots
-                            .get_mut(&e_node_id)
-                            .unwrap()
-                            .clear_output();
-                    }
+                    frame.release_drained_outputs(e_node_id);
                 }
             }
         }

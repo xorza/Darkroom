@@ -8,8 +8,8 @@
 //! up-to-date analysis (Ninja/Bazel), or a compiler between the CFG and a liveness / dead-code
 //! pass: the schedule is structural and reusable across runs, while liveness is per-run and
 //! cache-dependent. The reverse sweep visits consumers before producers, probes each needed
-//! node against the demand accumulated from running consumers, and stops at cache hits and
-//! missing-input nodes.
+//! node against the demand accumulated from running consumers, and stops at cache hits,
+//! missing-input nodes, and funcs without an implementation.
 //!
 //! Every node's digest is structural (a fold of its inputs and the run's prepared resource
 //! snapshot), so the sweep stamps the *whole* graph ahead of the run. The one stamp it can
@@ -27,7 +27,7 @@ use crate::execution::{NodeMap, OutputColumn, reset_node_map};
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
-/// reuse verdict with the backward cut so the three states are mutually exclusive by
+/// reuse verdict with the backward cut so the states are mutually exclusive by
 /// construction (a pruned reuse hit can't also read as `Reuse`). Authoritative for the whole
 /// run: a `Reuse` is never re-derived after the cut may have pruned its producers. The safe
 /// direction is allowed once: the run loop prepares and re-stamps a `Run` node whose bound
@@ -42,7 +42,10 @@ pub(crate) enum Disposition {
     /// An unchanged demanded output is verified and resident — serve it without running the
     /// lambda.
     Reuse,
-    /// The node must run.
+    /// Reached, but its func has no implementation. Report the error without probing its cache
+    /// or keeping its input cone alive.
+    MissingLambda,
+    /// The node must run and owns one pending read for each bound input.
     Run,
 }
 
@@ -150,9 +153,9 @@ fn stamp_digests(
 }
 
 /// Reverse cache-aware sweep. A running consumer marks exactly the producer ports it reads;
-/// reuse and missing-input nodes stop the walk. Producer classification happens only after
-/// every downstream consumer has contributed, so cache coverage is checked against exact
-/// demand rather than the planner's former structural over-approximation.
+/// reuse, missing-input nodes, and missing lambdas stop the walk. Producer classification
+/// happens only after every downstream consumer has contributed, so cache coverage is checked
+/// against exact demand rather than the planner's former structural over-approximation.
 async fn resolve_run(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
@@ -170,6 +173,10 @@ async fn resolve_run(
         }
         if !plan.verdicts[&e_node_id].wants_execute() {
             *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Cut;
+            continue;
+        }
+        if program.e_nodes[&e_node_id].lambda.is_none() {
+            *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::MissingLambda;
             continue;
         }
         run.outputs.seed_external_demand(program, plan, e_node_id);

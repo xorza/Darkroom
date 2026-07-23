@@ -5,7 +5,8 @@ use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, OutputIdx};
 use crate::node::definition::{FuncBehavior, FuncId};
-use crate::{DynamicValue, StaticValue};
+use crate::node::lambda::FuncLambda;
+use crate::{DynamicValue, StaticValue, async_lambda};
 use common::Span;
 
 #[derive(Debug)]
@@ -47,6 +48,9 @@ impl Fix {
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs: Span::new(inputs_start, inputs.len() as u32),
                 outputs: Span::new(outputs_start, outputs),
+                lambda: async_lambda!(|_ctx, _state, _events, _inputs, _demand, _outputs| {
+                    Ok(())
+                }),
                 ..Default::default()
             },
         );
@@ -219,6 +223,54 @@ async fn missing_input_stops_liveness_before_its_producer() {
             .readers
             .slice(fix.program.e_nodes[&source].outputs),
         &[0]
+    );
+}
+
+#[tokio::test]
+async fn missing_lambda_stops_liveness_before_its_producer() {
+    let mut fix = Fix::default();
+    let source = fix.node(&[], 1);
+    let missing = fix.node(&[(false, bind(source, 0))], 1);
+    fix.program.e_nodes.get_mut(&missing).unwrap().lambda = FuncLambda::None;
+    let sink = fix.node(&[(false, bind(missing, 0))], 0);
+
+    let run = fix
+        .resolve(
+            &[sink],
+            &[],
+            &[],
+            vec![CachedNode {
+                e_node_id: missing,
+                values: vec![value(9)],
+            }],
+        )
+        .await;
+
+    assert_eq!(run.disposition[&source], Disposition::Cut);
+    assert_eq!(
+        run.disposition[&missing],
+        Disposition::MissingLambda,
+        "a matching cache cannot hide a reached missing implementation"
+    );
+    assert_eq!(run.disposition[&sink], Disposition::Run);
+    assert_eq!(
+        run.outputs
+            .demand
+            .slice(fix.program.e_nodes[&source].outputs),
+        &[OutputDemand::Skip]
+    );
+    assert_eq!(
+        run.outputs
+            .readers
+            .slice(fix.program.e_nodes[&source].outputs),
+        &[0]
+    );
+    assert_eq!(
+        run.outputs
+            .readers
+            .slice(fix.program.e_nodes[&missing].outputs),
+        &[1],
+        "the downstream skip still owns one read to retire"
     );
 }
 

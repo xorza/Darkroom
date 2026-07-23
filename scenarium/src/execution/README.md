@@ -285,9 +285,10 @@ pass stamps content digests from upstream digests and prepared resource identiti
 consumer-first pass derives cache-aware liveness, exact output demand, and exact binding
 reader counts together. The reverse pass starts from the plan's roots, tests reuse only
 after all live downstream demand has accumulated, and propagates demand and readers only
-through nodes that will run. Cache hits and missing-input nodes therefore cut their entire
-upstream cone. A disk-cached node's now-unneeded upstream — a memory-only source, say —
-isn't recomputed on reopen.
+through nodes that will run. Cache hits, missing-input nodes, and funcs without an
+implementation therefore cut their entire upstream cone. A reached missing implementation
+remains an error, but its cache is not probed. A disk-cached node's now-unneeded upstream —
+a memory-only source, say — isn't recomputed on reopen.
 
 A digest folding a Bind-delivered resource value it can't read yet (§B.2 wired resource
 inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop prepares that
@@ -304,25 +305,26 @@ resolution and execution then follow this lifecycle:
    deleted and treated as a miss; the same reverse sweep continues through its producers, so
    the node recomputes this run.
 3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
-   demanded output fails the node; skipped outputs may remain `Unbound`. Resident snapshots
-   store only those values; `store_node` derives disk coverage from them and skips an existing
+   demanded output fails the node; skipped outputs may remain `Unbound`. A lambda may still
+   produce a skipped output as an opportunistic byproduct, which is retained as reusable cache
+   coverage. `store_node` derives disk coverage from the resident values and skips an existing
    frame only when both digest and coverage match. A broader result overwrites it.
 4. **mid-run release.** The executor seeds `RemainingOutputReads` from
-   the resolver's exact, cache-aware reader counts and counts them *down* as each running
-   consumer reads a bound producer (`ExecutionFrame::collect_inputs`). When an output
-   reaches zero its value is cleared one output at a time, and once *every* output of a
-   **non-RAM** node is spent its whole resident value is dropped the instant its last
-   consumer reads it. A `Ram`/`Both` node is left resident (kept hot for reuse).
-   This bounds a chain's peak RAM to its active frontier instead of every intermediate
-   at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
-   moment it finishes.
-5. **after the run → `release_dead_outputs`.** Sweep the leftovers step 4 didn't reach —
-   a prior run's untouched value, or a non-RAM value a consumer never read (so its outputs
-   never all went spent). A value remains resident only when its mode retains RAM and its
-   produced digest still matches the node's current digest. Non-RAM, impure, and superseded
-   values are dropped; an exact input flip-back therefore recomputes or hydrates instead of
-   relying on a stale snapshot. The same sweep runs during install, so disabling RAM
-   retention frees the slot without waiting for another execution.
+   the resolver's exact, cache-aware reader counts. Every `Run` node owns one read for each
+   bound input; it consumes those reads when invoked or retires them when a late cache hit,
+   errored dependency, or cancellation makes them impossible. When an output reaches zero
+   its value is cleared one output at a time, and once *every* output of a **non-RAM** node
+   is spent its whole resident value is dropped. A `Ram`/`Both` node is left resident (kept
+   hot for reuse). This bounds a chain's peak RAM to its active frontier instead of every
+   intermediate at once. A zero-reader node is reclaimed after pinned delivery whether it
+   ran or reused.
+5. **after the run → `release_dead_outputs`.** Sweep resident values outside the current
+   run's read lifecycle, such as untouched values from a prior run. A value remains resident
+   only when its mode retains RAM and its produced digest still matches the node's current
+   digest. Non-RAM, impure, and superseded values are dropped; an exact input flip-back
+   therefore recomputes or hydrates instead of relying on a stale snapshot. The same sweep
+   runs during install, so disabling RAM retention frees the slot without waiting for another
+   execution.
 
 ### Worked example
 
