@@ -3,9 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use common::CancelToken;
 use imaginarium::Image as RawImage;
-use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS};
+use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
     AnyState, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior, InvokeInput,
     Library, OutputDemand, SharedAnyState, StaticValue,
@@ -17,8 +16,8 @@ use crate::astro::config::processing::{
 };
 use crate::astro::config::stacking::{CombineConfigDef, DetectionConfigDef, RegistrationConfigDef};
 use crate::astro::masters::MASTERS_DATA_TYPE;
-use crate::astro::nodes::calibration::{build_masters_cached, cache_marker_path, frame_set_key};
-use crate::astro::nodes::io::{ASTRO_DIR_DATA_TYPE, ASTRO_IMAGE_PATH_DATA_TYPE, raw_frame_files};
+use crate::astro::nodes::calibration::frame_set_key;
+use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
 use crate::astro::nodes::runtime::image_to_cpu;
 use crate::astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
 use crate::config_node::config_data_type;
@@ -75,72 +74,12 @@ fn astro_image_path_filter_matches_preview_extensions() {
 }
 
 #[test]
-fn astro_dir_is_an_existing_directory_picker() {
-    let DataType::FsPath(cfg) = &*ASTRO_DIR_DATA_TYPE else {
+fn astro_raw_paths_are_a_filtered_multi_file_picker() {
+    let DataType::FsPath(cfg) = &*ASTRO_RAW_PATHS_DATA_TYPE else {
         panic!("expected an FsPath data type");
     };
-    assert_eq!(cfg.mode, FsPathMode::Directory);
-    assert!(cfg.extensions.is_empty());
-}
-
-#[test]
-fn raw_frame_scan_is_decoder_specific_sorted_and_contextual() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("test_output/lens/raw_frame_scan");
-    if dir.exists() {
-        fs::remove_dir_all(&dir).unwrap();
-    }
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("z.raf"), []).unwrap();
-    fs::write(dir.join("a.RAF"), []).unwrap();
-    fs::write(dir.join("ignored.fits"), []).unwrap();
-
-    let files = raw_frame_files(&dir).unwrap();
-
-    assert_eq!(files, [dir.join("a.RAF"), dir.join("z.raf")]);
-
-    fs::remove_dir_all(&dir).unwrap();
-    let error = raw_frame_files(&dir).unwrap_err();
-    let message = error.to_string();
-    assert!(message.contains("failed to scan camera-RAW frame folder"));
-    assert!(message.contains(&dir.display().to_string()));
-}
-
-#[test]
-fn build_masters_rebuilds_when_cache_load_fails() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("test_output/lens/stale_master_cache");
-    if dir.exists() {
-        fs::remove_dir_all(&dir).unwrap();
-    }
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("master_dark.fits"), b"obsolete cache format").unwrap();
-
-    let masters = build_masters_cached(
-        [Some(dir.clone()), None, None, None],
-        DEFAULT_SIGMA_THRESHOLD,
-        true,
-        CancelToken::never(),
-    )
-    .expect("a stale cache falls back to scanning and stacking its source folder");
-
-    assert_eq!(
-        masters.components().collect::<Vec<_>>(),
-        [],
-        "the empty source folder rebuilds to an absent dark master"
-    );
-    let cache_path = dir.join("master_dark.fits");
-    let key = frame_set_key(&[]).unwrap();
-    assert_eq!(
-        fs::read_to_string(cache_marker_path(&cache_path)).unwrap(),
-        format!("absent:{key}")
-    );
-    assert!(!cache_path.exists());
-    fs::remove_dir_all(dir).unwrap();
+    assert_eq!(cfg.mode, FsPathMode::ExistingFiles);
+    assert_eq!(cfg.extensions, RAW_EXTENSIONS);
 }
 
 #[test]
@@ -189,19 +128,18 @@ fn build_masters_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Build Masters");
     assert_eq!(f.category, "Astro");
-    // Pure: the digest folds each calibration folder's contents (directory-aware
-    // FsPath resolver), so a changed folder re-keys — no purity override needed.
+    // Pure: the digest folds each selected calibration file's identity.
     assert_eq!(f.behavior, FuncBehavior::Pure);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].ty.declared(), *MASTERS_DATA_TYPE);
 
-    // Four optional calibration-frame folders, then sigma and cache.
+    // Four optional calibration-frame sets, then sigma and cache.
     assert_eq!(f.inputs.len(), 6);
-    let dir_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(dir_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
+    let frame_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(frame_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
     for input in &f.inputs[..4] {
-        assert!(!input.required, "calibration folders are optional");
-        assert_eq!(input.data_type, *ASTRO_DIR_DATA_TYPE);
+        assert!(!input.required, "calibration frame sets are optional");
+        assert_eq!(input.data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
     }
     assert_eq!(f.inputs[4].name, "Sigma");
     assert_eq!(f.inputs[4].data_type, DataType::Float);
@@ -219,8 +157,7 @@ fn stack_lights_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = func(&lib, "Stack Lights");
     assert_eq!(f.category, "Astro");
-    // Pure: the digest folds the `lights` folder's contents (directory-aware
-    // FsPath resolver), so any add/remove/edit re-keys it — no override needed.
+    // Pure: the digest folds exactly the selected light files.
     assert_eq!(f.behavior, FuncBehavior::Pure);
 
     // One input per stage: lights, masters, detection, registration,
@@ -238,8 +175,8 @@ fn stack_lights_node_is_registered() {
             "Reference"
         ]
     );
-    assert_eq!(f.inputs[0].data_type, *ASTRO_DIR_DATA_TYPE);
-    assert!(f.inputs[0].required, "lights folder is required");
+    assert_eq!(f.inputs[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+    assert!(f.inputs[0].required, "light frames are required");
     assert_eq!(f.inputs[1].data_type, *MASTERS_DATA_TYPE);
     assert!(!f.inputs[1].required, "masters are genuinely optional");
     // Each stage is one config-typed input (so a build_*_config wires in),

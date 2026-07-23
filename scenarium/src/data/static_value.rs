@@ -11,6 +11,7 @@ pub enum StaticValue {
     Bool(bool),
     String(String),
     FsPath(String),
+    FsPaths(Vec<String>),
     Enum(String),
 }
 
@@ -25,6 +26,7 @@ impl PartialEq for StaticValue {
             (StaticValue::Bool(left), StaticValue::Bool(right)) => left == right,
             (StaticValue::String(left), StaticValue::String(right)) => left == right,
             (StaticValue::FsPath(left), StaticValue::FsPath(right)) => left == right,
+            (StaticValue::FsPaths(left), StaticValue::FsPaths(right)) => left == right,
             (StaticValue::Enum(left), StaticValue::Enum(right)) => left == right,
             _ => false,
         }
@@ -82,6 +84,13 @@ impl StaticValue {
         }
     }
 
+    pub fn as_fs_paths(&self) -> Option<&[String]> {
+        match self {
+            StaticValue::FsPaths(paths) => Some(paths),
+            _ => None,
+        }
+    }
+
     pub fn to_value_string(&self) -> String {
         match self {
             StaticValue::Null => "null".to_string(),
@@ -90,6 +99,7 @@ impl StaticValue {
             StaticValue::Bool(value) => value.to_string(),
             StaticValue::String(value) => value.clone(),
             StaticValue::FsPath(path) => path.clone(),
+            StaticValue::FsPaths(paths) => paths.join("\n"),
             StaticValue::Enum(variant) => variant.clone(),
         }
     }
@@ -102,7 +112,9 @@ impl Display for StaticValue {
             StaticValue::Float(value) => write!(f, "{value:.4}"),
             StaticValue::Int(value) => write!(f, "{value}"),
             StaticValue::Bool(value) => write!(f, "{value}"),
-            StaticValue::String(value) | StaticValue::FsPath(value) => write!(f, "\"{value}\""),
+            StaticValue::String(value) => write!(f, "\"{value}\""),
+            StaticValue::FsPath(path) => write!(f, "\"{path}\""),
+            StaticValue::FsPaths(paths) => write!(f, "{} paths", paths.len()),
             StaticValue::Enum(variant) => write!(f, "{variant}"),
         }
     }
@@ -164,14 +176,41 @@ mod tests {
         assert_eq!(StaticValue::String("x".into()).as_f64(), None);
         assert_eq!(StaticValue::String("hi".into()).as_string(), Some("hi"));
         assert_eq!(StaticValue::Enum("Add".into()).as_enum(), Some("Add"));
-        assert_eq!(StaticValue::FsPath("x".into()).as_fs_path(), Some("x"));
+        let one_path = StaticValue::FsPath("x".into());
+        assert_eq!(one_path.as_fs_path(), Some("x"));
+        assert_eq!(one_path.as_fs_paths(), None);
+        let paths = StaticValue::FsPaths(vec!["x".into(), "y".into()]);
+        assert_eq!(paths.as_fs_path(), None);
+        assert_eq!(
+            paths.as_fs_paths(),
+            Some(["x".to_string(), "y".to_string()].as_slice())
+        );
     }
 
     #[test]
     fn value_string_and_display_have_distinct_formats() {
         assert_eq!(StaticValue::Float(1.5).to_value_string(), "1.5");
         assert_eq!(StaticValue::String("hi".into()).to_value_string(), "hi");
+        assert_eq!(
+            StaticValue::FsPath("a.fit".into()).to_value_string(),
+            "a.fit"
+        );
+        assert_eq!(
+            StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]).to_value_string(),
+            "a.fit\nb.fit"
+        );
         assert_eq!(format!("{}", StaticValue::Float(1.5)), "1.5000");
         assert_eq!(format!("{}", StaticValue::String("hi".into())), "\"hi\"");
+        assert_eq!(
+            format!("{}", StaticValue::FsPath("a.fit".into())),
+            "\"a.fit\""
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])
+            ),
+            "2 paths"
+        );
     }
 }

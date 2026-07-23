@@ -81,6 +81,9 @@ fn constant_output_type(declared: DataType, value: StaticValue) -> DataType {
         StaticValue::Int(_) => DataType::Int,
         StaticValue::Bool(_) => DataType::Bool,
         StaticValue::String(_) => DataType::String,
-        StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => DataType::Any,
+        StaticValue::Null
+        | StaticValue::FsPath(_)
+        | StaticValue::FsPaths(_)
+        | StaticValue::Enum(_) => DataType::Any,
     }
 }

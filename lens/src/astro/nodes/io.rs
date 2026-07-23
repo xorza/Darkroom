@@ -1,9 +1,7 @@
-//! Astro path types, image loading, and camera-RAW directory scanning.
+//! Astro path types and image loading.
 
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use common::file_utils;
 use imaginarium::Image as RawImage;
 use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS};
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
@@ -11,14 +9,6 @@ use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
-
-#[derive(Debug, thiserror::Error)]
-#[error("failed to scan camera-RAW frame folder '{dir}': {source}", dir = .dir.display())]
-pub(crate) struct RawFrameScanError {
-    dir: PathBuf,
-    #[source]
-    source: std::io::Error,
-}
 
 pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
@@ -30,8 +20,15 @@ pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
     )))
 });
 
-pub(crate) static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
+pub(crate) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+        FsPathMode::ExistingFiles,
+        RAW_EXTENSIONS
+            .iter()
+            .map(|extension| extension.to_string())
+            .collect(),
+    )))
+});
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
@@ -69,11 +66,4 @@ pub(crate) fn register(library: &mut Library) {
                 })
             })),
     );
-}
-
-pub(crate) fn raw_frame_files(dir: &Path) -> Result<Vec<PathBuf>, RawFrameScanError> {
-    file_utils::files_with_extensions(dir, RAW_EXTENSIONS).map_err(|source| RawFrameScanError {
-        dir: dir.to_path_buf(),
-        source,
-    })
 }

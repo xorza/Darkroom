@@ -202,13 +202,13 @@ inside `node_digest`.
 - **Reproducibility taint.** Only `Pure` nodes are hashed; an `Impure` node, or any node
   with a non-reproducible producer, has digest `None` = "always recompute, never cache",
   for RAM and disk alike (a `None` producer folds to a `None` consumer).
-- **File inputs.** An `FsPath` const folds the path string *and* the file's identity
-  (`FileId`, default `(len, mtime)`; opt-in content hash), or — for a **directory** — a
-  sorted fingerprint of its entries, so the same path holding different
-  bytes, or a folder gaining/losing/editing a file, invalidates. This is what re-keys
-  `build_masters` when its calibration folders change.
+- **File inputs.** An `FsPath` const folds its path and referent identity (`FileId`,
+  default `(len, mtime)`; opt-in content hash), or — for a **directory** — a sorted
+  fingerprint of its entries. An `FsPaths` const folds its ordered path list and each
+  referent identity. A multi-file input therefore invalidates only for selected files,
+  while a directory input invalidates when any direct entry changes.
 - **Wired resource inputs.** A **resource reference** arriving over a `Bind` edge — an
-  `FsPath` value, or a value of a custom type with a registered
+  `FsPath`/`FsPaths` value, or a value of a custom type with a registered
   `ResourceStamper` (`TypeEntry::with_stamper`) — folds the *referent's* live identity,
   read off the **delivered value** (`hash_bound_resource`). The fold is gated on the
   consumer's *declared* input type (the contract "this node dereferences the reference"),

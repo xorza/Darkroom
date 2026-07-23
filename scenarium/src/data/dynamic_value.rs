@@ -101,6 +101,10 @@ impl DynamicValue {
         self.as_static().and_then(StaticValue::as_fs_path)
     }
 
+    pub fn as_fs_paths(&self) -> Option<&[String]> {
+        self.as_static().and_then(StaticValue::as_fs_paths)
+    }
+
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
             DynamicValue::Custom(data) => data.as_any().downcast_ref::<T>(),

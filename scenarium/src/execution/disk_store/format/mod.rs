@@ -13,7 +13,7 @@ use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, StaticValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
-const FORMAT_VERSION: u32 = 7;
+const FORMAT_VERSION: u32 = 9;
 const FIXED_LEN: usize = 8 + 4 + 32 + 4 + 8;
 const DESCRIPTOR_LEN: usize = 1 + 3 + 16 + 4 + 8;
 const BODY_LEN_OFFSET: u64 = (8 + 4 + 32 + 4) as u64;
@@ -390,8 +390,9 @@ async fn write_static(
         }
         StaticValue::Bool(value) => writer.write_all(&[3, u8::from(*value)]).await,
         StaticValue::String(value) => write_string(writer, 4, value).await,
-        StaticValue::FsPath(value) => write_string(writer, 5, value).await,
-        StaticValue::Enum(value) => write_string(writer, 6, value).await,
+        StaticValue::FsPath(path) => write_string(writer, 5, path).await,
+        StaticValue::FsPaths(paths) => write_strings(writer, 6, paths).await,
+        StaticValue::Enum(value) => write_string(writer, 7, value).await,
     }
 }
 
@@ -405,6 +406,24 @@ async fn write_string(
         .write_all(&(value.len() as u64).to_le_bytes())
         .await?;
     writer.write_all(value.as_bytes()).await
+}
+
+async fn write_strings(
+    writer: &mut (impl AsyncWrite + Unpin),
+    tag: u8,
+    values: &[String],
+) -> io::Result<()> {
+    writer.write_all(&[tag]).await?;
+    writer
+        .write_all(&(values.len() as u64).to_le_bytes())
+        .await?;
+    for value in values {
+        writer
+            .write_all(&(value.len() as u64).to_le_bytes())
+            .await?;
+        writer.write_all(value.as_bytes()).await?;
+    }
+    Ok(())
 }
 
 async fn read_static(
@@ -439,7 +458,10 @@ async fn read_static(
         }
         4 => Ok(StaticValue::String(read_string(reader, payload_len).await?)),
         5 => Ok(StaticValue::FsPath(read_string(reader, payload_len).await?)),
-        6 => Ok(StaticValue::Enum(read_string(reader, payload_len).await?)),
+        6 => Ok(StaticValue::FsPaths(
+            read_strings(reader, payload_len).await?,
+        )),
+        7 => Ok(StaticValue::Enum(read_string(reader, payload_len).await?)),
         _ => Err(codec::Error::Frame(
             "cached static value has an unknown variant".into(),
         )),
@@ -462,6 +484,47 @@ async fn read_string(
     reader.read_exact(&mut bytes).await?;
     String::from_utf8(bytes)
         .map_err(|_| codec::Error::Frame("cached string is not valid UTF-8".into()))
+}
+
+async fn read_strings(
+    reader: &mut (impl AsyncRead + Unpin),
+    payload_len: u64,
+) -> codec::Result<Vec<String>> {
+    let value_count = read_u64(reader).await?;
+    let minimum_len = 1u64
+        .checked_add(8)
+        .and_then(|prefix| prefix.checked_add(value_count.checked_mul(8)?))
+        .ok_or_else(|| codec::Error::Frame("cached path list length overflow".into()))?;
+    if minimum_len > payload_len {
+        return Err(codec::Error::Frame(
+            "cached path list count exceeds its payload".into(),
+        ));
+    }
+    let value_count = usize::try_from(value_count)
+        .map_err(|_| codec::Error::Frame("cached path count does not fit in memory".into()))?;
+    let mut expected_len = minimum_len;
+    let mut values = Vec::with_capacity(value_count);
+    for _ in 0..value_count {
+        let byte_len = read_u64(reader).await?;
+        expected_len = expected_len
+            .checked_add(byte_len)
+            .ok_or_else(|| codec::Error::Frame("cached path list length overflow".into()))?;
+        if expected_len > payload_len {
+            return Err(codec::Error::Frame(
+                "cached path length exceeds its payload".into(),
+            ));
+        }
+        let byte_len = usize::try_from(byte_len)
+            .map_err(|_| codec::Error::Frame("cached path does not fit in memory".into()))?;
+        let mut bytes = vec![0; byte_len];
+        reader.read_exact(&mut bytes).await?;
+        values.push(
+            String::from_utf8(bytes)
+                .map_err(|_| codec::Error::Frame("cached path is not valid UTF-8".into()))?,
+        );
+    }
+    require_payload_len(payload_len, expected_len)?;
+    Ok(values)
 }
 
 async fn read_u8(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<u8> {

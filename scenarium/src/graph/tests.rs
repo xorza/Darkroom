@@ -269,7 +269,8 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 #[test]
 fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     use crate::library::Library;
-    use crate::{DataType, StaticValue};
+    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue};
+    use std::sync::Arc;
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
@@ -350,6 +351,53 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
     assert!(
         g.validate_for_execution(&library).is_ok(),
         "a numeric constant satisfies a numeric input"
+    );
+
+    let single_path = Func::new(FuncId::unique(), "single_path")
+        .input(FuncInput::required(
+            "path",
+            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
+        ))
+        .output(FuncOutput::new("o", DataType::Int));
+    let path_list = Func::new(FuncId::unique(), "path_list")
+        .input(FuncInput::required(
+            "paths",
+            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+        ))
+        .output(FuncOutput::new("o", DataType::Int));
+    library.add(single_path.clone());
+    library.add(path_list.clone());
+
+    let mut g = Graph::default();
+    let single = g.add_func_node(&single_path);
+    g.set_input_binding(
+        InputPort::new(single, 0),
+        Binding::Const(StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])),
+    );
+    assert!(
+        g.validate_for_execution(&library)
+            .is_err_and(|error| error.to_string().contains("incompatible")),
+        "a path list cannot satisfy a single-path input"
+    );
+
+    let mut g = Graph::default();
+    let many = g.add_func_node(&path_list);
+    g.set_input_binding(
+        InputPort::new(many, 0),
+        Binding::Const(StaticValue::FsPath("a.fit".into())),
+    );
+    assert!(
+        g.validate_for_execution(&library)
+            .is_err_and(|error| error.to_string().contains("incompatible")),
+        "a single path cannot satisfy a multi-file input"
+    );
+    g.set_input_binding(
+        InputPort::new(many, 0),
+        Binding::Const(StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])),
+    );
+    assert!(
+        g.validate_for_execution(&library).is_ok(),
+        "a path list satisfies a multi-file input"
     );
 }
 

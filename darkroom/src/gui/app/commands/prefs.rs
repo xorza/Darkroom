@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 
 use aperture::Ui;
-use scenarium::{FsPathConfig, FsPathMode};
 
 use crate::gui::app::App;
 use crate::gui::dialogs;
@@ -59,9 +58,7 @@ impl App {
     }
 
     fn pick_ml_model(&mut self, kind: MlModelKind) {
-        let filter =
-            FsPathConfig::with_extensions(FsPathMode::ExistingFile, vec!["onnx".to_string()]);
-        if let Some(path) = dialogs::pick_path(&filter) {
+        if let Some(path) = dialogs::pick_existing_file(&["onnx"]) {
             self.set_ml_model_path(kind, path);
         }
     }

@@ -173,6 +173,14 @@ impl ResourceStampRequests {
         self.fs_paths.is_empty() && self.custom.is_empty()
     }
 
+    fn collect_fs_paths(&mut self, stamps: &RunResourceStamps, paths: &[String]) {
+        for path in paths {
+            if !stamps.fs_paths.contains_key(path) {
+                self.fs_paths.insert(path.clone());
+            }
+        }
+    }
+
     fn collect_node(
         &mut self,
         stamps: &RunResourceStamps,
@@ -187,9 +195,10 @@ impl ResourceStampRequests {
         for input in program.node_inputs(node) {
             match &input.binding {
                 ExecutionBinding::Const(StaticValue::FsPath(path)) => {
-                    if !stamps.fs_paths.contains_key(path) {
-                        self.fs_paths.insert(path.clone());
-                    }
+                    self.collect_fs_paths(stamps, std::slice::from_ref(path));
+                }
+                ExecutionBinding::Const(StaticValue::FsPaths(paths)) => {
+                    self.collect_fs_paths(stamps, paths);
                 }
                 ExecutionBinding::Bind(address) => {
                     let Some(stamper) = &input.stamper else {
@@ -202,13 +211,15 @@ impl ResourceStampRequests {
                         continue;
                     };
                     match stamper {
-                        InputStamper::FsPath => {
-                            if let Some(path) = value.as_fs_path()
-                                && !stamps.fs_paths.contains_key(path)
-                            {
-                                self.fs_paths.insert(path.to_string());
+                        InputStamper::FsPath => match value.as_static() {
+                            Some(StaticValue::FsPath(path)) => {
+                                self.collect_fs_paths(stamps, std::slice::from_ref(path))
                             }
-                        }
+                            Some(StaticValue::FsPaths(paths)) => {
+                                self.collect_fs_paths(stamps, paths);
+                            }
+                            _ => {}
+                        },
                         InputStamper::Custom(stamper) => {
                             let key = CustomResourceKey::new(address, stamper, value);
                             if !stamps.custom.contains_key(&key) {
@@ -316,8 +327,11 @@ impl RunResourceStamps {
         self.custom.extend(prepared.custom);
     }
 
-    pub(crate) fn hash_fs_path(&self, hasher: &mut DigestHasher, path: &str) -> Option<()> {
-        self.fs_paths.get(path)?.hash(hasher);
+    pub(crate) fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
+        hasher.write_pod(paths.len() as u64);
+        for path in paths {
+            self.fs_paths.get(path)?.hash(hasher);
+        }
         Some(())
     }
 

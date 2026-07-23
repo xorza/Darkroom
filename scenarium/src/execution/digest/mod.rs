@@ -156,9 +156,9 @@ fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
 
 /// Fold one constant's *own value* into `hasher`: a discriminant tag plus
 /// length-prefixed payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`). For an
-/// `FsPath` this is the path *string* only — the external file/dir it points at is a
-/// separate concern folded by [`hash_fs_content`], so this stays a pure, no-I/O
-/// structural fold. A free helper like [`hash_data_type`].
+/// Filesystem-path values fold only their authored path string(s) here — the external
+/// files/dirs they point at are a separate concern folded by [`hash_fs_content`], so
+/// this stays a pure, no-I/O structural fold. A free helper like [`hash_data_type`].
 fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
     match value {
         StaticValue::Null => {
@@ -179,21 +179,33 @@ fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
         StaticValue::FsPath(path) => {
             hasher.write_bytes(&[5]).write_str(path);
         }
+        StaticValue::FsPaths(paths) => {
+            hasher.write_bytes(&[6]).write_pod(paths.len() as u64);
+            for path in paths {
+                hasher.write_str(path);
+            }
+        }
         StaticValue::Enum(name) => {
-            hasher.write_bytes(&[6]).write_str(name);
+            hasher.write_bytes(&[7]).write_str(name);
         }
     }
 }
 
-/// Fold the prepared external identity an `FsPath` const points at. A no-op for any
-/// non-`FsPath` value.
+/// Fold the prepared external identities a filesystem-path const points at. A no-op
+/// for every other value.
 fn hash_fs_content(
     hasher: &mut DigestHasher,
     value: &StaticValue,
     resource_stamps: &RunResourceStamps,
 ) -> Option<()> {
-    if let StaticValue::FsPath(path) = value {
-        resource_stamps.hash_fs_path(hasher, path)?;
+    match value {
+        StaticValue::FsPath(path) => {
+            resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
+        }
+        StaticValue::FsPaths(paths) => {
+            resource_stamps.hash_fs_paths(hasher, paths)?;
+        }
+        _ => {}
     }
     Some(())
 }
@@ -312,12 +324,16 @@ fn hash_bound_resource(
         .current_output_values()?
         .get(addr.port_idx)?;
     match stamper {
-        InputStamper::FsPath => match value.as_fs_path() {
-            Some(path) => {
+        InputStamper::FsPath => match value.as_static() {
+            Some(StaticValue::FsPath(path)) => {
                 hasher.write_bytes(&[3]);
-                resource_stamps.hash_fs_path(hasher, path)?;
+                resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
             }
-            None => {
+            Some(StaticValue::FsPaths(paths)) => {
+                hasher.write_bytes(&[3]);
+                resource_stamps.hash_fs_paths(hasher, paths)?;
+            }
+            _ => {
                 hasher.write_bytes(&[4]);
             }
         },

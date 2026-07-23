@@ -64,7 +64,7 @@ pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
 pub(crate) struct PathPickRequest {
     pub(crate) port: InputPort,
     /// The picker config is type-level metadata, taken from the port's
-    /// `DataType` (the value only carries the path string).
+    /// `DataType` (the value only carries the selected path strings).
     pub(crate) config: Arc<FsPathConfig>,
 }
 
@@ -76,8 +76,10 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest>
     for node in scene.nodes.values() {
         for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
             let port = InputPort::new(node.id, port_idx);
-            if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
-                && let DataType::FsPath(config) = &input.ty
+            if matches!(
+                &input.binding,
+                InputBindingView::Const(StaticValue::FsPath(_) | StaticValue::FsPaths(_))
+            ) && let DataType::FsPath(config) = &input.ty
                 && ui.response_for(const_editor_wid(port)).left.clicked()
             {
                 return Some(PathPickRequest {

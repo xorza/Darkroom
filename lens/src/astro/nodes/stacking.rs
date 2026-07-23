@@ -14,22 +14,20 @@ use crate::astro::config::stacking::{
     RegistrationPreset,
 };
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
-use crate::astro::nodes::io::{self as astro_io, ASTRO_DIR_DATA_TYPE, RawFrameScanError};
+use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
 #[derive(Debug, thiserror::Error)]
 enum LightFramesError {
-    #[error(transparent)]
-    Scan(#[from] RawFrameScanError),
-    #[error("no camera-RAW frames found in light-frame folder '{dir}'", dir = .dir.display())]
-    Empty { dir: PathBuf },
+    #[error("no light frames selected")]
+    Empty,
 }
 
-fn light_frames(dir: PathBuf) -> Result<Vec<PathBuf>, LightFramesError> {
-    let frames = astro_io::raw_frame_files(&dir)?;
+fn light_frames(paths: &[String]) -> Result<Vec<PathBuf>, LightFramesError> {
+    let frames: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     if frames.is_empty() {
-        return Err(LightFramesError::Empty { dir });
+        return Err(LightFramesError::Empty);
     }
     Ok(frames)
 }
@@ -37,12 +35,12 @@ fn light_frames(dir: PathBuf) -> Result<Vec<PathBuf>, LightFramesError> {
 pub(crate) fn register(library: &mut Library) {
     library.add(
         Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "Stack Lights")
-            .description("Calibrates, aligns, and stacks a folder of light frames into one image.")
+            .description("Calibrates, aligns, and stacks selected light frames into one image.")
             .category("Astro")
             .pure()
             .input(
-                FuncInput::required("Lights", ASTRO_DIR_DATA_TYPE.clone())
-                    .description("Folder of light frames to stack."),
+                FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
+                    .description("Camera-RAW light frames to stack."),
             )
             .input(
                 FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
@@ -77,12 +75,11 @@ pub(crate) fn register(library: &mut Library) {
                     debug_assert_eq!(inputs.len(), 6);
                     debug_assert_eq!(outputs.len(), 3);
 
-                    let lights_dir = inputs[0]
+                    let light_paths = inputs[0]
                         .value
-                        .as_fs_path()
-                        .map(PathBuf::from)
+                        .as_fs_paths()
                         .expect("lights input type is validated at the compile boundary");
-                    let lights = light_frames(lights_dir).map_err(InvokeError::external)?;
+                    let lights = light_frames(light_paths).map_err(InvokeError::external)?;
 
                     let masters_value = inputs[1].value.clone();
                     let detection =
@@ -129,4 +126,24 @@ pub(crate) fn register(library: &mut Library) {
                 })
             })),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::astro::nodes::stacking::light_frames;
+
+    #[test]
+    fn light_frame_selection_requires_input_and_preserves_order() {
+        let selected = ["lights/b.raf".to_string(), "lights/a.raf".to_string()];
+        assert_eq!(
+            light_frames(&selected).unwrap(),
+            [PathBuf::from("lights/b.raf"), PathBuf::from("lights/a.raf")]
+        );
+        assert_eq!(
+            light_frames(&[]).unwrap_err().to_string(),
+            "no light frames selected"
+        );
+    }
 }

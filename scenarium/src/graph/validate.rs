@@ -9,7 +9,7 @@ use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{Binding, Graph, NodeId, NodeKind};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
-use crate::{DataType, StaticValue};
+use crate::{DataType, FsPathMode, StaticValue};
 
 type ValidationResult<T> = Result<T, GraphValidationError>;
 
@@ -321,7 +321,12 @@ fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) ->
             StaticValue::Float(_) | StaticValue::Int(_) | StaticValue::Bool(_)
         ),
         DataType::String => matches!(value, StaticValue::String(_)),
-        DataType::FsPath(_) => matches!(value, StaticValue::FsPath(_)),
+        DataType::FsPath(config) => match config.mode {
+            FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
+            FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                matches!(value, StaticValue::FsPath(_))
+            }
+        },
         DataType::Enum(type_id) => matches!(
             value,
             StaticValue::Enum(name)

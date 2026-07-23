@@ -5,7 +5,7 @@
 //! converts that into an `Intent::SetInput` carrying a constant binding.
 //!
 //! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick
-//! button showing the chosen file's name — `emit_path_picks` polls the click,
+//! button summarizing the chosen path or paths — `emit_path_picks` polls the click,
 //! then `App` opens the OS file dialog after authoring). `Enum` renders as a
 //! dropdown over the port's declared variants. `Any` renders as a
 //! smart text field that infers the literal's kind from the text (see
@@ -37,9 +37,7 @@ use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
     Ui, WidgetId,
 };
-use scenarium::Library;
-use scenarium::ValueVariant;
-use scenarium::{DataType, StaticValue};
+use scenarium::{DataType, FsPathMode, Library, StaticValue, ValueVariant};
 
 use crate::gui::theme::StaticValueEditorTheme;
 use crate::gui::widgets::buffered_edit::EditBuffer;
@@ -103,15 +101,23 @@ pub(crate) fn show(
             Checkbox::new(&mut draft).id(id).show(ui);
             (draft != *current).then_some(StaticValue::Bool(draft))
         }
-        StaticValue::FsPath(path) => {
-            // A pick button showing the chosen file's name. The click is
-            // polled by `emit_path_picks` (by `id`), which surfaces a
-            // `AppCommand::PickInputPath`; `App` opens the dialog outside
-            // the record and applies the resulting path. So no synchronous
-            // value here.
+        StaticValue::FsPath(_) | StaticValue::FsPaths(_) => {
+            let DataType::FsPath(config) = data_type else {
+                unreachable!("filesystem-path value requires an FsPath data type");
+            };
+            debug_assert_eq!(
+                matches!(value, StaticValue::FsPaths(_)),
+                config.mode == FsPathMode::ExistingFiles
+            );
+            let label = match value {
+                StaticValue::FsPath(path) => single_path_preview(path, config.mode),
+                StaticValue::FsPaths(paths) => multi_path_preview(paths),
+                _ => unreachable!(),
+            };
+            // The blocking dialog runs after authoring, so this button only records its click.
             Button::new()
                 .id(id)
-                .label(path_preview(path))
+                .label(label)
                 .style(&theme.drag_value.chip)
                 .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::FILL, Sizing::FILL))
@@ -227,16 +233,29 @@ fn read_only_label(
     None
 }
 
-/// The pick button's label: the chosen file's name (last path
-/// component), or a prompt when no path is set yet.
-fn path_preview(path: &str) -> String {
+fn single_path_preview(path: &str, mode: FsPathMode) -> String {
+    let prompt = match mode {
+        FsPathMode::ExistingFile => "Choose file…",
+        FsPathMode::ExistingFiles => "Choose files…",
+        FsPathMode::NewFile => "Choose save path…",
+        FsPathMode::Directory => "Choose directory…",
+    };
     if path.is_empty() {
-        return "Choose file…".to_owned();
+        return prompt.to_owned();
     }
     Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_owned())
+}
+
+fn multi_path_preview(paths: &[String]) -> String {
+    let count = paths.iter().filter(|path| !path.is_empty()).count();
+    match count {
+        0 => "Choose files…".to_owned(),
+        1 => "1 file".to_owned(),
+        _ => format!("{count} files"),
+    }
 }
 
 /// What [`buffered_text_edit`] hands back: the buffer's current text and
@@ -410,6 +429,36 @@ mod tests {
         assert_eq!(
             parse_any(&format_any(&StaticValue::String("42".into()))),
             StaticValue::Int(42)
+        );
+    }
+
+    #[test]
+    fn path_previews_distinguish_single_modes_and_multi_selections() {
+        assert_eq!(
+            single_path_preview("", FsPathMode::ExistingFile),
+            "Choose file…"
+        );
+        assert_eq!(
+            single_path_preview("", FsPathMode::NewFile),
+            "Choose save path…"
+        );
+        assert_eq!(
+            single_path_preview("", FsPathMode::Directory),
+            "Choose directory…"
+        );
+        assert_eq!(
+            single_path_preview("frames/light-01.raf", FsPathMode::ExistingFile),
+            "light-01.raf"
+        );
+        assert_eq!(multi_path_preview(&[]), "Choose files…");
+        assert_eq!(multi_path_preview(&[String::new()]), "Choose files…");
+        assert_eq!(
+            multi_path_preview(&["frames/light-01.raf".to_string()]),
+            "1 file"
+        );
+        assert_eq!(
+            multi_path_preview(&["a.raf".to_string(), "b.raf".to_string()]),
+            "2 files"
         );
     }
 

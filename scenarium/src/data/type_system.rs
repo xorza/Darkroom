@@ -33,6 +33,7 @@ impl TypeId {
 pub enum FsPathMode {
     #[default]
     ExistingFile,
+    ExistingFiles,
     NewFile,
     Directory,
 }
@@ -77,7 +78,12 @@ impl DataType {
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String(String::new()),
-            DataType::FsPath(_) => StaticValue::FsPath(String::new()),
+            DataType::FsPath(config) => match config.mode {
+                FsPathMode::ExistingFiles => StaticValue::FsPaths(Vec::new()),
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                    StaticValue::FsPath(String::new())
+                }
+            },
             DataType::Custom(_) | DataType::Enum(_) => return None,
         })
     }
@@ -162,6 +168,11 @@ mod tests {
         assert_eq!(
             DataType::FsPath(Arc::new(FsPathConfig::default())).default_value(),
             Some(StaticValue::FsPath(String::new()))
+        );
+        assert_eq!(
+            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles)))
+                .default_value(),
+            Some(StaticValue::FsPaths(Vec::new()))
         );
         assert_eq!(custom(1).default_value(), None);
         assert_eq!(DataType::Enum(TypeId::from_u128(2)).default_value(), None);

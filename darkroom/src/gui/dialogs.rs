@@ -7,8 +7,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use scenarium::{FsPathConfig, FsPathMode};
-
 use crate::core::io::document;
 
 const GRAPH_FILE_FILTERS: &[(&str, &[&str])] = &[
@@ -55,20 +53,34 @@ fn graph_file_dialog(start: Option<&Path>) -> rfd::FileDialog {
     dialog
 }
 
-/// Open a file/folder dialog for an `FsPath` input, honoring its config:
-/// the mode picks open-file / save-file / pick-folder, and any extensions
-/// become a filter. Returns the chosen path, or `None` if cancelled.
-pub(crate) fn pick_path(config: &FsPathConfig) -> Option<PathBuf> {
+fn filtered_file_dialog(extensions: &[&str]) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
-    if !config.extensions.is_empty() {
-        let exts: Vec<&str> = config.extensions.iter().map(String::as_str).collect();
-        dialog = dialog.add_filter("Files", &exts);
+    if !extensions.is_empty() {
+        dialog = dialog.add_filter("Files", extensions);
     }
-    match config.mode {
-        FsPathMode::ExistingFile => dialog.pick_file(),
-        FsPathMode::NewFile => dialog.save_file(),
-        FsPathMode::Directory => dialog.pick_folder(),
-    }
+    dialog
+}
+
+pub(crate) fn pick_existing_file(extensions: &[&str]) -> Option<PathBuf> {
+    filtered_file_dialog(extensions).pick_file()
+}
+
+pub(crate) fn pick_existing_files(extensions: &[&str]) -> Option<Vec<PathBuf>> {
+    normalize_file_selection(filtered_file_dialog(extensions).pick_files()?)
+}
+
+fn normalize_file_selection(mut paths: Vec<PathBuf>) -> Option<Vec<PathBuf>> {
+    paths.sort();
+    paths.dedup();
+    if paths.is_empty() { None } else { Some(paths) }
+}
+
+pub(crate) fn pick_new_file(extensions: &[&str]) -> Option<PathBuf> {
+    filtered_file_dialog(extensions).save_file()
+}
+
+pub(crate) fn pick_directory() -> Option<PathBuf> {
+    rfd::FileDialog::new().pick_folder()
 }
 
 /// Open `url` in the user's default browser via the platform opener. Non-
@@ -90,5 +102,25 @@ pub(crate) fn open_url(url: &str) {
     };
     if let Err(e) = cmd.arg(url).spawn() {
         tracing::warn!("failed to open url {url}: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::gui::dialogs::normalize_file_selection;
+
+    #[test]
+    fn file_selection_is_sorted_deduplicated_and_nonempty() {
+        assert_eq!(normalize_file_selection(Vec::new()), None);
+        assert_eq!(
+            normalize_file_selection(vec![
+                PathBuf::from("b.fit"),
+                PathBuf::from("a.fit"),
+                PathBuf::from("b.fit"),
+            ]),
+            Some(vec![PathBuf::from("a.fit"), PathBuf::from("b.fit")])
+        );
     }
 }

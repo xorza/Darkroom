@@ -14,11 +14,10 @@ use lumos::{
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
-use crate::astro::nodes::io::{self as astro_io, ASTRO_DIR_DATA_TYPE};
+use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
 
 const CACHE_PRESENT: &str = "present:";
-const CACHE_ABSENT: &str = "absent:";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FrameSetKeyError {
@@ -35,8 +34,6 @@ pub(crate) enum BuildMastersError {
     #[error("cancelled")]
     Cancelled,
     #[error(transparent)]
-    Scan(#[from] astro_io::RawFrameScanError),
-    #[error(transparent)]
     FrameSet(#[from] FrameSetKeyError),
     #[error(transparent)]
     Stack(#[from] lumos::StackError),
@@ -46,23 +43,31 @@ pub(crate) enum BuildMastersError {
         #[source]
         source: io::Error,
     },
+    #[error("calibration cache requires one source directory, but '{first}' and '{other}' differ")]
+    CacheSourceDirectories { first: PathBuf, other: PathBuf },
+}
+
+#[derive(Debug)]
+struct RoleCachePaths {
+    master: PathBuf,
+    marker: PathBuf,
 }
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
         Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
             .description(
-                "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
-                 masters. With `cache` on, each master is written next to its frames and reused \
-                 while the source-frame set is unchanged.",
+                "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
+                 calibration masters. With `cache` on, each master is written next to its \
+                 same-directory source frames and reused while that selection is unchanged.",
             )
             .category("Astro")
             .pure()
             .inputs([
-                dir_input("Darks", "dark frames"),
-                dir_input("Flats", "flat frames"),
-                dir_input("Bias", "bias frames"),
-                dir_input("Flat Darks", "flat-dark frames"),
+                frames_input("Darks", "dark frames"),
+                frames_input("Flats", "flat frames"),
+                frames_input("Bias", "bias frames"),
+                frames_input("Flat Darks", "flat-dark frames"),
             ])
             .input(
                 FuncInput::required("Sigma", DataType::Float)
@@ -84,8 +89,13 @@ pub(crate) fn register(library: &mut Library) {
                     debug_assert_eq!(inputs.len(), 6);
                     debug_assert_eq!(outputs.len(), 1);
 
-                    let dir = |index: usize| inputs[index].value.as_fs_path().map(PathBuf::from);
-                    let dirs = [dir(0), dir(1), dir(2), dir(3)];
+                    let frames = |index: usize| {
+                        inputs[index]
+                            .value
+                            .as_fs_paths()
+                            .map(|paths| paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>())
+                    };
+                    let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
                     let sigma = inputs[4]
                         .value
                         .as_f64()
@@ -97,7 +107,7 @@ pub(crate) fn register(library: &mut Library) {
                         .expect("cache input type is validated at the compile boundary");
 
                     let masters = runtime::run_cancellable(cancel, move |cancel| {
-                        build_masters_cached(dirs, sigma, cache, cancel)
+                        build_masters_cached(frame_sets, sigma, cache, cancel)
                     })
                     .await?;
                     outputs[0] = DynamicValue::from_custom(Masters::from(masters));
@@ -107,46 +117,48 @@ pub(crate) fn register(library: &mut Library) {
     );
 }
 
-fn dir_input(name: &str, what: &str) -> FuncInput {
-    FuncInput::optional(name, ASTRO_DIR_DATA_TYPE.clone()).description(format!("Folder of {what}."))
+fn frames_input(name: &str, what: &str) -> FuncInput {
+    FuncInput::optional(name, ASTRO_RAW_PATHS_DATA_TYPE.clone())
+        .description(format!("Camera-RAW {what} to stack."))
 }
 
 pub(crate) fn build_masters_cached(
-    dirs: [Option<PathBuf>; 4],
+    frame_sets: [Option<Vec<PathBuf>>; 4],
     sigma: f32,
     cache: bool,
     cancel: CancelToken,
 ) -> Result<CalibrationMasters, BuildMastersError> {
-    let [darks, flats, bias, flat_darks] = dirs;
-    let role = |dir: Option<PathBuf>,
+    let [darks, flats, bias, flat_darks] = frame_sets;
+    let role = |frames: Option<Vec<PathBuf>>,
                 config: StackConfig,
                 file: &str|
      -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
             return Err(BuildMastersError::Cancelled);
         }
-        let Some(dir) = dir else {
+        let Some(frames) = frames else {
             return Ok(None);
         };
-        let frames = astro_io::raw_frame_files(&dir)?;
+        if frames.is_empty() {
+            return Ok(None);
+        }
         let source_key = frame_set_key(&frames)?;
-        let cache_path = dir.join(file);
-        let marker_path = cache_marker_path(&cache_path);
+        let cache_paths = cache.then(|| role_cache_paths(&frames, file)).transpose()?;
 
-        if cache {
-            match fs::read_to_string(&marker_path).ok().as_deref() {
-                Some(marker) if marker == format!("{CACHE_ABSENT}{source_key}") => return Ok(None),
+        if let Some(cache_paths) = &cache_paths {
+            match fs::read_to_string(&cache_paths.marker).ok().as_deref() {
                 Some(marker)
-                    if marker == format!("{CACHE_PRESENT}{source_key}") && cache_path.is_file() =>
+                    if marker == format!("{CACHE_PRESENT}{source_key}")
+                        && cache_paths.master.is_file() =>
                 {
                     let context = LoadContext {
                         cancel: cancel.clone(),
                         ..Default::default()
                     };
-                    match CfaImage::from_file(&cache_path, &context) {
+                    match CfaImage::from_file(&cache_paths.master, &context) {
                         Ok(master) => return Ok(Some(master)),
                         Err(error) => tracing::warn!(
-                            path = %cache_path.display(),
+                            path = %cache_paths.master.display(),
                             %error,
                             "failed to load calibration master cache; rebuilding from source frames"
                         ),
@@ -156,30 +168,27 @@ pub(crate) fn build_masters_cached(
             }
         }
 
-        let master = stack_cfa_master(&frames, config, cancel.clone())?;
-        if cache {
-            let marker = if let Some(master) = &master {
-                master
-                    .save_fits(&cache_path)
-                    .map_err(|source| BuildMastersError::Cache {
-                        path: cache_path.clone(),
-                        source,
-                    })?;
-                format!("{CACHE_PRESENT}{source_key}")
-            } else {
-                remove_cache_file(&cache_path).map_err(|source| BuildMastersError::Cache {
-                    path: cache_path.clone(),
-                    source,
-                })?;
-                format!("{CACHE_ABSENT}{source_key}")
-            };
-            file_utils::publish_bytes(&marker_path, marker.as_bytes(), PublicationMode::Cache)
+        let master = stack_cfa_master(&frames, config, cancel.clone())?
+            .expect("a non-empty calibration frame set produces a master");
+        if let Some(cache_paths) = cache_paths {
+            master
+                .save_fits(&cache_paths.master)
                 .map_err(|source| BuildMastersError::Cache {
-                    path: marker_path,
+                    path: cache_paths.master.clone(),
                     source,
                 })?;
+            let marker = format!("{CACHE_PRESENT}{source_key}");
+            file_utils::publish_bytes(
+                &cache_paths.marker,
+                marker.as_bytes(),
+                PublicationMode::Cache,
+            )
+            .map_err(|source| BuildMastersError::Cache {
+                path: cache_paths.marker,
+                source,
+            })?;
         }
-        Ok(master)
+        Ok(Some(master))
     };
 
     CalibrationMasters::from_images(
@@ -193,6 +202,27 @@ pub(crate) fn build_masters_cached(
         cancel,
     )
     .map_err(BuildMastersError::from)
+}
+
+fn role_cache_paths(
+    frames: &[PathBuf],
+    master_file: &str,
+) -> Result<RoleCachePaths, BuildMastersError> {
+    let first = frames.first().expect("empty frame sets are not cached");
+    let directory = first.parent().unwrap_or_else(|| Path::new(""));
+    if let Some(other) = frames
+        .iter()
+        .skip(1)
+        .find(|path| path.parent().unwrap_or_else(|| Path::new("")) != directory)
+    {
+        return Err(BuildMastersError::CacheSourceDirectories {
+            first: first.clone(),
+            other: other.clone(),
+        });
+    }
+    let master = directory.join(master_file);
+    let marker = cache_marker_path(&master);
+    Ok(RoleCachePaths { master, marker })
 }
 
 pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
@@ -229,10 +259,39 @@ pub(crate) fn cache_marker_path(cache_path: &Path) -> PathBuf {
     cache_path.with_file_name(name)
 }
 
-fn remove_cache_file(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::astro::nodes::calibration::{BuildMastersError, role_cache_paths};
+
+    #[test]
+    fn role_cache_requires_one_source_directory() {
+        let frames = [
+            PathBuf::from("calibration/darks/a.raf"),
+            PathBuf::from("calibration/darks/b.raf"),
+        ];
+        let paths = role_cache_paths(&frames, "master_dark.fits").unwrap();
+        assert_eq!(
+            paths.master,
+            PathBuf::from("calibration/darks/master_dark.fits")
+        );
+        assert_eq!(
+            paths.marker,
+            PathBuf::from("calibration/darks/master_dark.fits.source")
+        );
+
+        let mixed = [
+            PathBuf::from("calibration/darks/a.raf"),
+            PathBuf::from("archive/darks/b.raf"),
+        ];
+        let error = role_cache_paths(&mixed, "master_dark.fits").unwrap_err();
+        assert!(matches!(
+            error,
+            BuildMastersError::CacheSourceDirectories {
+                first,
+                other
+            } if first == mixed[0] && other == mixed[1]
+        ));
     }
 }

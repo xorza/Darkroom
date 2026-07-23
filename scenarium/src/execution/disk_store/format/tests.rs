@@ -204,7 +204,11 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         DynamicValue::Static(StaticValue::Int(-42)),
         DynamicValue::Static(StaticValue::Bool(true)),
         DynamicValue::Static(StaticValue::String("hello".into())),
-        DynamicValue::Static(StaticValue::FsPath("frames/light.fit".into())),
+        DynamicValue::Static(StaticValue::FsPath("frames/reference.fit".into())),
+        DynamicValue::Static(StaticValue::FsPaths(vec![
+            "frames/light-1.fit".into(),
+            "frames/light-2.fit".into(),
+        ])),
         DynamicValue::Static(StaticValue::Enum("Screen".into())),
         DynamicValue::from_custom(Blob(first_blob.clone())),
         DynamicValue::from_custom(Blob(second_blob.clone())),
@@ -264,7 +268,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     .unwrap()
     .unwrap();
     assert_eq!(restored.len(), outputs.len());
-    for (actual, expected) in restored.iter().zip(&outputs).take(8) {
+    for (actual, expected) in restored.iter().zip(&outputs).take(9) {
         match (actual, expected) {
             (DynamicValue::Unbound, DynamicValue::Unbound) => {}
             (DynamicValue::Static(actual), DynamicValue::Static(expected)) => {
@@ -274,14 +278,14 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         }
     }
     assert_eq!(
-        restored[8].as_custom::<Blob>().unwrap().0.as_slice(),
+        restored[9].as_custom::<Blob>().unwrap().0.as_slice(),
         first_blob
     );
     assert_eq!(
-        restored[9].as_custom::<Blob>().unwrap().0.as_slice(),
+        restored[10].as_custom::<Blob>().unwrap().0.as_slice(),
         second_blob
     );
-    assert_eq!(restored[10].as_i64(), Some(99));
+    assert_eq!(restored[11].as_i64(), Some(99));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 

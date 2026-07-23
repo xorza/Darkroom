@@ -498,6 +498,7 @@ fn type_label(library: &Library, ty: &DataType) -> String {
             let mode = match cfg.mode {
                 FsPathMode::Directory => "directory",
                 FsPathMode::ExistingFile => "file",
+                FsPathMode::ExistingFiles => "files",
                 FsPathMode::NewFile => "save path",
             };
             if cfg.extensions.is_empty() {

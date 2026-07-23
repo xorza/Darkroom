@@ -236,6 +236,48 @@ fn fs_path_folds_file_identity_and_path() {
         "a file content change must re-key the digest"
     );
 
+    let unselected = file.with_file_name("scenarium_digest_unselected.bin");
+    std::fs::write(&unselected, b"not selected").unwrap();
+    assert_eq!(
+        digest_at(&p.program, 0),
+        d_len3,
+        "an unselected sibling file must not affect a single-path digest"
+    );
+
+    let second = file.with_file_name("scenarium_digest_selected_second.bin");
+    std::fs::write(&second, b"second").unwrap();
+    let mut selected = Prog::default();
+    selected.add(
+        10,
+        1,
+        &[konst(StaticValue::FsPaths(vec![
+            path.clone(),
+            second.to_string_lossy().into_owned(),
+        ]))],
+    );
+    let two_files = digest_at(&selected.program, 0);
+    std::fs::write(&second, b"second changed").unwrap();
+    let second_edited = digest_at(&selected.program, 0);
+    assert_ne!(
+        two_files, second_edited,
+        "editing any selected file must re-key the list"
+    );
+
+    let mut reversed = Prog::default();
+    reversed.add(
+        10,
+        1,
+        &[konst(StaticValue::FsPaths(vec![
+            second.to_string_lossy().into_owned(),
+            path.clone(),
+        ]))],
+    );
+    assert_ne!(
+        digest_at(&reversed.program, 0),
+        second_edited,
+        "path-list order is part of the authored input"
+    );
+
     // A present file and a missing one are distinct identities.
     std::fs::remove_file(&file).unwrap();
     let d_missing = digest_at(&p.program, 0);
@@ -246,12 +288,27 @@ fn fs_path_folds_file_identity_and_path() {
     assert_eq!(
         d_other,
         Some(Digest([
-            229, 175, 129, 161, 174, 17, 125, 62, 209, 177, 194, 55, 184, 231, 165, 251, 85, 188,
-            112, 243, 165, 247, 15, 70, 103, 132, 182, 87, 91, 106, 51, 222,
+            176, 232, 89, 255, 138, 89, 119, 40, 183, 103, 129, 186, 168, 197, 234, 18, 53, 132,
+            24, 131, 229, 252, 228, 149, 13, 238, 235, 109, 166, 65, 110, 61,
         ])),
-        "moving identity collection must not change cache keys"
+        "the single-path digest encoding must remain stable"
+    );
+    let mut singleton_list = Prog::default();
+    singleton_list.add(
+        10,
+        1,
+        &[konst(StaticValue::FsPaths(vec![
+            "definitely-missing-elsewhere".into(),
+        ]))],
+    );
+    assert_ne!(
+        digest_at(&singleton_list.program, 0),
+        d_other,
+        "single-path and path-list variants must hash apart"
     );
     assert_ne!(d_missing, d_other, "different path ⇒ different digest");
+    std::fs::remove_file(unselected).unwrap();
+    std::fs::remove_file(second).unwrap();
 }
 
 /// A **Bind-delivered** path re-keys its consumer like a const one: the fold reads the
@@ -326,6 +383,26 @@ fn bound_fs_path_folds_delivered_file_identity() {
         plain_len1, plain_len3,
         "an undeclared input folds no file identity — structural digest only"
     );
+
+    let second = file.with_file_name(format!(
+        "scenarium-digest-bound-fs-second-{}.bin",
+        std::process::id()
+    ));
+    std::fs::write(&second, b"second").unwrap();
+    let fs_paths = || {
+        Some(DynamicValue::Static(StaticValue::FsPaths(vec![
+            path.clone(),
+            second.to_string_lossy().into_owned(),
+        ])))
+    };
+    let typed_list = digests_with(fs_paths()).typed;
+    std::fs::write(&second, b"second changed").unwrap();
+    assert_ne!(
+        digests_with(fs_paths()).typed,
+        typed_list,
+        "a wired path list re-keys when any selected file changes"
+    );
+    std::fs::remove_file(second).unwrap();
 
     std::fs::remove_file(&file).unwrap();
     let typed_missing = digests_with(fs_path()).typed;
