@@ -34,3 +34,5 @@ subgraph to newnodeui
 subgraphs tabs movable
 
 element performance
+        let id = ui.widget_id(&self.element);
+        ui.node(id, self.element, None, |ui| {
