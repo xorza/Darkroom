@@ -113,7 +113,7 @@ impl App {
         for report in events {
             match report {
                 WorkerReport::Installed(compiled) => {
-                    self.editor.run_state.acknowledge_install(compiled);
+                    self.editor.run_state.compiled = Some(compiled);
                 }
                 WorkerReport::Cleared => {
                     self.editor.run_state.compiled = None;

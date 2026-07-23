@@ -1,7 +1,5 @@
-//! Graph execution + the worker event loop. These bridge the editor's
-//! document (the graph to evaluate) and run-state with the engine's worker,
-//! plus the `events_running` flag `App` mirrors so the toolbar toggle can't
-//! lag the worker's real state.
+//! Graph execution + the worker event loop. Commands only request work;
+//! worker lifecycle reports drive the toolbar's execution and loop state.
 
 use scenarium::NodeId;
 
@@ -40,34 +38,24 @@ impl App {
     /// Compile the document graph and execute its sinks once on the
     /// worker. A compile error is reported to the engine's status log
     /// synchronously — no run starts, so the prior run's status stays
-    /// untouched. On success, marks a fresh run in flight. The worker's `Update`
-    /// tears down any running event loop, so the toggle drops in lockstep.
+    /// untouched. Worker lifecycle reports acknowledge actual execution and
+    /// event-loop transitions.
     pub(crate) fn run_graph(&mut self) {
-        if !self.workspace.run_once() {
-            return;
-        }
-        self.editor.run_state.begin_run();
-        self.events_running = false;
+        self.workspace.run_once();
     }
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
-    /// upstream cone executes and its outputs are delivered. Same run-state
-    /// and event-loop bookkeeping as a full run.
+    /// upstream cone executes and its outputs are delivered.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
         if self.workspace.open.document.active_target() != Some(GraphRef::Main) {
             unimplemented!("run-node commands are only implemented for the main graph");
         }
-        if !self.workspace.run_node(node_id) {
-            return;
-        }
-        self.editor.run_state.begin_run();
-        self.events_running = false;
+        self.workspace.run_node(node_id);
     }
 
     fn evict_cache(&mut self, node_id: NodeId) {
         if self.workspace.evict_cache(node_id) {
             self.editor.run_state.clear_cache_projections();
-            self.events_running = false;
         }
     }
 
@@ -76,14 +64,11 @@ impl App {
     /// the engine's status log) leaves the loop's running state as it was —
     /// nothing reached the worker.
     fn start_events(&mut self) {
-        if self.workspace.start_event_loop() {
-            self.events_running = true;
-        }
+        self.workspace.start_event_loop();
     }
 
     /// Stop the worker's event loop.
     fn stop_events(&mut self) {
         self.workspace.runtime.stop_event_loop();
-        self.events_running = false;
     }
 }

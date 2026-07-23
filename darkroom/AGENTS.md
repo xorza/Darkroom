@@ -379,8 +379,7 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   cache eviction / RAM-cache / disk-cache / inspect; the `D` control appears only on runnable
   sinks, and the
   `↻` chip sends a runtime `RunCommand::EvictCache` without editing the document and
-  discards the frontend's cache RAM and pinned-output projections at the matching
-  `Installed` stream fence, after any older pushed values have been consumed,
+  immediately discards the frontend's cache RAM and pinned-output projections,
   while `R` and `↓` flip the two bits of
   `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `NodeProperty::RuntimeCache`), `port_row` (the two port

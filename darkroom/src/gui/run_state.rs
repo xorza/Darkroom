@@ -23,6 +23,7 @@ use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::RamUsage;
 use scenarium::RunError;
+use scenarium::WorkerLifecycle;
 use scenarium::{ExecutionStats, PinnedOutputs, RunPhase, RunProgress};
 
 use crate::core::document::Document;
@@ -106,6 +107,53 @@ pub(crate) struct NodeLog {
     pub(crate) message: String,
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(crate) enum RunActivity {
+    #[default]
+    Idle,
+    Executing,
+    EventLoop,
+    ExecutingEventLoop,
+}
+
+impl RunActivity {
+    pub(crate) fn is_executing(self) -> bool {
+        matches!(
+            self,
+            RunActivity::Executing | RunActivity::ExecutingEventLoop
+        )
+    }
+
+    pub(crate) fn event_loop_active(self) -> bool {
+        matches!(
+            self,
+            RunActivity::EventLoop | RunActivity::ExecutingEventLoop
+        )
+    }
+
+    fn apply(self, lifecycle: WorkerLifecycle) -> Self {
+        match (self, lifecycle) {
+            (RunActivity::Idle, WorkerLifecycle::ExecutionStarted) => RunActivity::Executing,
+            (RunActivity::EventLoop, WorkerLifecycle::ExecutionStarted) => {
+                RunActivity::ExecutingEventLoop
+            }
+            (RunActivity::Executing, WorkerLifecycle::ExecutionStopped) => RunActivity::Idle,
+            (RunActivity::ExecutingEventLoop, WorkerLifecycle::ExecutionStopped) => {
+                RunActivity::EventLoop
+            }
+            (RunActivity::Idle, WorkerLifecycle::EventLoopStarted) => RunActivity::EventLoop,
+            (RunActivity::Executing, WorkerLifecycle::EventLoopStarted) => {
+                RunActivity::ExecutingEventLoop
+            }
+            (RunActivity::EventLoop, WorkerLifecycle::EventLoopStopped) => RunActivity::Idle,
+            (RunActivity::ExecutingEventLoop, WorkerLifecycle::EventLoopStopped) => {
+                RunActivity::Executing
+            }
+            _ => panic!("invalid worker lifecycle transition: {self:?} + {lifecycle:?}"),
+        }
+    }
+}
+
 /// Central runtime state for the current editor. Off the serialized state.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
@@ -114,10 +162,7 @@ pub(crate) struct RunState {
     /// The program acknowledged by the worker's ordered report stream. Every
     /// subsequent flat progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
-    /// A run is in flight (`begin_run` → `WorkerReport::Finished` or
-    /// `WorkerReport::Error`). Drives the live repaint tick and whether the
-    /// Cancel affordance shows.
-    running: bool,
+    pub(crate) activity: RunActivity,
     /// RAM held by the worker's runtime cache after its latest run (system RAM
     /// vs GPU VRAM). Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
@@ -127,14 +172,6 @@ pub(crate) struct RunState {
 impl RunState {
     pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
-    }
-
-    /// Whether a run is in flight (kicked, not yet finished/cancelled). Drives
-    /// a per-frame repaint so the running node's elapsed-so-far timer keeps
-    /// ticking between progress events (a long single node emits none until it
-    /// finishes), and gates the Cancel affordance.
-    pub(crate) fn is_running(&self) -> bool {
-        self.running
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
@@ -169,7 +206,6 @@ impl RunState {
                 .as_ref()
                 .expect("worker reported results before installing a compiled graph"),
         );
-        self.running = false;
         self.cache_ram = stats.cache_ram;
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
@@ -307,18 +343,17 @@ impl RunState {
     /// Drop everything visible from a failed run: no glow, logs, or pinned
     /// values.
     pub(crate) fn clear(&mut self) {
-        self.running = false;
         self.nodes.clear();
         self.pinned_outputs.entries.clear();
     }
 
-    /// Mark a fresh run in flight while keeping status/logs/pinned values so
-    /// the glow and pinned previews don't blank during compute; the new run's
-    /// stats and pushes replace them as they arrive.
-    pub(crate) fn begin_run(&mut self) {
-        self.running = true;
-        self.nodes
-            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
+    /// Apply the worker's authoritative execution or event-loop transition.
+    pub(crate) fn apply_lifecycle(&mut self, lifecycle: WorkerLifecycle) {
+        self.activity = self.activity.apply(lifecycle);
+        if lifecycle == WorkerLifecycle::ExecutionStarted {
+            self.nodes
+                .retain(|_, node| node.status != ExecStatus::None || !node.logs.is_empty());
+        }
     }
 }
 
@@ -618,22 +653,44 @@ mod tests {
         assert_eq!(n[0], i[0], "both attributed nodes carry the same line");
     }
 
-    /// A fresh run keeps status/logs so the glow survives a recompute.
+    /// Worker lifecycle transitions preserve prior results during execution.
     #[test]
-    fn begin_run_keeps_status() {
+    fn execution_lifecycle_keeps_status_until_results_arrive() {
         let node = nid(1);
         let e_node_id = eid(1);
         let mut rs = run_state([(e_node_id, vec![], node)]);
         rs.set_results(&stats(&[(e_node_id, 1.0)], &[]));
 
-        assert!(!rs.is_running(), "not running after a finished run");
-        rs.begin_run();
+        assert_eq!(rs.activity, RunActivity::Idle);
+        rs.apply_lifecycle(WorkerLifecycle::ExecutionStarted);
 
-        assert!(rs.is_running(), "running once a run is kicked");
+        assert_eq!(rs.activity, RunActivity::Executing);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
 
-        // The finishing run clears the in-flight flag.
         rs.set_results(&stats(&[], &[]));
-        assert!(!rs.is_running(), "not running after results land");
+        assert!(
+            rs.activity.is_executing(),
+            "results do not infer a lifecycle transition"
+        );
+        rs.apply_lifecycle(WorkerLifecycle::EventLoopStarted);
+        assert_eq!(rs.activity, RunActivity::ExecutingEventLoop);
+        rs.clear();
+        assert!(
+            rs.activity.is_executing() && rs.activity.event_loop_active(),
+            "result clearing does not infer lifecycle transitions"
+        );
+        rs.apply_lifecycle(WorkerLifecycle::ExecutionStopped);
+        assert_eq!(rs.activity, RunActivity::EventLoop);
+        rs.apply_lifecycle(WorkerLifecycle::EventLoopStopped);
+        assert_eq!(rs.activity, RunActivity::Idle);
+
+        rs.apply_lifecycle(WorkerLifecycle::EventLoopStarted);
+        assert_eq!(rs.activity, RunActivity::EventLoop);
+        rs.apply_lifecycle(WorkerLifecycle::ExecutionStarted);
+        assert_eq!(rs.activity, RunActivity::ExecutingEventLoop);
+        rs.apply_lifecycle(WorkerLifecycle::EventLoopStopped);
+        assert_eq!(rs.activity, RunActivity::Executing);
+        rs.apply_lifecycle(WorkerLifecycle::ExecutionStopped);
+        assert_eq!(rs.activity, RunActivity::Idle);
     }
 }
