@@ -5,11 +5,12 @@
 //! compile is never sent, so the worker's install is infallible and a running
 //! event loop is never disturbed by a bad edit.
 
+use hashbrown::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
-use crate::execution::program::ExecutionProgram;
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 
@@ -54,6 +55,51 @@ impl CompiledGraph {
         self.flatten_map
             .attribution(e_node_id)
             .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
+    }
+
+    /// Resolve authored nodes or graph instances to their flattened occurrences,
+    /// then return their reflexive transitive closure over data-consumer edges.
+    pub(crate) fn data_consumer_closure(
+        &self,
+        authored_node_ids: &[NodeId],
+    ) -> Vec<ExecutionNodeId> {
+        let selected: HashSet<NodeId> = authored_node_ids.iter().copied().collect();
+        let mut closure: HashSet<ExecutionNodeId> = self
+            .program
+            .e_nodes
+            .keys()
+            .copied()
+            .filter(|e_node_id| {
+                self.flatten_map
+                    .attribution(*e_node_id)
+                    .expect("every execution node has authored attribution")
+                    .any(|node_id| selected.contains(&node_id))
+            })
+            .collect();
+
+        let mut consumers: HashMap<ExecutionNodeId, Vec<ExecutionNodeId>> = HashMap::new();
+        for (consumer_id, e_node) in &self.program.e_nodes {
+            for input in self.program.node_inputs(e_node) {
+                if let ExecutionBinding::Bind(address) = &input.binding {
+                    consumers
+                        .entry(address.e_node_id)
+                        .or_default()
+                        .push(*consumer_id);
+                }
+            }
+        }
+        let mut pending: Vec<_> = closure.iter().copied().collect();
+        while let Some(e_node_id) = pending.pop() {
+            for consumer_id in consumers.get(&e_node_id).into_iter().flatten() {
+                if closure.insert(*consumer_id) {
+                    pending.push(*consumer_id);
+                }
+            }
+        }
+
+        let mut closure: Vec<_> = closure.into_iter().collect();
+        closure.sort_unstable();
+        closure
     }
 }
 
@@ -195,6 +241,35 @@ mod tests {
         assert!(
             compiled.program.e_nodes[&e_node_id].disabled,
             "the disabled instance marks its compiled interior effectively disabled"
+        );
+    }
+
+    #[test]
+    fn data_consumer_closure_targets_one_instance_or_every_shared_definition_occurrence() {
+        let library = test_func_lib(TestFuncHooks::default());
+        let mut nested = Graph::new("Nested");
+        let interior_id = nested.add(library.by_name("get_b").unwrap().into());
+        let nested_id = GraphId::unique();
+
+        let mut graph = Graph::default();
+        let first_instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        let second_instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        graph.insert_graph(nested_id, nested);
+        let first = ExecutionNodeId::from_authoring(&[first_instance, interior_id]);
+        let second = ExecutionNodeId::from_authoring(&[second_instance, interior_id]);
+        let compiled = Compiler::default().compile(&graph, &library).unwrap();
+
+        assert_eq!(
+            compiled.data_consumer_closure(&[first_instance]),
+            vec![first],
+            "an instance evicts only its own flattened interior"
+        );
+        let mut both = vec![first, second];
+        both.sort_unstable();
+        assert_eq!(
+            compiled.data_consumer_closure(&[interior_id]),
+            both,
+            "editing a shared definition evicts every flattened occurrence"
         );
     }
 

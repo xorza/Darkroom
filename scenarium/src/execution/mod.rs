@@ -30,6 +30,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::RunEvent;
 use crate::execution::stats::ExecutionStats;
+use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 
 pub(crate) mod cache;
@@ -52,7 +53,7 @@ pub(crate) mod stats;
 mod tests;
 pub(crate) mod validate;
 
-use cache::RuntimeCache;
+use cache::{CacheEvictionFailure, RuntimeCache};
 use disk_store::StorePolicy;
 use executor::Executor;
 use identity::ExecutionEventPort;
@@ -270,6 +271,11 @@ impl ExecutionEngine {
         self.cache.reconcile(&self.compiled.program);
 
         self.compiled.validate_installed_debug(&self.cache);
+    }
+
+    pub(crate) async fn evict_cache(&mut self, node_ids: &[NodeId]) -> Vec<CacheEvictionFailure> {
+        let e_node_ids = self.compiled.data_consumer_closure(node_ids);
+        self.cache.evict(&e_node_ids).await
     }
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node

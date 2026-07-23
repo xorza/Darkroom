@@ -3837,6 +3837,7 @@ dependencies = [
  "blake3",
  "common",
  "hashbrown 0.17.1",
+ "indexmap",
  "serde",
  "serde_json",
  "strum",

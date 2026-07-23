@@ -13,7 +13,7 @@ use crate::worker::event_loop::{
     ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, LambdaPanic, StopOutcome, stop_event_loop,
 };
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerExited, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
 
 pub(crate) mod batch;
 pub(crate) mod event_loop;
@@ -95,10 +95,12 @@ where
     C: Fn(WorkerReport),
 {
     for panic in panics {
-        callback(WorkerReport::Finished(Err(Error::EventLambdaPanic {
-            e_node_id: panic.e_node_id,
-            message: panic.message,
-        })));
+        callback(WorkerReport::Error(WorkerError::Execution {
+            error: Error::EventLambdaPanic {
+                e_node_id: panic.e_node_id,
+                message: panic.message,
+            },
+        }));
     }
 }
 
@@ -173,6 +175,24 @@ async fn worker_loop<ExecutionCallback>(
             None => {}
         }
 
+        if !intent.evict_cache.is_empty() {
+            let node_ids = std::mem::take(&mut intent.evict_cache)
+                .into_iter()
+                .collect::<Vec<_>>();
+            let failures = execution_engine.evict_cache(&node_ids).await;
+            if !failures.is_empty() {
+                let details = failures
+                    .iter()
+                    .map(|failure| format!("{:?}: {}", failure.e_node_id, failure.message))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                execution_callback(WorkerReport::Error(WorkerError::CacheEviction {
+                    failure_count: failures.len(),
+                    details,
+                }));
+            }
+        }
+
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
@@ -181,8 +201,8 @@ async fn worker_loop<ExecutionCallback>(
 
         let needs_execute = intent.execute_sinks
             || intent.execute_event_triggers
-            || !intent.execute_nodes.values.is_empty()
-            || !intent.events.values.is_empty()
+            || !intent.execute_nodes.is_empty()
+            || !intent.events.is_empty()
             || should_start_event_loop;
 
         if needs_execute && !execution_engine.is_empty() {
@@ -195,8 +215,10 @@ async fn worker_loop<ExecutionCallback>(
             let seeds = RunSeeds {
                 sinks: intent.execute_sinks,
                 event_triggers: in_loop || intent.execute_event_triggers,
-                events: intent.events.take(),
-                nodes: intent.execute_nodes.take(),
+                events: std::mem::take(&mut intent.events).into_iter().collect(),
+                nodes: std::mem::take(&mut intent.execute_nodes)
+                    .into_iter()
+                    .collect(),
             };
             let result = run_and_forward(
                 &mut execution_engine,
@@ -210,17 +232,25 @@ async fn worker_loop<ExecutionCallback>(
                 .expect("worker cancellation mutex poisoned")
                 .take();
 
-            if should_start_event_loop && let Ok(stats) = &result {
-                assert!(event_loop.is_none());
-                let triggers = execution_engine.active_event_triggers(stats);
-                if !triggers.is_empty() {
-                    event_loop =
-                        Some(ActiveEventLoop::start(triggers, event_loop_pause_gate.clone()).await);
-                    tracing::info!("Event loop started");
+            match result {
+                Ok(stats) => {
+                    if should_start_event_loop {
+                        assert!(event_loop.is_none());
+                        let triggers = execution_engine.active_event_triggers(&stats);
+                        if !triggers.is_empty() {
+                            event_loop = Some(
+                                ActiveEventLoop::start(triggers, event_loop_pause_gate.clone())
+                                    .await,
+                            );
+                            tracing::info!("Event loop started");
+                        }
+                    }
+                    execution_callback(WorkerReport::Finished(stats));
+                }
+                Err(error) => {
+                    execution_callback(WorkerReport::Error(WorkerError::Execution { error }));
                 }
             }
-
-            execution_callback(WorkerReport::Finished(result));
         }
 
         for reply in intent.syncs.drain(..) {

@@ -436,7 +436,7 @@ mod cache_persistence {
                 .message
                 .starts_with(&format!("failed to remove {}:", blocked_path.display()))
         );
-        let mut expected_successes = reopened.compiled.cache_eviction_cone(&[get_a_id]);
+        let mut expected_successes = reopened.compiled.data_consumer_closure(&[get_a_id]);
         expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
         assert!(
             matches!(

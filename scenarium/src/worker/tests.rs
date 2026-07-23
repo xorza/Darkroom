@@ -1315,14 +1315,14 @@ fn scan_accumulates_simple_flags() {
     assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
     assert!(intent.execute_sinks);
     assert!(!intent.exit);
-    assert_eq!(intent.events.values.len(), 1);
-    assert!(intent.events.seen.contains(&event));
+    assert_eq!(intent.events.len(), 1);
+    assert!(intent.events.contains(&event));
     assert_eq!(
-        intent.execute_nodes.values.len(),
+        intent.execute_nodes.len(),
         1,
         "duplicate node seeds union to one"
     );
-    assert!(intent.execute_nodes.seen.contains(&e_node_id));
+    assert!(intent.execute_nodes.contains(&e_node_id));
     assert_eq!(intent.syncs.len(), 1);
 }
 
@@ -1347,7 +1347,7 @@ fn scan_deduplicates_events() {
     ]);
 
     assert_eq!(
-        intent.events.values.len(),
+        intent.events.len(),
         1,
         "duplicate events must collapse to one"
     );
@@ -1391,8 +1391,8 @@ fn scan_exit_dominates_entire_batch() {
         !intent.execute_sinks,
         "pre-Exit execute_sinks must be discarded"
     );
-    assert!(intent.events.values.is_empty());
-    assert!(intent.evict_cache.values.is_empty());
+    assert!(intent.events.is_empty());
+    assert!(intent.evict_cache.is_empty());
     assert!(intent.syncs.is_empty());
 }
 
@@ -1409,7 +1409,10 @@ fn scan_accumulates_unique_cache_evictions_in_order() {
         },
     ]);
 
-    assert_eq!(intent.evict_cache.values, vec![first, second]);
+    assert_eq!(
+        intent.evict_cache.into_iter().collect::<Vec<_>>(),
+        vec![first, second]
+    );
 }
 
 #[tokio::test]

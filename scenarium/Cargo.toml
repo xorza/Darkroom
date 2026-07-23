@@ -17,6 +17,7 @@ strum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
+indexmap = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 

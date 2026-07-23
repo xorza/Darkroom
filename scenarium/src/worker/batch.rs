@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-use std::hash::Hash;
 use std::sync::Arc;
 
+use indexmap::IndexSet;
 use tokio::sync::oneshot;
 
 use crate::execution::RunSeeds;
@@ -9,6 +8,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
+use crate::graph::NodeId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]
@@ -30,40 +30,11 @@ pub(crate) struct BatchIntent {
     pub(crate) loop_request: Option<LoopCommand>,
     pub(crate) execute_sinks: bool,
     pub(crate) execute_event_triggers: bool,
-    pub(crate) execute_nodes: OrderedUnique<ExecutionNodeId>,
+    pub(crate) execute_nodes: IndexSet<ExecutionNodeId>,
+    pub(crate) evict_cache: IndexSet<NodeId>,
     pub(crate) exit: bool,
-    pub(crate) events: OrderedUnique<ExecutionEventPort>,
+    pub(crate) events: IndexSet<ExecutionEventPort>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct OrderedUnique<T> {
-    pub(crate) values: Vec<T>,
-    pub(crate) seen: HashSet<T>,
-}
-
-impl<T> Default for OrderedUnique<T> {
-    fn default() -> Self {
-        Self {
-            values: Vec::new(),
-            seen: HashSet::new(),
-        }
-    }
-}
-
-impl<T: Clone + Eq + Hash> OrderedUnique<T> {
-    pub(crate) fn extend(&mut self, values: impl IntoIterator<Item = T>) {
-        for value in values {
-            if self.seen.insert(value.clone()) {
-                self.values.push(value);
-            }
-        }
-    }
-
-    pub(crate) fn take(&mut self) -> Vec<T> {
-        self.seen.clear();
-        std::mem::take(&mut self.values)
-    }
 }
 
 pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
@@ -81,6 +52,7 @@ pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 intent.graph_state = Some(GraphOp::Replace(compiled));
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
+            WorkerMessage::EvictCache { nodes } => intent.evict_cache.extend(nodes),
             WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
             WorkerMessage::Run { seeds } => {
                 let RunSeeds {
