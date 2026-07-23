@@ -4,7 +4,6 @@ use tokio::sync::oneshot;
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::report::PinnedOutputs;
 use crate::execution::{Error, RunSeeds};
 use crate::graph::NodeId;
@@ -36,7 +35,6 @@ pub enum WorkerReport {
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    InjectEvents { events: Vec<ExecutionEventPort> },
     Update { compiled: Arc<CompiledGraph> },
     Clear,
     EvictCache { nodes: Vec<NodeId> },

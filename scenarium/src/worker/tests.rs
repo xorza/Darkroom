@@ -99,9 +99,9 @@ impl FrameHarness {
         }
     }
 
-    fn inject_frame_event(&self) -> WorkerMessage {
-        WorkerMessage::InjectEvents {
-            events: vec![self.frame_event()],
+    fn run_frame_event(&self) -> WorkerMessage {
+        WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![self.frame_event()]),
         }
     }
 }
@@ -339,12 +339,12 @@ async fn test_worker() -> TestResult {
     let mut h = FrameHarness::new().await;
 
     h.worker
-        .send_many([h.update_msg(), h.inject_frame_event()])
+        .send_many([h.update_msg(), h.run_frame_event()])
         .unwrap();
 
     for expected in ["1", "2", "3"] {
         if expected != "1" {
-            h.worker.send(h.inject_frame_event()).unwrap();
+            h.worker.send(h.run_frame_event()).unwrap();
         }
         let executed = h
             .compute_rx
@@ -685,13 +685,13 @@ async fn clear_resets_execution_graph() {
     let mut h = FrameHarness::new().await;
 
     h.worker
-        .send_many([h.update_msg(), h.inject_frame_event()])
+        .send_many([h.update_msg(), h.run_frame_event()])
         .unwrap();
     let stats = h.compute_rx.recv().await.unwrap().unwrap();
     assert_eq!(messages(&stats), ["1"]);
 
     h.worker.send(WorkerMessage::Clear).unwrap();
-    h.worker.send(h.inject_frame_event()).unwrap();
+    h.worker.send(h.run_frame_event()).unwrap();
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     // After Clear the frame event has no subscribers, so nothing runs /
@@ -713,8 +713,8 @@ async fn events_are_deduplicated() {
 
     let event = h.frame_event();
     h.worker
-        .send(WorkerMessage::InjectEvents {
-            events: vec![event, event, event],
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![event, event, event]),
         })
         .unwrap();
 
@@ -1216,7 +1216,7 @@ async fn disabled_sink_stays_out_of_sink_runs() {
 async fn sync_fires_after_execution() {
     let mut h = FrameHarness::new().await;
 
-    sync_after(&h.worker, [h.update_msg(), h.inject_frame_event()]).await;
+    sync_after(&h.worker, [h.update_msg(), h.run_frame_event()]).await;
     let _ = h.compute_rx.recv().await;
 }
 
@@ -1320,7 +1320,7 @@ async fn clear_then_update_in_same_batch_applies_update() {
     let mut h = FrameHarness::new().await;
 
     h.worker
-        .send_many([WorkerMessage::Clear, h.update_msg(), h.inject_frame_event()])
+        .send_many([WorkerMessage::Clear, h.update_msg(), h.run_frame_event()])
         .unwrap();
 
     let executed = h
@@ -1363,11 +1363,11 @@ async fn execute_sinks_on_empty_graph_is_silent_noop() {
 async fn event_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = completed_worker(8);
     worker
-        .send(WorkerMessage::InjectEvents {
-            events: vec![ExecutionEventPort {
+        .send(WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![ExecutionEventPort {
                 e_node_id: ExecutionNodeId::unique(),
                 event_idx: 0,
-            }],
+            }]),
         })
         .unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
@@ -1381,7 +1381,7 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 }
 
 // F4 regression: when a batch triggers both an execution
-// (sink seeds or InjectEvents) and StartEventLoop, the commit
+// (sink or event seeds) and StartEventLoop, the commit
 // phase must run execute() once and fire the callback once — not twice.
 
 #[tokio::test]
@@ -1499,8 +1499,8 @@ async fn replacement_rejects_stale_event_without_stopping_worker() {
             WorkerMessage::Update {
                 compiled: replacement,
             },
-            WorkerMessage::InjectEvents {
-                events: vec![stale_event],
+            WorkerMessage::Run {
+                seeds: RunSeeds::events(vec![stale_event]),
             },
         ])
         .unwrap();
@@ -1661,8 +1661,8 @@ fn scan_accumulates_simple_flags() {
         WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
         },
-        WorkerMessage::InjectEvents {
-            events: vec![event],
+        WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![event]),
         },
         WorkerMessage::Run {
             seeds: RunSeeds::nodes(vec![e_node_id]),
@@ -1697,14 +1697,14 @@ fn scan_deduplicates_events() {
     };
 
     let intent = scan(vec![
-        WorkerMessage::InjectEvents {
-            events: vec![event],
+        WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![event]),
         },
-        WorkerMessage::InjectEvents {
-            events: vec![event],
+        WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![event]),
         },
-        WorkerMessage::InjectEvents {
-            events: vec![event, event],
+        WorkerMessage::Run {
+            seeds: RunSeeds::events(vec![event, event]),
         },
     ]);
 
@@ -1935,13 +1935,13 @@ fn scan_last_write_wins_per_slot() {
 
 // Integration: end-to-end confirmation that Update-then-Clear in
 // one batch leaves the execution graph empty — a subsequent
-// InjectEvents hits the empty-graph silent no-op path (no callback).
+// event-seeded run hits the empty-graph silent no-op path (no callback).
 #[tokio::test]
 async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
     let mut h = FrameHarness::new().await;
 
     h.worker
-        .send_many([h.update_msg(), WorkerMessage::Clear, h.inject_frame_event()])
+        .send_many([h.update_msg(), WorkerMessage::Clear, h.run_frame_event()])
         .unwrap();
     assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }

@@ -202,6 +202,13 @@ impl RunSeeds {
             ..Self::default()
         }
     }
+
+    pub fn events(events: Vec<ExecutionEventPort>) -> Self {
+        Self {
+            events,
+            ..Self::default()
+        }
+    }
 }
 
 /// The run-side pipeline container. Shares the installed program and its

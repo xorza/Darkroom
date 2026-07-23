@@ -47,7 +47,6 @@ pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                     ..BatchIntent::default()
                 };
             }
-            WorkerMessage::InjectEvents { events } => intent.events.extend(events),
             WorkerMessage::Update { compiled } => {
                 intent.graph_state = Some(GraphOp::Replace(compiled));
             }
