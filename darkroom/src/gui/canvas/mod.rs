@@ -497,7 +497,7 @@ pub(crate) fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> 
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
 /// `file!()`/`line!()` so calls from different source lines stay
 /// distinct; here we only need the id to survive between frames.
-pub(crate) const fn outer_canvas_widget_id() -> WidgetId {
+pub(crate) fn outer_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 
@@ -506,6 +506,6 @@ pub(crate) const fn outer_canvas_widget_id() -> WidgetId {
 /// connection draws — and, in `PinUi::apply`, to convert a pin drag's
 /// release point into canvas-world coordinates during prepass (before
 /// `frame` computes its own copy for painting).
-pub(crate) const fn inner_canvas_widget_id() -> WidgetId {
+pub(crate) fn inner_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
