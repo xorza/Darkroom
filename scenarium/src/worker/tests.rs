@@ -8,9 +8,12 @@ use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
-use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
-use crate::execution::report::RunPhase;
-use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::identity::{
+    ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
+};
+use crate::execution::outcome::{
+    ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage,
+};
 use crate::execution::{Error, Result as ExecResult, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
@@ -23,7 +26,10 @@ use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerError, WorkerLifecycle, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
+use crate::worker::status::{
+    NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind,
+};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -172,20 +178,80 @@ async fn start_single_event_loop(
     (active, e_node_id)
 }
 
-/// A worker whose callback forwards only `Finished` reports into a fresh
+fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
+    let WorkerStatusKind::Completed {
+        elapsed_secs,
+        cancelled,
+        ..
+    } = status.kind
+    else {
+        panic!("only completed statuses have an execution outcome");
+    };
+    let mut outcome = ExecutionOutcome {
+        elapsed_secs,
+        executed_nodes: Vec::new(),
+        missing_inputs: Vec::new(),
+        cached_nodes: Vec::new(),
+        triggered_events: Vec::new(),
+        node_errors: Vec::new(),
+        logs: status.logs.clone(),
+        cancelled,
+        cache_ram: status.cache_ram,
+        node_ram: Vec::new(),
+    };
+    for node in &status.nodes {
+        match &node.status {
+            Some(NodeExecutionStatus::Running { .. }) => {
+                panic!("completed status contains a running node")
+            }
+            Some(NodeExecutionStatus::Cached) => outcome.cached_nodes.push(node.e_node_id),
+            Some(NodeExecutionStatus::Executed { elapsed_secs }) => {
+                outcome.executed_nodes.push(ExecutedNodeStats {
+                    e_node_id: node.e_node_id,
+                    elapsed_secs: *elapsed_secs,
+                });
+            }
+            Some(NodeExecutionStatus::MissingInputs) => {
+                outcome.missing_inputs.push(ExecutionInputPort {
+                    e_node_id: node.e_node_id,
+                    port_idx: 0,
+                });
+            }
+            Some(NodeExecutionStatus::Errored { error }) => {
+                outcome.node_errors.push(NodeError {
+                    e_node_id: node.e_node_id,
+                    error: error.clone(),
+                });
+            }
+            None => {}
+        }
+        if let Some(usage) = node.ram {
+            outcome.node_ram.push(NodeRamUsage {
+                e_node_id: node.e_node_id,
+                usage,
+            });
+        }
+    }
+    outcome
+}
+
+/// A worker whose callback forwards only completed statuses into a fresh
 /// mpsc of capacity `cap` — the shape most tests want when they don't care
 /// about live progress. Works with or without a graph loaded.
 fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOutcome>>) {
     let (tx, rx) = mpsc::channel(cap);
     let worker = Worker::new(move |report| {
         let result = match report {
-            WorkerReport::Finished(stats) => Some(Ok(stats)),
+            WorkerReport::Status(status)
+                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
+            {
+                Some(Ok(execution_outcome(&status)))
+            }
             WorkerReport::Error(WorkerError::Execution { error }) => Some(Err(error)),
             WorkerReport::Installed(_)
             | WorkerReport::Cleared
             | WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Lifecycle(_)
-            | WorkerReport::Progress(_)
+            | WorkerReport::Status(_)
             | WorkerReport::PinnedOutputs(_) => None,
         };
         if let Some(result) = result {
@@ -211,10 +277,12 @@ async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun
         match report {
             WorkerReport::Installed(installed) => compiled = Some(installed),
             WorkerReport::Cleared => compiled = None,
-            WorkerReport::Finished(stats) => {
+            WorkerReport::Status(status)
+                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
+            {
                 return FinishedRun {
-                    compiled: compiled.expect("Finished arrived before Installed"),
-                    result: Ok(stats),
+                    compiled: compiled.expect("completion arrived before installation"),
+                    result: Ok(execution_outcome(&status)),
                 };
             }
             WorkerReport::Error(WorkerError::Execution { error }) => {
@@ -224,8 +292,7 @@ async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun
                 };
             }
             WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Lifecycle(_)
-            | WorkerReport::Progress(_)
+            | WorkerReport::Status(_)
             | WorkerReport::PinnedOutputs(_) => {}
         }
     }
@@ -434,9 +501,13 @@ async fn lambda_panic_is_captured_not_unwound() {
 }
 
 #[test]
-fn event_loop_stop_reports_lifecycle_before_lambda_errors() {
+fn event_loop_stop_reports_idle_status_before_lambda_errors() {
     let e_node_id = ExecutionNodeId::unique();
     let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut status = Arc::new(WorkerStatus {
+        activity: WorkerActivity::EventLoop,
+        ..WorkerStatus::default()
+    });
 
     crate::worker::report_event_loop_stop(
         StopOutcome {
@@ -446,13 +517,15 @@ fn event_loop_stop_reports_lifecycle_before_lambda_errors() {
                 message: "boom".into(),
             }],
         },
+        &mut status,
         &|report| tx.send(report).unwrap(),
     );
 
-    assert!(matches!(
-        rx.try_recv().unwrap(),
-        WorkerReport::Lifecycle(WorkerLifecycle::EventLoopStopped)
-    ));
+    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
+        panic!("event-loop stop must publish worker status");
+    };
+    assert_eq!(status.activity, WorkerActivity::Idle);
+    assert_eq!(status.kind, WorkerStatusKind::Activity);
     let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
         panic!("event-lambda panic must use the general worker error report");
     };
@@ -540,11 +613,11 @@ async fn execute_sinks_triggers_sink_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn worker_streams_node_progress_before_finished() {
+async fn worker_streams_node_patches_before_completion() {
     let library = system_library();
     let (graph, print_node_id) = print_literal_graph(&library, "hi");
 
-    // Capture the full report stream (progress + final), unlike the fixture.
+    // Capture the full status stream, unlike the fixture.
     let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
     let worker = Worker::new(move |report| {
         tx.try_send(report).ok();
@@ -563,13 +636,10 @@ async fn worker_streams_node_progress_before_finished() {
         ])
         .unwrap();
 
-    // The single node's Started + Finished progress both arrive (mapped to its
-    // authoring id) ahead of the sink `Finished` report.
     let mut started = 0;
     let mut node_finished = 0;
     let mut installed = None;
     let mut execution_started = false;
-    let mut execution_stopped = false;
     loop {
         let report = timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -581,44 +651,38 @@ async fn worker_streams_node_progress_before_finished() {
                 assert!(Arc::ptr_eq(&compiled, &expected_compiled));
                 installed = Some(compiled);
             }
-            WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStarted) => {
+            WorkerReport::Status(status)
+                if status.kind == WorkerStatusKind::Activity
+                    && status.activity == WorkerActivity::Executing =>
+            {
                 assert!(installed.is_some(), "execution started before installation");
                 assert!(!execution_started, "execution started more than once");
                 execution_started = true;
             }
-            WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStopped) => {
-                assert!(execution_started, "execution stopped before it started");
-                assert!(!execution_stopped, "execution stopped more than once");
-                assert_eq!(started, 1);
-                assert_eq!(node_finished, 1);
-                execution_stopped = true;
-            }
-            WorkerReport::Lifecycle(
-                WorkerLifecycle::EventLoopStarted | WorkerLifecycle::EventLoopStopped,
-            ) => panic!("one-shot run changed event-loop lifecycle"),
-            WorkerReport::Progress(p) => {
-                assert!(
-                    execution_started && !execution_stopped,
-                    "progress arrived outside execution lifecycle"
-                );
+            WorkerReport::Status(status) if status.kind == WorkerStatusKind::Patch => {
+                assert!(execution_started, "node patch arrived before execution");
                 let compiled = installed
                     .as_ref()
-                    .expect("Progress arrived before Installed");
-                assert_eq!(
-                    p.e_node_id,
-                    root_execution_node(print_node_id),
-                    "progress maps to the node"
-                );
-                assert_eq!(
-                    compiled
-                        .attribution(p.e_node_id)
-                        .unwrap()
-                        .collect::<Vec<_>>(),
-                    vec![print_node_id],
-                );
-                match p.phase {
-                    RunPhase::Started { .. } => started += 1,
-                    RunPhase::Finished { .. } => node_finished += 1,
+                    .expect("node patch arrived before installation");
+                assert_eq!(status.activity, WorkerActivity::Executing);
+                for node in &status.nodes {
+                    assert_eq!(
+                        node.e_node_id,
+                        root_execution_node(print_node_id),
+                        "status maps to the node"
+                    );
+                    assert_eq!(
+                        compiled
+                            .attribution(node.e_node_id)
+                            .unwrap()
+                            .collect::<Vec<_>>(),
+                        vec![print_node_id],
+                    );
+                    match node.status {
+                        Some(NodeExecutionStatus::Running { .. }) => started += 1,
+                        Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
+                        ref unexpected => panic!("unexpected live node status: {unexpected:?}"),
+                    }
                 }
             }
             WorkerReport::PinnedOutputs(_) => {
@@ -627,22 +691,23 @@ async fn worker_streams_node_progress_before_finished() {
                     "PinnedOutputs arrived before Installed"
                 );
             }
-            WorkerReport::Finished(stats) => {
-                assert!(installed.is_some(), "Finished arrived before Installed");
-                assert!(
-                    execution_stopped,
-                    "Finished arrived before execution stopped"
-                );
-                assert_eq!(stats.executed_nodes.len(), 1);
+            WorkerReport::Status(status)
+                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
+            {
+                assert!(installed.is_some(), "completion arrived before installation");
+                assert_eq!(status.activity, WorkerActivity::Idle);
+                assert_eq!(started, 1);
+                assert_eq!(node_finished, 1);
+                assert_eq!(execution_outcome(&status).executed_nodes.len(), 1);
                 break;
             }
+            WorkerReport::Status(status) => panic!("unexpected worker status: {status:?}"),
             WorkerReport::Cleared => panic!("unexpected clear"),
             WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
         }
     }
     assert_eq!(started, 1, "one Started before the final report");
     assert!(execution_started);
-    assert!(execution_stopped);
     assert_eq!(
         node_finished, 1,
         "one Finished progress before the final report"
@@ -777,7 +842,7 @@ async fn start_stop_event_loop() {
 }
 
 #[tokio::test]
-async fn worker_reports_execution_and_event_loop_lifecycle_in_order() {
+async fn worker_reports_absolute_activity_in_order() {
     let mut library = system_library();
     library.merge(worker_events_library());
     let graph = log_frame_no_graph(&library);
@@ -799,23 +864,21 @@ async fn worker_reports_execution_and_event_loop_lifecycle_in_order() {
     )
     .await;
 
-    let mut lifecycle = Vec::new();
-    while lifecycle.last() != Some(&WorkerLifecycle::EventLoopStarted) {
+    let mut activities = Vec::new();
+    while activities.last() != Some(&WorkerActivity::EventLoop) {
         let report = timeout(Duration::from_secs(5), report_rx.recv())
             .await
             .expect("worker timed out")
             .expect("worker channel closed");
-        if let WorkerReport::Lifecycle(event) = report {
-            lifecycle.push(event);
+        if let WorkerReport::Status(status) = report
+            && activities.last() != Some(&status.activity)
+        {
+            activities.push(status.activity);
         }
     }
     assert_eq!(
-        lifecycle,
-        [
-            WorkerLifecycle::ExecutionStarted,
-            WorkerLifecycle::ExecutionStopped,
-            WorkerLifecycle::EventLoopStarted,
-        ]
+        activities,
+        [WorkerActivity::Executing, WorkerActivity::EventLoop]
     );
 
     sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
@@ -826,7 +889,9 @@ async fn worker_reports_execution_and_event_loop_lifecycle_in_order() {
             .expect("worker channel closed");
         if matches!(
             report,
-            WorkerReport::Lifecycle(WorkerLifecycle::EventLoopStopped)
+            WorkerReport::Status(status)
+                if status.kind == WorkerStatusKind::Activity
+                    && status.activity == WorkerActivity::Idle
         ) {
             break;
         }
@@ -857,14 +922,18 @@ async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
         ])
         .unwrap();
 
-    let mut lifecycle = Vec::new();
+    let mut activities = Vec::new();
     loop {
         let report = timeout(Duration::from_secs(5), report_rx.recv())
             .await
             .expect("worker timed out")
             .expect("worker channel closed");
         match report {
-            WorkerReport::Lifecycle(event) => lifecycle.push(event),
+            WorkerReport::Status(status) => {
+                if activities.last() != Some(&status.activity) {
+                    activities.push(status.activity);
+                }
+            }
             WorkerReport::Error(WorkerError::Execution {
                 error:
                     Error::EventLambdaPanic {
@@ -879,18 +948,15 @@ async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
             | WorkerReport::Cleared
             | WorkerReport::Error(WorkerError::Execution { .. })
             | WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Progress(_)
-            | WorkerReport::PinnedOutputs(_)
-            | WorkerReport::Finished(_) => {}
+            | WorkerReport::PinnedOutputs(_) => {}
         }
     }
     assert_eq!(
-        lifecycle,
+        activities,
         [
-            WorkerLifecycle::ExecutionStarted,
-            WorkerLifecycle::ExecutionStopped,
-            WorkerLifecycle::EventLoopStarted,
-            WorkerLifecycle::EventLoopStopped,
+            WorkerActivity::Executing,
+            WorkerActivity::EventLoop,
+            WorkerActivity::Idle,
         ]
     );
 }
