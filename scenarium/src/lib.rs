@@ -54,4 +54,6 @@ pub use runtime::context::test_support::insert_context;
 pub use runtime::context::{ContextManager, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
-pub use worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
+pub use worker::protocol::{
+    WorkerError, WorkerExited, WorkerLifecycle, WorkerMessage, WorkerReport,
+};

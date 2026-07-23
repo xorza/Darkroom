@@ -28,7 +28,7 @@ fn normalization_is_shared_across_run_eviction_and_replacement_boundaries() {
     workspace.replace_document(OpenDocument::default());
     assert!(workspace.open.normalization_pending);
     assert!(
-        workspace.evict_cache(NodeId::unique()),
+        workspace.evict_cache(NodeId::unique()).is_some(),
         "the empty graph compiles and queues an eviction"
     );
     assert!(!workspace.open.normalization_pending);

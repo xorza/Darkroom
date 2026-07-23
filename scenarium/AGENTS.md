@@ -110,7 +110,9 @@ emits `Installed` or `Cleared` before any report belonging to the resulting
 state; its single execution loop and callback preserve that FIFO stream.
 Successful cache eviction is fire-and-forget. Operation-level execution and
 cache-eviction failures both arrive as `WorkerReport::Error`; `Finished`
-contains only successful execution stats.
+contains only successful execution stats. `WorkerReport::Lifecycle` brackets
+each actual execution and announces event-loop creation and teardown, including
+teardown caused by graph replacement or event-channel closure.
 `ActiveEventLoop` owns both its tasks and event receiver, so the lifecycle
 invariant is represented by one type. Event tasks rendezvous through Tokio's
 `Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping

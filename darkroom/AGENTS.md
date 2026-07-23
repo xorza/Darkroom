@@ -282,10 +282,10 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `scenarium::execution::compile::Compiler`) and sends the
   `Arc<CompiledGraph>` to the worker, followed by a separate
   `Run { RunSeeds::sinks() }` command. A compile error surfaces synchronously —
-  no run starts, `begin_run` is skipped, and the worker's prior program is
-  untouched. The FIFO worker first reports `WorkerReport::Installed` with that
-  exact shared compile, then streams its progress, pinned outputs, and final
-  result in order.
+  no lifecycle transition occurs and the worker's prior program is untouched.
+  The FIFO worker first reports `WorkerReport::Installed` with that exact shared
+  compile, then streams execution-started, progress, pinned outputs,
+  execution-stopped, and the final result in order.
   `RunState` retains the acknowledged compile and uses it to project flat result
   ids onto authoring nodes. `WorkerBridge::deliver` forwards reports to its
   channel and pokes `host.request_repaint()`.
@@ -308,16 +308,18 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `CacheMode` includes disk persistence (header `↓` chip) reloads its output
   across sessions from a store beside the project file.
 - On-thread, `App::update` drains the channel (`worker.drain()`, non-blocking).
+  `WorkerReport::Lifecycle` is the sole source of `RunState::activity`; commands
+  never update its execution/event-loop state optimistically.
   `WorkerReport::Progress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
   so the node header shows a `aperture::Spinner` + live elapsed-so-far
-  (`App::record` repaints ~20fps while `run_state.is_running()`);
+  (`App::record` repaints ~20fps while the activity is executing);
   `WorkerReport::Finished` → `set_results`
   folds the final `ExecutionStats` (including nested-graph attribution) onto
   authoring nodes: per-node `ExecStatus`
   (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.
-- **Cancel** (coarse): **Run ▸ Cancel Run** shows while `run_state.is_running()`
-  (a `running` flag, set by `begin_run`, cleared by `set_results`); it routes
+- **Cancel** (coarse): **Run ▸ Cancel Run** shows while `run_state.activity`
+  is executing (set and cleared by worker lifecycle reports); it routes
   `MenuCommand::CancelRun` → `RuntimeHost::cancel_run` → `WorkerBridge::cancel_run` →
   `Worker::request_cancel` (a shared `common::CancelToken` the executor polls
   between nodes). The
@@ -325,7 +327,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   P3), but nothing further runs and the run reports `stats.cancelled`.
 - **Status, logs, and pinned values persist across re-runs** so the UI doesn't
   blank during compute; fresh stats and pushes replace them as they arrive.
-- **Pinned outputs are centralized**: `WorkerEvent::PinnedOutputs` is stored
+- **Pinned outputs are centralized**: `WorkerReport::PinnedOutputs` is stored
   directly in `RunState`, with an eagerly prepared thumbnail and a monotonic
   revision. Pin previews and image viewers read it during rendering and cache
   only derived textures/navigation state. `WorkerBridge::deliver` requests the
@@ -377,7 +379,8 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   cache eviction / RAM-cache / disk-cache / inspect; the `D` control appears only on runnable
   sinks, and the
   `↻` chip sends a runtime `RunCommand::EvictCache` without editing the document and
-  discards the frontend's cache RAM and pinned-output projections until the next run,
+  discards the frontend's cache RAM and pinned-output projections at the matching
+  `Installed` stream fence, after any older pushed values have been consumed,
   while `R` and `↓` flip the two bits of
   `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `NodeProperty::RuntimeCache`), `port_row` (the two port

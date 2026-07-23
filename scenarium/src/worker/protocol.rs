@@ -24,11 +24,20 @@ pub enum WorkerError {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkerLifecycle {
+    ExecutionStarted,
+    ExecutionStopped,
+    EventLoopStarted,
+    EventLoopStopped,
+}
+
 #[derive(Debug)]
 pub enum WorkerReport {
     Installed(Arc<CompiledGraph>),
     Cleared,
     Error(WorkerError),
+    Lifecycle(WorkerLifecycle),
     Progress(RunProgress),
     PinnedOutputs(PinnedOutputs),
     Finished(ExecutionStats),

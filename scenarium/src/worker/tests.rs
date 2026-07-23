@@ -23,7 +23,7 @@ use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic};
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerError, WorkerLifecycle, WorkerMessage, WorkerReport};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -184,6 +184,7 @@ fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionSt
             WorkerReport::Installed(_)
             | WorkerReport::Cleared
             | WorkerReport::Error(WorkerError::CacheEviction { .. })
+            | WorkerReport::Lifecycle(_)
             | WorkerReport::Progress(_)
             | WorkerReport::PinnedOutputs(_) => None,
         };
@@ -223,6 +224,7 @@ async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun
                 };
             }
             WorkerReport::Error(WorkerError::CacheEviction { .. })
+            | WorkerReport::Lifecycle(_)
             | WorkerReport::Progress(_)
             | WorkerReport::PinnedOutputs(_) => {}
         }
@@ -559,6 +561,8 @@ async fn worker_streams_node_progress_before_finished() {
     let mut started = 0;
     let mut node_finished = 0;
     let mut installed = None;
+    let mut execution_started = false;
+    let mut execution_stopped = false;
     loop {
         let report = timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -570,7 +574,26 @@ async fn worker_streams_node_progress_before_finished() {
                 assert!(Arc::ptr_eq(&compiled, &expected_compiled));
                 installed = Some(compiled);
             }
+            WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStarted) => {
+                assert!(installed.is_some(), "execution started before installation");
+                assert!(!execution_started, "execution started more than once");
+                execution_started = true;
+            }
+            WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStopped) => {
+                assert!(execution_started, "execution stopped before it started");
+                assert!(!execution_stopped, "execution stopped more than once");
+                assert_eq!(started, 1);
+                assert_eq!(node_finished, 1);
+                execution_stopped = true;
+            }
+            WorkerReport::Lifecycle(
+                WorkerLifecycle::EventLoopStarted | WorkerLifecycle::EventLoopStopped,
+            ) => panic!("one-shot run changed event-loop lifecycle"),
             WorkerReport::Progress(p) => {
+                assert!(
+                    execution_started && !execution_stopped,
+                    "progress arrived outside execution lifecycle"
+                );
                 let compiled = installed
                     .as_ref()
                     .expect("Progress arrived before Installed");
@@ -599,6 +622,10 @@ async fn worker_streams_node_progress_before_finished() {
             }
             WorkerReport::Finished(stats) => {
                 assert!(installed.is_some(), "Finished arrived before Installed");
+                assert!(
+                    execution_stopped,
+                    "Finished arrived before execution stopped"
+                );
                 assert_eq!(stats.executed_nodes.len(), 1);
                 break;
             }
@@ -607,6 +634,8 @@ async fn worker_streams_node_progress_before_finished() {
         }
     }
     assert_eq!(started, 1, "one Started before the final report");
+    assert!(execution_started);
+    assert!(execution_stopped);
     assert_eq!(
         node_finished, 1,
         "one Finished progress before the final report"
@@ -738,6 +767,125 @@ async fn start_stop_event_loop() {
     sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
     while h.compute_rx.try_recv().is_ok() {}
     assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
+}
+
+#[tokio::test]
+async fn worker_reports_execution_and_event_loop_lifecycle_in_order() {
+    let mut library = system_library();
+    library.merge(worker_events_library());
+    let graph = log_frame_no_graph(&library);
+    let compiled = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let worker = Worker::new(move |report| {
+        report_tx.send(report).unwrap();
+    });
+
+    sync_after(
+        &worker,
+        [
+            WorkerMessage::Update { compiled },
+            WorkerMessage::StartEventLoop,
+        ],
+    )
+    .await;
+
+    let mut lifecycle = Vec::new();
+    while lifecycle.last() != Some(&WorkerLifecycle::EventLoopStarted) {
+        let report = timeout(Duration::from_secs(5), report_rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        if let WorkerReport::Lifecycle(event) = report {
+            lifecycle.push(event);
+        }
+    }
+    assert_eq!(
+        lifecycle,
+        [
+            WorkerLifecycle::ExecutionStarted,
+            WorkerLifecycle::ExecutionStopped,
+            WorkerLifecycle::EventLoopStarted,
+        ]
+    );
+
+    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
+    loop {
+        let report = timeout(Duration::from_secs(5), report_rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        if matches!(
+            report,
+            WorkerReport::Lifecycle(WorkerLifecycle::EventLoopStopped)
+        ) {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn event_lambda_exit_reports_loop_stopped_before_its_error() {
+    let mut library = system_library();
+    library.merge(worker_events_library());
+    let mut frame_event = library.by_name("Frame Event").unwrap().clone();
+    frame_event.events[0].event_lambda =
+        EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
+    library.add(frame_event);
+    let graph = log_frame_no_graph(&library);
+    let compiled = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let worker = Worker::new(move |report| {
+        report_tx.send(report).unwrap();
+    });
+    worker
+        .send_many([
+            WorkerMessage::Update { compiled },
+            WorkerMessage::StartEventLoop,
+        ])
+        .unwrap();
+
+    let mut lifecycle = Vec::new();
+    loop {
+        let report = timeout(Duration::from_secs(5), report_rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        match report {
+            WorkerReport::Lifecycle(event) => lifecycle.push(event),
+            WorkerReport::Error(WorkerError::Execution {
+                error:
+                    Error::EventLambdaPanic {
+                        e_node_id: _,
+                        message,
+                    },
+            }) => {
+                assert!(message.contains("event loop stopped"));
+                break;
+            }
+            WorkerReport::Installed(_)
+            | WorkerReport::Cleared
+            | WorkerReport::Error(WorkerError::Execution { .. })
+            | WorkerReport::Error(WorkerError::CacheEviction { .. })
+            | WorkerReport::Progress(_)
+            | WorkerReport::PinnedOutputs(_)
+            | WorkerReport::Finished(_) => {}
+        }
+    }
+    assert_eq!(
+        lifecycle,
+        [
+            WorkerLifecycle::ExecutionStarted,
+            WorkerLifecycle::ExecutionStopped,
+            WorkerLifecycle::EventLoopStarted,
+            WorkerLifecycle::EventLoopStopped,
+        ]
+    );
 }
 
 /// Node seeds end-to-end: the run seed overrides a compiled disabled node and the

@@ -96,6 +96,7 @@ impl TerminalSession {
                 }
                 WorkerReport::Installed(_)
                 | WorkerReport::Cleared
+                | WorkerReport::Lifecycle(_)
                 | WorkerReport::Progress(_)
                 | WorkerReport::PinnedOutputs(_) => {}
             }
