@@ -11,7 +11,7 @@
 use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
-use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map};
+use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds};
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.
@@ -80,27 +80,26 @@ pub(crate) struct ExecutionPlan {
     /// no persisted counterpart. Every output is demanded from the lambda and delivered
     /// to the host, while the node's cache mode remains the sole RAM-retention policy.
     pub(crate) pinned: NodeSet,
+    /// Event-owning roots that must execute successfully to initialize the shared
+    /// state their event lambdas consume. Unlike ordinary roots, these bypass cache
+    /// reuse for the event-loop bootstrap run.
+    pub(crate) event_sources: NodeSet,
 }
 
 impl ExecutionPlan {
-    pub(crate) fn clear(&mut self) {
+    pub(crate) fn reset_for_program(&mut self, program: &ExecutionProgram) {
         self.process_order.clear();
         self.verdicts.clear();
-        self.roots.clear();
-        self.pinned.clear();
-    }
-
-    /// Clear the order and reset every per-node verdict to default at the given pool
-    /// sizes. Called at the start of each planning pass.
-    pub(crate) fn reset(&mut self, program: &ExecutionProgram) {
-        self.process_order.clear();
-        reset_node_map(
-            &mut self.verdicts,
-            program.e_nodes.keys().copied(),
-            NodeVerdict::default(),
+        self.verdicts.extend(
+            program
+                .e_nodes
+                .keys()
+                .copied()
+                .map(|e_node_id| (e_node_id, NodeVerdict::default())),
         );
         self.roots.clear();
         self.pinned.clear();
+        self.event_sources.clear();
     }
 }
 
@@ -130,6 +129,18 @@ pub(crate) struct Planner {
 }
 
 impl Planner {
+    fn reset_for_program(&mut self, program: &ExecutionProgram) {
+        self.stack.clear();
+        self.color.clear();
+        self.color.extend(
+            program
+                .e_nodes
+                .keys()
+                .copied()
+                .map(|e_node_id| (e_node_id, Color::White)),
+        );
+    }
+
     /// Build the per-run schedule into `plan` from the compiled artifact and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
@@ -140,7 +151,8 @@ impl Planner {
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         let program = &compiled.program;
-        plan.reset(program);
+        plan.reset_for_program(program);
+        self.reset_for_program(program);
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below and the resolver's cache-aware reverse sweep.
@@ -164,15 +176,6 @@ impl Planner {
         program: &ExecutionProgram,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        // `plan.reset` (called at the top of `plan`) already cleared `process_order` and
-        // `roots`; this pass only needs to reset its own scratch.
-        self.stack.clear();
-        reset_node_map(
-            &mut self.color,
-            program.e_nodes.keys().copied(),
-            Color::White,
-        );
-
         for e_node_id in plan.roots.iter().copied() {
             self.stack.push(Visit::Discover(e_node_id));
         }
@@ -287,14 +290,19 @@ fn collect_roots(
     // loop — nodes owning a subscribed event.
     for e_node_id in program.e_nodes.keys().copied() {
         let e_node = &program.e_nodes[&e_node_id];
-        if !e_node.disabled
-            && ((run_sinks && e_node.sink)
-                || (seeds.event_triggers
-                    && program.events[e_node.events.range()]
-                        .iter()
-                        .any(|ev| !ev.subscribers.is_empty())))
+        if e_node.disabled {
+            continue;
+        }
+        if run_sinks && e_node.sink {
+            plan.roots.insert(e_node_id);
+        }
+        if seeds.event_triggers
+            && program.events[e_node.events.range()]
+                .iter()
+                .any(|event| !event.subscribers.is_empty())
         {
             plan.roots.insert(e_node_id);
+            plan.event_sources.insert(e_node_id);
         }
     }
     Ok(())

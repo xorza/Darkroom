@@ -1,7 +1,7 @@
 //! Runnable event state. An [`EventTrigger`] pairs an execution event port with
-//! the lambda and shared state needed to run it. It lives here (not in `worker`)
-//! so `execution` stays self-contained below the worker: the worker drives event
-//! triggers but does not define them.
+//! the lambda and shared state initialized by a successful event-source run.
+//! It lives here so execution can produce triggers without depending on the
+//! worker that consumes them.
 
 use crate::execution::identity::ExecutionEventPort;
 use crate::node::event::EventLambda;

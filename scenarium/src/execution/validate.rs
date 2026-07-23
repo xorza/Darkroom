@@ -80,6 +80,8 @@ pub(crate) enum ExecutionPlanValidationError {
     DuplicateNode { e_node_id: ExecutionNodeId },
     #[error("pinned node {e_node_id:?} is not an execution root")]
     PinnedNodeNotRoot { e_node_id: ExecutionNodeId },
+    #[error("event source {e_node_id:?} is not an execution root")]
+    EventSourceNotRoot { e_node_id: ExecutionNodeId },
 }
 
 impl CompiledGraph {
@@ -260,6 +262,13 @@ impl ExecutionPlan {
         for e_node_id in &self.pinned {
             if !self.roots.contains(e_node_id) {
                 return Err(ExecutionPlanValidationError::PinnedNodeNotRoot {
+                    e_node_id: *e_node_id,
+                });
+            }
+        }
+        for e_node_id in &self.event_sources {
+            if !self.roots.contains(e_node_id) {
+                return Err(ExecutionPlanValidationError::EventSourceNotRoot {
                     e_node_id: *e_node_id,
                 });
             }

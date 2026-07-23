@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -9,6 +10,7 @@ use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError, NodeRamUsage};
+use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
@@ -18,9 +20,10 @@ use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
+use crate::worker;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
-use crate::worker::event_loop::ActiveEventLoop;
+use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{
@@ -189,6 +192,7 @@ fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
         missing_inputs: Vec::new(),
         cached_nodes: Vec::new(),
         triggered_events: Vec::new(),
+        event_triggers: Vec::new(),
         node_errors: Vec::new(),
         logs: status.logs.clone(),
         cancelled,
@@ -497,6 +501,93 @@ async fn lambda_panic_is_captured_not_unwound() {
 }
 
 #[test]
+fn event_loop_stop_reports_idle_status_before_lambda_errors() {
+    let e_node_id = ExecutionNodeId::unique();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::EventLoop));
+
+    worker::report_event_loop_stop(
+        StopOutcome {
+            was_running: true,
+            panics: vec![LambdaPanic {
+                e_node_id,
+                message: "boom".into(),
+            }],
+        },
+        &mut status,
+        &|report| tx.send(report).unwrap(),
+    );
+
+    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
+        panic!("event-loop stop must publish worker status");
+    };
+    assert_eq!(status.activity, WorkerActivity::Idle);
+    assert_eq!(status.kind, WorkerStatusKind::Activity);
+    let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
+        panic!("event-lambda panic must use the general worker error report");
+    };
+    assert!(matches!(
+        error,
+        Error::EventLambdaPanic {
+            e_node_id: actual,
+            message
+        } if actual == e_node_id && message == "boom"
+    ));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn worker_status_batches_nodes_and_preserves_published_snapshots() {
+    let first_node = ExecutionNodeId::unique();
+    let second_node = ExecutionNodeId::unique();
+    let mut events = vec![
+        RunEvent::Progress(RunProgress {
+            e_node_id: first_node,
+            phase: RunPhase::Started { at: Instant::now() },
+        }),
+        RunEvent::Progress(RunProgress {
+            e_node_id: second_node,
+            phase: RunPhase::Finished { elapsed_secs: 0.25 },
+        }),
+    ];
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::Executing));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let callback = |report| tx.send(report).unwrap();
+
+    worker::forward_run_events(&mut events, &mut status, &callback);
+    let WorkerReport::Status(patch) = rx.try_recv().unwrap() else {
+        panic!("progress must produce a status patch");
+    };
+    assert_eq!(patch.kind, WorkerStatusKind::Patch);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(patch.nodes[0].e_node_id, first_node);
+    assert!(matches!(
+        patch.nodes[0].status,
+        Some(NodeExecutionStatus::Running { .. })
+    ));
+    assert_eq!(patch.nodes[1].e_node_id, second_node);
+    assert!(matches!(
+        patch.nodes[1].status,
+        Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
+    ));
+    let idle = status.activity(WorkerActivity::Idle);
+    assert!(!Arc::ptr_eq(&patch, &idle));
+    assert_eq!(patch.activity, WorkerActivity::Executing);
+    assert_eq!(patch.nodes.len(), 2);
+    assert_eq!(idle.activity, WorkerActivity::Idle);
+    assert!(idle.nodes.is_empty());
+
+    drop(patch);
+    let allocation = Arc::as_ptr(&idle);
+    drop(idle);
+    let executing = status.activity(WorkerActivity::Executing);
+    assert_eq!(Arc::as_ptr(&executing), allocation);
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
 fn completed_status_contains_the_full_gui_snapshot() {
     let executed = ExecutionNodeId::unique();
     let cached = ExecutionNodeId::unique();
@@ -516,6 +607,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
         cached_nodes: vec![cached],
         triggered_events: Vec::new(),
+        event_triggers: Vec::new(),
         node_errors: vec![
             NodeError {
                 e_node_id: failed,
@@ -544,13 +636,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
     };
     let mut publisher = WorkerStatusPublisher::default();
-    let executed_capacity = outcome.executed_nodes.capacity();
-    let logs_capacity = outcome.logs.capacity();
     let status = publisher.completed(WorkerActivity::EventLoop, &mut outcome);
-    assert!(outcome.executed_nodes.is_empty());
-    assert_eq!(outcome.executed_nodes.capacity(), executed_capacity);
-    assert!(outcome.logs.is_empty());
-    assert_eq!(outcome.logs.capacity(), logs_capacity);
     assert_eq!(status.activity, WorkerActivity::EventLoop);
     assert_eq!(
         status.kind,

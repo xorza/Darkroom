@@ -135,6 +135,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
             verdicts,
             roots: [first, second].into_iter().collect(),
             pinned: NodeSet::new(),
+            event_sources: NodeSet::new(),
         },
         first,
         second,
@@ -302,6 +303,7 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         verdicts,
         roots: [first_consumer, second_consumer].into_iter().collect(),
         pinned: NodeSet::new(),
+        event_sources: NodeSet::new(),
     };
     let mut cache = RuntimeCache::default();
     cache.reconcile(&program);

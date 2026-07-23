@@ -318,6 +318,21 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
         .unwrap();
     assert_eq!(plan.roots, NodeSet::from([subscriber]));
     assert_eq!(plan.process_order, vec![subscriber]);
+    assert!(plan.event_sources.is_empty());
+
+    planner
+        .plan(
+            &f.compiled,
+            &RunSeeds {
+                event_triggers: true,
+                ..Default::default()
+            },
+            &mut plan,
+        )
+        .unwrap();
+    assert_eq!(plan.roots, NodeSet::from([emitter]));
+    assert_eq!(plan.event_sources, NodeSet::from([emitter]));
+    assert_eq!(plan.process_order, vec![emitter]);
 
     let invalid = [
         ExecutionEventPort {

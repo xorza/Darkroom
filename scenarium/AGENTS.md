@@ -79,7 +79,11 @@ overrides, orders dependencies before consumers, and detects missing inputs.
 Resolution stamps
 content digests, then derives cache-aware liveness, exact `OutputDemand`, and
 binding-reader counts together. Execution invokes the surviving nodes in plan
-order.
+order. Event-loop bootstrap marks subscribed event owners as event sources,
+forces their initialization lambdas to run instead of reusing output caches,
+and prepares triggers only for sources that complete successfully. The worker
+takes those exact runtime triggers from `ExecutionOutcome` and moves them into
+event tasks; fired-event runs do not rebuild unrelated triggers.
 
 Before resolution, `RunResourceStamps` collects filesystem identities and custom
 resource stamps on Tokio's blocking pool. It memoizes each resource for one run

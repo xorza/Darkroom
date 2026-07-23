@@ -156,6 +156,7 @@ fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
         verdicts,
         roots: process_order.into_iter().collect(),
         pinned: NodeSet::new(),
+        event_sources: NodeSet::new(),
     }
 }
 
