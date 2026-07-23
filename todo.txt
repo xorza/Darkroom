@@ -30,3 +30,7 @@ save caches on cache click
 subgraph to newnodeui
 
 subgraphs tabs movable
+
+ram usage on node status update from worker
+
+do not evice ram if disk cache exists
