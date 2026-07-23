@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::{Library, WorkerError, WorkerReport};
+use scenarium::{Library, WorkerError, WorkerReport, WorkerStatusKind};
 
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::script::{ScriptConfig, ScriptMessage};
@@ -125,24 +125,21 @@ impl App {
                     }
                     self.workspace.runtime.status.error(error.to_string());
                 }
-                WorkerReport::Lifecycle(lifecycle) => {
-                    self.editor.run_state.apply_lifecycle(lifecycle);
-                }
-                WorkerReport::Finished(stats) => {
-                    if stats.cancelled {
-                        tracing::info!(
-                            "run cancelled after {} node(s)",
-                            stats.executed_nodes.len()
-                        );
+                WorkerReport::Status(status) => {
+                    if let WorkerStatusKind::Completed {
+                        executed_nodes,
+                        cancelled,
+                        ..
+                    } = status.kind
+                    {
+                        if cancelled {
+                            tracing::info!("run cancelled after {executed_nodes} node(s)");
+                        }
+                        // A completed run supersedes any lingering failure message
+                        // from an earlier event-loop tick.
+                        self.workspace.runtime.status.error = None;
                     }
-                    self.editor.run_state.set_results(&stats);
-                    // A finished run supersedes any lingering failure message
-                    // (e.g. an earlier event-loop tick's), so the loop
-                    // self-heals in the status bar too.
-                    self.workspace.runtime.status.error = None;
-                }
-                WorkerReport::Progress(progress) => {
-                    self.editor.run_state.apply_progress(&progress);
+                    self.editor.run_state.apply_worker_status(&status);
                 }
                 WorkerReport::PinnedOutputs(outputs) => {
                     self.editor.run_state.ingest_pinned_outputs(

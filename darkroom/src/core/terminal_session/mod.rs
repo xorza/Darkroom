@@ -4,7 +4,7 @@
 //! and tracks script-requested shutdown. Document/runtime invariants live in
 //! [`Workspace`], while the GUI owns its independent editing and undo policy.
 
-use scenarium::{Library, WorkerReport};
+use scenarium::{Library, WorkerReport, WorkerStatusKind};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent_cascading;
@@ -77,18 +77,23 @@ impl TerminalSession {
         let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
         for report in events {
             match report {
-                WorkerReport::Finished(stats) => {
-                    self.workspace.runtime.status.error = None;
-                    self.workspace.runtime.status.info(format!(
-                        "run finished: {} node(s), {:.3}s",
-                        stats.executed_nodes.len(),
-                        stats.elapsed_secs
-                    ));
-                    for log in &stats.logs {
-                        self.workspace
-                            .runtime
-                            .status
-                            .info(format!("  [{:?}] {}", log.level, log.message));
+                WorkerReport::Status(status) => {
+                    if let WorkerStatusKind::Completed {
+                        elapsed_secs,
+                        executed_nodes,
+                        ..
+                    } = status.kind
+                    {
+                        self.workspace.runtime.status.error = None;
+                        self.workspace.runtime.status.info(format!(
+                            "run finished: {executed_nodes} node(s), {elapsed_secs:.3}s"
+                        ));
+                        for log in &status.logs {
+                            self.workspace
+                                .runtime
+                                .status
+                                .info(format!("  [{:?}] {}", log.level, log.message));
+                        }
                     }
                 }
                 WorkerReport::Error(error) => {
@@ -96,8 +101,6 @@ impl TerminalSession {
                 }
                 WorkerReport::Installed(_)
                 | WorkerReport::Cleared
-                | WorkerReport::Lifecycle(_)
-                | WorkerReport::Progress(_)
                 | WorkerReport::PinnedOutputs(_) => {}
             }
         }

@@ -3,7 +3,7 @@
 //! [`RunState`] per [`Editor`], updated as worker reports arrive.
 //!
 //! Execution dissolves graphs and remaps interior node ids, so a run's
-//! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
+//! raw node statuses are keyed by *flattened* ids. [`RunState::apply_worker_status`]
 //! projects them through the worker-confirmed [`CompiledGraph`] to fold each outcome
 //! onto the authoring nodes: onto the node itself (unique per editor
 //! node — a graph's interior aggregates across its instances) and onto every
@@ -21,10 +21,13 @@ use scenarium::CompiledGraph;
 use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeId;
+use scenarium::NodeExecutionStatus;
 use scenarium::RamUsage;
 use scenarium::RunError;
-use scenarium::WorkerLifecycle;
-use scenarium::{ExecutionStats, PinnedOutputs, RunPhase, RunProgress};
+use scenarium::WorkerActivity;
+use scenarium::WorkerStatus;
+use scenarium::WorkerStatusKind;
+use scenarium::PinnedOutputs;
 
 use crate::core::document::Document;
 use crate::gui::pinned_output::PinnedOutputStore;
@@ -42,9 +45,8 @@ fn attributed_nodes(
 /// higher-severity status wins when several fold onto one node
 /// (`Errored` > `MissingInputs` > `Executed` > `Cached`). `Executed`
 /// carries the node's wall-clock run time (seconds). `Running` is the
-/// transient live state while a node computes (set directly from
-/// `RunProgress`, never produced by the final `set_results`); it carries the
-/// instant the node started so the UI can show live elapsed-so-far.
+/// transient live state while a node computes; it carries the instant the
+/// node started so the UI can show live elapsed-so-far.
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub(crate) enum ExecStatus {
     #[default]
@@ -107,53 +109,6 @@ pub(crate) struct NodeLog {
     pub(crate) message: String,
 }
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-pub(crate) enum RunActivity {
-    #[default]
-    Idle,
-    Executing,
-    EventLoop,
-    ExecutingEventLoop,
-}
-
-impl RunActivity {
-    pub(crate) fn is_executing(self) -> bool {
-        matches!(
-            self,
-            RunActivity::Executing | RunActivity::ExecutingEventLoop
-        )
-    }
-
-    pub(crate) fn event_loop_active(self) -> bool {
-        matches!(
-            self,
-            RunActivity::EventLoop | RunActivity::ExecutingEventLoop
-        )
-    }
-
-    fn apply(self, lifecycle: WorkerLifecycle) -> Self {
-        match (self, lifecycle) {
-            (RunActivity::Idle, WorkerLifecycle::ExecutionStarted) => RunActivity::Executing,
-            (RunActivity::EventLoop, WorkerLifecycle::ExecutionStarted) => {
-                RunActivity::ExecutingEventLoop
-            }
-            (RunActivity::Executing, WorkerLifecycle::ExecutionStopped) => RunActivity::Idle,
-            (RunActivity::ExecutingEventLoop, WorkerLifecycle::ExecutionStopped) => {
-                RunActivity::EventLoop
-            }
-            (RunActivity::Idle, WorkerLifecycle::EventLoopStarted) => RunActivity::EventLoop,
-            (RunActivity::Executing, WorkerLifecycle::EventLoopStarted) => {
-                RunActivity::ExecutingEventLoop
-            }
-            (RunActivity::EventLoop, WorkerLifecycle::EventLoopStopped) => RunActivity::Idle,
-            (RunActivity::ExecutingEventLoop, WorkerLifecycle::EventLoopStopped) => {
-                RunActivity::Executing
-            }
-            _ => panic!("invalid worker lifecycle transition: {self:?} + {lifecycle:?}"),
-        }
-    }
-}
-
 /// Central runtime state for the current editor. Off the serialized state.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
@@ -162,7 +117,7 @@ pub(crate) struct RunState {
     /// The program acknowledged by the worker's ordered report stream. Every
     /// subsequent flat progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
-    pub(crate) activity: RunActivity,
+    pub(crate) activity: WorkerActivity,
     /// RAM held by the worker's runtime cache after its latest run (system RAM
     /// vs GPU VRAM). Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
@@ -196,56 +151,94 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
     }
 
-    /// Reproject a finished run's status + logs onto the per-node map.
-    /// Status/logs are reset and rebuilt. Entries left carrying nothing are
-    /// dropped. The worker-confirmed compiled graph projects the stats' flat
-    /// ids onto authoring nodes.
-    pub(crate) fn set_results(&mut self, stats: &ExecutionStats) {
+    pub(crate) fn apply_worker_status(&mut self, update: &WorkerStatus) {
+        let entering_execution =
+            !self.activity.is_executing() && update.activity.is_executing();
+        self.activity = update.activity;
+        if entering_execution {
+            self.nodes
+                .retain(|_, node| node.status != ExecStatus::None || !node.logs.is_empty());
+        }
+
+        match update.kind {
+            WorkerStatusKind::Activity => {}
+            WorkerStatusKind::Patch => self.apply_node_patch(update),
+            WorkerStatusKind::Completed { .. } => self.replace_results(update),
+        }
+    }
+
+    fn apply_node_patch(&mut self, update: &WorkerStatus) {
+        let compiled = Arc::clone(
+            self.compiled
+                .as_ref()
+                .expect("worker reported node status before installing a compiled graph"),
+        );
+        for node in &update.nodes {
+            let Some(status) = &node.status else {
+                continue;
+            };
+            let status = match status {
+                NodeExecutionStatus::Running { at } => ExecStatus::Running(*at),
+                NodeExecutionStatus::Cached => ExecStatus::Cached,
+                NodeExecutionStatus::Executed { elapsed_secs } => {
+                    ExecStatus::Executed(*elapsed_secs)
+                }
+                NodeExecutionStatus::MissingInputs => ExecStatus::MissingInputs,
+                NodeExecutionStatus::Errored { error } => {
+                    self.record_error(&compiled, node.e_node_id, error);
+                    ExecStatus::Errored
+                }
+            };
+            for node_id in attributed_nodes(&compiled, node.e_node_id) {
+                self.nodes.entry(node_id).or_default().status = status;
+            }
+        }
+    }
+
+    /// Replace the last completed run with the worker's authoritative snapshot.
+    fn replace_results(&mut self, update: &WorkerStatus) {
         let compiled = Arc::clone(
             self.compiled
                 .as_ref()
                 .expect("worker reported results before installing a compiled graph"),
         );
-        self.cache_ram = stats.cache_ram;
+        self.cache_ram = update.cache_ram;
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
             node.errors.clear();
             node.ram = RamUsage::default();
         }
-        for e in &stats.executed_nodes {
-            self.record_status(&compiled, e.e_node_id, ExecStatus::Executed(e.elapsed_secs));
-        }
-        for id in &stats.cached_nodes {
-            self.record_status(&compiled, *id, ExecStatus::Cached);
-        }
-        for port in &stats.missing_inputs {
-            self.record_status(&compiled, port.e_node_id, ExecStatus::MissingInputs);
-        }
-        for e in &stats.node_errors {
-            // A node cancelled mid-run didn't fail — it was interrupted and
-            // will re-run next time. Leave it neutral (no glow) rather than
-            // flagging it as an error.
-            if matches!(e.error, RunError::Cancelled { .. }) {
-                continue;
+        for node in &update.nodes {
+            if let Some(status) = &node.status {
+                let status = match status {
+                    NodeExecutionStatus::Running { .. } => {
+                        panic!("completed worker status contains a running node")
+                    }
+                    NodeExecutionStatus::Cached => ExecStatus::Cached,
+                    NodeExecutionStatus::Executed { elapsed_secs } => {
+                        ExecStatus::Executed(*elapsed_secs)
+                    }
+                    NodeExecutionStatus::MissingInputs => ExecStatus::MissingInputs,
+                    NodeExecutionStatus::Errored { error } => {
+                        self.record_error(&compiled, node.e_node_id, error);
+                        ExecStatus::Errored
+                    }
+                };
+                self.record_status(&compiled, node.e_node_id, status);
             }
-            self.record_status(&compiled, e.e_node_id, ExecStatus::Errored);
-            self.record_error(&compiled, e.e_node_id, &e.error);
+            if let Some(ram) = node.ram {
+                for node_id in attributed_nodes(&compiled, node.e_node_id) {
+                    self.nodes.entry(node_id).or_default().ram += ram;
+                }
+            }
         }
-        for entry in &stats.logs {
+        for entry in &update.logs {
             for node_id in attributed_nodes(&compiled, entry.e_node_id) {
                 self.nodes.entry(node_id).or_default().logs.push(NodeLog {
                     level: entry.level,
                     message: entry.message.clone(),
                 });
-            }
-        }
-        // Per-node RAM folds like elapsed time: a flattened node's footprint adds
-        // onto its authoring node and every enclosing composite instance, so an
-        // instance aggregates its interior's memory.
-        for node_ram in &stats.node_ram {
-            for node_id in attributed_nodes(&compiled, node_ram.e_node_id) {
-                self.nodes.entry(node_id).or_default().ram += node_ram.usage;
             }
         }
         self.nodes
@@ -299,30 +292,6 @@ impl RunState {
         }
     }
 
-    /// Apply one live [`RunProgress`] event: mark the node(s) `Running` on
-    /// `Started`, `Executed` on `Finished`. Overwrites the prior status (the
-    /// final [`set_results`](Self::set_results) reconciles, e.g. summing an
-    /// instance subtree's times) — deliberately *not* folded through
-    /// `record_status`'s `merged`, since `Running` is live-only and must
-    /// always win over a stale `Errored`/`MissingInputs` from the last run.
-    /// The installed compile is the program the event came from (like
-    /// [`set_results`](Self::set_results)); `progress.e_node_id` is a flattened
-    /// id projected onto authoring nodes here.
-    pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
-        let compiled = Arc::clone(
-            self.compiled
-                .as_ref()
-                .expect("worker reported progress before installing a compiled graph"),
-        );
-        let status = match progress.phase {
-            RunPhase::Started { at } => ExecStatus::Running(at),
-            RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
-        };
-        for node_id in attributed_nodes(&compiled, progress.e_node_id) {
-            self.nodes.entry(node_id).or_default().status = status;
-        }
-    }
-
     pub(crate) fn ingest_pinned_outputs(
         &mut self,
         ui: &Ui,
@@ -346,15 +315,6 @@ impl RunState {
         self.nodes.clear();
         self.pinned_outputs.entries.clear();
     }
-
-    /// Apply the worker's authoritative execution or event-loop transition.
-    pub(crate) fn apply_lifecycle(&mut self, lifecycle: WorkerLifecycle) {
-        self.activity = self.activity.apply(lifecycle);
-        if lifecycle == WorkerLifecycle::ExecutionStarted {
-            self.nodes
-                .retain(|_, node| node.status != ExecStatus::None || !node.logs.is_empty());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -363,7 +323,7 @@ mod tests {
 
     use scenarium::CompiledGraphBuilder;
     use scenarium::FuncId;
-    use scenarium::{DynamicValue, ExecutedNodeStats, LogEntry, LogLevel, NodeError};
+    use scenarium::{DynamicValue, LogEntry, LogLevel, NodeStatus};
     use scenarium::{OutputPort, PinnedOutput, StaticValue};
 
     use crate::gui::pinned_output::StoredContent;
@@ -376,36 +336,64 @@ mod tests {
         ExecutionNodeId::from_u128(n)
     }
 
-    /// Build an `ExecutionStats` with the given executed `(e_node_id, secs)`
-    /// and errored `e_node_id`s. The installed compiled graph isn't part of the
-    /// stats; `RunState` retains it from the preceding worker report.
-    fn stats(executed: &[(ExecutionNodeId, f64)], errored: &[ExecutionNodeId]) -> ExecutionStats {
-        ExecutionStats {
-            elapsed_secs: 0.0,
-            executed_nodes: executed
+    fn completed_status(
+        executed: &[(ExecutionNodeId, f64)],
+        errored: &[ExecutionNodeId],
+    ) -> WorkerStatus {
+        let mut nodes = executed
+            .iter()
+            .map(|&(e_node_id, elapsed_secs)| NodeStatus {
+                e_node_id,
+                status: Some(NodeExecutionStatus::Executed { elapsed_secs }),
+                ram: None,
+            })
+            .collect::<Vec<_>>();
+        nodes.extend(
+            errored
                 .iter()
-                .map(|&(e_node_id, elapsed_secs)| ExecutedNodeStats {
+                .map(|&e_node_id| NodeStatus {
                     e_node_id,
-                    elapsed_secs,
-                })
-                .collect(),
-            missing_inputs: vec![],
-            cached_nodes: vec![],
-            triggered_events: vec![],
-            node_errors: errored
-                .iter()
-                .map(|&e_node_id| NodeError {
-                    e_node_id,
-                    error: RunError::Invoke {
-                        func_id: FuncId::from_u128(0),
-                        message: "test error".into(),
-                    },
-                })
-                .collect(),
-            logs: vec![],
-            cancelled: false,
-            cache_ram: RamUsage::default(),
-            node_ram: vec![],
+                    status: Some(NodeExecutionStatus::Errored {
+                        error: RunError::Invoke {
+                            func_id: FuncId::from_u128(0),
+                            message: "test error".into(),
+                        },
+                    }),
+                    ram: None,
+                }),
+        );
+        WorkerStatus {
+            kind: WorkerStatusKind::Completed {
+                elapsed_secs: 0.0,
+                executed_nodes: executed.len(),
+                cancelled: false,
+            },
+            nodes,
+            ..WorkerStatus::default()
+        }
+    }
+
+    fn node_patch(
+        activity: WorkerActivity,
+        e_node_id: ExecutionNodeId,
+        status: NodeExecutionStatus,
+    ) -> WorkerStatus {
+        WorkerStatus {
+            activity,
+            kind: WorkerStatusKind::Patch,
+            nodes: vec![NodeStatus {
+                e_node_id,
+                status: Some(status),
+                ram: None,
+            }],
+            ..WorkerStatus::default()
+        }
+    }
+
+    fn activity_status(activity: WorkerActivity) -> WorkerStatus {
+        WorkerStatus {
+            activity,
+            ..WorkerStatus::default()
         }
     }
 
@@ -466,24 +454,24 @@ mod tests {
     }
 
     #[test]
-    fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
+    fn node_patch_marks_all_attributed_nodes_running_then_executed() {
         let (interior, instance) = (nid(1), nid(2));
         let e_node_id = eid(100);
         let mut rs = run_state([(e_node_id, vec![instance], interior)]);
 
-        // Started → every attributed node turns Running.
-        rs.apply_progress(&RunProgress {
+        rs.apply_worker_status(&node_patch(
+            WorkerActivity::Executing,
             e_node_id,
-            phase: RunPhase::Started { at: Instant::now() },
-        });
+            NodeExecutionStatus::Running { at: Instant::now() },
+        ));
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
         assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
 
-        // Finished → Executed with the reported time (overwrites Running).
-        rs.apply_progress(&RunProgress {
+        rs.apply_worker_status(&node_patch(
+            WorkerActivity::Executing,
             e_node_id,
-            phase: RunPhase::Finished { elapsed_secs: 0.5 },
-        });
+            NodeExecutionStatus::Executed { elapsed_secs: 0.5 },
+        ));
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
         assert_eq!(rs.status(instance), ExecStatus::Executed(0.5));
 
@@ -504,7 +492,7 @@ mod tests {
             (e_node_id_a, vec![inst_a], interior),
             (e_node_id_b, vec![inst_b], interior),
         ]);
-        rs.set_results(&stats(&[(e_node_id_a, 2.0), (e_node_id_b, 3.0)], &[]));
+        rs.apply_worker_status(&completed_status(&[(e_node_id_a, 2.0), (e_node_id_b, 3.0)], &[]));
 
         // Shared interior view: both instances' times sum (2 + 3).
         assert_eq!(rs.status(interior), ExecStatus::Executed(5.0));
@@ -557,7 +545,7 @@ mod tests {
         let e_node_id = eid(100);
 
         let mut rs = run_state([(e_node_id, vec![outer, inner], interior)]);
-        rs.set_results(&stats(&[(e_node_id, 4.0)], &[]));
+        rs.apply_worker_status(&completed_status(&[(e_node_id, 4.0)], &[]));
 
         assert_eq!(rs.status(interior), ExecStatus::Executed(4.0));
         assert_eq!(rs.status(inner), ExecStatus::Executed(4.0));
@@ -571,78 +559,58 @@ mod tests {
         let interior = nid(1);
         let e_node_id = eid(1);
         let mut rs = run_state([(e_node_id, vec![], interior)]);
-        rs.set_results(&stats(&[(e_node_id, 1.0)], &[e_node_id]));
+        rs.apply_worker_status(&completed_status(&[(e_node_id, 1.0)], &[e_node_id]));
         assert_eq!(rs.status(interior), ExecStatus::Errored);
         // The failure message rides along with the status — the inspector
         // shows it instead of a bare "errored".
         assert_eq!(rs.errors(interior), ["test error"]);
     }
 
-    /// A failure's message folds onto the errored interior node *and* its
-    /// enclosing graph instance (same attribution as the status), while a
-    /// `Cancelled` "error" records neither status nor message (a cancel is not
-    /// a failure).
     #[test]
-    fn error_messages_attribute_to_instance_and_skip_cancelled() {
+    fn error_messages_attribute_to_instance() {
         let interior = nid(1);
-        let cancelled_interior = nid(2);
         let inst = nid(10);
-        let (fail_e_node_id, cancel_e_node_id) = (eid(100), eid(101));
-        let mut rs = run_state([
-            (fail_e_node_id, vec![inst], interior),
-            (cancel_e_node_id, vec![inst], cancelled_interior),
-        ]);
+        let fail_e_node_id = eid(100);
+        let mut rs = run_state([(fail_e_node_id, vec![inst], interior)]);
 
-        let node_err = |e_node_id, error| NodeError { e_node_id, error };
-        let mut s = stats(&[], &[]);
-        s.node_errors = vec![
-            node_err(
-                fail_e_node_id,
-                RunError::Invoke {
+        let mut s = completed_status(&[], &[]);
+        s.nodes.push(NodeStatus {
+            e_node_id: fail_e_node_id,
+            status: Some(NodeExecutionStatus::Errored {
+                error: RunError::Invoke {
                     func_id: FuncId::from_u128(0),
                     message: "no light frames provided".into(),
                 },
-            ),
-            node_err(
-                cancel_e_node_id,
-                RunError::Cancelled {
-                    func_id: FuncId::from_u128(0),
-                },
-            ),
-        ];
+            }),
+            ram: None,
+        });
 
-        rs.set_results(&s);
+        rs.apply_worker_status(&s);
 
-        // The real failure paints both the interior and the enclosing instance.
         assert_eq!(rs.status(interior), ExecStatus::Errored);
         assert_eq!(rs.errors(interior), ["no light frames provided"]);
         assert_eq!(rs.status(inst), ExecStatus::Errored);
         assert_eq!(rs.errors(inst), ["no light frames provided"]);
-        // The cancelled node contributes no extra status/message (only the one
-        // real failure's message is present, not a second entry for the cancel).
-        assert_eq!(rs.errors(interior).len(), 1, "cancel adds no message");
-        assert_eq!(rs.status(cancelled_interior), ExecStatus::None);
-        assert!(rs.errors(cancelled_interior).is_empty());
     }
 
     /// A log line emitted inside a graph instance attributes to both
     /// the interior node and the enclosing instance, preserving level +
     /// message in each editor node's own state.
     #[test]
-    fn set_results_attributes_logs_to_interior_and_instance() {
+    fn apply_worker_status_attributes_logs_to_interior_and_instance() {
         let interior = nid(1);
         let inst = nid(10);
         let e_node_id = eid(100);
         let mut rs = run_state([(e_node_id, vec![inst], interior)]);
 
-        let mut s = stats(&[], &[]);
+        let mut s = completed_status(&[], &[]);
         s.logs.push(LogEntry {
             e_node_id,
             level: LogLevel::Warn,
             message: "hi".into(),
         });
 
-        rs.set_results(&s);
+        rs.apply_worker_status(&s);
 
         let i = rs.logs(interior);
         assert_eq!(i.len(), 1, "interior carries the line");
@@ -653,44 +621,39 @@ mod tests {
         assert_eq!(n[0], i[0], "both attributed nodes carry the same line");
     }
 
-    /// Worker lifecycle transitions preserve prior results during execution.
     #[test]
-    fn execution_lifecycle_keeps_status_until_results_arrive() {
+    fn worker_activity_is_absolute_and_execution_keeps_results_until_completion() {
         let node = nid(1);
         let e_node_id = eid(1);
         let mut rs = run_state([(e_node_id, vec![], node)]);
-        rs.set_results(&stats(&[(e_node_id, 1.0)], &[]));
+        rs.apply_worker_status(&completed_status(&[(e_node_id, 1.0)], &[]));
 
-        assert_eq!(rs.activity, RunActivity::Idle);
-        rs.apply_lifecycle(WorkerLifecycle::ExecutionStarted);
+        assert_eq!(rs.activity, WorkerActivity::Idle);
+        rs.apply_worker_status(&activity_status(WorkerActivity::Executing));
 
-        assert_eq!(rs.activity, RunActivity::Executing);
+        assert_eq!(rs.activity, WorkerActivity::Executing);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
 
-        rs.set_results(&stats(&[], &[]));
-        assert!(
-            rs.activity.is_executing(),
-            "results do not infer a lifecycle transition"
-        );
-        rs.apply_lifecycle(WorkerLifecycle::EventLoopStarted);
-        assert_eq!(rs.activity, RunActivity::ExecutingEventLoop);
+        let mut completed = completed_status(&[], &[]);
+        completed.activity = WorkerActivity::EventLoop;
+        rs.apply_worker_status(&completed);
+        assert_eq!(rs.activity, WorkerActivity::EventLoop);
+        assert_eq!(rs.status(node), ExecStatus::None);
+
         rs.clear();
         assert!(
-            rs.activity.is_executing() && rs.activity.event_loop_active(),
-            "result clearing does not infer lifecycle transitions"
+            rs.activity.event_loop_active(),
+            "clearing projections preserves worker activity"
         );
-        rs.apply_lifecycle(WorkerLifecycle::ExecutionStopped);
-        assert_eq!(rs.activity, RunActivity::EventLoop);
-        rs.apply_lifecycle(WorkerLifecycle::EventLoopStopped);
-        assert_eq!(rs.activity, RunActivity::Idle);
-
-        rs.apply_lifecycle(WorkerLifecycle::EventLoopStarted);
-        assert_eq!(rs.activity, RunActivity::EventLoop);
-        rs.apply_lifecycle(WorkerLifecycle::ExecutionStarted);
-        assert_eq!(rs.activity, RunActivity::ExecutingEventLoop);
-        rs.apply_lifecycle(WorkerLifecycle::EventLoopStopped);
-        assert_eq!(rs.activity, RunActivity::Executing);
-        rs.apply_lifecycle(WorkerLifecycle::ExecutionStopped);
-        assert_eq!(rs.activity, RunActivity::Idle);
+        for activity in [
+            WorkerActivity::Idle,
+            WorkerActivity::EventLoop,
+            WorkerActivity::ExecutingEventLoop,
+            WorkerActivity::Executing,
+            WorkerActivity::Idle,
+        ] {
+            rs.apply_worker_status(&activity_status(activity));
+            assert_eq!(rs.activity, activity);
+        }
     }
 }
