@@ -5,6 +5,8 @@ mod format;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
@@ -23,6 +25,23 @@ use crate::runtime::context::ContextManager;
 pub struct DiskStore {
     library: Arc<Library>,
     disk_root: Option<PathBuf>,
+    #[cfg(test)]
+    pub(crate) store_io: StoreIoCounts,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct StoreIoCounts {
+    pub(crate) coverage_probes: AtomicU64,
+    pub(crate) publication_attempts: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StorePolicy {
+    /// The caller already established that no usable blob covers the new snapshot.
+    KnownMiss,
+    /// The on-disk state is unknown, so a covering blob must survive unchanged.
+    PreserveCovering,
 }
 
 #[derive(Debug)]
@@ -39,7 +58,12 @@ impl BlobTarget {
 
 impl DiskStore {
     pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
-        Self { library, disk_root }
+        Self {
+            library,
+            disk_root,
+            #[cfg(test)]
+            store_io: StoreIoCounts::default(),
+        }
     }
 
     pub(crate) fn blob_target(
@@ -112,15 +136,28 @@ impl DiskStore {
         }
     }
 
+    /// Publish a snapshot directly after a known reuse miss, or first preserve an existing
+    /// covering blob when the caller has no reuse verdict.
     pub(crate) async fn store(
         &self,
         target: &BlobTarget,
         snapshot: &OutputSnapshot,
+        policy: StorePolicy,
         ctx: &mut ContextManager,
     ) {
-        if self.covers(target, &snapshot.values).await {
+        if policy == StorePolicy::PreserveCovering {
+            #[cfg(test)]
+            self.store_io
+                .coverage_probes
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if policy == StorePolicy::PreserveCovering && self.covers(target, &snapshot.values).await {
             return;
         }
+        #[cfg(test)]
+        self.store_io
+            .publication_attempts
+            .fetch_add(1, Ordering::Relaxed);
         if let Some(parent) = target
             .path
             .parent()
@@ -158,10 +195,7 @@ impl DiskStore {
             tracing::warn!(path = %target.path.display(), %error, "failed to flush output cache");
             return;
         }
-        let result = writer.into_inner().commit().await;
-        if let Err(error) = result
-            && !self.covers(target, &snapshot.values).await
-        {
+        if let Err(error) = writer.into_inner().commit().await {
             tracing::warn!(path = %target.path.display(), %error, "failed to publish output cache");
         }
     }

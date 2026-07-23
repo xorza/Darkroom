@@ -242,9 +242,11 @@ header carries a magic value, format version, 32-byte content digest, body lengt
 fixed descriptor per output. A descriptor records the value kind and payload length plus the
 type identity and codec version for custom values. Presence probes read only the header,
 require matching content and current codec versions, and compare the descriptor tags directly
-with the outputs that must be preserved. Invalidation is an **overwrite**. A write is skipped
-only when the existing blob already covers every value being stored. Writes stream into a
-temporary file and publish it atomically, so readers never see a partially encoded generation.
+with the outputs that must be preserved. Invalidation is an **overwrite**. A successful
+invocation follows a reuse miss, so its write publishes directly without repeating the header
+probe. Attaching a store has no preceding verdict and probes once, preserving an existing blob
+that already covers every resident value being flushed. Writes stream into a temporary file and
+publish it atomically, so readers never see a partially encoded generation.
 Hydration intentionally restores the **whole accepted blob**: demand is a coverage gate, not a
 payload-selection mask. Once the header proves that every demanded output is present, the
 loader decodes every bound payload and installs the complete stored snapshot. If a
@@ -314,8 +316,9 @@ resolution and execution then follow this lifecycle:
 3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
    demanded output fails the node; skipped outputs may remain `Unbound`. A lambda may still
    produce a skipped output as an opportunistic byproduct, which is retained as reusable cache
-   coverage. `store_node` derives disk coverage from the resident values and skips an existing
-   frame only when both digest and coverage match. A broader result overwrites it.
+   coverage. Since invocation follows a reuse miss, `store_node` publishes the resident result
+   directly; maintenance flushes without that proof first preserve any blob whose digest and
+   coverage already cover the resident snapshot.
 4. **mid-run release.** The executor seeds `RemainingOutputReads` from
    the resolver's exact, cache-aware reader counts. Every `Run` node owns one read for each
    bound input; it consumes those reads when invoked or retires them when a late cache hit,

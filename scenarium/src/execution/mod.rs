@@ -53,6 +53,7 @@ mod tests;
 pub(crate) mod validate;
 
 use cache::RuntimeCache;
+use disk_store::StorePolicy;
 use executor::Executor;
 use identity::ExecutionEventPort;
 use plan::{ExecutionPlan, Planner};
@@ -345,9 +346,9 @@ impl ExecutionEngine {
     /// values when the worker attaches a new [`disk_store::DiskStore`]. This makes values computed
     /// while the store was memory-only durable once a document receives a cache root.
     ///
-    /// Never rewrites identical content: a blob already stamped with the node's current
-    /// digest is the same bytes, so [`disk_store::DiskStore::store`] skips it. Also a no-op for a
-    /// node with no resident value.
+    /// The attached store has no reuse verdict for these values, so each current resident
+    /// snapshot preserves an existing blob that already covers it. Also a no-op for a node with
+    /// no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
         for e_node_id in self.compiled.program.e_nodes.keys().copied() {
             if !self.compiled.program.e_nodes[&e_node_id]
@@ -360,6 +361,7 @@ impl ExecutionEngine {
                 .store_node(
                     &self.compiled.program,
                     e_node_id,
+                    StorePolicy::PreserveCovering,
                     &mut self.executor.ctx_manager,
                 )
                 .await;

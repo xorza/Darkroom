@@ -229,6 +229,47 @@ mod cache_persistence {
                 .iter()
                 .any(|node| node.e_node_id == e_node_id)
         );
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .coverage_probes
+                .load(Ordering::Relaxed),
+            0,
+            "a successful invocation publishes after a known reuse miss"
+        );
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .publication_attempts
+                .load(Ordering::Relaxed),
+            1
+        );
+
+        engine.store_resident_caches().await;
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .coverage_probes
+                .load(Ordering::Relaxed),
+            1,
+            "a maintenance flush probes because it has no reuse verdict"
+        );
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .publication_attempts
+                .load(Ordering::Relaxed),
+            1,
+            "the covering blob prevents a redundant maintenance publication"
+        );
 
         let library_v1 = make_lib(2, 1);
         engine.update(&graph, &library_v1).unwrap();
@@ -242,6 +283,25 @@ mod cache_persistence {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(*printed.lock().unwrap(), vec![1, 2]);
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .coverage_probes
+                .load(Ordering::Relaxed),
+            1,
+            "the executor does not add a store probe after the changed digest misses"
+        );
+        assert_eq!(
+            engine
+                .cache
+                .disk_store
+                .store_io
+                .publication_attempts
+                .load(Ordering::Relaxed),
+            2
+        );
         drop(engine);
 
         let mut reopened = disk_engine(&dir);

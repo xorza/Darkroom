@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::execution::cache::OutputSnapshot;
 use crate::execution::digest::Digest;
-use crate::execution::disk_store::{BlobTarget, DiskStore};
+use crate::execution::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::library::{Library, TypeEntry};
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextManager;
@@ -20,7 +20,9 @@ struct TempFile(PathBuf);
 
 impl Drop for TempFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        if std::fs::remove_file(&self.0).is_err() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }
 
@@ -166,8 +168,18 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     ]);
 
     store
-        .store(&first_target, &first, &mut ContextManager::default())
+        .store(
+            &first_target,
+            &first,
+            StorePolicy::KnownMiss,
+            &mut ContextManager::default(),
+        )
         .await;
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        1
+    );
     assert!(store.covers(&first_target, &first.values).await);
     assert!(!store.covers(&second_target, &first.values).await);
     let restored = read_snapshot(&store, &first_target, 3).await.unwrap();
@@ -177,8 +189,18 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 
     let second = OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(35))]);
     store
-        .store(&second_target, &second, &mut ContextManager::default())
+        .store(
+            &second_target,
+            &second,
+            StorePolicy::PreserveCovering,
+            &mut ContextManager::default(),
+        )
         .await;
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        2
+    );
     assert!(read_snapshot(&store, &first_target, 3).await.is_none());
     assert_eq!(
         read_snapshot(&store, &second_target, 1)
@@ -201,8 +223,18 @@ async fn broader_same_digest_blob_is_preserved() {
         DynamicValue::Unbound,
     ]);
     store
-        .store(&target, &partial, &mut ContextManager::default())
+        .store(
+            &target,
+            &partial,
+            StorePolicy::KnownMiss,
+            &mut ContextManager::default(),
+        )
         .await;
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        1
+    );
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
     assert!(store.read(&target, &second_output).await.is_none());
     assert!(
@@ -215,13 +247,33 @@ async fn broader_same_digest_blob_is_preserved() {
         DynamicValue::from_custom(Blob(vec![1, 2, 3])),
     ]);
     store
-        .store(&target, &complete, &mut ContextManager::default())
+        .store(
+            &target,
+            &complete,
+            StorePolicy::KnownMiss,
+            &mut ContextManager::default(),
+        )
         .await;
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        2
+    );
     let complete_bytes = std::fs::read(&file.0).unwrap();
 
     store
-        .store(&target, &partial, &mut ContextManager::default())
+        .store(
+            &target,
+            &partial,
+            StorePolicy::PreserveCovering,
+            &mut ContextManager::default(),
+        )
         .await;
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        2
+    );
     assert_eq!(std::fs::read(&file.0).unwrap(), complete_bytes);
     assert!(store.covers(&target, &complete.values).await);
     assert!(store.covers(&target, &partial.values).await);
@@ -242,7 +294,12 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let old_calls = Arc::new(AtomicU64::new(0));
     let old_store = versioned_store(1, old_calls.clone());
     old_store
-        .store(&target, &snapshot, &mut ContextManager::default())
+        .store(
+            &target,
+            &snapshot,
+            StorePolicy::KnownMiss,
+            &mut ContextManager::default(),
+        )
         .await;
 
     assert!(!DiskStore::default().covers(&target, &snapshot.values).await);
@@ -259,7 +316,12 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     assert_eq!(new_calls.load(Ordering::SeqCst), 0);
 
     new_store
-        .store(&target, &snapshot, &mut ContextManager::default())
+        .store(
+            &target,
+            &snapshot,
+            StorePolicy::KnownMiss,
+            &mut ContextManager::default(),
+        )
         .await;
     assert!(!old_store.covers(&target, &snapshot.values).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_some());
@@ -275,6 +337,7 @@ async fn unregistered_custom_value_is_not_written() {
         .store(
             &target(&file.0, Digest([1; 32])),
             &snapshot,
+            StorePolicy::KnownMiss,
             &mut ContextManager::default(),
         )
         .await;
@@ -291,6 +354,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         .store(
             &original_target,
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
+            StorePolicy::KnownMiss,
             &mut ContextManager::default(),
         )
         .await;
@@ -304,6 +368,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         .store(
             &target(&file.0, Digest([5; 32])),
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
+            StorePolicy::KnownMiss,
             &mut ContextManager::default(),
         )
         .await;
@@ -317,6 +382,31 @@ async fn failed_streaming_encode_preserves_previous_blob() {
 }
 
 #[tokio::test]
+async fn failed_publication_does_not_repeat_coverage_probe() {
+    let file = temp_file("publication-failure");
+    std::fs::create_dir_all(&file.0).unwrap();
+    let survivor = file.0.join("survivor");
+    std::fs::write(&survivor, b"old").unwrap();
+    let store = DiskStore::default();
+    store
+        .store(
+            &target(&file.0, Digest([9; 32])),
+            &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
+            StorePolicy::PreserveCovering,
+            &mut ContextManager::default(),
+        )
+        .await;
+
+    assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        store.store_io.publication_attempts.load(Ordering::Relaxed),
+        1
+    );
+    assert_eq!(std::fs::read(survivor).unwrap(), b"old");
+    assert!(publication_temp_files(&file.0).is_empty());
+}
+
+#[tokio::test]
 async fn truncated_blob_is_rejected_by_header_check_and_read() {
     let file = temp_file("truncated");
     let store = DiskStore::default();
@@ -327,6 +417,7 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
             &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::String(
                 "payload".into(),
             ))]),
+            StorePolicy::KnownMiss,
             &mut ContextManager::default(),
         )
         .await;

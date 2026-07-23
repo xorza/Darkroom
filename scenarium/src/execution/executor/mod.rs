@@ -32,6 +32,7 @@ use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, RamUsage};
 
 use crate::execution::cache::RuntimeCache;
+use crate::execution::disk_store::StorePolicy;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedRun};
@@ -510,9 +511,15 @@ impl Executor {
                 if succeeded {
                     // Deliver before later consumers can release values; host delivery is not a reader.
                     frame.emit_pinned_values(e_node_id, events);
+                    // The preceding reuse miss proves that no blob can cover this result.
                     frame
                         .cache
-                        .store_node(program, e_node_id, &mut self.ctx_manager)
+                        .store_node(
+                            program,
+                            e_node_id,
+                            StorePolicy::KnownMiss,
+                            &mut self.ctx_manager,
+                        )
                         .await;
                     frame.release_drained_outputs(e_node_id);
                 }

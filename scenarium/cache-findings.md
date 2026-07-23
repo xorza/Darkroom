@@ -44,15 +44,6 @@ disk hit — but by then every upstream producer has already executed (they were
 first), solely to feed inputs that `abandon_input_reads` then discards unread. The disk
 load itself is legitimate and single; the cone execution it obsoletes is the waste.
 
-**B3. Every store is preceded by a header read, and a failed commit adds another.**
-`DiskStore::store` calls `covers` (open + header/descriptor scan of the existing file)
-before every write, including the common fresh-digest case where the scan is guaranteed to
-answer "no" at the digest comparison. A failed commit runs `covers` a second time to
-decide whether to warn. `store_resident_caches` (disk-store attach) does this probe for
-every resident disk-backed node. These are header-only reads, not value loads, but they
-are per-store synchronous file opens on the run's critical path (the executor awaits
-`store_node` inline after each node).
-
 ## C. Can one blob be loaded twice in one run?
 
 No — within a single `ExecutionEngine::execute`, each node's blob is value-read at most
@@ -66,8 +57,8 @@ once. The two read sites are mutually exclusive per node:
 
 A resolver `Reuse` verdict is never re-derived in the executor (documented invariant), so
 no second probe exists for the same node. A failed decode deletes the blob and reports a
-miss with no retry. The remaining same-run disk *accesses* to a blob are header-only:
-`covers` before each store and after a failed commit (B3) — they never load values.
+miss with no retry. A freshly computed result follows that miss and publishes without a
+second header probe.
 
 Across runs, by design of `Disk` mode, the same blob is re-read once per run that demands
 it (the RAM copy is dropped by `release_dead_outputs`); B1 makes unchanged pin delivery
@@ -81,11 +72,7 @@ stats a run reports) matches the cluster, not the individual finding. Each batch
 small, independently landable, and touches a disjoint area, so they can ship in any order
 — the listed order is payoff-per-risk.
 
-**Batch 1 — store publication probes: B3** (`disk_store`).
-This is isolated to the write path and can be verified by the existing disk-store tests
-plus exact probe/write-count assertions.
-
-**Batch 2 — pin delivery memo: B1** (report/worker). Independent mechanism
+**Batch 1 — pin delivery memo: B1** (report/worker). Independent mechanism
 (delivered-under-digest tracking) with host-protocol implications; nothing else depends
 on it and it depends on nothing above.
 

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::execution::digest::{Digest, node_digest};
-use crate::execution::disk_store::DiskStore;
+use crate::execution::disk_store::{DiskStore, StorePolicy};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resource::RunResourceStamps;
@@ -380,9 +380,11 @@ impl RuntimeCache {
 
     /// Write `e_node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
     /// calls this right after a successful invoke), so a long run's earlier caches are durable
-    /// even if a later node errors or the run is cancelled. The target and output slice are
-    /// snapshotted **synchronously**; only [`DiskStore::store`]'s write awaits, so the borrow
-    /// across the await is just the value slice (`Sync`), never the whole cache.
+    /// even if a later node errors or the run is cancelled. [`StorePolicy::KnownMiss`] publishes
+    /// directly after resolution proved reuse impossible; [`StorePolicy::PreserveCovering`]
+    /// first protects a broader blob when a maintenance flush has no such verdict. The target
+    /// and output slice are snapshotted **synchronously**; the borrow across the store await is
+    /// just the value slice (`Sync`), never the whole cache.
     ///
     /// Only writes a value that matches the node's *current* digest
     /// ([`is_resident_hit`](Self::is_resident_hit)): a resident value produced under a superseded
@@ -393,6 +395,7 @@ impl RuntimeCache {
         &'a self,
         program: &ExecutionProgram,
         e_node_id: ExecutionNodeId,
+        policy: StorePolicy,
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.disk_store.blob_target(
@@ -411,7 +414,7 @@ impl RuntimeCache {
             let (Some(target), Some(snapshot)) = (target, resident) else {
                 return;
             };
-            disk.store(&target, snapshot, ctx).await;
+            disk.store(&target, snapshot, policy, ctx).await;
         }
     }
 
