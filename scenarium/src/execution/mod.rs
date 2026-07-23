@@ -29,7 +29,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::RunEvent;
-use crate::execution::stats::ExecutionStats;
+use crate::execution::outcome::ExecutionOutcome;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 
@@ -42,13 +42,13 @@ pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod identity;
+pub(crate) mod outcome;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
 pub(crate) mod report;
 pub(crate) mod resolve;
 pub(crate) mod resource;
-pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;
@@ -126,7 +126,7 @@ impl<T> OutputColumn<T> {
 /// ([`EventSeedNotFound`](Error::EventSeedNotFound)), or the event loop's lambda
 /// panicked ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the
 /// engine's `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
-/// (collected into [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats)),
+/// (collected into [`ExecutionOutcome::node_errors`](crate::execution::outcome::ExecutionOutcome)),
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](compile::CompileError), produced on the host before anything
 /// reaches the engine — the phases can't be confused at the type level.
@@ -148,7 +148,7 @@ pub enum Error {
 }
 
 /// A **single node's** run-time failure, collected per-node into
-/// [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats). Distinct
+/// [`ExecutionOutcome::node_errors`](crate::execution::outcome::ExecutionOutcome). Distinct
 /// from [`Error`] (whole-operation failures): a `RunError` always concerns exactly one
 /// node, so it can't carry a compile/plan failure, and a caller reading `node_errors`
 /// can't mistake a setup failure for a node's outcome.
@@ -290,7 +290,7 @@ impl ExecutionEngine {
         seeds: RunSeeds,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
-    ) -> Result<ExecutionStats> {
+    ) -> Result<ExecutionOutcome> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
@@ -386,7 +386,7 @@ pub(crate) mod test_support {
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program;
     use crate::execution::resource::RunResourceStamps;
-    use crate::execution::stats::ExecutionStats;
+    use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::{ExecutionEngine, Result, RunSeeds};
     use crate::node::lambda::OutputDemand;
 
@@ -404,7 +404,7 @@ pub(crate) mod test_support {
             Ok(())
         }
 
-        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionStats> {
+        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
             self.execute(
                 RunSeeds {
                     sinks: true,
@@ -419,7 +419,7 @@ pub(crate) mod test_support {
         pub(crate) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
             &mut self,
             events: T,
-        ) -> Result<ExecutionStats> {
+        ) -> Result<ExecutionOutcome> {
             self.execute(
                 RunSeeds {
                     events: events.into_iter().collect(),
@@ -434,7 +434,7 @@ pub(crate) mod test_support {
         pub(crate) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
             &mut self,
             nodes: T,
-        ) -> Result<ExecutionStats> {
+        ) -> Result<ExecutionOutcome> {
             self.execute(
                 RunSeeds {
                     nodes: nodes.into_iter().collect(),
