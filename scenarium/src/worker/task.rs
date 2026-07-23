@@ -4,6 +4,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use common::CancelToken;
 
+use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::report::RunEvent;
@@ -98,13 +99,10 @@ impl WorkerTask {
         self.apply_graph_state(&mut intent, callback);
         self.evict_cache(&mut intent, callback).await;
 
-        let start_event_loop = match intent.loop_request.take() {
-            Some(LoopCommand::Start) => true,
-            Some(LoopCommand::Stop) => false,
-            None => restart_event_loop,
-        };
-        self.execute_intent(&mut intent, start_event_loop, callback)
-            .await;
+        if restart_event_loop && intent.loop_command.is_none() {
+            intent.loop_command = Some(LoopCommand::Start);
+        }
+        self.execute_intent(&mut intent, callback).await;
 
         for reply in intent.syncs {
             let _ = reply.send(());
@@ -117,7 +115,7 @@ impl WorkerTask {
         C: Fn(WorkerReport),
     {
         let needs_stop =
-            intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
+            intent.graph_state.is_some() || intent.loop_command.is_some() || intent.exit;
         if needs_stop {
             self.stop_event_loop(callback).await
         } else {
@@ -204,15 +202,11 @@ impl WorkerTask {
         }));
     }
 
-    async fn execute_intent<C>(
-        &mut self,
-        intent: &mut BatchIntent,
-        start_event_loop: bool,
-        callback: &C,
-    ) where
+    async fn execute_intent<C>(&mut self, intent: &mut BatchIntent, callback: &C)
+    where
         C: Fn(WorkerReport) + Sync,
     {
-        if !self.execution_requested(intent, start_event_loop) {
+        if !self.execution_requested(intent) {
             return;
         }
 
@@ -220,22 +214,14 @@ impl WorkerTask {
         let cancel = self.cancel.clone();
         self.report_activity(true, callback);
         let _pause_guard = self.event_loop_pause_gate.close();
-        let seeds = RunSeeds {
-            sinks: intent.execute_sinks,
-            event_triggers: start_event_loop
-                || self.event_loop.is_some()
-                || intent.execute_event_triggers,
-            events: std::mem::take(&mut intent.events).into_iter().collect(),
-            nodes: std::mem::take(&mut intent.execute_nodes)
-                .into_iter()
-                .collect(),
-        };
+        let seeds = intent.take_run_seeds();
         let result = self.run_and_forward(seeds, cancel, callback).await;
 
         match result {
             Ok(()) => {
-                if start_event_loop {
-                    self.start_event_loop().await;
+                let event_triggers = std::mem::take(&mut self.outcome.event_triggers);
+                if intent.loop_command == Some(LoopCommand::Start) {
+                    self.spawn_event_loop(event_triggers).await;
                 }
                 let activity = self.activity(false);
                 callback(WorkerReport::Status(
@@ -249,13 +235,13 @@ impl WorkerTask {
         }
     }
 
-    fn execution_requested(&self, intent: &BatchIntent, start_event_loop: bool) -> bool {
+    fn execution_requested(&self, intent: &BatchIntent) -> bool {
         !self.engine.is_empty()
             && (intent.execute_sinks
                 || intent.execute_event_triggers
                 || !intent.execute_nodes.is_empty()
                 || !intent.events.is_empty()
-                || start_event_loop)
+                || intent.loop_command == Some(LoopCommand::Start))
     }
 
     fn activity(&self, executing: bool) -> WorkerActivity {
@@ -275,14 +261,13 @@ impl WorkerTask {
         callback(WorkerReport::Status(self.status.activity(activity)));
     }
 
-    async fn start_event_loop(&mut self) {
+    async fn spawn_event_loop(&mut self, event_triggers: Vec<EventTrigger>) {
         assert!(self.event_loop.is_none());
-        let triggers = self.engine.active_event_triggers(&self.outcome);
-        if triggers.is_empty() {
+        if event_triggers.is_empty() {
             return;
         }
         self.event_loop =
-            Some(ActiveEventLoop::start(triggers, self.event_loop_pause_gate.clone()).await);
+            Some(ActiveEventLoop::spawn(event_triggers, self.event_loop_pause_gate.clone()).await);
         tracing::info!("Event loop started");
     }
 

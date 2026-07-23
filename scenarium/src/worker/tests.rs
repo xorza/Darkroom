@@ -1587,7 +1587,7 @@ fn scan_accumulates_simple_flags() {
     ]);
 
     assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
-    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
+    assert!(matches!(intent.loop_command, Some(LoopCommand::Start)));
     assert!(intent.execute_sinks);
     assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
@@ -1602,7 +1602,7 @@ fn scan_accumulates_simple_flags() {
 
     let seeds = intent.take_run_seeds();
     assert!(seeds.sinks);
-    assert!(!seeds.event_triggers);
+    assert!(seeds.event_triggers);
     assert_eq!(seeds.events, vec![event]);
     assert_eq!(seeds.nodes, vec![e_node_id]);
     assert!(!intent.execute_sinks);
@@ -1669,7 +1669,7 @@ fn scan_exit_dominates_entire_batch() {
         "pre-Exit graph ops must be discarded"
     );
     assert!(
-        intent.loop_request.is_none(),
+        intent.loop_command.is_none(),
         "post-Exit loop ops must be discarded"
     );
     assert!(
@@ -1812,7 +1812,7 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     assert!(matches!(intent.graph_state, Some(GraphOp::Replace(_))));
 }
 
-// Slot reduction: last-write-wins for graph_state and loop_request.
+// Slot reduction: last-write-wins for graph_state and loop_command.
 
 #[test]
 fn scan_last_write_wins_per_slot() {
@@ -1841,12 +1841,12 @@ fn scan_last_write_wins_per_slot() {
         (
             "Start then Stop -> last write (Stop) wins",
             vec![WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
+            |intent| matches!(intent.loop_command, Some(LoopCommand::Stop)),
         ),
         (
             "Stop then Start -> last write (Start) wins",
             vec![WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
+            |intent| matches!(intent.loop_command, Some(LoopCommand::Start)),
         ),
     ];
 

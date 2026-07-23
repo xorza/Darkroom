@@ -25,7 +25,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use common::CancelToken;
 
 use crate::DynamicValue;
-use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
+use crate::execution::event::EventTrigger;
+use crate::execution::identity::{ExecutionEventPort, ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::node::lambda::{InvokeError, InvokeInput};
@@ -37,7 +38,7 @@ use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedRun};
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::{NodeMap, OutputColumn, RunError, reset_node_map};
+use crate::execution::{NodeMap, OutputColumn, RunError};
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -283,10 +284,13 @@ impl Executor {
         // one source.
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
-        reset_node_map(
-            &mut self.outcomes,
-            program.e_nodes.keys().copied(),
-            NodeOutcome::Pending,
+        self.outcomes.clear();
+        self.outcomes.extend(
+            program
+                .e_nodes
+                .keys()
+                .copied()
+                .map(|e_node_id| (e_node_id, NodeOutcome::Pending)),
         );
 
         self.remaining_reads.seed(resolved);
@@ -511,6 +515,24 @@ impl Executor {
                 // synchronously inside `store_node`; only the write awaits, so the cache
                 // borrow doesn't cross it.
                 if succeeded {
+                    if plan.event_sources.contains(&e_node_id) {
+                        outcome.event_triggers.extend(
+                            program.events[e_node.events.range()]
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, event)| {
+                                    !event.subscribers.is_empty() && !event.lambda.is_none()
+                                })
+                                .map(|(event_idx, event)| EventTrigger {
+                                    event: ExecutionEventPort {
+                                        e_node_id,
+                                        event_idx,
+                                    },
+                                    lambda: event.lambda.clone(),
+                                    state: event_state.clone(),
+                                }),
+                        );
+                    }
                     // Deliver before later consumers can release values; host delivery is not a reader.
                     frame.emit_pinned_values(e_node_id, events);
                     // The preceding reuse miss proves that no blob can cover this result.

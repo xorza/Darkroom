@@ -17,7 +17,7 @@ pub(crate) enum GraphOp {
     Replace(Arc<CompiledGraph>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopCommand {
     Start,
     Stop,
@@ -27,7 +27,7 @@ pub(crate) enum LoopCommand {
 pub(crate) struct BatchIntent {
     pub(crate) graph_state: Option<GraphOp>,
     pub(crate) disk_store: Option<DiskStore>,
-    pub(crate) loop_request: Option<LoopCommand>,
+    pub(crate) loop_command: Option<LoopCommand>,
     pub(crate) execute_sinks: bool,
     pub(crate) execute_event_triggers: bool,
     pub(crate) execute_nodes: IndexSet<ExecutionNodeId>,
@@ -41,7 +41,8 @@ impl BatchIntent {
     pub(crate) fn take_run_seeds(&mut self) -> RunSeeds {
         RunSeeds {
             sinks: std::mem::take(&mut self.execute_sinks),
-            event_triggers: std::mem::take(&mut self.execute_event_triggers),
+            event_triggers: std::mem::take(&mut self.execute_event_triggers)
+                || self.loop_command == Some(LoopCommand::Start),
             events: std::mem::take(&mut self.events).into_iter().collect(),
             nodes: std::mem::take(&mut self.execute_nodes)
                 .into_iter()
@@ -79,8 +80,8 @@ pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 intent.events.extend(events);
                 intent.execute_nodes.extend(nodes);
             }
-            WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
-            WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
+            WorkerMessage::StartEventLoop => intent.loop_command = Some(LoopCommand::Start),
+            WorkerMessage::StopEventLoop => intent.loop_command = Some(LoopCommand::Stop),
             WorkerMessage::Sync { reply } => intent.syncs.push(reply),
         }
     }

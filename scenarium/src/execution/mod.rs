@@ -45,7 +45,6 @@ pub(crate) mod identity;
 pub(crate) mod outcome;
 pub(crate) mod plan;
 pub(crate) mod program;
-mod query;
 pub(crate) mod report;
 pub(crate) mod resolve;
 pub(crate) mod resource;
@@ -100,15 +99,6 @@ impl<T> IndexMut<OutputIdx> for OutputColumn<T> {
 
 pub(crate) type NodeMap<T> = HashMap<ExecutionNodeId, T>;
 pub(crate) type NodeSet = HashSet<ExecutionNodeId>;
-
-fn reset_node_map<T: Clone>(
-    map: &mut NodeMap<T>,
-    e_node_ids: impl Iterator<Item = ExecutionNodeId>,
-    value: T,
-) {
-    map.clear();
-    map.extend(e_node_ids.map(|e_node_id| (e_node_id, value.clone())));
-}
 
 impl<T> OutputColumn<T> {
     pub(crate) fn slice(&self, outputs: Span) -> &[T] {
@@ -251,7 +241,7 @@ impl ExecutionEngine {
 
     pub(crate) fn clear(&mut self) {
         self.compiled = Arc::default();
-        self.plan.clear();
+        self.plan.reset_for_program(&self.compiled.program);
         self.cache.clear();
         self.resource_stamps = RunResourceStamps::default();
     }
@@ -260,9 +250,8 @@ impl ExecutionEngine {
     /// Infallible: everything that can go wrong went wrong at compile
     /// ([`compile::Compiler`]), on the host's thread.
     ///
-    /// The plan isn't cleared here: every `execute` re-`plan`s from scratch (the
-    /// planner `reset`s the buffer), and nothing reads the plan between an install
-    /// and the next run. `clear()` is reserved for full teardown (`Self::clear`).
+    /// The plan isn't cleared here: every `execute` re-`plan`s from scratch and nothing
+    /// reads the reusable plan buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
         self.compiled = compiled;
 
@@ -284,7 +273,8 @@ impl ExecutionEngine {
     /// node with a pinned output (or that is itself a pinned root) produces or
     /// reuses its value, so a GUI preview updates without polling. When `cancel`
     /// is set mid-run, scheduling stops after the in-flight node and the
-    /// caller-owned outcome is marked `cancelled`.
+    /// caller-owned outcome is marked `cancelled`. The outcome also owns triggers
+    /// initialized successfully by an `event_triggers` seed.
     pub(crate) async fn execute(
         &mut self,
         mut seeds: RunSeeds,
@@ -387,9 +377,17 @@ pub(crate) mod test_support {
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::program;
+    use crate::execution::program::ExecutionBinding;
     use crate::execution::resource::RunResourceStamps;
     use crate::execution::{ExecutionEngine, Result, RunSeeds};
+    use crate::graph::NodeId;
     use crate::node::lambda::OutputDemand;
+
+    #[derive(Debug, Default)]
+    pub(crate) struct ArgumentValues {
+        pub(crate) inputs: Vec<Option<DynamicValue>>,
+        pub(crate) outputs: Vec<DynamicValue>,
+    }
 
     /// Test-only inspection of the last plan's per-run flags and runtime slots.
     impl ExecutionEngine {
@@ -512,6 +510,43 @@ pub(crate) mod test_support {
         /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.
         pub(crate) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
             self.executor.ran(e_node_id)
+        }
+
+        /// Resident-only argument values, test inspection only: reads whatever is
+        /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
+        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
+            self.get_argument_values_at(ExecutionNodeId::from_authoring(&[*node_id]))
+        }
+
+        pub(crate) fn get_argument_values_at(
+            &self,
+            e_node_id: ExecutionNodeId,
+        ) -> Option<ArgumentValues> {
+            self.compiled.program.e_nodes.get(&e_node_id)?;
+            Some(self.argument_values_at(e_node_id))
+        }
+
+        fn argument_values_at(&self, e_node_id: ExecutionNodeId) -> ArgumentValues {
+            let e_node = &self.compiled.program.e_nodes[&e_node_id];
+
+            let inputs = self.compiled.program.inputs[e_node.inputs.range()]
+                .iter()
+                .map(|input| match &input.binding {
+                    ExecutionBinding::None => None,
+                    ExecutionBinding::Const(value) => Some(DynamicValue::from(value)),
+                    ExecutionBinding::Bind(address) => self.cache.slots[&address.e_node_id]
+                        .output_values()
+                        .and_then(|outputs| outputs.get(address.port_idx))
+                        .cloned(),
+                })
+                .collect();
+
+            let outputs = self.cache.slots[&e_node_id]
+                .output_values()
+                .map(|outputs| outputs.to_vec())
+                .unwrap_or_default();
+
+            ArgumentValues { inputs, outputs }
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and

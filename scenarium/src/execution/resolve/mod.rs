@@ -23,7 +23,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::{NodeMap, OutputColumn, reset_node_map};
+use crate::execution::{NodeMap, OutputColumn};
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
@@ -100,11 +100,14 @@ pub(crate) struct ResolvedRun {
 }
 
 impl ResolvedRun {
-    fn reset(&mut self, program: &ExecutionProgram) {
-        reset_node_map(
-            &mut self.disposition,
-            program.e_nodes.keys().copied(),
-            Disposition::Cut,
+    fn reset_for_program(&mut self, program: &ExecutionProgram) {
+        self.disposition.clear();
+        self.disposition.extend(
+            program
+                .e_nodes
+                .keys()
+                .copied()
+                .map(|e_node_id| (e_node_id, Disposition::Cut)),
         );
         self.outputs.reset(program.n_outputs());
     }
@@ -162,7 +165,7 @@ async fn resolve_run(
     cache: &mut RuntimeCache,
     run: &mut ResolvedRun,
 ) {
-    run.reset(program);
+    run.reset_for_program(program);
     for e_node_id in &plan.roots {
         *run.disposition.get_mut(e_node_id).unwrap() = Disposition::Run;
     }
@@ -182,7 +185,9 @@ async fn resolve_run(
         run.outputs.seed_external_demand(program, plan, e_node_id);
         let outputs = program.e_nodes[&e_node_id].outputs;
         let demand = run.outputs.demand.slice(outputs);
-        if cache.check_reuse(program, e_node_id, demand).await {
+        if !plan.event_sources.contains(&e_node_id)
+            && cache.check_reuse(program, e_node_id, demand).await
+        {
             *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Reuse;
             continue;
         }
