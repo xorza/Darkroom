@@ -8,7 +8,27 @@ use std::hint::black_box;
 use imaginarium::Image;
 
 use crate::Stretch;
+#[cfg(not(target_arch = "aarch64"))]
+use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
+
+/// Scalar reference path for targets (or x86 CPUs) without the SIMD kernel.
+#[cfg(not(target_arch = "aarch64"))]
+fn scalar_asinh(buf: &mut [f32], curve: &AsinhCurve) {
+    for px in buf.chunks_exact_mut(3) {
+        let out = stretching::color_preserve_pixel(
+            Rgb {
+                r: px[0],
+                g: px[1],
+                b: px[2],
+            },
+            curve,
+        );
+        px[0] = out.r;
+        px[1] = out.g;
+        px[2] = out.b;
+    }
+}
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 
@@ -92,8 +112,10 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         px[2] = v * 0.8;
     }
     b.bench(|| {
-        // SAFETY: NEON is always available on aarch64.
+        // Mirror `apply_color_preserving_asinh`'s dispatch so the bench
+        // times the kernel production actually runs on this machine.
         #[cfg(target_arch = "aarch64")]
+        // SAFETY: NEON is always available on aarch64.
         unsafe {
             stretching::simd_neon::asinh_color_preserve_neon(
                 &mut buf,
@@ -101,20 +123,21 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
                 curve.inv_norm,
             );
         }
-        #[cfg(not(target_arch = "aarch64"))]
-        for px in buf.chunks_exact_mut(3) {
-            let out = stretching::color_preserve_pixel(
-                Rgb {
-                    r: px[0],
-                    g: px[1],
-                    b: px[2],
-                },
-                &curve,
-            );
-            px[0] = out.r;
-            px[1] = out.g;
-            px[2] = out.b;
+        #[cfg(target_arch = "x86_64")]
+        if imaginarium::cpu_features::has_avx2_fma() {
+            // SAFETY: AVX2+FMA availability checked above.
+            unsafe {
+                stretching::simd_avx2::asinh_color_preserve_avx2(
+                    &mut buf,
+                    curve.inv_beta,
+                    curve.inv_norm,
+                );
+            }
+        } else {
+            scalar_asinh(&mut buf, &curve);
         }
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        scalar_asinh(&mut buf, &curve);
         black_box(&buf);
     });
 }

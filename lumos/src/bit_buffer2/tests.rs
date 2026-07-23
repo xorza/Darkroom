@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
 
@@ -139,6 +139,8 @@ fn from_slice_rejects_a_mismatched_length() {
 #[cfg(debug_assertions)]
 #[test]
 fn debug_access_rejects_out_of_bounds_indices_and_coordinates() {
+    use std::panic::AssertUnwindSafe;
+
     let mut buffer = BitBuffer2::new_default(3, 2);
 
     assert!(catch_unwind(|| buffer.get(6)).is_err());
