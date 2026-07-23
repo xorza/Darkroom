@@ -82,8 +82,8 @@ binding-reader counts together. Execution invokes the surviving nodes in plan
 order. Event-loop bootstrap marks subscribed event owners as event sources,
 forces their initialization lambdas to run instead of reusing output caches,
 and prepares triggers only for sources that complete successfully. The worker
-drains those prepared triggers directly into event tasks; fired-event runs do
-not rebuild unrelated triggers.
+receives the owned `PreparedEventLoop` execution result and moves it into event
+tasks; fired-event runs do not rebuild unrelated triggers.
 
 Before resolution, `RunResourceStamps` collects filesystem identities and custom
 resource stamps on Tokio's blocking pool. It memoizes each resource for one run

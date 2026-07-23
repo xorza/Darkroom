@@ -16,7 +16,7 @@ use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
-use crate::execution::event::EventTrigger;
+use crate::execution::event::{EventTrigger, PreparedEventLoop};
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
@@ -159,16 +159,17 @@ async fn start_single_event_loop(
     pause_gate: PauseGate,
 ) -> (ActiveEventLoop, ExecutionNodeId) {
     let e_node_id = ExecutionNodeId::unique();
-    let mut triggers = vec![EventTrigger {
-        event: ExecutionEventPort {
-            e_node_id,
-            event_idx: 0,
-        },
-        lambda,
-        state: SharedAnyState::default(),
-    }];
-    let active = ActiveEventLoop::start(&mut triggers, pause_gate).await;
-    assert!(triggers.is_empty());
+    let prepared = PreparedEventLoop {
+        triggers: vec![EventTrigger {
+            event: ExecutionEventPort {
+                e_node_id,
+                event_idx: 0,
+            },
+            lambda,
+            state: SharedAnyState::default(),
+        }],
+    };
+    let active = ActiveEventLoop::spawn(prepared, pause_gate).await;
     (active, e_node_id)
 }
 

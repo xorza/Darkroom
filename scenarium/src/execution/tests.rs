@@ -4483,24 +4483,25 @@ mod events {
 
         let mut outcome = ExecutionOutcome::default();
         for expected_calls in [1, 2] {
-            eg.execute(
-                RunSeeds {
-                    event_triggers: true,
-                    ..Default::default()
-                },
-                None,
-                CancelToken::never(),
-                &mut outcome,
-            )
-            .await?;
+            let prepared = eg
+                .execute(
+                    RunSeeds {
+                        event_triggers: true,
+                        ..Default::default()
+                    },
+                    None,
+                    CancelToken::never(),
+                    &mut outcome,
+                )
+                .await?;
 
             assert_eq!(*f.emit_calls.lock().await, expected_calls);
-            assert_eq!(eg.event_triggers.len(), 1);
+            assert_eq!(prepared.triggers.len(), 1);
             assert_eq!(
-                eg.event_triggers[0].event.e_node_id,
+                prepared.triggers[0].event.e_node_id,
                 root_execution_node(f.emit_id)
             );
-            assert_eq!(eg.event_triggers[0].event.event_idx, 0);
+            assert_eq!(prepared.triggers[0].event.event_idx, 0);
         }
 
         Ok(())
@@ -4523,7 +4524,10 @@ mod events {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
-        let outcome = eg.execute_sinks().await?;
+        let mut outcome = ExecutionOutcome::default();
+        let prepared = eg
+            .execute(RunSeeds::sinks(), None, CancelToken::never(), &mut outcome)
+            .await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
         assert!(
@@ -4532,7 +4536,7 @@ mod events {
                 .iter()
                 .any(|n| n.e_node_id == root_execution_node(f.emit_id))
         );
-        assert!(eg.event_triggers.is_empty());
+        assert!(prepared.triggers.is_empty());
 
         Ok(())
     }
@@ -4551,23 +4555,24 @@ mod events {
         eg.update(&f.graph, &f.library).unwrap();
 
         let mut outcome = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                event_triggers: true,
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-            &mut outcome,
-        )
-        .await?;
+        let prepared = eg
+            .execute(
+                RunSeeds {
+                    event_triggers: true,
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+                &mut outcome,
+            )
+            .await?;
 
         assert_eq!(outcome.node_errors.len(), 1);
         assert_eq!(
             outcome.node_errors[0].e_node_id,
             root_execution_node(f.emit_id)
         );
-        assert!(eg.event_triggers.is_empty());
+        assert!(prepared.triggers.is_empty());
 
         Ok(())
     }
