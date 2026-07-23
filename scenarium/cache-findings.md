@@ -10,6 +10,11 @@ Vocabulary: "RAM-retained" = `CacheMode::caches_in_ram()` (`Ram`/`Both`); "disk-
 `persists_to_disk()` (`Disk`/`Both`); "hydration" = `RuntimeCache::check_reuse` reading a
 blob via `DiskStore::read` and installing it as a `ValueState::Resident` slot.
 
+Policy decision: hydration intentionally reads the complete accepted blob. Demand determines
+whether the blob has enough coverage to be reused; it does not select payloads. Installing the
+complete snapshot, including opportunistic byproducts, and replacing narrower same-digest
+resident coverage are therefore expected behavior rather than optimization findings.
+
 ## A. RAM held longer than necessary
 
 **A1. Hydration happens at resolve time, so hydrated RAM peaks before the run starts.**
@@ -21,22 +26,7 @@ runs (long, disk-heavy) where it matters most.
 
 ## B. Disk loads that could be skipped or shrunk
 
-**B1. `format::read` decodes every stored payload regardless of demand.**
-The `demand` parameter of `DiskStore::read` only gates the *coverage* verdict (a demanded
-port stored `Unbound` → miss). `read_header` collects **all** descriptors and the value
-loop decodes every bound payload — including ports the run marked `Skip`. There is no
-seek-past for undemanded payloads, so a hydration pays full-blob I/O and decode cost, and
-the undemanded values then occupy RAM in the snapshot, no matter how narrow the actual
-demand was.
-
-**B2. Coverage expansion re-reads everything, discarding valid resident ports.**
-In `check_reuse`, a resident current-digest value that lacks even one newly-demanded port
-fails `is_resident_hit` and falls through to a full disk read whose result *replaces* the
-whole snapshot. Ports already resident in RAM under the same digest are re-read from disk
-(and, per B1, so is everything else in the blob). One newly-pinned port on a `Both`-mode
-node is enough to trigger a full re-hydration of values the cache already holds.
-
-**B3. Pin demand hydrates unconditionally, and unchanged pins re-hydrate every run.**
+**B1. Pin demand hydrates unconditionally, and unchanged pins re-hydrate every run.**
 `seed_external_demand` seeds `Produce` for pinned roots and authored pinned ports with no
 notion of whether the value already reached the host. For a `Disk`-mode node this means:
 every run whose cone includes the pinned node hydrates the blob at resolve, clones the
@@ -47,14 +37,14 @@ again next run, digest unchanged, to deliver an identical preview. There is no
 that served only pin demand was wasted entirely (production worker always passes
 `Some(&event_tx)`, so today this waste is confined to eventless callers).
 
-**B4. The upstream cone of a late-improved reuse has already executed.**
+**B2. The upstream cone of a late-improved reuse has already executed.**
 A `Run` node whose digest folded an unreadable bound resource keeps its whole producer
 cone alive ("uncacheable, must run"). At reach time the executor re-stamps and may find a
 disk hit — but by then every upstream producer has already executed (they were ordered
 first), solely to feed inputs that `abandon_input_reads` then discards unread. The disk
 load itself is legitimate and single; the cone execution it obsoletes is the waste.
 
-**B5. Every store is preceded by a header read, and a failed commit adds another.**
+**B3. Every store is preceded by a header read, and a failed commit adds another.**
 `DiskStore::store` calls `covers` (open + header/descriptor scan of the existing file)
 before every write, including the common fresh-digest case where the scan is guaranteed to
 answer "no" at the digest comparison. A failed commit runs `covers` a second time to
@@ -77,11 +67,11 @@ once. The two read sites are mutually exclusive per node:
 A resolver `Reuse` verdict is never re-derived in the executor (documented invariant), so
 no second probe exists for the same node. A failed decode deletes the blob and reports a
 miss with no retry. The remaining same-run disk *accesses* to a blob are header-only:
-`covers` before each store and after a failed commit (B5) — they never load values.
+`covers` before each store and after a failed commit (B3) — they never load values.
 
 Across runs, by design of `Disk` mode, the same blob is re-read once per run that demands
-it (the RAM copy is dropped by `release_dead_outputs`); combined with B1/B3 this is the
-dominant source of repeated disk I/O for unchanged graphs.
+it (the RAM copy is dropped by `release_dead_outputs`); B1 makes unchanged pin delivery
+the dominant avoidable source of repeated value I/O.
 
 ## D. Fix sequencing
 
@@ -91,19 +81,16 @@ stats a run reports) matches the cluster, not the individual finding. Each batch
 small, independently landable, and touches a disjoint area, so they can ship in any order
 — the listed order is payoff-per-risk.
 
-**Batch 1 — disk read/write path: B1, B2, B5** (`disk_store/format`, `check_reuse`).
-B2's proper shape depends on B1: only once the reader can skip or select payloads can
-coverage expansion read just the missing ports and merge instead of replace. B5 is the
-same module's write side. Verified by the existing format/disk-store tests plus new
-partial-read cases.
+**Batch 1 — store publication probes: B3** (`disk_store`).
+This is isolated to the write path and can be verified by the existing disk-store tests
+plus exact probe/write-count assertions.
 
-**Batch 2 — pin delivery memo: B3** (report/worker). Independent mechanism
+**Batch 2 — pin delivery memo: B1** (report/worker). Independent mechanism
 (delivered-under-digest tracking) with host-protocol implications; nothing else depends
 on it and it depends on nothing above.
 
-**Deferred, revisit after batch 1: A1, B4.** A1 (reach-time hydration) is the one
-architectural change — it reshapes the resolve/execute contract, and batch 1 changes its
-economics enough that it should be re-measured afterwards rather than built now. B4 is
-inherent to late-bound resources; fixing it means deferring cone execution
+**Deferred: A1, B2.** A1 (reach-time hydration) is an architectural change that reshapes
+the resolve/execute contract and should be justified by peak-RAM measurements before it
+is built. B2 is inherent to late-bound resources; fixing it means deferring cone execution
 until after reach-time re-stamping, i.e. a scheduler redesign — out of proportion to the
 waste unless profiles say otherwise.

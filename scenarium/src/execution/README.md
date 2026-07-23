@@ -245,6 +245,12 @@ require matching content and current codec versions, and compare the descriptor 
 with the outputs that must be preserved. Invalidation is an **overwrite**. A write is skipped
 only when the existing blob already covers every value being stored. Writes stream into a
 temporary file and publish it atomically, so readers never see a partially encoded generation.
+Hydration intentionally restores the **whole accepted blob**: demand is a coverage gate, not a
+payload-selection mask. Once the header proves that every demanded output is present, the
+loader decodes every bound payload and installs the complete stored snapshot. If a
+current-digest resident snapshot lacks newly demanded coverage, that complete disk snapshot
+replaces it; values under the same digest are equivalent, and retaining all stored outputs
+preserves opportunistic byproducts as one coherent cache entry.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
@@ -299,11 +305,12 @@ resolution and execution then follow this lifecycle:
    output is non-`Unbound`.
 2. **else verify disk reuse.** The loader opens the blob once, checks its digest, output
    count, codec versions, and demanded coverage while scanning the header, then continues
-   through the same file to decode its body. Insufficient coverage is rejected before any
+   through the same file to decode every bound payload. Demand decides whether the blob is
+   usable, not which payloads are hydrated. Insufficient coverage is rejected before any
    payload is read, while a valid partial blob remains available for a narrower future run.
-   Only a successful decode becomes `Reuse` and cuts the producer cone. A corrupt body is
-   deleted and treated as a miss; the same reverse sweep continues through its producers, so
-   the node recomputes this run.
+   Only a successful whole-blob decode becomes `Reuse` and cuts the producer cone. A corrupt
+   body is deleted and treated as a miss; the same reverse sweep continues through its
+   producers, so the node recomputes this run.
 3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
    demanded output fails the node; skipped outputs may remain `Unbound`. A lambda may still
    produce a skipped output as an opportunistic byproduct, which is retained as reusable cache
