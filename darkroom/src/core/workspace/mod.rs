@@ -5,6 +5,7 @@ use std::path::Path;
 use scenarium::NodeId;
 
 use crate::core::document::open_document::OpenDocument;
+use crate::core::io::document::DocumentSaveError;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::script::ScriptConfig;
@@ -82,7 +83,7 @@ impl Workspace {
         self.runtime.start_event_loop(&self.open.document.graph)
     }
 
-    pub(crate) fn save_to(&mut self, path: &Path) -> anyhow::Result<()> {
+    pub(crate) fn save_to(&mut self, path: &Path) -> Result<(), DocumentSaveError> {
         let library = self.runtime.library.published.load();
         self.open.save_to(path, &library)?;
         self.runtime.set_document_cache(self.open.path.as_deref());

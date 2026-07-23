@@ -18,7 +18,7 @@ pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, Ty
 pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
-pub use error::ValidationError;
+pub use error::{GraphDeserializeError, GraphValidationError};
 pub use execution::codec::{CodecError, CustomValueCodec};
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::test_support::CompiledGraphBuilder;
@@ -35,12 +35,13 @@ pub use execution::{Error, Result, RunError, RunSeeds};
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{
-    Binding, CacheMode, Graph, GraphDeserializeError, InputPort, Node, NodeId, NodeKind, NodeRef,
-    NodeSearch, OutputPort, Subscription,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeRef, NodeSearch, OutputPort,
+    Subscription,
 };
-pub use library::{Library, TypeDecl, TypeEntry};
+pub use library::{Library, TypeDecl, TypeEntry, TypeEntryValidationError};
 pub use node::definition::{
-    Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, OutputType, ValueVariant,
+    Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, FuncValidationError, OutputType,
+    ValueVariant,
 };
 pub use node::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use node::lambda::{

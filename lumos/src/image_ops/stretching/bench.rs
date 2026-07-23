@@ -8,7 +8,6 @@ use std::hint::black_box;
 use imaginarium::Image;
 
 use crate::Stretch;
-use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;

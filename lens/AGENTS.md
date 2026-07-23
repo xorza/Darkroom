@@ -71,5 +71,5 @@ src/
 
 ## Dependencies
 
-common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tracing,
+common, scenarium, imaginarium, lumos, thiserror, strum, strum_macros, tracing,
 tokio, async-trait, notify, rand, blake3.

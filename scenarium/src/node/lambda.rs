@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::{error, fmt};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -26,8 +27,14 @@ impl OutputDemand {
 
 #[derive(Debug, Error)]
 pub enum InvokeError {
-    #[error("{message}")]
-    External { message: String },
+    #[error("{0}")]
+    External(#[source] Box<dyn error::Error + Send + Sync>),
+    #[error("input {index} must be {expected}, got {actual}")]
+    InvalidInput {
+        index: usize,
+        expected: &'static str,
+        actual: String,
+    },
     /// The lambda bailed because the run was cancelled. The executor maps this
     /// to `execution::Error::Cancelled` (a cancel is not a failure): the node's
     /// output is dropped so it re-runs, and it's reported as cancelled, not
@@ -38,9 +45,15 @@ pub enum InvokeError {
 }
 
 impl InvokeError {
-    pub fn external(error: impl std::fmt::Display) -> Self {
-        Self::External {
-            message: error.to_string(),
+    pub fn external(error: impl error::Error + Send + Sync + 'static) -> Self {
+        Self::External(Box::new(error))
+    }
+
+    pub fn invalid_input(index: usize, expected: &'static str, actual: impl fmt::Debug) -> Self {
+        Self::InvalidInput {
+            index,
+            expected,
+            actual: format!("{actual:?}"),
         }
     }
 }
@@ -143,5 +156,28 @@ impl std::fmt::Debug for FuncLambda {
             FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
             FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::error;
+    use std::fmt;
+
+    use crate::node::lambda::InvokeError;
+
+    #[derive(Debug)]
+    struct TestInvokeError(String);
+
+    impl fmt::Display for TestInvokeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl error::Error for TestInvokeError {}
+
+    pub(crate) fn failure(message: impl Into<String>) -> InvokeError {
+        InvokeError::external(TestInvokeError(message.into()))
     }
 }

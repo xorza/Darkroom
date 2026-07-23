@@ -4,12 +4,12 @@ use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result as AnyResult, ensure};
 use common::file_utils;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::document::Document;
+use crate::core::document::validate::DocumentValidationError;
 
 pub(crate) const EXTENSION: &str = "darkroom";
 const DOCUMENT_ENTRY: &str = "document.json";
@@ -67,8 +67,36 @@ pub(crate) enum DocumentLoadError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("{path}: {reason}", path = .path.display())]
-    InvalidDocument { path: PathBuf, reason: String },
+    #[error("{path}: {source}", path = .path.display())]
+    InvalidDocument {
+        path: PathBuf,
+        #[source]
+        source: DocumentValidationError,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DocumentSaveError {
+    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
+    InvalidExtension { path: PathBuf },
+    #[error("failed to serialize {DOCUMENT_ENTRY} for {path}: {source}", path = .path.display())]
+    Serialize {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "{DOCUMENT_ENTRY} for {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
+        path = .path.display(),
+        max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
+    )]
+    DocumentTooLarge { path: PathBuf, size: u64 },
+    #[error("{path}: {source}", path = .path.display())]
+    Publish {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
@@ -142,29 +170,31 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         })?;
     document
         .validate()
-        .map_err(|error| DocumentLoadError::InvalidDocument {
+        .map_err(|source| DocumentLoadError::InvalidDocument {
             path: path.to_path_buf(),
-            reason: format!("{error:#}"),
+            source,
         })?;
     Ok(document)
 }
 
-pub(crate) fn save(document: &Document, path: &Path) -> AnyResult<()> {
+pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveError> {
     ensure_extension(path)?;
     document.validate_debug();
 
-    let json = serde_json::to_vec_pretty(document).with_context(|| {
-        format!(
-            "failed to serialize {DOCUMENT_ENTRY} for {}",
-            path.display()
-        )
-    })?;
-    ensure_document_size(json.len() as u64)?;
+    let json =
+        serde_json::to_vec_pretty(document).map_err(|source| DocumentSaveError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    ensure_save_document_size(path, json.len() as u64)?;
 
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         write_archive(file, &json)
     })
-    .with_context(|| path.display().to_string())
+    .map_err(|source| DocumentSaveError::Publish {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 pub(crate) fn with_extension(mut path: PathBuf) -> PathBuf {
@@ -174,12 +204,14 @@ pub(crate) fn with_extension(mut path: PathBuf) -> PathBuf {
     path
 }
 
-fn ensure_extension(path: &Path) -> AnyResult<()> {
-    ensure!(
-        has_extension(path),
-        "Darkroom documents must use the .{EXTENSION} extension"
-    );
-    Ok(())
+fn ensure_extension(path: &Path) -> Result<(), DocumentSaveError> {
+    if has_extension(path) {
+        Ok(())
+    } else {
+        Err(DocumentSaveError::InvalidExtension {
+            path: path.to_path_buf(),
+        })
+    }
 }
 
 fn has_extension(path: &Path) -> bool {
@@ -188,13 +220,15 @@ fn has_extension(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
 }
 
-fn ensure_document_size(size: u64) -> AnyResult<()> {
-    ensure!(
-        size <= MAX_DOCUMENT_BYTES,
-        "{DOCUMENT_ENTRY} exceeds the {} MiB size limit",
-        MAX_DOCUMENT_BYTES / (1024 * 1024)
-    );
-    Ok(())
+fn ensure_save_document_size(path: &Path, size: u64) -> Result<(), DocumentSaveError> {
+    if size <= MAX_DOCUMENT_BYTES {
+        Ok(())
+    } else {
+        Err(DocumentSaveError::DocumentTooLarge {
+            path: path.to_path_buf(),
+            size,
+        })
+    }
 }
 
 fn ensure_load_document_size(path: &Path, size: u64) -> Result<(), DocumentLoadError> {
@@ -249,8 +283,10 @@ mod tests {
     fn document_extension_is_required_case_insensitively() {
         let document = Document::default();
         let wrong = test_output_path("darkroom_document/wrong.json");
-        let error = save(&document, &wrong).unwrap_err().to_string();
-        assert!(error.contains(".darkroom extension"), "{error}");
+        assert!(matches!(
+            save(&document, &wrong).unwrap_err(),
+            DocumentSaveError::InvalidExtension { path } if path == wrong
+        ));
         assert!(
             matches!(
                 load(&wrong).unwrap_err(),
@@ -317,8 +353,8 @@ mod tests {
         assert!(
             matches!(
                 load(&invalid).unwrap_err(),
-                DocumentLoadError::InvalidDocument { path, reason }
-                    if path == invalid && reason.contains("graph has a nil origin")
+                DocumentLoadError::InvalidDocument { path, source }
+                    if path == invalid && source.to_string().contains("graph has a nil origin")
             ),
             "structural validation retains the archive path and reason"
         );
@@ -326,13 +362,16 @@ mod tests {
 
     #[test]
     fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
-        ensure_document_size(MAX_DOCUMENT_BYTES).expect("boundary is accepted");
-        let error = ensure_document_size(MAX_DOCUMENT_BYTES + 1)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("256 MiB size limit"), "{error}");
-
         let path = Path::new("oversized.darkroom");
+        ensure_save_document_size(path, MAX_DOCUMENT_BYTES).expect("save boundary is accepted");
+        assert!(matches!(
+            ensure_save_document_size(path, MAX_DOCUMENT_BYTES + 1).unwrap_err(),
+            DocumentSaveError::DocumentTooLarge {
+                path: error_path,
+                size
+            } if error_path == path && size == MAX_DOCUMENT_BYTES + 1
+        ));
+
         ensure_load_document_size(path, MAX_DOCUMENT_BYTES).expect("load boundary is accepted");
         assert!(matches!(
             ensure_load_document_size(path, MAX_DOCUMENT_BYTES + 1).unwrap_err(),

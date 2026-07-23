@@ -8,15 +8,14 @@
 //! dropping the worker/script tokio runtimes inside this async loop would
 //! panic); here we only borrow it.
 
-use std::io::Write;
+use std::io::{self, Write};
 
-use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Notify;
 
 use crate::core::terminal_session::TerminalSession;
 
-pub(crate) async fn run(session: &mut TerminalSession, notify: &Notify) -> Result<()> {
+pub(crate) async fn run(session: &mut TerminalSession, notify: &Notify) -> io::Result<()> {
     println!("darkroom TUI — type 'help' for commands.");
     prompt()?;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -75,7 +74,7 @@ fn handle_command(session: &mut TerminalSession, cmd: &str) -> bool {
     false
 }
 
-fn prompt() -> Result<()> {
+fn prompt() -> io::Result<()> {
     print!("> ");
     std::io::stdout().flush()?;
     Ok(())

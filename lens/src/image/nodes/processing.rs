@@ -1,8 +1,8 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
-use scenarium::{DataType, DynamicValue, StaticValue};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library};
+use scenarium::{DataType, DynamicValue, InvokeError, InvokeResult, StaticValue};
+use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
 use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
@@ -62,8 +62,7 @@ fn register_brightness(library: &mut Library) {
                         ContrastBrightness::new(contrast, brightness),
                         &mut vision.processing_ctx,
                         value,
-                    )
-                    .map_err(InvokeError::external)?;
+                    )?;
                     outputs[0] = DynamicValue::from_custom(image);
                     Ok(())
                 })
@@ -274,11 +273,14 @@ pub(crate) fn adjust_image(
     op: ContrastBrightness,
     context: &mut imaginarium::ProcessingContext,
     value: DynamicValue,
-) -> imaginarium::Result<Image> {
+) -> InvokeResult<Image> {
     match value.into_custom::<Image>() {
         Ok(mut image) if image.buffer.is_cpu() => {
             {
-                let cpu = image.buffer.make_cpu_mut(context)?;
+                let cpu = image
+                    .buffer
+                    .make_cpu_mut(context)
+                    .map_err(InvokeError::external)?;
                 op.apply_cpu(cpu);
             }
             Ok(image)
@@ -297,8 +299,9 @@ fn adjust_into_fresh(
     op: ContrastBrightness,
     context: &mut imaginarium::ProcessingContext,
     input: &Image,
-) -> imaginarium::Result<Image> {
+) -> InvokeResult<Image> {
     let mut output = imaginarium::ImageBuffer::new_empty(input.buffer.desc);
-    op.execute(context, &input.buffer, &mut output)?;
+    op.execute(context, &input.buffer, &mut output)
+        .map_err(InvokeError::external)?;
     Ok(Image::from(output))
 }

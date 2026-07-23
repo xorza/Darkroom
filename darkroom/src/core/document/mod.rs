@@ -546,6 +546,7 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::validate::{DocumentValidationError, GraphViewValidationError};
     use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
 
@@ -1132,8 +1133,15 @@ mod tests {
         doc.graph.set_output_pinned(port, true);
         let err = doc.validate().unwrap_err();
         assert!(
-            format!("{err:#}").contains("pinned output must have a view item"),
-            "unexpected validation error: {err:#}"
+            matches!(
+                err,
+                DocumentValidationError::MainView {
+                    source: GraphViewValidationError::MissingPinnedOutput {
+                        port: missing_port
+                    }
+                } if missing_port == port
+            ),
+            "missing pin item reports the exact port"
         );
 
         // The project loader calls this same gate in every build (release too),
@@ -1142,8 +1150,15 @@ mod tests {
         let decoded: Document = serde_json::from_slice(&bytes).expect("deserialize");
         let err = decoded.validate().unwrap_err();
         assert!(
-            format!("{err:#}").contains("pinned output must have a view item"),
-            "unexpected deserialize error: {err:#}"
+            matches!(
+                err,
+                DocumentValidationError::MainView {
+                    source: GraphViewValidationError::MissingPinnedOutput {
+                        port: missing_port
+                    }
+                } if missing_port == port
+            ),
+            "deserialized missing pin item reports the exact port"
         );
 
         // The reverse drift — a ghost item for an unpinned port (unpinning
@@ -1155,8 +1170,15 @@ mod tests {
             .insert(ItemRef::Pin(port), Vec2::ZERO);
         let err = doc.validate().unwrap_err();
         assert!(
-            format!("{err:#}").contains("view item references an output that isn't pinned"),
-            "unexpected validation error: {err:#}"
+            matches!(
+                err,
+                DocumentValidationError::MainView {
+                    source: GraphViewValidationError::UnpinnedOutput {
+                        port: unpinned_port
+                    }
+                } if unpinned_port == port
+            ),
+            "ghost pin item reports the exact port"
         );
     }
 }

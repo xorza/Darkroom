@@ -5,12 +5,10 @@ use scenarium::{
 };
 
 fn float_input(inputs: &[InvokeInput], index: usize) -> Result<f64, InvokeError> {
-    inputs[index].value.as_f64().ok_or_else(|| {
-        InvokeError::external(format!(
-            "input {} is not a number: {:?}",
-            index, inputs[index].value
-        ))
-    })
+    inputs[index]
+        .value
+        .as_f64()
+        .ok_or_else(|| InvokeError::invalid_input(index, "a number", &inputs[index].value))
 }
 
 fn scale_random(unit: f64, min: f64, max: f64) -> f64 {

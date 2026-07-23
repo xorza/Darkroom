@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
@@ -37,11 +36,37 @@ struct WatchState {
     _watcher: RecommendedWatcher,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum WatchError {
+    #[error("failed to inspect watch directory {path:?}: {source}")]
+    Inspect {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("watch path is not a directory: {path:?}")]
+    NotDirectory { path: String },
+    #[error("failed to create filesystem watcher: {0}")]
+    Create(#[source] notify::Error),
+    #[error("failed to watch {path:?}: {source}")]
+    Register {
+        path: String,
+        #[source]
+        source: notify::Error,
+    },
+}
+
 impl WatchState {
-    fn new(path: &str, recursive: bool, debounce: Duration) -> anyhow::Result<Self> {
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("failed to inspect watch directory {path:?}"))?;
-        anyhow::ensure!(metadata.is_dir(), "watch path is not a directory: {path:?}");
+    fn new(path: &str, recursive: bool, debounce: Duration) -> Result<Self, WatchError> {
+        let metadata = std::fs::metadata(path).map_err(|source| WatchError::Inspect {
+            path: path.to_owned(),
+            source,
+        })?;
+        if !metadata.is_dir() {
+            return Err(WatchError::NotDirectory {
+                path: path.to_owned(),
+            });
+        }
 
         let signal = Arc::new(Notify::new());
         let callback_signal = signal.clone();
@@ -56,13 +81,19 @@ impl WatchState {
                     %error,
                     "filesystem watcher backend error"
                 ),
-            })?;
+            })
+            .map_err(WatchError::Create)?;
         let mode = if recursive {
             RecursiveMode::Recursive
         } else {
             RecursiveMode::NonRecursive
         };
-        watcher.watch(Path::new(path), mode)?;
+        watcher
+            .watch(Path::new(path), mode)
+            .map_err(|source| WatchError::Register {
+                path: path.to_owned(),
+                source,
+            })?;
         Ok(Self {
             path: owned_path,
             recursive,

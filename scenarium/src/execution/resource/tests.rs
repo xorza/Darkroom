@@ -256,7 +256,7 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         inputs: vec![
             ExecutionInput {
                 stamper: Some(InputStamper::Custom(stamper.clone())),
-                binding: ExecutionBinding::Bind(address.clone()),
+                binding: ExecutionBinding::Bind(address),
                 ..Default::default()
             },
             ExecutionInput {

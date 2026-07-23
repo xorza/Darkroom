@@ -20,6 +20,34 @@ use crate::astro::nodes::runtime;
 const CACHE_PRESENT: &str = "present:";
 const CACHE_ABSENT: &str = "absent:";
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FrameSetKeyError {
+    #[error("failed to read metadata for '{path}': {source}", path = .path.display())]
+    Metadata {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum BuildMastersError {
+    #[error("cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Scan(#[from] astro_io::RawFrameScanError),
+    #[error(transparent)]
+    FrameSet(#[from] FrameSetKeyError),
+    #[error(transparent)]
+    Stack(#[from] lumos::StackError),
+    #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
+    Cache {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
 pub(crate) fn register(library: &mut Library) {
     library.add(
         Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
@@ -88,14 +116,14 @@ pub(crate) fn build_masters_cached(
     sigma: f32,
     cache: bool,
     cancel: CancelToken,
-) -> anyhow::Result<CalibrationMasters> {
+) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = dirs;
     let role = |dir: Option<PathBuf>,
                 config: StackConfig,
                 file: &str|
-     -> anyhow::Result<Option<CfaImage>> {
+     -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
-            anyhow::bail!("cancelled");
+            return Err(BuildMastersError::Cancelled);
         }
         let Some(dir) = dir else {
             return Ok(None);
@@ -128,17 +156,28 @@ pub(crate) fn build_masters_cached(
             }
         }
 
-        let master =
-            stack_cfa_master(&frames, config, cancel.clone()).map_err(anyhow::Error::from)?;
+        let master = stack_cfa_master(&frames, config, cancel.clone())?;
         if cache {
             let marker = if let Some(master) = &master {
-                master.save_fits(&cache_path)?;
+                master
+                    .save_fits(&cache_path)
+                    .map_err(|source| BuildMastersError::Cache {
+                        path: cache_path.clone(),
+                        source,
+                    })?;
                 format!("{CACHE_PRESENT}{source_key}")
             } else {
-                remove_cache_file(&cache_path)?;
+                remove_cache_file(&cache_path).map_err(|source| BuildMastersError::Cache {
+                    path: cache_path.clone(),
+                    source,
+                })?;
                 format!("{CACHE_ABSENT}{source_key}")
             };
-            file_utils::publish_bytes(&marker_path, marker.as_bytes(), PublicationMode::Cache)?;
+            file_utils::publish_bytes(&marker_path, marker.as_bytes(), PublicationMode::Cache)
+                .map_err(|source| BuildMastersError::Cache {
+                    path: marker_path,
+                    source,
+                })?;
         }
         Ok(master)
     };
@@ -153,17 +192,20 @@ pub(crate) fn build_masters_cached(
         sigma,
         cancel,
     )
-    .map_err(anyhow::Error::from)
+    .map_err(BuildMastersError::from)
 }
 
-pub(crate) fn frame_set_key(frames: &[PathBuf]) -> anyhow::Result<String> {
+pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
     let mut hasher = blake3::Hasher::new();
     for frame in frames {
         let name = frame
             .file_name()
             .expect("raw frame path has a file name")
             .as_encoded_bytes();
-        let metadata = fs::metadata(frame)?;
+        let metadata = fs::metadata(frame).map_err(|source| FrameSetKeyError::Metadata {
+            path: frame.clone(),
+            source,
+        })?;
         let modified = metadata
             .modified()
             .ok()

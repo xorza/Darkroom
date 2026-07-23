@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use scenarium::Library;
 
 use crate::core::document::Document;
-use crate::core::io::document::{self, DocumentLoadError};
+use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
@@ -33,7 +33,11 @@ impl OpenDocument {
         self.normalization_pending = false;
     }
 
-    pub(crate) fn save_to(&mut self, path: &Path, library: &Library) -> anyhow::Result<()> {
+    pub(crate) fn save_to(
+        &mut self,
+        path: &Path,
+        library: &Library,
+    ) -> Result<(), DocumentSaveError> {
         self.normalize(library);
         document::save(&self.document, path)?;
         self.path = Some(path.to_path_buf());

@@ -18,12 +18,10 @@ struct FloatOutputSpec {
 }
 
 fn float_input(inputs: &[InvokeInput], idx: usize) -> Result<f64, InvokeError> {
-    inputs[idx].value.as_f64().ok_or_else(|| {
-        InvokeError::external(format!(
-            "input {} is not a number: {:?}",
-            idx, inputs[idx].value
-        ))
-    })
+    inputs[idx]
+        .value
+        .as_f64()
+        .ok_or_else(|| InvokeError::invalid_input(idx, "a number", &inputs[idx].value))
 }
 
 fn declared_input(spec: FloatInputSpec) -> FuncInput {

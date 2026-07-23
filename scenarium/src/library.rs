@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::error::{ValidationError, ensure_valid};
 use crate::graph::Graph;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
 use hashbrown::HashMap as GraphMap;
+use thiserror::Error;
 
 /// The metadata of a registered nominal type — a `Custom`
 /// app-extension type or an `Enum`. Identity is the [`TypeId`] it's keyed by in
@@ -54,12 +54,24 @@ pub struct TypeEntry {
     pub stamper: Option<Arc<dyn ResourceStamper>>,
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum TypeEntryValidationError {
+    #[error("enum type cannot have a codec")]
+    EnumCodec,
+    #[error("enum type cannot have a stamper")]
+    EnumStamper,
+}
+
 impl TypeEntry {
     /// Validates that this declaration's runtime attachments match its kind.
-    pub fn validate(&self) -> Result<(), ValidationError> {
+    pub fn validate(&self) -> Result<(), TypeEntryValidationError> {
         if matches!(&self.decl, TypeDecl::Enum { .. }) {
-            ensure_valid!(self.codec.is_none(), "enum type cannot have a codec");
-            ensure_valid!(self.stamper.is_none(), "enum type cannot have a stamper");
+            if self.codec.is_some() {
+                return Err(TypeEntryValidationError::EnumCodec);
+            }
+            if self.stamper.is_some() {
+                return Err(TypeEntryValidationError::EnumStamper);
+            }
         }
         Ok(())
     }

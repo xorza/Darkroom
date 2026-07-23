@@ -1,7 +1,7 @@
+use crate::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
-    Binding, CacheMode, Graph, GraphDeserializeError, InputPort, Node, NodeId, NodeKind,
-    NodeSearch, OutputPort,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
@@ -239,7 +239,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
     // valid — only the `const_only` flag decides whether validation accepts it.
-    let validate = |const_only: bool| -> Result<(), crate::error::ValidationError> {
+    let validate = |const_only: bool| -> Result<(), GraphValidationError> {
         let port = FuncInput::required("locked", DataType::Int);
         let port = if const_only { port.const_only() } else { port };
         let func = Func::new(FuncId::unique(), "f")
@@ -643,7 +643,7 @@ fn deserialize_rejects_corrupt_graph() {
     let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(matches!(
         Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-        Err(GraphDeserializeError::Validation(_))
+        Err(GraphDeserializeError::InvalidGraph(_))
     ));
 
     let mut nil_key = Graph::default();
@@ -653,7 +653,7 @@ fn deserialize_rejects_corrupt_graph() {
     let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(matches!(
         Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-        Err(GraphDeserializeError::Validation(_))
+        Err(GraphDeserializeError::InvalidGraph(_))
     ));
 
     let nil_origin = Graph {

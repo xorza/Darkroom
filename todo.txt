@@ -23,8 +23,6 @@ mesh once registrations
 
 build masters chose array of files instead of directory
 
-remove anyhow
-
 Darkroom currently recompiles on every run, so each new compile still needs installation
 
 save caches on cache click
@@ -32,7 +30,3 @@ save caches on cache click
 subgraph to newnodeui
 
 subgraphs tabs movable
-
-element performance
-        let id = ui.widget_id(&self.element);
-        ui.node(id, self.element, None, |ui| {

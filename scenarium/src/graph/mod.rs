@@ -2,13 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
 use ::serde::{Deserialize, Serialize};
-use common::{DeserializeError, SerdeFormat, SerializeError, deserialize, serialize};
+use common::{SerdeFormat, SerializeError, deserialize, serialize};
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
-use thiserror::Error;
 
 use crate::StaticValue;
-use crate::error::ValidationError;
+use crate::error::GraphDeserializeError;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
@@ -17,14 +16,6 @@ use crate::node::special::SpecialNode;
 use common::id_type;
 
 id_type!(NodeId);
-
-#[derive(Debug, Error)]
-pub enum GraphDeserializeError {
-    #[error(transparent)]
-    Deserialize(#[from] DeserializeError),
-    #[error(transparent)]
-    Validation(#[from] ValidationError),
-}
 
 pub(crate) mod clone;
 pub(crate) mod interface;

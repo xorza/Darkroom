@@ -3,8 +3,8 @@
 
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::error::{ValidationError, ensure_valid};
 use crate::graph::NodeId;
 
 #[derive(
@@ -90,6 +90,14 @@ struct Leaf {
     node_id: NodeId,
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum FlattenMapValidationError {
+    #[error("flatten map must have exactly one leaf per execution node")]
+    LeafCount,
+    #[error("execution node {e_node_id:?} has no flatten-map leaf")]
+    MissingLeaf { e_node_id: ExecutionNodeId },
+}
+
 impl FlattenMap {
     pub(crate) fn reset(&mut self) {
         self.scopes.clear();
@@ -126,17 +134,14 @@ impl FlattenMap {
     pub(crate) fn validate(
         &self,
         e_node_ids: impl IntoIterator<Item = ExecutionNodeId>,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<(), FlattenMapValidationError> {
         let expected: HashSet<_> = e_node_ids.into_iter().collect();
-        ensure_valid!(
-            self.leaves.len() == expected.len(),
-            "flatten map must have exactly one leaf per execution node"
-        );
+        if self.leaves.len() != expected.len() {
+            return Err(FlattenMapValidationError::LeafCount);
+        }
         for e_node_id in expected {
             if !self.leaves.contains_key(&e_node_id) {
-                return Err(ValidationError::new(format!(
-                    "execution node {e_node_id:?} has no flatten-map leaf"
-                )));
+                return Err(FlattenMapValidationError::MissingLeaf { e_node_id });
             }
         }
         Ok(())

@@ -25,7 +25,6 @@
 //!   per-group `active` is in range, `focused` names a live group,
 //!   ratios stay in `RATIO_MIN..=RATIO_MAX`.
 
-use anyhow::{Context, Result, ensure};
 use common::id_type;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +41,34 @@ const RATIO_MAX: f32 = 0.9;
 /// panes) — [`DockLayout::move_tab`] refuses splits past it. Keeps the
 /// UI sane and every split address comfortably inside a [`DockPath`].
 const MAX_SPLIT_DEPTH: u32 = 4;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DockValidationError {
+    #[error("dock nodes are not in canonical pre-order")]
+    NonCanonical,
+    #[error("dock node index {index} out of range")]
+    NodeOutOfRange { index: u32 },
+    #[error("split nesting exceeds the cap")]
+    SplitNesting,
+    #[error("split ratio {ratio} out of bounds")]
+    SplitRatio { ratio: f32 },
+    #[error("dock tree has slots unreachable from the root")]
+    UnreachableSlots,
+    #[error("no group holds the Main graph tab")]
+    MissingMainTab,
+    #[error("dock group id {group_id:?} appears twice")]
+    DuplicateGroup { group_id: TabGroupId },
+    #[error("dock group {group_id:?} is empty")]
+    EmptyGroup { group_id: TabGroupId },
+    #[error("dock group {group_id:?} active tab out of range")]
+    ActiveTabOutOfRange { group_id: TabGroupId },
+    #[error("tab {tab:?} appears twice")]
+    DuplicateTab { tab: TabRef },
+    #[error("graph tab {tab:?} lives outside the primary group")]
+    GraphTabOutsidePrimary { tab: TabRef },
+    #[error("focused group {group_id:?} is missing")]
+    MissingFocusedGroup { group_id: TabGroupId },
+}
 
 /// A split's address: the turns taken from the root, packed into one
 /// byte — a leading sentinel bit, then one bit per level (`0` = first
@@ -575,28 +602,30 @@ impl DockLayout {
     /// caller's ([`Document::validate`] holds the graph).
     ///
     /// [`Document::validate`]: crate::core::document::Document::validate
-    pub(crate) fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<(), DockValidationError> {
         // Canonical pre-order: walking the tree must visit exactly the
         // slots 0..len in order — this covers reachability, no dead
         // slots, and acyclicity in one sweep.
-        fn walk(nodes: &[DockNode], idx: NodeIdx, depth: u32, expect: &mut u32) -> Result<()> {
-            ensure!(
-                idx.0 == *expect,
-                "dock nodes are not in canonical pre-order"
-            );
-            ensure!(
-                idx.usize() < nodes.len(),
-                "dock node index {} out of range",
-                idx.0
-            );
+        fn walk(
+            nodes: &[DockNode],
+            idx: NodeIdx,
+            depth: u32,
+            expect: &mut u32,
+        ) -> Result<(), DockValidationError> {
+            if idx.0 != *expect {
+                return Err(DockValidationError::NonCanonical);
+            }
+            if idx.usize() >= nodes.len() {
+                return Err(DockValidationError::NodeOutOfRange { index: idx.0 });
+            }
             *expect += 1;
             if let DockNode::Split(s) = &nodes[idx.usize()] {
-                ensure!(depth < MAX_SPLIT_DEPTH, "split nesting exceeds the cap");
-                ensure!(
-                    (RATIO_MIN..=RATIO_MAX).contains(&s.ratio),
-                    "split ratio {} out of bounds",
-                    s.ratio
-                );
+                if depth >= MAX_SPLIT_DEPTH {
+                    return Err(DockValidationError::SplitNesting);
+                }
+                if !(RATIO_MIN..=RATIO_MAX).contains(&s.ratio) {
+                    return Err(DockValidationError::SplitRatio { ratio: s.ratio });
+                }
                 walk(nodes, s.first, depth + 1, expect)?;
                 walk(nodes, s.second, depth + 1, expect)?;
             }
@@ -604,50 +633,46 @@ impl DockLayout {
         }
         let mut expect = 0;
         walk(&self.nodes, Self::ROOT, 0, &mut expect)?;
-        ensure!(
-            expect as usize == self.nodes.len(),
-            "dock tree has slots unreachable from the root"
-        );
+        if expect as usize != self.nodes.len() {
+            return Err(DockValidationError::UnreachableSlots);
+        }
 
         // Resolved by hand rather than via `primary()`, which `expect`s —
         // a corrupt layout may hold no Main tab at all.
         let primary = self
             .groups()
             .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
-            .context("no group holds the Main graph tab")?;
+            .ok_or(DockValidationError::MissingMainTab)?;
         let mut seen = Vec::new();
         let mut seen_groups = Vec::new();
         for g in self.groups() {
             // Group ids address every layout op (`group`/`group_mut` take the
             // first match), so a duplicate silently retargets ops.
-            ensure!(
-                !seen_groups.contains(&g.id),
-                "dock group id {:?} appears twice",
-                g.id
-            );
+            if seen_groups.contains(&g.id) {
+                return Err(DockValidationError::DuplicateGroup { group_id: g.id });
+            }
             seen_groups.push(g.id);
-            ensure!(!g.tabs.is_empty(), "dock group {:?} is empty", g.id);
-            ensure!(
-                g.active < g.tabs.len(),
-                "dock group {:?} active tab out of range",
-                g.id
-            );
+            if g.tabs.is_empty() {
+                return Err(DockValidationError::EmptyGroup { group_id: g.id });
+            }
+            if g.active >= g.tabs.len() {
+                return Err(DockValidationError::ActiveTabOutOfRange { group_id: g.id });
+            }
             for tab in &g.tabs {
-                ensure!(!seen.contains(tab), "tab {tab:?} appears twice");
+                if seen.contains(tab) {
+                    return Err(DockValidationError::DuplicateTab { tab: *tab });
+                }
                 seen.push(*tab);
-                if matches!(tab, TabRef::Graph(_)) {
-                    ensure!(
-                        g.id == primary.id,
-                        "graph tab {tab:?} lives outside the primary group"
-                    );
+                if matches!(tab, TabRef::Graph(_)) && g.id != primary.id {
+                    return Err(DockValidationError::GraphTabOutsidePrimary { tab: *tab });
                 }
             }
         }
-        ensure!(
-            self.group(self.focused).is_some(),
-            "focused group {:?} is missing",
-            self.focused
-        );
+        if self.group(self.focused).is_none() {
+            return Err(DockValidationError::MissingFocusedGroup {
+                group_id: self.focused,
+            });
+        }
         Ok(())
     }
 }

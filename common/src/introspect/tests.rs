@@ -2,8 +2,6 @@ use crate::introspect::{
     FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect, IntrospectEnum,
     IntrospectFloat, IntrospectInteger,
 };
-use common_derive::{Introspect, IntrospectEnum};
-
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 enum Mode {
     #[default]

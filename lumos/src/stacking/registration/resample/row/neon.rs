@@ -182,6 +182,8 @@ pub(crate) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use crate::stacking::registration::resample::kernel;
     use crate::stacking::registration::resample::row;
     use crate::stacking::registration::resample::row::neon;

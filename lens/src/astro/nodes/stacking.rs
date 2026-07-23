@@ -14,9 +14,25 @@ use crate::astro::config::stacking::{
     RegistrationPreset,
 };
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
-use crate::astro::nodes::io::{self as astro_io, ASTRO_DIR_DATA_TYPE};
+use crate::astro::nodes::io::{self as astro_io, ASTRO_DIR_DATA_TYPE, RawFrameScanError};
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+
+#[derive(Debug, thiserror::Error)]
+enum LightFramesError {
+    #[error(transparent)]
+    Scan(#[from] RawFrameScanError),
+    #[error("no camera-RAW frames found in light-frame folder '{dir}'", dir = .dir.display())]
+    Empty { dir: PathBuf },
+}
+
+fn light_frames(dir: PathBuf) -> Result<Vec<PathBuf>, LightFramesError> {
+    let frames = astro_io::raw_frame_files(&dir)?;
+    if frames.is_empty() {
+        return Err(LightFramesError::Empty { dir });
+    }
+    Ok(frames)
+}
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
@@ -66,14 +82,7 @@ pub(crate) fn register(library: &mut Library) {
                         .as_fs_path()
                         .map(PathBuf::from)
                         .expect("lights input type is validated at the compile boundary");
-                    let lights =
-                        astro_io::raw_frame_files(&lights_dir).map_err(InvokeError::external)?;
-                    if lights.is_empty() {
-                        return Err(InvokeError::external(format!(
-                            "no camera-RAW frames found in light-frame folder '{}'",
-                            lights_dir.display()
-                        )));
-                    }
+                    let lights = light_frames(lights_dir).map_err(InvokeError::external)?;
 
                     let masters_value = inputs[1].value.clone();
                     let detection =
@@ -106,7 +115,6 @@ pub(crate) fn register(library: &mut Library) {
                             .map(|masters| &masters.masters)
                             .unwrap_or(&empty);
                         calibrate_align_stack(&lights, masters, &config, cancel)
-                            .map_err(anyhow::Error::from)
                     })
                     .await?;
 

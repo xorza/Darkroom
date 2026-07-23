@@ -6,8 +6,7 @@ use crate::node::lambda::FuncLambda;
 use crate::{DataType, StaticValue};
 use common::id_type;
 use serde::{Deserialize, Serialize};
-
-use crate::error::{ValidationError, ensure_valid};
+use thiserror::Error;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -183,6 +182,27 @@ pub struct FuncEvent {
 
 id_type!(FuncId);
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum FuncValidationError {
+    #[error("function id must not be nil")]
+    NilId,
+    #[error("Function with no outputs should be impure")]
+    PureWithoutOutputs,
+    #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
+    NilInputType { func_id: FuncId, input_idx: usize },
+    #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]
+    NilOutputType { func_id: FuncId, output_idx: usize },
+    #[error(
+        "function {func_id:?} output {output_idx} mirrors input {input_idx}, but has {input_count} inputs"
+    )]
+    InvalidWildcardInput {
+        func_id: FuncId,
+        output_idx: usize,
+        input_idx: usize,
+        input_count: usize,
+    },
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
@@ -314,37 +334,42 @@ impl Func {
     }
 
     /// Validates this function declaration independently of a graph.
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        ensure_valid!(!self.id.is_nil(), "function id must not be nil");
-        ensure_valid!(
-            !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
-            "Function with no outputs should be impure"
-        );
+    pub fn validate(&self) -> Result<(), FuncValidationError> {
+        if self.id.is_nil() {
+            return Err(FuncValidationError::NilId);
+        }
+        if self.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
+            return Err(FuncValidationError::PureWithoutOutputs);
+        }
         for (input_idx, input) in self.inputs.iter().enumerate() {
-            if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type {
-                ensure_valid!(
-                    !type_id.is_nil(),
-                    "function {:?} input {input_idx} has a nil nominal type id",
-                    self.id
-                );
+            if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type
+                && type_id.is_nil()
+            {
+                return Err(FuncValidationError::NilInputType {
+                    func_id: self.id,
+                    input_idx,
+                });
             }
         }
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.ty {
                 OutputType::Fixed(DataType::Custom(type_id) | DataType::Enum(type_id)) => {
-                    ensure_valid!(
-                        !type_id.is_nil(),
-                        "function {:?} output {output_idx} has a nil nominal type id",
-                        self.id
-                    );
+                    if type_id.is_nil() {
+                        return Err(FuncValidationError::NilOutputType {
+                            func_id: self.id,
+                            output_idx,
+                        });
+                    }
                 }
                 OutputType::Wildcard { mirrors } => {
-                    ensure_valid!(
-                        *mirrors < self.inputs.len(),
-                        "function {:?} output {output_idx} mirrors input {mirrors}, but has {} inputs",
-                        self.id,
-                        self.inputs.len()
-                    );
+                    if *mirrors >= self.inputs.len() {
+                        return Err(FuncValidationError::InvalidWildcardInput {
+                            func_id: self.id,
+                            output_idx,
+                            input_idx: *mirrors,
+                            input_count: self.inputs.len(),
+                        });
+                    }
                 }
                 OutputType::Fixed(_) => {}
             }

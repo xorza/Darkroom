@@ -4,12 +4,14 @@
 use common::is_debug;
 use hashbrown::HashSet;
 
-use crate::error::{ValidationError, ensure_valid};
+use crate::error::GraphValidationError;
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{Binding, Graph, NodeId, NodeKind};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
 use crate::{DataType, StaticValue};
+
+type ValidationResult<T> = Result<T, GraphValidationError>;
 
 #[derive(Debug)]
 struct GraphChecker<'a> {
@@ -29,49 +31,50 @@ impl<'a> GraphChecker<'a> {
         }
     }
 
-    fn validate_graph(&mut self, graph: &Graph) -> Result<(), ValidationError> {
-        ensure_valid!(
-            graph.origin.is_none_or(|origin| !origin.is_nil()),
-            "graph has a nil origin"
-        );
+    fn validate_graph(&mut self, graph: &Graph) -> ValidationResult<()> {
+        if graph.origin.is_some_and(|origin| origin.is_nil()) {
+            return Err(GraphValidationError::NilOrigin);
+        }
         let mut boundary_inputs = 0usize;
         let mut boundary_outputs = 0usize;
         for (node_id, node) in &graph.nodes {
-            ensure_valid!(!node_id.is_nil(), "graph contains a node with a nil id");
-            ensure_valid!(
-                self.node_ids.insert(*node_id),
-                "node id {:?} occurs in more than one authoring graph",
-                node_id
-            );
+            if node_id.is_nil() {
+                return Err(GraphValidationError::NilNodeId);
+            }
+            if !self.node_ids.insert(*node_id) {
+                return Err(GraphValidationError::DuplicateNodeId { node_id: *node_id });
+            }
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    ensure_valid!(!func_id.is_nil(), "node {:?} has a nil func_id", node_id);
-                    if let Some(library) = self.library {
-                        ensure_valid!(
-                            library.by_id(func_id).is_some(),
-                            "node {:?} references func {:?}, absent from the library",
-                            node_id,
-                            func_id
-                        );
+                    if func_id.is_nil() {
+                        return Err(GraphValidationError::NilFuncId { node_id: *node_id });
+                    }
+                    if self
+                        .library
+                        .is_some_and(|library| library.by_id(func_id).is_none())
+                    {
+                        return Err(GraphValidationError::MissingFunc {
+                            node_id: *node_id,
+                            func_id: *func_id,
+                        });
                     }
                 }
                 NodeKind::Graph(link) => {
-                    ensure_valid!(!link.id().is_nil(), "node {:?} has a nil graph id", node_id);
-                    if let GraphLink::Local(id) = link {
-                        ensure_valid!(
-                            graph.graphs.contains_key(id),
-                            "node {:?} references missing local graph {:?}",
-                            node_id,
-                            id
-                        );
+                    if link.id().is_nil() {
+                        return Err(GraphValidationError::NilGraphId { node_id: *node_id });
+                    }
+                    if let GraphLink::Local(graph_id) = link
+                        && !graph.graphs.contains_key(graph_id)
+                    {
+                        return Err(GraphValidationError::MissingLocalGraph {
+                            node_id: *node_id,
+                            graph_id: *graph_id,
+                        });
                     }
                     if let Some(library) = self.library {
-                        let nested = graph.resolve_graph(*link, library).ok_or_else(|| {
-                            ValidationError::new(format!(
-                                "node {:?} references a missing graph",
-                                node_id
-                            ))
-                        })?;
+                        let nested = graph
+                            .resolve_graph(*link, library)
+                            .ok_or(GraphValidationError::MissingGraph { node_id: *node_id })?;
                         if let GraphLink::Shared(id) = link {
                             self.validate_shared(*id, nested)?;
                         }
@@ -86,170 +89,170 @@ impl<'a> GraphChecker<'a> {
                 }
             }
         }
-        ensure_valid!(
-            boundary_inputs <= 1,
-            "a graph holds at most one GraphInput, found {boundary_inputs}"
-        );
-        ensure_valid!(
-            boundary_outputs <= 1,
-            "a graph holds at most one GraphOutput, found {boundary_outputs}"
-        );
+        if boundary_inputs > 1 {
+            return Err(GraphValidationError::MultipleGraphInputs {
+                count: boundary_inputs,
+            });
+        }
+        if boundary_outputs > 1 {
+            return Err(GraphValidationError::MultipleGraphOutputs {
+                count: boundary_outputs,
+            });
+        }
 
         for (destination, binding) in &graph.bindings {
-            let consumer = graph.nodes.get(&destination.node_id).ok_or_else(|| {
-                ValidationError::new(format!("binding on missing node {:?}", destination.node_id))
-            })?;
+            let consumer = graph.nodes.get(&destination.node_id).ok_or(
+                GraphValidationError::BindingMissingNode {
+                    node_id: destination.node_id,
+                },
+            )?;
             if let Some(library) = self.library {
                 let input_count = graph
                     .input_count(consumer, library)
                     .expect("node reference resolved before binding validation");
-                ensure_valid!(
-                    destination.port_idx < input_count,
-                    "binding on node {:?} input {} is out of range",
-                    destination.node_id,
-                    destination.port_idx
-                );
-                if let Binding::Bind(_) = binding {
-                    ensure_valid!(
-                        !graph
-                            .input_spec(library, *destination)
-                            .is_some_and(|input| input.const_only),
-                        "input {} on node {:?} is const-only and cannot be wired to an upstream output",
-                        destination.port_idx,
-                        destination.node_id
-                    );
+                if destination.port_idx >= input_count {
+                    return Err(GraphValidationError::BindingInputOutOfRange {
+                        port: *destination,
+                    });
+                }
+                if matches!(binding, Binding::Bind(_))
+                    && graph
+                        .input_spec(library, *destination)
+                        .is_some_and(|input| input.const_only)
+                {
+                    return Err(GraphValidationError::ConstOnlyBinding { port: *destination });
                 }
             }
 
             if let Binding::Bind(src) = binding {
-                let producer = graph.nodes.get(&src.node_id).ok_or_else(|| {
-                    ValidationError::new(format!(
-                        "node {:?} input {} binds to missing node {:?}",
-                        destination.node_id, destination.port_idx, src.node_id
-                    ))
-                })?;
+                let producer = graph.nodes.get(&src.node_id).ok_or(
+                    GraphValidationError::BindingMissingProducer {
+                        destination: *destination,
+                        producer: *src,
+                    },
+                )?;
                 if let Some(library) = self.library {
                     let output_count = graph
                         .output_count(producer, library)
                         .expect("node reference resolved before binding validation");
-                    ensure_valid!(
-                        src.port_idx < output_count,
-                        "binding from node {:?} output {} is out of range",
-                        src.node_id,
-                        src.port_idx
-                    );
+                    if src.port_idx >= output_count {
+                        return Err(GraphValidationError::BindingOutputOutOfRange { port: *src });
+                    }
                     if let Some(sink_ty) = graph.input_type(library, *destination) {
                         let source_ty = graph.resolve_output_type(library, *src);
-                        ensure_valid!(
-                            sink_ty.compatible_with(&source_ty),
-                            "node {:?} input {} expects {:?} but is wired from an incompatible {:?}",
-                            destination.node_id,
-                            destination.port_idx,
-                            sink_ty,
-                            source_ty
-                        );
+                        if !sink_ty.compatible_with(&source_ty) {
+                            return Err(GraphValidationError::IncompatibleBinding {
+                                destination: *destination,
+                                expected: sink_ty,
+                                actual: source_ty,
+                            });
+                        }
                     }
                 }
             }
 
             if let (Some(library), Binding::Const(value)) = (self.library, binding)
                 && let Some(spec) = graph.input_spec(library, *destination)
+                && !const_satisfies(library, spec, value)
             {
-                ensure_valid!(
-                    const_satisfies(library, spec, value),
-                    "node {:?} input {} holds a constant incompatible with its type {:?}",
-                    destination.node_id,
-                    destination.port_idx,
-                    spec.data_type
-                );
+                return Err(GraphValidationError::IncompatibleConstant {
+                    port: *destination,
+                    data_type: spec.data_type.clone(),
+                });
             }
         }
 
         for subscription in &graph.subscriptions {
-            let emitter = graph.nodes.get(&subscription.emitter).ok_or_else(|| {
-                ValidationError::new(format!(
-                    "subscription from missing emitter {:?}",
-                    subscription.emitter
-                ))
-            })?;
-            ensure_valid!(
-                graph.nodes.contains_key(&subscription.subscriber),
-                "node {:?} event {} has missing subscriber {:?}",
-                subscription.emitter,
-                subscription.event_idx,
-                subscription.subscriber
-            );
+            let emitter = graph.nodes.get(&subscription.emitter).ok_or(
+                GraphValidationError::MissingSubscriptionEmitter {
+                    node_id: subscription.emitter,
+                },
+            )?;
+            if !graph.nodes.contains_key(&subscription.subscriber) {
+                return Err(GraphValidationError::MissingSubscriber {
+                    emitter: subscription.emitter,
+                    event_idx: subscription.event_idx,
+                    subscriber: subscription.subscriber,
+                });
+            }
             if let Some(library) = self.library {
                 let event_count = graph
                     .event_count(emitter, library)
                     .expect("node reference resolved before subscription validation");
-                ensure_valid!(
-                    subscription.event_idx < event_count,
-                    "subscription event index {} out of range on {:?}",
-                    subscription.event_idx,
-                    subscription.emitter
-                );
+                if subscription.event_idx >= event_count {
+                    return Err(GraphValidationError::SubscriptionEventOutOfRange {
+                        emitter: subscription.emitter,
+                        event_idx: subscription.event_idx,
+                    });
+                }
             }
         }
 
         for port in &graph.pinned_outputs {
-            let node = graph.nodes.get(&port.node_id).ok_or_else(|| {
-                ValidationError::new(format!("pinned output on missing node {:?}", port.node_id))
-            })?;
+            let node = graph.nodes.get(&port.node_id).ok_or(
+                GraphValidationError::PinnedOutputMissingNode {
+                    node_id: port.node_id,
+                },
+            )?;
             if let Some(library) = self.library {
                 let output_count = graph
                     .output_count(node, library)
                     .expect("node reference resolved before pinned-output validation");
-                ensure_valid!(
-                    port.port_idx < output_count,
-                    "pinned output on node {:?} output {} is out of range",
-                    port.node_id,
-                    port.port_idx
-                );
+                if port.port_idx >= output_count {
+                    return Err(GraphValidationError::PinnedOutputOutOfRange { port: *port });
+                }
             }
         }
 
         for event in &graph.events {
             let emitter = graph.nodes.get(&event.emitter).ok_or_else(|| {
-                ValidationError::new(format!(
-                    "exposed event {:?} names missing emitter {:?}",
-                    event.name, event.emitter
-                ))
+                GraphValidationError::ExposedEventMissingEmitter {
+                    name: event.name.clone(),
+                    emitter: event.emitter,
+                }
             })?;
             if let Some(library) = self.library {
                 let event_count = graph
                     .event_count(emitter, library)
                     .expect("node reference resolved before exposed-event validation");
-                ensure_valid!(
-                    event.emitter_event_idx < event_count,
-                    "exposed event index {} out of range on {:?}",
-                    event.emitter_event_idx,
-                    event.emitter
-                );
+                if event.emitter_event_idx >= event_count {
+                    return Err(GraphValidationError::ExposedEventOutOfRange {
+                        emitter: event.emitter,
+                        event_idx: event.emitter_event_idx,
+                    });
+                }
             }
         }
 
         for (graph_id, nested) in &graph.graphs {
-            ensure_valid!(!graph_id.is_nil(), "local graph has a nil id");
+            if graph_id.is_nil() {
+                return Err(GraphValidationError::NilLocalGraphId);
+            }
             self.validate_graph(nested)
-                .map_err(|error| error.context(format!("in local graph {:?}", nested.name)))?;
+                .map_err(|source| GraphValidationError::LocalGraph {
+                    name: nested.name.clone(),
+                    source: Box::new(source),
+                })?;
         }
 
         Ok(())
     }
 
-    fn validate_shared(&mut self, graph_id: GraphId, graph: &Graph) -> Result<(), ValidationError> {
+    fn validate_shared(&mut self, graph_id: GraphId, graph: &Graph) -> ValidationResult<()> {
         if self.checked_shared.contains(&graph_id) {
             return Ok(());
         }
-        ensure_valid!(
-            self.shared_path.insert(graph_id),
-            "graph {:?} is recursive (contains itself)",
-            graph.name
-        );
-        let result = self
-            .validate_graph(graph)
-            .map_err(|error| error.context(format!("in shared graph {:?}", graph.name)));
+        if !self.shared_path.insert(graph_id) {
+            return Err(GraphValidationError::RecursiveGraph {
+                name: graph.name.clone(),
+            });
+        }
+        let result =
+            self.validate_graph(graph)
+                .map_err(|source| GraphValidationError::SharedGraph {
+                    name: graph.name.clone(),
+                    source: Box::new(source),
+                });
         self.shared_path.remove(&graph_id);
         result?;
         self.checked_shared.insert(graph_id);
@@ -259,7 +262,7 @@ impl<'a> GraphChecker<'a> {
 
 impl Graph {
     /// Validate this reusable graph and its complete local graph tree.
-    pub fn validate(&self) -> Result<(), ValidationError> {
+    pub fn validate(&self) -> ValidationResult<()> {
         GraphChecker::new(None).validate_graph(self)
     }
 
@@ -274,15 +277,13 @@ impl Graph {
 
     /// Validate an execution entry and every local or reachable shared graph
     /// against `library`.
-    pub fn validate_for_execution(&self, library: &Library) -> Result<(), ValidationError> {
-        ensure_valid!(
-            self.inputs.is_empty() && self.outputs.is_empty() && self.events.is_empty(),
-            "entry graph cannot expose an interface"
-        );
-        ensure_valid!(
-            self.nodes.values().all(|node| !node.kind.is_boundary()),
-            "entry graph cannot contain interface boundary nodes"
-        );
+    pub fn validate_for_execution(&self, library: &Library) -> ValidationResult<()> {
+        if !self.inputs.is_empty() || !self.outputs.is_empty() || !self.events.is_empty() {
+            return Err(GraphValidationError::EntryInterface);
+        }
+        if self.nodes.values().any(|node| node.kind.is_boundary()) {
+            return Err(GraphValidationError::EntryBoundaryNodes);
+        }
         GraphChecker::new(Some(library)).validate_graph(self)
     }
 
