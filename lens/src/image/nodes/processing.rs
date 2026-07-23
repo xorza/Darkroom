@@ -278,8 +278,8 @@ pub(crate) fn adjust_image(
     match value.into_custom::<Image>() {
         Ok(mut image) if image.buffer.is_cpu() => {
             {
-                let mut cpu = image.buffer.make_cpu_mut(context)?;
-                op.apply_cpu(&mut cpu);
+                let cpu = image.buffer.make_cpu_mut(context)?;
+                op.apply_cpu(cpu);
             }
             Ok(image)
         }

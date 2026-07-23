@@ -75,7 +75,6 @@ memmap2 = { version = "0.9" }
 tiff = { version = "0.11" }
 image = { version = "0.25" }
 paste = { version = "1.0" }
-atomic_refcell = { version = "0.1" }
 sysinfo = { version = "0.39" }
 bumpalo = { version = "3.20", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "0.14", features = ["std"] }
