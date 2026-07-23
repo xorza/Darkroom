@@ -150,7 +150,7 @@ async fn worker_loop<ExecutionCallback>(
             }
         }
 
-        let mut intent = BatchIntent::new(std::mem::take(&mut cmd_batch));
+        let mut intent = BatchIntent::new(cmd_batch.drain(..));
         intent.events.extend(event_buffer.drain(..));
 
         let needs_stop =
