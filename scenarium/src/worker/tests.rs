@@ -5,7 +5,7 @@ use std::time::Instant;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::StaticValue;
+use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
@@ -16,7 +16,7 @@ use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::outcome::{
     ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage,
 };
-use crate::execution::{Error, Result as ExecResult, RunSeeds};
+use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
@@ -602,6 +602,110 @@ fn worker_status_batches_nodes_and_preserves_published_snapshots() {
         WorkerStatusKind::Patch,
     );
     assert_eq!(Arc::as_ptr(&status), allocation);
+}
+
+#[test]
+fn completed_status_contains_the_full_gui_snapshot() {
+    let executed = ExecutionNodeId::unique();
+    let cached = ExecutionNodeId::unique();
+    let missing = ExecutionNodeId::unique();
+    let failed = ExecutionNodeId::unique();
+    let cancelled = ExecutionNodeId::unique();
+    let resident = ExecutionNodeId::unique();
+    let outcome = ExecutionOutcome {
+        elapsed_secs: 1.25,
+        executed_nodes: vec![ExecutedNodeStats {
+            e_node_id: executed,
+            elapsed_secs: 0.5,
+        }],
+        missing_inputs: vec![ExecutionInputPort {
+            e_node_id: missing,
+            port_idx: 3,
+        }],
+        cached_nodes: vec![cached],
+        triggered_events: Vec::new(),
+        node_errors: vec![
+            NodeError {
+                e_node_id: failed,
+                error: RunError::Invoke {
+                    func_id: FuncId::unique(),
+                    message: "failed".into(),
+                },
+            },
+            NodeError {
+                e_node_id: cancelled,
+                error: RunError::Cancelled {
+                    func_id: FuncId::unique(),
+                },
+            },
+        ],
+        logs: vec![LogEntry {
+            e_node_id: executed,
+            level: LogLevel::Warn,
+            message: "warning".into(),
+        }],
+        cancelled: true,
+        cache_ram: RamUsage { cpu: 13, gpu: 17 },
+        node_ram: vec![NodeRamUsage {
+            e_node_id: resident,
+            usage: RamUsage { cpu: 5, gpu: 7 },
+        }],
+    };
+    let mut status = Arc::<WorkerStatus>::default();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    worker::report_completed(
+        &mut status,
+        WorkerActivity::EventLoop,
+        outcome,
+        &|report| tx.send(report).unwrap(),
+    );
+
+    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
+        panic!("completion must produce a worker status");
+    };
+    assert_eq!(status.activity, WorkerActivity::EventLoop);
+    assert_eq!(
+        status.kind,
+        WorkerStatusKind::Completed {
+            elapsed_secs: 1.25,
+            executed_nodes: 1,
+            cancelled: true,
+        }
+    );
+    assert_eq!(status.cache_ram, RamUsage { cpu: 13, gpu: 17 });
+    assert_eq!(status.logs.len(), 1);
+    assert_eq!(status.logs[0].message, "warning");
+    assert_eq!(status.nodes.len(), 5);
+    assert!(status.nodes.iter().any(|node| {
+        node.e_node_id == executed
+            && matches!(
+                node.status,
+                Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 })
+            )
+    }));
+    assert!(status.nodes.iter().any(|node| {
+        node.e_node_id == cached && matches!(node.status, Some(NodeExecutionStatus::Cached))
+    }));
+    assert!(status.nodes.iter().any(|node| {
+        node.e_node_id == missing
+            && matches!(node.status, Some(NodeExecutionStatus::MissingInputs))
+    }));
+    assert!(status.nodes.iter().any(|node| {
+        node.e_node_id == failed
+            && matches!(
+                &node.status,
+                Some(NodeExecutionStatus::Errored {
+                    error: RunError::Invoke { message, .. }
+                }) if message == "failed"
+            )
+    }));
+    assert!(!status.nodes.iter().any(|node| node.e_node_id == cancelled));
+    assert!(status.nodes.iter().any(|node| {
+        node.e_node_id == resident
+            && node.status.is_none()
+            && node.ram == Some(RamUsage { cpu: 5, gpu: 7 })
+    }));
 }
 
 #[tokio::test]
