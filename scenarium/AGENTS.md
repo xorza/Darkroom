@@ -113,7 +113,7 @@ Successful cache eviction is fire-and-forget. Operation-level execution and
 cache-eviction failures both arrive as `WorkerReport::Error`.
 `WorkerReport::Status` carries an `Arc<WorkerStatus>` with absolute activity,
 batched live node patches, or an authoritative completed-run snapshot. The
-worker retains one status allocation and updates it through `Arc::make_mut`;
+`WorkerStatusPublisher` retains one status allocation and updates it through `Arc::make_mut`;
 the GUI consumes and drops published snapshots, allowing subsequent reports to
 reuse their vectors when no older snapshot is still queued.
 `ActiveEventLoop` owns both its tasks and event receiver, so the activity

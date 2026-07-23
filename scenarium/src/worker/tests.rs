@@ -26,7 +26,9 @@ use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
-use crate::worker::status::{NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind};
+use crate::worker::status::{
+    NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind, WorkerStatusPublisher,
+};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -501,10 +503,8 @@ async fn lambda_panic_is_captured_not_unwound() {
 fn event_loop_stop_reports_idle_status_before_lambda_errors() {
     let e_node_id = ExecutionNodeId::unique();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut status = Arc::new(WorkerStatus {
-        activity: WorkerActivity::EventLoop,
-        ..WorkerStatus::default()
-    });
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::EventLoop));
 
     worker::report_event_loop_stop(
         StopOutcome {
@@ -550,10 +550,8 @@ fn worker_status_batches_nodes_and_preserves_published_snapshots() {
             phase: RunPhase::Finished { elapsed_secs: 0.25 },
         }),
     ];
-    let mut status = Arc::new(WorkerStatus {
-        activity: WorkerActivity::Executing,
-        ..WorkerStatus::default()
-    });
+    let mut status = WorkerStatusPublisher::default();
+    drop(status.activity(WorkerActivity::Executing));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let callback = |report| tx.send(report).unwrap();
 
@@ -573,12 +571,7 @@ fn worker_status_batches_nodes_and_preserves_published_snapshots() {
         patch.nodes[1].status,
         Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
     ));
-    assert!(Arc::ptr_eq(&patch, &status));
-
-    worker::report_activity(&mut status, WorkerActivity::Idle, &callback);
-    let WorkerReport::Status(idle) = rx.try_recv().unwrap() else {
-        panic!("activity change must produce a status");
-    };
+    let idle = status.activity(WorkerActivity::Idle);
     assert!(!Arc::ptr_eq(&patch, &idle));
     assert_eq!(patch.activity, WorkerActivity::Executing);
     assert_eq!(patch.nodes.len(), 2);
@@ -586,14 +579,11 @@ fn worker_status_batches_nodes_and_preserves_published_snapshots() {
     assert!(idle.nodes.is_empty());
 
     drop(patch);
+    let allocation = Arc::as_ptr(&idle);
     drop(idle);
-    let allocation = Arc::as_ptr(&status);
-    worker::prepare_status(
-        &mut status,
-        WorkerActivity::Executing,
-        WorkerStatusKind::Patch,
-    );
-    assert_eq!(Arc::as_ptr(&status), allocation);
+    let executing = status.activity(WorkerActivity::Executing);
+    assert_eq!(Arc::as_ptr(&executing), allocation);
+    assert!(rx.try_recv().is_err());
 }
 
 #[test]
@@ -643,16 +633,8 @@ fn completed_status_contains_the_full_gui_snapshot() {
             usage: RamUsage { cpu: 5, gpu: 7 },
         }],
     };
-    let mut status = Arc::<WorkerStatus>::default();
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    worker::report_completed(&mut status, WorkerActivity::EventLoop, outcome, &|report| {
-        tx.send(report).unwrap()
-    });
-
-    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
-        panic!("completion must produce a worker status");
-    };
+    let mut publisher = WorkerStatusPublisher::default();
+    let status = publisher.completed(WorkerActivity::EventLoop, outcome);
     assert_eq!(status.activity, WorkerActivity::EventLoop);
     assert_eq!(
         status.kind,
