@@ -889,14 +889,14 @@ mod cache_persistence {
     }
 
     /// A top-level node recomputed (rather than reused) in the last run.
-    fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
+    fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
         stats
             .executed_nodes
             .iter()
             .any(|e| e.e_node_id == root_execution_node(id))
     }
     /// A top-level node reused a cache or remained resident behind a cut last run.
-    fn cached(stats: &ExecutionStats, id: NodeId) -> bool {
+    fn cached(stats: &ExecutionOutcome, id: NodeId) -> bool {
         stats.cached_nodes.contains(&root_execution_node(id))
     }
     /// Count of blobs in the store — one per persisted node.
@@ -1333,7 +1333,7 @@ mod cache_persistence {
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-        let ran = |s: &ExecutionStats, id: NodeId| {
+        let ran = |s: &ExecutionOutcome, id: NodeId| {
             s.executed_nodes
                 .iter()
                 .any(|n| n.e_node_id == root_execution_node(id))
@@ -2019,7 +2019,7 @@ mod resource_binds {
         }
     }
 
-    fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
+    fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
         stats
             .executed_nodes
             .iter()
@@ -2731,7 +2731,7 @@ mod const_bindings {
         let mult_id = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print_id = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         let ran =
-            |stats: &ExecutionStats, id| stats.executed_nodes.iter().any(|n| n.e_node_id == id);
+            |stats: &ExecutionOutcome, id| stats.executed_nodes.iter().any(|n| n.e_node_id == id);
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's reused
         // (cache hit); only print (impure sink) actually recomputes.
@@ -3109,7 +3109,7 @@ mod behavior {
         use common::CancelToken;
 
         use crate::async_lambda;
-        use crate::execution::stats::NodeError;
+        use crate::execution::outcome::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
@@ -3203,7 +3203,7 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
-        use crate::execution::stats::NodeError;
+        use crate::execution::outcome::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};

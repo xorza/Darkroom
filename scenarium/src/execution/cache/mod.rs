@@ -19,7 +19,7 @@ use crate::execution::disk_store::{DiskStore, StorePolicy};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::stats::NodeRamUsage;
+use crate::execution::outcome::NodeRamUsage;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;

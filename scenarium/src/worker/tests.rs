@@ -10,7 +10,7 @@ use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::report::RunPhase;
-use crate::execution::stats::ExecutionStats;
+use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::{Error, Result as ExecResult, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
@@ -32,8 +32,8 @@ fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
 }
 
 /// Print messages a run logged, in order — `print` now logs via
-/// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
-fn messages(stats: &ExecutionStats) -> Vec<String> {
+/// `ContextManager::info`, surfaced in `ExecutionOutcome.logs`.
+fn messages(stats: &ExecutionOutcome) -> Vec<String> {
     stats.logs.iter().map(|e| e.message.clone()).collect()
 }
 
@@ -48,7 +48,7 @@ struct FrameHarness {
     library: Arc<Library>,
     graph: Graph,
     frame_event_node_id: NodeId,
-    compute_rx: mpsc::Receiver<ExecResult<ExecutionStats>>,
+    compute_rx: mpsc::Receiver<ExecResult<ExecutionOutcome>>,
 }
 
 impl FrameHarness {
@@ -175,7 +175,7 @@ async fn start_single_event_loop(
 /// A worker whose callback forwards only `Finished` reports into a fresh
 /// mpsc of capacity `cap` — the shape most tests want when they don't care
 /// about live progress. Works with or without a graph loaded.
-fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
+fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOutcome>>) {
     let (tx, rx) = mpsc::channel(cap);
     let worker = Worker::new(move |report| {
         let result = match report {
@@ -198,7 +198,7 @@ fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionSt
 #[derive(Debug)]
 struct FinishedRun {
     compiled: Arc<CompiledGraph>,
-    result: ExecResult<ExecutionStats>,
+    result: ExecResult<ExecutionOutcome>,
 }
 
 async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun {
@@ -1132,7 +1132,7 @@ async fn clear_then_update_in_same_batch_applies_update() {
 // until a graph is loaded.
 
 async fn assert_no_callback_within(
-    rx: &mut mpsc::Receiver<ExecResult<ExecutionStats>>,
+    rx: &mut mpsc::Receiver<ExecResult<ExecutionOutcome>>,
     d: Duration,
 ) {
     assert!(
@@ -1933,7 +1933,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
-    async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionStats {
+    async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionOutcome {
         let (worker, mut rx) = finished_worker(4);
         // SetDiskStore shares the batch with Update, proving it's applied before
         // the install hydrates.

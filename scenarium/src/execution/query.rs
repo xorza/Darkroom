@@ -5,14 +5,14 @@
 use crate::execution::ExecutionEngine;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-use crate::execution::stats::ExecutionStats;
+use crate::execution::outcome::ExecutionOutcome;
 
 impl ExecutionEngine {
     /// Collect every (event → lambda → state) triple that is currently "live" —
     /// node was executed or cached this run, the event has at least one
     /// subscriber, and its lambda is populated. Used by the worker to spawn the
     /// tasks that drive the event loop.
-    pub(crate) fn active_event_triggers(&self, stats: &ExecutionStats) -> Vec<EventTrigger> {
+    pub(crate) fn active_event_triggers(&self, stats: &ExecutionOutcome) -> Vec<EventTrigger> {
         stats
             .cached_nodes
             .iter()

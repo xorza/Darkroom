@@ -26,7 +26,7 @@ use common::CancelToken;
 
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
-use crate::execution::stats::{ExecutedNodeStats, ExecutionStats, NodeError};
+use crate::execution::outcome::{ExecutedNodeStats, ExecutionOutcome, NodeError};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, RamUsage};
@@ -274,7 +274,7 @@ impl Executor {
         resource_stamps: &mut RunResourceStamps,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
-    ) -> ExecutionStats {
+    ) -> ExecutionOutcome {
         let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
         // off-thread work, and so the loop-top / post-loop checks below read
@@ -563,7 +563,7 @@ fn collect_execution_stats(
     plan: &ExecutionPlan,
     outcomes: &NodeMap<NodeOutcome>,
     start: Instant,
-) -> ExecutionStats {
+) -> ExecutionOutcome {
     let mut executed_nodes = Vec::new();
     let mut missing_inputs = Vec::new();
     let mut cached_nodes = Vec::new();
@@ -616,7 +616,7 @@ fn collect_execution_stats(
         }
     }
 
-    ExecutionStats {
+    ExecutionOutcome {
         elapsed_secs: start.elapsed().as_secs_f64(),
         executed_nodes,
         missing_inputs,

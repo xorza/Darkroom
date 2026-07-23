@@ -28,9 +28,7 @@ pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
 };
 pub use execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
-pub use execution::stats::{
-    ExecutedNodeStats, ExecutionStats, LogEntry, LogLevel, NodeError, NodeRamUsage,
-};
+pub use execution::outcome::{LogEntry, LogLevel};
 pub use execution::{Error, Result, RunError, RunSeeds};
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
@@ -54,6 +52,7 @@ pub use runtime::context::test_support::insert_context;
 pub use runtime::context::{ContextManager, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
-pub use worker::protocol::{
-    WorkerError, WorkerExited, WorkerLifecycle, WorkerMessage, WorkerReport,
+pub use worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
+pub use worker::status::{
+    NodeExecutionStatus, NodeStatus, WorkerActivity, WorkerStatus, WorkerStatusKind,
 };

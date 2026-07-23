@@ -29,6 +29,4 @@ subgraph to newnodeui
 
 subgraphs tabs movable
 
-ram usage on node status update from worker
-
-status request from worker. reused entity for status
+execution stats persist

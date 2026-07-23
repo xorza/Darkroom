@@ -8,7 +8,7 @@ use common::id_type;
 use hashbrown::HashMap;
 
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::stats::{LogEntry, LogLevel};
+use crate::execution::outcome::{LogEntry, LogLevel};
 
 type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
 id_type!(CtxId);
@@ -26,7 +26,7 @@ pub struct ContextManager {
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
     pub(crate) current_node: Option<ExecutionNodeId>,
-    /// Log lines emitted this run, drained into `ExecutionStats` when the
+    /// Log lines emitted this run, drained into `ExecutionOutcome` when the
     /// run finishes.
     pub(crate) logs: Vec<LogEntry>,
     /// The run's cooperative cancel token (the executor polls it between

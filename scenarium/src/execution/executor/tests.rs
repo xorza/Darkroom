@@ -187,7 +187,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     );
 }
 
-async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionStats) {
+async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
@@ -213,7 +213,7 @@ async fn run_with(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     cache: &mut RuntimeCache,
-) -> ExecutionStats {
+) -> ExecutionOutcome {
     let mut executor = Executor::default();
     // Resolve dispositions like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
@@ -240,7 +240,7 @@ async fn run_with(
 async fn run_with_pinned(
     program: &ExecutionProgram,
     run: &TestRun,
-) -> (RuntimeCache, ExecutionStats, Vec<PinnedOutputs>) {
+) -> (RuntimeCache, ExecutionOutcome, Vec<PinnedOutputs>) {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut executor = Executor::default();

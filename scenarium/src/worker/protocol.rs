@@ -5,10 +5,10 @@ use tokio::sync::oneshot;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::identity::ExecutionEventPort;
-use crate::execution::report::{PinnedOutputs, RunProgress};
-use crate::execution::stats::ExecutionStats;
+use crate::execution::report::PinnedOutputs;
 use crate::execution::{Error, RunSeeds};
 use crate::graph::NodeId;
+use crate::worker::status::WorkerStatus;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -24,23 +24,13 @@ pub enum WorkerError {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkerLifecycle {
-    ExecutionStarted,
-    ExecutionStopped,
-    EventLoopStarted,
-    EventLoopStopped,
-}
-
 #[derive(Debug)]
 pub enum WorkerReport {
     Installed(Arc<CompiledGraph>),
     Cleared,
     Error(WorkerError),
-    Lifecycle(WorkerLifecycle),
-    Progress(RunProgress),
+    Status(Arc<WorkerStatus>),
     PinnedOutputs(PinnedOutputs),
-    Finished(ExecutionStats),
 }
 
 #[derive(Debug)]
