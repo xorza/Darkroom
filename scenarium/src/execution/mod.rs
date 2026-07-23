@@ -175,8 +175,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct RunSeeds {
     /// Include all sink nodes — the ordinary "produce the outputs" trigger.
     pub sinks: bool,
-    /// Include every node owning a subscribed event — drives the event loop.
-    pub event_triggers: bool,
+    /// Include every node owning a subscribed event so it initializes the
+    /// shared state and runtime triggers that drive the event loop.
+    pub event_sources: bool,
     /// Run the subscribers of these specific fired events. An event absent from the
     /// installed program fails with [`Error::EventSeedNotFound`].
     pub events: Vec<ExecutionEventPort>,
@@ -274,7 +275,7 @@ impl ExecutionEngine {
     /// reuses its value, so a GUI preview updates without polling. When `cancel`
     /// is set mid-run, scheduling stops after the in-flight node and the
     /// caller-owned outcome is marked `cancelled`. The outcome also owns triggers
-    /// initialized successfully by an `event_triggers` seed.
+    /// initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
         mut seeds: RunSeeds,
@@ -458,12 +459,12 @@ pub(crate) mod test_support {
         pub(crate) async fn prepare_execution(
             &mut self,
             sinks: bool,
-            event_triggers: bool,
+            event_sources: bool,
             events: &[ExecutionEventPort],
         ) -> Result<()> {
             let seeds = RunSeeds {
                 sinks,
-                event_triggers,
+                event_sources,
                 events: events.to_vec(),
                 nodes: Vec::new(),
             };

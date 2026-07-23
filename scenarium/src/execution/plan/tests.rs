@@ -324,7 +324,7 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
         .plan(
             &f.compiled,
             &RunSeeds {
-                event_triggers: true,
+                event_sources: true,
                 ..Default::default()
             },
             &mut plan,

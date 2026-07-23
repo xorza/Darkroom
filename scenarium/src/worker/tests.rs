@@ -16,7 +16,7 @@ use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
-use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
+use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
@@ -1386,8 +1386,8 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn execute_sinks_with_start_event_loop_fires_callback_once() {
-    // Sink-only graph: active_event_triggers() returns empty, so
-    // the loop never actually spawns. This removes lambda-driven
+    // A sink-only graph prepares no event triggers, so the loop never
+    // actually starts. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
     let library = system_library();
@@ -2003,6 +2003,107 @@ async fn lambda_events_drive_worker_execution() {
         second.is_ok(),
         "lambda-driven execution must succeed: {second:?}"
     );
+}
+
+#[tokio::test]
+async fn fired_event_does_not_reinitialize_event_sources() {
+    use std::sync::atomic::AtomicUsize;
+
+    let source_a_calls = Arc::new(AtomicUsize::new(0));
+    let source_b_calls = Arc::new(AtomicUsize::new(0));
+    let subscriber_calls = Arc::new(AtomicUsize::new(0));
+    let source_a_notify = Arc::new(Notify::new());
+    let source_b_notify = Arc::new(Notify::new());
+    let source_a_calls_for_lambda = Arc::clone(&source_a_calls);
+    let source_b_calls_for_lambda = Arc::clone(&source_b_calls);
+    let subscriber_calls_for_lambda = Arc::clone(&subscriber_calls);
+
+    let mut library = Library::default();
+    library.add(
+        Func::new(FuncId::unique(), "source_a")
+            .event(
+                "tick",
+                EventLambda::new({
+                    let notify = Arc::clone(&source_a_notify);
+                    move |_state| {
+                        let notify = Arc::clone(&notify);
+                        Box::pin(async move { notify.notified().await })
+                    }
+                }),
+            )
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, _| { calls = Arc::clone(&source_a_calls_for_lambda) } => {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            )),
+    );
+    library.add(
+        Func::new(FuncId::unique(), "source_b")
+            .event(
+                "tick",
+                EventLambda::new({
+                    let notify = Arc::clone(&source_b_notify);
+                    move |_state| {
+                        let notify = Arc::clone(&notify);
+                        Box::pin(async move { notify.notified().await })
+                    }
+                }),
+            )
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, _| { calls = Arc::clone(&source_b_calls_for_lambda) } => {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            )),
+    );
+    library.add(
+        Func::new(FuncId::unique(), "subscriber").lambda(async_lambda!(
+            move |_, _, _, _, _, _| { calls = Arc::clone(&subscriber_calls_for_lambda) } => {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        )),
+    );
+
+    let mut graph = Graph::default();
+    let source_a = graph.add(Node::from(library.by_name("source_a").unwrap()));
+    let source_b = graph.add(Node::from(library.by_name("source_b").unwrap()));
+    let subscriber = graph.add(Node::from(library.by_name("subscriber").unwrap()));
+    graph.subscribe(source_a, 0, subscriber);
+    graph.subscribe(source_b, 0, subscriber);
+
+    let (worker, mut completion_rx) = completed_worker(4);
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                compiled: Compiler::default()
+                    .compile(&graph, &library)
+                    .unwrap()
+                    .into(),
+            },
+            WorkerMessage::StartEventLoop,
+        ])
+        .unwrap();
+
+    let initialized = completion_rx.recv().await.unwrap().unwrap();
+    assert_eq!(initialized.executed_nodes.len(), 2);
+    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
+
+    source_a_notify.notify_one();
+    let fired = timeout(Duration::from_millis(500), completion_rx.recv())
+        .await
+        .expect("notified event did not execute")
+        .expect("worker callback channel closed")
+        .expect("event execution failed");
+    assert_eq!(fired.executed_nodes.len(), 1);
+    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
+
+    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
 }
 
 // F4: Exit dominates the batch at the runtime level — any pre-Exit

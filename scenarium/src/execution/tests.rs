@@ -4439,17 +4439,17 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn event_triggers_collects_nodes_with_subscribers() -> TestResult {
+    async fn event_sources_collects_nodes_with_subscribers() -> TestResult {
         let f = build();
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
 
-        // sinks=false, event_triggers=true → emit (owns a subscribed event)
+        // sinks=false, event_sources=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
         let mut outcome = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
-                event_triggers: true,
+                event_sources: true,
                 ..Default::default()
             },
             None,
@@ -4485,7 +4485,7 @@ mod events {
         for expected_calls in [1, 2] {
             eg.execute(
                 RunSeeds {
-                    event_triggers: true,
+                    event_sources: true,
                     ..Default::default()
                 },
                 None,
@@ -4555,7 +4555,7 @@ mod events {
         let mut outcome = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
-                event_triggers: true,
+                event_sources: true,
                 ..Default::default()
             },
             None,

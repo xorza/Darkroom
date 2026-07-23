@@ -282,7 +282,7 @@ fn collect_roots(
         }
     }
 
-    if !run_sinks && !seeds.event_triggers {
+    if !run_sinks && !seeds.event_sources {
         return Ok(());
     }
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
@@ -296,7 +296,7 @@ fn collect_roots(
         if run_sinks && e_node.sink {
             plan.roots.insert(e_node_id);
         }
-        if seeds.event_triggers
+        if seeds.event_sources
             && program.events[e_node.events.range()]
                 .iter()
                 .any(|event| !event.subscribers.is_empty())

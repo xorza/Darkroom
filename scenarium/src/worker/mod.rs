@@ -207,7 +207,7 @@ async fn worker_loop<ExecutionCallback>(
         };
 
         let needs_execute = intent.execute_sinks
-            || intent.execute_event_triggers
+            || intent.execute_event_sources
             || !intent.execute_nodes.is_empty()
             || !intent.events.is_empty()
             || should_start_event_loop;
@@ -218,10 +218,9 @@ async fn worker_loop<ExecutionCallback>(
                 status.activity(worker_activity(true, event_loop.is_some())),
             ));
             let _pause_guard = event_loop_pause_gate.close();
-            let in_loop = should_start_event_loop || event_loop.is_some();
             let seeds = RunSeeds {
                 sinks: intent.execute_sinks,
-                event_triggers: in_loop || intent.execute_event_triggers,
+                event_sources: should_start_event_loop || intent.execute_event_sources,
                 events: std::mem::take(&mut intent.events).into_iter().collect(),
                 nodes: std::mem::take(&mut intent.execute_nodes)
                     .into_iter()
@@ -240,9 +239,9 @@ async fn worker_loop<ExecutionCallback>(
 
             match result {
                 Ok(()) => {
+                    let triggers = std::mem::take(&mut outcome.event_triggers);
                     if should_start_event_loop {
                         assert!(event_loop.is_none());
-                        let triggers = std::mem::take(&mut outcome.event_triggers);
                         if !triggers.is_empty() {
                             event_loop = Some(
                                 ActiveEventLoop::start(triggers, event_loop_pause_gate.clone())

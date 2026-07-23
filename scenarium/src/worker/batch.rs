@@ -29,7 +29,7 @@ pub(crate) struct BatchIntent {
     pub(crate) disk_store: Option<DiskStore>,
     pub(crate) loop_request: Option<LoopCommand>,
     pub(crate) execute_sinks: bool,
-    pub(crate) execute_event_triggers: bool,
+    pub(crate) execute_event_sources: bool,
     pub(crate) execute_nodes: IndexSet<ExecutionNodeId>,
     pub(crate) evict_cache: IndexSet<NodeId>,
     pub(crate) exit: bool,
@@ -57,12 +57,12 @@ pub(crate) fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::Run { seeds } => {
                 let RunSeeds {
                     sinks,
-                    event_triggers,
+                    event_sources,
                     events,
                     nodes,
                 } = seeds;
                 intent.execute_sinks |= sinks;
-                intent.execute_event_triggers |= event_triggers;
+                intent.execute_event_sources |= event_sources;
                 intent.events.extend(events);
                 intent.execute_nodes.extend(nodes);
             }
