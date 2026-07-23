@@ -10,10 +10,12 @@ use crate::execution::stats::ExecutionStats;
 use crate::execution::{Error, ExecutionEngine, Result, RunSeeds};
 use crate::worker::batch::{GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{
-    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, LambdaPanic, StopOutcome, stop_event_loop,
+    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, StopOutcome, stop_event_loop,
 };
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{
+    WorkerError, WorkerExited, WorkerLifecycle, WorkerMessage, WorkerReport,
+};
 
 pub(crate) mod batch;
 pub(crate) mod event_loop;
@@ -90,11 +92,14 @@ impl Drop for Worker {
     }
 }
 
-fn report_lambda_panics<C>(panics: Vec<LambdaPanic>, callback: &C)
+fn report_event_loop_stop<C>(outcome: StopOutcome, callback: &C)
 where
     C: Fn(WorkerReport),
 {
-    for panic in panics {
+    if outcome.was_running {
+        callback(WorkerReport::Lifecycle(WorkerLifecycle::EventLoopStopped));
+    }
+    for panic in outcome.panics {
         callback(WorkerReport::Error(WorkerError::Execution {
             error: Error::EventLambdaPanic {
                 e_node_id: panic.e_node_id,
@@ -133,8 +138,8 @@ async fn worker_loop<ExecutionCallback>(
                     .recv_many(&mut event_buffer, EVENT_LOOP_BACKPRESSURE).await
             }, if event_loop.is_some() => {
                 if count == 0 {
-                    let mut active = event_loop.take().unwrap();
-                    report_lambda_panics(active.stop().await, &execution_callback);
+                    let stop_outcome = stop_event_loop(&mut event_loop).await;
+                    report_event_loop_stop(stop_outcome, &execution_callback);
                     continue;
                 }
             }
@@ -150,8 +155,8 @@ async fn worker_loop<ExecutionCallback>(
         } else {
             StopOutcome::default()
         };
-        report_lambda_panics(stop_outcome.panics, &execution_callback);
         let loop_was_running_before_stop = stop_outcome.was_running;
+        report_event_loop_stop(stop_outcome, &execution_callback);
 
         if intent.exit {
             return;
@@ -206,6 +211,7 @@ async fn worker_loop<ExecutionCallback>(
             || should_start_event_loop;
 
         if needs_execute && !execution_engine.is_empty() {
+            execution_callback(WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStarted));
             let _pause_guard = event_loop_pause_gate.close();
             let in_loop = should_start_event_loop || event_loop.is_some();
             let cancel = CancelToken::new();
@@ -231,6 +237,7 @@ async fn worker_loop<ExecutionCallback>(
                 .lock()
                 .expect("worker cancellation mutex poisoned")
                 .take();
+            execution_callback(WorkerReport::Lifecycle(WorkerLifecycle::ExecutionStopped));
 
             match result {
                 Ok(stats) => {
@@ -242,6 +249,9 @@ async fn worker_loop<ExecutionCallback>(
                                 ActiveEventLoop::start(triggers, event_loop_pause_gate.clone())
                                     .await,
                             );
+                            execution_callback(WorkerReport::Lifecycle(
+                                WorkerLifecycle::EventLoopStarted,
+                            ));
                             tracing::info!("Event loop started");
                         }
                     }

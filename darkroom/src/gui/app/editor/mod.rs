@@ -179,7 +179,6 @@ impl Editor {
     /// graph), because input that switches tabs/opens graphs comes from
     /// *last* frame's click responses and must resolve before anything
     /// edits or records.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn frame(
         &mut self,
         open: &mut OpenDocument,
@@ -187,7 +186,6 @@ impl Editor {
         library: &Library,
         theme: &Theme,
         preferences: &mut Preferences,
-        events_running: bool,
         status_error: Option<&str>,
     ) -> Option<AppCommand> {
         self.intents.clear();
@@ -242,7 +240,6 @@ impl Editor {
             theme,
             library,
             run_state: &self.run_state,
-            events_running,
             status_error,
         };
         let command = self

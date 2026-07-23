@@ -30,11 +30,6 @@ pub(crate) struct AppContext<'a> {
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest pinned-output values read by previews and viewers.
     pub(crate) run_state: &'a RunState,
-    /// Whether the worker's event loop is running — drives the events
-    /// toggle's on/off look. App-side intent rather than the worker's atomic,
-    /// so the button can't lag a frame behind (and `Update` from a one-shot
-    /// run, which tears the loop down, resets it in lockstep).
-    pub(crate) events_running: bool,
     /// The last failed action's message (the engine's
     /// [`StatusLog::error`](crate::core::status::StatusLog) slot), shown in
     /// the status bar until a subsequent success clears it.
@@ -56,10 +51,6 @@ pub(crate) struct App {
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
     pub(crate) preferences: Preferences,
-    /// Whether the worker's event loop is currently running (toggled by the
-    /// events button). Reset whenever a one-shot run's `Update` tears the
-    /// loop down, so it tracks the worker's real state.
-    pub(crate) events_running: bool,
     /// Whether the "save changes before quitting?" dialog is currently up.
     /// Raised when a quit is requested (window close, File ▸ Quit) with
     /// unsaved changes; cleared when the user answers.
@@ -95,7 +86,6 @@ impl App {
             theme: Theme::default(),
             host_handle: handle,
             preferences,
-            events_running: false,
             confirm_quit: false,
         };
         // Resolve the saved preference: `System` (the default) follows
@@ -123,7 +113,7 @@ impl App {
         for report in events {
             match report {
                 WorkerReport::Installed(compiled) => {
-                    self.editor.run_state.compiled = Some(compiled);
+                    self.editor.run_state.acknowledge_install(compiled);
                 }
                 WorkerReport::Cleared => {
                     self.editor.run_state.compiled = None;
@@ -134,6 +124,9 @@ impl App {
                         self.editor.run_state.clear();
                     }
                     self.workspace.runtime.status.error(error.to_string());
+                }
+                WorkerReport::Lifecycle(lifecycle) => {
+                    self.editor.run_state.apply_lifecycle(lifecycle);
                 }
                 WorkerReport::Finished(stats) => {
                     if stats.cancelled {
@@ -319,7 +312,7 @@ impl aperture::App for App {
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
-        if self.editor.run_state.is_running() {
+        if self.editor.run_state.activity.is_executing() {
             ui.request_repaint_after(Duration::from_millis(50));
         }
 
@@ -332,7 +325,6 @@ impl aperture::App for App {
             &library,
             &self.theme,
             &mut self.preferences,
-            self.events_running,
             self.workspace.runtime.status.error.as_deref(),
         );
 

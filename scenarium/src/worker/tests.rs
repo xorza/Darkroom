@@ -21,7 +21,7 @@ use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
-use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic};
+use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerLifecycle, WorkerMessage, WorkerReport};
 
@@ -434,18 +434,25 @@ async fn lambda_panic_is_captured_not_unwound() {
 }
 
 #[test]
-fn lambda_panics_use_general_worker_error_report() {
+fn event_loop_stop_reports_lifecycle_before_lambda_errors() {
     let e_node_id = ExecutionNodeId::unique();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    crate::worker::report_lambda_panics(
-        vec![LambdaPanic {
-            e_node_id,
-            message: "boom".into(),
-        }],
+    crate::worker::report_event_loop_stop(
+        StopOutcome {
+            was_running: true,
+            panics: vec![LambdaPanic {
+                e_node_id,
+                message: "boom".into(),
+            }],
+        },
         &|report| tx.send(report).unwrap(),
     );
 
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        WorkerReport::Lifecycle(WorkerLifecycle::EventLoopStopped)
+    ));
     let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
         panic!("event-lambda panic must use the general worker error report");
     };

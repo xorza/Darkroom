@@ -70,7 +70,7 @@ pub(crate) fn show(
                 Panel::hstack().id_salt("graph_toolbar_run"),
                 |ui| {
                     // Run / cancel: toggled while a one-shot run is in flight.
-                    let running = ctx.run_state.is_running();
+                    let running = ctx.run_state.activity.is_executing();
                     let run_tip = if running { "Cancel run" } else { "Run" };
                     // Run is the one primary action in the cluster — it alone
                     // idles with the accent glyph; the event-loop toggle sits
@@ -88,17 +88,18 @@ pub(crate) fn show(
                         });
                     }
                     // Event loop start / stop: toggled while the loop runs.
-                    let events_tip = if ctx.events_running {
+                    let event_loop_active = ctx.run_state.activity.event_loop_active();
+                    let events_tip = if event_loop_active {
                         "Stop events"
                     } else {
                         "Start events"
                     };
                     if Chip::new(events_button_wid(), events_tip)
-                        .toggled(ctx.events_running)
+                        .toggled(event_loop_active)
                         .toggled_fill(ctx.theme.colors.exec_running_glow)
                         .show(ui, ctx.theme, draw_play_bar)
                     {
-                        command = Some(if ctx.events_running {
+                        command = Some(if event_loop_active {
                             AppCommand::Run(RunCommand::StopEvents)
                         } else {
                             AppCommand::Run(RunCommand::StartEvents)
