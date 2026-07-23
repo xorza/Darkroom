@@ -1,5 +1,6 @@
 use super::*;
 use crate::DataType;
+use crate::execution::NodeSet;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
@@ -79,6 +80,7 @@ impl Fix {
             verdicts,
             roots: roots.iter().copied().collect(),
             pinned: pinned.iter().copied().collect(),
+            event_sources: NodeSet::new(),
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);

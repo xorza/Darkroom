@@ -4469,35 +4469,45 @@ mod events {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn active_event_triggers_lists_live_events() -> TestResult {
-        let f = build();
+    async fn bootstrap_prepares_events_and_bypasses_source_cache() -> TestResult {
+        let mut f = build();
+        mutate_func(&mut f.library, "emit", |func| {
+            func.behavior = FuncBehavior::Pure;
+        });
+        f.graph
+            .find_mut(&f.emit_id, NodeSearch::TopLevel)
+            .unwrap()
+            .cache = CacheMode::Ram;
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
 
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                event_triggers: true,
-                ..Default::default()
-            },
-            None,
-            CancelToken::never(),
-            &mut stats,
-        )
-        .await?;
-        let triggers = eg.active_event_triggers(&stats);
+        let mut outcome = ExecutionOutcome::default();
+        for expected_calls in [1, 2] {
+            eg.execute(
+                RunSeeds {
+                    event_triggers: true,
+                    ..Default::default()
+                },
+                None,
+                CancelToken::never(),
+                &mut outcome,
+            )
+            .await?;
 
-        // emit executed and has a populated lambda + a subscriber → one trigger.
-        // recv has no events → contributes nothing.
-        assert_eq!(triggers.len(), 1);
-        assert_eq!(triggers[0].event.e_node_id, root_execution_node(f.emit_id));
-        assert_eq!(triggers[0].event.event_idx, 0);
+            assert_eq!(*f.emit_calls.lock().await, expected_calls);
+            assert_eq!(eg.event_triggers.len(), 1);
+            assert_eq!(
+                eg.event_triggers[0].event.e_node_id,
+                root_execution_node(f.emit_id)
+            );
+            assert_eq!(eg.event_triggers[0].event.event_idx, 0);
+        }
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn active_event_triggers_empty_without_subscribers() -> TestResult {
+    async fn bootstrap_prepares_no_events_without_subscribers() -> TestResult {
         let mut f = build();
         // Drop the subscriber but keep emit reachable by making it a sink.
         let emit_id = f.emit_id;
@@ -4513,16 +4523,51 @@ mod events {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
-        let stats = eg.execute_sinks().await?;
+        let outcome = eg.execute_sinks().await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
         assert!(
-            stats
+            outcome
                 .executed_nodes
                 .iter()
                 .any(|n| n.e_node_id == root_execution_node(f.emit_id))
         );
-        assert!(eg.active_event_triggers(&stats).is_empty());
+        assert!(eg.event_triggers.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_event_source_prepares_no_trigger() -> TestResult {
+        let mut f = build();
+        mutate_func(&mut f.library, "emit", |func| {
+            func.lambda = async_lambda!(|_, _, _, _, _, _| {
+                Err(InvokeError::external(std::io::Error::other(
+                    "bootstrap failed",
+                )))
+            });
+        });
+        let mut eg = ExecutionEngine::default();
+        eg.update(&f.graph, &f.library).unwrap();
+
+        let mut outcome = ExecutionOutcome::default();
+        eg.execute(
+            RunSeeds {
+                event_triggers: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+            &mut outcome,
+        )
+        .await?;
+
+        assert_eq!(outcome.node_errors.len(), 1);
+        assert_eq!(
+            outcome.node_errors[0].e_node_id,
+            root_execution_node(f.emit_id)
+        );
+        assert!(eg.event_triggers.is_empty());
 
         Ok(())
     }
