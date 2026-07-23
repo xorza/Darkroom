@@ -45,7 +45,7 @@ impl OutputPort {
 
 /// Address of a consumer node's input port. Keys a node's data binding in
 /// `Graph.bindings`, and reports unsatisfied inputs
-/// (`ExecutionOutcome::missing_inputs`) / edges the editor's breaker severs.
+/// (the execution outcome's missing-input list) / edges the editor's breaker severs.
 /// Distinct from `OutputPort` so source/sink intent can't be confused.
 #[derive(
     Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,

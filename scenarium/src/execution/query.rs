@@ -12,12 +12,12 @@ impl ExecutionEngine {
     /// node was executed or cached this run, the event has at least one
     /// subscriber, and its lambda is populated. Used by the worker to spawn the
     /// tasks that drive the event loop.
-    pub(crate) fn active_event_triggers(&self, stats: &ExecutionOutcome) -> Vec<EventTrigger> {
-        stats
+    pub(crate) fn active_event_triggers(&self, outcome: &ExecutionOutcome) -> Vec<EventTrigger> {
+        outcome
             .cached_nodes
             .iter()
             .copied()
-            .chain(stats.executed_nodes.iter().map(|n| n.e_node_id))
+            .chain(outcome.executed_nodes.iter().map(|n| n.e_node_id))
             .flat_map(|e_node_id| {
                 let e_node = &self.compiled.program.e_nodes[&e_node_id];
                 let event_state = self.cache.slots[&e_node_id].event_state.clone();

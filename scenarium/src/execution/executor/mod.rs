@@ -3,7 +3,7 @@
 //! the [`RuntimeCache`](crate::execution::cache::RuntimeCache). Given an immutable
 //! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `RuntimeCache`,
-//! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
+//! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the
@@ -25,8 +25,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use common::CancelToken;
 
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
-use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::execution::outcome::{ExecutedNodeStats, ExecutionOutcome, NodeError};
+use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, RamUsage};
@@ -263,7 +263,7 @@ impl Executor {
     /// [`NodeOutcome::Cut`] if the resolver pruned its cone, report a missing implementation,
     /// serve it from RAM/disk on [`Disposition::Reuse`], or invoke its lambda and persist the
     /// result to disk right away (so a long run's earlier caches survive a later failure or
-    /// cancel). The `program`, `plan`, and `resolved` run are read-only. Returns per-run stats.
+    /// cancel). The `program`, `plan`, and `resolved` run are read-only.
     #[allow(clippy::too_many_arguments)] // Each argument is a distinct run collaborator.
     pub(crate) async fn run(
         &mut self,
@@ -304,7 +304,7 @@ impl Executor {
             for (process_idx, &e_node_id) in plan.process_order.iter().enumerate() {
                 // Coarse cancel: stop scheduling further nodes and retire the tail's reads. A
                 // node already mid-invoke isn't interrupted, while unreached outcomes stay
-                // `Pending` and are omitted from stats.
+                // `Pending` and are omitted from the outcome.
                 if self.ctx_manager.cancel.is_cancelled() {
                     for &pending_id in &plan.process_order[process_idx..] {
                         if resolved.disposition[&pending_id] == Disposition::Run {
@@ -527,10 +527,10 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        let mut stats = collect_execution_stats(program, plan, &self.outcomes, start);
-        stats.logs = std::mem::take(&mut self.ctx_manager.logs);
-        stats.cancelled = self.ctx_manager.cancel.is_cancelled();
-        stats
+        let mut outcome = collect_execution_outcome(program, plan, &self.outcomes, start);
+        outcome.logs = std::mem::take(&mut self.ctx_manager.logs);
+        outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
+        outcome
     }
 }
 
@@ -558,7 +558,7 @@ fn has_errored_dependency(
     })
 }
 
-fn collect_execution_stats(
+fn collect_execution_outcome(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     outcomes: &NodeMap<NodeOutcome>,

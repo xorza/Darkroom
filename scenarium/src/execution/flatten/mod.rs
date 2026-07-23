@@ -323,7 +323,7 @@ impl<'a> Run<'a> {
             debug_assert!(previous.is_none(), "flattened node ids must be unique");
 
             // Record where this flat node came from (current scope + authoring
-            // id) so stats map back to editor nodes.
+            // id) so outcomes map back to editor nodes.
             let scope = *self.scope_stack.last().unwrap();
             self.flatten.set_leaf(e_node_id, scope, node.id);
 

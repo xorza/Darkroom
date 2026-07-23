@@ -53,14 +53,15 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `execution/program.rs` | Private flat runtime program |
 | `execution/plan/` | Structural scheduling and missing-input verdicts |
 | `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
-| `execution/executor/` | Invocation, delivery, reclamation, and stats |
+| `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | Cross-run values and output coverage |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
 | `execution/disk_store/` | Indexed on-disk cache format and atomic persistence |
-| `execution/report.rs` | Live progress and pinned-output transport |
+| `execution/report.rs` | Internal live progress and pinned-output transport |
 | `execution/resource/` | Off-thread, memoized per-run external-resource stamps |
-| `execution/stats.rs` | Completed-run results |
+| `execution/outcome.rs` | Private completed-run outcome |
 | `worker/protocol.rs` | Host/worker messages and reports |
+| `worker/status.rs` | Shared worker activity and node-status snapshots |
 | `worker/batch.rs` | Ordered batch reduction |
 | `worker/event_loop.rs` | Active event-task lifecycle |
 | `worker/pause_gate/` | Counted RAII pause gate for worker execution |
@@ -109,15 +110,18 @@ last-write-wins and `Exit` dominates its batch. Compiled programs are shared as
 emits `Installed` or `Cleared` before any report belonging to the resulting
 state; its single execution loop and callback preserve that FIFO stream.
 Successful cache eviction is fire-and-forget. Operation-level execution and
-cache-eviction failures both arrive as `WorkerReport::Error`; `Finished`
-contains only successful execution stats. `WorkerReport::Lifecycle` brackets
-each actual execution and announces event-loop creation and teardown, including
-teardown caused by graph replacement or event-channel closure.
-`ActiveEventLoop` owns both its tasks and event receiver, so the lifecycle
+cache-eviction failures both arrive as `WorkerReport::Error`.
+`WorkerReport::Status` carries an `Arc<WorkerStatus>` with absolute activity,
+batched live node patches, or an authoritative completed-run snapshot. The
+worker retains one status allocation and updates it through `Arc::make_mut`;
+the GUI consumes and drops published snapshots, allowing subsequent reports to
+reuse their vectors when no older snapshot is still queued.
+`ActiveEventLoop` owns both its tasks and event receiver, so the activity
 invariant is represented by one type. Event tasks rendezvous through Tokio's
 `Barrier`; the worker's counted pause gate uses Tokio `watch` so overlapping
 close guards reopen it only after the last guard drops. Worker reports stream
-progress and exact scoped pinned outputs before the matching finished result.
+node-status patches and exact scoped pinned outputs before the matching
+completion snapshot.
 
 ## Tests
 

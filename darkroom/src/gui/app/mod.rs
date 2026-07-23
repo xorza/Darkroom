@@ -98,7 +98,7 @@ impl App {
         app
     }
 
-    /// Consume worker results posted since the last frame. A finished run
+    /// Consume worker results posted since the last frame. A completed run
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. A pinned output's live push lands in the
@@ -127,13 +127,15 @@ impl App {
                 }
                 WorkerReport::Status(status) => {
                     if let WorkerStatusKind::Completed {
-                        executed_nodes,
+                        executed_node_count,
                         cancelled,
                         ..
                     } = status.kind
                     {
                         if cancelled {
-                            tracing::info!("run cancelled after {executed_nodes} node(s)");
+                            tracing::info!(
+                                "run cancelled after {executed_node_count} node(s)"
+                            );
                         }
                         // A completed run supersedes any lingering failure message
                         // from an earlier event-loop tick.

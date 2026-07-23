@@ -28,8 +28,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::report::RunEvent;
 use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::report::RunEvent;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 
@@ -279,12 +279,12 @@ impl ExecutionEngine {
     }
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
-    /// feedback ahead of the final stats: a `RunEvent::Progress` before and
+    /// feedback ahead of the final outcome: a `RunEvent::Progress` before and
     /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` when a
     /// node with a pinned output (or that is itself a pinned root) produces or
     /// reuses its value, so a GUI preview updates without polling. When
     /// `cancel` is `Some` and gets set mid-run, scheduling stops after the
-    /// in-flight node and the returned stats are marked `cancelled`.
+    /// in-flight node and the returned outcome is marked `cancelled`.
     pub(crate) async fn execute(
         &mut self,
         seeds: RunSeeds,
@@ -322,7 +322,7 @@ impl ExecutionEngine {
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
         // caches are durable even if a later node fails or the run is cancelled.
-        let mut stats = self
+        let mut outcome = self
             .executor
             .run(
                 &self.compiled.program,
@@ -340,12 +340,12 @@ impl ExecutionEngine {
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
         let ram = self.cache.resident_ram_stats();
-        stats.cache_ram = ram.total;
-        stats.node_ram = ram.by_node;
+        outcome.cache_ram = ram.total;
+        outcome.node_ram = ram.by_node;
 
-        stats.triggered_events = seeds.events;
+        outcome.triggered_events = seeds.events;
 
-        Ok(stats)
+        Ok(outcome)
     }
 
     /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
@@ -384,9 +384,9 @@ pub(crate) mod test_support {
     use crate::execution::compile;
     use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::program;
     use crate::execution::resource::RunResourceStamps;
-    use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::{ExecutionEngine, Result, RunSeeds};
     use crate::node::lambda::OutputDemand;
 

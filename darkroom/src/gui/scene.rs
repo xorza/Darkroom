@@ -184,8 +184,8 @@ pub(crate) struct SceneNode {
     /// values, so the const-value affordances (inline editor, "Set
     /// constant" menu, drag-to-own-body) are suppressed on them.
     pub boundary: bool,
-    /// Outcome of the last graph run, mirrored from the worker's
-    /// `ExecutionStats`. Drives the node's status-glow shadow and (for
+    /// Outcome of the last graph run, mirrored from `WorkerStatus`. Drives the
+    /// node's status-glow shadow and (for
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,

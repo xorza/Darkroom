@@ -1,5 +1,5 @@
 //! Graph execution + the worker event loop. Commands only request work;
-//! worker lifecycle reports drive the toolbar's execution and loop state.
+//! worker status reports drive the toolbar's execution and loop state.
 
 use scenarium::NodeId;
 
@@ -38,7 +38,7 @@ impl App {
     /// Compile the document graph and execute its sinks once on the
     /// worker. A compile error is reported to the engine's status log
     /// synchronously — no run starts, so the prior run's status stays
-    /// untouched. Worker lifecycle reports acknowledge actual execution and
+    /// untouched. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
     pub(crate) fn run_graph(&mut self) {
         self.workspace.run_once();

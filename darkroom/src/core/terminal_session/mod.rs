@@ -80,13 +80,13 @@ impl TerminalSession {
                 WorkerReport::Status(status) => {
                     if let WorkerStatusKind::Completed {
                         elapsed_secs,
-                        executed_nodes,
+                        executed_node_count,
                         ..
                     } = status.kind
                     {
                         self.workspace.runtime.status.error = None;
                         self.workspace.runtime.status.info(format!(
-                            "run finished: {executed_nodes} node(s), {elapsed_secs:.3}s"
+                            "run finished: {executed_node_count} node(s), {elapsed_secs:.3}s"
                         ));
                         for log in &status.logs {
                             self.workspace

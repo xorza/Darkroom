@@ -246,7 +246,7 @@ impl RunState {
     }
 
     /// Successful eviction has no reply, so its affected cache residency cannot
-    /// be projected exactly until the next run reports fresh stats and pins.
+    /// be projected exactly until the next run reports fresh status and pins.
     pub(crate) fn clear_cache_projections(&mut self) {
         self.cache_ram = RamUsage::default();
         for node in self.nodes.values_mut() {
@@ -365,7 +365,7 @@ mod tests {
         WorkerStatus {
             kind: WorkerStatusKind::Completed {
                 elapsed_secs: 0.0,
-                executed_nodes: executed.len(),
+                executed_node_count: executed.len(),
                 cancelled: false,
             },
             nodes,

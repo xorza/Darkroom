@@ -1,9 +1,9 @@
 use std::time::Instant;
 
+use crate::RamUsage;
 use crate::execution::RunError;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::LogEntry;
-use crate::RamUsage;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub enum WorkerActivity {
@@ -37,7 +37,7 @@ pub enum WorkerStatusKind {
     Patch,
     Completed {
         elapsed_secs: f64,
-        executed_nodes: usize,
+        executed_node_count: usize,
         cancelled: bool,
     },
 }

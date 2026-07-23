@@ -5,34 +5,28 @@ use std::time::Instant;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
-use crate::execution::identity::{
-    ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
-};
+use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
+use crate::execution::outcome::{ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage};
 use crate::execution::report::{RunEvent, RunPhase, RunProgress};
-use crate::execution::outcome::{
-    ExecutedNodeStats, ExecutionOutcome, NodeError, NodeRamUsage,
-};
 use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
+use crate::{FuncId, LogEntry, LogLevel, RamUsage, StaticValue};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-use crate::worker::Worker;
 use crate::worker;
+use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
 use crate::worker::event_loop::{ActiveEventLoop, LambdaPanic, StopOutcome};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
-use crate::worker::status::{
-    NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind,
-};
+use crate::worker::status::{NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -76,7 +70,7 @@ impl FrameHarness {
             .id;
         let library = Arc::new(library);
 
-        let (worker, compute_rx) = finished_worker(cap);
+        let (worker, compute_rx) = completed_worker(cap);
 
         Self {
             worker,
@@ -241,7 +235,7 @@ fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
 /// A worker whose callback forwards only completed statuses into a fresh
 /// mpsc of capacity `cap` — the shape most tests want when they don't care
 /// about live progress. Works with or without a graph loaded.
-fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOutcome>>) {
+fn completed_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOutcome>>) {
     let (tx, rx) = mpsc::channel(cap);
     let worker = Worker::new(move |report| {
         let result = match report {
@@ -265,12 +259,12 @@ fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOu
 }
 
 #[derive(Debug)]
-struct FinishedRun {
+struct CompletedRun {
     compiled: Arc<CompiledGraph>,
     result: ExecResult<ExecutionOutcome>,
 }
 
-async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun {
+async fn next_completed_run(rx: &mut mpsc::Receiver<WorkerReport>) -> CompletedRun {
     let mut compiled = None;
     loop {
         let report = timeout(Duration::from_secs(5), rx.recv())
@@ -283,13 +277,13 @@ async fn next_finished_run(rx: &mut mpsc::Receiver<WorkerReport>) -> FinishedRun
             WorkerReport::Status(status)
                 if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
             {
-                return FinishedRun {
+                return CompletedRun {
                     compiled: compiled.expect("completion arrived before installation"),
                     result: Ok(execution_outcome(&status)),
                 };
             }
             WorkerReport::Error(WorkerError::Execution { error }) => {
-                return FinishedRun {
+                return CompletedRun {
                     compiled: compiled.expect("Error arrived before Installed"),
                     result: Err(error),
                 };
@@ -577,9 +571,7 @@ fn worker_status_batches_nodes_and_preserves_published_snapshots() {
     assert_eq!(patch.nodes[1].e_node_id, second_node);
     assert!(matches!(
         patch.nodes[1].status,
-        Some(NodeExecutionStatus::Executed {
-            elapsed_secs: 0.25
-        })
+        Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
     ));
     assert!(Arc::ptr_eq(&patch, &status));
 
@@ -654,12 +646,9 @@ fn completed_status_contains_the_full_gui_snapshot() {
     let mut status = Arc::<WorkerStatus>::default();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    worker::report_completed(
-        &mut status,
-        WorkerActivity::EventLoop,
-        outcome,
-        &|report| tx.send(report).unwrap(),
-    );
+    worker::report_completed(&mut status, WorkerActivity::EventLoop, outcome, &|report| {
+        tx.send(report).unwrap()
+    });
 
     let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
         panic!("completion must produce a worker status");
@@ -669,7 +658,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         status.kind,
         WorkerStatusKind::Completed {
             elapsed_secs: 1.25,
-            executed_nodes: 1,
+            executed_node_count: 1,
             cancelled: true,
         }
     );
@@ -688,8 +677,7 @@ fn completed_status_contains_the_full_gui_snapshot() {
         node.e_node_id == cached && matches!(node.status, Some(NodeExecutionStatus::Cached))
     }));
     assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == missing
-            && matches!(node.status, Some(NodeExecutionStatus::MissingInputs))
+        node.e_node_id == missing && matches!(node.status, Some(NodeExecutionStatus::MissingInputs))
     }));
     assert!(status.nodes.iter().any(|node| {
         node.e_node_id == failed
@@ -756,7 +744,7 @@ async fn execute_sinks_triggers_sink_nodes() {
     // Simple single-sink graph — doesn't use FrameHarness' frame-event setup.
     let (graph, _print_id) = print_literal_graph(&library, "hello");
 
-    let (worker, mut compute_finish_rx) = finished_worker(8);
+    let (worker, mut completion_rx) = completed_worker(8);
     worker
         .send_many([
             WorkerMessage::Update {
@@ -771,7 +759,7 @@ async fn execute_sinks_triggers_sink_nodes() {
         ])
         .unwrap();
 
-    let executed = compute_finish_rx
+    let executed = completion_rx
         .recv()
         .await
         .expect("Missing compute completion")
@@ -863,7 +851,10 @@ async fn worker_streams_node_patches_before_completion() {
             WorkerReport::Status(status)
                 if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
             {
-                assert!(installed.is_some(), "completion arrived before installation");
+                assert!(
+                    installed.is_some(),
+                    "completion arrived before installation"
+                );
                 assert_eq!(status.activity, WorkerActivity::Idle);
                 assert_eq!(started, 1);
                 assert_eq!(node_finished, 1);
@@ -875,12 +866,9 @@ async fn worker_streams_node_patches_before_completion() {
             WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
         }
     }
-    assert_eq!(started, 1, "one Started before the final report");
+    assert_eq!(started, 1, "one running update before completion");
     assert!(execution_started);
-    assert_eq!(
-        node_finished, 1,
-        "one Finished progress before the final report"
-    );
+    assert_eq!(node_finished, 1, "one executed update before completion");
 
     worker.send(WorkerMessage::Clear).unwrap();
     let cleared = timeout(Duration::from_secs(5), rx.recv())
@@ -938,7 +926,7 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
         ])
         .unwrap();
 
-    let finished = next_finished_run(&mut rx).await;
+    let finished = next_completed_run(&mut rx).await;
     let stats = finished.result.unwrap();
     let attributions: HashSet<_> = stats
         .executed_nodes
@@ -963,7 +951,7 @@ async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
     let library = system_library();
     let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
 
     worker.request_cancel();
     worker
@@ -1160,7 +1148,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
         .unwrap()
         .id;
 
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
     worker
         .send_many([
             WorkerMessage::Update {
@@ -1216,7 +1204,7 @@ async fn disabled_sink_stays_out_of_sink_runs() {
         .unwrap()
         .disabled = true;
 
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
     worker
         .send_many([
             WorkerMessage::Update {
@@ -1378,7 +1366,7 @@ async fn assert_no_callback_within(
 
 #[tokio::test]
 async fn execute_sinks_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
     worker
         .send(WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
@@ -1389,7 +1377,7 @@ async fn execute_sinks_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn event_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
     worker
         .send(WorkerMessage::InjectEvents {
             events: vec![ExecutionEventPort {
@@ -1403,7 +1391,7 @@ async fn event_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn start_event_loop_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
     sync_after(&worker, [WorkerMessage::StartEventLoop]).await;
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
@@ -1421,7 +1409,7 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
     let library = system_library();
     let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
-    let (worker, mut compute_finish_rx) = finished_worker(8);
+    let (worker, mut completion_rx) = completed_worker(8);
 
     worker
         .send_many([
@@ -1438,13 +1426,13 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
         ])
         .unwrap();
 
-    let first = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+    let first = timeout(Duration::from_millis(500), completion_rx.recv())
         .await
         .expect("batch must fire callback")
         .expect("callback channel closed");
     assert!(first.is_ok(), "execute must succeed: {first:?}");
 
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
+    assert_no_callback_within(&mut completion_rx, Duration::from_millis(100)).await;
     assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
 }
 
@@ -1487,8 +1475,8 @@ async fn queued_separate_install_and_run_commands_preserve_program_order() {
         })
         .unwrap();
 
-    let first = next_finished_run(&mut rx).await;
-    let second = next_finished_run(&mut rx).await;
+    let first = next_completed_run(&mut rx).await;
+    let second = next_completed_run(&mut rx).await;
     assert!(Arc::ptr_eq(&first.compiled, &compiled_a));
     assert!(Arc::ptr_eq(&second.compiled, &compiled_b));
     assert_eq!(
@@ -1616,7 +1604,7 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
     }
     sync_after(&worker, std::iter::empty()).await;
 
-    let finished = next_finished_run(&mut rx).await;
+    let finished = next_completed_run(&mut rx).await;
     assert!(Arc::ptr_eq(&finished.compiled, &running_compiled));
     assert!(finished.result.is_ok());
     assert_eq!(
@@ -1659,7 +1647,7 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
 async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
     // F5 + F4: a batch with sink seeds + StartEventLoop on an
     // empty graph must fire no callback at all.
-    let (worker, mut rx) = finished_worker(8);
+    let (worker, mut rx) = completed_worker(8);
 
     sync_after(
         &worker,
@@ -2039,7 +2027,7 @@ async fn lambda_events_drive_worker_execution() {
 // scan side; this pins the end-to-end contract.
 #[tokio::test]
 async fn exit_in_batch_closes_pending_sync() {
-    let (worker, _rx) = finished_worker(8);
+    let (worker, _rx) = completed_worker(8);
 
     let (reply, rx) = oneshot::channel();
     worker
@@ -2169,7 +2157,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
     async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionOutcome {
-        let (worker, mut rx) = finished_worker(4);
+        let (worker, mut rx) = completed_worker(4);
         // SetDiskStore shares the batch with Update, proving it's applied before
         // the install hydrates.
         let cache = DiskStore::new(Arc::new(Library::default()), Some(root.to_path_buf()));
@@ -2189,7 +2177,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
             .unwrap();
         rx.recv()
             .await
-            .expect("worker reports Finished")
+            .expect("worker reports completion")
             .expect("run succeeds")
     }
 
@@ -2270,7 +2258,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
-    let (worker, mut rx) = finished_worker(4);
+    let (worker, mut rx) = completed_worker(4);
 
     // Run with NO store root: the Both value stays resident-only.
     worker

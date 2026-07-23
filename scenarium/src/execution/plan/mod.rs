@@ -47,7 +47,7 @@ impl NodeVerdict {
 /// producers — a cached or executing one delivers a value, optional or not).
 /// `verdicts` must already hold the producer's verdict, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
-/// stats so the two can't drift.
+/// outcome so the two can't drift.
 pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdict>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,

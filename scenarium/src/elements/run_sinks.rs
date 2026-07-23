@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use crate::node::definition::Func;
 
 /// Stable `FuncId` standing in for the run-sinks node in the flattened
-/// program (stats attribution). Not registered in any `Library`.
+/// program (outcome attribution). Not registered in any `Library`.
 const RUN_SINKS_FUNC_ID: &str = "edec890e-5c23-49fb-a131-aaef3844d7c7";
 
 /// The hardcoded interface for `RunSinks`, built once. No inputs, outputs,

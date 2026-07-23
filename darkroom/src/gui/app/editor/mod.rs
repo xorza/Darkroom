@@ -87,8 +87,8 @@ pub(crate) struct Editor {
     /// `NodeId`s so it resolves against any tab (root or graph
     /// interior): execution status (the glow + header time, projected into
     /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
-    /// it as it drains the worker (`RunState::set_results` / `apply_progress`
-    /// / `clear`). Off the serialized state.
+    /// it as it drains the worker (`RunState::apply_worker_status` / `clear`).
+    /// Off the serialized state.
     pub(crate) run_state: RunState,
 }
 

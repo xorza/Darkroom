@@ -3,7 +3,7 @@
 //! failures parked in the engine's [`StatusLog`](crate::core::status::StatusLog)
 //! error slot until a subsequent success clears it) and the runtime cache's
 //! memory footprint (right, system RAM and GPU VRAM mirrored from the last
-//! run's `ExecutionStats`; each pool shows only when non-zero). The whole bar
+//! completed `WorkerStatus`; each pool shows only when non-zero). The whole bar
 //! is omitted when both are empty — an idle empty graph never grows a blank
 //! strip.
 
