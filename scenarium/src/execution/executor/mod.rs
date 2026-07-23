@@ -75,14 +75,14 @@ impl NodeOutcome {
 
 /// Why every `events.send(..)` in this module is `.expect`-asserted rather than
 /// silently ignored: `send` only fails once every receiver is dropped, and the
-/// worker's `event_rx` (see `worker::worker_loop`) isn't dropped until *after*
+/// worker task's `event_rx` isn't dropped until *after*
 /// the `execute` future this `run` lives inside resolves — `send` isn't an
 /// await point, so an abort mid-run can only land at an earlier `.await` and
 /// drop this whole future before a send is ever reached, never selectively
 /// close just the receiver. A failed send here means that lifetime invariant
 /// broke — a real bug, not an expected failure to shrug off.
 const EVENTS_OUTLIVE_RUN: &str =
-    "the events receiver outlives this future — worker_loop only drops it after `execute` resolves";
+    "the events receiver outlives this future — the worker only drops it after `execute` resolves";
 
 #[derive(Default, Debug)]
 struct RemainingOutputReads {

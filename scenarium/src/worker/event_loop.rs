@@ -160,23 +160,3 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         "unknown panic".to_string()
     }
 }
-
-#[derive(Debug, Default)]
-pub(crate) struct StopOutcome {
-    pub(crate) was_running: bool,
-    pub(crate) panics: Vec<LambdaPanic>,
-}
-
-pub(crate) async fn stop_event_loop(event_loop: &mut Option<ActiveEventLoop>) -> StopOutcome {
-    match event_loop.take() {
-        Some(mut active) => {
-            let panics = active.stop().await;
-            tracing::info!("Event loop stopped");
-            StopOutcome {
-                was_running: true,
-                panics,
-            }
-        }
-        None => StopOutcome::default(),
-    }
-}

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -10,7 +9,6 @@ use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError, NodeRamUsage};
-use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::execution::{Error, Result as ExecResult, RunError, RunSeeds};
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
@@ -20,10 +18,9 @@ use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambd
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-use crate::worker;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
-use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake, LambdaPanic, StopOutcome};
+use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{
@@ -34,6 +31,12 @@ type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Sen
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
     ExecutionNodeId::from_authoring(&[node_id])
+}
+
+fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
+    let mut intent = BatchIntent::default();
+    intent.reset(msgs);
+    intent
 }
 
 /// Print messages a run logged, in order — `print` now logs via
@@ -489,93 +492,6 @@ async fn lambda_panic_is_captured_not_unwound() {
         panic.message
     );
     assert!(active.stop().await.is_empty());
-}
-
-#[test]
-fn event_loop_stop_reports_idle_status_before_lambda_errors() {
-    let e_node_id = ExecutionNodeId::unique();
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut status = WorkerStatusPublisher::default();
-    drop(status.activity(WorkerActivity::EventLoop));
-
-    worker::report_event_loop_stop(
-        StopOutcome {
-            was_running: true,
-            panics: vec![LambdaPanic {
-                e_node_id,
-                message: "boom".into(),
-            }],
-        },
-        &mut status,
-        &|report| tx.send(report).unwrap(),
-    );
-
-    let WorkerReport::Status(status) = rx.try_recv().unwrap() else {
-        panic!("event-loop stop must publish worker status");
-    };
-    assert_eq!(status.activity, WorkerActivity::Idle);
-    assert_eq!(status.kind, WorkerStatusKind::Activity);
-    let WorkerReport::Error(WorkerError::Execution { error }) = rx.try_recv().unwrap() else {
-        panic!("event-lambda panic must use the general worker error report");
-    };
-    assert!(matches!(
-        error,
-        Error::EventLambdaPanic {
-            e_node_id: actual,
-            message
-        } if actual == e_node_id && message == "boom"
-    ));
-    assert!(rx.try_recv().is_err());
-}
-
-#[test]
-fn worker_status_batches_nodes_and_preserves_published_snapshots() {
-    let first_node = ExecutionNodeId::unique();
-    let second_node = ExecutionNodeId::unique();
-    let mut events = vec![
-        RunEvent::Progress(RunProgress {
-            e_node_id: first_node,
-            phase: RunPhase::Started { at: Instant::now() },
-        }),
-        RunEvent::Progress(RunProgress {
-            e_node_id: second_node,
-            phase: RunPhase::Finished { elapsed_secs: 0.25 },
-        }),
-    ];
-    let mut status = WorkerStatusPublisher::default();
-    drop(status.activity(WorkerActivity::Executing));
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let callback = |report| tx.send(report).unwrap();
-
-    worker::forward_run_events(&mut events, &mut status, &callback);
-    let WorkerReport::Status(patch) = rx.try_recv().unwrap() else {
-        panic!("progress must produce a status patch");
-    };
-    assert_eq!(patch.kind, WorkerStatusKind::Patch);
-    assert_eq!(patch.nodes.len(), 2);
-    assert_eq!(patch.nodes[0].e_node_id, first_node);
-    assert!(matches!(
-        patch.nodes[0].status,
-        Some(NodeExecutionStatus::Running { .. })
-    ));
-    assert_eq!(patch.nodes[1].e_node_id, second_node);
-    assert!(matches!(
-        patch.nodes[1].status,
-        Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
-    ));
-    let idle = status.activity(WorkerActivity::Idle);
-    assert!(!Arc::ptr_eq(&patch, &idle));
-    assert_eq!(patch.activity, WorkerActivity::Executing);
-    assert_eq!(patch.nodes.len(), 2);
-    assert_eq!(idle.activity, WorkerActivity::Idle);
-    assert!(idle.nodes.is_empty());
-
-    drop(patch);
-    let allocation = Arc::as_ptr(&idle);
-    drop(idle);
-    let executing = status.activity(WorkerActivity::Executing);
-    assert_eq!(Arc::as_ptr(&executing), allocation);
-    assert!(rx.try_recv().is_err());
 }
 
 #[test]
@@ -1390,7 +1306,7 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
     // A sink-only graph prepares no event triggers, so the loop never
     // actually starts. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
-    // should_start_event_loop branch.
+    // event-loop rebuild transition.
     let library = system_library();
     let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
@@ -1651,14 +1567,18 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 fn batch_intent_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
     let e_node_id = ExecutionNodeId::unique();
+    let node_id = NodeId::from_u128(1);
     let event = ExecutionEventPort {
         e_node_id,
         event_idx: 0,
     };
 
-    let intent = BatchIntent::new([
+    let mut intent = batch_intent([
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
+        WorkerMessage::EvictCache {
+            nodes: vec![node_id],
+        },
         WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
         },
@@ -1686,7 +1606,29 @@ fn batch_intent_accumulates_simple_flags() {
         "duplicate node seeds union to one"
     );
     assert!(intent.execute_nodes.contains(&e_node_id));
+    assert!(intent.evict_cache.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
+
+    let event_capacity = intent.events.capacity();
+    let node_capacity = intent.execute_nodes.capacity();
+    let eviction_capacity = intent.evict_cache.capacity();
+    let sync_capacity = intent.syncs.capacity();
+
+    intent.reset([WorkerMessage::StopEventLoop]);
+
+    assert!(intent.graph_state.is_none());
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
+    assert!(!intent.execute_sinks);
+    assert!(!intent.execute_event_sources);
+    assert!(!intent.exit);
+    assert!(intent.events.is_empty());
+    assert!(intent.execute_nodes.is_empty());
+    assert!(intent.evict_cache.is_empty());
+    assert!(intent.syncs.is_empty());
+    assert_eq!(intent.events.capacity(), event_capacity);
+    assert_eq!(intent.execute_nodes.capacity(), node_capacity);
+    assert_eq!(intent.evict_cache.capacity(), eviction_capacity);
+    assert_eq!(intent.syncs.capacity(), sync_capacity);
 }
 
 #[test]
@@ -1697,7 +1639,7 @@ fn batch_intent_deduplicates_events() {
         event_idx: 0,
     };
 
-    let intent = BatchIntent::new([
+    let intent = batch_intent([
         WorkerMessage::Run {
             seeds: RunSeeds::events(vec![event]),
         },
@@ -1729,7 +1671,7 @@ fn empty_compiled() -> Arc<CompiledGraph> {
 fn batch_intent_exit_dominates_entire_batch() {
     // Exit is sticky across the whole batch: every other command
     // in the batch is discarded, whether sent before or after.
-    let intent = BatchIntent::new([
+    let intent = batch_intent([
         WorkerMessage::Clear,
         WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
@@ -1763,7 +1705,7 @@ fn batch_intent_exit_dominates_entire_batch() {
 fn batch_intent_accumulates_unique_cache_evictions_in_order() {
     let first = NodeId::from_u128(1);
     let second = NodeId::from_u128(2);
-    let intent = BatchIntent::new([
+    let intent = batch_intent([
         WorkerMessage::EvictCache {
             nodes: vec![first, second],
         },
@@ -1878,7 +1820,7 @@ fn batch_intent_update_overwrites_earlier_update_in_same_batch() {
     // Two Updates in one batch: the last one wins. This is
     // implicit today (Option::replace) but worth pinning since
     // callers do send [Update(A), Update(B)] during rapid edits.
-    let intent = BatchIntent::new([
+    let intent = batch_intent([
         WorkerMessage::Update {
             compiled: empty_compiled(),
         },
@@ -1929,7 +1871,7 @@ fn batch_intent_last_write_wins_per_slot() {
     ];
 
     for (label, msgs, expected) in cases {
-        let intent = BatchIntent::new(msgs);
+        let intent = batch_intent(msgs);
         assert!(expected(&intent), "{label}");
     }
 }
@@ -2129,10 +2071,8 @@ async fn exit_in_batch_closes_pending_sync() {
     );
 }
 
-// F6: StartEventLoop while a loop is already running must not trip
-// the `assert!(event_loop.is_none())` in the commit phase — the
-// needs_stop path is what keeps that invariant, and this test
-// exists so a refactor touching needs_stop fails loudly.
+// F6: StartEventLoop while a loop is already running must stop the
+// current loop before rebuilding it.
 #[tokio::test]
 async fn start_event_loop_twice_is_idempotent() {
     let mut h = FrameHarness::with_callback_capacity(64).await;
