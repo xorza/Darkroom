@@ -21,7 +21,7 @@ use crate::execution::cache::slot::{RuntimeSlot, ValueState};
 use crate::execution::digest::Digest;
 use crate::execution::digest::node_digest;
 use crate::execution::disk_store::{DiskStore, StorePolicy};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resource::RunResourceStamps;
@@ -160,7 +160,7 @@ impl RuntimeCache {
         }
     }
 
-    /// Read producer `e_node_id`'s output `port` for a consumer: a clone of the value, or — with
+    /// Read a producer output for a consumer: a clone of the value, or — with
     /// `take` — the value itself, moved out of the slot (leaving `Unbound`). The move is the
     /// executor's last-read fast path for a non-RAM producer: the RAM copy would be released
     /// right after anyway, and handing over the slot's copy leaves the consumer as the sole
@@ -169,35 +169,37 @@ impl RuntimeCache {
     pub(crate) fn read_output_port(
         &mut self,
         program: &ExecutionProgram,
-        e_node_id: ExecutionNodeId,
-        port: usize,
+        address: ExecutionOutputPort,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = program.e_nodes[&e_node_id].outputs.len as usize;
+        let arity = program.e_nodes[&address.e_node_id].outputs.len as usize;
         let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&e_node_id).unwrap().value
+            &mut self.slots.get_mut(&address.e_node_id).unwrap().value
         else {
             return None;
         };
         debug_assert_eq!(snapshot.values.len(), arity);
         Some(if take {
-            std::mem::take(&mut snapshot.values[port])
+            std::mem::take(&mut snapshot.values[address.port_idx])
         } else {
-            snapshot.values[port].clone()
+            snapshot.values[address.port_idx].clone()
         })
     }
 
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
     /// others are still owed to other consumers.
-    pub(crate) fn clear_output_port(&mut self, e_node_id: ExecutionNodeId, port: usize) {
+    pub(crate) fn clear_output_port(&mut self, address: ExecutionOutputPort) {
         let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&e_node_id).unwrap().value
+            &mut self.slots.get_mut(&address.e_node_id).unwrap().value
         else {
             panic!("an output can only be released from a resident slot");
         };
-        debug_assert!(port < snapshot.values.len(), "output port must be in range");
-        snapshot.values[port] = DynamicValue::Unbound;
+        debug_assert!(
+            address.port_idx < snapshot.values.len(),
+            "output port must be in range"
+        );
+        snapshot.values[address.port_idx] = DynamicValue::Unbound;
     }
 
     /// Stamp `e_node_id`'s structural content digest into its slot. The producer-first resolver

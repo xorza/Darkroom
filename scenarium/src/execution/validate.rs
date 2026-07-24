@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::identity::{ExecutionNodeId, FlattenMapValidationError};
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort, FlattenMapValidationError};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::library::Library;
@@ -38,16 +38,15 @@ pub(crate) enum CompiledGraphValidationError {
     OutputRange { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} event range is out of bounds")]
     EventRange { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} binds to missing node {target:?}")]
+    #[error("execution node {e_node_id:?} binds to missing output {target:?}")]
     MissingBindingTarget {
         e_node_id: ExecutionNodeId,
-        target: ExecutionNodeId,
+        target: ExecutionOutputPort,
     },
-    #[error("execution node {e_node_id:?} binds to out-of-range output {port_idx} on {target:?}")]
+    #[error("execution node {e_node_id:?} binds to out-of-range output {target:?}")]
     BindingOutputOutOfRange {
         e_node_id: ExecutionNodeId,
-        port_idx: usize,
-        target: ExecutionNodeId,
+        target: ExecutionOutputPort,
     },
 }
 
@@ -143,14 +142,13 @@ impl CompiledGraph {
                     let target = program.e_nodes.get(&e_addr.e_node_id).ok_or(
                         CompiledGraphValidationError::MissingBindingTarget {
                             e_node_id: *e_node_id,
-                            target: e_addr.e_node_id,
+                            target: *e_addr,
                         },
                     )?;
                     if e_addr.port_idx >= target.outputs.len as usize {
                         return Err(CompiledGraphValidationError::BindingOutputOutOfRange {
                             e_node_id: *e_node_id,
-                            port_idx: e_addr.port_idx,
-                            target: e_addr.e_node_id,
+                            target: *e_addr,
                         });
                     }
                 }

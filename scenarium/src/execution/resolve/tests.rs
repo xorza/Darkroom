@@ -278,7 +278,10 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
     let mut fix = Fix::default();
     let graph_pinned = fix.node(&[], 2);
     let node_pinned = fix.node(&[], 2);
-    let output_idx = fix.program.output_idx(graph_pinned, 1);
+    let output_idx = fix.program.output_idx(ExecutionOutputPort {
+        e_node_id: graph_pinned,
+        port_idx: 1,
+    });
     fix.program.outputs[output_idx.idx()].pinned = true;
 
     let run = fix

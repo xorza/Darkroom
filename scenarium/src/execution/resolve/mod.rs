@@ -19,7 +19,7 @@
 //! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::index::{NodeMap, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
@@ -75,7 +75,10 @@ impl ResolvedOutputs {
             return;
         }
         for port_idx in 0..outputs.len as usize {
-            let output_idx = program.output_idx(e_node_id, port_idx);
+            let output_idx = program.output_idx(ExecutionOutputPort {
+                e_node_id,
+                port_idx,
+            });
             if program.outputs[output_idx.idx()].pinned {
                 self.demand[output_idx] = OutputDemand::Produce;
             }
@@ -195,8 +198,7 @@ async fn resolve_run(
         for input in &program.inputs[program.e_nodes[&e_node_id].inputs] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
                 *run.disposition.get_mut(&addr.e_node_id).unwrap() = Disposition::Run;
-                run.outputs
-                    .add_reader(program.output_idx(addr.e_node_id, addr.port_idx));
+                run.outputs.add_reader(program.output_idx(*addr));
             }
         }
     }

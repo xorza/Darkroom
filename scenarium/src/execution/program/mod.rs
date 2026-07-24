@@ -123,17 +123,17 @@ pub(crate) struct ExecutionProgram {
 }
 
 impl ExecutionProgram {
-    pub(crate) fn output_idx(&self, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputIdx {
-        let outputs = self.e_nodes[&e_node_id].outputs;
+    pub(crate) fn output_idx(&self, address: ExecutionOutputPort) -> OutputIdx {
+        let outputs = self.e_nodes[&address.e_node_id].outputs;
         debug_assert!(
-            port_idx < outputs.len as usize,
+            address.port_idx < outputs.len as usize,
             "output port is out of range"
         );
         debug_assert!(
-            outputs.start.checked_add(port_idx as u32).is_some(),
+            outputs.start.checked_add(address.port_idx as u32).is_some(),
             "output pool index must fit in u32"
         );
-        OutputIdx(outputs.start.wrapping_add(port_idx as u32))
+        OutputIdx(outputs.start.wrapping_add(address.port_idx as u32))
     }
 
     /// Fill the output metadata pool by resolving each node's declared output types

@@ -116,21 +116,20 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
     }
 }
 
-fn demand_output(
-    program: &ExecutionProgram,
-    run: &mut TestRun,
-    e_node_id: ExecutionNodeId,
-    port_idx: usize,
-) {
-    let output_idx = program.output_idx(e_node_id, port_idx);
+fn demand_output(program: &ExecutionProgram, run: &mut TestRun, address: ExecutionOutputPort) {
+    let output_idx = program.output_idx(address);
     run.resolved.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
-fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionOutputPort {
+fn output(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionOutputPort {
+    ExecutionOutputPort {
         e_node_id,
-        port_idx: port,
-    })
+        port_idx,
+    }
+}
+
+fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+    ExecutionBinding::Bind(output(e_node_id, port))
 }
 
 /// A resolved run that runs every node in index order, each output marked needed. These tests
@@ -166,7 +165,10 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     let mut p = Prog::default();
     let e_node_id = p.node(&[], 1, FuncLambda::default());
     assert!(
-        catch_unwind(AssertUnwindSafe(|| p.program.output_idx(e_node_id, 1))).is_err(),
+        catch_unwind(AssertUnwindSafe(|| {
+            p.program.output_idx(output(e_node_id, 1))
+        }))
+        .is_err(),
         "a node-local output outside its compiled range must trip in debug"
     );
 
@@ -400,7 +402,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     assert!(stats.cancelled);
     assert_eq!(
-        executor.remaining_reads.counts[p.program.output_idx(source, 0)],
+        executor.remaining_reads.counts[p.program.output_idx(output(source, 0))],
         0,
         "the pending consumer's read was retired"
     );
@@ -558,7 +560,7 @@ async fn pinned_root_demands_output_without_retaining_it() {
     );
 
     let mut plan = run_with_readers(&p.program, vec![0]);
-    demand_output(&p.program, &mut plan, a, 0);
+    demand_output(&p.program, &mut plan, output(a, 0));
     plan.plan.pinned.insert(a);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
@@ -605,7 +607,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     p.set_output_pinned(a, 0, true);
 
     let mut plan = run_with_readers(&p.program, vec![0]);
-    demand_output(&p.program, &mut plan, a, 0);
+    demand_output(&p.program, &mut plan, output(a, 0));
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "the value was still pushed");
@@ -627,7 +629,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     p.set_output_pinned(a, 0, true);
 
     let mut run = run_with_readers(&p.program, vec![0]);
-    demand_output(&p.program, &mut run, a, 0);
+    demand_output(&p.program, &mut run, output(a, 0));
     *run.resolved.disposition.get_mut(&a).unwrap() = Disposition::Reuse;
 
     let mut cache = RuntimeCache::default();
@@ -684,8 +686,8 @@ async fn pinned_root_pushes_every_output() {
     p.set_cache(a, CacheMode::None);
 
     let mut plan = run_with_readers(&p.program, vec![0, 0]);
-    demand_output(&p.program, &mut plan, a, 0);
-    demand_output(&p.program, &mut plan, a, 1);
+    demand_output(&p.program, &mut plan, output(a, 0));
+    demand_output(&p.program, &mut plan, output(a, 1));
     plan.plan.pinned.insert(a);
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 

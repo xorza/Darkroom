@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::execution::cache::runtime::{RuntimeCache, test_support};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::digest::Digest;
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
 use crate::graph::CacheMode;
@@ -337,7 +337,10 @@ fn resident_hit_derives_coverage_from_values() {
     assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache.clear_output_port(e_node_id, 0);
+    cache.clear_output_port(ExecutionOutputPort {
+        e_node_id,
+        port_idx: 0,
+    });
     let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
@@ -395,13 +398,26 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            cache.read_output_port(&program, e_node_id, 0, false);
+            cache.read_output_port(
+                &program,
+                ExecutionOutputPort {
+                    e_node_id,
+                    port_idx: 0,
+                },
+                false,
+            );
         }))
         .is_err(),
         "resident values must match the compiled output arity"
     );
     assert!(
-        catch_unwind(AssertUnwindSafe(|| cache.clear_output_port(e_node_id, 1))).is_err(),
+        catch_unwind(AssertUnwindSafe(|| {
+            cache.clear_output_port(ExecutionOutputPort {
+                e_node_id,
+                port_idx: 1,
+            });
+        }))
+        .is_err(),
         "a released output port must be in range"
     );
 }
