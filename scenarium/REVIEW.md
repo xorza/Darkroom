@@ -93,6 +93,11 @@ flattened execution identity when a new program is installed.
   The advisory remnants fell with it: `Func::required_contexts` (writers, no
   readers) and the always-empty `ContextType::description` were deleted, and
   lens declares `VISION_CTX_TYPE` as a plain `const`.
+- *"Live" progress flushed only after a ready-heavy run completed* — the run
+  loop now yields once per scheduled node (`task::yield_now` at the loop
+  top, `src/execution/executor/mod.rs`), so the `biased` select drains per
+  node and a node's `Started`/`Finished` reach the host before the next
+  lambda runs.
 
 ## High: Worker lifecycle
 
@@ -156,16 +161,13 @@ flattened execution identity when a new program is installed.
   accumulate into startup latency, and all accepted snapshots can occupy RAM
   together before the first lambda runs.
 
-- [ ] **Live reporting adds an unbounded same-task relay followed by
+- [ ] **Live reporting relays through an unbounded same-task channel into
   copy-on-write status snapshots.** Each run creates an unbounded channel
   polled in a `biased` select beside the engine future
   (`src/worker/task.rs:352`, `:356-364`) while the executor synchronously
   queues progress and pinned payloads
   (`src/execution/executor/mod.rs:248-255`, `:330-338`,
-  `src/execution/executor/value_flow.rs:66-87`). A ready-heavy run completes
-  before the recv branch is ever polled, so the whole event stream buffers
-  and flushes only in the post-loop drain (`src/worker/task.rs:366-368`) —
-  "live" updates arrive after completion. If an earlier published report
+  `src/execution/executor/value_flow.rs`). If an earlier published report
   remains queued, `Arc::make_mut` deep-clones the status vectors before the
   next update (`src/worker/status.rs:79`, `:188-192`).
 
