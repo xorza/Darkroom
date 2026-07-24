@@ -81,38 +81,50 @@ pub(crate) fn show(
             .then(|| value_variants.get(idx).map(|o| o.value.clone()))
             .flatten();
     }
-    // An untyped (`Any`) port declares no concrete kind, so the literal's kind
-    // is inferred from the text (see `parse_any`). Keyed on the port type, not
-    // the stored value, so the field keeps reinterpreting across kinds — typing
-    // "42" then "hello" flips `Int` → `String` — instead of locking to the kind
-    // first entered.
+    // The widget follows the *declared* port type, not the stored literal's
+    // kind: a coerced or library-drifted literal still gets the declared
+    // type's editor (displaying its coerced reading), and the next commit
+    // stores the declared kind — re-canonicalizing the document. A literal
+    // outside the type's coercion class falls back to a read-only label.
     let editor = &theme.drag_value.editor;
-    if matches!(data_type, DataType::Any) {
-        return any_smart_edit(ui, editor, id, value, width);
-    }
-    match value {
-        StaticValue::Int(_) | StaticValue::Float(_) => numeric_edit(ui, theme, id, value, width),
-        StaticValue::String(current) => {
-            let edit = buffered_text_edit(ui, editor, id, current, |s| s.clone(), width);
-            (edit.committed && edit.text != *current).then_some(StaticValue::String(edit.text))
-        }
-        StaticValue::Bool(current) => {
-            let mut draft = *current;
-            Checkbox::new(&mut draft).id(id).show(ui);
-            (draft != *current).then_some(StaticValue::Bool(draft))
-        }
-        StaticValue::FsPath(_) | StaticValue::FsPaths(_) => {
-            let DataType::FsPath(config) = data_type else {
-                unreachable!("filesystem-path value requires an FsPath data type");
+    match data_type {
+        // An untyped (`Any`) port declares no concrete kind, so the literal's
+        // kind is inferred from the text (see `parse_any`). Keyed on the port
+        // type, not the stored value, so the field keeps reinterpreting across
+        // kinds — typing "42" then "hello" flips `Int` → `String` — instead of
+        // locking to the kind first entered.
+        DataType::Any => any_smart_edit(ui, editor, id, value, width),
+        DataType::Int => match value.as_i64() {
+            Some(current) => int_edit(ui, theme, id, current, width),
+            None => read_only_label(ui, editor, id, value, width),
+        },
+        DataType::Float => match value.as_f64() {
+            Some(current) => float_edit(ui, theme, id, current, width),
+            None => read_only_label(ui, editor, id, value, width),
+        },
+        DataType::Bool => {
+            let Some(current) = value.as_bool() else {
+                return read_only_label(ui, editor, id, value, width);
             };
-            debug_assert_eq!(
-                matches!(value, StaticValue::FsPaths(_)),
-                config.mode == FsPathMode::ExistingFiles
-            );
+            let mut draft = current;
+            Checkbox::new(&mut draft).id(id).show(ui);
+            (draft != current).then_some(StaticValue::Bool(draft))
+        }
+        DataType::String => {
+            let Some(current) = value.as_string() else {
+                return read_only_label(ui, editor, id, value, width);
+            };
+            let edit = buffered_text_edit(ui, editor, id, &current, |s| (*s).to_owned(), width);
+            (edit.committed && edit.text != current).then_some(StaticValue::String(edit.text))
+        }
+        DataType::FsPath(config) => {
+            // Preview whichever path literal is stored — a mode/kind mismatch
+            // left by library drift still previews, and the pick dialog
+            // (opened per the declared config) replaces it wholesale.
             let label = match value {
                 StaticValue::FsPath(path) => single_path_preview(path, config.mode),
                 StaticValue::FsPaths(paths) => multi_path_preview(paths),
-                _ => unreachable!(),
+                _ => return read_only_label(ui, editor, id, value, width),
             };
             // The blocking dialog runs after authoring, so this button only records its click.
             Button::new()
@@ -125,19 +137,16 @@ pub(crate) fn show(
                 .show(ui);
             None
         }
-        StaticValue::Enum(current) => {
-            // A dropdown over the port's registered variants. The variant
-            // list lives on the library's `Enum` type entry, not on the value
-            // or the id-only `DataType` — without it (a non-`Enum` port, or an
-            // unregistered type) we can't populate the menu, so fall back to a
-            // read-only label (shouldn't happen: an `Enum` value always rides a
-            // registered `Enum`-typed port).
-            let DataType::Enum(type_id) = data_type else {
-                return read_only_label(ui, editor, id, value, width);
-            };
+        DataType::Enum(type_id) => {
+            // A dropdown over the port's registered variants. The variant list
+            // lives on the library's `Enum` type entry, not on the value or the
+            // id-only `DataType` — without it (an unregistered type) we can't
+            // populate the menu, so fall back to a read-only label. A drifted
+            // non-`Enum` literal seeds the first variant; any pick repairs it.
             let Some(variants) = library.enum_variants(type_id) else {
                 return read_only_label(ui, editor, id, value, width);
             };
+            let current = value.as_enum().unwrap_or_default();
             let options: Vec<&str> = variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
             let mut idx = before;
@@ -153,7 +162,8 @@ pub(crate) fn show(
                 None
             }
         }
-        StaticValue::Null => read_only_label(ui, editor, id, value, width),
+        // No literal form (pick-or-wire ports carry variants, handled above).
+        DataType::Custom(_) => read_only_label(ui, editor, id, value, width),
     }
 }
 
@@ -309,50 +319,52 @@ fn format_float(v: &f64) -> String {
     format!("{v:?}")
 }
 
-/// Editor for a numeric const (`Int`/`Float`): an editable `DragValue` —
-/// drag horizontally to scrub, click to type an exact value. Both modes,
-/// the focus swap, and Enter/blur commit live inside the widget. The draft
-/// re-seeds from the document value every frame and is emitted only on the
-/// widget's `committed` frame, which carries the gesture's final value —
-/// one scrub or typed entry lands as one change. Non-numeric values return
-/// `None`.
-fn numeric_edit(
+/// Editor for an `Int` const: an editable `DragValue` — drag horizontally
+/// to scrub, click to type an exact value. Both modes, the focus swap, and
+/// Enter/blur commit live inside the widget. The draft re-seeds from the
+/// document value every frame and is emitted only on the widget's
+/// `committed` frame, which carries the gesture's final value — one scrub
+/// or typed entry lands as one change.
+fn int_edit(
     ui: &mut Ui,
     theme: &StaticValueEditorTheme,
     id: WidgetId,
-    value: &StaticValue,
+    current: i64,
     width: f32,
 ) -> Option<StaticValue> {
-    match value {
-        StaticValue::Int(current) => {
-            let mut draft = *current;
-            let committed = DragValue::new(&mut draft)
-                .editable(true)
-                .speed(int_speed(*current))
-                .style(&theme.drag_value)
-                .size((Sizing::fixed(width), Sizing::FILL))
-                .id(id)
-                .show(ui)
-                .committed;
-            (committed && draft != *current).then_some(StaticValue::Int(draft))
-        }
-        StaticValue::Float(current) => {
-            let mut draft = *current;
-            let committed = DragValue::new(&mut draft)
-                .editable(true)
-                .speed(float_speed(*current))
-                .decimals(3)
-                .style(&theme.drag_value)
-                .size((Sizing::fixed(width), Sizing::FILL))
-                .id(id)
-                .show(ui)
-                .committed;
-            // Bit-exact: matches StaticValue's PartialEq, so `1.0` → `1`
-            // (same value, different textual form) doesn't emit a change.
-            (committed && draft.to_bits() != current.to_bits()).then_some(StaticValue::Float(draft))
-        }
-        _ => None,
-    }
+    let mut draft = current;
+    let committed = DragValue::new(&mut draft)
+        .editable(true)
+        .speed(int_speed(current))
+        .style(&theme.drag_value)
+        .size((Sizing::fixed(width), Sizing::FILL))
+        .id(id)
+        .show(ui)
+        .committed;
+    (committed && draft != current).then_some(StaticValue::Int(draft))
+}
+
+/// `Float` sibling of [`int_edit`].
+fn float_edit(
+    ui: &mut Ui,
+    theme: &StaticValueEditorTheme,
+    id: WidgetId,
+    current: f64,
+    width: f32,
+) -> Option<StaticValue> {
+    let mut draft = current;
+    let committed = DragValue::new(&mut draft)
+        .editable(true)
+        .speed(float_speed(current))
+        .decimals(3)
+        .style(&theme.drag_value)
+        .size((Sizing::fixed(width), Sizing::FILL))
+        .id(id)
+        .show(ui)
+        .committed;
+    // Bit-exact: matches StaticValue's PartialEq, so `1.0` → `1`
+    // (same value, different textual form) doesn't emit a change.
+    (committed && draft.to_bits() != current.to_bits()).then_some(StaticValue::Float(draft))
 }
 
 /// Drag speed for a float: ≈1% of the value's magnitude per logical pixel
