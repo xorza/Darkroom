@@ -16,7 +16,7 @@ mod task;
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
-    tx: UnboundedSender<Vec<WorkerMessage>>,
+    tx: UnboundedSender<WorkerMessage>,
     cancel: CancelToken,
 }
 
@@ -25,7 +25,7 @@ impl Worker {
     where
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
-        let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
+        let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let cancel = CancelToken::new();
         let task = WorkerTask::new(rx, callback, cancel.clone());
         let thread_handle = tokio::spawn(task.run());
@@ -42,22 +42,21 @@ impl Worker {
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
-        self.send_many([msg])
+        self.tx.send(msg).map_err(|_| WorkerExited)
     }
 
     pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(
         &self,
         msgs: T,
     ) -> std::result::Result<(), WorkerExited> {
-        let msgs = msgs.into_iter().collect::<Vec<_>>();
-        if msgs.is_empty() {
-            return Ok(());
+        for msg in msgs {
+            self.send(msg)?;
         }
-        self.tx.send(msgs).map_err(|_| WorkerExited)
+        Ok(())
     }
 
     pub fn exit(&mut self) {
-        self.tx.send(vec![WorkerMessage::Exit]).ok();
+        self.tx.send(WorkerMessage::Exit).ok();
         self.request_cancel();
 
         if let Some(thread_handle) = self.thread_handle.take() {
