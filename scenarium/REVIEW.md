@@ -4,10 +4,9 @@
 
 Scenarium has a clear compile → plan → resolve → execute pipeline, but several
 invariants are split across parallel representations and lifecycle layers. The
-highest-impact problems are in the event/worker lifecycle: the FPS source can
-turn into an unthrottled execution loop, `send_many` does not establish the
-batch boundary its callers rely on, and structured shutdown races immediate
-task abortion.
+highest-impact worker problems are that `send_many` does not establish the
+batch boundary its callers rely on and structured shutdown races immediate task
+abortion.
 
 The authoring model has similar duplication between declarations, boundary
 nodes, normalization, validation, and detached undo state. At runtime,
@@ -30,8 +29,6 @@ and reconciles them by flattened execution identity when a new program is
 installed.
 
 ## High: Event and worker lifecycle
-
-- [ ] **The FPS event throttle depends on its source node being re-executed as a data dependency.** The event lambda clones `FpsEventState` without advancing `last_execution`; only the separate function lambda updates the timing state (`src/elements/worker_events_library.rs:47-68`, `src/elements/worker_events_library.rs:83-100`). Fired events schedule subscribers rather than their source, and the event task immediately invokes its lambda again after each send (`src/execution/plan/mod.rs:266-283`, `src/worker/event_loop.rs:61-68`). An event-only subscriber therefore sleeps once and then drives a continuous event/run loop. Negative and NaN frequencies also reach `Duration::from_secs_f64` and panic the event task (`src/elements/worker_events_library.rs:55-63`).
 
 - [ ] **`Worker::send_many` does not create the worker commit boundary its API consumers rely on.** It sends messages one at a time, while the worker reduces only whichever messages happen to be ready when `recv_many` wakes (`src/worker/mod.rs:48-55`, `src/worker/task.rs:134-163`, `src/worker/batch.rs:41-78`). The worker can process the first message before the remaining sends arrive, so logically coupled operations can be split across intents; Darkroom explicitly treats update, eviction, and event-loop stop as one commit (`../darkroom/src/core/worker.rs:68-78`). That split can rebuild or run an event loop between the update and the stop/eviction that was meant to accompany it.
 
