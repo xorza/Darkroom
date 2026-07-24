@@ -321,8 +321,8 @@ impl<'a> Run<'a> {
                 // Drift tolerance: a subscription to an event the func no
                 // longer declares wires nothing.
                 if graph
-                    .event_count(node, self.library)
-                    .is_some_and(|count| event_idx >= count)
+                    .node_ports(node, self.library)
+                    .is_some_and(|ports| event_idx >= ports.events.len())
                 {
                     return None;
                 }
@@ -400,8 +400,8 @@ impl<'a> Run<'a> {
                 // addressing a vanished slot (the planner reports the
                 // consumer's missing input).
                 if graph
-                    .output_count(node, self.library)
-                    .is_some_and(|count| port_idx >= count)
+                    .node_ports(node, self.library)
+                    .is_some_and(|ports| port_idx >= ports.outputs.len())
                 {
                     return ExecutionBinding::None;
                 }

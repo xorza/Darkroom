@@ -312,56 +312,33 @@ impl Scene {
             // A node's interface comes from its func, its referenced
             // definition, or — for a boundary node — the enclosing
             // definition's own interface, which only a `GraphDef` carries.
+            // Scenarium resolves the first three into one `NodePorts`; only
+            // the boundary pair, whose ports the editor synthesizes, is
+            // spelled out here.
             let interface = match &node.kind {
-                NodeKind::Func(func_id) => library.by_id(*func_id).map(|f| NodeInterface {
-                    kind_label: ui.intern(&f.name),
-                    description: ui.intern(f.description.as_deref().unwrap_or_default()),
-                    inputs: Cow::Borrowed(&f.inputs),
-                    outputs: Cow::Borrowed(&f.outputs),
-                    events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                    graph: None,
-                    sink: f.sink,
-                    uncacheable: f.uncacheable,
-                    impure: f.behavior == FuncBehavior::Impure,
-                }),
-                NodeKind::Graph(r) => graph
-                    .resolve_graph(*r, library)
-                    .map(|def| &def.definition)
-                    .map(|definition| NodeInterface {
-                        kind_label: ui.intern(&definition.name),
-                        description: ui.intern(""),
-                        inputs: Cow::Borrowed(&definition.inputs),
-                        outputs: Cow::Borrowed(&definition.outputs),
-                        events: definition
-                            .events
-                            .iter()
-                            .map(|event| ui.intern(&event.name))
-                            .collect(),
-                        graph: Some(*r),
-                        // A composite's sink-ness is derived at flatten
-                        // time, not stored separately; treat "no exposed
-                        // outputs" as the visible sink signal.
-                        sink: definition.outputs.is_empty(),
-                        uncacheable: false,
+                NodeKind::Func(_) | NodeKind::Graph(_) | NodeKind::Special(_) => {
+                    graph.node_ports(node, library).map(|ports| NodeInterface {
+                        kind_label: ui.intern(ports.name),
+                        description: ui.intern(ports.description.unwrap_or_default()),
+                        inputs: Cow::Borrowed(ports.inputs),
+                        outputs: Cow::Borrowed(ports.outputs),
+                        events: ports.events.names().map(|name| ui.intern(name)).collect(),
+                        graph: match node.kind {
+                            NodeKind::Graph(link) => Some(link),
+                            _ => None,
+                        },
+                        // A composite's sink-ness is derived at flatten time,
+                        // not stored separately; treat "no exposed outputs" as
+                        // the visible sink signal.
+                        sink: ports
+                            .func
+                            .map_or_else(|| ports.outputs.is_empty(), |func| func.sink),
+                        uncacheable: ports.func.is_some_and(|func| func.uncacheable),
                         // Aggregate purity of a composite isn't known here, so the
                         // cache chips stay available for it (unlike a func).
-                        impure: false,
-                    }),
-                // A built-in special node: its interface is the hardcoded spec.
-                // Any wildcard output it declares is resolved below, with every
-                // other node's, in one place.
-                NodeKind::Special(s) => {
-                    let f = s.func();
-                    Some(NodeInterface {
-                        kind_label: ui.intern(&f.name),
-                        description: ui.intern(f.description.as_deref().unwrap_or_default()),
-                        inputs: Cow::Borrowed(&f.inputs),
-                        outputs: Cow::Borrowed(&f.outputs),
-                        events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                        graph: None,
-                        sink: f.sink,
-                        uncacheable: f.uncacheable,
-                        impure: f.behavior == FuncBehavior::Impure,
+                        impure: ports
+                            .func
+                            .is_some_and(|func| func.behavior == FuncBehavior::Impure),
                     })
                 }
                 // Inbound boundary: no inputs; one output per graph input,

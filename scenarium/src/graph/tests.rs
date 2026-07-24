@@ -1,11 +1,13 @@
 use crate::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
+use crate::graph::query::NodePorts;
 use crate::graph::{
     Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
     SubgraphDefinition,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+use crate::node::event::EventLambda;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, StaticValue, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
@@ -1142,24 +1144,29 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 
 #[test]
 fn add_graph_node_seeds_default_const_binding() {
-    let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
+    // Defaults are seeded at their *declared* port index, so gaps in the
+    // interface don't shift the bindings that follow them.
     let graph_id = GraphId::unique();
-    let def = GraphDef::new("Def")
-        .category("Test")
-        .inputs([input.clone(), {
-            input.default_value = None;
-            input
-        }]);
+    let def = GraphDef::new("Def").category("Test").inputs([
+        FuncInput::optional("A", DataType::Int),
+        FuncInput::optional("B", DataType::Int).default(3i64),
+        FuncInput::optional("C", DataType::Int),
+        FuncInput::optional("D", DataType::Int).default(5i64),
+    ]);
 
     let mut graph = Graph::default();
     let id = graph.add_graph_node(&def, GraphLink::Local(graph_id));
 
-    // Port 0 had a default; port 1 did not.
     assert_eq!(
-        graph.bindings.get(&InputPort::new(id, 0)),
+        graph.bindings.get(&InputPort::new(id, 1)),
         Some(&Binding::Const(3i64.into()))
     );
-    assert!(!graph.bindings.contains_key(&InputPort::new(id, 1)));
+    assert_eq!(
+        graph.bindings.get(&InputPort::new(id, 3)),
+        Some(&Binding::Const(5i64.into()))
+    );
+    assert!(!graph.bindings.contains_key(&InputPort::new(id, 0)));
+    assert!(!graph.bindings.contains_key(&InputPort::new(id, 2)));
 }
 
 #[test]
@@ -1241,11 +1248,11 @@ fn node_search_scope_gates_graph_interiors() {
 }
 
 #[test]
-fn port_arity_queries_answer_only_what_a_bare_body_knows() {
-    // `Some(n)` is an authoritative arity a caller may range-check against;
-    // `None` means "unknowable here" and must *not* read as zero — the
-    // drift guards do `is_some_and(|count| idx >= count)`, so the two
-    // decide opposite ways.
+fn node_ports_resolve_every_kind_to_its_declaration() {
+    // `Some(ports)` is an authoritative arity a caller may range-check
+    // against; `None` means "unknowable here" and must *not* read as an empty
+    // port list — the drift guards do `is_some_and(|p| idx >= p.len())`, so
+    // the two decide opposite ways.
     let library = test_func_lib(TestFuncHooks::default());
     let mut def = GraphDef::new("S")
         .inputs([
@@ -1258,29 +1265,70 @@ fn port_arity_queries_answer_only_what_a_bare_body_knows() {
     let body = &def.body;
     let node = |id: NodeId| body.find(id, NodeSearch::TopLevel).unwrap();
 
-    // The inbound boundary's *outputs* mirror the interface's inputs, which
-    // the body alone doesn't carry — the one genuinely unknowable arity.
-    assert_eq!(body.output_count(node(input), &library), None);
-    // Everything else is structural, so the body answers it exactly.
-    assert_eq!(body.event_count(node(input), &library), Some(1));
-    assert_eq!(body.output_count(node(output), &library), Some(0));
-    assert_eq!(body.event_count(node(output), &library), Some(0));
+    // Both boundary nodes mirror the enclosing interface, which a bare body
+    // doesn't carry — unknowable from here.
+    assert!(body.node_ports(node(input), &library).is_none());
+    assert!(body.node_ports(node(output), &library).is_none());
 
-    // A graph *instance* reads its target's interface, so both arities are
-    // known even though the instance's own body isn't involved.
+    // A graph *instance* reads its target's interface, even though the
+    // instance's own body isn't involved.
     let mut root = Graph::default();
     let def_id = GraphId::unique();
-    let instance = root.add_graph_node(&def, GraphLink::Local(def_id));
+    let instance_id = root.add_graph_node(&def, GraphLink::Local(def_id));
     root.insert_graph(def_id, def);
-    let instance = root.find(instance, NodeSearch::TopLevel).unwrap();
-    assert_eq!(root.output_count(instance, &library), Some(1));
-    assert_eq!(root.event_count(instance, &library), Some(0));
+    let instance = root.find(instance_id, NodeSearch::TopLevel).unwrap();
+    let ports = root.node_ports(instance, &library).unwrap();
+    assert_eq!(ports.name, "S");
+    assert_eq!(ports.inputs.len(), 2);
+    assert_eq!(ports.outputs.len(), 1);
+    assert_eq!(ports.events.len(), 0);
+    assert!(
+        ports.func.is_none(),
+        "a composite has no func declaration to read flags from"
+    );
 
-    // An unresolvable link is unknown, not zero — library drift must not
+    // A func node resolves through the library to its own declaration.
+    let sum = library.by_name("sum").unwrap();
+    let sum_id = root.add_func_node(sum);
+    let sum_node = root.find(sum_id, NodeSearch::TopLevel).unwrap();
+    let ports = root.node_ports(sum_node, &library).unwrap();
+    assert_eq!(ports.name, "sum");
+    assert_eq!(ports.inputs.len(), sum.inputs.len());
+    assert_eq!(ports.func.map(|func| func.id), Some(sum.id));
+
+    // An unresolvable link is unknown, not empty — library drift must not
     // silently report every port out of range.
     let dangling = Node::new(NodeKind::Graph(GraphLink::Local(GraphId::unique())));
-    assert_eq!(root.output_count(&dangling, &library), None);
-    assert_eq!(root.event_count(&dangling, &library), None);
+    assert!(root.node_ports(&dangling, &library).is_none());
+    let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
+    assert!(root.node_ports(&missing_func, &library).is_none());
+}
+
+#[test]
+fn node_events_expose_names_and_arity_for_both_declarations() {
+    // `FuncEvent` and `GraphEvent` are different types; `NodeEvents` is the
+    // common ground, so both spell arity and names the same way.
+    let emitter = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "ticker")
+            .event("tick", EventLambda::default())
+            .event("tock", EventLambda::default()),
+    );
+    let ports = NodePorts::from(&emitter);
+    assert_eq!(ports.events.len(), 2);
+    assert_eq!(ports.events.names().collect::<Vec<_>>(), ["tick", "tock"]);
+
+    let mut def = GraphDef::new("D");
+    let interior = def.body.add(Node::new(NodeKind::Func(emitter.id)));
+    let def = def.event(GraphEvent {
+        name: "exposed".into(),
+        emitter: interior,
+        emitter_event_idx: 0,
+    });
+    let ports = def.ports();
+    assert_eq!(ports.events.len(), 1);
+    assert_eq!(ports.events.names().collect::<Vec<_>>(), ["exposed"]);
+
+    assert!(GraphDef::new("empty").ports().events.is_empty());
 }
 
 #[test]
