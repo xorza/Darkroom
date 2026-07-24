@@ -24,12 +24,13 @@ pub use execution::codec::{CodecError, CustomValueCodec};
 pub use execution::compile::test_support::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
 pub use execution::disk_store::DiskStore;
+pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
 };
 pub use execution::outcome::{LogEntry, LogLevel};
 pub use execution::report::{PinnedOutput, PinnedOutputs};
-pub use execution::{Error, Result, RunError, RunSeeds};
+pub use execution::seeds::RunSeeds;
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{

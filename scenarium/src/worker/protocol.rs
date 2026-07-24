@@ -4,8 +4,9 @@ use tokio::sync::oneshot;
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
+use crate::execution::error::Error;
 use crate::execution::report::PinnedOutputs;
-use crate::execution::{Error, RunSeeds};
+use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 use crate::worker::status::WorkerStatus;
 

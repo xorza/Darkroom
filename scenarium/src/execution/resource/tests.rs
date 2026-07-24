@@ -7,16 +7,17 @@ use std::time::Duration;
 use common::{CancelToken, Span};
 use tokio::sync::Notify;
 
-use crate::execution::cache::test_support::hydrate;
-use crate::execution::cache::{OutputSnapshot, RuntimeCache};
+use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::runtime::test_support::hydrate;
+use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::digest::{Digest, DigestHasher};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
+use crate::execution::program::index::{NodeMap, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionProgram, InputStamper,
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
-use crate::execution::{NodeMap, NodeSet};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{
     CustomValue, DataType, DynamicValue, ResourceStamp, ResourceStamper, StaticValue, TypeId,

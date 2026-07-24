@@ -18,7 +18,7 @@ use crate::library::Library;
 /// against an evolved library (a dropped func, a shrunk port list, a
 /// type-mismatched binding), so this is a recoverable error the caller
 /// surfaces, not a logic bug. The compile-phase counterpart of the run-phase
-/// [`Error`](crate::execution::Error) — the two can't be confused at the type
+/// [`Error`](crate::execution::error::Error) — the two can't be confused at the type
 /// level, and only `compile` produces it.
 #[derive(Debug, Error)]
 #[error("invalid graph: {message}")]
@@ -116,7 +116,7 @@ impl Compiler {
     /// Compile `graph` against `library`: validate, flatten composites into a
     /// flat func-only program, and resolve the output-type pool. Pure CPU on
     /// the caller's thread; the result is
-    /// [installed](crate::execution::ExecutionEngine::install) into an engine
+    /// [installed](crate::execution::engine::ExecutionEngine::install) into an engine
     /// (typically across the worker channel).
     pub fn compile(
         &mut self,
@@ -213,7 +213,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::cache::RuntimeCache;
+    use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::identity::test_support::FlattenMapBuilder;
     use crate::execution::program::ExecutionNode;
     use crate::graph::NodeSearch;

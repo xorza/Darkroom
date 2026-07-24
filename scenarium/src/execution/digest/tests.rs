@@ -1,7 +1,7 @@
 use super::*;
 use crate::StaticValue;
-use crate::execution::cache::OutputSnapshot;
-use crate::execution::cache::test_support::hydrate;
+use crate::execution::cache::runtime::test_support::hydrate;
+use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::{ExecutionInput, ExecutionNode};
 use crate::execution::resource::RunResourceStamps;

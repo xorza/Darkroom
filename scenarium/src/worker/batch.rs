@@ -3,11 +3,11 @@ use std::sync::Arc;
 use indexmap::IndexSet;
 use tokio::sync::oneshot;
 
-use crate::execution::RunSeeds;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
+use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 use crate::worker::protocol::WorkerMessage;
 

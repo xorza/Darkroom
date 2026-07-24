@@ -130,7 +130,7 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Optio
 mod cache_persistence {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::cache::ValueState;
+    use crate::execution::cache::slot::ValueState;
     use crate::execution::disk_store::DiskStore;
     use crate::execution::report::{PinnedOutputs, RunEvent};
     use crate::node::definition::{FuncId, FuncOutput};
@@ -2913,7 +2913,7 @@ mod const_bindings {
 
 mod behavior {
     use super::*;
-    use crate::execution::cache::ValueState;
+    use crate::execution::cache::slot::ValueState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pure_node_skips_on_rerun() -> TestResult {

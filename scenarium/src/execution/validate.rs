@@ -7,7 +7,7 @@ use common::is_debug;
 use hashbrown::HashSet;
 use thiserror::Error;
 
-use crate::execution::cache::RuntimeCache;
+use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::{ExecutionNodeId, FlattenMapValidationError};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};

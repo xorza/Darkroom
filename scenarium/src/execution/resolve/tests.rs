@@ -1,10 +1,12 @@
 use super::*;
 use crate::DataType;
-use crate::execution::NodeSet;
-use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, OutputIdx};
+use crate::execution::program::index::NodeSet;
+use crate::execution::program::index::OutputIdx;
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::FuncLambda;
 use crate::{DynamicValue, StaticValue, async_lambda};

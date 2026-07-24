@@ -1,9 +1,11 @@
 use crate::DataType;
 use crate::execution::compile::CompiledGraph;
+use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
+use crate::execution::program::index::NodeSet;
 use crate::execution::program::{ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode};
-use crate::execution::{Error, NodeSet, RunSeeds};
+use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;

@@ -9,9 +9,11 @@
 //! unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
+use crate::execution::error::{Error, Result};
 use crate::execution::identity::ExecutionNodeId;
+use crate::execution::program::index::{NodeMap, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
-use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds};
+use crate::execution::seeds::RunSeeds;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.

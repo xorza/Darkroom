@@ -3,12 +3,15 @@
 //! state; it is deliberately not a persistence format. Mutable state is split
 //! between the per-run plan/resolver/executor and the cross-run runtime cache.
 
+pub(crate) mod index;
+
 use std::sync::Arc;
 
 use common::Span;
 use hashbrown::HashMap;
 
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::program::index::OutputIdx;
 use crate::graph::CacheMode;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
@@ -17,27 +20,6 @@ use crate::node::lambda::FuncLambda;
 use crate::node::output_type::{OutputTypeResolver, OutputTypeSource};
 use crate::node::special::SpecialNode;
 use crate::{DataType, ResourceStamper, StaticValue};
-
-/// A position in the program's flat output pool. It cannot be confused with a node
-/// id or a node-local port number.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct OutputIdx(pub(crate) u32);
-
-impl OutputIdx {
-    pub(crate) fn idx(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl From<usize> for OutputIdx {
-    fn from(i: usize) -> Self {
-        debug_assert!(
-            u32::try_from(i).is_ok(),
-            "output pool index must fit in u32"
-        );
-        OutputIdx(i as u32)
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {

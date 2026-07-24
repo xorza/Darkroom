@@ -11,7 +11,7 @@ use std::sync::Arc;
 use common::CancelToken;
 use hashbrown::{HashMap, HashSet};
 
-use crate::execution::cache::RuntimeCache;
+use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::DigestHasher;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::ExecutionPlan;
@@ -354,7 +354,7 @@ impl RunResourceStamps {
 pub(crate) mod test_support {
     use common::CancelToken;
 
-    use crate::execution::cache::RuntimeCache;
+    use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
 

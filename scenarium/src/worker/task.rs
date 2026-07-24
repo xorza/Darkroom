@@ -4,10 +4,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use common::CancelToken;
 
+use crate::execution::engine::ExecutionEngine;
+use crate::execution::error::{Error, Result};
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::report::RunEvent;
-use crate::execution::{Error, ExecutionEngine, Result, RunSeeds};
+use crate::execution::seeds::RunSeeds;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::event_loop::{
     ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, EventLoopWake, LambdaPanic,
@@ -379,9 +381,9 @@ mod tests {
 
     use common::CancelToken;
 
-    use crate::execution::RunSeeds;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::report::{RunEvent, RunPhase, RunProgress};
+    use crate::execution::seeds::RunSeeds;
     use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
     use crate::worker::protocol::{WorkerMessage, WorkerReport};
     use crate::worker::status::{

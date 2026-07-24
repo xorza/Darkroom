@@ -18,12 +18,12 @@
 //! and the run loop prepares the identity and re-stamps at reach time once its producers
 //! have settled, possibly improving `Run` to a reuse.
 
-use crate::execution::cache::RuntimeCache;
+use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
+use crate::execution::program::index::{NodeMap, OutputColumn, OutputIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::{NodeMap, OutputColumn};
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the

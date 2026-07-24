@@ -4,18 +4,20 @@ use tokio::sync::mpsc;
 
 use super::*;
 use crate::async_lambda;
-use crate::execution::NodeSet;
-use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::{ExecutionInput, ExecutionNode, OutputIdx};
+use crate::execution::program::index::{NodeSet, OutputColumn, OutputIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::report::PinnedOutputs;
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::test_support;
 use crate::node::lambda::{FuncLambda, OutputDemand};
-use crate::{DataType, StaticValue};
+use crate::{DataType, DynamicValue, StaticValue};
 use common::Span;
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::RamUsage;
-use crate::execution::RunError;
+use crate::execution::error::RunError;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::{ExecutionOutcome, LogEntry};
 use crate::execution::report::{RunPhase, RunProgress};

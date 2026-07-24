@@ -38,7 +38,7 @@
 
 use blake3::Hasher;
 
-use crate::execution::cache::RuntimeCache;
+use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, InputStamper};
 use crate::execution::resource::RunResourceStamps;

@@ -12,7 +12,7 @@ use common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;
-use crate::execution::cache::OutputSnapshot;
+use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::codec;
 use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;

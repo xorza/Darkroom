@@ -1,5 +1,5 @@
 use crate::RamUsage;
-use crate::execution::RunError;
+use crate::execution::error::RunError;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
