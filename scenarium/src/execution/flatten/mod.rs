@@ -14,6 +14,7 @@
 
 use hashbrown::{HashMap, HashSet};
 
+use crate::DataType;
 use crate::execution::identity::{
     ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
 };
@@ -26,15 +27,15 @@ use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, Outp
 use crate::library::Library;
 use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
-use crate::{DataType, StaticValue};
 
 /// Hard cap on nesting depth — a release backstop after `validate_for_execution` has
 /// rejected recursive graphs.
 const MAX_DEPTH: usize = 256;
 
 /// Reusable flattening scratch owned by the
-/// [`Compiler`](crate::execution::compile::Compiler). The current graph at each level is
-/// re-derived from `path`, keeping the struct free of borrowed references.
+/// [`Compiler`](crate::execution::compile::Compiler). The per-build resolved-graph
+/// stack lives on `Run` (it borrows the build's graph), keeping this struct
+/// free of borrowed references.
 #[derive(Debug, Default)]
 pub(crate) struct Flattener {
     path: Vec<NodeId>,
@@ -83,15 +84,14 @@ impl Flattener {
         pools.events.clear();
         {
             let mut run = Run {
-                root,
                 library,
                 path: &mut self.path,
+                levels: vec![root],
                 scope_stack: &mut self.scope_stack,
                 flatten,
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 e_nodes,
-                cur_id: ExecutionNodeId::default(),
                 inputs: pools.inputs,
                 outputs: pools.outputs,
                 events: pools.events,
@@ -114,31 +114,6 @@ impl Flattener {
     }
 }
 
-/// The graph at the level addressed by `path` — descend from `root`, resolving
-/// each composite instance through its shared or local graph.
-fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a Graph {
-    let mut graph = root;
-    for id in path {
-        let r = graph
-            .find(id, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
-            .as_graph()
-            .expect("descent path id must be a composite");
-        graph = graph
-            .resolve_graph(r, library)
-            .expect("graph node references a missing graph");
-    }
-    graph
-}
-
-/// Where an output reference resolves once boundaries are followed through.
-enum Source {
-    Producer(ExecutionOutputPort),
-    Const(StaticValue),
-    None,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ExecutionSubscription {
     event: ExecutionEventPort,
@@ -146,12 +121,16 @@ struct ExecutionSubscription {
 }
 
 /// One flattening pass. Borrows the reusable `path` buffer from `Flattener`;
-/// the current graph at each level is `graph_at(root, library, path)`.
+/// `levels` carries the resolved graph per descent level (root at the
+/// bottom), so the current graph is one stack read, not a root re-walk.
 #[derive(Debug)]
 struct Run<'a> {
-    root: &'a Graph,
     library: &'a Library,
     path: &'a mut Vec<NodeId>,
+    /// Resolved graphs parallel to `path`, plus the root at the bottom:
+    /// `levels.len() == path.len() + 1` and `levels.last()` is the current
+    /// level's graph.
+    levels: Vec<&'a Graph>,
     /// Scope indices parallel to `path` (the emit descent). `last()` is the
     /// scope the current level's nodes live in.
     scope_stack: &'a mut Vec<u32>,
@@ -161,8 +140,7 @@ struct Run<'a> {
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<ExecutionSubscription>,
     e_nodes: &'a mut HashMap<ExecutionNodeId, ExecutionNode>,
-    cur_id: ExecutionNodeId,
-    /// The inputs pool being built this update; `cur_id`'s range is its tail.
+    /// The inputs pool being built this update.
     inputs: &'a mut Pool<ExecutionInput>,
     outputs: &'a mut Pool<ExecutionOutput>,
     events: &'a mut Pool<ExecutionEvent>,
@@ -170,16 +148,26 @@ struct Run<'a> {
 
 impl<'a> Run<'a> {
     fn current(&self) -> &'a Graph {
-        graph_at(self.root, self.library, self.path.as_slice())
+        self.levels
+            .last()
+            .copied()
+            .expect("the root level always exists")
     }
 
     /// Descend one composite level. A legitimate graph never nests this deep.
-    fn push_level(&mut self, instance_id: NodeId) {
+    fn push_level(&mut self, instance_id: NodeId, graph: &'a Graph) {
         debug_assert!(
             self.path.len() < MAX_DEPTH,
             "graph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
         );
         self.path.push(instance_id);
+        self.levels.push(graph);
+    }
+
+    /// Ascend one composite level — the inverse of [`Self::push_level`].
+    fn pop_level(&mut self) {
+        self.path.pop().expect("cannot pop the root level");
+        self.levels.pop().unwrap();
     }
 
     fn execution_node_id(&mut self, node_id: NodeId) -> ExecutionNodeId {
@@ -200,10 +188,9 @@ impl<'a> Run<'a> {
             // special node both resolve to a `&Func` spec and emit one leaf —
             // the spec is the only difference (`library` vs. the hardcoded
             // `SpecialNode::func`), so the emit body below is shared.
-            let library = self.library;
             let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
                 NodeKind::Func(func_id) => (
-                    library
+                    self.library
                         .by_id(func_id)
                         .expect("func resolved by update's validate_for_execution validation"),
                     None,
@@ -219,7 +206,10 @@ impl<'a> Run<'a> {
                     {
                         panic!("recursive shared graph {id:?} (it contains itself)");
                     }
-                    self.push_level(node.id);
+                    let nested = graph
+                        .resolve_graph(*link, self.library)
+                        .expect("graph node references a missing graph");
+                    self.push_level(node.id, nested);
                     // Open this instance's scope under the current one; its
                     // interior nodes record their leaves against it.
                     let parent = *self.scope_stack.last().unwrap();
@@ -227,7 +217,7 @@ impl<'a> Run<'a> {
                     self.scope_stack.push(scope);
                     self.emit(disabled);
                     self.scope_stack.pop();
-                    self.path.pop();
+                    self.pop_level();
                     if let Some(id) = shared_id {
                         self.seen_shared.remove(&id);
                     }
@@ -237,7 +227,6 @@ impl<'a> Run<'a> {
             };
 
             let e_node_id = self.execution_node_id(node.id);
-            let input_count = func.inputs.len();
 
             let outputs =
                 self.outputs
@@ -263,6 +252,7 @@ impl<'a> Run<'a> {
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                     ..Default::default()
                 }));
+            let inputs_start = inputs.start as usize;
 
             let previous = self.e_nodes.insert(
                 e_node_id,
@@ -287,12 +277,10 @@ impl<'a> Run<'a> {
             let scope = *self.scope_stack.last().unwrap();
             self.flatten.set_leaf(e_node_id, scope, node.id);
 
-            self.cur_id = e_node_id;
-
-            for port_idx in 0..input_count {
+            for port_idx in 0..func.inputs.len() {
                 let port = InputPort::new(node.id, port_idx);
-                let source = self.resolve_binding(graph.bindings.get(&port));
-                self.set_input(port_idx, source);
+                let binding = self.resolve_binding(graph.bindings.get(&port));
+                self.inputs[inputs_start + port_idx].binding = binding;
             }
         }
 
@@ -306,10 +294,7 @@ impl<'a> Run<'a> {
     /// emitted *by* a `GraphInput` (the trigger) are consumed when the
     /// enclosing instance is resolved as a subscriber, so they are skipped here.
     fn collect_subscriptions(&mut self, graph: &'a Graph) {
-        let trigger = graph
-            .iter()
-            .find(|n| matches!(n.kind, NodeKind::GraphInput))
-            .map(|n| n.id);
+        let trigger = graph.boundary_node(NodeKind::GraphInput);
 
         for sub in graph.subscriptions() {
             if Some(sub.emitter) == trigger {
@@ -353,10 +338,9 @@ impl<'a> Run<'a> {
                     .expect("nested graph requires a subgraph definition")
                     .events
                     .get(event_idx)?;
-                let (interior, interior_idx) = (exposed.emitter, exposed.emitter_event_idx);
-                self.push_level(node_id);
-                let resolved = self.resolve_emitter(interior, interior_idx);
-                self.path.pop();
+                self.push_level(node_id, nested);
+                let resolved = self.resolve_emitter(exposed.emitter, exposed.emitter_event_idx);
+                self.pop_level();
                 resolved
             }
             NodeKind::GraphInput | NodeKind::GraphOutput => None,
@@ -369,72 +353,45 @@ impl<'a> Run<'a> {
     /// trigger.
     fn resolve_subscriber(&mut self, node_id: NodeId, event: ExecutionEventPort) {
         let graph = self.current();
+        let Some(node) = graph.find(&node_id, NodeSearch::TopLevel) else {
+            return;
+        };
         // A disabled node runs nothing, so it receives no events.
-        if graph
-            .find(&node_id, NodeSearch::TopLevel)
-            .is_some_and(|n| n.disabled)
-        {
+        if node.disabled {
             return;
         }
-        match graph.find(&node_id, NodeSearch::TopLevel).map(|n| &n.kind) {
+        match &node.kind {
             // A special node subscribes like a func: it flattens to one leaf and
             // becomes the flat subscriber. `RunSinks` in particular relies on
             // this edge so the planner sees it among a fired event's subscribers.
-            Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
+            NodeKind::Func(_) | NodeKind::Special(_) => {
                 let e_node_id = self.execution_node_id(node_id);
                 self.subs.push(ExecutionSubscription {
                     event,
                     subscriber: e_node_id,
                 });
             }
-            Some(NodeKind::Graph(r)) => {
+            NodeKind::Graph(r) => {
                 let Some(nested) = graph.resolve_graph(*r, self.library) else {
                     return;
                 };
-                let Some(trigger) = nested
-                    .iter()
-                    .find(|n| matches!(n.kind, NodeKind::GraphInput))
-                    .map(|n| n.id)
-                else {
+                let Some(trigger) = nested.boundary_node(NodeKind::GraphInput) else {
                     return;
                 };
-                let interior: Vec<NodeId> = nested
-                    .subscriptions()
-                    .filter(|s| s.emitter == trigger)
-                    .map(|s| s.subscriber)
-                    .collect();
-                self.push_level(node_id);
-                for sub in interior {
-                    self.resolve_subscriber(sub, event);
+                self.push_level(node_id, nested);
+                for sub in nested.subscriptions().filter(|s| s.emitter == trigger) {
+                    self.resolve_subscriber(sub.subscriber, event);
                 }
-                self.path.pop();
+                self.pop_level();
             }
-            _ => {}
+            NodeKind::GraphInput | NodeKind::GraphOutput => {}
         }
-    }
-
-    /// Pool index of input `input_idx` of the node currently being filled.
-    fn cur_input_idx(&self, input_idx: usize) -> usize {
-        self.e_nodes[&self.cur_id].inputs.start as usize + input_idx
-    }
-
-    /// Write the resolved source into input `cur_id`/`input_idx`. A changed
-    /// binding changes the node's content digest, which drives cache
-    /// invalidation — no per-input dirty tracking is needed.
-    fn set_input(&mut self, input_idx: usize, source: Source) {
-        let pool_idx = self.cur_input_idx(input_idx);
-        let binding = match source {
-            Source::None => ExecutionBinding::None,
-            Source::Const(v) => ExecutionBinding::Const(v),
-            Source::Producer(address) => ExecutionBinding::Bind(address),
-        };
-        self.inputs[pool_idx].binding = binding;
     }
 
     /// Resolve an output reference in the current frame to a concrete flat
     /// producer, following through boundary and composite nodes. Leaves the
     /// descent stack as it found it.
-    fn resolve(&mut self, port: OutputPort) -> Source {
+    fn resolve(&mut self, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
         let graph = self.current();
         let node = graph
@@ -450,9 +407,9 @@ impl<'a> Run<'a> {
                     .output_count(node, self.library)
                     .is_some_and(|count| port_idx >= count)
                 {
-                    return Source::None;
+                    return ExecutionBinding::None;
                 }
-                Source::Producer(ExecutionOutputPort {
+                ExecutionBinding::Bind(ExecutionOutputPort {
                     e_node_id: self.execution_node_id(node_id),
                     port_idx,
                 })
@@ -463,37 +420,34 @@ impl<'a> Run<'a> {
                 let nested = graph
                     .resolve_graph(*r, self.library)
                     .expect("graph node references a missing graph");
-                let Some(output) = nested
-                    .iter()
-                    .find(|n| matches!(n.kind, NodeKind::GraphOutput))
-                else {
-                    return Source::None;
+                let Some(output) = nested.boundary_node(NodeKind::GraphOutput) else {
+                    return ExecutionBinding::None;
                 };
-                let port = InputPort::new(output.id, port_idx);
-                let binding = nested.bindings.get(&port).cloned();
-                self.push_level(node_id);
-                let source = self.resolve_binding(binding.as_ref());
-                self.path.pop();
+                let binding = nested.bindings.get(&InputPort::new(output, port_idx));
+                self.push_level(node_id, nested);
+                let source = self.resolve_binding(binding);
+                self.pop_level();
                 source
             }
             // Follow out: this GraphInput output `port_idx` is the enclosing
             // instance's exposed input `port_idx`; resolve it one level up.
             NodeKind::GraphInput => {
-                let instance_id = self.path.pop().expect("GraphInput at the root level");
+                let instance_id = *self.path.last().expect("GraphInput at the root level");
+                self.pop_level();
                 let port = InputPort::new(instance_id, port_idx);
-                let binding = self.current().bindings.get(&port).cloned();
-                let source = self.resolve_binding(binding.as_ref());
-                self.path.push(instance_id);
+                let binding = self.current().bindings.get(&port);
+                let source = self.resolve_binding(binding);
+                self.push_level(instance_id, graph);
                 source
             }
-            NodeKind::GraphOutput => Source::None,
+            NodeKind::GraphOutput => ExecutionBinding::None,
         }
     }
 
-    fn resolve_binding(&mut self, binding: Option<&Binding>) -> Source {
+    fn resolve_binding(&mut self, binding: Option<&Binding>) -> ExecutionBinding {
         match binding {
-            None => Source::None,
-            Some(Binding::Const(value)) => Source::Const(value.clone()),
+            None => ExecutionBinding::None,
+            Some(Binding::Const(value)) => ExecutionBinding::Const(value.clone()),
             Some(Binding::Bind(output)) => self.resolve(*output),
         }
     }

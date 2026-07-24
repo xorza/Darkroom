@@ -268,7 +268,7 @@ impl Graph {
     }
 
     /// This graph's single boundary node of `kind`, if present.
-    fn boundary_node(&self, kind: NodeKind) -> Option<NodeId> {
+    pub(crate) fn boundary_node(&self, kind: NodeKind) -> Option<NodeId> {
         self.iter()
             .find(|node| node.kind == kind)
             .map(|node| node.id)
