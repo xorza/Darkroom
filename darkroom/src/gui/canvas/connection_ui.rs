@@ -311,11 +311,17 @@ impl ConnectionUI {
             let endpoint_hover =
                 geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
             let hovered = !broken && emphasis.hovered(endpoint_hover);
+            let src_ty = port_data_type(scene, src_port).unwrap_or_default();
+            let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
             let brush = if broken {
                 CurveBrush::Solid(ctx.theme.colors.connection_broken)
+            } else if !tgt_ty.compatible_with(&src_ty) {
+                // A wildcard retype upstream left this wire type-mismatched.
+                // Nothing severs it — it flattens as unbound (drift
+                // tolerance) — so paint it in the missing-input warning
+                // color, matching the port glow the run will report.
+                CurveBrush::Solid(emphasis.tint(ctx.theme.colors.exec_missing_glow, hovered))
             } else {
-                let src_ty = port_data_type(scene, src_port).unwrap_or_default();
-                let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
                 let a = emphasis.tint(
                     port_color(ctx.theme, &src_ty, PortKind::Output, false),
                     hovered,
@@ -523,11 +529,11 @@ pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
 /// `Intent::SetInput` binding. A cycle-forming pair never reaches here —
-/// [`scan_snap_target`] refuses to snap one, and `commit_intent` rejects any
+/// [`scan_snap_target`] refuses to snap one, and `build_step` rejects any
 /// cycle-forming bind that slips through (the planner is the final backstop,
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
-/// and dropping the downstream wires it invalidates is handled centrally when the
-/// batch commits (`commit_intent_cascading`), so this stays a plain binding.
+/// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
+/// the warning color, and flattens as unbound.
 ///
 /// An endpoint that is a boundary node's trailing "+" placeholder first
 /// materializes the interface port it stands for (`Intent::AddBoundaryPort`)

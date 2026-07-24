@@ -10,11 +10,11 @@
 //!     `UndoStep`. Pure.
 //!   - [`apply`] — `apply_step` / `revert_step` write the "to"/"from" half
 //!     of an `UndoStep` to `&mut Document` (used by initial commit,
-//!     undo-stack redo, and undo respectively), plus the high-level
-//!     `commit_intent_cascading` entry the live frontends drive their
-//!     per-intent loop through: build → no-op-filter → apply, then cascade
-//!     the edits an input change implies (a wildcard-output retype drops
-//!     the wires it invalidated).
+//!     undo-stack redo, and undo respectively), plus the `commit_intent`
+//!     entry the live frontends drive their per-intent loop through:
+//!     build → no-op-filter → apply. Uniform across variants — a
+//!     wildcard-output retype severs nothing (mismatched wires are
+//!     tolerated and flatten as unbound).
 //!   - [`query`] — the five exhaustive per-step predicates (`is_noop`,
 //!     `requires_relayout`, `dirties_document`, `gesture_key`,
 //!     `coalesce`) that drive the undo stack and the per-frame pipeline.

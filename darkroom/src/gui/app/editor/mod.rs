@@ -14,7 +14,7 @@ use crate::core::document::dock::{DockOp, TabAddress};
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::apply::commit_intent_cascading;
+use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::duplicate::{
     build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
@@ -114,14 +114,9 @@ impl Editor {
     /// drain — e.g. a file-picker result `App` handles after the record.
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
-    pub(crate) fn apply_edit(
-        &mut self,
-        open: &mut OpenDocument,
-        intent: Intent,
-        library: &Library,
-    ) {
+    pub(crate) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, library, [intent]);
+        self.commit_batch(open, target, [intent]);
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -129,14 +124,9 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(crate) fn apply_external_intents(
-        &mut self,
-        open: &mut OpenDocument,
-        intents: Vec<Intent>,
-        library: &Library,
-    ) {
+    pub(crate) fn apply_external_intents(&mut self, open: &mut OpenDocument, intents: Vec<Intent>) {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, library, intents);
+        self.commit_batch(open, target, intents);
     }
 
     /// Build, apply, and record `intents` against `target` as one undo
@@ -149,14 +139,11 @@ impl Editor {
         &mut self,
         open: &mut OpenDocument,
         target: GraphRef,
-        library: &Library,
         intents: impl IntoIterator<Item = Intent>,
     ) -> bool {
         let mut batch = Vec::new();
         for intent in intents {
-            // A `SetInput` that retypes a wildcard output cascades into dropping
-            // the now-incompatible downstream wires — all one undo entry.
-            for step in commit_intent_cascading(intent, &mut open.document, target, library) {
+            if let Some(step) = commit_intent(intent, &mut open.document, target) {
                 self.needs_relayout |= step.requires_relayout();
                 self.dirty |= step.dirties_document();
                 batch.push(step);
@@ -195,7 +182,7 @@ impl Editor {
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, open, library);
+        self.navigate(ui, open);
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers(open);
@@ -220,7 +207,7 @@ impl Editor {
             // connection commit) drained *before* the record so Pass A sees
             // the settled doc. It reads everything off `Scene`.
             self.main_window.prepass(ui, &self.scene, &mut self.intents);
-            self.drain_intents(open, target, library);
+            self.drain_intents(open, target);
             self.apply_canvas_shortcuts(ui, open, target);
         }
 
@@ -267,7 +254,7 @@ impl Editor {
         // cache toggle, const edit) plus tab-strip renames. Those and the
         // navigation steps are graph-agnostic, so a non-graph active tab
         // drains against `Main` (the target is unused for them).
-        self.drain_intents(open, graph_target.unwrap_or(GraphRef::Main), library);
+        self.drain_intents(open, graph_target.unwrap_or(GraphRef::Main));
 
         // Single consumption point for the frame's accumulated relayout
         // signal (edits, tab switch, undo/redo). A menu side effect adds
@@ -317,7 +304,7 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, library: &Library) {
+    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
         self.apply_undo_redo(ui, open);
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
@@ -333,7 +320,6 @@ impl Editor {
         self.drain_intents(
             open,
             open.document.active_target().unwrap_or(GraphRef::Main),
-            library,
         );
         // A closed/deleted target can't be active; fall back to Main.
         open.document.ensure_valid_layout();
@@ -387,12 +373,12 @@ impl Editor {
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
-    fn drain_intents(&mut self, open: &mut OpenDocument, target: GraphRef, library: &Library) {
+    fn drain_intents(&mut self, open: &mut OpenDocument, target: GraphRef) {
         // Move the scratch buffer out so it can drive `commit_batch` (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
-        if self.commit_batch(open, target, library, scratch.drain(..)) {
+        if self.commit_batch(open, target, scratch.drain(..)) {
             self.scene_dirty = true;
         }
         self.intents = scratch;
@@ -479,13 +465,13 @@ impl Editor {
     /// routes through a recorded activation. Called from the File ▸
     /// Preferences menu via `App`, so it records the switch and drains it
     /// immediately like every external edit.
-    pub(crate) fn open_preferences(&mut self, open: &mut OpenDocument, library: &Library) {
+    pub(crate) fn open_preferences(&mut self, open: &mut OpenDocument) {
         let group = open.document.layout.focused;
         let addr = open
             .document
             .layout
             .find_or_insert(TabRef::Preferences, group);
-        self.apply_edit(open, activate_intent(addr), library);
+        self.apply_edit(open, activate_intent(addr));
     }
 }
 
@@ -505,7 +491,7 @@ mod tests {
     use scenarium::DataType;
     use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
-    use scenarium::{Graph, InputPort, Library, Node, NodeKind};
+    use scenarium::{Graph, InputPort, Node, NodeKind};
 
     use crate::core::document::open_document::OpenDocument;
     use crate::core::document::{Document, GraphRef, ItemRef, PortKind, PortRef, TabRef};
@@ -533,8 +519,7 @@ mod tests {
 
         fn open_graph(&mut self, target: GraphRef) {
             self.editor.open_graph(&mut self.open, target);
-            self.editor
-                .drain_intents(&mut self.open, GraphRef::Main, &Library::default());
+            self.editor.drain_intents(&mut self.open, GraphRef::Main);
         }
 
         fn undo(&mut self) -> bool {
@@ -552,7 +537,6 @@ mod tests {
 
     #[test]
     fn dirty_flag_tracks_content_edits_not_navigation() {
-        let lib = Library::default();
         let mut test = TestEditor::new(Document::default());
         assert!(!test.editor.dirty, "a freshly opened document is clean");
 
@@ -570,7 +554,6 @@ mod tests {
                 node_id: id,
                 to: "renamed".into(),
             },
-            &lib,
         );
         assert!(test.editor.dirty, "renaming a node is unsaved work");
 
@@ -582,7 +565,6 @@ mod tests {
             Intent::SetSelection {
                 to: BTreeSet::from([ItemRef::Node(id)]),
             },
-            &lib,
         );
         assert_eq!(
             test.open.document.main_view.selected,
@@ -603,7 +585,6 @@ mod tests {
 
     #[test]
     fn image_viewer_tabs_dedupe_per_port_and_prune_state_on_close() {
-        let lib = Library::default();
         let mut test = TestEditor::new(Document::default());
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = test.open.document.graph.add(node);
@@ -620,8 +601,7 @@ mod tests {
         let open = |test: &mut TestEditor, p| {
             test.editor.actions.push(UiAction::OpenImageViewer(p));
             test.editor.apply_view_actions(&mut test.open);
-            test.editor
-                .drain_intents(&mut test.open, GraphRef::Main, &lib);
+            test.editor.drain_intents(&mut test.open, GraphRef::Main);
         };
         let tabs = |test: &TestEditor| test.open.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |test: &TestEditor| test.open.document.layout.primary().active;
@@ -723,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
+    fn passthrough_rewire_preserves_downstream_wiring() {
         let float_src = testing::with_stub_lambda(
             Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
         );
@@ -740,12 +720,6 @@ mod tests {
                 .input(FuncInput::required("x", DataType::Any))
                 .wildcard_output("o", 0),
         );
-        let library = Library::from([
-            float_src.clone(),
-            string_src.clone(),
-            float_sink.clone(),
-            pass_func.clone(),
-        ]);
 
         let mut graph = Graph::default();
         let fp = graph.add_func_node(&float_src);
@@ -757,15 +731,17 @@ mod tests {
 
         let mut test = TestEditor::new(graph.into());
 
-        // Rewire the passthrough input to the String producer: the cascade
-        // severs the now-incompatible Float sink edge, in one undo batch.
+        // Rewire the passthrough input to the String producer. The sink's
+        // wire is now type-incompatible, but nothing severs it: type
+        // mismatches degrade at flatten (drift tolerance) while the
+        // authored wiring survives — and revives if the types line up
+        // again. The edit is a single step, so undo touches only it.
         test.editor.apply_edit(
             &mut test.open,
             Intent::SetInput {
                 input: InputPort::new(pass, 0),
                 to: Some(Binding::bind(sp, 0)),
             },
-            &library,
         );
         assert_eq!(
             test.open
@@ -773,13 +749,10 @@ mod tests {
                 .graph
                 .bindings
                 .get(&InputPort::new(sink, 0)),
-            None,
-            "the incompatible sink edge is severed"
+            Some(&Binding::bind(pass, 0)),
+            "the mismatched sink wire is preserved, not severed"
         );
 
-        // Undo reverts the whole batch — the rewire *and* the sever — so the
-        // graph returns to the original valid Float → passthrough → Float-sink
-        // rather than leaving the severed edge dropped.
         assert!(test.undo());
         assert_eq!(
             test.open
@@ -797,7 +770,7 @@ mod tests {
                 .bindings
                 .get(&InputPort::new(sink, 0)),
             Some(&Binding::bind(pass, 0)),
-            "the severed edge is restored, not left dangling"
+            "the sink wire was never touched"
         );
     }
 }

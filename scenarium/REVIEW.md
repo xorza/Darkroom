@@ -5,8 +5,9 @@
 Scenarium has a clear compile → plan → resolve → execute pipeline. Since the
 previous pass, the authoring model shed its largest duplication cluster: graph
 normalization is gone, subgraph interfaces are authored state with reversible
-detach/attach, library drift is tolerated uniformly at compile time instead
-of pruned, registration gates declared defaults, deep nesting is a validation
+detach/attach, library drift *and type mismatches* are tolerated uniformly at
+compile time (degrading to unbound at flatten) instead of pruned or severed,
+registration gates declared defaults, deep nesting is a validation
 error, and flattening keeps a resolved-graph stack instead of re-walking from
 the root. The highest-impact remaining problem is unchanged: `Worker::send_many`
 does not establish the batch boundary its callers rely on. The other open
@@ -19,7 +20,8 @@ vectors).
 
 `Compiler` validates an authored `Graph` (tolerating library-range drift in
 bindings, subscriptions, and pins), recursively flattens composite instances
-into an `ExecutionProgram` — dangling references degrade to unbound —
+into an `ExecutionProgram` — dangling references and type-mismatched
+bindings degrade to unbound —
 resolves output types, and returns a `CompiledGraph`. `WorkerTask`
 opportunistically reduces ready messages and events into a `BatchIntent`,
 installs compiled state, plans roots, prepares filesystem stamps, resolves

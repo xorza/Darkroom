@@ -264,12 +264,15 @@ via scenarium's `detach_graph_input/output`, all recorded on the step so
 undo restores the exact wiring. Unwiring never deletes a port.
 
 Library drift (a func or shared graph that changed shape between sessions)
-is *tolerated*, never repaired: Scenarium's compile accepts wiring whose
-ports/events the current library no longer declares, degrading it to
-unbound at flatten time — a required input surfaces as a plan-level
-missing-input verdict (the port's warning glow). The document keeps the
-authored wiring, which revives if the library gets the port back; the
-canvas simply doesn't draw a wire whose endpoint has no rendered port.
+and type mismatches (a wildcard retype leaving a downstream wire or const
+incompatible) are *tolerated*, never repaired: Scenarium's compile accepts
+them, degrading the binding to unbound at flatten time — a required input
+surfaces as a plan-level missing-input verdict (the port's warning glow).
+The document keeps the authored wiring, which revives when the library or
+the upstream types come back; the canvas paints a type-mismatched wire in
+the missing-input warning color and skips a wire whose endpoint has no
+rendered port. Editing never severs wires for type reasons — a `SetInput`
+is always a single undo step.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view

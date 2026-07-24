@@ -165,9 +165,8 @@ impl App {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    let library = self.workspace.runtime.library.published.load();
                     self.editor
-                        .apply_external_intents(&mut self.workspace.open, intents, &library);
+                        .apply_external_intents(&mut self.workspace.open, intents);
                 }
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch

@@ -119,14 +119,13 @@ impl<'a> GraphChecker<'a> {
             });
         }
 
-        // Library-range drift is tolerated everywhere below: a binding,
-        // subscription, or pin referencing a port the current library no
-        // longer declares stays valid and degrades to unbound at
-        // flatten/plan time (a required input surfaces as a missing-input
-        // verdict). Deleting it would destroy authored wiring that
-        // revives when the library gets the port back. Out-of-range
-        // specs also resolve to no `input_spec`/`input_type`, so the
-        // const-only and type checks skip dangling ports naturally.
+        // Drift is tolerated everywhere below: a binding, subscription, or
+        // pin referencing a port the current library no longer declares —
+        // and a wire or const whose type no longer matches — stays valid
+        // and degrades to unbound at flatten time (a required input
+        // surfaces as a missing-input verdict; see flatten's `typed_binding`).
+        // Deleting or rejecting it would destroy authored wiring that
+        // revives when the library or the upstream types come back.
         for (destination, binding) in &graph.bindings {
             if !graph.nodes.contains_key(&destination.node_id) {
                 return Err(GraphValidationError::BindingMissingNode {
@@ -142,34 +141,12 @@ impl<'a> GraphChecker<'a> {
                 return Err(GraphValidationError::ConstOnlyBinding { port: *destination });
             }
 
-            if let Binding::Bind(src) = binding {
-                if !graph.nodes.contains_key(&src.node_id) {
-                    return Err(GraphValidationError::BindingMissingProducer {
-                        destination: *destination,
-                        producer: *src,
-                    });
-                }
-                if let Some(library) = self.library
-                    && let Some(sink_ty) = graph.input_type(library, *destination)
-                {
-                    let source_ty = graph.resolve_output_type(library, *src);
-                    if !sink_ty.compatible_with(&source_ty) {
-                        return Err(GraphValidationError::IncompatibleBinding {
-                            destination: *destination,
-                            expected: sink_ty,
-                            actual: source_ty,
-                        });
-                    }
-                }
-            }
-
-            if let (Some(library), Binding::Const(value)) = (self.library, binding)
-                && let Some(spec) = graph.input_spec(library, *destination)
-                && !const_satisfies(library, spec, value)
+            if let Binding::Bind(src) = binding
+                && !graph.nodes.contains_key(&src.node_id)
             {
-                return Err(GraphValidationError::IncompatibleConstant {
-                    port: *destination,
-                    data_type: spec.data_type.clone(),
+                return Err(GraphValidationError::BindingMissingProducer {
+                    destination: *destination,
+                    producer: *src,
                 });
             }
         }
@@ -299,8 +276,9 @@ impl Graph {
 }
 
 /// Whether a `Const` literal `value` may sit on `input` — the `Const` half of
-/// the compile-boundary type check (the `Bind` half uses
-/// [`DataType::compatible_with`]). Matched directly rather than via
+/// the flatten-time type degrade (the `Bind` half uses
+/// [`DataType::compatible_with`]); a literal that doesn't satisfy its port
+/// flattens as unbound. Matched directly rather than via
 /// `compatible_with` because a bare `StaticValue` can't be turned back into a
 /// `DataType` (it lacks the `FsPathConfig`, and the enum's variant list lives in
 /// `library`).
@@ -311,7 +289,7 @@ impl Graph {
 /// offered picks. Otherwise the literal must match the declared type — scalar
 /// numerics coerce, an `Enum` literal must name a registered variant, and a
 /// `Custom` port has no literal form.
-fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) -> bool {
+pub(crate) fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) -> bool {
     if !input.value_variants.is_empty() {
         return input.value_variants.iter().any(|v| v.value == *value);
     }

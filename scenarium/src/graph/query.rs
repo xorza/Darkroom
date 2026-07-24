@@ -2,8 +2,6 @@
 //! declared types, wildcard reroute following, and edge invalidation. Shared
 //! by compile-time validation and the editor.
 
-use hashbrown::HashSet;
-
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{FuncInput, FuncOutput, OutputType};
@@ -127,70 +125,6 @@ impl Graph {
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
         let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
         self.node_outputs(library, node)?.get(port.port_idx)
-    }
-
-    /// Output ports of `input.node_id` whose type *mirrors* `input` —
-    /// wildcard (passthrough / reroute) outputs that retype when that input
-    /// changes. Empty for an ordinary input or node.
-    fn wildcard_outputs_mirroring(&self, library: &Library, input: InputPort) -> Vec<OutputPort> {
-        let Some(node) = self.find(&input.node_id, NodeSearch::TopLevel) else {
-            return Vec::new();
-        };
-        let Some(outputs) = self.node_outputs(library, node) else {
-            return Vec::new();
-        };
-        outputs
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| {
-                matches!(o.ty, OutputType::Wildcard { mirrors } if mirrors == input.port_idx)
-            })
-            .map(|(i, _)| OutputPort::new(input.node_id, i))
-            .collect()
-    }
-
-    /// The input ports whose incoming `Bind` is no longer type-compatible once
-    /// `changed` changed — the wires the editor drops to keep the graph
-    /// well-typed. Follows wildcard outputs *transitively*: a passthrough /
-    /// reroute fed by the change retypes too, so its now-incompatible consumers
-    /// (any number of hops downstream) are included. Empty when the change
-    /// retypes nothing (an ordinary node's input, or a wildcard input no output
-    /// mirrors). The engine never type-checks, so only the editor calls this.
-    pub fn edges_invalidated_by(&self, library: &Library, changed: InputPort) -> Vec<InputPort> {
-        // Output ports whose resolved type just changed, grown forward from
-        // `changed`'s wildcard outputs through downstream wildcards. The
-        // set doubles as the cycle / re-visit guard.
-        let mut retyped: HashSet<OutputPort> = HashSet::new();
-        let mut frontier: Vec<OutputPort> = Vec::new();
-        for port in self.wildcard_outputs_mirroring(library, changed) {
-            if retyped.insert(port) {
-                frontier.push(port);
-            }
-        }
-
-        let mut invalidated = Vec::new();
-        while let Some(src) = frontier.pop() {
-            let source_ty = self.resolve_output_type(library, src);
-            for (dst, edge_src) in self.edges() {
-                if edge_src != src {
-                    continue;
-                }
-                match self.input_type(library, dst) {
-                    // The consumer can't accept the retyped value — drop the wire.
-                    Some(sink_ty) if !sink_ty.compatible_with(&source_ty) => invalidated.push(dst),
-                    // Kept: a wildcard output of the consumer mirroring this
-                    // input retypes too, so follow it further downstream.
-                    _ => {
-                        for port in self.wildcard_outputs_mirroring(library, dst) {
-                            if retyped.insert(port) {
-                                frontier.push(port);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        invalidated
     }
 
     /// Every data edge as (consumer input ← producer output). Const bindings

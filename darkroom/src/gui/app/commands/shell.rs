@@ -17,9 +17,7 @@ impl App {
     pub(crate) fn handle_shell(&mut self, command: ShellCommand) {
         match command {
             ShellCommand::OpenPreferences => {
-                let library = self.workspace.runtime.library.published.load();
-                self.editor
-                    .open_preferences(&mut self.workspace.open, &library);
+                self.editor.open_preferences(&mut self.workspace.open);
             }
             ShellCommand::Quit => self.request_quit(),
         }

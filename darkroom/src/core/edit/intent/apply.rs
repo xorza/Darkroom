@@ -1,13 +1,12 @@
 //! Commit an [`Intent`] against a [`Document`] (build → no-op filter →
 //! write), and forward/backward-replay a stored [`UndoStep`]'s "to"/"from"
-//! half. [`commit_intent_cascading`], [`apply_step`], and [`revert_step`]
+//! half. [`commit_intent`], [`apply_step`], and [`revert_step`]
 //! are the entry points the rest of the crate drives the edit pipeline
 //! through. The `build_step` / `apply_step` halves stay public for
 //! undo-stack redo, which applies a *stored* step without rebuilding it.
 
 use glam::Vec2;
 use scenarium::GraphLink;
-use scenarium::Library;
 use scenarium::{FuncInput, FuncOutput};
 use scenarium::{NodeId, NodeKind, NodeSearch, OutputPort};
 
@@ -18,9 +17,10 @@ use crate::core::edit::intent::types::{
 };
 
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
-/// call. The per-intent core of [`commit_intent_cascading`] (the entry the
-/// frontends use); kept separate so the cascade can drive its own sever
-/// intents through the same path.
+/// call — the entry every frontend drives its per-intent loop through. A
+/// `SetInput` that retypes wildcard outputs severs nothing: type mismatches
+/// are tolerated (the wire draws as mismatched and flattens as unbound —
+/// see scenarium's `typed_binding`), so the edit stays a single step.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
 /// `requires_*` signals), or `None` when `build_step` dropped the intent
@@ -39,50 +39,6 @@ pub(crate) fn commit_intent(
     }
     apply_step(&step, doc, target);
     Some(step)
-}
-
-/// [`commit_intent`], plus the cascaded edits an input change implies: when a
-/// `SetInput` retypes a node's *wildcard* output (a passthrough / reroute), every
-/// downstream wire that no longer typechecks is dropped — in the same batch, so
-/// undo restores the binding and the severed edges together. `library` resolves
-/// the port types. Returns every committed step (the triggering one first), so
-/// the caller records / inspects them as one unit. Both the GUI editor and the
-/// headless session drive their forward-apply loop through this.
-pub(crate) fn commit_intent_cascading(
-    intent: Intent,
-    doc: &mut Document,
-    target: GraphRef,
-    library: &Library,
-) -> Vec<UndoStep> {
-    // Only a `SetInput` can retype a node's output, so only it can invalidate
-    // downstream wires. Capture which input changed before the intent is moved.
-    let retyped = match &intent {
-        Intent::SetInput { input, .. } => Some(*input),
-        _ => None,
-    };
-    let Some(step) = commit_intent(intent, doc, target) else {
-        return Vec::new();
-    };
-    let mut steps = vec![step];
-    if let Some(input) = retyped {
-        // The engine resolves which wires the retype invalidated (transitively,
-        // through any chain of wildcard outputs); drop each in the same batch.
-        let severed = doc
-            .graph_for(target)
-            .map(|graph| graph.edges_invalidated_by(library, input))
-            .unwrap_or_default();
-        for dst in severed {
-            steps.extend(commit_intent(
-                Intent::SetInput {
-                    input: dst,
-                    to: None,
-                },
-                doc,
-                target,
-            ));
-        }
-    }
-    steps
 }
 
 /// Resolve the right graph+view for a scoped step, run `body`, and

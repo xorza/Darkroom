@@ -1,8 +1,6 @@
 use glam::Vec2;
 use scenarium::FuncId;
-use scenarium::Library;
 use scenarium::StaticValue;
-use scenarium::testing;
 use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::Document;
@@ -31,7 +29,7 @@ fn apply_intents_adds_node() {
         bindings: vec![],
     };
 
-    apply_intents(&mut doc, vec![intent], &Library::default());
+    apply_intents(&mut doc, vec![intent]);
     assert_eq!(doc.graph.len(), 1);
     assert!(
         doc.graph.find(&id, NodeSearch::TopLevel).is_some(),
@@ -53,7 +51,7 @@ fn apply_add_node_seeds_initial_bindings() {
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
     };
 
-    apply_intents(&mut doc, vec![intent], &Library::default());
+    apply_intents(&mut doc, vec![intent]);
     assert_eq!(
         doc.graph.bindings.get(&port),
         Some(&Binding::Const(StaticValue::Float(5.0))),
@@ -71,7 +69,6 @@ fn apply_intents_drops_stale_intent() {
         vec![Intent::RemoveNode {
             node_id: NodeId::unique(),
         }],
-        &Library::default(),
     );
     assert_eq!(doc.graph.len(), 0);
 }
@@ -90,7 +87,6 @@ fn apply_intents_selects_existing_node() {
         vec![Intent::SetSelection {
             to: [ItemRef::Node(id)].into_iter().collect(),
         }],
-        &Library::default(),
     );
     assert!(doc.main_view.selected.contains(&ItemRef::Node(id)));
 }
@@ -111,137 +107,6 @@ fn apply_intents_batches_multiple() {
         })
         .collect();
 
-    apply_intents(&mut doc, intents, &Library::default());
+    apply_intents(&mut doc, intents);
     assert_eq!(doc.graph.len(), 3, "all three nodes applied in one batch");
-}
-
-#[test]
-fn apply_intents_severs_incompatible_passthrough_output_edges() {
-    use scenarium::DataType;
-    use scenarium::Library;
-    use scenarium::{Func, FuncInput, FuncOutput};
-
-    // Float producer → wildcard passthrough → Float sink, all headless.
-    let float_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
-    );
-    let string_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String)),
-    );
-    let float_sink = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("o", DataType::Float)),
-    );
-    let pass_func = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "pass")
-            .input(FuncInput::required("x", DataType::Any))
-            .wildcard_output("o", 0),
-    );
-    let library = Library::from([
-        float_src.clone(),
-        string_src.clone(),
-        float_sink.clone(),
-        pass_func.clone(),
-    ]);
-
-    let mut doc = empty_document();
-    let fp = doc.graph.add_func_node(&float_src);
-    let sp = doc.graph.add_func_node(&string_src);
-    let pass = doc.graph.add_func_node(&pass_func);
-    let sink = doc.graph.add_func_node(&float_sink);
-    doc.graph
-        .set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
-    doc.graph
-        .set_input_binding(InputPort::new(sink, 0), Binding::bind(pass, 0));
-
-    // A script rewires the passthrough's input to the String producer: the
-    // output type becomes String, so the cascade drops the Float sink edge.
-    apply_intents(
-        &mut doc,
-        vec![Intent::SetInput {
-            input: InputPort::new(pass, 0),
-            to: Some(Binding::bind(sp, 0)),
-        }],
-        &library,
-    );
-
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(pass, 0)),
-        Some(&Binding::bind(sp, 0)),
-        "the rewire landed"
-    );
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(sink, 0)),
-        None,
-        "the now-incompatible Float sink edge was severed in the same batch"
-    );
-}
-
-#[test]
-fn apply_intents_severs_through_a_passthrough_chain() {
-    use scenarium::DataType;
-    use scenarium::Library;
-    use scenarium::{Func, FuncInput, FuncOutput};
-
-    // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
-    let float_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
-    );
-    let string_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String)),
-    );
-    let float_sink = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("o", DataType::Float)),
-    );
-    let pass_func = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "pass")
-            .input(FuncInput::required("x", DataType::Any))
-            .wildcard_output("o", 0),
-    );
-    let library = Library::from([
-        float_src.clone(),
-        string_src.clone(),
-        float_sink.clone(),
-        pass_func.clone(),
-    ]);
-
-    let add_pass = |doc: &mut Document| doc.graph.add_func_node(&pass_func);
-
-    let mut doc = empty_document();
-    let fp = doc.graph.add_func_node(&float_src);
-    let sp = doc.graph.add_func_node(&string_src);
-    let p1 = add_pass(&mut doc);
-    let p2 = add_pass(&mut doc);
-    let sink = doc.graph.add_func_node(&float_sink);
-    doc.graph
-        .set_input_binding(InputPort::new(p1, 0), Binding::bind(fp, 0));
-    doc.graph
-        .set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
-    doc.graph
-        .set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
-
-    // Rewire pass1 to the String producer: both passthrough outputs retype to
-    // String, so the edge *two hops down* (pass2 → sink) is the invalid one.
-    apply_intents(
-        &mut doc,
-        vec![Intent::SetInput {
-            input: InputPort::new(p1, 0),
-            to: Some(Binding::bind(sp, 0)),
-        }],
-        &library,
-    );
-
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(p2, 0)),
-        Some(&Binding::bind(p1, 0)),
-        "pass2's wildcard input accepts the new type and is kept"
-    );
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(sink, 0)),
-        None,
-        "the cascade follows the chain and severs the two-hops-down sink edge"
-    );
 }

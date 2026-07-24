@@ -54,14 +54,12 @@ impl App {
         let Some(value) = value else {
             return;
         };
-        let library = self.workspace.runtime.library.published.load();
         self.editor.apply_edit(
             &mut self.workspace.open,
             Intent::SetInput {
                 input: req.port,
                 to: Some(Binding::Const(value)),
             },
-            &library,
         );
     }
 }

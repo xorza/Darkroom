@@ -4,10 +4,10 @@
 //! and tracks script-requested shutdown. Document/runtime invariants live in
 //! [`Workspace`], while the GUI owns its independent editing and undo policy.
 
-use scenarium::{Library, WorkerReport, WorkerStatusKind};
+use scenarium::{WorkerReport, WorkerStatusKind};
 
 use crate::core::document::{Document, GraphRef};
-use crate::core::edit::intent::apply::commit_intent_cascading;
+use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::types::Intent;
 use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
@@ -43,8 +43,7 @@ impl TerminalSession {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    let library = self.workspace.runtime.library.published.load();
-                    apply_intents(&mut self.workspace.open.document, intents, &library);
+                    apply_intents(&mut self.workspace.open.document, intents);
                 }
                 ScriptMessage::RunOnce => run = true,
                 ScriptMessage::Shutdown => self.quit = true,
@@ -105,9 +104,9 @@ impl TerminalSession {
     }
 }
 
-fn apply_intents(document: &mut Document, intents: Vec<Intent>, library: &Library) {
+fn apply_intents(document: &mut Document, intents: Vec<Intent>) {
     let target = document.active_target().unwrap_or(GraphRef::Main);
     for intent in intents {
-        commit_intent_cascading(intent, document, target, library);
+        commit_intent(intent, document, target);
     }
 }

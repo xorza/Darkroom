@@ -334,13 +334,16 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 }
 
 #[test]
-fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
+fn type_mismatches_degrade_at_flatten_not_at_validation() {
+    use crate::execution::compile::Compiler;
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program::ExecutionBinding;
     use crate::library::Library;
-    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue};
+    use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
     // Int and String never coerce (numerics coerce among themselves, but a
-    // string is a distinct kind), so this pair exercises a real rejection.
+    // string is a distinct kind), so this pair exercises a real mismatch.
     let int_src = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "int_src").output(FuncOutput::new("o", DataType::Int)),
     );
@@ -354,77 +357,6 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
             .input(FuncInput::required("x", DataType::Int))
             .output(FuncOutput::new("o", DataType::Int)),
     );
-    let pass_func = passthrough_func();
-    let mut library = Library::default();
-    library.add(int_src.clone());
-    library.add(str_sink.clone());
-    library.add(int_sink.clone());
-    library.add(pass_func.clone());
-
-    // Direct Int → String is rejected at the compile boundary.
-    let mut g = Graph::default();
-    let s = g.add_func_node(&int_src);
-    let f = g.add_func_node(&str_sink);
-    g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
-    let err = g
-        .validate_for_execution(&library)
-        .expect_err("Int into a String input must be rejected");
-    assert!(
-        err.to_string().contains("incompatible"),
-        "unexpected: {err}"
-    );
-
-    // Direct Int → Int is accepted.
-    let mut g = Graph::default();
-    let s = g.add_func_node(&int_src);
-    let i = g.add_func_node(&int_sink);
-    g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
-    assert!(g.validate_for_execution(&library).is_ok());
-
-    // The check resolves *through* a passthrough: Int → pass → Int is fine,
-    // Int → pass → String is rejected (the wildcard carries the real type).
-    let mut g = Graph::default();
-    let s = g.add_func_node(&int_src);
-    let pid = g.add_func_node(&pass_func);
-    g.set_input_binding(InputPort::new(pid, 0), Binding::bind(s, 0));
-    let i = g.add_func_node(&int_sink);
-    g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
-    assert!(
-        g.validate_for_execution(&library).is_ok(),
-        "Int through a passthrough into Int is compatible"
-    );
-
-    g.set_input_binding(InputPort::new(i, 0), None);
-    let f = g.add_func_node(&str_sink);
-    g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
-    assert!(
-        g.validate_for_execution(&library)
-            .is_err_and(|e| e.to_string().contains("incompatible")),
-        "Int through a passthrough into String must be rejected"
-    );
-
-    // Constants are type-checked too: a String literal can't satisfy an Int
-    // input, but a numeric literal can (the scalar coercion).
-    let mut g = Graph::default();
-    let i = g.add_func_node(&int_sink);
-    g.set_input_binding(
-        InputPort::new(i, 0),
-        Binding::Const(StaticValue::String("x".into())),
-    );
-    assert!(
-        g.validate_for_execution(&library)
-            .is_err_and(|e| e.to_string().contains("incompatible")),
-        "a String constant on an Int input must be rejected"
-    );
-    g.set_input_binding(
-        InputPort::new(i, 0),
-        Binding::Const(StaticValue::Float(2.5)),
-    );
-    assert!(
-        g.validate_for_execution(&library).is_ok(),
-        "a numeric constant satisfies a numeric input"
-    );
-
     let single_path = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "single_path")
             .input(FuncInput::required(
@@ -441,40 +373,69 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
             ))
             .output(FuncOutput::new("o", DataType::Int)),
     );
+    let mut library = Library::default();
+    library.add(int_src.clone());
+    library.add(str_sink.clone());
+    library.add(int_sink.clone());
     library.add(single_path.clone());
     library.add(path_list.clone());
 
+    // Validation always accepts; the compiled program's flat input shows
+    // whether the binding survived the type gate or degraded to unbound.
+    let flat_input = |g: &Graph, node: NodeId| {
+        assert!(g.validate_for_execution(&library).is_ok());
+        let compiled = Compiler::default().compile(g, &library).unwrap();
+        let e_node = &compiled.program.e_nodes[&ExecutionNodeId::from_authoring(&[node])];
+        compiled.program.inputs[e_node.inputs.start as usize]
+            .binding
+            .clone()
+    };
+
+    // Wires: Int -> String degrades, Int -> Int binds.
     let mut g = Graph::default();
-    let single = g.add_func_node(&single_path);
-    g.set_input_binding(
-        InputPort::new(single, 0),
-        Binding::Const(StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])),
+    let s = g.add_func_node(&int_src);
+    let f = g.add_func_node(&str_sink);
+    let i = g.add_func_node(&int_sink);
+    g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
+    g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
+    assert!(
+        matches!(flat_input(&g, f), ExecutionBinding::None),
+        "Int into a String input flattens as unbound"
     );
     assert!(
-        g.validate_for_execution(&library)
-            .is_err_and(|error| error.to_string().contains("incompatible")),
-        "a path list cannot satisfy a single-path input"
+        matches!(flat_input(&g, i), ExecutionBinding::Bind(_)),
+        "Int into an Int input binds"
     );
 
-    let mut g = Graph::default();
-    let many = g.add_func_node(&path_list);
-    g.set_input_binding(
-        InputPort::new(many, 0),
-        Binding::Const(StaticValue::FsPath("a.fit".into())),
-    );
-    assert!(
-        g.validate_for_execution(&library)
-            .is_err_and(|error| error.to_string().contains("incompatible")),
-        "a single path cannot satisfy a multi-file input"
-    );
-    g.set_input_binding(
-        InputPort::new(many, 0),
-        Binding::Const(StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])),
-    );
-    assert!(
-        g.validate_for_execution(&library).is_ok(),
-        "a path list satisfies a multi-file input"
-    );
+    // Constants: a String literal can't satisfy an Int input, a numeric one
+    // can (scalar coercion), and the two FsPath shapes only satisfy their
+    // matching picker mode.
+    let cases = [
+        (&int_sink, StaticValue::String("x".into()), false),
+        (&int_sink, StaticValue::Float(2.5), true),
+        (
+            &single_path,
+            StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
+            false,
+        ),
+        (&path_list, StaticValue::FsPath("a.fit".into()), false),
+        (
+            &path_list,
+            StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
+            true,
+        ),
+    ];
+    for (func, value, satisfied) in cases {
+        let mut g = Graph::default();
+        let node = g.add_func_node(func);
+        g.set_input_binding(InputPort::new(node, 0), Binding::Const(value.clone()));
+        assert_eq!(
+            matches!(flat_input(&g, node), ExecutionBinding::Const(_)),
+            satisfied,
+            "const {value:?} on {:?}",
+            func.name
+        );
+    }
 }
 
 #[test]
@@ -510,7 +471,9 @@ fn validate_for_execution_tolerates_library_range_drift() {
     graph.insert_graph(GraphId::unique(), child);
     assert!(graph.validate_for_execution(&library).is_ok());
 
-    // `Null` consts are "explicitly unset" and valid only on optional inputs.
+    // `Null` consts ("explicitly unset") are tolerated on both sides:
+    // meaningful on an optional input, degrading to a missing input on a
+    // required one at flatten (see `const_satisfies`).
     let nullable = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "nullable")
             .input(FuncInput::optional("opt", DataType::Int))
@@ -520,13 +483,8 @@ fn validate_for_execution_tolerates_library_range_drift() {
     library.add(nullable.clone());
     let node = graph.add_func_node(&nullable);
     graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
-    assert!(graph.validate_for_execution(&library).is_ok());
     graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
-    let error = graph.validate_for_execution(&library).unwrap_err();
-    assert!(
-        error.to_string().contains("holds a constant incompatible"),
-        "{error}"
-    );
+    assert!(graph.validate_for_execution(&library).is_ok());
 }
 
 #[test]
@@ -682,8 +640,11 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 }
 
 #[test]
-fn edges_invalidated_by_follows_wildcard_chains() {
+fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     use crate::DataType;
+    use crate::execution::compile::Compiler;
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program::ExecutionBinding;
     use crate::library::Library;
 
     let float_src = testing::with_stub_lambda(
@@ -717,26 +678,48 @@ fn edges_invalidated_by_follows_wildcard_chains() {
     g.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
     g.set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
 
-    // Rewire pass1's value input to the String producer: pass1.out and
-    // pass2.out both retype to String, so the *two-hops-down* sink edge is
-    // the one now incompatible — the chain must be followed to find it.
-    g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
-    assert_eq!(
-        g.edges_invalidated_by(&library, InputPort::new(p1, 0)),
-        vec![InputPort::new(sink, 0)],
-        "the edge two passthroughs downstream is flagged"
+    // The sink's flat input in the compiled program: the type gate rules on
+    // the authored wire, never on the document (nothing is severed).
+    let sink_binding = |g: &Graph| {
+        let mut compiler = Compiler::default();
+        let compiled = compiler.compile(g, &library).expect("mismatches compile");
+        let e_node = &compiled.program.e_nodes[&ExecutionNodeId::from_authoring(&[sink])];
+        compiled.program.inputs[e_node.inputs.start as usize]
+            .binding
+            .clone()
+    };
+
+    // The valid Float chain binds the sink to its passthrough producer
+    // (passthroughs are real func nodes — only boundaries short-circuit).
+    assert!(
+        matches!(sink_binding(&g), ExecutionBinding::Bind(addr)
+            if addr.e_node_id == ExecutionNodeId::from_authoring(&[p2])),
+        "a well-typed chain flattens as bound"
     );
 
-    // Changing an ordinary node's input retypes nothing → no invalidations.
-    assert!(
-        g.edges_invalidated_by(&library, InputPort::new(sink, 0))
-            .is_empty()
+    // Rewire pass1's value input to the String producer: pass1.out and
+    // pass2.out both retype to String, so the *two-hops-down* sink edge is
+    // the one now incompatible — it flattens as unbound while the authored
+    // wire survives in the document.
+    g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
+    assert!(matches!(sink_binding(&g), ExecutionBinding::None));
+    assert_eq!(
+        g.bindings.get(&InputPort::new(sink, 0)),
+        Some(&Binding::bind(p2, 0)),
+        "the mismatched wire stays authored"
     );
-    // Changing the passthrough's *path* input (no output mirrors it) → none.
-    assert!(
-        g.edges_invalidated_by(&library, InputPort::new(p1, 1))
-            .is_empty()
+
+    // A const that doesn't satisfy its port degrades the same way.
+    g.set_input_binding(
+        InputPort::new(sink, 0),
+        Binding::Const(StaticValue::String("nope".into())),
     );
+    assert!(matches!(sink_binding(&g), ExecutionBinding::None));
+    g.set_input_binding(
+        InputPort::new(sink, 0),
+        Binding::Const(StaticValue::Float(1.0)),
+    );
+    assert!(matches!(sink_binding(&g), ExecutionBinding::Const(_)));
 }
 
 #[test]

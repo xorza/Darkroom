@@ -1,7 +1,6 @@
 use common::DeserializeError;
 use thiserror::Error;
 
-use crate::DataType;
 use crate::graph::interface::GraphId;
 use crate::graph::{InputPort, NodeId, OutputPort};
 use crate::node::definition::FuncId;
@@ -55,25 +54,6 @@ pub enum GraphValidationError {
     BindingMissingProducer {
         destination: InputPort,
         producer: OutputPort,
-    },
-    #[error(
-        "node {node_id:?} input {port_idx} expects {expected:?} but is wired from an incompatible {actual:?}",
-        node_id = .destination.node_id,
-        port_idx = .destination.port_idx
-    )]
-    IncompatibleBinding {
-        destination: InputPort,
-        expected: DataType,
-        actual: DataType,
-    },
-    #[error(
-        "node {node_id:?} input {port_idx} holds a constant incompatible with its type {data_type:?}",
-        node_id = .port.node_id,
-        port_idx = .port.port_idx
-    )]
-    IncompatibleConstant {
-        port: InputPort,
-        data_type: DataType,
     },
     #[error("subscription from missing emitter {node_id:?}")]
     MissingSubscriptionEmitter { node_id: NodeId },

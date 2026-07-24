@@ -23,10 +23,10 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
 };
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::validate::MAX_NESTING_DEPTH;
+use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies};
 use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
-use crate::node::definition::Func;
+use crate::node::definition::{Func, FuncInput};
 use crate::node::special::SpecialNode;
 
 /// Reusable flattening scratch owned by the
@@ -278,9 +278,9 @@ impl<'a> Run<'a> {
             let scope = *self.scope_stack.last().unwrap();
             self.flatten.set_leaf(e_node_id, scope, node.id);
 
-            for port_idx in 0..func.inputs.len() {
+            for (port_idx, func_input) in func.inputs.iter().enumerate() {
                 let port = InputPort::new(node.id, port_idx);
-                let binding = self.resolve_binding(graph.bindings.get(&port));
+                let binding = self.typed_binding(graph, func_input, graph.bindings.get(&port));
                 self.inputs[inputs_start + port_idx].binding = binding;
             }
         }
@@ -443,6 +443,31 @@ impl<'a> Run<'a> {
             }
             NodeKind::GraphOutput => ExecutionBinding::None,
         }
+    }
+
+    /// [`Self::resolve_binding`] behind the type gate: a wire whose resolved
+    /// source type is incompatible with the declared input, or a const that
+    /// doesn't satisfy it, flattens as unbound — the type half of drift
+    /// tolerance. The editor paints such a wire as mismatched; a required
+    /// input surfaces as a missing-input verdict. Nothing is severed, so the
+    /// wiring revives when the types line up again.
+    fn typed_binding(
+        &mut self,
+        graph: &'a Graph,
+        input: &FuncInput,
+        binding: Option<&Binding>,
+    ) -> ExecutionBinding {
+        let mismatched = match binding {
+            Some(Binding::Bind(src)) => !input
+                .data_type
+                .compatible_with(&graph.resolve_output_type(self.library, *src)),
+            Some(Binding::Const(value)) => !const_satisfies(self.library, input, value),
+            None => false,
+        };
+        if mismatched {
+            return ExecutionBinding::None;
+        }
+        self.resolve_binding(binding)
     }
 
     fn resolve_binding(&mut self, binding: Option<&Binding>) -> ExecutionBinding {
