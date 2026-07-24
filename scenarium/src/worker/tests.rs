@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -14,6 +14,7 @@ use crate::execution::seeds::RunSeeds;
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
+use crate::node::lambda::{FuncLambda, InvokeError};
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
@@ -1595,7 +1596,6 @@ fn batch_intent_accumulates_simple_flags() {
     assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
     assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
     assert!(intent.execute_sinks);
-    assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
     assert!(intent.events.contains(&event));
     assert_eq!(
@@ -1618,7 +1618,6 @@ fn batch_intent_accumulates_simple_flags() {
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
     assert!(!intent.execute_sinks);
     assert!(!intent.execute_event_sources);
-    assert!(!intent.exit);
     assert!(intent.events.is_empty());
     assert!(intent.execute_nodes.is_empty());
     assert!(intent.evict_cache.is_empty());
@@ -1667,40 +1666,6 @@ fn empty_compiled() -> Arc<CompiledGraph> {
         .compile(&Graph::default(), &Library::default())
         .unwrap()
         .into()
-}
-
-#[test]
-fn batch_intent_exit_dominates_entire_batch() {
-    // Exit is sticky across the whole batch: every other command
-    // in the batch is discarded, whether sent before or after.
-    let intent = batch_intent([
-        WorkerMessage::Clear,
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        },
-        WorkerMessage::Exit,
-        WorkerMessage::StartEventLoop, // post-Exit: dropped
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-    ]);
-
-    assert!(intent.exit);
-    assert!(
-        intent.graph_state.is_none(),
-        "pre-Exit graph ops must be discarded"
-    );
-    assert!(
-        intent.loop_request.is_none(),
-        "post-Exit loop ops must be discarded"
-    );
-    assert!(
-        !intent.execute_sinks,
-        "pre-Exit execute_sinks must be discarded"
-    );
-    assert!(intent.events.is_empty());
-    assert!(intent.evict_cache.is_empty());
-    assert!(intent.syncs.is_empty());
 }
 
 #[test]
@@ -2051,28 +2016,6 @@ async fn fired_event_does_not_reinitialize_event_sources() {
     sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
 }
 
-// F4: Exit dominates the batch at the runtime level — any pre-Exit
-// Sync reply sender must drop (waiter observes RecvError), not fire
-// with `Ok(())`. `batch_intent_exit_dominates_entire_batch` pins the pure
-// reduction side; this pins the end-to-end contract.
-#[tokio::test]
-async fn exit_in_batch_closes_pending_sync() {
-    let (worker, _rx) = completed_worker(8);
-
-    let (reply, rx) = oneshot::channel();
-    worker
-        .send_many([WorkerMessage::Sync { reply }, WorkerMessage::Exit])
-        .unwrap();
-
-    let result = timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("rx must resolve once the dropped Sync sender is observed");
-    assert!(
-        result.is_err(),
-        "Sync batched with Exit must drop the reply sender, got {result:?}"
-    );
-}
-
 // F6: StartEventLoop while a loop is already running must stop the
 // current loop before rebuilding it.
 #[tokio::test]
@@ -2097,11 +2040,131 @@ async fn start_event_loop_twice_is_idempotent() {
         .expect("event loop execution failed");
 }
 
-// F8: dropping a Worker without calling exit() must not leak or
-// panic. Uses a shared flag to prove the tokio task actually
-// terminates — if Drop regresses (e.g. thread_handle take but no
-// abort), the lambda inside a running loop would keep running past
-// the drop.
+#[tokio::test]
+async fn exit_waits_for_active_event_cleanup_and_idle_report() {
+    #[derive(Debug)]
+    struct EventFutureDrop(Arc<AtomicBool>);
+
+    impl Drop for EventFutureDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let entered = Arc::new(Notify::new());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let mut library = system_library();
+    library.merge(worker_events_library());
+    let mut frame_event = library.by_name("Frame Event").unwrap().clone();
+    frame_event.events[0].event_lambda = EventLambda::new({
+        let entered = Arc::clone(&entered);
+        let dropped = Arc::clone(&dropped);
+        move |_state| {
+            let entered = Arc::clone(&entered);
+            let dropped = Arc::clone(&dropped);
+            Box::pin(async move {
+                let _drop = EventFutureDrop(dropped);
+                entered.notify_one();
+                std::future::pending::<()>().await;
+            })
+        }
+    });
+    library.remove(&frame_event.id).unwrap();
+    library.add(frame_event);
+
+    let graph = log_frame_no_graph(&library);
+    let compiled = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let mut worker = Worker::new(move |report| {
+        report_tx.send(report).unwrap();
+    });
+    sync_after(
+        &worker,
+        [
+            WorkerMessage::Update { compiled },
+            WorkerMessage::StartEventLoop,
+        ],
+    )
+    .await;
+    timeout(Duration::from_millis(500), entered.notified())
+        .await
+        .expect("event future did not start");
+
+    worker.exit().await.unwrap();
+
+    assert!(dropped.load(Ordering::SeqCst));
+    let mut saw_idle = false;
+    while let Ok(report) = report_rx.try_recv() {
+        if matches!(
+            report,
+            WorkerReport::Status(status)
+                if status.kind == WorkerStatusKind::Activity
+                    && status.activity == WorkerActivity::Idle
+        ) {
+            saw_idle = true;
+        }
+    }
+    assert!(saw_idle, "exit returned before publishing idle");
+    assert!(worker.send(WorkerMessage::Clear).is_err());
+}
+
+#[tokio::test]
+async fn exit_cancels_active_execution_before_joining() {
+    let entered = Arc::new(Notify::new());
+    let observed_cancel = Arc::new(AtomicBool::new(false));
+    let func = Func::new(FuncId::unique(), "Wait for cancellation")
+        .sink()
+        .lambda(FuncLambda::new({
+            let entered = Arc::clone(&entered);
+            let observed_cancel = Arc::clone(&observed_cancel);
+            move |context, _state, _event_state, _inputs, _output_demand, _outputs| {
+                let cancel = context.cancel_flag();
+                let entered = Arc::clone(&entered);
+                let observed_cancel = Arc::clone(&observed_cancel);
+                Box::pin(async move {
+                    entered.notify_one();
+                    loop {
+                        if cancel.is_cancelled() {
+                            observed_cancel.store(true, Ordering::SeqCst);
+                            return Err(InvokeError::Cancelled);
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+            }
+        }));
+    let mut library = Library::default();
+    library.add(func.clone());
+    let mut graph = Graph::default();
+    graph.add((&func).into());
+    let compiled = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    let mut worker = Worker::new(|_| {});
+    worker
+        .send_many([
+            WorkerMessage::Update { compiled },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
+        .unwrap();
+    timeout(Duration::from_millis(500), entered.notified())
+        .await
+        .expect("execution did not start");
+
+    timeout(Duration::from_millis(500), worker.exit())
+        .await
+        .expect("worker did not exit")
+        .unwrap();
+
+    assert!(observed_cancel.load(Ordering::SeqCst));
+}
+
 #[tokio::test]
 async fn drop_without_exit_shuts_down_cleanly() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2113,13 +2176,9 @@ async fn drop_without_exit_shuts_down_cleanly() {
             counter_cb.fetch_add(1, Ordering::SeqCst);
         });
 
-        // Minimal traffic: confirm the worker is alive before drop.
         sync_after(&worker, std::iter::empty()).await;
-
-        // `worker` goes out of scope → Drop → exit().
     }
 
-    // Give any dangling task time to (incorrectly) run; none should.
     let before = counter.load(Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(50)).await;
     let after = counter.load(Ordering::SeqCst);

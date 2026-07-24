@@ -35,7 +35,6 @@ pub enum WorkerReport {
 
 #[derive(Debug)]
 pub enum WorkerMessage {
-    Exit,
     Update { compiled: Arc<CompiledGraph> },
     Clear,
     EvictCache { nodes: Vec<NodeId> },

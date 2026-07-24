@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
@@ -71,6 +72,7 @@ impl PendingRun {
 #[derive(Debug)]
 enum WorkerWake {
     Ready,
+    Shutdown,
     MessagesClosed,
     EventLoopPanicked(LambdaPanic),
 }
@@ -79,7 +81,8 @@ enum WorkerWake {
 pub(crate) struct WorkerTask<ExecutionCallback> {
     message_rx: UnboundedReceiver<WorkerMessage>,
     callback: ExecutionCallback,
-    cancel: CancelToken,
+    run_cancel: CancelToken,
+    shutdown: CancellationToken,
     engine: ExecutionEngine,
     status: WorkerStatusPublisher,
     outcome: ExecutionOutcome,
@@ -98,12 +101,14 @@ where
     pub(crate) fn new(
         message_rx: UnboundedReceiver<WorkerMessage>,
         callback: ExecutionCallback,
-        cancel: CancelToken,
+        run_cancel: CancelToken,
+        shutdown: CancellationToken,
     ) -> Self {
         Self {
             message_rx,
             callback,
-            cancel,
+            run_cancel,
+            shutdown,
             engine: ExecutionEngine::default(),
             status: WorkerStatusPublisher::default(),
             outcome: ExecutionOutcome::default(),
@@ -117,18 +122,11 @@ where
     }
 
     pub(crate) async fn run(mut self) {
-        loop {
-            let exit = match self.next_intent().await {
-                Some(intent) => intent.exit,
-                None => return,
-            };
-            if exit {
-                self.stop_event_loop().await;
-                return;
-            }
+        while self.next_intent().await.is_some() {
             self.apply_intent().await;
             tokio::task::yield_now().await;
         }
+        self.stop_event_loop().await;
     }
 
     async fn next_intent(&mut self) -> Option<&BatchIntent> {
@@ -137,6 +135,7 @@ where
             self.event_buffer.clear();
             let wake = tokio::select! {
                 biased;
+                _ = self.shutdown.cancelled() => WorkerWake::Shutdown,
                 count = self.message_rx.recv_many(&mut self.messages, usize::MAX) => match count {
                     0 => WorkerWake::MessagesClosed,
                     _ => WorkerWake::Ready,
@@ -151,7 +150,7 @@ where
 
             match wake {
                 WorkerWake::Ready => {}
-                WorkerWake::MessagesClosed => return None,
+                WorkerWake::Shutdown | WorkerWake::MessagesClosed => return None,
                 WorkerWake::EventLoopPanicked(panic) => {
                     self.fail_event_loop(panic).await;
                     continue;
@@ -223,7 +222,10 @@ where
     }
 
     async fn execute(&mut self, run: PendingRun) {
-        self.cancel.reset();
+        self.run_cancel.reset();
+        if self.shutdown.is_cancelled() {
+            return;
+        }
         let activity = self.executing_activity();
         (self.callback)(WorkerReport::Status(self.status.activity(activity)));
         let _pause_guard = self.event_loop_pause_gate.close();
@@ -233,14 +235,14 @@ where
             &mut self.run_events,
             &mut self.status,
             run.seeds,
-            self.cancel.clone(),
+            self.run_cancel.clone(),
             &self.callback,
         )
         .await;
 
         match result {
             Ok(()) => {
-                if run.start_event_loop {
+                if run.start_event_loop && !self.shutdown.is_cancelled() {
                     assert!(self.event_loop.is_none());
                     let triggers = std::mem::take(&mut self.outcome.event_triggers);
                     if !triggers.is_empty() {
@@ -378,6 +380,7 @@ mod tests {
     use std::time::Instant;
 
     use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
 
     use common::CancelToken;
 
@@ -400,7 +403,13 @@ mod tests {
             seeds: RunSeeds::nodes(vec![e_node_id]),
         })
         .unwrap();
-        let mut task = WorkerTask::new(rx, |_: WorkerReport| {}, CancelToken::new());
+        let shutdown = CancellationToken::new();
+        let mut task = WorkerTask::new(
+            rx,
+            |_: WorkerReport| {},
+            CancelToken::new(),
+            shutdown.clone(),
+        );
 
         {
             let intent = task.next_intent().await.unwrap();
@@ -418,6 +427,10 @@ mod tests {
         let intent = task.next_intent().await.unwrap();
         assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
         assert_eq!(task.messages.capacity(), capacity);
+
+        tx.send(WorkerMessage::Clear).unwrap();
+        shutdown.cancel();
+        assert!(task.next_intent().await.is_none());
     }
 
     #[test]

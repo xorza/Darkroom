@@ -8,6 +8,8 @@
 //! once so both owners just build one, `enter` it to construct their inner
 //! value, and store it alongside for drop order.
 
+use std::future::Future;
+
 use tokio::runtime::{Builder, Runtime};
 
 /// A dedicated background tokio runtime, held only for its `Drop`. Build
@@ -33,24 +35,21 @@ impl BackgroundRuntime {
         let _guard = self.runtime.enter();
         f()
     }
+
+    /// Drive shutdown work on the owned runtime before its threads are dropped.
+    pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.runtime.block_on(future)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-    use std::time::Duration;
-
     use super::BackgroundRuntime;
 
     #[test]
-    fn enter_provides_an_ambient_runtime_for_spawn() {
+    fn enter_spawns_on_owned_runtime_and_block_on_joins_the_task() {
         let rt = BackgroundRuntime::new().unwrap();
-        let (tx, rx) = mpsc::channel();
-        // Outside `enter`, this `tokio::spawn` would panic (no ambient
-        // runtime); the received value proves the task ran on `rt`.
-        rt.enter(|| {
-            tokio::spawn(async move { tx.send(42).unwrap() });
-        });
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 42);
+        let task = rt.enter(|| tokio::spawn(async { 42 }));
+        assert_eq!(rt.block_on(task).unwrap(), 42);
     }
 }

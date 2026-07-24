@@ -32,7 +32,6 @@ pub(crate) struct BatchIntent {
     pub(crate) execute_event_sources: bool,
     pub(crate) execute_nodes: IndexSet<ExecutionNodeId>,
     pub(crate) evict_cache: IndexSet<NodeId>,
-    pub(crate) exit: bool,
     pub(crate) events: IndexSet<ExecutionEventPort>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
@@ -46,11 +45,6 @@ impl BatchIntent {
         self.clear();
         for msg in msgs {
             match msg {
-                WorkerMessage::Exit => {
-                    self.clear();
-                    self.exit = true;
-                    return;
-                }
                 WorkerMessage::Update { compiled } => {
                     self.graph_state = Some(GraphOp::Replace(compiled));
                 }
@@ -85,7 +79,6 @@ impl BatchIntent {
         self.execute_event_sources = false;
         self.execute_nodes.clear();
         self.evict_cache.clear();
-        self.exit = false;
         self.events.clear();
         self.syncs.clear();
     }

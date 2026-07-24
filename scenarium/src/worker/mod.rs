@@ -1,5 +1,6 @@
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
+use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
@@ -15,9 +16,10 @@ mod task;
 
 #[derive(Debug)]
 pub struct Worker {
-    thread_handle: Option<JoinHandle<()>>,
+    task: Option<JoinHandle<()>>,
     tx: UnboundedSender<WorkerMessage>,
-    cancel: CancelToken,
+    run_cancel: CancelToken,
+    shutdown: CancellationToken,
 }
 
 impl Worker {
@@ -26,19 +28,21 @@ impl Worker {
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
-        let cancel = CancelToken::new();
-        let task = WorkerTask::new(rx, callback, cancel.clone());
-        let thread_handle = tokio::spawn(task.run());
+        let run_cancel = CancelToken::new();
+        let shutdown = CancellationToken::new();
+        let worker_task = WorkerTask::new(rx, callback, run_cancel.clone(), shutdown.clone());
+        let task = tokio::spawn(worker_task.run());
 
         Self {
-            thread_handle: Some(thread_handle),
+            task: Some(task),
             tx,
-            cancel,
+            run_cancel,
+            shutdown,
         }
     }
 
     pub fn request_cancel(&self) {
-        self.cancel.cancel();
+        self.run_cancel.cancel();
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
@@ -55,19 +59,30 @@ impl Worker {
         Ok(())
     }
 
-    pub fn exit(&mut self) {
-        self.tx.send(WorkerMessage::Exit).ok();
-        self.request_cancel();
+    /// Cancel active work, drain event tasks, and wait for the worker task to finish.
+    pub async fn exit(&mut self) -> std::result::Result<(), JoinError> {
+        self.request_exit();
+        let result = match self.task.as_mut() {
+            Some(task) => task.await,
+            None => return Ok(()),
+        };
+        self.task.take();
+        result
+    }
 
-        if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle.abort();
-        }
+    fn request_exit(&self) {
+        self.shutdown.cancel();
+        self.run_cancel.cancel();
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.exit();
+        self.request_exit();
+        // Drop cannot await; callers needing structured cleanup use `exit`.
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
     }
 }
 

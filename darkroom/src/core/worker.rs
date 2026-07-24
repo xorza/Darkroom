@@ -22,12 +22,9 @@ use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
 
 pub(crate) struct WorkerBridge {
-    /// Kept alive so the worker's spawned tasks keep running; dropping it
-    /// shuts the runtime down. Never read — its lifetime is the point.
-    #[allow(dead_code)]
-    runtime: BackgroundRuntime,
     worker: Worker,
     rx: Receiver<WorkerReport>,
+    runtime: BackgroundRuntime,
 }
 
 impl std::fmt::Debug for WorkerBridge {
@@ -48,9 +45,9 @@ impl WorkerBridge {
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = runtime.enter(|| Worker::new(move |report| Self::deliver(&tx, &wake, report)));
         Self {
-            runtime,
             worker,
             rx,
+            runtime,
         }
     }
 
@@ -122,5 +119,81 @@ impl WorkerBridge {
     /// last frame.
     pub(crate) fn drain(&self) -> impl Iterator<Item = WorkerReport> + '_ {
         self.rx.try_iter()
+    }
+}
+
+impl Drop for WorkerBridge {
+    fn drop(&mut self) {
+        if let Err(error) = self.runtime.block_on(self.worker.exit()) {
+            tracing::error!(%error, "worker task failed during shutdown");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use scenarium::{
+        Binding, Compiler, Graph, InputPort, StaticValue, WorkerActivity, WorkerReport,
+        WorkerStatusKind, system_library, worker_events_library,
+    };
+
+    use crate::core::wake::Wake;
+    use crate::core::worker::WorkerBridge;
+
+    #[test]
+    fn drop_waits_for_worker_idle_before_runtime_shutdown() {
+        let wake_count = Arc::new(AtomicUsize::new(0));
+        let wake: Wake = {
+            let wake_count = Arc::clone(&wake_count);
+            Arc::new(move || {
+                wake_count.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let bridge = WorkerBridge::new(wake);
+
+        let mut library = system_library();
+        library.merge(worker_events_library());
+        let mut graph = Graph::default();
+        let frame = graph.add(library.by_name("Frame Event").unwrap().into());
+        let print = graph.add(library.by_name("Print").unwrap().into());
+        graph.set_input_binding(
+            InputPort::new(frame, 0),
+            Binding::from(StaticValue::Float(0.0)),
+        );
+        graph.set_input_binding(
+            InputPort::new(print, 0),
+            Binding::from(StaticValue::String("tick".to_string())),
+        );
+        graph.subscribe(frame, 1, print);
+        let compiled = Compiler::default()
+            .compile(&graph, &library)
+            .unwrap()
+            .into();
+        bridge.install(compiled);
+        bridge.start_event_loop();
+
+        loop {
+            let report = bridge
+                .rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("worker did not start its event loop");
+            if matches!(
+                report,
+                WorkerReport::Status(status)
+                    if status.activity == WorkerActivity::EventLoop
+                        && matches!(status.kind, WorkerStatusKind::Completed { .. })
+            ) {
+                break;
+            }
+        }
+        let before_drop = wake_count.load(Ordering::SeqCst);
+
+        drop(bridge);
+
+        assert_eq!(wake_count.load(Ordering::SeqCst), before_drop + 1);
     }
 }
