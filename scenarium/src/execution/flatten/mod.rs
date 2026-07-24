@@ -23,14 +23,11 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
 };
 use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::validate::MAX_NESTING_DEPTH;
 use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
-
-/// Hard cap on nesting depth — a release backstop after `validate_for_execution` has
-/// rejected recursive graphs.
-const MAX_DEPTH: usize = 256;
 
 /// Reusable flattening scratch owned by the
 /// [`Compiler`](crate::execution::compile::Compiler). The per-build resolved-graph
@@ -154,11 +151,15 @@ impl<'a> Run<'a> {
             .expect("the root level always exists")
     }
 
-    /// Descend one composite level. A legitimate graph never nests this deep.
+    /// Descend one composite level. A release-build backstop against stack
+    /// overflow — validation already rejected trees past the cap, but its
+    /// shared-graph memoization measures a graph's depth only at first
+    /// encounter, so flatten re-checks the true instance depth. Compile is a
+    /// cold path; the assert stays in release.
     fn push_level(&mut self, instance_id: NodeId, graph: &'a Graph) {
-        debug_assert!(
-            self.path.len() < MAX_DEPTH,
-            "graph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
+        assert!(
+            self.path.len() < MAX_NESTING_DEPTH,
+            "graph nesting exceeds {MAX_NESTING_DEPTH} levels"
         );
         self.path.push(instance_id);
         self.levels.push(graph);

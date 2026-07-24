@@ -24,7 +24,7 @@ mod query;
 mod serde;
 #[cfg(test)]
 mod tests;
-mod validate;
+pub(crate) mod validate;
 pub(crate) mod wiring;
 
 /// Address of a producer node's output port — the source side of a data

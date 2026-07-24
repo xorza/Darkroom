@@ -13,12 +13,18 @@ use crate::{DataType, FsPathMode, StaticValue};
 
 type ValidationResult<T> = Result<T, GraphValidationError>;
 
+/// Hard cap on graph-tree nesting. Enforced here as a validation error (the
+/// recursive walk below is itself stack-bound), and re-asserted as a release
+/// backstop in flatten's descent.
+pub(crate) const MAX_NESTING_DEPTH: usize = 256;
+
 #[derive(Debug)]
 struct GraphChecker<'a> {
     library: Option<&'a Library>,
     node_ids: HashSet<NodeId>,
     checked_shared: HashSet<GraphId>,
     shared_path: HashSet<GraphId>,
+    depth: usize,
 }
 
 impl<'a> GraphChecker<'a> {
@@ -28,10 +34,16 @@ impl<'a> GraphChecker<'a> {
             node_ids: HashSet::new(),
             checked_shared: HashSet::new(),
             shared_path: HashSet::new(),
+            depth: 0,
         }
     }
 
     fn validate_graph(&mut self, graph: &Graph, requires_definition: bool) -> ValidationResult<()> {
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(GraphValidationError::NestingTooDeep {
+                max: MAX_NESTING_DEPTH,
+            });
+        }
         let definition = graph.definition.as_ref();
         if requires_definition && definition.is_none() {
             return Err(GraphValidationError::MissingSubgraphDefinition);
@@ -200,11 +212,12 @@ impl<'a> GraphChecker<'a> {
             if graph_id.is_nil() {
                 return Err(GraphValidationError::NilLocalGraphId);
             }
-            self.validate_graph(nested, true).map_err(|source| {
-                GraphValidationError::LocalGraph {
-                    name: subgraph_name(nested),
-                    source: Box::new(source),
-                }
+            self.depth += 1;
+            let nested_result = self.validate_graph(nested, true);
+            self.depth -= 1;
+            nested_result.map_err(|source| GraphValidationError::LocalGraph {
+                name: subgraph_name(nested),
+                source: Box::new(source),
             })?;
         }
 
@@ -220,12 +233,14 @@ impl<'a> GraphChecker<'a> {
                 name: subgraph_name(graph),
             });
         }
+        self.depth += 1;
         let result =
             self.validate_graph(graph, true)
                 .map_err(|source| GraphValidationError::SharedGraph {
                     name: subgraph_name(graph),
                     source: Box::new(source),
                 });
+        self.depth -= 1;
         self.shared_path.remove(&graph_id);
         result?;
         self.checked_shared.insert(graph_id);

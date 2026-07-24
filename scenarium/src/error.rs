@@ -89,6 +89,8 @@ pub enum GraphValidationError {
     ExposedEventMissingEmitter { name: String, emitter: NodeId },
     #[error("local graph has a nil id")]
     NilLocalGraphId,
+    #[error("graph nesting exceeds {max} levels")]
+    NestingTooDeep { max: usize },
     #[error("graph {name:?} is recursive (contains itself)")]
     RecursiveGraph { name: String },
     #[error("in local graph {name:?}: {source}")]

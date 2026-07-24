@@ -530,6 +530,36 @@ fn validate_for_execution_tolerates_library_range_drift() {
 }
 
 #[test]
+fn validate_caps_graph_nesting_depth() {
+    use crate::graph::validate::MAX_NESTING_DEPTH;
+
+    let nest = |levels: usize| {
+        let mut graph = Graph::new("leaf");
+        for _ in 0..levels {
+            let mut parent = Graph::new("level");
+            parent.insert_graph(GraphId::unique(), graph);
+            graph = parent;
+        }
+        let mut root = Graph::default();
+        root.insert_graph(GraphId::unique(), graph);
+        root
+    };
+
+    // `nest(k)` puts the leaf definition at depth `k + 1`; the cap is the
+    // parameter deciding, not the walk giving up.
+    assert!(nest(MAX_NESTING_DEPTH - 2).validate().is_ok());
+    let error = nest(MAX_NESTING_DEPTH).validate().unwrap_err();
+    let mut source: &dyn std::error::Error = &error;
+    while let Some(next) = source.source() {
+        source = next;
+    }
+    assert_eq!(
+        source.to_string(),
+        format!("graph nesting exceeds {MAX_NESTING_DEPTH} levels")
+    );
+}
+
+#[test]
 fn resolve_output_type_follows_passthrough_chain() {
     use crate::library::Library;
     use crate::{DataType, StaticValue};

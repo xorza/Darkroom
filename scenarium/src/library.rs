@@ -6,7 +6,7 @@ use crate::CustomValueCodec;
 use crate::graph::Graph;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
-use crate::{DataType, EnumVariants, TypeId};
+use crate::{DataType, EnumVariants, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
 #[derive(Clone, Debug)]
@@ -133,6 +133,7 @@ impl Library {
             !self.funcs.contains_key(&func.id),
             "duplicate function registration"
         );
+        self.assert_enum_defaults(&func);
         self.funcs.insert(func.id, func);
     }
 
@@ -169,6 +170,40 @@ impl Library {
             "duplicate type registration"
         );
         self.types.insert(type_id, entry);
+        // Funcs and their enum types register in either order, so the
+        // membership gate runs from both directions: `add` checks against
+        // types already present, and a fresh enum entry re-checks the funcs
+        // already added.
+        for func in self.funcs.values() {
+            self.assert_enum_defaults(func);
+        }
+    }
+
+    /// Panic when `func` declares an `Enum` default whose name isn't among
+    /// its type's registered variants. Variant-kind and picker-membership
+    /// checks already ran in `Func::validate`; this closes the half that
+    /// needs the registry. A default on a type not (yet) registered passes —
+    /// `register_type` re-checks when the entry arrives.
+    fn assert_enum_defaults(&self, func: &Func) {
+        for input in &func.inputs {
+            if !input.value_variants.is_empty() {
+                continue;
+            }
+            let (DataType::Enum(type_id), Some(StaticValue::Enum(name))) =
+                (&input.data_type, &input.default_value)
+            else {
+                continue;
+            };
+            if let Some(variants) = self.enum_variants(type_id) {
+                assert!(
+                    variants.iter().any(|variant| variant == name),
+                    "function {:?} input {:?} defaults to {name:?}, which is not a registered \
+                     variant of its enum type",
+                    func.name,
+                    input.name,
+                );
+            }
+        }
     }
 
     /// The variant names of a registered `Enum` type — for the editor's enum
@@ -335,6 +370,52 @@ mod tests {
             }));
             assert!(result.is_err(), "invalid declaration was registered");
         }
+    }
+
+    /// A func whose `mode` input defaults to the enum variant `default`.
+    fn modal_func(type_id: TypeId, default: &str) -> Func {
+        testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "modal").input(
+                FuncInput::optional("mode", DataType::Enum(type_id))
+                    .default(StaticValue::Enum(default.into())),
+            ),
+        )
+    }
+
+    fn mode_entry() -> TypeEntry {
+        TypeEntry::enum_with_variants("Mode", vec!["fast".into(), "slow".into()])
+    }
+
+    #[test]
+    fn enum_defaults_must_name_registered_variants_in_either_order() {
+        // Type first: `add` gates membership on registration.
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.register_type(type_id, mode_entry());
+        library.add(modal_func(type_id, "fast"));
+
+        // Func first: registering the enum re-checks the funcs already added.
+        let mut library = Library::default();
+        library.add(modal_func(type_id, "slow"));
+        library.register_type(type_id, mode_entry());
+    }
+
+    #[test]
+    #[should_panic(expected = "not a registered variant")]
+    fn add_rejects_an_enum_default_naming_no_registered_variant() {
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.register_type(type_id, mode_entry());
+        library.add(modal_func(type_id, "slothful"));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a registered variant")]
+    fn register_type_rejects_an_earlier_enum_default_naming_no_variant() {
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.add(modal_func(type_id, "slothful"));
+        library.register_type(type_id, mode_entry());
     }
 
     #[test]

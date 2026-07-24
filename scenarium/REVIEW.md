@@ -5,14 +5,15 @@
 Scenarium has a clear compile → plan → resolve → execute pipeline. Since the
 previous pass, the authoring model shed its largest duplication cluster: graph
 normalization is gone, subgraph interfaces are authored state with reversible
-detach/attach, library drift is tolerated at compile time instead of pruned,
-and flattening keeps a resolved-graph stack instead of re-walking from the
-root. The highest-impact remaining worker problem is unchanged: `send_many`
-does not establish the batch boundary its callers rely on. The remaining
+detach/attach, library drift is tolerated uniformly at compile time instead
+of pruned, registration gates declared defaults, deep nesting is a validation
+error, and flattening keeps a resolved-graph stack instead of re-walking from
+the root. The highest-impact remaining problem is unchanged: `Worker::send_many`
+does not establish the batch boundary its callers rely on. The other open
 findings cluster around runtime state ownership (state retained by execution
-id alone, advisory context declarations), per-run orchestration costs, one
-leftover drift asymmetry (exposed events), and the detached-record pattern
-that undo state duplicates.
+id alone, advisory context declarations), per-run orchestration costs, and
+the parallel representations (`SpecialNode` dispatch, detached-record
+vectors).
 
 ## Current flow
 
@@ -67,6 +68,15 @@ flattened execution identity when a new program is installed.
   answered yes: it exactly mirrors the runtime `as_*` accessors and is now
   documented on `DataType::compatible_with`; declared defaults are the one
   place held to exact kinds (`Func::validate`'s `default_fits`).
+- *A registered `Enum` default could name an unregistered variant* — the
+  membership gate now runs from both registration directions (`Library::add`
+  checks against present types; `register_type` re-checks the funcs already
+  added), so declaration order doesn't matter.
+- *The nesting cap was debug-only and validation recursed unguarded* —
+  `validate_graph` now rejects trees past `MAX_NESTING_DEPTH` as a proper
+  `NestingTooDeep` error before any deep recursion, and flatten's descent
+  backstop is a release `assert!` (compile is cold; validation's
+  shared-graph memoization can under-count true instance depth).
 
 ## High: Worker lifecycle
 
@@ -82,29 +92,6 @@ flattened execution identity when a new program is installed.
   (`src/worker/task.rs:36`), which re-runs and restarts the event loop —
   repopulating exactly the cache entries the not-yet-arrived eviction and
   stop were meant to protect.
-
-## High: Authoring and compilation invariants
-
-- [ ] **A registered `Enum`-typed default can still name an unregistered
-  variant.** `Func::validate` now holds declared defaults to exact kinds and
-  picker-variant membership (`src/node/definition.rs`, `default_fits`), so
-  the kind-mismatch half of the old "registration accepts invalid defaults"
-  finding is closed — but variant membership for an `Enum` default needs the
-  `Library`'s registered variant list, which `Func::validate` doesn't have.
-  `Library::add` (`src/library.rs:130-131`) could check it and doesn't, so
-  `add_func_node` can still seed a `Const` an eventual
-  `const_satisfies` rejects (`src/graph/validate.rs:327-331`).
-
-- [ ] **The advertised nesting cap neither exists in release builds nor
-  protects the recursive validation that runs first.** Compilation validates
-  the complete graph tree before flattening
-  (`src/execution/compile.rs:129` → `:140`), and the recursive validator has
-  no depth guard at all (`src/graph/validate.rs:34`, recursion at
-  `:210-220` and `:225-244`; only shared-graph *cycles* are caught). The only
-  depth check is a `debug_assert!` inside flatten's `push_level`
-  (`src/execution/flatten/mod.rs:33`, `:159-162`). Deep acyclic input
-  therefore has build-profile-dependent behavior and can exhaust the stack
-  before or during compilation.
 
 ## Medium: Cross-run state ownership
 
