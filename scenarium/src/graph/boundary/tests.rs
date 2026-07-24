@@ -313,6 +313,36 @@ fn detach_and_attach_graph_output_round_trip() {
 }
 
 #[test]
+#[should_panic(expected = "does not sit on the detached input slot")]
+fn attach_rejects_an_instance_binding_off_its_slot() {
+    let fixture = input_fixture();
+    let mut graph = fixture.graph;
+    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
+    detached.parent[0].port.port_idx = 0;
+    graph.attach_graph_input(fixture.graph_id, detached);
+}
+
+#[test]
+#[should_panic(expected = "detached pin does not sit on the detached input slot")]
+fn attach_rejects_a_pin_off_its_slot() {
+    let fixture = input_fixture();
+    let mut graph = fixture.graph;
+    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
+    detached.pins.push(OutputPort::new(fixture.boundary, 5));
+    graph.attach_graph_input(fixture.graph_id, detached);
+}
+
+#[test]
+#[should_panic(expected = "does not read the detached output slot")]
+fn attach_rejects_a_consumer_binding_off_its_slot() {
+    let fixture = output_fixture();
+    let mut graph = fixture.graph;
+    let mut detached = graph.detach_graph_output(fixture.graph_id, 1);
+    detached.parent[0].binding = Binding::bind(fixture.instance, 0);
+    graph.attach_graph_output(fixture.graph_id, detached);
+}
+
+#[test]
 fn snapshot_returns_none_for_missing_graph_or_slot() {
     let fixture = input_fixture();
     assert!(

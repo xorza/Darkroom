@@ -126,7 +126,9 @@ impl FuncInput {
     /// of exactly the declared kind (`Null` doubles as "explicitly unset" on
     /// an optional input). Declaration-time strictness on purpose — the
     /// looser runtime scalar coercion (see `DataType::compatible_with`) is
-    /// for document consts, not specs.
+    /// for document consts, not specs. The compile-time const check
+    /// (`const_satisfies` in graph validation) is the coercive twin; keep
+    /// their variant and `Null` rules in lockstep.
     fn default_fits(&self, value: &StaticValue) -> bool {
         if !self.value_variants.is_empty() {
             return self.value_variants.iter().any(|v| v.value == *value);

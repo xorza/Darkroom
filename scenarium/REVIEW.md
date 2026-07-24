@@ -45,6 +45,28 @@ flattened execution identity when a new program is installed.
 - *Flattening repeatedly reconstructs the current graph from the root* — the
   per-build `Run` now keeps a `levels: Vec<&Graph>` stack parallel to `path`;
   the current graph is one stack read (`execution/flatten/mod.rs:126-171`).
+- *Exposed-event drift hard-failed compilation* — the last drift class fell
+  in line: `ExposedEventOutOfRange` was removed from `validate_for_execution`
+  (flatten already wired the dangling event as nothing).
+- *`execute()` erased a cancel requested before the run began* — the token
+  now resets at the batch drain (`worker/task.rs`, `next_intent`), so a
+  cancel raised after commit targets the imminent run.
+- *A graph replace mid-event-loop flashed a transient `Idle` status* —
+  intent application now stops the loop quietly; `Idle` is reported only
+  when no run follows (terminal stops and panics still report it, in order).
+- *`ExecutionNode::special`'s doc described a nonexistent cache node* —
+  rewritten to the `RunSinks` reality.
+- *`const_satisfies` rejected `Null` consts the runtime understands* —
+  `Null` is now valid on optional inputs ("explicitly unset", matching
+  lens's `Option`-field config reads) and still rejected on required ones.
+- *`DetachedGraphInput`/`Output` attach accepted malformed records* — attach
+  now panics unless every recorded binding and pin references the detached
+  slot, and re-added pins assert like bindings do
+  (`graph/boundary/mod.rs`, attach fns).
+- *Open question: is the scalar-literal coercion intentionally loose?* —
+  answered yes: it exactly mirrors the runtime `as_*` accessors and is now
+  documented on `DataType::compatible_with`; declared defaults are the one
+  place held to exact kinds (`Func::validate`'s `default_fits`).
 
 ## High: Worker lifecycle
 
@@ -72,18 +94,6 @@ flattened execution identity when a new program is installed.
   `Library::add` (`src/library.rs:130-131`) could check it and doesn't, so
   `add_func_node` can still seed a `Const` an eventual
   `const_satisfies` rejects (`src/graph/validate.rs:327-331`).
-
-- [ ] **Exposed-event drift is the one remaining drift class that hard-fails
-  compilation, with no repair path.** `validate_for_execution` still rejects
-  `ExposedEventOutOfRange` when a `definition.events` entry references an
-  interior emitter event index the current library no longer declares
-  (`src/graph/validate.rs:196-206`, variant at `src/error.rs:90-91`), while
-  flattening tolerates the identical dangling reference — `resolve_emitter`
-  absorbs it via `.get(event_idx)?` and the Func-level drift check
-  (`src/execution/flatten/mod.rs:322-327`, `:340-342`). Bindings,
-  subscriptions, and pins all degrade to unbound under the same drift; a
-  drifted exposed event instead makes the whole document uncompilable, and
-  with normalization gone nothing ever removes it.
 
 - [ ] **The advertised nesting cap neither exists in release builds nor
   protects the recursive validation that runs first.** Compilation validates
@@ -191,16 +201,7 @@ flattened execution identity when a new program is installed.
   propagate through the public ABI, macros, executor, and every registered
   lambda.
 
-## Medium: Worker responsiveness and cancellation
-
-- [ ] **`execute()` unconditionally resets the shared cancel token at run
-  start, erasing a cancel requested before the run begins.**
-  `src/worker/task.rs:224` clears the token before anything else, so a
-  `Worker::request_cancel` (`src/worker/mod.rs:44-46`) landing between a
-  batch drain and its run start is silently dropped and the run executes
-  uncancelled. Latent today (darkroom only offers Cancel once `Executing` is
-  reported, after the reset), but a real footgun for any caller that cancels
-  a just-queued run.
+## Medium: Worker responsiveness
 
 - [ ] **The `biased` intent select can starve event-loop delivery under
   sustained host traffic.** `next_intent` polls `message_rx` ahead of the
@@ -209,13 +210,6 @@ flattened execution identity when a new program is installed.
   (`src/worker/event_loop.rs:13`, `:38`, `:63`). A continuous message stream
   keeps the message branch ready, so event ports are never drained and
   event-lambda progress stalls until the host stream quiesces.
-
-- [ ] **A graph replace while an event loop is active emits a transient `Idle`
-  status mid-rebuild.** A `Rebuild` transition stops the loop, which
-  unconditionally reports `Idle` (`src/worker/task.rs:165-168`, `:290-292`)
-  immediately before `execute()` re-emits `Executing` (`:229`). The host
-  treats activity as absolute and repaints per report, so an update during an
-  active loop produces a one-frame idle flicker. Cosmetic.
 
 ## Medium: Parallel authoring representations
 
@@ -231,41 +225,13 @@ flattened execution identity when a new program is installed.
   `src/execution/validate.rs:100`). One planner-specific behavior expands
   the common authoring and execution state space across the crate.
 
-- [ ] **The doc on `ExecutionNode::special` describes a node kind that does
-  not exist.** `src/execution/program/mod.rs:78-81` speaks of a cache node's
-  path-keyed load/store, input pruning, and a bypass toggle riding in the
-  variant — but `SpecialNode` has exactly one variant, `RunSinks`
-  (`src/node/special.rs:20-27`). The comment actively misleads about current
-  engine behavior.
-
 - [ ] **Detached undo records duplicate the graph's ordered side-tables as
-  manually validated public vectors — and the newer boundary records carry
-  no validation at all.** `DetachedNode` re-represents the ordered
-  map/set side-tables (`src/graph/mod.rs:257-271`) as public serializable
-  vectors, manually re-derives their invariants, and converts back on attach
-  (`src/graph/wiring.rs:44-101`, `:146-191`). `DetachedGraphInput`/`Output`
-  follow the same pattern (`src/graph/boundary/mod.rs:18-44`) but their
-  attach paths check only insert-overlap and `idx <= len`
-  (`src/graph/boundary/mod.rs:112-151`, `:219-258`) — nothing verifies the
-  recorded wiring actually references the detached slot, and re-added pins
-  are silently absorbed where bindings assert
-  (`src/graph/boundary/mod.rs:149`, `:239`). A malformed or hand-built
-  record corrupts the owning graph's wiring without a guard.
-
-## Open questions
-
-- [ ] **`const_satisfies` rejects `Null` consts that the runtime deliberately
-  understands.** Lens's config machinery reads a `Const(Null)` on an
-  optional (`Option`-field) input as "explicitly unset"
-  (`../lens/src/config_node.rs:218-222`) and can author `Null` field
-  defaults (`../lens/src/config_node.rs:183`), but `const_satisfies` has no
-  `Null` arm — a `Null` literal on any typed port is an
-  `IncompatibleConstant` compile error (`src/graph/validate.rs:310-334`).
-  No production config currently declares an `Option` field, so the
-  mismatch is latent; the first one added would compile-fail. (The former
-  open question here — whether the scalar coercion is intentionally loose —
-  is answered: yes; it exactly mirrors the runtime `as_*` accessors, is now
-  documented on `DataType::compatible_with`, and declared defaults are held
-  to exact kinds at registration. The stored-kind leak in darkroom's value
-  editor, including an `unreachable!` on drifted path literals, is a
-  darkroom issue outside this crate's scope.)
+  manually validated public vectors.** `DetachedNode` re-represents the
+  ordered map/set side-tables (`src/graph/mod.rs:257-271`) as public
+  serializable vectors, manually re-derives their invariants, and converts
+  back on attach (`src/graph/wiring.rs:44-101`, `:146-191`);
+  `DetachedGraphInput`/`Output` follow the same pattern
+  (`src/graph/boundary/mod.rs:18-44`, attach-time slot asserts). The second
+  serializable representation still admits malformed states that only the
+  attach-time panics reject, and every new detached kind re-derives the
+  invariants the canonical containers already encode.

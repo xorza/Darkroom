@@ -1,5 +1,5 @@
 use crate::error::{GraphDeserializeError, GraphValidationError};
-use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
     SubgraphDefinition,
@@ -7,7 +7,7 @@ use crate::graph::{
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
-use crate::{DataType, DetachedNode, closes_data_cycle};
+use crate::{DataType, DetachedNode, StaticValue, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -492,14 +492,41 @@ fn validate_for_execution_tolerates_library_range_drift() {
     graph.set_output_pinned(OutputPort::new(id, 0), true);
     assert!(graph.validate_for_execution(&library).is_ok());
 
-    // Wiring the current library can't resolve — a pin, binding, and
-    // subscription past the declared ranges — stays valid: drift is
-    // tolerated (it degrades to unbound at flatten/plan time), never a
-    // compile error. See `engine::tests::dangling_wiring_compiles_and_reports_missing_input`.
+    // Wiring the current library can't resolve — a pin, binding,
+    // subscription, and exposed event past the declared ranges — stays
+    // valid: drift is tolerated (it degrades to unbound at flatten/plan
+    // time), never a compile error. See
+    // `engine::tests::dangling_wiring_compiles_and_reports_missing_input`.
     graph.set_output_pinned(OutputPort::new(id, 1), true);
     graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
     graph.subscribe(id, 3, id);
+    let mut child = Graph::new("child");
+    let interior = child.add_func_node(&func);
+    child.definition.as_mut().unwrap().events.push(GraphEvent {
+        name: "drifted".into(),
+        emitter: interior,
+        emitter_event_idx: 9,
+    });
+    graph.insert_graph(GraphId::unique(), child);
     assert!(graph.validate_for_execution(&library).is_ok());
+
+    // `Null` consts are "explicitly unset" and valid only on optional inputs.
+    let nullable = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "nullable")
+            .input(FuncInput::optional("opt", DataType::Int))
+            .input(FuncInput::required("req", DataType::Int))
+            .output(FuncOutput::new("o", DataType::Int)),
+    );
+    library.add(nullable.clone());
+    let node = graph.add_func_node(&nullable);
+    graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
+    assert!(graph.validate_for_execution(&library).is_ok());
+    graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
+    let error = graph.validate_for_execution(&library).unwrap_err();
+    assert!(
+        error.to_string().contains("holds a constant incompatible"),
+        "{error}"
+    );
 }
 
 #[test]

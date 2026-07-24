@@ -75,10 +75,10 @@ pub(crate) struct ExecutionNode {
     pub cache: CacheMode,
 
     /// `Some` for a built-in [`SpecialNode`] (flattened from
-    /// [`NodeKind::Special`](crate::graph::NodeKind::Special)); the engine
-    /// recognizes the kind for special behavior — e.g. the cache node's path-keyed
-    /// load/store + input pruning, with the bypass toggle riding in the variant.
-    /// See `README.md` Part C.
+    /// [`NodeKind::Special`](crate::graph::NodeKind::Special)). The planner
+    /// recognizes the kind — a subscribed `RunSinks` promotes a fired event
+    /// into a full sinks run — and it marks the node's interface as coming
+    /// from the hardcoded spec rather than the library.
     pub special: Option<SpecialNode>,
 
     pub inputs: InputRange,

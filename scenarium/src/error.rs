@@ -87,8 +87,6 @@ pub enum GraphValidationError {
     PinnedOutputMissingNode { node_id: NodeId },
     #[error("exposed event {name:?} names missing emitter {emitter:?}")]
     ExposedEventMissingEmitter { name: String, emitter: NodeId },
-    #[error("exposed event index {event_idx} out of range on {emitter:?}")]
-    ExposedEventOutOfRange { emitter: NodeId, event_idx: usize },
     #[error("local graph has a nil id")]
     NilLocalGraphId,
     #[error("graph {name:?} is recursive (contains itself)")]

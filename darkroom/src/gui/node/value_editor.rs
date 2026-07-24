@@ -94,14 +94,18 @@ pub(crate) fn show(
         // kinds — typing "42" then "hello" flips `Int` → `String` — instead of
         // locking to the kind first entered.
         DataType::Any => any_smart_edit(ui, editor, id, value, width),
-        DataType::Int => match value.as_i64() {
-            Some(current) => int_edit(ui, theme, id, current, width),
-            None => read_only_label(ui, editor, id, value, width),
-        },
-        DataType::Float => match value.as_f64() {
-            Some(current) => float_edit(ui, theme, id, current, width),
-            None => read_only_label(ui, editor, id, value, width),
-        },
+        DataType::Int => {
+            let Some(current) = value.as_i64() else {
+                return read_only_label(ui, editor, id, value, width);
+            };
+            int_edit(ui, theme, id, current, width)
+        }
+        DataType::Float => {
+            let Some(current) = value.as_f64() else {
+                return read_only_label(ui, editor, id, value, width);
+            };
+            float_edit(ui, theme, id, current, width)
+        }
         DataType::Bool => {
             let Some(current) = value.as_bool() else {
                 return read_only_label(ui, editor, id, value, width);
@@ -224,8 +228,9 @@ fn parse_any(text: &str) -> StaticValue {
     StaticValue::String(text.to_owned())
 }
 
-/// Non-editable fallback for an `Enum` on a port that lost its type (or a
-/// stray `Null`): shows the textual form in a read-only field; clicks fall
+/// Non-editable fallback for a literal outside its port's coercion class —
+/// a drifted kind, a `Custom` port's stray const, an unregistered enum, a
+/// `Null`: shows the textual form in a read-only field; clicks fall
 /// through to the surrounding row. Always returns `None`.
 fn read_only_label(
     ui: &mut Ui,

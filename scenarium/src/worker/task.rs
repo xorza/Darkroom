@@ -157,14 +157,20 @@ where
             }
             self.intent
                 .reset(self.messages.drain(..), self.event_buffer.drain(..));
+            // The cancellation commit boundary: a cancel raised from here on
+            // targets this batch's (possibly imminent) run; one raised while
+            // nothing was committed clears now instead of leaking into it.
+            self.run_cancel.reset();
             return Some(&self.intent);
         }
     }
 
     async fn apply_intent(&mut self) {
         let transition = EventLoopTransition::for_intent(&self.intent, self.event_loop.is_some());
-        if !matches!(transition, EventLoopTransition::Preserve) {
-            self.stop_event_loop().await;
+        let stopped_loop =
+            !matches!(transition, EventLoopTransition::Preserve) && self.event_loop.is_some();
+        if stopped_loop {
+            self.finish_event_loop(None, false).await;
         }
 
         if let Some(cache) = self.intent.disk_store.take() {
@@ -187,10 +193,20 @@ where
 
         self.evict_cache().await;
 
+        let mut ran = false;
         if let Some(run) = PendingRun::take(&mut self.intent, transition)
             && !self.engine.is_empty()
         {
             self.execute(run).await;
+            ran = true;
+        }
+        // A stopped loop with no follow-up run really is idle; a rebuild's
+        // stop is not — its `execute` reports `Executing` directly, without
+        // a transient `Idle` flashing in between.
+        if stopped_loop && !ran {
+            (self.callback)(WorkerReport::Status(
+                self.status.activity(WorkerActivity::Idle),
+            ));
         }
 
         for reply in self.intent.syncs.drain(..) {
@@ -221,7 +237,6 @@ where
     }
 
     async fn execute(&mut self, run: PendingRun) {
-        self.run_cancel.reset();
         if self.shutdown.is_cancelled() {
             return;
         }
@@ -265,15 +280,19 @@ where
         }
     }
 
+    /// Stop the loop and report `Idle` — the terminal form (worker
+    /// shutdown). Intent application stops quietly instead
+    /// (`finish_event_loop(None, false)`): a rebuild's `execute` reports
+    /// `Executing` directly, without a transient `Idle` flashing between.
     async fn stop_event_loop(&mut self) {
-        self.finish_event_loop(None).await;
+        self.finish_event_loop(None, true).await;
     }
 
     async fn fail_event_loop(&mut self, panic: LambdaPanic) {
-        self.finish_event_loop(Some(panic)).await;
+        self.finish_event_loop(Some(panic), true).await;
     }
 
-    async fn finish_event_loop(&mut self, leading_panic: Option<LambdaPanic>) {
+    async fn finish_event_loop(&mut self, leading_panic: Option<LambdaPanic>, report_idle: bool) {
         let Some(mut active) = self.event_loop.take() else {
             assert!(
                 leading_panic.is_none(),
@@ -287,9 +306,11 @@ where
             panics.insert(0, panic);
         }
         tracing::info!("Event loop stopped");
-        (self.callback)(WorkerReport::Status(
-            self.status.activity(WorkerActivity::Idle),
-        ));
+        if report_idle {
+            (self.callback)(WorkerReport::Status(
+                self.status.activity(WorkerActivity::Idle),
+            ));
+        }
         for panic in panics {
             (self.callback)(WorkerReport::Error(WorkerError::Execution {
                 error: Error::EventLambdaPanic {

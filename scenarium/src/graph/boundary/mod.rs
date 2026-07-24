@@ -109,6 +109,8 @@ impl Graph {
 
     /// Exact inverse of [`Self::detach_graph_input`]: shift ports back up
     /// and restore the spec, interior edges, pins, and instance bindings.
+    /// Panics on a malformed record — one whose wiring doesn't reference the
+    /// detached slot, or that overlaps wiring created after detachment.
     pub fn attach_graph_input(&mut self, graph_id: GraphId, detached: DetachedGraphInput) {
         let DetachedGraphInput {
             idx,
@@ -117,8 +119,15 @@ impl Graph {
             pins,
             parent,
         } = detached;
-        for instance in self.local_instances(graph_id) {
-            self.unshift_binding_keys(instance, idx);
+        let instances = self.local_instances(graph_id);
+        for entry in &parent {
+            assert!(
+                entry.port.port_idx == idx && instances.contains(&entry.port.node_id),
+                "detached instance binding does not sit on the detached input slot"
+            );
+        }
+        for instance in &instances {
+            self.unshift_binding_keys(*instance, idx);
         }
         for entry in parent {
             let previous = self.bindings.insert(entry.port, entry.binding);
@@ -134,9 +143,28 @@ impl Graph {
         let definition = child.definition.as_mut().unwrap();
         assert!(idx <= definition.inputs.len(), "attach index out of range");
         definition.inputs.insert(idx, spec);
-        if let Some(boundary) = child.boundary_node(NodeKind::GraphInput) {
-            child.unshift_bound_values(boundary, idx);
-            child.unshift_pins(boundary, idx);
+        match child.boundary_node(NodeKind::GraphInput) {
+            Some(boundary) => {
+                let slot = OutputPort::new(boundary, idx);
+                for entry in &interior {
+                    assert!(
+                        matches!(&entry.binding, Binding::Bind(src) if *src == slot),
+                        "detached interior edge is not fed by the detached input slot"
+                    );
+                }
+                for pin in &pins {
+                    assert!(
+                        *pin == slot,
+                        "detached pin does not sit on the detached input slot"
+                    );
+                }
+                child.unshift_bound_values(boundary, idx);
+                child.unshift_pins(boundary, idx);
+            }
+            None => assert!(
+                interior.is_empty() && pins.is_empty(),
+                "detached interior wiring without a boundary node"
+            ),
         }
         for entry in interior {
             let previous = child.bindings.insert(entry.port, entry.binding);
@@ -146,7 +174,10 @@ impl Graph {
             );
         }
         for pin in pins {
-            child.pinned_outputs.insert(pin);
+            assert!(
+                child.pinned_outputs.insert(pin),
+                "cannot attach over pins created after detachment"
+            );
         }
     }
 
@@ -215,7 +246,9 @@ impl Graph {
         detached
     }
 
-    /// Exact inverse of [`Self::detach_graph_output`].
+    /// Exact inverse of [`Self::detach_graph_output`]. Panics on a malformed
+    /// record — one whose wiring doesn't reference the detached slot, or
+    /// that overlaps wiring created after detachment.
     pub fn attach_graph_output(&mut self, graph_id: GraphId, detached: DetachedGraphOutput) {
         let DetachedGraphOutput {
             idx,
@@ -224,9 +257,23 @@ impl Graph {
             pins,
             parent,
         } = detached;
-        for instance in self.local_instances(graph_id) {
-            self.unshift_bound_values(instance, idx);
-            self.unshift_pins(instance, idx);
+        let instances = self.local_instances(graph_id);
+        for entry in &parent {
+            assert!(
+                matches!(&entry.binding, Binding::Bind(src)
+                    if src.port_idx == idx && instances.contains(&src.node_id)),
+                "detached consumer binding does not read the detached output slot"
+            );
+        }
+        for pin in &pins {
+            assert!(
+                pin.port_idx == idx && instances.contains(&pin.node_id),
+                "detached pin does not sit on the detached output slot"
+            );
+        }
+        for instance in &instances {
+            self.unshift_bound_values(*instance, idx);
+            self.unshift_pins(*instance, idx);
         }
         for entry in parent {
             let previous = self.bindings.insert(entry.port, entry.binding);
@@ -236,7 +283,10 @@ impl Graph {
             );
         }
         for pin in pins {
-            self.pinned_outputs.insert(pin);
+            assert!(
+                self.pinned_outputs.insert(pin),
+                "cannot attach over pins created after detachment"
+            );
         }
         let child = self
             .graphs
@@ -245,8 +295,20 @@ impl Graph {
         let definition = child.definition.as_mut().unwrap();
         assert!(idx <= definition.outputs.len(), "attach index out of range");
         definition.outputs.insert(idx, spec);
-        if let Some(boundary) = child.boundary_node(NodeKind::GraphOutput) {
-            child.unshift_binding_keys(boundary, idx);
+        match child.boundary_node(NodeKind::GraphOutput) {
+            Some(boundary) => {
+                for entry in &interior {
+                    assert!(
+                        entry.port == InputPort::new(boundary, idx),
+                        "detached interior binding does not sit on the detached output slot"
+                    );
+                }
+                child.unshift_binding_keys(boundary, idx);
+            }
+            None => assert!(
+                interior.is_empty(),
+                "detached interior wiring without a boundary node"
+            ),
         }
         for entry in interior {
             let previous = child.bindings.insert(entry.port, entry.binding);

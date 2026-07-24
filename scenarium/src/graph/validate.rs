@@ -187,22 +187,11 @@ impl<'a> GraphChecker<'a> {
 
         if let Some(definition) = definition {
             for event in &definition.events {
-                let emitter = graph.nodes.get(&event.emitter).ok_or_else(|| {
-                    GraphValidationError::ExposedEventMissingEmitter {
+                if !graph.nodes.contains_key(&event.emitter) {
+                    return Err(GraphValidationError::ExposedEventMissingEmitter {
                         name: event.name.clone(),
                         emitter: event.emitter,
-                    }
-                })?;
-                if let Some(library) = self.library {
-                    let event_count = graph
-                        .event_count(emitter, library)
-                        .expect("node reference resolved before exposed-event validation");
-                    if event.emitter_event_idx >= event_count {
-                        return Err(GraphValidationError::ExposedEventOutOfRange {
-                            emitter: event.emitter,
-                            event_idx: event.emitter_event_idx,
-                        });
-                    }
+                    });
                 }
             }
         }
@@ -310,6 +299,12 @@ impl Graph {
 fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) -> bool {
     if !input.value_variants.is_empty() {
         return input.value_variants.iter().any(|v| v.value == *value);
+    }
+    // `Null` is "explicitly unset": lens's config machinery authors it on
+    // optional (`Option`-field) inputs and reads it back as `None`. Keep in
+    // lockstep with `FuncInput::default_fits`, the declaration-time twin.
+    if matches!(value, StaticValue::Null) {
+        return !input.required;
     }
     match &input.data_type {
         DataType::Any => true,
