@@ -10,7 +10,7 @@ use scenarium::Library;
 use scenarium::{
     Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
-use scenarium::{DataType, RamUsage, StaticValue};
+use scenarium::{DataType, GraphDef, RamUsage, StaticValue, SubgraphDefinition};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
 use crate::core::document::{GraphView, ItemRef, Viewport};
@@ -233,6 +233,38 @@ pub(crate) struct SceneConnection {
     pub tgt: InputPort,
 }
 
+/// What a rebuild projects. An enum rather than a graph + optional
+/// interface, so a definition body separated from its interface — which
+/// would strand its boundary nodes with nothing to mirror — can't be
+/// spelled at all.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SceneSource<'a> {
+    /// The document root: no interface, and no boundary nodes to want one
+    /// (`validate_for_execution` rejects them there).
+    Entry(&'a Graph),
+    /// A local definition: the body on the canvas, plus the interface its
+    /// boundary nodes mirror.
+    Def(&'a GraphDef),
+}
+
+impl<'a> SceneSource<'a> {
+    /// The graph whose nodes and wiring the scene projects.
+    pub(crate) fn graph(self) -> &'a Graph {
+        match self {
+            SceneSource::Entry(graph) => graph,
+            SceneSource::Def(def) => &def.body,
+        }
+    }
+
+    /// The interface a boundary node mirrors, if this source has one.
+    pub(crate) fn interface(self) -> Option<&'a SubgraphDefinition> {
+        match self {
+            SceneSource::Entry(_) => None,
+            SceneSource::Def(def) => Some(&def.definition),
+        }
+    }
+}
+
 impl Scene {
     /// Names are arena-backed handles authored through this record pass's
     /// `Ui`. Rebuilding keeps the projection synchronized with the graph and
@@ -242,12 +274,13 @@ impl Scene {
     pub(crate) fn rebuild(
         &mut self,
         ui: &mut Ui,
-        graph: &Graph,
+        source: SceneSource<'_>,
         view: &GraphView,
         library: &Library,
         run_state: &RunState,
         run_available: bool,
     ) {
+        let (graph, interface) = (source.graph(), source.interface());
         self.selected = view.selected.clone();
         // Mirror the persisted viewport. The gesture overwrites this
         // later this frame and `App` copies it back onto the doc, so
@@ -276,8 +309,9 @@ impl Scene {
             let Some(node) = graph.find(&id, NodeSearch::TopLevel) else {
                 continue;
             };
-            // A node's interface comes from its func, referenced graph, or
-            // the containing graph when the node is a boundary.
+            // A node's interface comes from its func, its referenced
+            // definition, or — for a boundary node — the enclosing
+            // definition's own interface, which only a `GraphDef` carries.
             let interface = match &node.kind {
                 NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
                     kind_label: ui.intern(&f.name),
@@ -292,7 +326,7 @@ impl Scene {
                 }),
                 NodeKind::Graph(r) => graph
                     .resolve_graph(*r, library)
-                    .and_then(|graph| graph.definition.as_ref())
+                    .map(|def| &def.definition)
                     .map(|definition| NodeInterface {
                         kind_label: ui.intern(&definition.name),
                         description: ui.intern(""),
@@ -335,7 +369,7 @@ impl Scene {
                 // placeholder emits `AddBoundaryPort` + `SetInput` as one
                 // batch (see `connection_ui::commit_connection`), so a
                 // fresh placeholder appears next frame.
-                NodeKind::GraphInput => graph.definition.as_ref().map(|definition| {
+                NodeKind::GraphInput => interface.map(|definition| {
                     let mut outputs: Vec<FuncOutput> =
                         definition.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
@@ -355,7 +389,7 @@ impl Scene {
                 // as `FuncInput`s for names + zero defaults), plus a
                 // trailing placeholder input. Symmetric to the inbound
                 // case — wiring the placeholder grows the definition's outputs.
-                NodeKind::GraphOutput => graph.definition.as_ref().map(|definition| {
+                NodeKind::GraphOutput => interface.map(|definition| {
                     let mut inputs: Vec<FuncInput> =
                         definition.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
@@ -384,9 +418,10 @@ impl Scene {
                     let kind_label = match node.kind {
                         NodeKind::Func(_) => "missing func",
                         NodeKind::Graph(_) => "missing graph",
-                        // A special node's spec always resolves, so it never
-                        // reaches this `None` branch, and boundary interfaces
-                        // always come from the containing graph.
+                        // A special node's spec always resolves. A boundary
+                        // node only exists in a definition body, and
+                        // `SceneSource::Def` carries that body's interface
+                        // inseparably — so neither reaches this branch.
                         NodeKind::Special(_) | NodeKind::GraphInput | NodeKind::GraphOutput => {
                             unreachable!("special and boundary interfaces always resolve")
                         }
@@ -686,8 +721,8 @@ mod tests {
     use super::*;
     use crate::gui::scene::test_support::scene_node_stub;
     use scenarium::DataType;
-    use scenarium::Graph;
     use scenarium::testing;
+    use scenarium::{Graph, GraphDef};
     use scenarium::{GraphId, InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
@@ -723,7 +758,7 @@ mod tests {
 
     #[derive(Debug)]
     struct AdderGraph {
-        graph: Graph,
+        graph: GraphDef,
         input: NodeId,
         output: NodeId,
     }
@@ -731,13 +766,15 @@ mod tests {
     fn adder_graph() -> AdderGraph {
         let in_node = Node::new(NodeKind::GraphInput);
         let out_node = Node::new(NodeKind::GraphOutput);
-        let mut graph = Graph::new("Adder")
+        let mut graph = GraphDef::new("Adder")
             .category("Graph")
             .inputs([finput("A", DataType::Int), finput("B", DataType::Float)])
             .output(FuncOutput::new("Sum", DataType::Int));
-        let input = graph.add(in_node);
-        let output = graph.add(out_node);
-        graph.set_input_binding(InputPort::new(output, 0), Binding::bind(input, 0));
+        let input = graph.body.add(in_node);
+        let output = graph.body.add(out_node);
+        graph
+            .body
+            .set_input_binding(InputPort::new(output, 0), Binding::bind(input, 0));
         AdderGraph {
             graph,
             input,
@@ -748,12 +785,12 @@ mod tests {
     #[test]
     fn boundary_nodes_mirror_graph_interface() {
         let fixture = adder_graph();
-        let view = GraphView::for_graph(&fixture.graph);
+        let view = GraphView::for_graph(&fixture.graph.body);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
         scene.rebuild(
             &mut ui,
-            &fixture.graph,
+            SceneSource::Def(&fixture.graph),
             &view,
             &Library::default(),
             &RunState::default(),
@@ -860,7 +897,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
@@ -904,7 +948,7 @@ mod tests {
 
         scene.rebuild(
             &mut ui,
-            &graph,
+            SceneSource::Entry(&graph),
             &view,
             &library,
             &RunState::default(),
@@ -931,7 +975,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         let n = scene.nodes.get(&node_id).unwrap();
         let event_names: Vec<String> = scene
@@ -972,7 +1023,14 @@ mod tests {
         *view.item_placements.get_mut(&pin_key).unwrap() = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         let n = scene.nodes.get(&node_id).unwrap();
         let pins: Vec<Option<Vec2>> = scene
@@ -996,7 +1054,14 @@ mod tests {
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
         view.move_item_to_index(&pin_key, 0);
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
         assert_eq!(
             scene.z_order,
             vec![pin_key, ItemRef::Node(node_id)],
@@ -1021,7 +1086,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         assert_eq!(scene.subscriptions.len(), 1);
         let s = &scene.subscriptions[0];
@@ -1054,7 +1126,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         for (id, mode) in ids {
             let projected = scene.nodes.get(&id).unwrap();
@@ -1068,7 +1147,7 @@ mod tests {
         use scenarium::math_library;
 
         let library = math_library();
-        let nested = Graph::new("Nested").output(FuncOutput::new("Out", DataType::Int));
+        let nested = GraphDef::new("Nested").output(FuncOutput::new("Out", DataType::Int));
         let nested_id = GraphId::unique();
         let mut graph = Graph::default();
         let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
@@ -1077,7 +1156,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         let instance = &scene.nodes[&instance_id];
         assert!(
@@ -1123,7 +1209,14 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default(), true);
+        scene.rebuild(
+            &mut ui,
+            SceneSource::Entry(&graph),
+            &view,
+            &library,
+            &RunState::default(),
+            true,
+        );
 
         let pure = scene.nodes.get(&pure_id).unwrap();
         let impure = scene.nodes.get(&impure_id).unwrap();

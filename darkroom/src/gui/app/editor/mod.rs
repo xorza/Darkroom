@@ -354,16 +354,13 @@ impl Editor {
         // Only a local definition carries the interface its boundary nodes
         // mirror; the root graph has neither.
         let source = match target {
-            GraphRef::Main => SceneSource {
-                graph: &open.document.graph,
-                interface: None,
-            },
-            GraphRef::Local(id) => open
-                .document
-                .graph
-                .find_graph(id)
-                .expect("active tab graph exists")
-                .into(),
+            GraphRef::Main => SceneSource::Entry(&open.document.graph),
+            GraphRef::Local(id) => SceneSource::Def(
+                open.document
+                    .graph
+                    .find_graph(id)
+                    .expect("active tab graph exists"),
+            ),
         };
         let view = open.document.view(target).expect("active tab view exists");
         self.scene.rebuild(
