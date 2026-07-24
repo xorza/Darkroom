@@ -1,6 +1,14 @@
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
-use crate::graph::{GraphDef, Node, NodeKind, NodeSearch};
+use crate::graph::{Graph, GraphDef, Node, NodeKind, NodeSearch};
 use crate::node::definition::FuncId;
+
+/// The link of the one graph-instance node `graph` holds.
+fn instance_link(graph: &Graph) -> Option<GraphLink> {
+    graph.iter().find_map(|node| match node.kind {
+        NodeKind::Graph(link) => Some(link),
+        _ => None,
+    })
+}
 
 #[test]
 fn graph_link_preserves_registry_and_identity() {
@@ -35,7 +43,7 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     assert_ne!(copied_emitter, emitter);
     assert!(
         copy.body
-            .find(&copied_emitter, NodeSearch::TopLevel)
+            .find(copied_emitter, NodeSearch::TopLevel)
             .is_some(),
         "event emitter follows the copied node"
     );
@@ -53,15 +61,11 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     assert!(
         copied_child
             .body
-            .find(&child_node, NodeSearch::TopLevel)
+            .find(child_node, NodeSearch::TopLevel)
             .is_none(),
         "nested node identities are remapped"
     );
-    let linked = copy
-        .body
-        .iter()
-        .find_map(|n| n.kind.as_graph())
-        .expect("instance node copied");
+    let linked = instance_link(&copy.body).expect("instance node copied");
     assert_eq!(
         linked,
         GraphLink::Local(*copied_child_id),
@@ -88,12 +92,12 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     assert!(
         verbatim_child
             .body
-            .find(&child_node, NodeSearch::TopLevel)
+            .find(child_node, NodeSearch::TopLevel)
             .is_some(),
         "nested node ids are preserved, where clone_mapped remaps them"
     );
     assert_eq!(
-        verbatim.body.iter().find_map(|n| n.kind.as_graph()),
+        instance_link(&verbatim.body),
         Some(GraphLink::Local(child_id)),
         "the instance's Local link still names the original def"
     );

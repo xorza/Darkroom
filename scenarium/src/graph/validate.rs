@@ -81,7 +81,7 @@ impl<'a> GraphChecker<'a> {
                     }
                     if self
                         .library
-                        .is_some_and(|library| library.by_id(func_id).is_none())
+                        .is_some_and(|library| library.by_id(*func_id).is_none())
                     {
                         return Err(GraphValidationError::MissingFunc {
                             node_id: *node_id,
@@ -198,7 +198,7 @@ impl<'a> GraphChecker<'a> {
             let nested_result = self.validate_def(nested);
             self.depth -= 1;
             nested_result.map_err(|source| GraphValidationError::LocalGraph {
-                name: subgraph_name(nested),
+                name: nested.definition.name.clone(),
                 source: Box::new(source),
             })?;
         }
@@ -212,14 +212,14 @@ impl<'a> GraphChecker<'a> {
         }
         if !self.shared_path.insert(graph_id) {
             return Err(GraphValidationError::RecursiveGraph {
-                name: subgraph_name(graph),
+                name: graph.definition.name.clone(),
             });
         }
         self.depth += 1;
         let result = self
             .validate_def(graph)
             .map_err(|source| GraphValidationError::SharedGraph {
-                name: subgraph_name(graph),
+                name: graph.definition.name.clone(),
                 source: Box::new(source),
             });
         self.depth -= 1;
@@ -228,10 +228,6 @@ impl<'a> GraphChecker<'a> {
         self.checked_shared.insert(graph_id);
         Ok(())
     }
-}
-
-fn subgraph_name(def: &GraphDef) -> String {
-    def.definition.name.clone()
 }
 
 impl GraphDef {
@@ -318,7 +314,7 @@ pub(crate) fn const_satisfies(library: &Library, input: &FuncInput, value: &Stat
         DataType::Enum(type_id) => matches!(
             value,
             StaticValue::Enum(name)
-                if library.enum_variants(type_id).is_some_and(|vs| vs.iter().any(|v| v == name))
+                if library.enum_variants(*type_id).is_some_and(|vs| vs.iter().any(|v| v == name))
         ),
         DataType::Custom(_) => false,
     }

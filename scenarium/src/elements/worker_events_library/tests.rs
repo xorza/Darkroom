@@ -46,7 +46,7 @@ async fn invoke_frame(
 
 fn frame_func() -> Func {
     worker_events_library()
-        .by_id(&FRAME_EVENT_FUNC_ID)
+        .by_id(FRAME_EVENT_FUNC_ID)
         .expect("worker events library must contain Frame Event")
         .clone()
 }

@@ -248,7 +248,7 @@ fn register_host_helpers(engine: &mut Engine, library: PublishedLibrary) {
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
             let func = library
-                .by_id(&func_id)
+                .by_id(func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: Node = func.into();
             let action = Intent::AddNode {

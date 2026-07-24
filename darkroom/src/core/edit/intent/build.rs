@@ -188,12 +188,12 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             GraphStep::MoveSelection { grabbed, moves }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
-            from: graph.find(&node_id, NodeSearch::TopLevel)?.name.clone(),
+            from: graph.find(node_id, NodeSearch::TopLevel)?.name.clone(),
             node_id,
             to,
         },
         Intent::SetInput { input, to } => {
-            graph.find(&input.node_id, NodeSearch::TopLevel)?;
+            graph.find(input.node_id, NodeSearch::TopLevel)?;
             // Reject a bind that would close a data cycle: the planner
             // rejects a cyclic graph outright (`Error::CycleDetected`), so
             // the edit must never land. The GUI snap filter normally stops
@@ -225,7 +225,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::SetNodeProperty { node_id, to } => {
-            let node = graph.find(&node_id, NodeSearch::TopLevel)?;
+            let node = graph.find(node_id, NodeSearch::TopLevel)?;
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
@@ -235,7 +235,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::DetachGraph { node_id } => {
             let NodeKind::Graph(GraphLink::Local(from_id)) =
-                graph.find(&node_id, NodeSearch::TopLevel)?.kind
+                graph.find(node_id, NodeSearch::TopLevel)?.kind
             else {
                 return None; // not a local graph instance — nothing to fork
             };
@@ -269,8 +269,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // An unsubscribe of a vanished node no-ops naturally (nothing is
             // subscribed → from == to == false), so it needs no existence check.
             if subscribe {
-                graph.find(&emitter, NodeSearch::TopLevel)?;
-                graph.find(&subscriber, NodeSearch::TopLevel)?;
+                graph.find(emitter, NodeSearch::TopLevel)?;
+                graph.find(subscriber, NodeSearch::TopLevel)?;
             }
             GraphStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
@@ -286,7 +286,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // also reaches this variant directly, unchecked, from a script's
             // generic `apply()`/`apply_all()`, so a stale or bogus `node_id`
             // must drop like every other intent here, not assert.
-            graph.find(&output.node_id, NodeSearch::TopLevel)?;
+            graph.find(output.node_id, NodeSearch::TopLevel)?;
             let key = ItemRef::Pin(output);
             // Present iff currently pinned; captured so reverting an unpin
             // puts the widget back in its exact paint-stack slot.

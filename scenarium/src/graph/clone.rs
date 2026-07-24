@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use hashbrown::HashMap as NodeMap;
+use hashbrown::HashMap;
 
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
@@ -34,7 +32,7 @@ impl Graph {
             .keys()
             .map(|graph_id| (*graph_id, GraphId::unique()))
             .collect();
-        let mut nodes = NodeMap::with_capacity(self.nodes.len());
+        let mut nodes = HashMap::with_capacity(self.nodes.len());
         for (node_id, node) in &self.nodes {
             let new_id = NodeId::unique();
             node_ids.insert(*node_id, new_id);

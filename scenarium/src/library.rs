@@ -113,9 +113,9 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
+    pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         assert!(!id.is_nil());
-        self.funcs.get(id)
+        self.funcs.get(&id)
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
@@ -137,13 +137,13 @@ impl Library {
         self.funcs.insert(func.id, func);
     }
 
-    pub fn remove(&mut self, id: &FuncId) -> Option<Func> {
-        self.funcs.remove(id)
+    pub fn remove(&mut self, id: FuncId) -> Option<Func> {
+        self.funcs.remove(&id)
     }
 
-    pub fn graph_by_id(&self, id: &GraphId) -> Option<&GraphDef> {
+    pub fn graph_by_id(&self, id: GraphId) -> Option<&GraphDef> {
         assert!(!id.is_nil());
-        self.graphs.get(id)
+        self.graphs.get(&id)
     }
 
     /// Registers a shared graph definition.
@@ -170,7 +170,7 @@ impl Library {
         // membership gate runs from both directions: `add` checks against
         // types already present, and a fresh enum entry re-checks the funcs
         // already added.
-        if self.enum_variants(&type_id).is_some() {
+        if self.enum_variants(type_id).is_some() {
             for func in self.funcs.values() {
                 self.assert_enum_defaults(func);
             }
@@ -192,7 +192,7 @@ impl Library {
             else {
                 continue;
             };
-            if let Some(variants) = self.enum_variants(type_id) {
+            if let Some(variants) = self.enum_variants(*type_id) {
                 assert!(
                     variants.iter().any(|variant| variant == name),
                     "function {:?} input {:?} defaults to {name:?}, which is not a registered \
@@ -207,9 +207,9 @@ impl Library {
     /// The variant names of a registered `Enum` type — for the editor's enum
     /// picker and the const type-check. `None` if `type_id` is unregistered or
     /// names a non-enum type.
-    pub fn enum_variants(&self, type_id: &TypeId) -> Option<&[String]> {
+    pub fn enum_variants(&self, type_id: TypeId) -> Option<&[String]> {
         assert!(!type_id.is_nil());
-        self.types.get(type_id)?.variants()
+        self.types.get(&type_id)?.variants()
     }
 
     /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a
@@ -233,8 +233,8 @@ impl Library {
 
     /// The disk codec registered for `type_id`, if any. Used by the output
     /// cache's serialize/deserialize.
-    pub(crate) fn codec(&self, type_id: &TypeId) -> Option<&dyn CustomValueCodec> {
-        self.types.get(type_id)?.codec()
+    pub(crate) fn codec(&self, type_id: TypeId) -> Option<&dyn CustomValueCodec> {
+        self.types.get(&type_id)?.codec()
     }
 
     pub fn merge<T: Into<Library>>(&mut self, other: T) {
@@ -319,7 +319,7 @@ mod tests {
             library.add(testing::with_stub_lambda(Func::new(func_id, "After")));
         }));
         assert!(duplicate_func.is_err());
-        assert_eq!(library.by_id(&func_id).unwrap().name, "Before");
+        assert_eq!(library.by_id(func_id).unwrap().name, "Before");
 
         let graph_id = GraphId::unique();
         library.insert_graph(graph_id, GraphDef::new("Before"));
@@ -328,7 +328,7 @@ mod tests {
         }));
         assert!(duplicate_graph.is_err());
         assert_eq!(
-            library.graph_by_id(&graph_id).unwrap().definition.name,
+            library.graph_by_id(graph_id).unwrap().definition.name,
             "Before"
         );
 
@@ -421,8 +421,8 @@ mod tests {
         library.register_type(custom_id, custom);
         let enum_id = TypeId::unique();
         library.register_type(enum_id, enum_entry);
-        assert!(library.codec(&custom_id).is_some());
-        assert!(library.codec(&enum_id).is_none());
+        assert!(library.codec(custom_id).is_some());
+        assert!(library.codec(enum_id).is_none());
     }
 
     #[tokio::test]
@@ -444,7 +444,7 @@ mod tests {
         let output_demand = vec![OutputDemand::Produce; outputs.len()];
         let event_state = SharedAnyState::default();
         library
-            .by_id(&sum_id)
+            .by_id(sum_id)
             .unwrap()
             .lambda
             .invoke(
@@ -466,7 +466,7 @@ mod tests {
         inputs[1].value = DynamicValue::Static(StaticValue::Int(5));
         outputs[0] = DynamicValue::Unbound;
         library
-            .by_id(&sum_id)
+            .by_id(sum_id)
             .unwrap()
             .lambda
             .invoke(

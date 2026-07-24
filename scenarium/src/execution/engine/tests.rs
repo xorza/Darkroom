@@ -5,7 +5,7 @@ use crate::execution::compile::{CompileError, Compiler};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{
-    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeSearch, OutputPort,
+    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior};
@@ -33,15 +33,13 @@ fn execution_node_name<'a>(
     let instances = attribution.collect::<Vec<_>>();
     let mut current = graph;
     for instance in instances.iter().rev() {
-        let link = current
-            .find(instance, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
-            .as_graph()
-            .unwrap();
+        let node = current.find(*instance, NodeSearch::TopLevel).unwrap();
+        let NodeKind::Graph(link) = node.kind else {
+            panic!("an attributed instance is always a graph node");
+        };
         current = &current.resolve_graph(link, library).unwrap().body;
     }
-    &current.find(&node_id, NodeSearch::TopLevel).unwrap().name
+    &current.find(node_id, NodeSearch::TopLevel).unwrap().name
 }
 
 fn execution_node_id(
@@ -112,7 +110,7 @@ fn default_hooks() -> TestFuncHooks {
 fn mutate_func(library: &mut Library, name: &str, mutate: impl FnOnce(&mut Func)) {
     let mut func = library.by_name(name).unwrap().clone();
     mutate(&mut func);
-    library.remove(&func.id).unwrap();
+    library.remove(func.id).unwrap();
     library.add(func);
 }
 
@@ -351,10 +349,7 @@ mod cache_persistence {
         let mut graph = test_graph();
         for name in ["get_a", "get_b", "sum", "mult"] {
             let node_id = graph.find_by_name(name, NodeSearch::TopLevel).unwrap().id;
-            graph
-                .find_mut(&node_id, NodeSearch::TopLevel)
-                .unwrap()
-                .cache = CacheMode::Both;
+            graph.find_mut(node_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Both;
         }
         let get_a_id = graph
             .find_by_name("get_a", NodeSearch::TopLevel)
@@ -2501,7 +2496,7 @@ mod disabled_nodes {
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         graph
-            .find_mut(&sum_id, NodeSearch::TopLevel)
+            .find_mut(sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
 
@@ -2543,7 +2538,7 @@ mod disabled_nodes {
 
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         graph
-            .find_mut(&sum_id, NodeSearch::TopLevel)
+            .find_mut(sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
         mutate_func(&mut library, "mult", |func| {
@@ -3252,7 +3247,7 @@ mod composite_behavior {
         let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         let get_b = library.by_name("get_b").unwrap().id;
-        library.remove(&get_b).unwrap();
+        library.remove(get_b).unwrap();
 
         // A `Local` def resolves from the graph itself, so validation reaches
         // its interior while every top-level func remains resolvable.
@@ -3350,7 +3345,7 @@ mod composite_behavior {
         let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         for instance_id in [first_instance, second_instance] {
             graph
-                .find_mut(&instance_id, NodeSearch::TopLevel)
+                .find_mut(instance_id, NodeSearch::TopLevel)
                 .unwrap()
                 .disabled = true;
         }
@@ -3389,7 +3384,7 @@ mod composite_behavior {
         assert_eq!(pushed, expected);
         assert!(
             graph
-                .find(&inner_id, NodeSearch::Recursive)
+                .find(inner_id, NodeSearch::Recursive)
                 .unwrap()
                 .disabled,
             "execution leaves the nested authoring node disabled"
@@ -3825,7 +3820,7 @@ mod node_seeds {
         let mut graph = uncached_test_graph();
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         graph
-            .find_mut(&sum_id, NodeSearch::TopLevel)
+            .find_mut(sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
         let mut eg = ExecutionEngine::default();
@@ -4379,7 +4374,7 @@ mod events {
             func.behavior = FuncBehavior::Pure;
         });
         f.graph
-            .find_mut(&f.emit_id, NodeSearch::TopLevel)
+            .find_mut(f.emit_id, NodeSearch::TopLevel)
             .unwrap()
             .cache = CacheMode::Ram;
         let mut eg = ExecutionEngine::default();
@@ -5323,7 +5318,7 @@ mod graph {
         library.insert_graph(def_id, def);
 
         let mut graph = Graph::default();
-        let def_ref = library.graph_by_id(&def_id).unwrap();
+        let def_ref = library.graph_by_id(def_id).unwrap();
         graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
         graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
 
@@ -5500,7 +5495,7 @@ mod graph {
         library.insert_graph(def_id, def);
 
         // Two linked instances with const inputs, each feeding a print.
-        let def_ref = library.graph_by_id(&def_id).unwrap();
+        let def_ref = library.graph_by_id(def_id).unwrap();
         let c1 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
         let c2 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
         let p1 = fnode(&library, "Print");

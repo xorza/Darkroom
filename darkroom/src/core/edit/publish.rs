@@ -16,7 +16,7 @@ pub(crate) fn publish_graph(
     let Some(source) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Graph(GraphLink::Local(local_id)) =
-            scope.graph.find(&node_id, NodeSearch::TopLevel)?.kind
+            scope.graph.find(node_id, NodeSearch::TopLevel)?.kind
         else {
             return None;
         };
@@ -84,7 +84,7 @@ fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
             let ItemRef::Node(nid) = key else {
                 continue;
             };
-            if let Some(node) = graph.find(nid, NodeSearch::TopLevel)
+            if let Some(node) = graph.find(*nid, NodeSearch::TopLevel)
                 && let NodeKind::Graph(link) = node.kind
             {
                 return Some(ExportTarget::Node {

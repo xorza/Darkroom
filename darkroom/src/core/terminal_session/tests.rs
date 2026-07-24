@@ -32,7 +32,7 @@ fn apply_intents_adds_node() {
     apply_intents(&mut doc, vec![intent]);
     assert_eq!(doc.graph.len(), 1);
     assert!(
-        doc.graph.find(&id, NodeSearch::TopLevel).is_some(),
+        doc.graph.find(id, NodeSearch::TopLevel).is_some(),
         "node landed in the graph"
     );
 }

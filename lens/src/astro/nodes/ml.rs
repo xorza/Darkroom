@@ -21,10 +21,10 @@ pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
 
 pub(crate) fn replace(library: &mut Library, model_paths: &MlModelPaths) {
     library
-        .remove(&DENOISE_FUNC_ID)
+        .remove(DENOISE_FUNC_ID)
         .expect("ML denoise function is registered");
     library
-        .remove(&STAR_REMOVAL_FUNC_ID)
+        .remove(STAR_REMOVAL_FUNC_ID)
         .expect("ML star-removal function is registered");
     register(library, model_paths);
 }

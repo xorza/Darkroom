@@ -182,36 +182,14 @@ impl Deref for NodeRef<'_> {
 }
 
 impl NodeKind {
-    pub fn as_func(&self) -> Option<FuncId> {
-        match self {
-            NodeKind::Func(id) => Some(*id),
-            _ => None,
-        }
-    }
-
-    pub fn as_graph(&self) -> Option<GraphLink> {
-        match self {
-            NodeKind::Graph(link) => Some(*link),
-            _ => None,
-        }
-    }
-
     pub fn is_boundary(&self) -> bool {
         matches!(self, NodeKind::GraphInput | NodeKind::GraphOutput)
     }
 }
 
-impl Node {
-    /// The func this node instantiates, or `None` for graph/boundary nodes.
-    pub fn func_id(&self) -> Option<FuncId> {
-        self.kind.as_func()
-    }
-}
-
 /// How deep a node lookup reaches: this graph's own nodes only, or also every
-/// local nested graph, recursively. The argument to
-/// [`Graph::find_node`], [`Graph::find_node_mut`], and
-/// [`Graph::find_node_by_name`].
+/// local nested graph, recursively. The argument to [`Graph::find`],
+/// [`Graph::find_mut`], and [`Graph::find_by_name`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeSearch {
     TopLevel,
@@ -388,9 +366,9 @@ impl Graph {
     /// The node with `id`, at the depth `search` selects. Node ids are unique
     /// across a whole document (nested graphs included), so a
     /// [`Recursive`](NodeSearch::Recursive) hit is unambiguous.
-    pub fn find(&self, id: &NodeId, search: NodeSearch) -> Option<&Node> {
+    pub fn find(&self, id: NodeId, search: NodeSearch) -> Option<&Node> {
         assert!(!id.is_nil());
-        match self.nodes.get(id) {
+        match self.nodes.get(&id) {
             Some(node) => Some(node),
             None => match search {
                 NodeSearch::TopLevel => None,
@@ -421,14 +399,14 @@ impl Graph {
         }
     }
 
-    /// Mutable counterpart of [`Self::find_node`].
-    pub fn find_mut(&mut self, id: &NodeId, search: NodeSearch) -> Option<&mut Node> {
+    /// Mutable counterpart of [`Self::find`].
+    pub fn find_mut(&mut self, id: NodeId, search: NodeSearch) -> Option<&mut Node> {
         assert!(!id.is_nil());
         match search {
-            NodeSearch::TopLevel => self.nodes.get_mut(id),
+            NodeSearch::TopLevel => self.nodes.get_mut(&id),
             NodeSearch::Recursive => {
                 let Self { nodes, graphs, .. } = self;
-                nodes.get_mut(id).or_else(|| {
+                nodes.get_mut(&id).or_else(|| {
                     graphs
                         .values_mut()
                         .find_map(|def| def.body.find_mut(id, NodeSearch::Recursive))
@@ -574,13 +552,6 @@ impl Binding {
     /// A data binding wired to producer `node_id`'s output port `port_idx`.
     pub fn bind(node_id: NodeId, port_idx: usize) -> Self {
         Binding::Bind(OutputPort::new(node_id, port_idx))
-    }
-
-    pub fn as_output_binding(&self) -> Option<&OutputPort> {
-        match self {
-            Binding::Bind(output_binding) => Some(output_binding),
-            _ => None,
-        }
     }
 }
 
