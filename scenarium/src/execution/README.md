@@ -102,7 +102,7 @@ An instance has one outgoing event port per entry. Incoming events use ordinary
 subscriptions; flattening expands a composite subscriber into the interior nodes
 subscribed to its `GraphInput` trigger.
 
-`Graph::fresh_copy()` preserves definition metadata and interface while assigning
+`Graph::clone_mapped()` preserves definition metadata and interface while assigning
 fresh node ids throughout the copied graph tree and remapping event emitters. The
 caller chooses a fresh `GraphId` when inserting that value.
 `SubgraphDefinition::origin` is editor-only lineage pointing from a local graph to

@@ -127,7 +127,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 "apply AddNode expects node to be absent"
             );
             if let Some((graph_id, nested_graph)) = graph {
-                scope.graph.insert_graph(*graph_id, nested_graph.restore());
+                scope
+                    .graph
+                    .insert_graph(*graph_id, nested_graph.clone_verbatim());
             }
             scope.graph.insert(*node_id, node.clone());
             for (port, binding) in bindings {
@@ -199,7 +201,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             graph,
             ..
         } => {
-            scope.graph.insert_graph(*to_id, graph.restore());
+            scope.graph.insert_graph(*to_id, graph.clone_verbatim());
             scope
                 .graph
                 .find_mut(node_id, NodeSearch::TopLevel)

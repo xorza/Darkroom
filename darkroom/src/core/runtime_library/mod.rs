@@ -69,7 +69,9 @@ impl RuntimeLibrary {
 
     pub(crate) fn import_template(&mut self, graph: GraphDef) -> RuntimeLibraryChange {
         let graph_id = GraphId::unique();
-        self.graph_library.graphs.insert(graph_id, graph.fresh());
+        self.graph_library
+            .graphs
+            .insert(graph_id, graph.clone_mapped());
         self.finish_graph_library_change(true)
     }
 
@@ -122,7 +124,7 @@ fn compose(model_paths: &MlModelPaths, graph_library: &GraphLibrary) -> Scenariu
     library.merge(image_library());
     library.merge(astro_library(model_paths));
     for (id, graph) in &graph_library.graphs {
-        library.insert_graph(*id, graph.restore());
+        library.insert_graph(*id, graph.clone_verbatim());
     }
     library
 }

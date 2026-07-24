@@ -3,17 +3,32 @@ use std::collections::HashMap;
 use hashbrown::HashMap as NodeMap;
 
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, OutputPort, Subscription};
+use crate::graph::{
+    Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, OutputPort, Subscription,
+};
+
+/// A remapped clone alongside the node mapping that produced it, so a caller
+/// holding ids into the original — a definition's exposed-event emitters —
+/// can follow them across the copy.
+#[derive(Debug)]
+pub(crate) struct MappedClone {
+    pub graph: Graph,
+    pub node_ids: HashMap<NodeId, NodeId>,
+}
 
 impl Graph {
-    /// Copy this graph with fresh node *and* nested-graph identities
-    /// throughout its local graph tree. The returned value has no library
-    /// lineage. Both id kinds are unique across a whole document, so every
-    /// copy boundary must sever both; `Local` links are rewritten per level
-    /// (a node references only its own graph's map — resolution is
-    /// parent-scoped). `Shared` links name library graphs and stay as-is.
-    pub fn fresh_copy(&self) -> Graph {
-        let mut id_map = HashMap::with_capacity(self.nodes.len());
+    /// Clone with every node *and* nested-graph identity remapped to a fresh
+    /// one, throughout the local graph tree. Both id kinds are unique across
+    /// a whole document, so every copy boundary must sever both; `Local`
+    /// links are rewritten per level (a node references only its own graph's
+    /// map — resolution is parent-scoped). `Shared` links name library graphs
+    /// and stay as-is.
+    pub fn clone_mapped(&self) -> Graph {
+        self.clone_mapped_with_ids().graph
+    }
+
+    pub(crate) fn clone_mapped_with_ids(&self) -> MappedClone {
+        let mut node_ids = HashMap::with_capacity(self.nodes.len());
         let graph_id_map: HashMap<GraphId, GraphId> = self
             .graphs
             .keys()
@@ -22,7 +37,7 @@ impl Graph {
         let mut nodes = NodeMap::with_capacity(self.nodes.len());
         for (node_id, node) in &self.nodes {
             let new_id = NodeId::unique();
-            id_map.insert(*node_id, new_id);
+            node_ids.insert(*node_id, new_id);
             let mut node = node.clone();
             // A dangling link (def already missing) keeps its old id —
             // drift tolerance, same as everywhere else.
@@ -33,7 +48,7 @@ impl Graph {
             }
             nodes.insert(new_id, node);
         }
-        let remap = |id: NodeId| id_map.get(&id).copied().unwrap_or(id);
+        let remap = |id: NodeId| node_ids.get(&id).copied().unwrap_or(id);
         let bindings = self
             .bindings
             .iter()
@@ -60,37 +75,29 @@ impl Graph {
             .iter()
             .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
             .collect();
-        let mut definition = self.definition.clone();
-        if let Some(definition) = &mut definition {
-            definition.origin = None;
-            for event in &mut definition.events {
-                event.emitter = remap(event.emitter);
-            }
-        }
         let graphs = self
             .graphs
             .iter()
-            .map(|(graph_id, graph)| (graph_id_map[graph_id], graph.fresh_copy()))
+            .map(|(graph_id, def)| (graph_id_map[graph_id], def.clone_mapped()))
             .collect();
-        Graph {
-            definition,
+        let graph = Graph {
             nodes,
             bindings,
             subscriptions,
             pinned_outputs,
             graphs,
-        }
+        };
+        MappedClone { graph, node_ids }
     }
 
-    /// Copy this graph keeping every identity — node ids, nested graph ids,
-    /// and library lineage — exactly as they are. The counterpart to
-    /// [`Self::fresh_copy`], and the reason `Graph` isn't `Clone`: a
-    /// verbatim copy is only sound where the original is *not* concurrently
-    /// present in the same document, i.e. undo/redo replay of a stored step
-    /// and library composition. Anywhere else, use `fresh_copy`.
-    pub fn verbatim_copy(&self) -> Graph {
+    /// Clone keeping every identity — node ids and nested graph ids —
+    /// exactly as they are. The counterpart to [`Self::clone_mapped`], and
+    /// the reason `Graph` isn't `Clone`: preserving identities is only sound
+    /// where the original is *not* concurrently present in the same
+    /// document, i.e. undo/redo replay of a stored step and library
+    /// composition. Anywhere else, use `clone_mapped`.
+    pub fn clone_verbatim(&self) -> Graph {
         Graph {
-            definition: self.definition.clone(),
             nodes: self.nodes.clone(),
             bindings: self.bindings.clone(),
             subscriptions: self.subscriptions.clone(),
@@ -98,8 +105,39 @@ impl Graph {
             graphs: self
                 .graphs
                 .iter()
-                .map(|(graph_id, graph)| (*graph_id, graph.verbatim_copy()))
+                .map(|(graph_id, def)| (*graph_id, def.clone_verbatim()))
                 .collect(),
+        }
+    }
+}
+
+impl GraphDef {
+    /// [`Graph::clone_mapped`] for a definition: remapped identities and no
+    /// library lineage. The interface travels along, with exposed-event
+    /// emitters following the remapped interior nodes.
+    pub fn clone_mapped(&self) -> Self {
+        let mapped = self.body.clone_mapped_with_ids();
+        let mut definition = self.definition.clone();
+        definition.origin = None;
+        for event in &mut definition.events {
+            event.emitter = mapped
+                .node_ids
+                .get(&event.emitter)
+                .copied()
+                .unwrap_or(event.emitter);
+        }
+        Self {
+            definition,
+            body: mapped.graph,
+        }
+    }
+
+    /// [`Graph::clone_verbatim`] for a definition, with the same soundness
+    /// condition.
+    pub fn clone_verbatim(&self) -> Self {
+        Self {
+            definition: self.definition.clone(),
+            body: self.body.clone_verbatim(),
         }
     }
 }

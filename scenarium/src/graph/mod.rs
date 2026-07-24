@@ -241,9 +241,10 @@ pub struct SubgraphDefinition {
 }
 
 /// Deliberately not `Clone`: node and graph ids are unique across a whole
-/// document, so duplicating a graph is never a neutral act. Copy through
-/// [`Graph::fresh_copy`] (new identities) or [`Graph::verbatim_copy`]
-/// (identities preserved — undo/redo replay only).
+/// document, so duplicating a graph is never a neutral act. Clone through
+/// [`Graph::clone_mapped`] (identities remapped) or
+/// [`Graph::clone_verbatim`] (identities preserved — undo/redo replay and
+/// library composition only).
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     pub(crate) nodes: HashMap<NodeId, Node>,
@@ -280,7 +281,7 @@ pub struct Graph {
 /// Distinct from [`Graph`] — an entry graph, which has no interface and
 /// cannot be instantiated — so "a definition has an interface" is a type
 /// fact rather than a validated invariant. Not `Clone`, for the same reason
-/// `Graph` isn't: see [`Self::fresh`] and [`Self::restore`].
+/// `Graph` isn't: see [`Self::clone_mapped`] and [`Self::clone_verbatim`].
 ///
 /// Deliberately *not* `Deref<Target = Graph>`: an inherited method would see
 /// only the body, silently skipping the interface on anything whole-value

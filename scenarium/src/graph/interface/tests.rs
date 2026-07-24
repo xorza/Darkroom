@@ -11,7 +11,7 @@ fn graph_link_preserves_registry_and_identity() {
 }
 
 #[test]
-fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
+fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     let child_id = GraphId::unique();
     let child_origin = GraphId::unique();
     let mut child = GraphDef::new("child").origin(child_origin);
@@ -29,7 +29,7 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
     graph.body.insert_graph(child_id, child);
     graph.body.add(instance);
 
-    let copy = graph.fresh();
+    let copy = graph.clone_mapped();
     assert_eq!(copy.definition.origin, None);
     let copied_emitter = copy.definition.events[0].emitter;
     assert_ne!(copied_emitter, emitter);
@@ -68,14 +68,14 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
         "the instance's Local link follows the remapped def id"
     );
 
-    // The other copy mode is the exact inverse on every axis `fresh_copy`
+    // The other copy mode is the exact inverse on every axis `clone_mapped`
     // touches — that contrast is why `Graph` isn't `Clone`.
-    let verbatim = graph.restore();
+    let verbatim = graph.clone_verbatim();
     assert_eq!(verbatim, graph, "a verbatim copy is field-for-field equal");
     assert_eq!(
         verbatim.definition.origin,
         Some(graph_origin),
-        "library lineage survives, where fresh_copy clears it"
+        "library lineage survives, where clone_mapped clears it"
     );
     assert_eq!(verbatim.definition.events[0].emitter, emitter);
     let (verbatim_child_id, verbatim_child) = verbatim.body.graphs.iter().next().unwrap();
@@ -90,7 +90,7 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
             .body
             .find(&child_node, NodeSearch::TopLevel)
             .is_some(),
-        "nested node ids are preserved, where fresh_copy remaps them"
+        "nested node ids are preserved, where clone_mapped remaps them"
     );
     assert_eq!(
         verbatim.body.iter().find_map(|n| n.kind.as_graph()),
