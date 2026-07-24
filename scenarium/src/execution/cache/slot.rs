@@ -1,5 +1,6 @@
 use crate::DynamicValue;
 use crate::execution::digest::Digest;
+use crate::node::definition::FuncId;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -51,10 +52,22 @@ pub(crate) enum ValueState {
     },
 }
 
+/// The implementation identity that owns a slot's `state`/`event_state`. Output
+/// values are digest-keyed (the digest folds func id and version), but state
+/// survives installs untouched — so [`RuntimeSlot::reown`] drops it when the
+/// installed node's implementation no longer matches.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub(crate) struct StateOwner {
+    pub(crate) func_id: FuncId,
+    pub(crate) version: u32,
+}
+
 /// One node's cross-run runtime state: the [`value`](RuntimeSlot::value) cache and
-/// the node's persistent `state`/`event_state`.
+/// the node's persistent `state`/`event_state`, owned by the implementation
+/// recorded in [`owner`](RuntimeSlot::owner).
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeSlot {
+    pub(crate) owner: StateOwner,
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
     /// The node's current content digest — its cache-validity key (`None` when not
@@ -75,6 +88,19 @@ pub(crate) struct InvokeSlot<'a> {
 }
 
 impl RuntimeSlot {
+    /// Re-stamp the slot for the installed node's implementation, dropping `state`
+    /// and `event_state` when a different one owned them — a changed function must
+    /// not inherit state written by its predecessor. The output value stays: its
+    /// validity is digest-keyed and the digest already folds the owner.
+    pub(crate) fn reown(&mut self, owner: StateOwner) {
+        if self.owner == owner {
+            return;
+        }
+        self.owner = owner;
+        self.state.clear();
+        self.event_state = SharedAnyState::default();
+    }
+
     /// Drop the cached output, leaving the persistent `state`/`event_state` intact.
     /// The run loop calls this on the failure paths — a node that errored or was
     /// skipped for an errored dependency — so a stale prior value isn't left resident

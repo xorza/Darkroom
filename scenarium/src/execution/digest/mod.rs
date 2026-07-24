@@ -16,6 +16,9 @@
 //! assumptions; violating one is a *false hit* (a stale value served):
 //! - **`Func::version` is the implementation contract.** Bump it when a lambda can return
 //!   different values for the same inputs; leaving it unchanged can reuse an old digest.
+//!   A bump also drops the node's persistent `state`/`event_state` at the next install
+//!   ([`RuntimeCache::reconcile`]), so a new implementation never inherits its
+//!   predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
