@@ -45,8 +45,8 @@ impl SerdeFormat {
 }
 
 /// Test-only helpers, gated out of the released surface. Enabled in downstream
-/// crates' test targets via `common = { …, features = ["test-support"] }`.
-#[cfg(any(test, feature = "test-support"))]
+/// crates' test targets via `common = { …, features = ["internals"] }`.
+#[cfg(any(test, feature = "internals"))]
 impl SerdeFormat {
     /// All formats a round-trip test should sweep. Omits `Toml` deliberately:
     /// TOML can't serialize a top-level sequence, which several round-tripped

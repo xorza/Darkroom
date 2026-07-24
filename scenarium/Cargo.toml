@@ -25,5 +25,5 @@ blake3 = { workspace = true }
 internals = []
 
 [dev-dependencies]
-common = { workspace = true, features = ["test-support"] }
+common = { workspace = true, features = ["internals"] }
 serde_json = { workspace = true }

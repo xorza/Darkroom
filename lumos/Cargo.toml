@@ -39,7 +39,7 @@ parking_lot = { workspace = true }
 blake3 = { workspace = true }
 
 [dev-dependencies]
-common = { workspace = true, features = ["test-support"] }
+common = { workspace = true, features = ["internals"] }
 quickbench = { workspace = true }
 image = { workspace = true }
 tracing-subscriber = { workspace = true }

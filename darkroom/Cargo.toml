@@ -40,7 +40,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 aperture = { workspace = true, features = ["internals"] }
-common = { workspace = true, features = ["test-support"] }
+common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }
 static_assertions = { workspace = true }
 

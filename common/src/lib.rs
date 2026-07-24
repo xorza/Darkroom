@@ -11,7 +11,7 @@ extern crate self as common;
 pub mod macros;
 pub mod file_utils;
 pub mod serde;
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(any(test, feature = "internals"))]
 pub mod test_utils;
 
 pub(crate) mod cancel_token;

@@ -297,7 +297,7 @@ pub trait IntrospectEnum: Sized {
     fn from_variant(name: &str) -> Option<Self>;
 }
 
-#[cfg(feature = "introspect-derive")]
+#[cfg(any(test, feature = "introspect-derive"))]
 pub use common_derive::{Introspect, IntrospectEnum};
 
 #[cfg(test)]
