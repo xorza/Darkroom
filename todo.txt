@@ -29,6 +29,4 @@ subgraph to newnodeui
 
 subgraphs tabs movable
 
-what is resourcestamps
-
-refactor      let triggers = self.engine.active_event_triggers(&self.outcome);
+what is resourcestamps - remove and simplify
