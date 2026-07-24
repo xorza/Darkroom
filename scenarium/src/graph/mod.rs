@@ -240,7 +240,11 @@ pub struct SubgraphDefinition {
     pub origin: Option<GraphId>,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Deliberately not `Clone`: node and graph ids are unique across a whole
+/// document, so duplicating a graph is never a neutral act. Copy through
+/// [`Graph::fresh_copy`] (new identities) or [`Graph::verbatim_copy`]
+/// (identities preserved — undo/redo replay only).
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     /// Definition metadata for a reusable graph. Entry graphs have no
     /// definition because they cannot be instantiated or expose an interface.

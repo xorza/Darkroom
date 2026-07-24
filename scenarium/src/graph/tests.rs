@@ -1113,7 +1113,7 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
 
     assert_eq!(bindings.len(), 3);
 
-    let before = graph.clone();
+    let before = graph.verbatim_copy();
     let edges_before = graph.edges().count();
     let detached = graph.detach_node(sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
@@ -1131,7 +1131,7 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     for invalid in [nil_id, mismatched] {
         let serialized = serialize(&invalid, SerdeFormat::Json)?;
         let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Json)?;
-        let detached_graph = graph.clone();
+        let detached_graph = graph.verbatim_copy();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             graph.attach_node(decoded_invalid);
         }));

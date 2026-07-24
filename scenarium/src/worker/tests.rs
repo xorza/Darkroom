@@ -793,7 +793,7 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
 
     let definition_id = GraphId::unique();
     let mut graph = Graph::default();
-    graph.insert_graph(definition_id, definition.clone());
+    graph.insert_graph(definition_id, definition.verbatim_copy());
     let instance_a = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
     let instance_b = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
     for instance in [instance_a, instance_b] {
@@ -2269,7 +2269,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     }
 
     // Cold cache: all three nodes compute; mult is stored to disk.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    let stats = run(&dir.0, graph.verbatim_copy(), Arc::new(make_lib())).await;
     assert_eq!(
         stats.executed_nodes.len(),
         3,
@@ -2280,7 +2280,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     // Reopen on a fresh worker over the same store: mult loads from disk and is reused. Its
     // input `get_a` feeds only the reused mult, which never reads it, so the pre-run cut
     // prunes `get_a` — the `Memory` source is not recomputed on reopen.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    let stats = run(&dir.0, graph.verbatim_copy(), Arc::new(make_lib())).await;
     assert_eq!(
         get_a_calls.load(Ordering::SeqCst),
         1,

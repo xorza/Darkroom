@@ -124,7 +124,7 @@ fn compose(model_paths: &MlModelPaths, graph_library: &GraphLibrary) -> Scenariu
     library.merge(image_library());
     library.merge(astro_library(model_paths));
     for (id, graph) in &graph_library.graphs {
-        library.insert_graph(*id, graph.clone());
+        library.insert_graph(*id, graph.verbatim_copy());
     }
     library
 }

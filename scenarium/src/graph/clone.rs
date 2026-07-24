@@ -81,4 +81,25 @@ impl Graph {
             graphs,
         }
     }
+
+    /// Copy this graph keeping every identity — node ids, nested graph ids,
+    /// and library lineage — exactly as they are. The counterpart to
+    /// [`Self::fresh_copy`], and the reason `Graph` isn't `Clone`: a
+    /// verbatim copy is only sound where the original is *not* concurrently
+    /// present in the same document, i.e. undo/redo replay of a stored step
+    /// and library composition. Anywhere else, use `fresh_copy`.
+    pub fn verbatim_copy(&self) -> Graph {
+        Graph {
+            definition: self.definition.clone(),
+            nodes: self.nodes.clone(),
+            bindings: self.bindings.clone(),
+            subscriptions: self.subscriptions.clone(),
+            pinned_outputs: self.pinned_outputs.clone(),
+            graphs: self
+                .graphs
+                .iter()
+                .map(|(graph_id, graph)| (*graph_id, graph.verbatim_copy()))
+                .collect(),
+        }
+    }
 }
