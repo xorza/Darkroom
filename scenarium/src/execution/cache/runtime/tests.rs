@@ -7,7 +7,7 @@ use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
 use crate::graph::CacheMode;
-use crate::node::definition::FuncBehavior;
+use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::OutputDemand;
 use crate::{DynamicValue, RamUsage, StaticValue};
 
@@ -283,6 +283,71 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
             "{mode:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
+    let func_id = FuncId::from_u128(77);
+    let node = |func_id, version| ExecutionNode {
+        func_id,
+        version,
+        cache: CacheMode::Ram,
+        behavior: FuncBehavior::Pure,
+        ..Default::default()
+    };
+    let e_node_id = ExecutionNodeId::from_u128(1);
+    let mut program = ExecutionProgram::default();
+    program.e_nodes.insert(e_node_id, node(func_id, 0));
+
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&program);
+    let digest = Digest([5u8; 32]);
+    let slot = cache.slots.get_mut(&e_node_id).unwrap();
+    slot.state.set(17_u32);
+    slot.event_state.lock().await.set(23_u32);
+    slot.current_digest = Some(digest);
+    slot.value = ValueState::Resident {
+        snapshot: complete_snapshot(out()),
+        produced_under: Some(digest),
+    };
+
+    // Same (func, version): everything survives.
+    cache.reconcile(&program);
+    assert_eq!(cache.slots[&e_node_id].state.get::<u32>(), Some(&17));
+    assert_eq!(
+        cache.slots[&e_node_id]
+            .event_state
+            .lock()
+            .await
+            .get::<u32>(),
+        Some(&23),
+        "a same-owner reconcile must keep event state"
+    );
+
+    // Bumped version: state and event state drop; the resident value stays —
+    // its validity is digest-keyed and the digest folds the version.
+    program.e_nodes.insert(e_node_id, node(func_id, 1));
+    cache.reconcile(&program);
+    assert!(
+        cache.slots[&e_node_id].state.is_none(),
+        "a version bump must drop the predecessor's state"
+    );
+    assert!(cache.slots[&e_node_id].event_state.lock().await.is_none());
+    assert!(
+        cache.slots[&e_node_id].output_values().is_some(),
+        "reowning must not touch the digest-keyed value"
+    );
+
+    // Changed func id at the same version: state drops too.
+    cache.slots.get_mut(&e_node_id).unwrap().state.set(31_u32);
+    program
+        .e_nodes
+        .insert(e_node_id, node(FuncId::from_u128(78), 1));
+    cache.reconcile(&program);
+    assert!(
+        cache.slots[&e_node_id].state.is_none(),
+        "a func change must drop the predecessor's state"
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@ use hashbrown::HashSet;
 use thiserror::Error;
 
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::slot::StateOwner;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort, FlattenMapValidationError};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
@@ -58,6 +59,8 @@ pub(crate) enum InstalledGraphValidationError {
     MissingNode { e_node_id: ExecutionNodeId },
     #[error("runtime cache output arity does not match node {e_node_id:?}")]
     OutputArity { e_node_id: ExecutionNodeId },
+    #[error("runtime cache state owner does not match node {e_node_id:?}")]
+    StateOwner { e_node_id: ExecutionNodeId },
 }
 
 #[derive(Debug, Error)]
@@ -189,6 +192,15 @@ impl CompiledGraph {
                 && output_values.len() != e_node.outputs.len as usize
             {
                 return Err(InstalledGraphValidationError::OutputArity {
+                    e_node_id: *e_node_id,
+                });
+            }
+            let owner = StateOwner {
+                func_id: e_node.func_id,
+                version: e_node.version,
+            };
+            if slot.owner != owner {
+                return Err(InstalledGraphValidationError::StateOwner {
                     e_node_id: *e_node_id,
                 });
             }

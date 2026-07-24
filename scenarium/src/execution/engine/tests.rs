@@ -201,10 +201,11 @@ mod cache_persistence {
                 .category("Test")
                 .pure()
                 .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                .lambda(async_lambda!(move |_, state, _, _, _, outputs| {
                     invocation_calls = invocation_calls.clone()
                 } => {
                     invocation_calls.fetch_add(1, Ordering::SeqCst);
+                    state.set(result);
                     outputs[0] = StaticValue::Int(result).into();
                     Ok(())
                 }));
@@ -273,8 +274,20 @@ mod cache_persistence {
             "the covering blob prevents a redundant maintenance publication"
         );
 
+        assert_eq!(engine.cache.slots[&e_node_id].state.get::<i64>(), Some(&1));
+        engine.update(&graph, &library_v0).unwrap();
+        assert_eq!(
+            engine.cache.slots[&e_node_id].state.get::<i64>(),
+            Some(&1),
+            "a same-version reinstall keeps node state"
+        );
+
         let library_v1 = make_lib(2, 1);
         engine.update(&graph, &library_v1).unwrap();
+        assert!(
+            engine.cache.slots[&e_node_id].state.is_none(),
+            "a version bump drops the predecessor's state"
+        );
         let changed = engine.execute_sinks().await.unwrap();
         assert!(
             changed
@@ -285,6 +298,11 @@ mod cache_persistence {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(*printed.lock().unwrap(), vec![1, 2]);
+        assert_eq!(
+            engine.cache.slots[&e_node_id].state.get::<i64>(),
+            Some(&2),
+            "the new implementation owns freshly written state"
+        );
         assert_eq!(
             engine
                 .cache

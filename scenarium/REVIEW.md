@@ -11,8 +11,8 @@ registration gates declared defaults, deep nesting is a validation
 error, and flattening keeps a resolved-graph stack instead of re-walking from
 the root. The highest-impact remaining problem is unchanged: `Worker::send_many`
 does not establish the batch boundary its callers rely on. The other open
-findings cluster around runtime state ownership (state retained by execution
-id alone, advisory context declarations), per-run orchestration costs, and
+findings cluster around runtime state ownership (context identity and
+advisory context declarations), per-run orchestration costs, and
 the parallel representations (`SpecialNode` dispatch, detached-record
 vectors).
 
@@ -80,6 +80,12 @@ flattened execution identity when a new program is installed.
   `NestingTooDeep` error before any deep recursion, and flatten's descent
   backstop is a release `assert!` (compile is cold; validation's
   shared-graph memoization can under-count true instance depth).
+- *Program installation preserved function and event state solely because an
+  execution ID still existed* — each `RuntimeSlot` now records a `StateOwner`
+  (func id + version, the same identity the digest folds); `reconcile` drops
+  `state`/`event_state` when the installed node's owner differs and leaves
+  the digest-keyed value alone, and `validate_installed` asserts the pairing
+  (`src/execution/cache/slot.rs`, `reown`).
 
 ## High: Worker lifecycle
 
@@ -97,17 +103,6 @@ flattened execution identity when a new program is installed.
   stop were meant to protect.
 
 ## Medium: Cross-run state ownership
-
-- [ ] **Program installation preserves function and event state solely because
-  an execution ID still exists.** A runtime slot combines outputs with
-  `AnyState` and `SharedAnyState` (`src/execution/cache/slot.rs:56-67`);
-  installation replaces the program and `reconcile` retains the entire slot
-  for every matching ID (`src/execution/engine/mod.rs:83-91`,
-  `src/execution/cache/runtime/mod.rs:118-125`) without comparing function
-  identity, version, or signature. Execution IDs encode only authoring UUIDs
-  (`src/execution/identity.rs:21-38`), so a changed function implementation
-  inherits state owned by the previous implementation even though output
-  digests correctly invalidate its values.
 
 - [ ] **Context identity and payload type are independent runtime choices.**
   `ContextType::new<T>` erases `T` (`src/runtime/context.rs:106-118`),

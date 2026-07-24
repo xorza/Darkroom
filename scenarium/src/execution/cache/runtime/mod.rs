@@ -16,7 +16,7 @@ use hashbrown::HashMap;
 
 #[cfg(test)]
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::cache::slot::{RuntimeSlot, ValueState};
+use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
 #[cfg(test)]
 use crate::execution::digest::Digest;
 use crate::execution::digest::node_digest;
@@ -113,13 +113,24 @@ impl RuntimeCache {
         total
     }
 
-    /// Preserve surviving slots by id, default new nodes, trim removed ones, and apply the
-    /// installed program's RAM-retention policy immediately.
+    /// Preserve surviving slots by id — dropping persistent state whose owning
+    /// implementation (func id + version) changed — default new nodes, trim removed
+    /// ones, and apply the installed program's RAM-retention policy immediately.
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
             .retain(|e_node_id, _| program.e_nodes.contains_key(e_node_id));
-        for e_node_id in program.e_nodes.keys().copied() {
-            self.slots.entry(e_node_id).or_default();
+        for (e_node_id, e_node) in &program.e_nodes {
+            let owner = StateOwner {
+                func_id: e_node.func_id,
+                version: e_node.version,
+            };
+            self.slots
+                .entry(*e_node_id)
+                .and_modify(|slot| slot.reown(owner))
+                .or_insert_with(|| RuntimeSlot {
+                    owner,
+                    ..Default::default()
+                });
         }
         self.release_dead_outputs(program);
     }
