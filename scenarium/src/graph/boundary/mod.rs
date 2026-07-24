@@ -53,13 +53,13 @@ impl Graph {
         idx: usize,
     ) -> Option<DetachedGraphInput> {
         let child = self.graphs.get(&graph_id)?;
-        let spec = child.definition.as_ref()?.inputs.get(idx)?.clone();
+        let spec = child.definition.inputs.get(idx)?.clone();
         let mut interior = Vec::new();
         let mut pins = Vec::new();
-        if let Some(boundary) = child.boundary_node(NodeKind::GraphInput) {
+        if let Some(boundary) = child.body.boundary_node(NodeKind::GraphInput) {
             let port = OutputPort::new(boundary, idx);
-            interior = child.bindings_bound_to(port);
-            if child.is_output_pinned(port) {
+            interior = child.body.bindings_bound_to(port);
+            if child.body.is_output_pinned(port) {
                 pins.push(port);
             }
         }
@@ -92,13 +92,13 @@ impl Graph {
             .expect("cannot detach a graph input that does not exist");
         let instances = self.local_instances(graph_id);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.as_mut().unwrap().inputs.remove(idx);
-        if let Some(boundary) = child.boundary_node(NodeKind::GraphInput) {
-            child.bindings.retain(|_, binding| {
+        child.definition.inputs.remove(idx);
+        if let Some(boundary) = child.body.boundary_node(NodeKind::GraphInput) {
+            child.body.bindings.retain(|_, binding| {
                 !matches!(binding, Binding::Bind(src) if *src == OutputPort::new(boundary, idx))
             });
-            child.shift_bound_values(boundary, idx);
-            child.shift_pins(boundary, idx);
+            child.body.shift_bound_values(boundary, idx);
+            child.body.shift_pins(boundary, idx);
         }
         for instance in instances {
             self.bindings.remove(&InputPort::new(instance, idx));
@@ -140,10 +140,10 @@ impl Graph {
             .graphs
             .get_mut(&graph_id)
             .expect("cannot attach a graph input to a missing graph");
-        let definition = child.definition.as_mut().unwrap();
+        let definition = &mut child.definition;
         assert!(idx <= definition.inputs.len(), "attach index out of range");
         definition.inputs.insert(idx, spec);
-        match child.boundary_node(NodeKind::GraphInput) {
+        match child.body.boundary_node(NodeKind::GraphInput) {
             Some(boundary) => {
                 let slot = OutputPort::new(boundary, idx);
                 for entry in &interior {
@@ -158,8 +158,8 @@ impl Graph {
                         "detached pin does not sit on the detached input slot"
                     );
                 }
-                child.unshift_bound_values(boundary, idx);
-                child.unshift_pins(boundary, idx);
+                child.body.unshift_bound_values(boundary, idx);
+                child.body.unshift_pins(boundary, idx);
             }
             None => assert!(
                 interior.is_empty() && pins.is_empty(),
@@ -167,7 +167,7 @@ impl Graph {
             ),
         }
         for entry in interior {
-            let previous = child.bindings.insert(entry.port, entry.binding);
+            let previous = child.body.bindings.insert(entry.port, entry.binding);
             assert!(
                 previous.is_none(),
                 "cannot attach over interior bindings created after detachment"
@@ -175,7 +175,7 @@ impl Graph {
         }
         for pin in pins {
             assert!(
-                child.pinned_outputs.insert(pin),
+                child.body.pinned_outputs.insert(pin),
                 "cannot attach over pins created after detachment"
             );
         }
@@ -189,11 +189,12 @@ impl Graph {
         idx: usize,
     ) -> Option<DetachedGraphOutput> {
         let child = self.graphs.get(&graph_id)?;
-        let spec = child.definition.as_ref()?.outputs.get(idx)?.clone();
-        let interior = match child.boundary_node(NodeKind::GraphOutput) {
+        let spec = child.definition.outputs.get(idx)?.clone();
+        let interior = match child.body.boundary_node(NodeKind::GraphOutput) {
             Some(boundary) => {
                 let port = InputPort::new(boundary, idx);
                 child
+                    .body
                     .bindings
                     .get(&port)
                     .map(|binding| BindingEntry {
@@ -231,10 +232,10 @@ impl Graph {
             .expect("cannot detach a graph output that does not exist");
         let instances = self.local_instances(graph_id);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.as_mut().unwrap().outputs.remove(idx);
-        if let Some(boundary) = child.boundary_node(NodeKind::GraphOutput) {
-            child.bindings.remove(&InputPort::new(boundary, idx));
-            child.shift_binding_keys(boundary, idx);
+        child.definition.outputs.remove(idx);
+        if let Some(boundary) = child.body.boundary_node(NodeKind::GraphOutput) {
+            child.body.bindings.remove(&InputPort::new(boundary, idx));
+            child.body.shift_binding_keys(boundary, idx);
         }
         for instance in instances {
             self.bindings.retain(|_, binding| {
@@ -292,10 +293,10 @@ impl Graph {
             .graphs
             .get_mut(&graph_id)
             .expect("cannot attach a graph output to a missing graph");
-        let definition = child.definition.as_mut().unwrap();
+        let definition = &mut child.definition;
         assert!(idx <= definition.outputs.len(), "attach index out of range");
         definition.outputs.insert(idx, spec);
-        match child.boundary_node(NodeKind::GraphOutput) {
+        match child.body.boundary_node(NodeKind::GraphOutput) {
             Some(boundary) => {
                 for entry in &interior {
                     assert!(
@@ -303,7 +304,7 @@ impl Graph {
                         "detached interior binding does not sit on the detached output slot"
                     );
                 }
-                child.unshift_binding_keys(boundary, idx);
+                child.body.unshift_binding_keys(boundary, idx);
             }
             None => assert!(
                 interior.is_empty(),
@@ -311,7 +312,7 @@ impl Graph {
             ),
         }
         for entry in interior {
-            let previous = child.bindings.insert(entry.port, entry.binding);
+            let previous = child.body.bindings.insert(entry.port, entry.binding);
             assert!(
                 previous.is_none(),
                 "cannot attach over interior bindings created after detachment"

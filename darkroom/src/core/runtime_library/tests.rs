@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use lens::MlModelPaths;
-use scenarium::{Graph, GraphId, StaticValue};
+use scenarium::{GraphDef, GraphId, StaticValue};
 
 use crate::core::graph_library::GraphLibrary;
 use crate::core::runtime_library::RuntimeLibrary;
@@ -10,17 +10,14 @@ use crate::core::runtime_library::RuntimeLibrary;
 fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     let graph_id = GraphId::unique();
     let mut graphs = GraphLibrary::default();
-    graphs.graphs.insert(graph_id, Graph::new("shared"));
+    graphs.graphs.insert(graph_id, GraphDef::new("shared"));
     let defaults = MlModelPaths::default();
     let mut library = RuntimeLibrary::with_graph_library(&defaults, graphs);
 
     let current = library.published.load();
     assert!(current.by_name("Watch Directory").is_some());
     assert!(current.by_name("Random").is_some());
-    assert_eq!(
-        current.graphs[&graph_id].definition.as_ref().unwrap().name,
-        "shared"
-    );
+    assert_eq!(current.graphs[&graph_id].definition.name, "shared");
     assert!(!library.update_ml_model_paths(&defaults));
 
     let paths = MlModelPaths {
@@ -45,12 +42,5 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
             paths.star_removal.display().to_string()
         ))
     );
-    assert_eq!(
-        published.graphs[&graph_id]
-            .definition
-            .as_ref()
-            .unwrap()
-            .name,
-        "shared"
-    );
+    assert_eq!(published.graphs[&graph_id].definition.name, "shared");
 }

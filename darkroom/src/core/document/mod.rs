@@ -9,7 +9,9 @@ use glam::Vec2;
 use indexmap::IndexMap;
 use scenarium::GraphId;
 use scenarium::GraphLink;
-use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
+use scenarium::{
+    DetachedNode, Graph as CoreGraph, GraphDef as CoreGraphDef, NodeId, NodeSearch, OutputPort,
+};
 use scenarium::{Node, NodeKind};
 use std::collections::{BTreeSet, HashMap};
 
@@ -296,7 +298,7 @@ impl Document {
     pub(crate) fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
         match target {
             GraphRef::Main => Some(&self.graph),
-            GraphRef::Local(id) => self.graph.find_graph(id),
+            GraphRef::Local(id) => Some(&self.graph.find_graph(id)?.body),
         }
     }
 
@@ -311,7 +313,7 @@ impl Document {
     pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
         match target {
             GraphRef::Main => Some(&mut self.graph),
-            GraphRef::Local(id) => self.graph.find_graph_mut(id),
+            GraphRef::Local(id) => Some(&mut self.graph.find_graph_mut(id)?.body),
         }
     }
 
@@ -323,7 +325,7 @@ impl Document {
                 view: &mut self.main_view,
             }),
             GraphRef::Local(id) => {
-                let graph = self.graph.find_graph_mut(id)?;
+                let graph = &mut self.graph.find_graph_mut(id)?.body;
                 let view = self.local_views.get_mut(&id)?;
                 Some(EditScope { graph, view })
             }
@@ -356,7 +358,7 @@ impl Document {
                 || graph
                     .graphs
                     .values()
-                    .any(|nested| graph_contains(nested, port))
+                    .any(|nested| graph_contains(&nested.body, port))
         }
 
         graph_contains(&self.graph, port)
@@ -385,9 +387,10 @@ impl Document {
             return true;
         }
         let view = {
-            let Some(graph) = self.graph.find_graph(id) else {
+            let Some(def) = self.graph.find_graph(id) else {
                 return false;
             };
+            let graph = &def.body;
             let mut view = GraphView::for_graph(graph);
             view.auto_layout(graph);
             view
@@ -447,9 +450,9 @@ impl Document {
         let view = {
             let scope = self.scope_mut(target)?;
             let sibling_count = scope.graph.graphs.len();
-            let mut graph = CoreGraph::new(format!("graph {}", sibling_count + 1));
-            let input_id = graph.add(Node::new(NodeKind::GraphInput));
-            let output_id = graph.add(Node::new(NodeKind::GraphOutput));
+            let mut graph = CoreGraphDef::new(format!("graph {}", sibling_count + 1));
+            let input_id = graph.body.add(Node::new(NodeKind::GraphInput));
+            let output_id = graph.body.add(Node::new(NodeKind::GraphOutput));
             let inst = Node::graph_instance(&graph, GraphLink::Local(id));
             let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * sibling_count as f32;
             scope.graph.insert_graph(id, graph);
@@ -480,8 +483,7 @@ impl Document {
         side: BoundarySide,
         idx: usize,
     ) -> Option<&str> {
-        let graph = self.graph.find_graph(graph_id)?;
-        let definition = graph.definition.as_ref()?;
+        let definition = &self.graph.find_graph(graph_id)?.definition;
         let name = match side {
             BoundarySide::Input => &definition.inputs.get(idx)?.name,
             BoundarySide::Output => &definition.outputs.get(idx)?.name,
@@ -501,12 +503,10 @@ impl Document {
         expected: &str,
         new: &str,
     ) {
-        let Some(graph) = self.graph.find_graph_mut(graph_id) else {
+        let Some(def) = self.graph.find_graph_mut(graph_id) else {
             return;
         };
-        let Some(definition) = graph.definition.as_mut() else {
-            return;
-        };
+        let definition = &mut def.definition;
         let slot = match side {
             BoundarySide::Input => definition.inputs.get_mut(idx).map(|input| &mut input.name),
             BoundarySide::Output => definition
@@ -543,8 +543,8 @@ mod tests {
     use scenarium::testing::test_graph as core_test_graph;
     use scenarium::{FuncId, SubgraphDefinition};
 
-    fn leaf_graph(name: &str) -> CoreGraph {
-        CoreGraph::new(name)
+    fn leaf_graph(name: &str) -> CoreGraphDef {
+        CoreGraphDef::new(name)
     }
 
     #[test]
@@ -560,6 +560,7 @@ mod tests {
             .graphs
             .get_mut(&graph_id)
             .unwrap()
+            .body
             .insert(node_id, dup);
 
         let err = doc.validate().unwrap_err();
@@ -579,8 +580,8 @@ mod tests {
         // (recording its `origin`) is added alongside the instance node, as
         // one undoable `AddNode`.
         let lib_id = GraphId::unique();
-        let mut local = leaf_graph("Lib").fresh_copy();
-        local.definition.as_mut().unwrap().origin = Some(lib_id);
+        let mut local = leaf_graph("Lib").fresh();
+        local.definition.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -605,14 +606,7 @@ mod tests {
             "local graph added alongside the instance"
         );
         assert_eq!(
-            doc.graph
-                .graphs
-                .get(&local_id)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .origin,
+            doc.graph.graphs.get(&local_id).unwrap().definition.origin,
             Some(lib_id),
             "copy records its library origin"
         );
@@ -640,8 +634,8 @@ mod tests {
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
 
-        let mut local = leaf_graph("Lib").fresh_copy();
-        local.definition.as_mut().unwrap().origin = Some(lib_id);
+        let mut local = leaf_graph("Lib").fresh();
+        local.definition.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -700,7 +694,7 @@ mod tests {
         let lib_id = GraphId::unique();
         let mut doc = Document::default();
         let mut local = leaf_graph("Lib");
-        local.definition.as_mut().unwrap().origin = Some(lib_id);
+        local.definition.origin = Some(lib_id);
         let local_id = GraphId::unique();
         doc.graph.insert_graph(local_id, local);
         let node = Node::graph_instance(
@@ -724,14 +718,7 @@ mod tests {
         };
         assert_ne!(new_id, local_id, "node now points at the fork");
         assert_eq!(
-            doc.graph
-                .graphs
-                .get(&new_id)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .origin,
+            doc.graph.graphs.get(&new_id).unwrap().definition.origin,
             None,
             "detach clears the library lineage"
         );
@@ -810,29 +797,33 @@ mod tests {
         let def = doc.graph.graphs.get(&id).expect("def added");
 
         // Exactly the two boundary nodes, nothing else, empty interface.
-        assert_eq!(def.len(), 2);
+        assert_eq!(def.body.len(), 2);
         assert_eq!(
-            def.iter()
+            def.body
+                .iter()
                 .filter(|n| matches!(n.kind, NodeKind::GraphInput))
                 .count(),
             1
         );
         assert_eq!(
-            def.iter()
+            def.body
+                .iter()
                 .filter(|n| matches!(n.kind, NodeKind::GraphOutput))
                 .count(),
             1
         );
-        let definition = def.definition.as_ref().unwrap();
+        let definition = &def.definition;
         assert!(definition.inputs.is_empty() && definition.outputs.is_empty());
 
         // Boundary nodes are placed input-left / output-right, level.
         let input_id = def
+            .body
             .iter()
             .find(|n| matches!(n.kind, NodeKind::GraphInput))
             .unwrap()
             .id;
         let output_id = def
+            .body
             .iter()
             .find(|n| matches!(n.kind, NodeKind::GraphOutput))
             .unwrap()
@@ -886,8 +877,9 @@ mod tests {
         // instance node live in the outer graph, not at root.
         assert!(!doc.graph.graphs.contains_key(&inner));
         let outer_def = doc.graph.graphs.get(&outer).unwrap();
-        assert!(outer_def.graphs.contains_key(&inner));
+        assert!(outer_def.body.graphs.contains_key(&inner));
         let inst_id = outer_def
+            .body
             .iter()
             .find_map(|n| {
                 matches!(n.kind, NodeKind::Graph(GraphLink::Local(id)) if id == inner)
@@ -930,9 +922,11 @@ mod tests {
                 .graphs
                 .get(&outer)
                 .unwrap()
+                .body
                 .graphs
                 .get(&inner)
                 .unwrap()
+                .body
                 .find(&node_id, NodeSearch::TopLevel)
                 .is_some(),
             "node added inside the depth-2 def"
@@ -952,22 +946,15 @@ mod tests {
         )
         .expect("boundary add builds at depth");
         apply_step(&add_port, &mut doc, GraphRef::Local(inner));
-        let input_count = |doc: &Document| {
-            doc.graph
-                .find_graph(inner)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .inputs
-                .len()
-        };
+        let input_count =
+            |doc: &Document| doc.graph.find_graph(inner).unwrap().definition.inputs.len();
         assert_eq!(input_count(&doc), 1);
         let inst_port = InputPort::new(inst_id, 0);
         let bound = Binding::Const(StaticValue::Float(4.0));
         doc.graph
             .find_graph_mut(outer)
             .unwrap()
+            .body
             .set_input_binding(inst_port, bound.clone());
 
         let remove_port = build_step(
@@ -985,6 +972,7 @@ mod tests {
             !doc.graph
                 .find_graph(outer)
                 .unwrap()
+                .body
                 .bindings
                 .contains_key(&inst_port),
             "the parent's instance binding was severed"
@@ -995,6 +983,7 @@ mod tests {
             doc.graph
                 .find_graph(outer)
                 .unwrap()
+                .body
                 .bindings
                 .get(&inst_port),
             Some(&bound),
@@ -1012,16 +1001,7 @@ mod tests {
         )
         .expect("rename builds at depth");
         apply_step(&rename, &mut doc, GraphRef::Main);
-        assert_eq!(
-            doc.graph
-                .find_graph(inner)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .name,
-            "deep"
-        );
+        assert_eq!(doc.graph.find_graph(inner).unwrap().definition.name, "deep");
         doc.validate()
             .expect("document still validates after edits");
     }
@@ -1055,9 +1035,9 @@ mod tests {
         let def_id = doc.create_graph(GraphRef::Main).unwrap();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
         let definition = doc.graph.graphs.get_mut(&def_id).unwrap();
-        let nested_node_id = definition.add(nested_node);
+        let nested_node_id = definition.body.add(nested_node);
         let nested_port = OutputPort::new(nested_node_id, 0);
-        definition.set_output_pinned(nested_port, true);
+        definition.body.set_output_pinned(nested_port, true);
         assert!(
             doc.is_output_pinned(nested_port),
             "pins in nested authoring graphs retain their presentation resource"
@@ -1199,10 +1179,16 @@ mod tests {
         assert_roundtrip();
 
         let mut invalid = build_test_doc();
-        invalid.graph.definition = Some(SubgraphDefinition {
-            origin: Some(GraphId::nil()),
-            ..Default::default()
-        });
+        invalid.graph.insert_graph(
+            GraphId::unique(),
+            CoreGraphDef {
+                definition: SubgraphDefinition {
+                    origin: Some(GraphId::nil()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
         let serialized = serde_json::to_vec(&invalid).unwrap();
         let invalid: Document = serde_json::from_slice(&serialized).unwrap();
         let error = invalid.validate().unwrap_err().to_string();

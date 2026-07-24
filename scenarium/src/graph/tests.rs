@@ -1,7 +1,7 @@
 use crate::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
     SubgraphDefinition,
 };
 use crate::library::Library;
@@ -12,8 +12,8 @@ use common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-fn definition(graph: &Graph) -> &SubgraphDefinition {
-    graph.definition.as_ref().unwrap()
+fn definition(def: &GraphDef) -> &SubgraphDefinition {
+    &def.definition
 }
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
@@ -37,9 +37,12 @@ fn roundtrip_serialization() -> TestResult {
     }
 
     let entry_json = serde_json::to_value(&graph)?;
-    assert_eq!(entry_json["definition"], serde_json::Value::Null);
+    assert!(
+        entry_json.get("definition").is_none(),
+        "an entry graph has no interface to serialize"
+    );
 
-    let subgraph = Graph::new("Reusable")
+    let subgraph = GraphDef::new("Reusable")
         .category("Test")
         .input(FuncInput::optional("value", DataType::Int))
         .output(FuncOutput::new("result", DataType::Int));
@@ -72,8 +75,8 @@ fn roundtrip_serialization() -> TestResult {
 fn validate_rejects_node_ids_reused_across_graph_levels() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let node_id = NodeId::unique();
-    let mut interior = Graph::new("duplicate id");
-    interior.insert(node_id, node.clone());
+    let mut interior = GraphDef::new("duplicate id");
+    interior.body.insert(node_id, node.clone());
     let graph_id = GraphId::unique();
 
     let mut graph = Graph::default();
@@ -91,10 +94,10 @@ fn validate_rejects_graph_ids_reused_across_parents() {
     // corrupt input validation refuses: a bare graph id must be an
     // unambiguous document-wide address.
     let graph_id = GraphId::unique();
-    let mut parent_a = Graph::new("parent a");
-    parent_a.insert_graph(graph_id, Graph::new("dup"));
+    let mut parent_a = GraphDef::new("parent a");
+    parent_a.body.insert_graph(graph_id, GraphDef::new("dup"));
     let mut graph = Graph::default();
-    graph.insert_graph(graph_id, Graph::new("dup"));
+    graph.insert_graph(graph_id, GraphDef::new("dup"));
     graph.insert_graph(GraphId::unique(), parent_a);
 
     let error = graph.validate().unwrap_err().to_string();
@@ -108,17 +111,9 @@ fn validate_rejects_graph_ids_reused_across_parents() {
 fn insert_graph_replaces_existing_graph() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
-    graph.insert_graph(graph_id, Graph::new("original"));
-    graph.insert_graph(graph_id, Graph::new("replacement"));
+    graph.insert_graph(graph_id, GraphDef::new("original"));
+    graph.insert_graph(graph_id, GraphDef::new("replacement"));
     assert_eq!(definition(&graph.graphs[&graph_id]).name, "replacement");
-
-    let missing_definition = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        graph.insert_graph(GraphId::unique(), Graph::default());
-    }));
-    assert!(
-        missing_definition.is_err(),
-        "a local graph cannot omit its definition"
-    );
 }
 
 #[test]
@@ -144,46 +139,38 @@ fn validate_passes_for_valid_graph() {
 
 #[test]
 fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
+    // "A definition carries an interface, an entry graph doesn't" is a type
+    // fact (`GraphDef` vs `Graph`), so only the *boundary-node* half of the
+    // distinction is still checkable at runtime.
     let entry = Graph::default();
-    assert!(entry.definition.is_none());
     assert!(entry.validate_for_execution(&Library::default()).is_ok());
-    assert!(matches!(
-        entry.validate_subgraph(),
-        Err(GraphValidationError::MissingSubgraphDefinition)
-    ));
 
-    let mut graph = Graph::new("reusable")
+    let mut def = GraphDef::new("reusable")
         .input(FuncInput::optional("value", DataType::Int))
         .output(FuncOutput::new("result", DataType::Int));
-    graph.add(Node::new(NodeKind::GraphInput));
-    graph.add(Node::new(NodeKind::GraphOutput));
+    def.body.add(Node::new(NodeKind::GraphInput));
+    def.body.add(Node::new(NodeKind::GraphOutput));
+    assert_eq!(def.definition.name, "reusable");
+    assert_eq!(def.definition.inputs.len(), 1);
+    assert_eq!(def.definition.outputs.len(), 1);
+    assert!(def.body.validate().is_ok());
 
-    let definition = definition(&graph);
-    assert_eq!(definition.name, "reusable");
-    assert_eq!(definition.inputs.len(), 1);
-    assert_eq!(definition.outputs.len(), 1);
-    assert!(graph.validate_subgraph().is_ok());
-    let error = graph
+    // The boundary nodes that make it a definition are exactly what an
+    // execution entry may not contain.
+    let error = def
+        .body
         .validate_for_execution(&Default::default())
         .unwrap_err();
-    assert!(matches!(error, GraphValidationError::EntryDefinition));
-
-    let graph_id = GraphId::unique();
-    let mut entry = Graph::default();
-    entry.graphs.insert(graph_id, Graph::default());
-    let error = entry.validate().unwrap_err();
-    assert!(matches!(
-        error,
-        GraphValidationError::LocalGraph { source, .. }
-            if matches!(*source, GraphValidationError::MissingSubgraphDefinition)
-    ));
+    assert!(matches!(error, GraphValidationError::EntryBoundaryNodes));
 }
 
 #[test]
 fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     let graph_id = GraphId::unique();
-    let mut shared = Graph::new("recursive");
-    shared.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
+    let mut shared = GraphDef::new("recursive");
+    shared
+        .body
+        .add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
     let mut library = Library::default();
     library.insert_graph(graph_id, shared);
@@ -198,9 +185,9 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     assert!(error.contains("recursive"));
 
     let graph_id = GraphId::unique();
-    let mut shared = Graph::new("structurally invalid");
-    shared.add(Node::new(NodeKind::GraphInput));
-    shared.add(Node::new(NodeKind::GraphInput));
+    let mut shared = GraphDef::new("structurally invalid");
+    shared.body.add(Node::new(NodeKind::GraphInput));
+    shared.body.add(Node::new(NodeKind::GraphInput));
 
     let mut library = Library::default();
     library.insert_graph(graph_id, shared);
@@ -481,9 +468,9 @@ fn validate_for_execution_tolerates_library_range_drift() {
     graph.set_output_pinned(OutputPort::new(id, 1), true);
     graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
     graph.subscribe(id, 3, id);
-    let mut child = Graph::new("child");
-    let interior = child.add_func_node(&func);
-    child.definition.as_mut().unwrap().events.push(GraphEvent {
+    let mut child = GraphDef::new("child");
+    let interior = child.body.add_func_node(&func);
+    child.definition.events.push(GraphEvent {
         name: "drifted".into(),
         emitter: interior,
         emitter_event_idx: 9,
@@ -512,10 +499,10 @@ fn validate_caps_graph_nesting_depth() {
     use crate::graph::validate::MAX_NESTING_DEPTH;
 
     let nest = |levels: usize| {
-        let mut graph = Graph::new("leaf");
+        let mut graph = GraphDef::new("leaf");
         for _ in 0..levels {
-            let mut parent = Graph::new("level");
-            parent.insert_graph(GraphId::unique(), graph);
+            let mut parent = GraphDef::new("level");
+            parent.body.insert_graph(GraphId::unique(), graph);
             graph = parent;
         }
         let mut root = Graph::default();
@@ -854,7 +841,13 @@ fn deserialize_rejects_corrupt_graph() {
         Err(GraphDeserializeError::InvalidGraph(_))
     ));
 
-    let nil_origin = Graph::new("nil origin").origin(GraphId::nil());
+    // A definition's lineage is checked through its parent, since a def is
+    // only ever decoded as part of the graph holding it.
+    let mut nil_origin = Graph::default();
+    nil_origin.insert_graph(
+        GraphId::unique(),
+        GraphDef::new("nil origin").origin(GraphId::nil()),
+    );
     let bytes = nil_origin.serialize(SerdeFormat::Bitcode).unwrap();
     let error = Graph::deserialize(&bytes, SerdeFormat::Bitcode)
         .unwrap_err()
@@ -1182,10 +1175,12 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 fn add_graph_node_seeds_default_const_binding() {
     let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
     let graph_id = GraphId::unique();
-    let def = Graph::new("Def").category("Test").inputs([input.clone(), {
-        input.default_value = None;
-        input
-    }]);
+    let def = GraphDef::new("Def")
+        .category("Test")
+        .inputs([input.clone(), {
+            input.default_value = None;
+            input
+        }]);
 
     let mut graph = Graph::default();
     let id = graph.add_graph_node(&def, GraphLink::Local(graph_id));
@@ -1202,14 +1197,14 @@ fn add_graph_node_seeds_default_const_binding() {
 fn node_search_scope_gates_graph_interiors() {
     // A top-level node plus one two-levels-deep: a local graph whose
     // interior holds another local graph with the target node inside.
-    let mut inner_graph = Graph::new("Inner");
+    let mut inner_graph = GraphDef::new("Inner");
     let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
     deep.name = "deep".to_owned();
-    let deep_id = inner_graph.add(deep);
+    let deep_id = inner_graph.body.add(deep);
     let inner_id = GraphId::unique();
 
-    let mut outer_graph = Graph::new("Outer");
-    outer_graph.insert_graph(inner_id, inner_graph);
+    let mut outer_graph = GraphDef::new("Outer");
+    outer_graph.body.insert_graph(inner_id, inner_graph);
     let outer_id = GraphId::unique();
 
     let mut graph = Graph::default();
@@ -1283,23 +1278,64 @@ fn node_search_scope_gates_graph_interiors() {
 }
 
 #[test]
+fn port_arity_queries_answer_only_what_a_bare_body_knows() {
+    // `Some(n)` is an authoritative arity a caller may range-check against;
+    // `None` means "unknowable here" and must *not* read as zero — the
+    // drift guards do `is_some_and(|count| idx >= count)`, so the two
+    // decide opposite ways.
+    let library = test_func_lib(TestFuncHooks::default());
+    let mut def = GraphDef::new("S")
+        .inputs([
+            FuncInput::optional("a", DataType::Int),
+            FuncInput::optional("b", DataType::Int),
+        ])
+        .output(FuncOutput::new("r", DataType::Int));
+    let input = def.body.add(Node::new(NodeKind::GraphInput));
+    let output = def.body.add(Node::new(NodeKind::GraphOutput));
+    let body = &def.body;
+    let node = |id: &NodeId| body.find(id, NodeSearch::TopLevel).unwrap();
+
+    // The inbound boundary's *outputs* mirror the interface's inputs, which
+    // the body alone doesn't carry — the one genuinely unknowable arity.
+    assert_eq!(body.output_count(node(&input), &library), None);
+    // Everything else is structural, so the body answers it exactly.
+    assert_eq!(body.event_count(node(&input), &library), Some(1));
+    assert_eq!(body.output_count(node(&output), &library), Some(0));
+    assert_eq!(body.event_count(node(&output), &library), Some(0));
+
+    // A graph *instance* reads its target's interface, so both arities are
+    // known even though the instance's own body isn't involved.
+    let mut root = Graph::default();
+    let def_id = GraphId::unique();
+    let instance = root.add_graph_node(&def, GraphLink::Local(def_id));
+    root.insert_graph(def_id, def);
+    let instance = root.find(&instance, NodeSearch::TopLevel).unwrap();
+    assert_eq!(root.output_count(instance, &library), Some(1));
+    assert_eq!(root.event_count(instance, &library), Some(0));
+
+    // An unresolvable link is unknown, not zero — library drift must not
+    // silently report every port out of range.
+    let dangling = Node::new(NodeKind::Graph(GraphLink::Local(GraphId::unique())));
+    assert_eq!(root.output_count(&dangling, &library), None);
+    assert_eq!(root.event_count(&dangling, &library), None);
+}
+
+#[test]
 fn resolve_graph_picks_local_or_linked_source() {
     let mut library = test_func_lib(TestFuncHooks::default());
 
     let linked_id = GraphId::unique();
-    library.insert_graph(linked_id, Graph::new("Linked").category("Test"));
+    library.insert_graph(linked_id, GraphDef::new("Linked").category("Test"));
 
     let mut graph = Graph::default();
     let local_id = GraphId::unique();
-    graph.insert_graph(local_id, Graph::new("Local").category("Test"));
+    graph.insert_graph(local_id, GraphDef::new("Local").category("Test"));
 
     assert_eq!(
         graph
             .resolve_graph(GraphLink::Local(local_id), &library)
             .unwrap()
             .definition
-            .as_ref()
-            .unwrap()
             .name,
         "Local"
     );
@@ -1308,8 +1344,6 @@ fn resolve_graph_picks_local_or_linked_source() {
             .resolve_graph(GraphLink::Shared(linked_id), &library)
             .unwrap()
             .definition
-            .as_ref()
-            .unwrap()
             .name,
         "Linked"
     );
@@ -1327,7 +1361,8 @@ fn resolve_graph_picks_local_or_linked_source() {
         .graphs
         .get_mut(&local_id)
         .unwrap()
-        .insert_graph(deep_id, Graph::new("Deep").category("Test"));
+        .body
+        .insert_graph(deep_id, GraphDef::new("Deep").category("Test"));
     assert!(
         graph
             .resolve_graph(GraphLink::Local(deep_id), &library)
@@ -1339,26 +1374,18 @@ fn resolve_graph_picks_local_or_linked_source() {
         "Deep",
         "find_graph reaches a depth-2 def by bare id"
     );
-    assert_eq!(
-        definition(graph.find_graph_parent(deep_id).unwrap()).name,
-        "Local",
-        "the parent of the deep def is the mid-level graph"
+    assert!(
+        std::ptr::eq(
+            graph.find_graph_parent(deep_id).unwrap(),
+            &graph.find_graph(local_id).unwrap().body
+        ),
+        "the parent of the deep def is the mid-level graph's body"
     );
     assert!(
-        graph
-            .find_graph_parent(local_id)
-            .unwrap()
-            .definition
-            .is_none(),
+        std::ptr::eq(graph.find_graph_parent(local_id).unwrap(), &graph),
         "a top-level def's parent is the root itself"
     );
-    graph
-        .find_graph_mut(deep_id)
-        .unwrap()
-        .definition
-        .as_mut()
-        .unwrap()
-        .name = "Renamed".into();
+    graph.find_graph_mut(deep_id).unwrap().definition.name = "Renamed".into();
     assert_eq!(
         definition(graph.find_graph(deep_id).unwrap()).name,
         "Renamed",

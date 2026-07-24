@@ -6,7 +6,7 @@ use glam::Vec2;
 use scenarium::NodeId;
 use scenarium::{Binding, InputPort, Node, NodeKind};
 use scenarium::{Func, FuncInput};
-use scenarium::{Graph, GraphId, GraphLink};
+use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
@@ -21,7 +21,7 @@ use crate::gui::scene::Scene;
 struct ChosenNode {
     node_id: NodeId,
     node: Node,
-    graph: Option<(GraphId, Box<Graph>)>,
+    graph: Option<(GraphId, Box<GraphDef>)>,
     bindings: Vec<(InputPort, Binding)>,
 }
 
@@ -31,7 +31,7 @@ struct ChosenNode {
 enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
-    Graph(GraphId, &'a Graph),
+    Graph(GraphId, &'a GraphDef),
 }
 
 impl PaletteEntry<'_> {
@@ -39,7 +39,7 @@ impl PaletteEntry<'_> {
         match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Graph(_, graph) => &graph.definition.as_ref().unwrap().name,
+            PaletteEntry::Graph(_, graph) => &graph.definition.name,
         }
     }
 }
@@ -240,7 +240,7 @@ fn category_column(
                 .graphs
                 .iter()
                 .filter(|(_, graph)| {
-                    let definition = graph.definition.as_ref().unwrap();
+                    let definition = &graph.definition;
                     definition.category == category && shows(&definition.name)
                 })
                 .map(|(id, graph)| PaletteEntry::Graph(*id, graph)),
@@ -297,7 +297,7 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
             ctx.library
                 .graphs
                 .values()
-                .map(|graph| graph.definition.as_ref().unwrap().category.as_str()),
+                .map(|graph| graph.definition.category.as_str()),
         )
         .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
@@ -334,9 +334,9 @@ fn graph_entry(
     ui: &mut Ui,
     popup: &PopupHandle,
     shared_id: GraphId,
-    graph: &Graph,
+    graph: &GraphDef,
 ) -> Option<ChosenNode> {
-    let definition = graph.definition.as_ref().unwrap();
+    let definition = &graph.definition;
     if !MenuItem::new(&definition.name)
         .show(ui, popup)
         .left
@@ -345,11 +345,11 @@ fn graph_entry(
         return None;
     }
     let local_id = GraphId::unique();
-    let mut local = graph.fresh_copy();
-    local.definition.as_mut().unwrap().origin = Some(shared_id);
+    let mut local = graph.fresh();
+    local.definition.origin = Some(shared_id);
     let node_id = NodeId::unique();
     let node = Node::graph_instance(&local, GraphLink::Local(local_id));
-    let bindings = default_bindings(node_id, &local.definition.as_ref().unwrap().inputs);
+    let bindings = default_bindings(node_id, &local.definition.inputs);
     Some(ChosenNode {
         node_id,
         node,

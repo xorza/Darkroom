@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use common::test_utils::test_output_path;
-use scenarium::{Graph, GraphEvent, GraphId, NodeId};
+use scenarium::{GraphDef, GraphEvent, GraphId, NodeId};
 
 use crate::core::graph_library::GraphLibrary;
 use crate::core::io::graph_library::{
     GraphLibraryLoadError, GraphLibraryReadError, broken_path, load_from, save_to,
 };
 
-fn graph(name: &str) -> Graph {
-    Graph::new(name).category("test")
+fn graph(name: &str) -> GraphDef {
+    GraphDef::new(name).category("test")
 }
 
 fn library<const N: usize>(names: [&str; N]) -> GraphLibrary {
@@ -76,7 +76,7 @@ fn structurally_invalid_graph_is_quarantined() {
     let path = test_output_path("darkroom_graph_library/invalid-graph.json");
     let _ = std::fs::remove_file(&path);
     let mut bad = graph("dangling");
-    bad.definition.as_mut().unwrap().events.push(GraphEvent {
+    bad.definition.events.push(GraphEvent {
         name: "tick".into(),
         emitter: NodeId::unique(),
         emitter_event_idx: 0,

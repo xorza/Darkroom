@@ -2,7 +2,7 @@
 //! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
 //! intent pipeline. Pure: never writes to the graph.
 
-use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeKind, NodeSearch};
+use scenarium::{Binding, Graph, GraphDef, GraphId, GraphLink, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
@@ -40,7 +40,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }));
     }
     if let Intent::RenameGraph { id, to } = intent {
-        let from = doc.graph.find_graph(id)?.definition.as_ref()?.name.clone();
+        let from = doc.graph.find_graph(id)?.definition.name.clone();
         return Some(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
     }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
@@ -67,7 +67,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         let GraphRef::Local(graph_id) = target else {
             return None;
         };
-        let definition = doc.graph.find_graph(graph_id)?.definition.as_ref()?;
+        let definition = &doc.graph.find_graph(graph_id)?.definition;
         let idx = match side {
             BoundarySide::Input => definition.inputs.len(),
             BoundarySide::Output => definition.outputs.len(),
@@ -240,8 +240,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 return None; // not a local graph instance — nothing to fork
             };
             let to_id = GraphId::unique();
-            let mut copy = graph.graphs.get(&from_id)?.fresh_copy();
-            copy.definition.as_mut().unwrap().origin = None;
+            let mut copy = graph.graphs.get(&from_id)?.fresh();
+            copy.definition.origin = None;
             GraphStep::DetachGraph {
                 node_id,
                 from_id,
@@ -310,18 +310,17 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
 fn reuse_local_graph(
     graph: &Graph,
     node: &mut Node,
-    pending: Option<(GraphId, Box<Graph>)>,
-) -> Option<(GraphId, Box<Graph>)> {
+    pending: Option<(GraphId, Box<GraphDef>)>,
+) -> Option<(GraphId, Box<GraphDef>)> {
     let (graph_id, pending) = pending?;
-    let Some(origin) = pending.definition.as_ref().unwrap().origin else {
+    let Some(origin) = pending.definition.origin else {
         return Some((graph_id, pending));
     };
-    match graph.graphs.iter().find(|(_, existing)| {
-        existing
-            .definition
-            .as_ref()
-            .is_some_and(|definition| definition.origin == Some(origin))
-    }) {
+    match graph
+        .graphs
+        .iter()
+        .find(|(_, existing)| existing.definition.origin == Some(origin))
+    {
         Some((existing_id, _)) => {
             node.kind = NodeKind::Graph(GraphLink::Local(*existing_id));
             None

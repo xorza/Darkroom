@@ -73,7 +73,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
         DocStep::RenameGraph { id, to, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.definition.as_mut().unwrap().name = to.clone();
+                graph.definition.name = to.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -84,7 +84,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             data_type,
         } => {
             if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = graph.definition.as_mut().unwrap();
+                let definition = &mut graph.definition;
                 match side {
                     BoundarySide::Input => definition
                         .inputs
@@ -127,9 +127,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 "apply AddNode expects node to be absent"
             );
             if let Some((graph_id, nested_graph)) = graph {
-                scope
-                    .graph
-                    .insert_graph(*graph_id, nested_graph.verbatim_copy());
+                scope.graph.insert_graph(*graph_id, nested_graph.restore());
             }
             scope.graph.insert(*node_id, node.clone());
             for (port, binding) in bindings {
@@ -201,7 +199,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             graph,
             ..
         } => {
-            scope.graph.insert_graph(*to_id, graph.verbatim_copy());
+            scope.graph.insert_graph(*to_id, graph.restore());
             scope
                 .graph
                 .find_mut(node_id, NodeSearch::TopLevel)
@@ -309,7 +307,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
         DocStep::RenameGraph { id, from, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.definition.as_mut().unwrap().name = from.clone();
+                graph.definition.name = from.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -319,7 +317,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             ..
         } => {
             if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = graph.definition.as_mut().unwrap();
+                let definition = &mut graph.definition;
                 match side {
                     BoundarySide::Input => {
                         definition.inputs.remove(*idx);

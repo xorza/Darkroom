@@ -1,20 +1,20 @@
 use common::test_utils::test_output_path;
 use common::{SerdeFormat, deserialize};
-use scenarium::{Graph, GraphEvent, GraphId, NodeId};
+use scenarium::{GraphDef, GraphEvent, GraphId, NodeId};
 
 use crate::core::io::graph_template::{GraphTemplateLoadError, load, save};
 
 #[test]
 fn graph_template_roundtrips_and_validates_input() {
     let path = test_output_path("darkroom_graph_template/graph.json");
-    let graph = Graph::new("ok").category("test");
+    let graph = GraphDef::new("ok").category("test");
     save(&graph, &path).unwrap();
     assert_eq!(load(&path).unwrap(), graph);
 
     let extensionless = test_output_path("darkroom_graph_template/graph");
     save(&graph, &extensionless).unwrap();
     let bytes = std::fs::read(extensionless).unwrap();
-    let decoded: Graph = deserialize(&bytes, SerdeFormat::Json).unwrap();
+    let decoded: GraphDef = deserialize(&bytes, SerdeFormat::Json).unwrap();
     assert_eq!(decoded, graph, "unknown save extensions default to JSON");
 
     let unsupported = test_output_path("darkroom_graph_template/graph.unsupported");
@@ -25,8 +25,8 @@ fn graph_template_roundtrips_and_validates_input() {
     ));
 
     let bad_path = test_output_path("darkroom_graph_template/bad-graph.json");
-    let mut bad = Graph::new("bad");
-    bad.definition.as_mut().unwrap().events.push(GraphEvent {
+    let mut bad = GraphDef::new("bad");
+    bad.definition.events.push(GraphEvent {
         name: "tick".into(),
         emitter: NodeId::unique(),
         emitter_event_idx: 0,
@@ -43,8 +43,8 @@ fn graph_template_roundtrips_and_validates_input() {
     );
 
     let nil_origin_path = test_output_path("darkroom_graph_template/nil-origin-graph.json");
-    let mut nil_origin = Graph::new("nil origin");
-    nil_origin.definition.as_mut().unwrap().origin = Some(GraphId::nil());
+    let mut nil_origin = GraphDef::new("nil origin");
+    nil_origin.definition.origin = Some(GraphId::nil());
     save(&nil_origin, &nil_origin_path).unwrap();
     let error = load(&nil_origin_path).unwrap_err();
     assert!(

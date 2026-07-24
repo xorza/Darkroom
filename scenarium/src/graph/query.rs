@@ -28,7 +28,7 @@ impl Graph {
         let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
-            NodeKind::Graph(r) => &self.resolve_graph(*r, library)?.definition.as_ref()?.inputs,
+            NodeKind::Graph(r) => &self.resolve_graph(*r, library)?.definition.inputs,
             NodeKind::Special(s) => &s.func().inputs,
             NodeKind::GraphInput | NodeKind::GraphOutput => return None,
         };
@@ -40,13 +40,14 @@ impl Graph {
             NodeKind::Func(id) => library.by_id(id).map(|function| function.outputs.len()),
             NodeKind::Graph(reference) => self
                 .resolve_graph(*reference, library)
-                .and_then(|graph| graph.definition.as_ref())
-                .map(|definition| definition.outputs.len()),
+                .map(|def| def.definition.outputs.len()),
             NodeKind::Special(special) => Some(special.func().outputs.len()),
-            NodeKind::GraphInput => self
-                .definition
-                .as_ref()
-                .map(|definition| definition.inputs.len()),
+            // The inbound boundary's outputs *are* the enclosing definition's
+            // inputs, which a bare body doesn't carry — unknown here, so
+            // callers needing the arity resolve the `GraphDef`.
+            NodeKind::GraphInput => None,
+            // The outbound boundary's ports are all inputs, whatever the
+            // interface says.
             NodeKind::GraphOutput => Some(0),
         }
     }
@@ -56,10 +57,13 @@ impl Graph {
             NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
             NodeKind::Graph(reference) => self
                 .resolve_graph(*reference, library)
-                .and_then(|graph| graph.definition.as_ref())
-                .map(|definition| definition.events.len()),
+                .map(|def| def.definition.events.len()),
             NodeKind::Special(special) => Some(special.func().events.len()),
-            NodeKind::GraphInput => self.definition.as_ref().map(|_| 1),
+            // Both are interface-independent: the inbound boundary exposes
+            // exactly the graph's trigger, the outbound one emits nothing.
+            // A boundary node only exists in a definition body at all —
+            // `validate_for_execution` rejects one in an entry graph.
+            NodeKind::GraphInput => Some(1),
             NodeKind::GraphOutput => Some(0),
         }
     }
@@ -112,8 +116,7 @@ impl Graph {
             NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
             NodeKind::Graph(r) => self
                 .resolve_graph(*r, library)
-                .and_then(|graph| graph.definition.as_ref())
-                .map(|definition| definition.outputs.as_slice()),
+                .map(|def| def.definition.outputs.as_slice()),
             NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
             NodeKind::GraphInput | NodeKind::GraphOutput => None,
         }

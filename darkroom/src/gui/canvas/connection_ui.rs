@@ -605,7 +605,7 @@ fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> 
 mod tests {
     use aperture::Ui;
     use scenarium::testing::{TestFuncHooks, test_func_lib};
-    use scenarium::{Binding, DataType, Graph, InputPort, Node, NodeId, NodeKind};
+    use scenarium::{Binding, DataType, GraphDef, InputPort, Node, NodeId, NodeKind};
 
     use crate::core::document::{BoundarySide, GraphView, PortKind, PortRef};
     use crate::core::edit::intent::types::Intent;
@@ -628,18 +628,20 @@ mod tests {
         let library = test_func_lib(TestFuncHooks::default());
         let mult_id = library.by_name("mult").unwrap().id;
         let mut graph =
-            Graph::new("S").input(scenarium::FuncInput::optional("input0", DataType::Int));
-        let boundary_in = graph.add(Node::new(NodeKind::GraphInput));
-        let boundary_out = graph.add(Node::new(NodeKind::GraphOutput));
-        let mult = graph.add(Node::new(NodeKind::Func(mult_id)));
-        graph.set_input_binding(InputPort::new(mult, 0), Binding::bind(boundary_in, 0));
+            GraphDef::new("S").input(scenarium::FuncInput::optional("input0", DataType::Int));
+        let boundary_in = graph.body.add(Node::new(NodeKind::GraphInput));
+        let boundary_out = graph.body.add(Node::new(NodeKind::GraphOutput));
+        let mult = graph.body.add(Node::new(NodeKind::Func(mult_id)));
+        graph
+            .body
+            .set_input_binding(InputPort::new(mult, 0), Binding::bind(boundary_in, 0));
 
-        let view = GraphView::for_graph(&graph);
+        let view = GraphView::for_graph(&graph.body);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
         scene.rebuild(
             &mut ui,
-            &graph,
+            (&graph).into(),
             &view,
             &library,
             &RunState::default(),

@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
-use scenarium::{Graph, GraphId, NodeId, math_library, system_library, worker_events_library};
+use scenarium::{GraphDef, GraphId, NodeId, math_library, system_library, worker_events_library};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::publish;
@@ -67,11 +67,9 @@ impl RuntimeLibrary {
         }
     }
 
-    pub(crate) fn import_template(&mut self, graph: Graph) -> RuntimeLibraryChange {
+    pub(crate) fn import_template(&mut self, graph: GraphDef) -> RuntimeLibraryChange {
         let graph_id = GraphId::unique();
-        self.graph_library
-            .graphs
-            .insert(graph_id, graph.fresh_copy());
+        self.graph_library.graphs.insert(graph_id, graph.fresh());
         self.finish_graph_library_change(true)
     }
 
@@ -124,7 +122,7 @@ fn compose(model_paths: &MlModelPaths, graph_library: &GraphLibrary) -> Scenariu
     library.merge(image_library());
     library.merge(astro_library(model_paths));
     for (id, graph) in &graph_library.graphs {
-        library.insert_graph(*id, graph.verbatim_copy());
+        library.insert_graph(*id, graph.restore());
     }
     library
 }
