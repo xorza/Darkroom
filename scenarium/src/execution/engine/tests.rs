@@ -2229,7 +2229,7 @@ mod resource_binds {
         }
     }
 
-    /// End-to-end wiring of a **registered** resource type: `TypeEntry::with_stamper` →
+    /// End-to-end wiring of a **registered** resource type: `TypeEntry` stamper →
     /// flatten resolves the input's stamper → digest folds the referent version →
     /// reach-time re-stamp keeps the reader cacheable. Bumping the store's version is the
     /// only change between runs — no value, const, or structural digest moves — and the
@@ -2246,7 +2246,7 @@ mod resource_binds {
         let mut lib = Library::default();
         lib.register_type(
             STORE_TYPE,
-            TypeEntry::custom("StoreHandle").with_stamper(Arc::new(StoreStamper(store.clone()))),
+            TypeEntry::custom_with_stamper("StoreHandle", Arc::new(StoreStamper(store.clone()))),
         );
         lib.add(
             Func::new(MAKE_HANDLE, "make_handle")

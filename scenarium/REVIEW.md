@@ -4,7 +4,7 @@
 
 Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Filesystem identity remains intentionally approximate, but runtime eviction now removes selected flattened cache cones from RAM and disk without mutating the authored graph. Eager hydration and pin delivery still make disk-backed reuse consume more RAM and I/O than the live schedule requires.
 
-The main structural problems are invalid registry states, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
+The main structural problems are mixed lifecycle state in `ContextManager` and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
 ## Current flow
 
@@ -20,7 +20,7 @@ The main structural problems are invalid registry states, mixed lifecycle state 
 
 - [x] **Registry collisions panic consistently without replacing the existing entry.** Function, shared-graph, and type registration check for an occupied identity before insertion, and `Library::merge` inherits the same behavior through those methods. Callers that intentionally evolve a test function remove the old definition explicitly before registering its replacement (`src/library.rs`).
 
-- [ ] **`TypeEntry` represents invalid enum attachment states.** Its public `decl`, `codec`, and `stamper` fields allow enum types to carry runtime attachments, and registration rejects those combinations only through fallible validation followed by a panic. The public model therefore permits states the registry cannot accept (`src/library.rs:13-64`, `src/library.rs:168-175`).
+- [x] **`TypeEntry` makes invalid enum attachment states unrepresentable.** A private tagged representation stores codecs and stampers only in the custom variant, while enum entries physically contain only their display name and variants. Registration no longer needs fallible validation for combinations callers cannot construct (`src/library.rs`).
 
 - [ ] **Context lookup is dynamically typed while context declarations are advisory.** `ContextType` does not retain its value type, so callers can request the wrong `T` and panic during downcast. Its public `description` is unread, and `Func::required_contexts` has production writers but no production reader, exposing metadata that does not enforce or describe runtime behavior (`src/runtime/context.rs:16-20`, `src/runtime/context.rs:105-137`, `src/node/definition.rs:207-212`, `src/node/definition.rs:303-305`).
 

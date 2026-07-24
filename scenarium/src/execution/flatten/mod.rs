@@ -122,7 +122,7 @@ fn input_stamper(ty: &DataType, library: &Library) -> Option<InputStamper> {
     match ty {
         DataType::FsPath(_) => Some(InputStamper::FsPath),
         DataType::Custom(type_id) => {
-            let stamper = library.types.get(type_id)?.stamper.clone()?;
+            let stamper = library.types.get(type_id)?.stamper().cloned()?;
             Some(InputStamper::Custom(stamper))
         }
         _ => None,

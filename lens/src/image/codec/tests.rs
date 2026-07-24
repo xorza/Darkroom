@@ -112,5 +112,5 @@ fn register_image_type_wires_the_codec() {
     let id = *IMAGE_TYPE_ID;
     let mut library = Library::default();
     library.register_type(id, image_type_entry());
-    assert!(library.type_decl(&id).is_some());
+    assert!(library.types.contains_key(&id));
 }

@@ -154,9 +154,10 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
         } => {
             let id: TypeId = type_id.as_str().into();
             let entry = TypeEntry::enum_with_variants(display_name, variants.clone());
-            if let Some(existing) = library.type_decl(&id) {
-                assert_eq!(
-                    existing, &entry.decl,
+            if let Some(existing) = library.types.get(&id) {
+                assert!(
+                    existing.display_name() == entry.display_name()
+                        && existing.variants() == entry.variants(),
                     "conflicting enum type registration for {id}"
                 );
             } else {
@@ -261,10 +262,10 @@ mod tests {
         let mut library = Library::default();
         register_field_enum(&mut library, &kind);
         register_field_enum(&mut library, &kind);
-        let decl = library.type_decl(&expected_id).unwrap();
-        assert_eq!(decl.display_name(), "Mode");
+        let entry = library.types.get(&expected_id).unwrap();
+        assert_eq!(entry.display_name(), "Mode");
         assert_eq!(
-            decl.variants(),
+            entry.variants(),
             Some(["a".to_string(), "b".to_string()].as_slice())
         );
     }

@@ -8,16 +8,13 @@ use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
 use hashbrown::HashMap as GraphMap;
-use thiserror::Error;
 
-/// The metadata of a registered nominal type — a `Custom`
-/// app-extension type or an `Enum`. Identity is the [`TypeId`] it's keyed by in
-/// [`Library::types`]; this is everything else the editor needs to render and
-/// validate it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TypeDecl {
+#[derive(Clone, Debug)]
+enum TypeEntryKind {
     Custom {
         display_name: String,
+        codec: Option<Arc<dyn CustomValueCodec>>,
+        stamper: Option<Arc<dyn ResourceStamper>>,
     },
     Enum {
         display_name: String,
@@ -25,66 +22,31 @@ pub enum TypeDecl {
     },
 }
 
-impl TypeDecl {
-    pub fn display_name(&self) -> &str {
-        match self {
-            TypeDecl::Custom { display_name } | TypeDecl::Enum { display_name, .. } => display_name,
-        }
-    }
-
-    /// The variant names for an `Enum` decl; `None` for a `Custom` type.
-    pub fn variants(&self) -> Option<&[String]> {
-        match self {
-            TypeDecl::Enum { variants, .. } => Some(variants),
-            TypeDecl::Custom { .. } => None,
-        }
-    }
-}
-
-/// A registered type declaration plus its optional runtime
-/// attachments — the [`CustomValueCodec`] that makes its values disk-cacheable, and the
-/// [`ResourceStamper`] that marks it a resource-reference type (its values name external
-/// state whose identity folds into consumers' digests — see `execution/digest`). Both are
-/// attachments. An `Enum` never carries either; enum values serialize directly as
-/// [`crate::StaticValue`] inside authored graphs.
+/// A registered nominal type. A custom type may carry a disk codec and resource
+/// stamper; an enum carries only its display metadata and variants.
 #[derive(Clone, Debug)]
 pub struct TypeEntry {
-    pub decl: TypeDecl,
-    pub codec: Option<Arc<dyn CustomValueCodec>>,
-    pub stamper: Option<Arc<dyn ResourceStamper>>,
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum TypeEntryValidationError {
-    #[error("enum type cannot have a codec")]
-    EnumCodec,
-    #[error("enum type cannot have a stamper")]
-    EnumStamper,
+    kind: TypeEntryKind,
 }
 
 impl TypeEntry {
-    /// Validates that this declaration's runtime attachments match its kind.
-    pub fn validate(&self) -> Result<(), TypeEntryValidationError> {
-        if matches!(&self.decl, TypeDecl::Enum { .. }) {
-            if self.codec.is_some() {
-                return Err(TypeEntryValidationError::EnumCodec);
-            }
-            if self.stamper.is_some() {
-                return Err(TypeEntryValidationError::EnumStamper);
-            }
+    fn custom_with_attachments(
+        display_name: impl Into<String>,
+        codec: Option<Arc<dyn CustomValueCodec>>,
+        stamper: Option<Arc<dyn ResourceStamper>>,
+    ) -> Self {
+        Self {
+            kind: TypeEntryKind::Custom {
+                display_name: display_name.into(),
+                codec,
+                stamper,
+            },
         }
-        Ok(())
     }
 
     /// A custom type with no disk codec (not cacheable).
     pub fn custom(display_name: impl Into<String>) -> Self {
-        Self {
-            decl: TypeDecl::Custom {
-                display_name: display_name.into(),
-            },
-            codec: None,
-            stamper: None,
-        }
+        Self::custom_with_attachments(display_name, None, None)
     }
 
     /// A custom type with a disk codec.
@@ -92,16 +54,24 @@ impl TypeEntry {
         display_name: impl Into<String>,
         codec: Arc<dyn CustomValueCodec>,
     ) -> Self {
-        Self {
-            codec: Some(codec),
-            ..Self::custom(display_name)
-        }
+        Self::custom_with_attachments(display_name, Some(codec), None)
     }
 
-    /// Declare this a resource-reference type by attaching its [`ResourceStamper`].
-    pub fn with_stamper(mut self, stamper: Arc<dyn ResourceStamper>) -> Self {
-        self.stamper = Some(stamper);
-        self
+    /// A custom resource-reference type with no disk codec.
+    pub fn custom_with_stamper(
+        display_name: impl Into<String>,
+        stamper: Arc<dyn ResourceStamper>,
+    ) -> Self {
+        Self::custom_with_attachments(display_name, None, Some(stamper))
+    }
+
+    /// A disk-cacheable custom resource-reference type.
+    pub fn custom_with_codec_and_stamper(
+        display_name: impl Into<String>,
+        codec: Arc<dyn CustomValueCodec>,
+        stamper: Arc<dyn ResourceStamper>,
+    ) -> Self {
+        Self::custom_with_attachments(display_name, Some(codec), Some(stamper))
     }
 
     /// An enum type with the variant names taken from `E` (via strum).
@@ -113,12 +83,39 @@ impl TypeEntry {
     /// where the concrete type isn't available — see `lens`'s config builders).
     pub fn enum_with_variants(display_name: impl Into<String>, variants: Vec<String>) -> Self {
         Self {
-            decl: TypeDecl::Enum {
+            kind: TypeEntryKind::Enum {
                 display_name: display_name.into(),
                 variants,
             },
-            codec: None,
-            stamper: None,
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match &self.kind {
+            TypeEntryKind::Custom { display_name, .. }
+            | TypeEntryKind::Enum { display_name, .. } => display_name,
+        }
+    }
+
+    /// The variant names for an enum entry; `None` for a custom type.
+    pub fn variants(&self) -> Option<&[String]> {
+        match &self.kind {
+            TypeEntryKind::Enum { variants, .. } => Some(variants),
+            TypeEntryKind::Custom { .. } => None,
+        }
+    }
+
+    fn codec(&self) -> Option<&dyn CustomValueCodec> {
+        match &self.kind {
+            TypeEntryKind::Custom { codec, .. } => codec.as_deref(),
+            TypeEntryKind::Enum { .. } => None,
+        }
+    }
+
+    pub(crate) fn stamper(&self) -> Option<&Arc<dyn ResourceStamper>> {
+        match &self.kind {
+            TypeEntryKind::Custom { stamper, .. } => stamper.as_ref(),
+            TypeEntryKind::Enum { .. } => None,
         }
     }
 }
@@ -190,7 +187,6 @@ impl Library {
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
-        entry.validate().expect("invalid type declaration");
         assert!(
             !self.types.contains_key(&type_id),
             "duplicate type registration"
@@ -198,16 +194,12 @@ impl Library {
         self.types.insert(type_id, entry);
     }
 
-    pub fn type_decl(&self, type_id: &TypeId) -> Option<&TypeDecl> {
-        assert!(!type_id.is_nil());
-        self.types.get(type_id).map(|entry| &entry.decl)
-    }
-
     /// The variant names of a registered `Enum` type — for the editor's enum
     /// picker and the const type-check. `None` if `type_id` is unregistered or
     /// names a non-enum type.
     pub fn enum_variants(&self, type_id: &TypeId) -> Option<&[String]> {
-        self.type_decl(type_id)?.variants()
+        assert!(!type_id.is_nil());
+        self.types.get(type_id)?.variants()
     }
 
     /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a
@@ -222,8 +214,9 @@ impl Library {
             DataType::String => Cow::Borrowed("string"),
             DataType::FsPath(_) => Cow::Borrowed("path"),
             DataType::Custom(id) | DataType::Enum(id) => self
-                .type_decl(id)
-                .map(|decl| Cow::Borrowed(decl.display_name()))
+                .types
+                .get(id)
+                .map(|entry| Cow::Borrowed(entry.display_name()))
                 .unwrap_or_else(|| Cow::Owned(id.to_string())),
         }
     }
@@ -231,7 +224,7 @@ impl Library {
     /// The disk codec registered for `type_id`, if any. Used by the output
     /// cache's serialize/deserialize.
     pub(crate) fn codec(&self, type_id: &TypeId) -> Option<&dyn CustomValueCodec> {
-        self.types.get(type_id)?.codec.as_deref()
+        self.types.get(type_id)?.codec()
     }
 
     pub fn merge<T: Into<Library>>(&mut self, other: T) {
@@ -342,10 +335,7 @@ mod tests {
             library.register_type(type_id, TypeEntry::custom("After"));
         }));
         assert!(duplicate_type.is_err());
-        assert_eq!(
-            library.type_decl(&type_id).unwrap().display_name(),
-            "Before"
-        );
+        assert_eq!(library.types[&type_id].display_name(), "Before");
     }
 
     #[test]
@@ -365,33 +355,33 @@ mod tests {
     }
 
     #[test]
-    fn register_type_rejects_enum_runtime_attachments() {
-        let custom = TypeEntry::custom_with_codec("Custom", Arc::new(StubCodec))
-            .with_stamper(Arc::new(StubStamper));
-        custom.validate().unwrap();
+    fn type_entry_kinds_expose_only_valid_runtime_attachments() {
+        let custom = TypeEntry::custom_with_codec_and_stamper(
+            "Custom",
+            Arc::new(StubCodec),
+            Arc::new(StubStamper),
+        );
+        assert_eq!(custom.display_name(), "Custom");
+        assert!(custom.variants().is_none());
+        assert!(custom.codec().is_some());
+        assert!(custom.stamper().is_some());
+
+        let variants = vec!["A".to_string()];
+        let enum_entry = TypeEntry::enum_with_variants("Enum", variants.clone());
+        assert_eq!(enum_entry.display_name(), "Enum");
+        assert_eq!(enum_entry.variants(), Some(variants.as_slice()));
+        assert!(enum_entry.codec().is_none());
+        assert!(enum_entry.stamper().is_none());
+
         let mut library = Library::default();
         let custom_id = TypeId::unique();
         library.register_type(custom_id, custom);
-        assert!(library.types[&custom_id].codec.is_some());
-        assert!(library.types[&custom_id].stamper.is_some());
-
-        let mut enum_with_codec = TypeEntry::enum_with_variants("Enum", vec!["A".into()]);
-        enum_with_codec.codec = Some(Arc::new(StubCodec));
-        let enum_with_stamper = TypeEntry::enum_with_variants("Enum", vec!["A".into()])
-            .with_stamper(Arc::new(StubStamper));
-        for (expected, entry) in [
-            ("enum type cannot have a codec", enum_with_codec),
-            ("enum type cannot have a stamper", enum_with_stamper),
-        ] {
-            assert_eq!(entry.validate().unwrap_err().to_string(), expected);
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Library::default().register_type(TypeId::unique(), entry);
-            }));
-            assert!(
-                result.is_err(),
-                "invalid declaration was registered: {expected}"
-            );
-        }
+        let enum_id = TypeId::unique();
+        library.register_type(enum_id, enum_entry);
+        assert!(library.codec(&custom_id).is_some());
+        assert!(library.types[&custom_id].stamper().is_some());
+        assert!(library.codec(&enum_id).is_none());
+        assert!(library.types[&enum_id].stamper().is_none());
     }
 
     #[tokio::test]

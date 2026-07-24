@@ -37,7 +37,7 @@ pub use graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeRef, NodeSearch, OutputPort,
     Subscription,
 };
-pub use library::{Library, TypeDecl, TypeEntry, TypeEntryValidationError};
+pub use library::{Library, TypeEntry};
 pub use node::definition::{
     Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, FuncValidationError, OutputType,
     ValueVariant,
