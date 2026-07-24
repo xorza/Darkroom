@@ -1,28 +1,43 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::fmt::Debug;
-use std::hash::Hash;
-use std::sync::Arc;
 
 use common::CancelToken;
-use common::id_type;
 use hashbrown::HashMap;
 
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::{LogEntry, LogLevel};
 
-type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
-id_type!(CtxId);
+/// Typed handle declaring one persistent runtime context. The payload type is
+/// the identity — the store is keyed by `TypeId::of::<T>()` — so a handle can
+/// only yield the type it declares. Declare one handle per type; wrap two
+/// contexts of the same underlying type in newtypes.
+pub struct ContextType<T> {
+    ctor: fn() -> T,
+}
 
-#[derive(Clone)]
-pub struct ContextType {
-    ctx_id: CtxId,
-    pub description: String,
-    ctor: Arc<ContextCtor>,
+impl<T> Clone for ContextType<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for ContextType<T> {}
+
+impl<T> Debug for ContextType<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ContextType<{}>", std::any::type_name::<T>())
+    }
+}
+
+impl<T: Any + Send + Sync> ContextType<T> {
+    pub const fn new(ctor: fn() -> T) -> Self {
+        Self { ctor }
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct ContextManager {
-    store: HashMap<ContextType, Box<dyn Any + Send>>,
+    store: HashMap<TypeId, Box<dyn Any + Send>>,
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
     pub(crate) current_node: Option<ExecutionNodeId>,
@@ -37,6 +52,17 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
+    /// The context of type `T`, created by the handle's constructor on first
+    /// access. Infallible: every store writer keys `TypeId::of::<T>` with a
+    /// `T`, so the slot cannot hold anything else.
+    pub fn get<T: Any + Send + Sync>(&mut self, ctx_type: ContextType<T>) -> &mut T {
+        self.store
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new((ctx_type.ctor)()))
+            .downcast_mut::<T>()
+            .unwrap()
+    }
+
     /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
     /// long-running work (e.g. a `spawn_blocking` lumos op) so it can poll
     /// `token.is_cancelled()` and stop early. A never-token outside a
@@ -78,84 +104,22 @@ impl ContextManager {
     }
 }
 
-impl Debug for ContextType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "ContextMeta {{ ctx_id: {:?}, ctor: <function> }}",
-            self.ctx_id
-        )
-    }
-}
-
-impl PartialEq for ContextType {
-    fn eq(&self, other: &Self) -> bool {
-        self.ctx_id == other.ctx_id
-    }
-}
-
-impl Eq for ContextType {}
-
-impl Hash for ContextType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ctx_id.hash(state);
-    }
-}
-
-impl ContextType {
-    pub fn new<T: 'static + Send + Sync, F>(ctx_id: CtxId, ctor: F) -> Self
-    where
-        F: Fn() -> T + Send + Sync + 'static,
-    {
-        let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any + Send>);
-
-        ContextType {
-            ctx_id,
-            description: String::new(),
-            ctor,
-        }
-    }
-}
-
-impl ContextManager {
-    pub fn get<T>(&mut self, ctx_type: &ContextType) -> &mut T
-    where
-        T: Any + Send + Sync + 'static,
-    {
-        use hashbrown::hash_map::Entry;
-
-        let boxed = match self.store.entry(ctx_type.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let value = (ctx_type.ctor)();
-                entry.insert(value)
-            }
-        };
-
-        boxed
-            .downcast_mut::<T>()
-            .expect("ContextManager has unexpected type")
-    }
-}
-
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod test_support {
-    use super::*;
+    use std::any::{Any, TypeId};
 
-    pub fn insert_context<T>(manager: &mut ContextManager, ctx_type: &ContextType, value: T)
+    use crate::runtime::context::ContextManager;
+
+    pub fn insert_context<T>(manager: &mut ContextManager, value: T)
     where
-        T: Any + Send + Sync + 'static,
+        T: Any + Send + Sync,
     {
-        manager.store.insert(ctx_type.clone(), Box::new(value));
+        manager.store.insert(TypeId::of::<T>(), Box::new(value));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{any::Any, sync::Arc};
-
-    use crate::runtime::context::ContextCtor;
-
     use crate::runtime::context::{ContextManager, ContextType};
 
     #[derive(Debug, Default)]
@@ -163,38 +127,31 @@ mod tests {
         value: i32,
     }
 
-    #[test]
-    fn custom_default_context_is_created_and_reused() {
-        let ctor: Arc<ContextCtor> =
-            Arc::new(|| Box::new(TestCtx::default()) as Box<dyn Any + Send>);
-        let ctx_type = ContextType {
-            ctx_id: "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
-            description: String::new(),
-            ctor,
-        };
-
-        let mut manager = ContextManager::default();
-        let ctx = manager.get::<TestCtx>(&ctx_type);
-        assert_eq!(ctx.value, 0);
-        ctx.value = 42;
-
-        let ctx_again = manager.get::<TestCtx>(&ctx_type);
-        assert_eq!(ctx_again.value, 42);
+    #[derive(Debug, Default)]
+    struct OtherCtx {
+        value: i32,
     }
 
+    const TEST_CTX: ContextType<TestCtx> = ContextType::new(TestCtx::default);
+    const OTHER_CTX: ContextType<OtherCtx> = ContextType::new(OtherCtx::default);
+
     #[test]
-    fn custom_context_is_created_and_reused() {
-        let ctx_type = ContextType::new::<TestCtx, _>(
-            "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
-            TestCtx::default,
+    fn contexts_are_keyed_and_reused_by_payload_type() {
+        let mut manager = ContextManager::default();
+        let ctx = manager.get(TEST_CTX);
+        assert_eq!(ctx.value, 0, "first access runs the handle's constructor");
+        ctx.value = 42;
+        assert_eq!(
+            manager.get(TEST_CTX).value,
+            42,
+            "second access reuses the stored payload"
         );
 
-        let mut manager = ContextManager::default();
-        let ctx = manager.get::<TestCtx>(&ctx_type);
-        assert_eq!(ctx.value, 0);
-        ctx.value = 42;
-
-        let ctx_again = manager.get::<TestCtx>(&ctx_type);
-        assert_eq!(ctx_again.value, 42);
+        // A different payload type gets its own slot — handles cannot alias.
+        let other = manager.get(OTHER_CTX);
+        assert_eq!(other.value, 0);
+        other.value = 7;
+        assert_eq!(manager.get(TEST_CTX).value, 42);
+        assert_eq!(manager.get(OTHER_CTX).value, 7);
     }
 }

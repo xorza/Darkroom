@@ -1,5 +1,3 @@
-use crate::runtime::context::ContextType;
-
 use crate::graph::CacheMode;
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
@@ -269,7 +267,6 @@ pub struct Func {
     pub inputs: Vec<FuncInput>,
     pub outputs: Vec<FuncOutput>,
     pub events: Vec<FuncEvent>,
-    pub required_contexts: Vec<ContextType>,
     pub lambda: FuncLambda,
 }
 
@@ -358,11 +355,6 @@ impl Func {
             name: name.into(),
             event_lambda,
         });
-        self
-    }
-
-    pub fn context(mut self, context: ContextType) -> Self {
-        self.required_contexts.push(context);
         self
     }
 

@@ -8,7 +8,7 @@ use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError, S
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
+use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
@@ -70,7 +70,6 @@ fn register_save(library: &mut Library) {
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),
             )
-            .context(VISION_CTX_TYPE.clone())
             .lambda(FuncLambda::new(move |contexts, _, _, inputs, _, _| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
@@ -87,7 +86,7 @@ fn register_save(library: &mut Library) {
                         .expect("format input type is validated at the compile boundary")
                         .to_owned();
                     let cpu_image = {
-                        let vision = contexts.get::<VisionCtx>(&VISION_CTX_TYPE);
+                        let vision = contexts.get(VISION_CTX_TYPE);
                         match value.into_custom::<Image>() {
                             Ok(image) => image
                                 .buffer

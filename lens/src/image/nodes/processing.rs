@@ -5,7 +5,7 @@ use scenarium::{DataType, DynamicValue, InvokeError, InvokeResult, StaticValue};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
+use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
@@ -26,7 +26,6 @@ fn register_brightness(library: &mut Library) {
         .description("Adjusts the brightness and contrast of an image.")
         .category("Image")
         .pure()
-        .context(VISION_CTX_TYPE.clone())
         .input(
             FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to adjust."),
         )
@@ -57,7 +56,7 @@ fn register_brightness(library: &mut Library) {
                         .as_f64()
                         .expect("contrast input type is validated at the compile boundary")
                         as f32;
-                    let vision = contexts.get::<VisionCtx>(&VISION_CTX_TYPE);
+                    let vision = contexts.get(VISION_CTX_TYPE);
                     let image = adjust_image(
                         ContrastBrightness::new(contrast, brightness),
                         &mut vision.processing_ctx,
@@ -77,7 +76,6 @@ fn register_convert(library: &mut Library) {
             .description("Converts an image to a different color format.")
             .category("Image")
             .pure()
-            .context(VISION_CTX_TYPE.clone())
             .input(
                 FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
                     .description("Image to convert."),
@@ -106,7 +104,7 @@ fn register_convert(library: &mut Library) {
                                 .expect("image input type is validated at the compile boundary");
                             match conversion_target(format, image.buffer.desc.color_format) {
                                 Some(target) => {
-                                    let vision = contexts.get::<VisionCtx>(&VISION_CTX_TYPE);
+                                    let vision = contexts.get(VISION_CTX_TYPE);
                                     let cpu_image = image
                                         .buffer
                                         .make_cpu(&vision.processing_ctx)
@@ -137,7 +135,6 @@ fn register_blend(library: &mut Library) {
             .description("Blends two images using the selected blend mode.")
             .category("Image")
             .pure()
-            .context(VISION_CTX_TYPE.clone())
             .input(
                 FuncInput::required("Source", IMAGE_DATA_TYPE.clone())
                     .description("Top image (the blend source)."),
@@ -177,7 +174,7 @@ fn register_blend(library: &mut Library) {
                             .as_f64()
                             .expect("alpha input type is validated at the compile boundary")
                             as f32;
-                        let vision = contexts.get::<VisionCtx>(&VISION_CTX_TYPE);
+                        let vision = contexts.get(VISION_CTX_TYPE);
                         let mut output = imaginarium::ImageBuffer::new_empty(source.buffer.desc);
                         Blend::new(mode, alpha)
                             .execute(
@@ -201,7 +198,6 @@ fn register_transform(library: &mut Library) {
             .description("Applies scale, rotation, and translation to an image.")
             .category("Image")
             .pure()
-            .context(VISION_CTX_TYPE.clone())
             .input(
                 FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
                     .description("Image to transform."),
@@ -249,7 +245,7 @@ fn register_transform(library: &mut Library) {
                                     "transform input type is validated at the compile boundary",
                                 ) as f32
                             };
-                        let vision = contexts.get::<VisionCtx>(&VISION_CTX_TYPE);
+                        let vision = contexts.get(VISION_CTX_TYPE);
                         let mut output = imaginarium::ImageBuffer::new_empty(image.buffer.desc);
                         let center = Vec2::new(
                             image.buffer.desc.width as f32 / 2.0,
