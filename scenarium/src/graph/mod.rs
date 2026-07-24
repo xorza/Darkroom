@@ -246,11 +246,6 @@ pub struct SubgraphDefinition {
 /// (identities preserved — undo/redo replay only).
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
-    /// Definition metadata for a reusable graph. Entry graphs have no
-    /// definition because they cannot be instantiated or expose an interface.
-    #[serde(default)]
-    pub definition: Option<SubgraphDefinition>,
-
     pub(crate) nodes: HashMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port. Sparse: only bound ports
@@ -274,70 +269,85 @@ pub struct Graph {
     #[serde(default)]
     pub(crate) pinned_outputs: BTreeSet<OutputPort>,
 
-    /// Local graphs referenced by this graph's `GraphLink::Local` instances.
-    /// Shared graphs live in `Library::graphs`.
+    /// Local graph definitions referenced by this graph's `GraphLink::Local`
+    /// instances. Shared definitions live in `Library::graphs`.
     #[serde(default)]
-    pub graphs: HashMap<GraphId, Graph>,
+    pub graphs: HashMap<GraphId, GraphDef>,
 }
 
-impl Graph {
-    /// Create an empty reusable graph with a subgraph definition.
+/// A reusable graph definition: an interface plus the body implementing it.
+///
+/// Distinct from [`Graph`] — an entry graph, which has no interface and
+/// cannot be instantiated — so "a definition has an interface" is a type
+/// fact rather than a validated invariant. Not `Clone`, for the same reason
+/// `Graph` isn't: see [`Self::fresh`] and [`Self::restore`].
+///
+/// Deliberately *not* `Deref<Target = Graph>`: an inherited method would see
+/// only the body, silently skipping the interface on anything whole-value
+/// (`validate` would check no interface at all; `serialize` would drop it).
+/// Reach the body explicitly through `body`.
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphDef {
+    pub definition: SubgraphDefinition,
+    pub body: Graph,
+}
+
+impl GraphDef {
+    /// An empty definition named `name`, with no interface ports yet.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            definition: Some(SubgraphDefinition {
+            definition: SubgraphDefinition {
                 name: name.into(),
                 ..Default::default()
-            }),
-            ..Default::default()
+            },
+            body: Graph::default(),
         }
     }
 
     pub fn category(mut self, category: impl Into<String>) -> Self {
-        self.definition.as_mut().unwrap().category = category.into();
+        self.definition.category = category.into();
         self
     }
 
     pub fn input(mut self, input: FuncInput) -> Self {
-        self.definition.as_mut().unwrap().inputs.push(input);
+        self.definition.inputs.push(input);
         self
     }
 
     pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
-        self.definition.as_mut().unwrap().inputs.extend(inputs);
+        self.definition.inputs.extend(inputs);
         self
     }
 
     pub fn output(mut self, output: FuncOutput) -> Self {
-        self.definition.as_mut().unwrap().outputs.push(output);
+        self.definition.outputs.push(output);
         self
     }
 
     pub fn outputs(mut self, outputs: impl IntoIterator<Item = FuncOutput>) -> Self {
-        self.definition.as_mut().unwrap().outputs.extend(outputs);
+        self.definition.outputs.extend(outputs);
         self
     }
 
     pub fn event(mut self, event: GraphEvent) -> Self {
-        self.definition.as_mut().unwrap().events.push(event);
+        self.definition.events.push(event);
         self
     }
 
     pub fn events(mut self, events: impl IntoIterator<Item = GraphEvent>) -> Self {
-        self.definition.as_mut().unwrap().events.extend(events);
+        self.definition.events.extend(events);
         self
     }
 
     pub fn origin(mut self, origin: GraphId) -> Self {
-        self.definition.as_mut().unwrap().origin = Some(origin);
+        self.definition.origin = Some(origin);
         self
     }
+}
 
-    pub fn insert_graph(&mut self, graph_id: GraphId, graph: Graph) {
+impl Graph {
+    pub fn insert_graph(&mut self, graph_id: GraphId, graph: GraphDef) {
         assert!(!graph_id.is_nil(), "cannot insert a graph with a nil id");
-        assert!(
-            graph.definition.is_some(),
-            "local graph requires a subgraph definition"
-        );
         self.graphs.insert(graph_id, graph);
     }
 
@@ -386,7 +396,7 @@ impl Graph {
                 NodeSearch::Recursive => self
                     .graphs
                     .values()
-                    .find_map(|graph| graph.find(id, NodeSearch::Recursive)),
+                    .find_map(|def| def.body.find(id, NodeSearch::Recursive)),
             },
         }
     }
@@ -406,7 +416,7 @@ impl Graph {
             NodeSearch::Recursive => self
                 .graphs
                 .values()
-                .find_map(|graph| graph.find_by_name(name, NodeSearch::Recursive)),
+                .find_map(|def| def.body.find_by_name(name, NodeSearch::Recursive)),
         }
     }
 
@@ -420,7 +430,7 @@ impl Graph {
                 nodes.get_mut(id).or_else(|| {
                     graphs
                         .values_mut()
-                        .find_map(|graph| graph.find_mut(id, NodeSearch::Recursive))
+                        .find_map(|def| def.body.find_mut(id, NodeSearch::Recursive))
                 })
             }
         }
@@ -439,7 +449,11 @@ impl Graph {
     }
 
     /// Resolve a graph instance link from this graph or the shared library.
-    pub fn resolve_graph<'a>(&'a self, link: GraphLink, library: &'a Library) -> Option<&'a Graph> {
+    pub fn resolve_graph<'a>(
+        &'a self,
+        link: GraphLink,
+        library: &'a Library,
+    ) -> Option<&'a GraphDef> {
         match link {
             GraphLink::Local(id) => self.graphs.get(&id),
             GraphLink::Shared(id) => library.graphs.get(&id),
@@ -454,7 +468,9 @@ impl Graph {
         if self.graphs.contains_key(&id) {
             return Some(self);
         }
-        self.graphs.values().find_map(|g| g.find_graph_parent(id))
+        self.graphs
+            .values()
+            .find_map(|def| def.body.find_graph_parent(id))
     }
 
     /// Mutable counterpart of [`Self::find_graph_parent`].
@@ -464,17 +480,17 @@ impl Graph {
         }
         self.graphs
             .values_mut()
-            .find_map(|g| g.find_graph_parent_mut(id))
+            .find_map(|def| def.body.find_graph_parent_mut(id))
     }
 
-    /// The local graph `id` anywhere in this graph's nested tree —
+    /// The local definition `id` anywhere in this graph's nested tree —
     /// unambiguous for the same reason as [`Self::find_graph_parent`].
-    pub fn find_graph(&self, id: GraphId) -> Option<&Graph> {
+    pub fn find_graph(&self, id: GraphId) -> Option<&GraphDef> {
         self.find_graph_parent(id).map(|parent| &parent.graphs[&id])
     }
 
     /// Mutable counterpart of [`Self::find_graph`].
-    pub fn find_graph_mut(&mut self, id: GraphId) -> Option<&mut Graph> {
+    pub fn find_graph_mut(&mut self, id: GraphId) -> Option<&mut GraphDef> {
         self.find_graph_parent_mut(id)
             .map(|parent| parent.graphs.get_mut(&id).unwrap())
     }
@@ -496,14 +512,10 @@ impl Graph {
     }
 
     /// Add a graph instance and seed its inputs' default const bindings.
-    pub fn add_graph_node(&mut self, graph: &Graph, link: GraphLink) -> NodeId {
-        let node = Node::graph_instance(graph, link);
+    pub fn add_graph_node(&mut self, def: &GraphDef, link: GraphLink) -> NodeId {
+        let node = Node::graph_instance(def, link);
         let node_id = self.add(node);
-        let definition = graph
-            .definition
-            .as_ref()
-            .expect("graph instance requires a subgraph definition");
-        for (port_idx, io) in definition.inputs.iter().enumerate() {
+        for (port_idx, io) in def.definition.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
                     InputPort::new(node_id, port_idx),
@@ -533,15 +545,11 @@ impl Node {
         }
     }
 
-    /// A graph instance node shaped from the referenced graph.
-    pub fn graph_instance(graph: &Graph, link: GraphLink) -> Self {
-        let definition = graph
-            .definition
-            .as_ref()
-            .expect("graph instance requires a subgraph definition");
+    /// A graph instance node shaped from the referenced definition.
+    pub fn graph_instance(def: &GraphDef, link: GraphLink) -> Self {
         Node {
             kind: NodeKind::Graph(link),
-            name: definition.name.clone(),
+            name: def.definition.name.clone(),
             cache: CacheMode::None,
             disabled: false,
         }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, ExecutionNodeId, WorkerReport};
-use scenarium::{Graph, NodeId};
+use scenarium::{Graph, GraphDef, NodeId};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
@@ -83,7 +83,7 @@ impl RuntimeHost {
         }
     }
 
-    pub(crate) fn import_template(&mut self, graph: Graph) -> bool {
+    pub(crate) fn import_template(&mut self, graph: GraphDef) -> bool {
         let change = self.library.import_template(graph);
         self.apply_library_change(change)
     }

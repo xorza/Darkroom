@@ -6,7 +6,7 @@ use common::{
     DeserializeError, FileExtensionError, SerdeFormat, SerializeError, deserialize, file_utils,
     serialize,
 };
-use scenarium::Graph;
+use scenarium::GraphDef;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GraphTemplateLoadError {
@@ -47,7 +47,7 @@ pub(crate) enum GraphTemplateSaveError {
     },
 }
 
-pub(crate) fn save(graph: &Graph, path: &Path) -> Result<(), GraphTemplateSaveError> {
+pub(crate) fn save(graph: &GraphDef, path: &Path) -> Result<(), GraphTemplateSaveError> {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Json);
     let bytes =
         serialize(graph, format).map_err(|source| GraphTemplateSaveError::Serialize { source })?;
@@ -59,7 +59,7 @@ pub(crate) fn save(graph: &Graph, path: &Path) -> Result<(), GraphTemplateSaveEr
     )
 }
 
-pub(crate) fn load(path: &Path) -> Result<Graph, GraphTemplateLoadError> {
+pub(crate) fn load(path: &Path) -> Result<GraphDef, GraphTemplateLoadError> {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).map_err(|source| {
         GraphTemplateLoadError::Format {
             path: path.to_path_buf(),
@@ -70,14 +70,14 @@ pub(crate) fn load(path: &Path) -> Result<Graph, GraphTemplateLoadError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let graph = deserialize::<Graph>(&bytes, format).map_err(|source| {
+    let graph = deserialize::<GraphDef>(&bytes, format).map_err(|source| {
         GraphTemplateLoadError::Deserialize {
             path: path.to_path_buf(),
             source,
         }
     })?;
     graph
-        .validate_subgraph()
+        .validate()
         .map_err(|error| GraphTemplateLoadError::Invalid {
             path: path.to_path_buf(),
             reason: format!("{error:#}"),

@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use scenarium::{Graph, GraphId};
+use scenarium::{GraphDef, GraphId};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct GraphLibrary {
     #[serde(default)]
-    pub(crate) graphs: HashMap<GraphId, Graph>,
+    pub(crate) graphs: HashMap<GraphId, GraphDef>,
 }

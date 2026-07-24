@@ -1,7 +1,7 @@
 //! Graph template export and publication operations.
 
 use scenarium::Library;
-use scenarium::{Graph, GraphId, GraphLink};
+use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::{Document, GraphRef, ItemRef};
@@ -23,12 +23,11 @@ pub(crate) fn publish_graph(
         let local = scope.graph.graphs.get(&local_id)?;
         let existing_lib = local
             .definition
-            .as_ref()?
             .origin
             .filter(|id| graph_library.graphs.contains_key(id));
         Some(PublishSource {
             local_id,
-            graph: local.fresh_copy(),
+            graph: local.fresh(),
             existing_id: existing_lib,
         })
     })() else {
@@ -44,7 +43,7 @@ pub(crate) fn publish_graph(
 #[derive(Debug)]
 struct PublishSource {
     local_id: GraphId,
-    graph: Graph,
+    graph: GraphDef,
     existing_id: Option<GraphId>,
 }
 
@@ -54,7 +53,7 @@ fn set_origin(document: &mut Document, parent: GraphRef, graph_id: GraphId, orig
     if let Some(graph) = document.graph_mut(parent)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
-        nested.definition.as_mut().unwrap().origin = Some(origin);
+        nested.definition.origin = Some(origin);
     }
 }
 
@@ -68,7 +67,7 @@ enum ExportTarget {
 pub(crate) fn graph_template_to_export<'a>(
     document: &'a Document,
     library: &'a Library,
-) -> Option<&'a Graph> {
+) -> Option<&'a GraphDef> {
     match resolve_export_target(document)? {
         ExportTarget::Node { graph, link } => {
             document.graph_for(graph)?.resolve_graph(link, library)
@@ -104,7 +103,7 @@ fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{FuncId, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
+    use scenarium::{FuncId, GraphDef, GraphId, GraphLink, Node, NodeId, NodeKind};
 
     use crate::core::document::{Document, GraphRef};
     use crate::core::edit::publish::publish_graph;
@@ -116,7 +115,7 @@ mod tests {
         node_id: NodeId,
     }
 
-    fn add_local_instance(doc: &mut Document, graph: Graph) -> LocalInstance {
+    fn add_local_instance(doc: &mut Document, graph: GraphDef) -> LocalInstance {
         let graph_id = GraphId::unique();
         doc.graph.insert_graph(graph_id, graph);
         let node = Node::graph_instance(
@@ -129,9 +128,9 @@ mod tests {
         }
     }
 
-    fn graph(name: &str, origin: Option<GraphId>) -> Graph {
-        let mut graph = Graph::new(name);
-        graph.definition.as_mut().unwrap().origin = origin;
+    fn graph(name: &str, origin: Option<GraphId>) -> GraphDef {
+        let mut graph = GraphDef::new(name);
+        graph.definition.origin = origin;
         graph
     }
 
@@ -139,7 +138,7 @@ mod tests {
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = GraphId::unique();
         let mut graph_library = GraphLibrary::default();
-        graph_library.graphs.insert(lib_id, Graph::new("Old"));
+        graph_library.graphs.insert(lib_id, GraphDef::new("Old"));
 
         // Local copy linked to that library graph, with diverged content.
         let mut doc = Document::default();
@@ -157,14 +156,7 @@ mod tests {
             "update in place — no new library entry"
         );
         assert_eq!(
-            graph_library
-                .graphs
-                .get(&lib_id)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .name,
+            graph_library.graphs.get(&lib_id).unwrap().definition.name,
             "New",
             "library graph took the local graph's content"
         );
@@ -174,8 +166,6 @@ mod tests {
                 .get(&local.graph_id)
                 .unwrap()
                 .definition
-                .as_ref()
-                .unwrap()
                 .origin,
             Some(lib_id),
             "lineage preserved"
@@ -205,8 +195,6 @@ mod tests {
             .get(&local.graph_id)
             .unwrap()
             .definition
-            .as_ref()
-            .unwrap()
             .origin
             .expect("local graph linked to the new entry");
         assert!(

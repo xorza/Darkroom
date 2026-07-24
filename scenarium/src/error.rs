@@ -15,8 +15,6 @@ pub enum GraphDeserializeError {
 
 #[derive(Debug, Error)]
 pub enum GraphValidationError {
-    #[error("nested and shared graphs require a subgraph definition")]
-    MissingSubgraphDefinition,
     #[error("graph has a nil origin")]
     NilOrigin,
     #[error("graph contains a node with a nil id")]
@@ -87,8 +85,6 @@ pub enum GraphValidationError {
         #[source]
         source: Box<GraphValidationError>,
     },
-    #[error("entry graph cannot have a subgraph definition")]
-    EntryDefinition,
     #[error("entry graph cannot contain interface boundary nodes")]
     EntryBoundaryNodes,
 }

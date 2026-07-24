@@ -216,16 +216,16 @@ mod tests {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::identity::test_support::FlattenMapBuilder;
     use crate::execution::program::ExecutionNode;
-    use crate::graph::NodeSearch;
     use crate::graph::interface::{GraphId, GraphLink};
+    use crate::graph::{GraphDef, NodeSearch};
     use crate::node::definition::FuncId;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     #[test]
     fn compilation_retains_a_disabled_composite_interior_as_disabled() {
         let library = test_func_lib(TestFuncHooks::default());
-        let mut nested = Graph::new("Nested");
-        let interior_id = nested.add(library.by_name("Print").unwrap().into());
+        let mut nested = GraphDef::new("Nested");
+        let interior_id = nested.body.add(library.by_name("Print").unwrap().into());
         let nested_id = GraphId::unique();
 
         let mut graph = Graph::default();
@@ -247,8 +247,8 @@ mod tests {
     #[test]
     fn data_consumer_closure_targets_one_instance_or_every_shared_definition_occurrence() {
         let library = test_func_lib(TestFuncHooks::default());
-        let mut nested = Graph::new("Nested");
-        let interior_id = nested.add(library.by_name("get_b").unwrap().into());
+        let mut nested = GraphDef::new("Nested");
+        let interior_id = nested.body.add(library.by_name("get_b").unwrap().into());
         let nested_id = GraphId::unique();
 
         let mut graph = Graph::default();

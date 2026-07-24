@@ -28,8 +28,6 @@ pub(crate) enum GraphViewValidationError {
 pub(crate) enum DocumentValidationError {
     #[error(transparent)]
     Graph(#[from] GraphValidationError),
-    #[error("entry graph cannot have a subgraph definition")]
-    EntryDefinition,
     #[error("entry graph cannot contain interface boundary nodes")]
     EntryBoundaryNodes,
     #[error("main view: {source}")]
@@ -98,9 +96,6 @@ impl Document {
     /// Full structural validation for untrusted documents.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
-        if self.graph.definition.is_some() {
-            return Err(DocumentValidationError::EntryDefinition);
-        }
         if self.graph.iter().any(|node| node.kind.is_boundary()) {
             return Err(DocumentValidationError::EntryBoundaryNodes);
         }
@@ -109,10 +104,11 @@ impl Document {
             .validate(&self.graph)
             .map_err(|source| DocumentValidationError::MainView { source })?;
         for (id, view) in &self.local_views {
-            let graph = self
+            let graph = &self
                 .graph
                 .find_graph(*id)
-                .ok_or(DocumentValidationError::MissingLocalGraph { graph_id: *id })?;
+                .ok_or(DocumentValidationError::MissingLocalGraph { graph_id: *id })?
+                .body;
             view.validate(graph)
                 .map_err(|source| DocumentValidationError::LocalView {
                     graph_id: *id,

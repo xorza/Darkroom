@@ -71,7 +71,7 @@ impl App {
         };
         match graph_template::load(&path) {
             Ok(graph) => {
-                let graph = graph.fresh_copy();
+                let graph = graph.fresh();
                 self.workspace.runtime.import_template(graph);
             }
             Err(error) => self

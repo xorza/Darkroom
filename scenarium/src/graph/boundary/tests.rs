@@ -2,7 +2,7 @@ use crate::data::static_value::StaticValue;
 use crate::data::type_system::DataType;
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::wiring::BindingEntry;
-use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, OutputPort};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, OutputPort};
 use crate::node::definition::{FuncId, FuncInput, FuncOutput};
 
 fn int_input(name: &str) -> FuncInput {
@@ -35,14 +35,20 @@ struct InputFixture {
 /// outputs; pins on boundary outputs 1 and 2; instance A bound on all three
 /// slots (10/11/12), instance B only on slot 1.
 fn input_fixture() -> InputFixture {
-    let mut child = Graph::new("child").inputs([int_input("A"), int_input("B"), int_input("C")]);
-    let boundary = child.add(Node::new(NodeKind::GraphInput));
-    let consumer = child.add(func_node());
+    let mut child = GraphDef::new("child").inputs([int_input("A"), int_input("B"), int_input("C")]);
+    let boundary = child.body.add(Node::new(NodeKind::GraphInput));
+    let consumer = child.body.add(func_node());
     for idx in 0..3 {
-        child.set_input_binding(InputPort::new(consumer, idx), Binding::bind(boundary, idx));
+        child
+            .body
+            .set_input_binding(InputPort::new(consumer, idx), Binding::bind(boundary, idx));
     }
-    child.set_output_pinned(OutputPort::new(boundary, 1), true);
-    child.set_output_pinned(OutputPort::new(boundary, 2), true);
+    child
+        .body
+        .set_output_pinned(OutputPort::new(boundary, 1), true);
+    child
+        .body
+        .set_output_pinned(OutputPort::new(boundary, 2), true);
 
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
@@ -112,8 +118,6 @@ fn detach_and_attach_graph_input_round_trip() {
     let child = graph.graphs.get(&graph_id).unwrap();
     let names: Vec<&str> = child
         .definition
-        .as_ref()
-        .unwrap()
         .inputs
         .iter()
         .map(|input| input.name.as_str())
@@ -122,16 +126,16 @@ fn detach_and_attach_graph_input_round_trip() {
     // Interior: in0 keeps slot 0, in1's edge was severed, in2's source
     // shifted 2 -> 1.
     assert_eq!(
-        child.bindings.get(&InputPort::new(consumer, 0)),
+        child.body.bindings.get(&InputPort::new(consumer, 0)),
         Some(&Binding::bind(boundary, 0))
     );
-    assert_eq!(child.bindings.get(&InputPort::new(consumer, 1)), None);
+    assert_eq!(child.body.bindings.get(&InputPort::new(consumer, 1)), None);
     assert_eq!(
-        child.bindings.get(&InputPort::new(consumer, 2)),
+        child.body.bindings.get(&InputPort::new(consumer, 2)),
         Some(&Binding::bind(boundary, 1))
     );
     // Pins: 1 dropped, 2 shifted to 1.
-    let pins: Vec<OutputPort> = child.pinned_outputs().collect();
+    let pins: Vec<OutputPort> = child.body.pinned_outputs().collect();
     assert_eq!(pins, vec![OutputPort::new(boundary, 1)]);
     // Instance A: 0 stays 10, old 2 (12) shifted to 1, slot 2 cleared;
     // instance B: fully unbound.
@@ -170,8 +174,6 @@ fn detach_graph_input_at_each_index_severs_that_slot() {
         let child = graph.graphs.get(&fixture.graph_id).unwrap();
         let names: Vec<&str> = child
             .definition
-            .as_ref()
-            .unwrap()
             .inputs
             .iter()
             .map(|input| input.name.as_str())
@@ -209,12 +211,18 @@ struct OutputFixture {
 /// consumers read instance outputs 1 and 2, with pins on both.
 fn output_fixture() -> OutputFixture {
     let mut child =
-        Graph::new("child").outputs([int_output("X"), int_output("Y"), int_output("Z")]);
-    let boundary = child.add(Node::new(NodeKind::GraphOutput));
-    let producer = child.add(func_node());
-    child.set_input_binding(InputPort::new(boundary, 0), Binding::bind(producer, 0));
-    child.set_input_binding(InputPort::new(boundary, 1), Binding::bind(producer, 0));
-    child.set_input_binding(InputPort::new(boundary, 2), Binding::bind(producer, 1));
+        GraphDef::new("child").outputs([int_output("X"), int_output("Y"), int_output("Z")]);
+    let boundary = child.body.add(Node::new(NodeKind::GraphOutput));
+    let producer = child.body.add(func_node());
+    child
+        .body
+        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(producer, 0));
+    child
+        .body
+        .set_input_binding(InputPort::new(boundary, 1), Binding::bind(producer, 0));
+    child
+        .body
+        .set_input_binding(InputPort::new(boundary, 2), Binding::bind(producer, 1));
 
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
@@ -278,8 +286,6 @@ fn detach_and_attach_graph_output_round_trip() {
     let child = graph.graphs.get(&graph_id).unwrap();
     let names: Vec<&str> = child
         .definition
-        .as_ref()
-        .unwrap()
         .outputs
         .iter()
         .map(|output| output.name.as_str())
@@ -287,14 +293,14 @@ fn detach_and_attach_graph_output_round_trip() {
     assert_eq!(names, ["X", "Z"]);
     // Interior: slot 1's binding removed, slot 2's rekeyed to 1.
     assert_eq!(
-        child.bindings.get(&InputPort::new(boundary, 0)),
+        child.body.bindings.get(&InputPort::new(boundary, 0)),
         Some(&Binding::bind(producer, 0))
     );
     assert_eq!(
-        child.bindings.get(&InputPort::new(boundary, 1)),
+        child.body.bindings.get(&InputPort::new(boundary, 1)),
         Some(&Binding::bind(producer, 1))
     );
-    assert_eq!(child.bindings.get(&InputPort::new(boundary, 2)), None);
+    assert_eq!(child.body.bindings.get(&InputPort::new(boundary, 2)), None);
     // Parent: consumer A severed, consumer B's source shifted 2 -> 1,
     // pin 1 dropped and pin 2 shifted to 1.
     assert_eq!(graph.bindings.get(&InputPort::new(consumer_a, 0)), None);
@@ -373,7 +379,7 @@ fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
     // A child that declares an interface but has no GraphInput node —
     // detach drops the spec and the instance wiring; there is no interior
     // to touch.
-    let child = Graph::new("bare").inputs([int_input("A"), int_input("B")]);
+    let child = GraphDef::new("bare").inputs([int_input("A"), int_input("B")]);
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     let instance = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
@@ -386,7 +392,7 @@ fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
     assert!(detached.interior.is_empty() && detached.pins.is_empty());
     assert_eq!(detached.parent.len(), 1);
     let child = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(child.definition.as_ref().unwrap().inputs[0].name, "B");
+    assert_eq!(child.definition.inputs[0].name, "B");
     assert_eq!(
         graph.bindings.get(&InputPort::new(instance, 0)),
         Some(&const_int(2)),

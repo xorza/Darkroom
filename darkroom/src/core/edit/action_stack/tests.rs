@@ -7,7 +7,7 @@ use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
 use scenarium::testing::test_graph;
-use scenarium::{GraphId, NodeSearch, SubgraphDefinition};
+use scenarium::{GraphDef, GraphId, NodeSearch, SubgraphDefinition};
 
 /// Three tabs with distinct `Local` targets in the primary group so an
 /// activation/close at a given index is observable. Dock steps are
@@ -467,12 +467,11 @@ fn history_bounded_by_byte_budget() {
 /// `[A]` and outputs `[R]`, plus that `Local` target.
 fn doc_with_def() -> (Document, GraphRef) {
     use scenarium::DataType;
-    use scenarium::Graph;
     use scenarium::{FuncInput, FuncOutput};
 
     let mut doc: Document = test_graph().into();
     let id: GraphId = "00000000-0000-0000-0000-0000000000bb".into();
-    let def = Graph::new("S")
+    let def = GraphDef::new("S")
         .category("Graph")
         .input(FuncInput::optional("A", DataType::Int))
         .output(FuncOutput::new("R", DataType::Int));
@@ -481,17 +480,11 @@ fn doc_with_def() -> (Document, GraphRef) {
 }
 
 fn definition(doc: &Document, id: GraphId) -> &SubgraphDefinition {
-    doc.graph.graphs[&id].definition.as_ref().unwrap()
+    &doc.graph.graphs[&id].definition
 }
 
 fn definition_mut(doc: &mut Document, id: GraphId) -> &mut SubgraphDefinition {
-    doc.graph
-        .graphs
-        .get_mut(&id)
-        .unwrap()
-        .definition
-        .as_mut()
-        .unwrap()
+    &mut doc.graph.graphs.get_mut(&id).unwrap().definition
 }
 
 #[test]
@@ -586,12 +579,11 @@ fn stale_rename_step_no_ops_instead_of_clobbering() {
     use crate::core::edit::intent::apply::revert_step;
     use scenarium::DataType;
     use scenarium::FuncInput;
-    use scenarium::Graph;
 
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);
     let mut doc: Document = test_graph().into();
     let def_id: GraphId = "00000000-0000-0000-0000-0000000000cc".into();
-    let def = Graph::new("S")
+    let def = GraphDef::new("S")
         .category("Graph")
         .inputs([finput("A"), finput("B")]);
     doc.graph.insert_graph(def_id, def);
@@ -691,19 +683,24 @@ fn remove_boundary_port_round_trips_severed_wiring() {
     use crate::core::document::BoundarySide;
     use crate::core::edit::intent::apply::revert_step;
     use scenarium::DataType;
-    use scenarium::Graph;
     use scenarium::{Binding, FuncInput, InputPort, Node, NodeKind};
 
     // Child [A, B] with a GraphInput boundary feeding an interior
     // consumer from both slots; the root instance binds both slots.
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);
-    let mut child = Graph::new("S")
+    let mut child = GraphDef::new("S")
         .category("Graph")
         .inputs([finput("A"), finput("B")]);
-    let boundary = child.add(Node::new(NodeKind::GraphInput));
-    let consumer = child.add(Node::new(NodeKind::Func(scenarium::FuncId::unique())));
-    child.set_input_binding(InputPort::new(consumer, 0), Binding::bind(boundary, 0));
-    child.set_input_binding(InputPort::new(consumer, 1), Binding::bind(boundary, 1));
+    let boundary = child.body.add(Node::new(NodeKind::GraphInput));
+    let consumer = child
+        .body
+        .add(Node::new(NodeKind::Func(scenarium::FuncId::unique())));
+    child
+        .body
+        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(boundary, 0));
+    child
+        .body
+        .set_input_binding(InputPort::new(consumer, 1), Binding::bind(boundary, 1));
 
     let mut doc: Document = test_graph().into();
     let def_id: GraphId = "00000000-0000-0000-0000-0000000000dd".into();
@@ -738,9 +735,9 @@ fn remove_boundary_port_round_trips_severed_wiring() {
     assert_eq!(definition(&doc, def_id).inputs.len(), 1);
     assert_eq!(definition(&doc, def_id).inputs[0].name, "B");
     let child = &doc.graph.graphs[&def_id];
-    assert_eq!(child.bindings.get(&InputPort::new(consumer, 0)), None);
+    assert_eq!(child.body.bindings.get(&InputPort::new(consumer, 0)), None);
     assert_eq!(
-        child.bindings.get(&InputPort::new(consumer, 1)),
+        child.body.bindings.get(&InputPort::new(consumer, 1)),
         Some(&Binding::bind(boundary, 0)),
         "surviving interior edge shifted 1 -> 0"
     );
@@ -771,6 +768,7 @@ fn remove_boundary_port_round_trips_severed_wiring() {
         .graphs
         .get_mut(&def_id)
         .unwrap()
+        .body
         .set_output_pinned(scenarium::OutputPort::new(boundary, 0), true);
     assert!(
         build_step(

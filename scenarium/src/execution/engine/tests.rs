@@ -4,7 +4,9 @@ use super::*;
 use crate::execution::compile::{CompileError, Compiler};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
-use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeSearch, OutputPort};
+use crate::graph::{
+    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeSearch, OutputPort,
+};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior};
 use crate::node::lambda::test_support;
@@ -37,7 +39,7 @@ fn execution_node_name<'a>(
             .kind
             .as_graph()
             .unwrap();
-        current = current.resolve_graph(link, library).unwrap();
+        current = &current.resolve_graph(link, library).unwrap().body;
     }
     &current.find(&node_id, NodeSearch::TopLevel).unwrap().name
 }
@@ -3182,24 +3184,26 @@ mod composite_behavior {
 
     /// A graph with no inputs and one output, whose interior is the
     /// impure `get_b` (named `inner_name`) feeding `GraphOutput[0]`.
-    fn impure_output_def(library: &Library, name: &str, inner_name: &str) -> Graph {
+    fn impure_output_def(library: &Library, name: &str, inner_name: &str) -> GraphDef {
         let inner = func_node(library, "get_b", inner_name);
         let so = Node::new(NodeKind::GraphOutput);
-        let mut graph = Graph::new(name).output(int_output("Out"));
-        let inner_id = graph.add(inner);
-        let so_id = graph.add(so);
-        graph.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
+        let mut graph = GraphDef::new(name).output(int_output("Out"));
+        let inner_id = graph.body.add(inner);
+        let so_id = graph.body.add(so);
+        graph
+            .body
+            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         graph
     }
 
     /// Main graph: one instance of `def` whose output feeds a sink `print`.
-    fn main_with(library: &Library, def: Graph) -> Graph {
+    fn main_with(library: &Library, def: GraphDef) -> Graph {
         main_with_id(library, GraphId::unique(), def)
     }
 
-    fn main_with_id(library: &Library, def_id: GraphId, def: Graph) -> Graph {
+    fn main_with_id(library: &Library, def_id: GraphId, def: GraphDef) -> Graph {
         let mut graph = Graph::default();
-        graph.insert_graph(def_id, def.verbatim_copy());
+        graph.insert_graph(def_id, def.restore());
         let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
         let p = func_node(library, "Print", "p");
         let p_id = graph.add(p);
@@ -3272,17 +3276,24 @@ mod composite_behavior {
         });
         let inner_def = impure_output_def(&library, "Inner", "deep");
         let deep_id = inner_def
+            .body
             .iter()
             .find(|node| node.name == "deep")
             .unwrap()
             .id;
         let inner_def_id = GraphId::unique();
-        let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
-        outer_interior.insert_graph(inner_def_id, inner_def.verbatim_copy());
-        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
+        let mut outer_interior = GraphDef::new("Outer").output(int_output("Out"));
+        outer_interior
+            .body
+            .insert_graph(inner_def_id, inner_def.restore());
+        let inner_inst = outer_interior
+            .body
+            .add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
         let so = Node::new(NodeKind::GraphOutput);
-        let so_id = outer_interior.add(so);
-        outer_interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
+        let so_id = outer_interior.body.add(so);
+        outer_interior
+            .body
+            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
         let graph = main_with_id(&library, GraphId::unique(), outer_interior);
         let outer_inst = graph
             .iter()
@@ -3326,13 +3337,15 @@ mod composite_behavior {
         let mut inner = func_node(&library, "get_b", "inner");
         inner.disabled = true;
         let so = Node::new(NodeKind::GraphOutput);
-        let mut interior = Graph::new("S").output(int_output("Out"));
-        let inner_id = interior.add(inner);
-        let so_id = interior.add(so);
-        interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
+        let mut interior = GraphDef::new("S").output(int_output("Out"));
+        let inner_id = interior.body.add(inner);
+        let so_id = interior.body.add(so);
+        interior
+            .body
+            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         let graph_id = GraphId::unique();
         let mut graph = Graph::default();
-        graph.insert_graph(graph_id, interior.verbatim_copy());
+        graph.insert_graph(graph_id, interior.restore());
         let first_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         for instance_id in [first_instance, second_instance] {
@@ -5077,27 +5090,33 @@ mod graph {
     }
 
     /// `in(A,B) -> sum -> out(Sum)`.
-    fn wrap_sum_def(library: &Library) -> Graph {
+    fn wrap_sum_def(library: &Library) -> GraphDef {
         let in_node = Node::new(NodeKind::GraphInput);
         let sum = fnode(library, "sum");
         let out = Node::new(NodeKind::GraphOutput);
 
-        let mut graph = Graph::new("WrapSum")
+        let mut graph = GraphDef::new("WrapSum")
             .category("Test")
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
             .output(int_out("Sum"));
-        let in_id = graph.add(in_node);
-        let sum_id = graph.add(sum);
-        let out_id = graph.add(out);
-        graph.set_input_binding(InputPort::new(sum_id, 0), Binding::bind(in_id, 0));
-        graph.set_input_binding(InputPort::new(sum_id, 1), Binding::bind(in_id, 1));
-        graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_id, 0));
+        let in_id = graph.body.add(in_node);
+        let sum_id = graph.body.add(sum);
+        let out_id = graph.body.add(out);
+        graph
+            .body
+            .set_input_binding(InputPort::new(sum_id, 0), Binding::bind(in_id, 0));
+        graph
+            .body
+            .set_input_binding(InputPort::new(sum_id, 1), Binding::bind(in_id, 1));
+        graph
+            .body
+            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_id, 0));
 
         graph
     }
 
-    fn local_instance(parent: &mut Graph, graph: Graph) -> Node {
+    fn local_instance(parent: &mut Graph, graph: GraphDef) -> Node {
         let graph_id = GraphId::unique();
         let node = Node::graph_instance(&graph, GraphLink::Local(graph_id));
         parent.insert_graph(graph_id, graph);
@@ -5160,14 +5179,18 @@ mod graph {
         let src_a = fnode(&library, "get_a");
         let src_b = fnode(&library, "get_b");
         let out = Node::new(NodeKind::GraphOutput);
-        let mut def_graph = Graph::new("TwoSources")
+        let mut def_graph = GraphDef::new("TwoSources")
             .category("Test")
             .outputs([int_out("O0"), int_out("O1")]);
-        let sa = def_graph.add(src_a);
-        let sb = def_graph.add(src_b);
-        let out_id = def_graph.add(out);
-        def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sa, 0));
-        def_graph.set_input_binding(InputPort::new(out_id, 1), Binding::bind(sb, 0));
+        let sa = def_graph.body.add(src_a);
+        let sb = def_graph.body.add(src_b);
+        let out_id = def_graph.body.add(out);
+        def_graph
+            .body
+            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sa, 0));
+        def_graph
+            .body
+            .set_input_binding(InputPort::new(out_id, 1), Binding::bind(sb, 0));
         // parent: C, print <- C.out0 (out1 unused).
         let print = fnode(&library, "Print");
 
@@ -5322,7 +5345,7 @@ mod graph {
         let library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
         // The id the editor knows the interior node by (in the def graph).
-        let interior_sum_id = def.iter().find(|n| n.name == "sum").unwrap().id;
+        let interior_sum_id = def.body.iter().find(|n| n.name == "sum").unwrap().id;
 
         let get_a = fnode(&library, "get_a");
 
@@ -5397,18 +5420,13 @@ mod graph {
         // def: a single `ticker`, its `tick` event exposed as the composite's
         // event 0.
         let emitter = fnode(&library, "ticker");
-        let mut def_graph = Graph::new("Exposer").category("Test");
-        let emitter_id = def_graph.add(emitter);
-        def_graph
-            .definition
-            .as_mut()
-            .unwrap()
-            .events
-            .push(GraphEvent {
-                name: "tick".into(),
-                emitter: emitter_id,
-                emitter_event_idx: 0,
-            });
+        let mut def_graph = GraphDef::new("Exposer").category("Test");
+        let emitter_id = def_graph.body.add(emitter);
+        def_graph.definition.events.push(GraphEvent {
+            name: "tick".into(),
+            emitter: emitter_id,
+            emitter_event_idx: 0,
+        });
 
         // parent: composite C, and `listener` subscribing to C's event 0.
         let listener = fnode(&library, "Print");
@@ -5439,10 +5457,10 @@ mod graph {
         // def: GraphInput trigger → interior `print` subscribes to it.
         let si = Node::new(NodeKind::GraphInput);
         let reactor = fnode(&library, "Print");
-        let mut def_graph = Graph::new("Reactor").category("Test");
-        let si_id = def_graph.add(si);
-        let reactor_id = def_graph.add(reactor);
-        def_graph.subscribe(si_id, 0, reactor_id);
+        let mut def_graph = GraphDef::new("Reactor").category("Test");
+        let si_id = def_graph.body.add(si);
+        let reactor_id = def_graph.body.add(reactor);
+        def_graph.body.subscribe(si_id, 0, reactor_id);
         // parent: `ticker` emits; composite C subscribes to it.
         let emitter = fnode(&library, "ticker");
 
@@ -5529,16 +5547,20 @@ mod graph {
         {
             let graph = library.graphs.get_mut(&def_id).unwrap();
             let si = graph
+                .body
                 .iter()
                 .find(|n| matches!(n.kind, NodeKind::GraphInput))
                 .unwrap()
                 .id;
             let so = graph
+                .body
                 .iter()
                 .find(|n| matches!(n.kind, NodeKind::GraphOutput))
                 .unwrap()
                 .id;
-            graph.set_input_binding(InputPort::new(so, 0), Binding::bind(si, 0));
+            graph
+                .body
+                .set_input_binding(InputPort::new(so, 0), Binding::bind(si, 0));
         }
 
         eg.update(&graph, &library).unwrap();
@@ -5576,10 +5598,10 @@ mod graph {
         // def Reactor: GraphInput trigger → interior `get_a` subscribes.
         let si = Node::new(NodeKind::GraphInput);
         let reactor = fnode(&library, "get_a");
-        let mut def_graph = Graph::new("Reactor").category("Test");
-        let si_id = def_graph.add(si);
-        let reactor_id = def_graph.add(reactor);
-        def_graph.subscribe(si_id, 0, reactor_id);
+        let mut def_graph = GraphDef::new("Reactor").category("Test");
+        let si_id = def_graph.body.add(si);
+        let reactor_id = def_graph.body.add(reactor);
+        def_graph.body.subscribe(si_id, 0, reactor_id);
         // parent: `ticker` E; composite C subscribes to E's event.
         let emitter = fnode(&library, "ticker");
 
@@ -6134,17 +6156,23 @@ mod compile_regressions {
         let in_node = Node::new(NodeKind::GraphInput);
         let sum: Node = library.by_name("sum").unwrap().into();
         let out = Node::new(NodeKind::GraphOutput);
-        let mut def_graph = Graph::new("WrapSum")
+        let mut def_graph = GraphDef::new("WrapSum")
             .category("Test")
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
             .output(FuncOutput::new("Sum", DataType::Int));
-        let in_id = def_graph.add(in_node);
-        let sum_interior_id = def_graph.add(sum);
-        let out_id = def_graph.add(out);
-        def_graph.set_input_binding(InputPort::new(sum_interior_id, 0), Binding::bind(in_id, 0));
-        def_graph.set_input_binding(InputPort::new(sum_interior_id, 1), Binding::bind(in_id, 1));
-        def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_interior_id, 0));
+        let in_id = def_graph.body.add(in_node);
+        let sum_interior_id = def_graph.body.add(sum);
+        let out_id = def_graph.body.add(out);
+        def_graph
+            .body
+            .set_input_binding(InputPort::new(sum_interior_id, 0), Binding::bind(in_id, 0));
+        def_graph
+            .body
+            .set_input_binding(InputPort::new(sum_interior_id, 1), Binding::bind(in_id, 1));
+        def_graph
+            .body
+            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_interior_id, 0));
         let get_a: Node = library.by_name("get_a").unwrap().into();
         let get_b: Node = library.by_name("get_b").unwrap().into();
         let graph_id = GraphId::unique();

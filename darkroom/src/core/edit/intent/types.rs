@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{Binding, CacheMode, DataType, InputPort, Node, NodeId, OutputPort, Subscription};
-use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, Graph, GraphId};
+use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, GraphDef, GraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
@@ -66,7 +66,7 @@ pub(crate) enum Intent {
         node: Node,
         /// Local graph to add alongside a new `Graph(Local(_))` instance.
         /// `None` for nodes that do not materialize a nested graph.
-        graph: Option<(GraphId, Box<Graph>)>,
+        graph: Option<(GraphId, Box<GraphDef>)>,
         /// Initial input bindings to seed alongside the node — the caller
         /// fills these with each input's func-declared default
         /// (`Binding::Const`) so a fresh node lands ready to run instead of
@@ -238,7 +238,7 @@ pub(crate) enum GraphStep {
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        graph: Option<(GraphId, Box<Graph>)>,
+        graph: Option<(GraphId, Box<GraphDef>)>,
         bindings: Vec<(InputPort, Binding)>,
     },
     /// Add a batch of nodes + their internal wiring and swap the
@@ -313,7 +313,7 @@ pub(crate) enum GraphStep {
         node_id: NodeId,
         from_id: GraphId,
         to_id: GraphId,
-        graph: Box<Graph>,
+        graph: Box<GraphDef>,
     },
     SetViewport {
         from: Viewport,

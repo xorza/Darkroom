@@ -6,7 +6,7 @@ use hashbrown::HashSet;
 
 use crate::error::GraphValidationError;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{Binding, Graph, NodeId, NodeKind};
+use crate::graph::{Binding, Graph, GraphDef, NodeId, NodeKind};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
 use crate::{DataType, FsPathMode, StaticValue};
@@ -43,21 +43,27 @@ impl<'a> GraphChecker<'a> {
         }
     }
 
-    fn validate_graph(&mut self, graph: &Graph, requires_definition: bool) -> ValidationResult<()> {
+    /// Validate a definition: its interface, then the body implementing it.
+    fn validate_def(&mut self, def: &GraphDef) -> ValidationResult<()> {
+        if def.definition.origin.is_some_and(|origin| origin.is_nil()) {
+            return Err(GraphValidationError::NilOrigin);
+        }
+        for event in &def.definition.events {
+            if !def.body.nodes.contains_key(&event.emitter) {
+                return Err(GraphValidationError::ExposedEventMissingEmitter {
+                    name: event.name.clone(),
+                    emitter: event.emitter,
+                });
+            }
+        }
+        self.validate_graph(&def.body)
+    }
+
+    fn validate_graph(&mut self, graph: &Graph) -> ValidationResult<()> {
         if self.depth > MAX_NESTING_DEPTH {
             return Err(GraphValidationError::NestingTooDeep {
                 max: MAX_NESTING_DEPTH,
             });
-        }
-        let definition = graph.definition.as_ref();
-        if requires_definition && definition.is_none() {
-            return Err(GraphValidationError::MissingSubgraphDefinition);
-        }
-        if definition
-            .and_then(|definition| definition.origin)
-            .is_some_and(|origin| origin.is_nil())
-        {
-            return Err(GraphValidationError::NilOrigin);
         }
         let mut boundary_inputs = 0usize;
         let mut boundary_outputs = 0usize;
@@ -179,17 +185,6 @@ impl<'a> GraphChecker<'a> {
             }
         }
 
-        if let Some(definition) = definition {
-            for event in &definition.events {
-                if !graph.nodes.contains_key(&event.emitter) {
-                    return Err(GraphValidationError::ExposedEventMissingEmitter {
-                        name: event.name.clone(),
-                        emitter: event.emitter,
-                    });
-                }
-            }
-        }
-
         for (graph_id, nested) in &graph.graphs {
             if graph_id.is_nil() {
                 return Err(GraphValidationError::NilLocalGraphId);
@@ -200,7 +195,7 @@ impl<'a> GraphChecker<'a> {
                 });
             }
             self.depth += 1;
-            let nested_result = self.validate_graph(nested, true);
+            let nested_result = self.validate_def(nested);
             self.depth -= 1;
             nested_result.map_err(|source| GraphValidationError::LocalGraph {
                 name: subgraph_name(nested),
@@ -211,7 +206,7 @@ impl<'a> GraphChecker<'a> {
         Ok(())
     }
 
-    fn validate_shared(&mut self, graph_id: GraphId, graph: &Graph) -> ValidationResult<()> {
+    fn validate_shared(&mut self, graph_id: GraphId, graph: &GraphDef) -> ValidationResult<()> {
         if self.checked_shared.contains(&graph_id) {
             return Ok(());
         }
@@ -221,12 +216,12 @@ impl<'a> GraphChecker<'a> {
             });
         }
         self.depth += 1;
-        let result =
-            self.validate_graph(graph, true)
-                .map_err(|source| GraphValidationError::SharedGraph {
-                    name: subgraph_name(graph),
-                    source: Box::new(source),
-                });
+        let result = self
+            .validate_def(graph)
+            .map_err(|source| GraphValidationError::SharedGraph {
+                name: subgraph_name(graph),
+                source: Box::new(source),
+            });
         self.depth -= 1;
         self.shared_path.remove(&graph_id);
         result?;
@@ -235,23 +230,24 @@ impl<'a> GraphChecker<'a> {
     }
 }
 
-fn subgraph_name(graph: &Graph) -> String {
-    graph
-        .definition
-        .as_ref()
-        .map(|definition| definition.name.clone())
-        .unwrap_or_else(|| "<missing definition>".to_owned())
+fn subgraph_name(def: &GraphDef) -> String {
+    def.definition.name.clone()
+}
+
+impl GraphDef {
+    /// Validate this definition: its interface, then the body implementing
+    /// it, then the whole nested tree.
+    /// Distinct from [`Graph::validate`] on the body, which checks no
+    /// interface at all.
+    pub fn validate(&self) -> ValidationResult<()> {
+        GraphChecker::new(None).validate_def(self)
+    }
 }
 
 impl Graph {
     /// Validate this graph and its complete local graph tree.
     pub fn validate(&self) -> ValidationResult<()> {
-        GraphChecker::new(None).validate_graph(self, false)
-    }
-
-    /// Validate this graph as a reusable subgraph definition.
-    pub fn validate_subgraph(&self) -> ValidationResult<()> {
-        GraphChecker::new(None).validate_graph(self, true)
+        GraphChecker::new(None).validate_graph(self)
     }
 
     /// Debug-only assert form of [`Self::validate`].
@@ -266,13 +262,10 @@ impl Graph {
     /// Validate an execution entry and every local or reachable shared graph
     /// against `library`.
     pub fn validate_for_execution(&self, library: &Library) -> ValidationResult<()> {
-        if self.definition.is_some() {
-            return Err(GraphValidationError::EntryDefinition);
-        }
         if self.nodes.values().any(|node| node.kind.is_boundary()) {
             return Err(GraphValidationError::EntryBoundaryNodes);
         }
-        GraphChecker::new(Some(library)).validate_graph(self, false)
+        GraphChecker::new(Some(library)).validate_graph(self)
     }
 
     /// Debug-only assert form of [`Self::validate_for_execution`].

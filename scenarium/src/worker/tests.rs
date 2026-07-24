@@ -11,7 +11,7 @@ use crate::execution::error::{Error, Result as ExecResult, RunError};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError, NodeRamUsage};
 use crate::execution::seeds::RunSeeds;
-use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::node::lambda::{FuncLambda, InvokeError};
@@ -786,14 +786,18 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
         get_b: Arc::new(|| 7),
         print: Arc::new(|_| {}),
     });
-    let mut definition = Graph::new("Repeated").output(FuncOutput::new("Out", DataType::Int));
-    let interior = definition.add(library.by_name("get_b").unwrap().into());
-    let output = definition.add(Node::new(NodeKind::GraphOutput));
-    definition.set_input_binding(InputPort::new(output, 0), Binding::bind(interior, 0));
+    let mut definition = GraphDef::new("Repeated").output(FuncOutput::new("Out", DataType::Int));
+    let interior = definition
+        .body
+        .add(library.by_name("get_b").unwrap().into());
+    let output = definition.body.add(Node::new(NodeKind::GraphOutput));
+    definition
+        .body
+        .set_input_binding(InputPort::new(output, 0), Binding::bind(interior, 0));
 
     let definition_id = GraphId::unique();
     let mut graph = Graph::default();
-    graph.insert_graph(definition_id, definition.verbatim_copy());
+    graph.insert_graph(definition_id, definition.restore());
     let instance_a = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
     let instance_b = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
     for instance in [instance_a, instance_b] {

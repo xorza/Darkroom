@@ -25,7 +25,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::Scene;
+use crate::gui::scene::{Scene, SceneSource};
 use crate::gui::theme::Theme;
 
 use crate::gui::app::AppContext;
@@ -351,14 +351,24 @@ impl Editor {
         target: GraphRef,
         library: &Library,
     ) {
-        let graph = open
-            .document
-            .graph_for(target)
-            .expect("active tab graph exists");
+        // Only a local definition carries the interface its boundary nodes
+        // mirror; the root graph has neither.
+        let source = match target {
+            GraphRef::Main => SceneSource {
+                graph: &open.document.graph,
+                interface: None,
+            },
+            GraphRef::Local(id) => open
+                .document
+                .graph
+                .find_graph(id)
+                .expect("active tab graph exists")
+                .into(),
+        };
         let view = open.document.view(target).expect("active tab view exists");
         self.scene.rebuild(
             ui,
-            graph,
+            source,
             view,
             library,
             &self.run_state,

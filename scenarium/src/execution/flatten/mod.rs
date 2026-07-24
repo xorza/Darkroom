@@ -210,7 +210,7 @@ impl<'a> Run<'a> {
                     let nested = graph
                         .resolve_graph(*link, self.library)
                         .expect("graph node references a missing graph");
-                    self.push_level(node.id, nested);
+                    self.push_level(node.id, &nested.body);
                     // Open this instance's scope under the current one; its
                     // interior nodes record their leaves against it.
                     let parent = *self.scope_stack.last().unwrap();
@@ -333,13 +333,8 @@ impl<'a> Run<'a> {
             }
             NodeKind::Graph(r) => {
                 let nested = graph.resolve_graph(*r, self.library)?;
-                let exposed = nested
-                    .definition
-                    .as_ref()
-                    .expect("nested graph requires a subgraph definition")
-                    .events
-                    .get(event_idx)?;
-                self.push_level(node_id, nested);
+                let exposed = nested.definition.events.get(event_idx)?;
+                self.push_level(node_id, &nested.body);
                 let resolved = self.resolve_emitter(exposed.emitter, exposed.emitter_event_idx);
                 self.pop_level();
                 resolved
@@ -376,11 +371,11 @@ impl<'a> Run<'a> {
                 let Some(nested) = graph.resolve_graph(*r, self.library) else {
                     return;
                 };
-                let Some(trigger) = nested.boundary_node(NodeKind::GraphInput) else {
+                let Some(trigger) = nested.body.boundary_node(NodeKind::GraphInput) else {
                     return;
                 };
-                self.push_level(node_id, nested);
-                for sub in nested.subscriptions().filter(|s| s.emitter == trigger) {
+                self.push_level(node_id, &nested.body);
+                for sub in nested.body.subscriptions().filter(|s| s.emitter == trigger) {
                     self.resolve_subscriber(sub.subscriber, event);
                 }
                 self.pop_level();
@@ -421,11 +416,11 @@ impl<'a> Run<'a> {
                 let nested = graph
                     .resolve_graph(*r, self.library)
                     .expect("graph node references a missing graph");
-                let Some(output) = nested.boundary_node(NodeKind::GraphOutput) else {
+                let Some(output) = nested.body.boundary_node(NodeKind::GraphOutput) else {
                     return ExecutionBinding::None;
                 };
-                let binding = nested.bindings.get(&InputPort::new(output, port_idx));
-                self.push_level(node_id, nested);
+                let binding = nested.body.bindings.get(&InputPort::new(output, port_idx));
+                self.push_level(node_id, &nested.body);
                 let source = self.resolve_binding(binding);
                 self.pop_level();
                 source

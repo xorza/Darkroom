@@ -9,13 +9,22 @@ crate-private, so downstream crates import public concepts directly from
 ## Models and identities
 
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
-bindings, event subscriptions, pinned outputs, and local graphs.
-Entry graphs have no definition; reusable local/shared graphs carry an optional
-`SubgraphDefinition` containing their name, category, interface, and library
-lineage.
+bindings, event subscriptions, pinned outputs, and local graph definitions.
+A `Graph` is an *entry* graph: no interface, not instantiable. A reusable
+local/shared definition is a `GraphDef` — a `SubgraphDefinition` (name,
+category, interface, library lineage) plus the `Graph` `body` implementing it,
+so "a definition has an interface" is a type fact rather than a validated
+invariant. `GraphDef` is deliberately not `Deref<Target = Graph>`: reach the
+body through `body`, since a whole-value operation (`validate`,
+serialization) must target the `GraphDef` — the body's own would silently skip
+the interface.
+Neither type is `Clone`: node and graph ids are document-unique, so every copy
+declares its intent — `Graph::fresh_copy`/`GraphDef::fresh` mint new
+identities (import, localize, detach, publish), `verbatim_copy`/`restore`
+preserve them (undo/redo replay, library composition).
 Identity exists only in the map key; `Node` is authored data and does not store
 its id. Its cache mode is storage policy, not cache validity. `Graph` is the
-persisted model. `Graph::validate` enforces node-id
+persisted model. `Graph::validate` enforces node-id *and* graph-id
 uniqueness across the whole reachable authoring tree. Node removal and restoration
 use `DetachedNode`, which keeps the id, node, all touching wiring, subscriptions,
 and pins together.

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::CustomValueCodec;
-use crate::graph::Graph;
+use crate::graph::GraphDef;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{DataType, EnumVariants, StaticValue, TypeId};
@@ -103,7 +103,7 @@ pub struct Library {
     funcs: HashMap<FuncId, Func>,
 
     /// Shared graphs. Editing one propagates to every shared instance.
-    pub graphs: GraphMap<GraphId, Graph>,
+    pub graphs: GraphMap<GraphId, GraphDef>,
 
     /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
     /// for type metadata and the disk codecs the output cache dispatches through.
@@ -141,18 +141,14 @@ impl Library {
         self.funcs.remove(id)
     }
 
-    pub fn graph_by_id(&self, id: &GraphId) -> Option<&Graph> {
+    pub fn graph_by_id(&self, id: &GraphId) -> Option<&GraphDef> {
         assert!(!id.is_nil());
         self.graphs.get(id)
     }
 
-    /// Registers a shared graph.
-    pub fn insert_graph(&mut self, id: GraphId, graph: Graph) {
+    /// Registers a shared graph definition.
+    pub fn insert_graph(&mut self, id: GraphId, graph: GraphDef) {
         assert!(!id.is_nil());
-        assert!(
-            graph.definition.is_some(),
-            "shared graph requires a subgraph definition"
-        );
         assert!(
             !self.graphs.contains_key(&id),
             "duplicate graph registration"
@@ -274,7 +270,7 @@ mod tests {
 
     use tokio::io::{AsyncRead, AsyncWrite};
 
-    use crate::graph::Graph;
+    use crate::graph::GraphDef;
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
     use crate::node::definition::{Func, FuncId, FuncInput};
@@ -326,27 +322,14 @@ mod tests {
         assert_eq!(library.by_id(&func_id).unwrap().name, "Before");
 
         let graph_id = GraphId::unique();
-        library.insert_graph(graph_id, Graph::new("Before"));
+        library.insert_graph(graph_id, GraphDef::new("Before"));
         let duplicate_graph = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            library.insert_graph(graph_id, Graph::new("After"));
+            library.insert_graph(graph_id, GraphDef::new("After"));
         }));
         assert!(duplicate_graph.is_err());
         assert_eq!(
-            library
-                .graph_by_id(&graph_id)
-                .unwrap()
-                .definition
-                .as_ref()
-                .unwrap()
-                .name,
+            library.graph_by_id(&graph_id).unwrap().definition.name,
             "Before"
-        );
-        let missing_definition = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Library::default().insert_graph(GraphId::unique(), Graph::default());
-        }));
-        assert!(
-            missing_definition.is_err(),
-            "a shared graph cannot omit its definition"
         );
 
         let type_id = TypeId::unique();
