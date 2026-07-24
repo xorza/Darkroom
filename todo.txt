@@ -29,6 +29,6 @@ subgraph to newnodeui
 
 subgraphs tabs movable
 
-what is resourcestamps - remove and simplify
+what is resourcestamps  simplify
 
 shaper.with_render_buffers(requests, |split| {
