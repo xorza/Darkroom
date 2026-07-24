@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 use scenarium::ContextType;
 
 #[derive(Debug)]
@@ -16,9 +14,4 @@ impl Default for VisionCtx {
     }
 }
 
-pub(crate) static VISION_CTX_TYPE: LazyLock<ContextType> = LazyLock::new(|| {
-    ContextType::new(
-        "46a85022-e3c7-4c80-aa90-cf1a77251286".into(),
-        VisionCtx::default,
-    )
-});
+pub(crate) const VISION_CTX_TYPE: ContextType<VisionCtx> = ContextType::new(VisionCtx::default);

@@ -11,8 +11,8 @@ registration gates declared defaults, deep nesting is a validation
 error, and flattening keeps a resolved-graph stack instead of re-walking from
 the root. The highest-impact remaining problem is unchanged: `Worker::send_many`
 does not establish the batch boundary its callers rely on. The other open
-findings cluster around runtime state ownership (context identity and
-advisory context declarations), per-run orchestration costs, and
+findings cluster around runtime state ownership (the `ContextManager`'s
+mixed lifetimes and the codec ABI), per-run orchestration costs, and
 the parallel representations (`SpecialNode` dispatch, detached-record
 vectors).
 
@@ -86,6 +86,13 @@ flattened execution identity when a new program is installed.
   `state`/`event_state` when the installed node's owner differs and leaves
   the digest-keyed value alone, and `validate_installed` asserts the pairing
   (`src/execution/cache/slot.rs`, `reown`).
+- *Context identity and payload type were independent runtime choices* — the
+  UUID is gone: `ContextType<T>` is a typed `Copy` handle whose payload type
+  is the identity, the store is keyed by `TypeId::of::<T>()`, and `get`
+  cannot request a type its handle doesn't declare (`src/runtime/context.rs`).
+  The advisory remnants fell with it: `Func::required_contexts` (writers, no
+  readers) and the always-empty `ContextType::description` were deleted, and
+  lens declares `VISION_CTX_TYPE` as a plain `const`.
 
 ## High: Worker lifecycle
 
@@ -104,25 +111,11 @@ flattened execution identity when a new program is installed.
 
 ## Medium: Cross-run state ownership
 
-- [ ] **Context identity and payload type are independent runtime choices.**
-  `ContextType::new<T>` erases `T` (`src/runtime/context.rs:106-118`),
-  `ContextManager::get<T>` accepts an unrelated requested type and panics on
-  downcast (`src/runtime/context.rs:121-138`, panic at `:137`), and equality
-  and hashing consider only the UUID (`src/runtime/context.rs:91-103`).
-  Separately declared handles with one ID alias regardless of constructor or
-  payload type, making ordinary context access depend on manually keeping
-  three independent facts consistent.
-
-- [ ] **Context declarations are advisory while `ContextManager` mixes
-  persistent and per-run lifetimes.** `Func::required_contexts` has
-  production writers but no production reader
-  (`src/node/definition.rs:272`, `:364-367`; writers in lens, zero reads
-  workspace-wide), and `ContextType::description` is only ever assigned
-  `String::new()` (`src/runtime/context.rs:19`, `:114`). The manager
-  simultaneously owns persistent resources, current-node attribution, logs,
-  and cancellation (`src/runtime/context.rs:23-37`), and custom codecs
-  receive that entire object merely to access resources during encoding
-  (`src/execution/codec.rs:19-24`,
+- [ ] **`ContextManager` mixes persistent and per-run lifetimes.** The
+  manager simultaneously owns persistent resources, current-node
+  attribution, logs, and cancellation (`src/runtime/context.rs`,
+  `ContextManager` fields), and custom codecs receive that entire object
+  merely to access resources during encoding (`src/execution/codec.rs:19-24`,
   `src/execution/disk_store/format/mod.rs:56-62`, `:96-99`).
 
 - [ ] **The codec ABI is asymmetric: `encode` receives the `ContextManager`,

@@ -2,7 +2,7 @@ use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, ProcessingContext};
 use scenarium::{ContextManager, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
-use crate::image::context::{VISION_CTX_TYPE, VisionCtx};
+use crate::image::context::VisionCtx;
 use crate::image::{IMAGE_TYPE_ID, Image};
 
 #[derive(Debug)]
@@ -22,7 +22,6 @@ fn cpu_context() -> ContextManager {
     let mut context = ContextManager::default();
     scenarium::insert_context(
         &mut context,
-        &VISION_CTX_TYPE,
         VisionCtx {
             processing_ctx: ProcessingContext::cpu_only(),
         },
