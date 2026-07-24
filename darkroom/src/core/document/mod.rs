@@ -23,7 +23,10 @@ use crate::core::document::dock::DockLayout;
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
 /// Which graph an editor tab is pointed at. `Main` is the document root;
-/// `Local(id)` addresses a nested graph in `Document::graph.graphs`.
+/// `Local(id)` addresses a local graph *anywhere* in the document's nested
+/// graph tree — graph ids are document-unique (upheld by
+/// `Graph::fresh_copy` at every copy boundary and enforced by
+/// `Graph::validate`), so the bare id is a complete address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum GraphRef {
     Main,
@@ -282,7 +285,7 @@ pub(crate) struct Document {
 fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
-        TabRef::Graph(GraphRef::Local(id)) => graph.graphs.contains_key(&id),
+        TabRef::Graph(GraphRef::Local(id)) => graph.find_graph(id).is_some(),
         TabRef::ImageViewer(port) => graph.find(&port.node_id, NodeSearch::Recursive).is_some(),
     }
 }
@@ -293,7 +296,7 @@ impl Document {
     pub(crate) fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
         match target {
             GraphRef::Main => Some(&self.graph),
-            GraphRef::Local(id) => self.graph.graphs.get(&id),
+            GraphRef::Local(id) => self.graph.find_graph(id),
         }
     }
 
@@ -308,7 +311,7 @@ impl Document {
     pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
         match target {
             GraphRef::Main => Some(&mut self.graph),
-            GraphRef::Local(id) => self.graph.graphs.get_mut(&id),
+            GraphRef::Local(id) => self.graph.find_graph_mut(id),
         }
     }
 
@@ -320,7 +323,7 @@ impl Document {
                 view: &mut self.main_view,
             }),
             GraphRef::Local(id) => {
-                let graph = self.graph.graphs.get_mut(&id)?;
+                let graph = self.graph.find_graph_mut(id)?;
                 let view = self.local_views.get_mut(&id)?;
                 Some(EditScope { graph, view })
             }
@@ -382,7 +385,7 @@ impl Document {
             return true;
         }
         let view = {
-            let Some(graph) = self.graph.graphs.get(&id) else {
+            let Some(graph) = self.graph.find_graph(id) else {
                 return false;
             };
             let mut view = GraphView::for_graph(graph);
@@ -434,32 +437,40 @@ impl Document {
         }
     }
 
-    /// Create a fresh, empty local graph with its two boundary nodes.
-    pub(crate) fn create_graph(&mut self) -> GraphId {
+    /// Create a fresh, empty local graph with its two boundary nodes inside
+    /// `target`'s scope: the def joins that graph's `graphs` map and the
+    /// instance node lands on its canvas — so New Graph in a local tab
+    /// nests rather than silently dropping the instance at root. `None`
+    /// when the target no longer resolves (e.g. undone away this frame).
+    pub(crate) fn create_graph(&mut self, target: GraphRef) -> Option<GraphId> {
         let id = GraphId::unique();
-        let mut graph = CoreGraph::new(format!("graph {}", self.graph.graphs.len() + 1));
-        let input = Node::new(NodeKind::GraphInput);
-        let output = Node::new(NodeKind::GraphOutput);
-        let input_id = graph.add(input);
-        let output_id = graph.add(output);
-        let inst = Node::graph_instance(&graph, GraphLink::Local(id));
-        let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.graphs.len() as f32;
-        self.graph.insert_graph(id, graph);
-        let inst_id = self.graph.add(inst);
-        self.main_view
-            .item_placements
-            .insert(ItemRef::Node(inst_id), inst_pos);
+        let view = {
+            let scope = self.scope_mut(target)?;
+            let sibling_count = scope.graph.graphs.len();
+            let mut graph = CoreGraph::new(format!("graph {}", sibling_count + 1));
+            let input_id = graph.add(Node::new(NodeKind::GraphInput));
+            let output_id = graph.add(Node::new(NodeKind::GraphOutput));
+            let inst = Node::graph_instance(&graph, GraphLink::Local(id));
+            let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * sibling_count as f32;
+            scope.graph.insert_graph(id, graph);
+            let inst_id = scope.graph.add(inst);
+            scope
+                .view
+                .item_placements
+                .insert(ItemRef::Node(inst_id), inst_pos);
 
-        let mut view = GraphView::default();
-        view.item_placements
-            .insert(ItemRef::Node(input_id), AUTO_LAYOUT_ORIGIN);
-        view.item_placements.insert(
-            ItemRef::Node(output_id),
-            AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
-        );
+            let mut view = GraphView::default();
+            view.item_placements
+                .insert(ItemRef::Node(input_id), AUTO_LAYOUT_ORIGIN);
+            view.item_placements.insert(
+                ItemRef::Node(output_id),
+                AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
+            );
+            view
+        };
         self.local_views.insert(id, view);
 
-        id
+        Some(id)
     }
 
     /// Current name of a nested graph interface port.
@@ -469,7 +480,7 @@ impl Document {
         side: BoundarySide,
         idx: usize,
     ) -> Option<&str> {
-        let graph = self.graph.graphs.get(&graph_id)?;
+        let graph = self.graph.find_graph(graph_id)?;
         let definition = graph.definition.as_ref()?;
         let name = match side {
             BoundarySide::Input => &definition.inputs.get(idx)?.name,
@@ -490,7 +501,7 @@ impl Document {
         expected: &str,
         new: &str,
     ) {
-        let Some(graph) = self.graph.graphs.get_mut(&graph_id) else {
+        let Some(graph) = self.graph.find_graph_mut(graph_id) else {
             return;
         };
         let Some(definition) = graph.definition.as_mut() else {
@@ -543,7 +554,7 @@ mod tests {
         // identity via `fresh_copy`), so it's corrupt input validation refuses.
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let graph_id = doc.create_graph();
+        let graph_id = doc.create_graph(GraphRef::Main).unwrap();
         let dup = Node::new(NodeKind::Func(FuncId::unique()));
         doc.graph
             .graphs
@@ -795,7 +806,7 @@ mod tests {
     #[test]
     fn create_graph_has_only_boundary_nodes() {
         let mut doc = Document::default();
-        let id = doc.create_graph();
+        let id = doc.create_graph(GraphRef::Main).unwrap();
         let def = doc.graph.graphs.get(&id).expect("def added");
 
         // Exactly the two boundary nodes, nothing else, empty interface.
@@ -855,9 +866,164 @@ mod tests {
         );
 
         // Each create mints a distinct id (no overwrite).
-        let id2 = doc.create_graph();
+        let id2 = doc.create_graph(GraphRef::Main).unwrap();
         assert_ne!(id, id2);
         assert_eq!(doc.graph.graphs.len(), 2);
+    }
+
+    #[test]
+    fn nested_graph_defs_resolve_and_edit_at_depth() {
+        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::Intent;
+        use scenarium::{Binding, DataType, InputPort, StaticValue};
+
+        let mut doc = Document::default();
+        let outer = doc.create_graph(GraphRef::Main).unwrap();
+        let inner = doc.create_graph(GraphRef::Local(outer)).unwrap();
+
+        // Creating inside a local scope nests: the inner def and its
+        // instance node live in the outer graph, not at root.
+        assert!(!doc.graph.graphs.contains_key(&inner));
+        let outer_def = doc.graph.graphs.get(&outer).unwrap();
+        assert!(outer_def.graphs.contains_key(&inner));
+        let inst_id = outer_def
+            .iter()
+            .find_map(|n| {
+                matches!(n.kind, NodeKind::Graph(GraphLink::Local(id)) if id == inner)
+                    .then_some(n.id)
+            })
+            .expect("instance node lives in the outer graph");
+
+        // A bare id addresses the nested def: resolution, tab liveness,
+        // and validation all reach depth 2.
+        assert!(doc.graph_for(GraphRef::Local(inner)).is_some());
+        let primary = doc.layout.primary().id;
+        doc.layout
+            .find_or_insert(TabRef::Graph(GraphRef::Local(inner)), primary);
+        doc.ensure_valid_layout();
+        assert!(
+            doc.layout
+                .all_tabs()
+                .any(|t| t == TabRef::Graph(GraphRef::Local(inner))),
+            "a depth-2 tab stays alive"
+        );
+        doc.validate().expect("nested document validates");
+
+        // Graph-scoped edits commit against the nested target.
+        let node_id = NodeId::unique();
+        let add_node = build_step(
+            Intent::AddNode {
+                pos: Vec2::ZERO,
+                node_id,
+                node: Node::new(NodeKind::Func(FuncId::unique())),
+                graph: None,
+                bindings: vec![],
+            },
+            &doc,
+            GraphRef::Local(inner),
+        )
+        .expect("add builds against the nested target");
+        apply_step(&add_node, &mut doc, GraphRef::Local(inner));
+        assert!(
+            doc.graph
+                .graphs
+                .get(&outer)
+                .unwrap()
+                .graphs
+                .get(&inner)
+                .unwrap()
+                .find(&node_id, NodeSearch::TopLevel)
+                .is_some(),
+            "node added inside the depth-2 def"
+        );
+
+        // Boundary-port doc-steps resolve the def — and, for removal, its
+        // *parent* (the outer def, whose instance bindings must be
+        // severed and restored) — recursively.
+        let add_port = build_step(
+            Intent::AddBoundaryPort {
+                side: BoundarySide::Input,
+                name: "in".into(),
+                data_type: DataType::Float,
+            },
+            &doc,
+            GraphRef::Local(inner),
+        )
+        .expect("boundary add builds at depth");
+        apply_step(&add_port, &mut doc, GraphRef::Local(inner));
+        let input_count = |doc: &Document| {
+            doc.graph
+                .find_graph(inner)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .inputs
+                .len()
+        };
+        assert_eq!(input_count(&doc), 1);
+        let inst_port = InputPort::new(inst_id, 0);
+        let bound = Binding::Const(StaticValue::Float(4.0));
+        doc.graph
+            .find_graph_mut(outer)
+            .unwrap()
+            .set_input_binding(inst_port, bound.clone());
+
+        let remove_port = build_step(
+            Intent::RemoveBoundaryPort {
+                side: BoundarySide::Input,
+                idx: 0,
+            },
+            &doc,
+            GraphRef::Local(inner),
+        )
+        .expect("boundary remove builds via the parent");
+        apply_step(&remove_port, &mut doc, GraphRef::Local(inner));
+        assert_eq!(input_count(&doc), 0, "slot removed from the nested def");
+        assert!(
+            !doc.graph
+                .find_graph(outer)
+                .unwrap()
+                .bindings
+                .contains_key(&inst_port),
+            "the parent's instance binding was severed"
+        );
+        revert_step(&remove_port, &mut doc, GraphRef::Local(inner));
+        assert_eq!(input_count(&doc), 1, "undo re-attaches the slot");
+        assert_eq!(
+            doc.graph
+                .find_graph(outer)
+                .unwrap()
+                .bindings
+                .get(&inst_port),
+            Some(&bound),
+            "undo restores the parent's instance binding"
+        );
+
+        // A rename doc-step writes through to the nested def too.
+        let rename = build_step(
+            Intent::RenameGraph {
+                id: inner,
+                to: "deep".into(),
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("rename builds at depth");
+        apply_step(&rename, &mut doc, GraphRef::Main);
+        assert_eq!(
+            doc.graph
+                .find_graph(inner)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .name,
+            "deep"
+        );
+        doc.validate()
+            .expect("document still validates after edits");
     }
 
     /// An output-0 [`PortRef`] on `node_id`, for viewer-tab tests.
@@ -886,7 +1052,7 @@ mod tests {
             .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
         assert!(doc.retains_output_resource(root_port));
 
-        let def_id = doc.create_graph();
+        let def_id = doc.create_graph(GraphRef::Main).unwrap();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
         let definition = doc.graph.graphs.get_mut(&def_id).unwrap();
         let nested_node_id = definition.add(nested_node);
@@ -934,7 +1100,7 @@ mod tests {
     fn ensure_valid_layout_keeps_non_graph_tabs_when_a_graph_tab_vanishes() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let id = doc.create_graph();
+        let id = doc.create_graph(GraphRef::Main).unwrap();
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::Graph(GraphRef::Local(id)), primary);

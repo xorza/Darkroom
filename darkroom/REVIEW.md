@@ -23,7 +23,7 @@ bound host-side memory.
 
 ## Critical
 
-- [ ] **A bare local-graph ID cannot address Darkroom's recursive graph model.**
+- [x] **A bare local-graph ID cannot address Darkroom's recursive graph model.**
   `GraphRef::Local(GraphId)` resolves only through the root graph's `graphs` map,
   while adding a graph instance inside a local graph inserts its definition into
   that local graph's own map (`src/core/document/mod.rs:25-31`,

@@ -442,6 +442,39 @@ impl Graph {
         }
     }
 
+    /// The graph whose `graphs` map holds `id` — the *owner* boundary ops
+    /// are called on — searching the whole nested tree. `self` when the
+    /// def is a direct child here. Graph ids are unique across a document
+    /// (like node ids), so a hit is unambiguous.
+    pub fn find_graph_parent(&self, id: GraphId) -> Option<&Graph> {
+        if self.graphs.contains_key(&id) {
+            return Some(self);
+        }
+        self.graphs.values().find_map(|g| g.find_graph_parent(id))
+    }
+
+    /// Mutable counterpart of [`Self::find_graph_parent`].
+    pub fn find_graph_parent_mut(&mut self, id: GraphId) -> Option<&mut Graph> {
+        if self.graphs.contains_key(&id) {
+            return Some(self);
+        }
+        self.graphs
+            .values_mut()
+            .find_map(|g| g.find_graph_parent_mut(id))
+    }
+
+    /// The local graph `id` anywhere in this graph's nested tree —
+    /// unambiguous for the same reason as [`Self::find_graph_parent`].
+    pub fn find_graph(&self, id: GraphId) -> Option<&Graph> {
+        self.find_graph_parent(id).map(|parent| &parent.graphs[&id])
+    }
+
+    /// Mutable counterpart of [`Self::find_graph`].
+    pub fn find_graph_mut(&mut self, id: GraphId) -> Option<&mut Graph> {
+        self.find_graph_parent_mut(id)
+            .map(|parent| parent.graphs.get_mut(&id).unwrap())
+    }
+
     /// Add a func instance and seed its inputs' default const bindings.
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {

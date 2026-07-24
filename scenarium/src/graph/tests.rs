@@ -85,6 +85,26 @@ fn validate_rejects_node_ids_reused_across_graph_levels() {
 }
 
 #[test]
+fn validate_rejects_graph_ids_reused_across_parents() {
+    // The same def id planted under two parents — unreachable through
+    // `fresh_copy` (it remaps graph ids at every copy boundary), so it's
+    // corrupt input validation refuses: a bare graph id must be an
+    // unambiguous document-wide address.
+    let graph_id = GraphId::unique();
+    let mut parent_a = Graph::new("parent a");
+    parent_a.insert_graph(graph_id, Graph::new("dup"));
+    let mut graph = Graph::default();
+    graph.insert_graph(graph_id, Graph::new("dup"));
+    graph.insert_graph(GraphId::unique(), parent_a);
+
+    let error = graph.validate().unwrap_err().to_string();
+    assert!(
+        error.contains("occurs in more than one parent graph"),
+        "{error}"
+    );
+}
+
+#[test]
 fn insert_graph_replaces_existing_graph() {
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
@@ -1299,4 +1319,50 @@ fn resolve_graph_picks_local_or_linked_source() {
             .resolve_graph(GraphLink::Local(linked_id), &library)
             .is_none()
     );
+
+    // `resolve_graph` is parent-scoped by design; the recursive queries
+    // reach any depth. Nest a def two levels down and address it bare.
+    let deep_id = GraphId::unique();
+    graph
+        .graphs
+        .get_mut(&local_id)
+        .unwrap()
+        .insert_graph(deep_id, Graph::new("Deep").category("Test"));
+    assert!(
+        graph
+            .resolve_graph(GraphLink::Local(deep_id), &library)
+            .is_none(),
+        "parent-scoped resolution does not see nested defs"
+    );
+    assert_eq!(
+        definition(graph.find_graph(deep_id).unwrap()).name,
+        "Deep",
+        "find_graph reaches a depth-2 def by bare id"
+    );
+    assert_eq!(
+        definition(graph.find_graph_parent(deep_id).unwrap()).name,
+        "Local",
+        "the parent of the deep def is the mid-level graph"
+    );
+    assert!(
+        graph
+            .find_graph_parent(local_id)
+            .unwrap()
+            .definition
+            .is_none(),
+        "a top-level def's parent is the root itself"
+    );
+    graph
+        .find_graph_mut(deep_id)
+        .unwrap()
+        .definition
+        .as_mut()
+        .unwrap()
+        .name = "Renamed".into();
+    assert_eq!(
+        definition(graph.find_graph(deep_id).unwrap()).name,
+        "Renamed",
+        "find_graph_mut writes through to the nested def"
+    );
+    assert!(graph.find_graph(GraphId::unique()).is_none());
 }

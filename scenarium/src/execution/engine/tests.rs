@@ -3262,9 +3262,11 @@ mod composite_behavior {
     }
 
     #[tokio::test]
-    async fn nested_impure_interior_reruns_when_local_graph_ids_repeat() {
+    async fn nested_impure_interior_reruns_through_two_composite_levels() {
         // A doubly-nested impure node recomputes — flattening preserves its
-        // impurity through two composite levels whose map-local ids coincide.
+        // impurity through two composite levels. (Graph ids are unique
+        // across the tree — validation rejects a repeated map-local id —
+        // so each level carries its own.)
         let mut library = test_func_lib(TestFuncHooks::default());
         mutate_func(&mut library, "get_b", |func| {
             func.behavior = FuncBehavior::Impure;
@@ -3275,14 +3277,14 @@ mod composite_behavior {
             .find(|node| node.name == "deep")
             .unwrap()
             .id;
-        let repeated_id = GraphId::unique();
+        let inner_def_id = GraphId::unique();
         let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
-        outer_interior.insert_graph(repeated_id, inner_def.clone());
-        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(repeated_id));
+        outer_interior.insert_graph(inner_def_id, inner_def.clone());
+        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
         let so = Node::new(NodeKind::GraphOutput);
         let so_id = outer_interior.add(so);
         outer_interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
-        let graph = main_with_id(&library, repeated_id, outer_interior);
+        let graph = main_with_id(&library, GraphId::unique(), outer_interior);
         let outer_inst = graph
             .iter()
             .find(|node| matches!(node.kind, NodeKind::Graph(_)))
