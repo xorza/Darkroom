@@ -38,7 +38,11 @@ pub(crate) struct BatchIntent {
 }
 
 impl BatchIntent {
-    pub(crate) fn reset(&mut self, msgs: impl IntoIterator<Item = WorkerMessage>) {
+    pub(crate) fn reset(
+        &mut self,
+        msgs: impl IntoIterator<Item = WorkerMessage>,
+        events: impl IntoIterator<Item = ExecutionEventPort>,
+    ) {
         self.clear();
         for msg in msgs {
             match msg {
@@ -70,6 +74,7 @@ impl BatchIntent {
                 WorkerMessage::Sync { reply } => self.syncs.push(reply),
             }
         }
+        self.events.extend(events);
     }
 
     fn clear(&mut self) {

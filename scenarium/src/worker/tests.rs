@@ -35,7 +35,7 @@ fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
-    intent.reset(msgs);
+    intent.reset(msgs, []);
     intent
 }
 
@@ -1338,9 +1338,9 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn queued_separate_install_and_run_commands_preserve_program_order() {
+async fn queued_messages_ready_at_the_same_wake_reduce_together() {
     let library = system_library();
-    let (graph_a, print_a) = print_literal_graph(&library, "first");
+    let (graph_a, _print_a) = print_literal_graph(&library, "first");
     let (graph_b, print_b) = print_literal_graph(&library, "second");
     let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
     let worker = Worker::new(move |report| {
@@ -1376,28 +1376,24 @@ async fn queued_separate_install_and_run_commands_preserve_program_order() {
         })
         .unwrap();
 
-    let first = next_completed_run(&mut rx).await;
-    let second = next_completed_run(&mut rx).await;
-    assert!(Arc::ptr_eq(&first.compiled, &compiled_a));
-    assert!(Arc::ptr_eq(&second.compiled, &compiled_b));
+    let completed = next_completed_run(&mut rx).await;
+    assert!(!Arc::ptr_eq(&completed.compiled, &compiled_a));
+    assert!(Arc::ptr_eq(&completed.compiled, &compiled_b));
     assert_eq!(
-        first
-            .compiled
-            .attribution(root_execution_node(print_a))
-            .unwrap()
-            .collect::<Vec<_>>(),
-        vec![print_a],
-    );
-    assert_eq!(
-        second
+        completed
             .compiled
             .attribution(root_execution_node(print_b))
             .unwrap()
             .collect::<Vec<_>>(),
         vec![print_b],
     );
-    assert_eq!(messages(&first.result.unwrap()), ["first"]);
-    assert_eq!(messages(&second.result.unwrap()), ["second"]);
+    assert_eq!(messages(&completed.result.unwrap()), ["second"]);
+    assert!(
+        timeout(Duration::from_millis(100), next_completed_run(&mut rx))
+            .await
+            .is_err(),
+        "ready messages must produce one reduced run"
+    );
 }
 
 #[tokio::test]
@@ -1614,7 +1610,7 @@ fn batch_intent_accumulates_simple_flags() {
     let eviction_capacity = intent.evict_cache.capacity();
     let sync_capacity = intent.syncs.capacity();
 
-    intent.reset([WorkerMessage::StopEventLoop]);
+    intent.reset([WorkerMessage::StopEventLoop], []);
 
     assert!(intent.graph_state.is_none());
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
@@ -1639,17 +1635,21 @@ fn batch_intent_deduplicates_events() {
         event_idx: 0,
     };
 
-    let intent = batch_intent([
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event, event]),
-        },
-    ]);
+    let mut intent = BatchIntent::default();
+    intent.reset(
+        [
+            WorkerMessage::Run {
+                seeds: RunSeeds::events(vec![event]),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::events(vec![event]),
+            },
+            WorkerMessage::Run {
+                seeds: RunSeeds::events(vec![event, event]),
+            },
+        ],
+        [event],
+    );
 
     assert_eq!(
         intent.events.len(),

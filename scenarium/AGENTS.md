@@ -108,7 +108,8 @@ cache support.
 
 ## Worker
 
-One `Vec<WorkerMessage>` is one commit unit. `BatchIntent` preserves first-seen
+Each worker wake drains the currently ready `WorkerMessage`s into a reusable
+vector and reduces them as one commit unit. `BatchIntent` preserves first-seen
 order while deduplicating node seeds and events; conflicting state slots are
 last-write-wins and `Exit` dominates its batch. Compiled programs are shared as
 `Arc<CompiledGraph>` values. After applying a graph-state change, the worker
