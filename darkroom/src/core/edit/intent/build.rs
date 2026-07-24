@@ -40,7 +40,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }));
     }
     if let Intent::RenameGraph { id, to } = intent {
-        let from = doc.graph.find_graph(id)?.definition.name.clone();
+        let from = doc.graph.find_graph(id)?.interface.name.clone();
         return Some(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
     }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
@@ -67,10 +67,10 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         let GraphRef::Local(graph_id) = target else {
             return None;
         };
-        let definition = &doc.graph.find_graph(graph_id)?.definition;
+        let interface = &doc.graph.find_graph(graph_id)?.interface;
         let idx = match side {
-            BoundarySide::Input => definition.inputs.len(),
-            BoundarySide::Output => definition.outputs.len(),
+            BoundarySide::Input => interface.inputs.len(),
+            BoundarySide::Output => interface.outputs.len(),
         };
         return Some(UndoStep::Doc(DocStep::AddBoundaryPort {
             graph_id,
@@ -241,7 +241,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             };
             let to_id = GraphId::unique();
             let mut copy = graph.graphs.get(&from_id)?.clone_mapped();
-            copy.definition.origin = None;
+            copy.interface.origin = None;
             GraphStep::DetachGraph {
                 node_id,
                 from_id,
@@ -313,13 +313,13 @@ fn reuse_local_graph(
     pending: Option<(GraphId, Box<GraphDef>)>,
 ) -> Option<(GraphId, Box<GraphDef>)> {
     let (graph_id, pending) = pending?;
-    let Some(origin) = pending.definition.origin else {
+    let Some(origin) = pending.interface.origin else {
         return Some((graph_id, pending));
     };
     match graph
         .graphs
         .iter()
-        .find(|(_, existing)| existing.definition.origin == Some(origin))
+        .find(|(_, existing)| existing.interface.origin == Some(origin))
     {
         Some((existing_id, _)) => {
             node.kind = NodeKind::Graph(GraphLink::Local(*existing_id));

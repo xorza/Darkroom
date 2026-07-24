@@ -39,7 +39,7 @@ impl PaletteEntry<'_> {
         match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Graph(_, graph) => &graph.definition.name,
+            PaletteEntry::Graph(_, graph) => &graph.interface.name,
         }
     }
 }
@@ -240,8 +240,8 @@ fn category_column(
                 .graphs
                 .iter()
                 .filter(|(_, graph)| {
-                    let definition = &graph.definition;
-                    definition.category == category && shows(&definition.name)
+                    let interface = &graph.interface;
+                    interface.category == category && shows(&interface.name)
                 })
                 .map(|(id, graph)| PaletteEntry::Graph(*id, graph)),
         )
@@ -297,7 +297,7 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
             ctx.library
                 .graphs
                 .values()
-                .map(|graph| graph.definition.category.as_str()),
+                .map(|graph| graph.interface.category.as_str()),
         )
         .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
@@ -336,8 +336,8 @@ fn graph_entry(
     shared_id: GraphId,
     graph: &GraphDef,
 ) -> Option<ChosenNode> {
-    let definition = &graph.definition;
-    if !MenuItem::new(&definition.name)
+    let interface = &graph.interface;
+    if !MenuItem::new(&interface.name)
         .show(ui, popup)
         .left
         .clicked()
@@ -346,7 +346,7 @@ fn graph_entry(
     }
     let local_id = GraphId::unique();
     let mut local = graph.clone_mapped();
-    local.definition.origin = Some(shared_id);
+    local.interface.origin = Some(shared_id);
     let node_id = NodeId::unique();
     let node = Node::graph_instance(&local, GraphLink::Local(local_id));
     let bindings = local.ports().default_bindings(node_id).collect();

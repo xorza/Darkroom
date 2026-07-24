@@ -483,10 +483,10 @@ impl Document {
         side: BoundarySide,
         idx: usize,
     ) -> Option<&str> {
-        let definition = &self.graph.find_graph(graph_id)?.definition;
+        let interface = &self.graph.find_graph(graph_id)?.interface;
         let name = match side {
-            BoundarySide::Input => &definition.inputs.get(idx)?.name,
-            BoundarySide::Output => &definition.outputs.get(idx)?.name,
+            BoundarySide::Input => &interface.inputs.get(idx)?.name,
+            BoundarySide::Output => &interface.outputs.get(idx)?.name,
         };
         Some(name)
     }
@@ -506,10 +506,10 @@ impl Document {
         let Some(def) = self.graph.find_graph_mut(graph_id) else {
             return;
         };
-        let definition = &mut def.definition;
+        let interface = &mut def.interface;
         let slot = match side {
-            BoundarySide::Input => definition.inputs.get_mut(idx).map(|input| &mut input.name),
-            BoundarySide::Output => definition
+            BoundarySide::Input => interface.inputs.get_mut(idx).map(|input| &mut input.name),
+            BoundarySide::Output => interface
                 .outputs
                 .get_mut(idx)
                 .map(|output| &mut output.name),
@@ -541,7 +541,7 @@ mod tests {
     use super::*;
     use crate::core::document::validate::{DocumentValidationError, GraphViewValidationError};
     use scenarium::testing::test_graph as core_test_graph;
-    use scenarium::{FuncId, SubgraphDefinition};
+    use scenarium::{FuncId, GraphInterface};
 
     fn leaf_graph(name: &str) -> CoreGraphDef {
         CoreGraphDef::new(name)
@@ -581,7 +581,7 @@ mod tests {
         // one undoable `AddNode`.
         let lib_id = GraphId::unique();
         let mut local = leaf_graph("Lib").clone_mapped();
-        local.definition.origin = Some(lib_id);
+        local.interface.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -606,7 +606,7 @@ mod tests {
             "local graph added alongside the instance"
         );
         assert_eq!(
-            doc.graph.graphs.get(&local_id).unwrap().definition.origin,
+            doc.graph.graphs.get(&local_id).unwrap().interface.origin,
             Some(lib_id),
             "copy records its library origin"
         );
@@ -635,7 +635,7 @@ mod tests {
         use crate::core::edit::intent::types::Intent;
 
         let mut local = leaf_graph("Lib").clone_mapped();
-        local.definition.origin = Some(lib_id);
+        local.interface.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -694,7 +694,7 @@ mod tests {
         let lib_id = GraphId::unique();
         let mut doc = Document::default();
         let mut local = leaf_graph("Lib");
-        local.definition.origin = Some(lib_id);
+        local.interface.origin = Some(lib_id);
         let local_id = GraphId::unique();
         doc.graph.insert_graph(local_id, local);
         let node = Node::graph_instance(
@@ -718,7 +718,7 @@ mod tests {
         };
         assert_ne!(new_id, local_id, "node now points at the fork");
         assert_eq!(
-            doc.graph.graphs.get(&new_id).unwrap().definition.origin,
+            doc.graph.graphs.get(&new_id).unwrap().interface.origin,
             None,
             "detach clears the library lineage"
         );
@@ -812,8 +812,8 @@ mod tests {
                 .count(),
             1
         );
-        let definition = &def.definition;
-        assert!(definition.inputs.is_empty() && definition.outputs.is_empty());
+        let interface = &def.interface;
+        assert!(interface.inputs.is_empty() && interface.outputs.is_empty());
 
         // Boundary nodes are placed input-left / output-right, level.
         let input_id = def
@@ -947,7 +947,7 @@ mod tests {
         .expect("boundary add builds at depth");
         apply_step(&add_port, &mut doc, GraphRef::Local(inner));
         let input_count =
-            |doc: &Document| doc.graph.find_graph(inner).unwrap().definition.inputs.len();
+            |doc: &Document| doc.graph.find_graph(inner).unwrap().interface.inputs.len();
         assert_eq!(input_count(&doc), 1);
         let inst_port = InputPort::new(inst_id, 0);
         let bound = Binding::Const(StaticValue::Float(4.0));
@@ -1001,7 +1001,7 @@ mod tests {
         )
         .expect("rename builds at depth");
         apply_step(&rename, &mut doc, GraphRef::Main);
-        assert_eq!(doc.graph.find_graph(inner).unwrap().definition.name, "deep");
+        assert_eq!(doc.graph.find_graph(inner).unwrap().interface.name, "deep");
         doc.validate()
             .expect("document still validates after edits");
     }
@@ -1182,7 +1182,7 @@ mod tests {
         invalid.graph.insert_graph(
             GraphId::unique(),
             CoreGraphDef {
-                definition: SubgraphDefinition {
+                interface: GraphInterface {
                     origin: Some(GraphId::nil()),
                     ..Default::default()
                 },

@@ -333,7 +333,7 @@ impl<'a> Run<'a> {
             }
             NodeKind::Graph(r) => {
                 let nested = graph.resolve_graph(*r, self.library)?;
-                let exposed = nested.definition.events.get(event_idx)?;
+                let exposed = nested.interface.events.get(event_idx)?;
                 self.push_level(node_id, &nested.body);
                 let resolved = self.resolve_emitter(exposed.emitter, exposed.emitter_event_idx);
                 self.pop_level();

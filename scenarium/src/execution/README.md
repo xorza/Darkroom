@@ -16,17 +16,21 @@ design home that the module's `//!` docs point at. Two parts:
 
 ## A.1 Authoring and execution representations
 
-`Graph` is the only authoring graph entity. It owns nodes, wiring, and a map of
-nested local graphs. Reusable-only metadata is grouped separately:
+`Graph` owns nodes, wiring, and a map of nested local definitions. A reusable
+definition pairs an interface with the body implementing it:
 
 ```text
 Graph {
-    definition: Option<SubgraphDefinition>,
-    nodes, bindings, subscriptions,
-    graphs: HashMap<GraphId, Graph>,
+    nodes, bindings, subscriptions, pinned_outputs,
+    graphs: HashMap<GraphId, GraphDef>,
 }
 
-SubgraphDefinition {
+GraphDef {
+    interface: GraphInterface,
+    body: Graph,
+}
+
+GraphInterface {
     name, category,
     inputs: Vec<FuncInput>,
     outputs: Vec<FuncOutput>,
@@ -35,9 +39,10 @@ SubgraphDefinition {
 }
 ```
 
-The root document value has `definition: None` and no boundary nodes. A reusable
-graph has `definition: Some(_)` and is stored under an external `GraphId`; the
-definition does not duplicate that registry id.
+The root document value is a bare `Graph`: no interface to carry, and no
+boundary nodes (`validate_for_execution` rejects them there). A reusable
+definition is a `GraphDef` stored under an external `GraphId`; the interface
+does not duplicate that registry id.
 
 Compilation lowers the authoring graph into an immutable `ExecutionProgram`.
 Composite instances and boundaries disappear, leaving only flat func nodes for
@@ -65,7 +70,7 @@ Two node kinds route values across a reusable graph's boundary:
 
 Either boundary may be absent when that side of the interface is empty. Boundaries
 are routing only and emit no execution node. Validation reads their arity directly
-from the containing graph's `SubgraphDefinition`.
+from the containing graph's `GraphInterface`.
 
 ## A.3 Graph instances and lookup
 
@@ -83,8 +88,9 @@ enum GraphLink {
 - `Local(id)` resolves through the containing `Graph.graphs`.
 - `Shared(id)` resolves through `Library.graphs`.
 
-Both registries are `HashMap<GraphId, Graph>`. `Graph::resolve_graph` returns the
-`&Graph` value directly.
+Both registries are `HashMap<GraphId, GraphDef>`, and `Graph::resolve_graph`
+returns the `&GraphDef` directly — interface and body together, since a caller
+resolving a link needs the ports as often as the interior.
 
 ## A.4 Events, copying, and lineage
 
@@ -102,19 +108,19 @@ An instance has one outgoing event port per entry. Incoming events use ordinary
 subscriptions; flattening expands a composite subscriber into the interior nodes
 subscribed to its `GraphInput` trigger.
 
-`Graph::clone_mapped()` preserves definition metadata and interface while assigning
-fresh node ids throughout the copied graph tree and remapping event emitters. The
-caller chooses a fresh `GraphId` when inserting that value.
-`SubgraphDefinition::origin` is editor-only lineage pointing from a local graph to
+`GraphDef::clone_mapped()` carries the interface across while assigning fresh
+node *and* nested-graph ids throughout the copied tree and remapping event
+emitters; `clone_verbatim()` is its identity-preserving counterpart.
+`GraphInterface::origin` is editor-only lineage pointing from a local graph to
 its shared source.
 
 ## A.5 Validation and recursion
 
-`Graph::validate()` validates either graph form, including boundaries, nested graphs,
-and exposed events. `Graph::validate_subgraph()` additionally requires a definition.
-`Graph::validate_for_execution()` resolves the complete local/shared graph tree
-against the library and requires the entry graph to have no definition or boundary
-nodes. The document boundary applies the same entry constraints without requiring a
+`Graph::validate()` checks a body: boundaries, nested definitions, and their
+exposed events. `GraphDef::validate()` checks the interface first, then that
+body. `Graph::validate_for_execution()` resolves the complete local/shared tree
+against the library and requires the entry graph to have no boundary nodes. The
+document boundary applies the same entry constraints without requiring a
 runtime library.
 
 Compilation validates links against the library and rejects recursive composition.

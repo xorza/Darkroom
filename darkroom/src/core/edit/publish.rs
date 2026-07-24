@@ -22,7 +22,7 @@ pub(crate) fn publish_graph(
         };
         let local = scope.graph.graphs.get(&local_id)?;
         let existing_lib = local
-            .definition
+            .interface
             .origin
             .filter(|id| graph_library.graphs.contains_key(id));
         Some(PublishSource {
@@ -53,7 +53,7 @@ fn set_origin(document: &mut Document, parent: GraphRef, graph_id: GraphId, orig
     if let Some(graph) = document.graph_mut(parent)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
-        nested.definition.origin = Some(origin);
+        nested.interface.origin = Some(origin);
     }
 }
 
@@ -130,7 +130,7 @@ mod tests {
 
     fn graph(name: &str, origin: Option<GraphId>) -> GraphDef {
         let mut graph = GraphDef::new(name);
-        graph.definition.origin = origin;
+        graph.interface.origin = origin;
         graph
     }
 
@@ -156,7 +156,7 @@ mod tests {
             "update in place — no new library entry"
         );
         assert_eq!(
-            graph_library.graphs.get(&lib_id).unwrap().definition.name,
+            graph_library.graphs.get(&lib_id).unwrap().interface.name,
             "New",
             "library graph took the local graph's content"
         );
@@ -165,7 +165,7 @@ mod tests {
                 .graphs
                 .get(&local.graph_id)
                 .unwrap()
-                .definition
+                .interface
                 .origin,
             Some(lib_id),
             "lineage preserved"
@@ -194,7 +194,7 @@ mod tests {
             .graphs
             .get(&local.graph_id)
             .unwrap()
-            .definition
+            .interface
             .origin
             .expect("local graph linked to the new entry");
         assert!(

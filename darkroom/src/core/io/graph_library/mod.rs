@@ -110,7 +110,7 @@ fn read(path: &Path) -> Result<GraphLibrary, GraphLibraryReadError> {
             .validate()
             .map_err(|error| GraphLibraryReadError::InvalidGraph {
                 path: path.to_path_buf(),
-                graph_name: graph.definition.name.clone(),
+                graph_name: graph.interface.name.clone(),
                 reason: format!("{error:#}"),
             })?;
     }

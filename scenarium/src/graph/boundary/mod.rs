@@ -132,7 +132,7 @@ impl Graph {
         idx: usize,
     ) -> Option<DetachedGraphInput> {
         let child = self.graphs.get(&graph_id)?;
-        let spec = child.definition.inputs.get(idx)?.clone();
+        let spec = child.interface.inputs.get(idx)?.clone();
         let interior = match child.body.boundary_node(NodeKind::GraphInput) {
             Some(boundary) => child.body.output_slot_wiring(boundary, idx),
             None => OutputSlotWiring::default(),
@@ -162,7 +162,7 @@ impl Graph {
             .expect("cannot detach a graph input that does not exist");
         let instances = self.local_instances(graph_id);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.inputs.remove(idx);
+        child.interface.inputs.remove(idx);
         if let Some(boundary) = child.body.boundary_node(NodeKind::GraphInput) {
             child.body.remove_output_slot(boundary, idx);
         }
@@ -184,7 +184,7 @@ impl Graph {
             .expect("cannot attach a graph input to a missing graph");
         let boundary = child.body.boundary_node(NodeKind::GraphInput);
         assert!(
-            detached.idx <= child.definition.inputs.len(),
+            detached.idx <= child.interface.inputs.len(),
             "attach index out of range"
         );
         detached.assert_targets_slot(&instances, boundary);
@@ -201,7 +201,7 @@ impl Graph {
         }
         self.restore_bindings(parent);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.inputs.insert(idx, spec);
+        child.interface.inputs.insert(idx, spec);
         if let Some(boundary) = boundary {
             child.body.insert_output_slot(boundary, idx);
         }
@@ -217,7 +217,7 @@ impl Graph {
         idx: usize,
     ) -> Option<DetachedGraphOutput> {
         let child = self.graphs.get(&graph_id)?;
-        let spec = child.definition.outputs.get(idx)?.clone();
+        let spec = child.interface.outputs.get(idx)?.clone();
         let interior = match child.body.boundary_node(NodeKind::GraphOutput) {
             Some(boundary) => child
                 .body
@@ -249,7 +249,7 @@ impl Graph {
             .expect("cannot detach a graph output that does not exist");
         let instances = self.local_instances(graph_id);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.outputs.remove(idx);
+        child.interface.outputs.remove(idx);
         if let Some(boundary) = child.body.boundary_node(NodeKind::GraphOutput) {
             child.body.remove_input_slot(boundary, idx);
         }
@@ -270,7 +270,7 @@ impl Graph {
             .expect("cannot attach a graph output to a missing graph");
         let boundary = child.body.boundary_node(NodeKind::GraphOutput);
         assert!(
-            detached.idx <= child.definition.outputs.len(),
+            detached.idx <= child.interface.outputs.len(),
             "attach index out of range"
         );
         detached.assert_targets_slot(&instances, boundary);
@@ -288,7 +288,7 @@ impl Graph {
         self.restore_bindings(parent);
         self.restore_pins(pins);
         let child = self.graphs.get_mut(&graph_id).unwrap();
-        child.definition.outputs.insert(idx, spec);
+        child.interface.outputs.insert(idx, spec);
         if let Some(boundary) = boundary {
             child.body.insert_input_slot(boundary, idx);
         }

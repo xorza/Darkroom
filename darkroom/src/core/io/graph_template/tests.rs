@@ -26,7 +26,7 @@ fn graph_template_roundtrips_and_validates_input() {
 
     let bad_path = test_output_path("darkroom_graph_template/bad-graph.json");
     let mut bad = GraphDef::new("bad");
-    bad.definition.events.push(GraphEvent {
+    bad.interface.events.push(GraphEvent {
         name: "tick".into(),
         emitter: NodeId::unique(),
         emitter_event_idx: 0,
@@ -44,7 +44,7 @@ fn graph_template_roundtrips_and_validates_input() {
 
     let nil_origin_path = test_output_path("darkroom_graph_template/nil-origin-graph.json");
     let mut nil_origin = GraphDef::new("nil origin");
-    nil_origin.definition.origin = Some(GraphId::nil());
+    nil_origin.interface.origin = Some(GraphId::nil());
     save(&nil_origin, &nil_origin_path).unwrap();
     let error = load(&nil_origin_path).unwrap_err();
     assert!(

@@ -146,8 +146,11 @@ impl Library {
         self.graphs.get(&id)
     }
 
-    /// Registers a shared graph definition.
-    pub fn insert_graph(&mut self, id: GraphId, graph: GraphDef) {
+    /// Register a shared graph definition. Panics on a duplicate id, like
+    /// [`Self::add`] and [`Self::register_type`] — and unlike
+    /// [`Graph::insert_graph`](crate::graph::Graph::insert_graph), whose
+    /// map-`insert` semantics undo/redo replay depends on.
+    pub fn register_graph(&mut self, id: GraphId, graph: GraphDef) {
         assert!(!id.is_nil());
         assert!(
             !self.graphs.contains_key(&id),
@@ -243,7 +246,7 @@ impl Library {
             self.add(func);
         }
         for (id, graph) in other.graphs {
-            self.insert_graph(id, graph);
+            self.register_graph(id, graph);
         }
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
@@ -322,13 +325,13 @@ mod tests {
         assert_eq!(library.by_id(func_id).unwrap().name, "Before");
 
         let graph_id = GraphId::unique();
-        library.insert_graph(graph_id, GraphDef::new("Before"));
+        library.register_graph(graph_id, GraphDef::new("Before"));
         let duplicate_graph = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            library.insert_graph(graph_id, GraphDef::new("After"));
+            library.register_graph(graph_id, GraphDef::new("After"));
         }));
         assert!(duplicate_graph.is_err());
         assert_eq!(
-            library.graph_by_id(graph_id).unwrap().definition.name,
+            library.graph_by_id(graph_id).unwrap().interface.name,
             "Before"
         );
 

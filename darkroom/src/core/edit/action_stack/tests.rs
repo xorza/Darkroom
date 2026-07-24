@@ -7,7 +7,7 @@ use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
 use scenarium::testing::test_graph;
-use scenarium::{GraphDef, GraphId, NodeSearch, SubgraphDefinition};
+use scenarium::{GraphDef, GraphId, GraphInterface, NodeSearch};
 
 /// Three tabs with distinct `Local` targets in the primary group so an
 /// activation/close at a given index is observable. Dock steps are
@@ -479,12 +479,12 @@ fn doc_with_def() -> (Document, GraphRef) {
     (doc, GraphRef::Local(id))
 }
 
-fn definition(doc: &Document, id: GraphId) -> &SubgraphDefinition {
-    &doc.graph.graphs[&id].definition
+fn interface(doc: &Document, id: GraphId) -> &GraphInterface {
+    &doc.graph.graphs[&id].interface
 }
 
-fn definition_mut(doc: &mut Document, id: GraphId) -> &mut SubgraphDefinition {
-    &mut doc.graph.graphs.get_mut(&id).unwrap().definition
+fn interface_mut(doc: &mut Document, id: GraphId) -> &mut GraphInterface {
+    &mut doc.graph.graphs.get_mut(&id).unwrap().interface
 }
 
 #[test]
@@ -508,11 +508,11 @@ fn rename_boundary_port_applies_and_reverts() {
     .expect("rename builds against a Local target");
 
     apply_step(&step, &mut doc, target);
-    assert_eq!(definition(&doc, def_id).inputs[0].name, "alpha");
+    assert_eq!(interface(&doc, def_id).inputs[0].name, "alpha");
 
     revert_step(&step, &mut doc, target);
     assert_eq!(
-        definition(&doc, def_id).inputs[0].name,
+        interface(&doc, def_id).inputs[0].name,
         "A",
         "revert restores the captured `from` name"
     );
@@ -537,7 +537,7 @@ fn rename_boundary_port_renames_outputs_side() {
     )
     .unwrap();
     apply_step(&step, &mut doc, target);
-    assert_eq!(definition(&doc, def_id).outputs[0].name, "result");
+    assert_eq!(interface(&doc, def_id).outputs[0].name, "result");
 }
 
 #[test]
@@ -601,23 +601,21 @@ fn stale_rename_step_no_ops_instead_of_clobbering() {
     )
     .unwrap();
     apply_step(&step, &mut doc, target);
-    assert_eq!(definition(&doc, def_id).inputs[1].name, "beta");
+    assert_eq!(interface(&doc, def_id).inputs[1].name, "beta");
 
     // An out-of-band edit removes input 0, shifting "beta" to index 0.
     // The step's slot addressing is now stale: its idx (1) is out of
     // range, so undo no-ops instead of touching the wrong slot.
-    definition_mut(&mut doc, def_id).inputs.remove(0);
+    interface_mut(&mut doc, def_id).inputs.remove(0);
     revert_step(&step, &mut doc, target);
-    assert_eq!(definition(&doc, def_id).inputs[0].name, "beta");
+    assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
 
     // Same guard by name: a slot at the recorded index but holding an
     // unexpected name is left alone.
-    definition_mut(&mut doc, def_id)
-        .inputs
-        .push(finput("other"));
+    interface_mut(&mut doc, def_id).inputs.push(finput("other"));
     revert_step(&step, &mut doc, target);
-    assert_eq!(definition(&doc, def_id).inputs[0].name, "beta");
-    assert_eq!(definition(&doc, def_id).inputs[1].name, "other");
+    assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
+    assert_eq!(interface(&doc, def_id).inputs[1].name, "other");
 }
 
 #[test]
@@ -645,24 +643,24 @@ fn add_boundary_port_applies_and_reverts_on_both_sides() {
         )
         .expect("add builds against a Local target");
         apply_step(&step, &mut doc, target);
-        let definition = definition(&doc, def_id);
+        let interface = interface(&doc, def_id);
         match side {
             BoundarySide::Input => {
-                assert_eq!(definition.inputs.len(), 2, "appended after A");
-                assert_eq!(definition.inputs[1].name, name);
-                assert_eq!(definition.inputs[1].data_type, DataType::Float);
+                assert_eq!(interface.inputs.len(), 2, "appended after A");
+                assert_eq!(interface.inputs[1].name, name);
+                assert_eq!(interface.inputs[1].data_type, DataType::Float);
             }
             BoundarySide::Output => {
-                assert_eq!(definition.outputs.len(), 2, "appended after R");
-                assert_eq!(definition.outputs[1].name, name);
-                assert_eq!(definition.outputs[1].ty.declared(), DataType::Float);
+                assert_eq!(interface.outputs.len(), 2, "appended after R");
+                assert_eq!(interface.outputs[1].name, name);
+                assert_eq!(interface.outputs[1].ty.declared(), DataType::Float);
             }
         }
         revert_step(&step, &mut doc, target);
     }
     // Both reverts leave the original one-in/one-out interface.
-    assert_eq!(definition(&doc, def_id).inputs.len(), 1);
-    assert_eq!(definition(&doc, def_id).outputs.len(), 1);
+    assert_eq!(interface(&doc, def_id).inputs.len(), 1);
+    assert_eq!(interface(&doc, def_id).outputs.len(), 1);
     // Off a Local target the intent drops.
     assert!(
         build_step(
@@ -732,8 +730,8 @@ fn remove_boundary_port_round_trips_severed_wiring() {
 
     // "B" survives at index 0 on both sides of the boundary; the removed
     // slot's wiring is gone.
-    assert_eq!(definition(&doc, def_id).inputs.len(), 1);
-    assert_eq!(definition(&doc, def_id).inputs[0].name, "B");
+    assert_eq!(interface(&doc, def_id).inputs.len(), 1);
+    assert_eq!(interface(&doc, def_id).inputs[0].name, "B");
     let child = &doc.graph.graphs[&def_id];
     assert_eq!(child.body.bindings.get(&InputPort::new(consumer, 0)), None);
     assert_eq!(

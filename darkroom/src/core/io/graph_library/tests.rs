@@ -76,7 +76,7 @@ fn structurally_invalid_graph_is_quarantined() {
     let path = test_output_path("darkroom_graph_library/invalid-graph.json");
     let _ = std::fs::remove_file(&path);
     let mut bad = graph("dangling");
-    bad.definition.events.push(GraphEvent {
+    bad.interface.events.push(GraphEvent {
         name: "tick".into(),
         emitter: NodeId::unique(),
         emitter_event_idx: 0,

@@ -117,7 +117,7 @@ fn detach_and_attach_graph_input_round_trip() {
     // Interface compacts [A, B, C] -> [A, C].
     let child = graph.graphs.get(&graph_id).unwrap();
     let names: Vec<&str> = child
-        .definition
+        .interface
         .inputs
         .iter()
         .map(|input| input.name.as_str())
@@ -173,7 +173,7 @@ fn detach_graph_input_at_each_index_severs_that_slot() {
         graph.detach_graph_input(fixture.graph_id, idx);
         let child = graph.graphs.get(&fixture.graph_id).unwrap();
         let names: Vec<&str> = child
-            .definition
+            .interface
             .inputs
             .iter()
             .map(|input| input.name.as_str())
@@ -285,7 +285,7 @@ fn detach_and_attach_graph_output_round_trip() {
     // Interface [X, Y, Z] -> [X, Z].
     let child = graph.graphs.get(&graph_id).unwrap();
     let names: Vec<&str> = child
-        .definition
+        .interface
         .outputs
         .iter()
         .map(|output| output.name.as_str())
@@ -425,7 +425,7 @@ fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
     assert!(detached.interior.is_empty() && detached.pins.is_empty());
     assert_eq!(detached.parent.len(), 1);
     let child = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(child.definition.inputs[0].name, "B");
+    assert_eq!(child.interface.inputs[0].name, "B");
     assert_eq!(
         graph.bindings.get(&InputPort::new(instance, 0)),
         Some(&const_int(2)),

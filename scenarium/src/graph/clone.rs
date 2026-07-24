@@ -115,9 +115,9 @@ impl GraphDef {
     /// emitters following the remapped interior nodes.
     pub fn clone_mapped(&self) -> Self {
         let mapped = self.body.clone_mapped_with_ids();
-        let mut definition = self.definition.clone();
-        definition.origin = None;
-        for event in &mut definition.events {
+        let mut interface = self.interface.clone();
+        interface.origin = None;
+        for event in &mut interface.events {
             event.emitter = mapped
                 .node_ids
                 .get(&event.emitter)
@@ -125,7 +125,7 @@ impl GraphDef {
                 .unwrap_or(event.emitter);
         }
         Self {
-            definition,
+            interface,
             body: mapped.graph,
         }
     }
@@ -134,7 +134,7 @@ impl GraphDef {
     /// condition.
     pub fn clone_verbatim(&self) -> Self {
         Self {
-            definition: self.definition.clone(),
+            interface: self.interface.clone(),
             body: self.body.clone_verbatim(),
         }
     }
