@@ -73,7 +73,7 @@ impl Prog {
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
     fn set_output_pinned(&mut self, e_node_id: ExecutionNodeId, port: usize, pinned: bool) {
         let start = self.program.e_nodes[&e_node_id].outputs.start as usize;
-        self.program.outputs.values[start + port].pinned = pinned;
+        self.program.outputs[start + port].pinned = pinned;
     }
 }
 
@@ -88,7 +88,7 @@ struct TestRun {
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
 fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
-    assert_eq!(readers.len(), program.outputs.values.len());
+    assert_eq!(readers.len(), program.outputs.len());
     let demand: Vec<OutputDemand> = readers
         .iter()
         .map(|count| {
@@ -137,7 +137,7 @@ fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
 fn straight_run(program: &ExecutionProgram) -> TestRun {
-    run_with_readers(program, vec![1; program.outputs.values.len()])
+    run_with_readers(program, vec![1; program.outputs.len()])
 }
 
 fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {

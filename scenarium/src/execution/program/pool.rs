@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, Index, IndexMut};
 
 #[derive(Debug)]
 pub(crate) struct PoolRange<T> {
@@ -39,7 +39,7 @@ impl<T> Default for PoolRange<T> {
 
 #[derive(Debug, Default)]
 pub(crate) struct Pool<T> {
-    pub(crate) values: Vec<T>,
+    values: Vec<T>,
 }
 
 impl<T> Pool<T> {
@@ -48,6 +48,32 @@ impl<T> Pool<T> {
         self.values.extend(values);
         let end = u32::try_from(self.values.len()).expect("program pool length exceeds u32");
         PoolRange::new(start, end - start)
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.values.clear();
+    }
+}
+
+impl<T> Deref for Pool<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.values
+    }
+}
+
+impl<T> Index<usize> for Pool<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        &self.values[index]
+    }
+}
+
+impl<T> IndexMut<usize> for Pool<T> {
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        &mut self.values[index]
     }
 }
 
@@ -83,12 +109,23 @@ mod tests {
         assert_eq!(empty.len, 0);
         assert_eq!(second.start, 2);
         assert_eq!(second.len, 1);
-        assert_eq!(pool.values, [10, 20, 30]);
+        assert_eq!(&*pool, [10, 20, 30]);
+        assert_eq!(pool[0], 10);
         assert_eq!(pool[first], [10, 20]);
         assert!(pool[empty].is_empty());
         assert_eq!(pool[second], [30]);
 
+        pool[0] = 15;
         pool[first][1] = 25;
-        assert_eq!(pool.values, [10, 25, 30]);
+        assert_eq!(&*pool, [15, 25, 30]);
+
+        let capacity = pool.values.capacity();
+        pool.clear();
+        assert!(pool.is_empty());
+        assert_eq!(pool.values.capacity(), capacity);
+        let rebuilt = pool.append([40]);
+        assert_eq!(rebuilt.start, 0);
+        assert_eq!(rebuilt.len, 1);
+        assert_eq!(pool[0], 40);
     }
 }

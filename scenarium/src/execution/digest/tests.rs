@@ -52,7 +52,7 @@ impl Prog {
     /// to none) — gates the Bind-side referent-identity fold.
     fn stamp_input(&mut self, idx: usize, input_idx: usize, stamper: InputStamper) {
         let pool = self.program.e_nodes[&e_node_id(idx)].inputs.start as usize + input_idx;
-        self.program.inputs.values[pool].stamper = Some(stamper);
+        self.program.inputs[pool].stamper = Some(stamper);
     }
 
     fn add_with(

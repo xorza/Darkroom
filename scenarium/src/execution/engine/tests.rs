@@ -3591,9 +3591,9 @@ mod invalidation {
         assert!(execution_graph.compiled.program.e_nodes.is_empty());
         assert!(execution_graph.plan.process_order.is_empty());
         // The packed pools are emptied too (not just the node list).
-        assert!(execution_graph.compiled.program.inputs.values.is_empty());
-        assert!(execution_graph.compiled.program.outputs.values.is_empty());
-        assert!(execution_graph.compiled.program.events.values.is_empty());
+        assert!(execution_graph.compiled.program.inputs.is_empty());
+        assert!(execution_graph.compiled.program.outputs.is_empty());
+        assert!(execution_graph.compiled.program.events.is_empty());
 
         Ok(())
     }

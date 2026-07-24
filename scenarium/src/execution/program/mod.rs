@@ -169,7 +169,7 @@ impl ExecutionProgram {
                 }
             }
         };
-        let mut resolver = OutputTypeResolver::new(self.outputs.values.len());
+        let mut resolver = OutputTypeResolver::new(self.outputs.len());
         for (e_node_id, e_node) in e_nodes {
             for port_idx in 0..e_node.outputs.len as usize {
                 let data_type = resolver.resolve(
@@ -179,7 +179,7 @@ impl ExecutionProgram {
                     },
                     &source,
                 );
-                self.outputs.values[e_node.outputs.start as usize + port_idx].data_type = data_type;
+                self.outputs[e_node.outputs.start as usize + port_idx].data_type = data_type;
             }
         }
     }

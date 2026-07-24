@@ -122,17 +122,17 @@ impl CompiledGraph {
                     e_node_id: *e_node_id,
                 });
             }
-            let inputs = program.inputs.values.get(e_node.inputs.range()).ok_or(
+            let inputs = program.inputs.get(e_node.inputs.range()).ok_or(
                 CompiledGraphValidationError::InputRange {
                     e_node_id: *e_node_id,
                 },
             )?;
-            if program.outputs.values.get(e_node.outputs.range()).is_none() {
+            if program.outputs.get(e_node.outputs.range()).is_none() {
                 return Err(CompiledGraphValidationError::OutputRange {
                     e_node_id: *e_node_id,
                 });
             }
-            if program.events.values.get(e_node.events.range()).is_none() {
+            if program.events.get(e_node.events.range()).is_none() {
                 return Err(CompiledGraphValidationError::EventRange {
                     e_node_id: *e_node_id,
                 });
@@ -227,7 +227,6 @@ impl ExecutionPlan {
                 .ok_or(ExecutionPlanValidationError::MissingNode { e_node_id })?;
             let inputs = program
                 .inputs
-                .values
                 .get(e_node.inputs.range())
                 .ok_or(ExecutionPlanValidationError::InputRange { e_node_id })?;
             for input in inputs {

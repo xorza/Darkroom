@@ -279,7 +279,7 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
     let graph_pinned = fix.node(&[], 2);
     let node_pinned = fix.node(&[], 2);
     let output_idx = fix.program.output_idx(graph_pinned, 1);
-    fix.program.outputs.values[output_idx.idx()].pinned = true;
+    fix.program.outputs[output_idx.idx()].pinned = true;
 
     let run = fix
         .resolve(

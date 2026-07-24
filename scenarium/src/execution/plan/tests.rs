@@ -194,7 +194,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
 fn node_seed_is_both_a_root_and_pinned() {
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
-    f.compiled.program.outputs.values[0].pinned = true;
+    f.compiled.program.outputs[0].pinned = true;
 
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();

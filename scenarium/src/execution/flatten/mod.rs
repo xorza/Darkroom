@@ -78,9 +78,9 @@ impl Flattener {
         self.scope_stack.clear();
         self.scope_stack.push(0);
 
-        pools.inputs.values.clear();
-        pools.outputs.values.clear();
-        pools.events.values.clear();
+        pools.inputs.clear();
+        pools.outputs.clear();
+        pools.events.clear();
         {
             let mut run = Run {
                 root,
@@ -428,7 +428,7 @@ impl<'a> Run<'a> {
             Source::Const(v) => ExecutionBinding::Const(v),
             Source::Producer(address) => ExecutionBinding::Bind(address),
         };
-        self.inputs.values[pool_idx].binding = binding;
+        self.inputs[pool_idx].binding = binding;
     }
 
     /// Resolve an output reference in the current frame to a concrete flat
