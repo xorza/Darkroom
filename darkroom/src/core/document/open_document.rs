@@ -27,13 +27,13 @@ impl OpenDocument {
     }
 
     /// Drop wiring the current library can no longer resolve (see
-    /// `Graph::prune_dangling_wiring`) — once per opened document, the
+    /// `Graph::prune`) — once per opened document, the
     /// first time a library is at hand.
     pub(crate) fn prune(&mut self, library: &Library) {
         if !self.prune_pending {
             return;
         }
-        self.document.graph.prune_dangling_wiring(library);
+        self.document.graph.prune(library);
         self.prune_pending = false;
     }
 

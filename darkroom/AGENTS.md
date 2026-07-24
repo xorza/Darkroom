@@ -266,7 +266,7 @@ undo restores the exact wiring. Unwiring never deletes a port.
 Library drift (a func or shared graph that changed shape between sessions)
 is handled once per opened document: `OpenDocument::prune` (gated by
 `prune_pending`, set on load/replace) calls
-`Graph::prune_dangling_wiring` to drop bindings and subscriptions the
+`Graph::prune` to drop bindings and subscriptions the
 current library can no longer resolve.
 
 ### Render projection: `Scene` (`src/scene.rs`)
