@@ -956,6 +956,7 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
         EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
     frame_event.events[1].event_lambda =
         EventLambda::new(|_state| Box::pin(std::future::pending()));
+    library.remove(&frame_event.id).unwrap();
     library.add(frame_event);
     let mut graph = log_frame_no_graph(&library);
     let frame_event_node_id = graph

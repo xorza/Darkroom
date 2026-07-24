@@ -4,7 +4,7 @@
 
 Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Filesystem identity remains intentionally approximate, but runtime eviction now removes selected flattened cache cones from RAM and disk without mutating the authored graph. Eager hydration and pin delivery still make disk-backed reuse consume more RAM and I/O than the live schedule requires.
 
-The main structural problems are inconsistent registry semantics, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
+The main structural problems are invalid registry states, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
 ## Current flow
 
@@ -18,7 +18,7 @@ The main structural problems are inconsistent registry semantics, mixed lifecycl
 
 - [x] **`Library` rejects functions without implementations.** `Func::validate` reports `MissingLambda`, and every registration path (`add`, `from`, and `merge`) passes through that validation before inserting each function. Declaration-only tests attach an explicit stub implementation rather than constructing a runtime-invalid library (`src/node/definition.rs`, `src/library.rs`).
 
-- [ ] **Registry collisions have incompatible semantics.** Function and shared-graph insertion silently replace an existing identity, while duplicate type registration panics; `Library::merge` applies all three behaviors implicitly. Accidental function replacement is particularly dangerous because `FuncId` is also part of persistent cache identity (`src/library.rs:148-175`, `src/library.rs:214-224`).
+- [x] **Registry collisions panic consistently without replacing the existing entry.** Function, shared-graph, and type registration check for an occupied identity before insertion, and `Library::merge` inherits the same behavior through those methods. Callers that intentionally evolve a test function remove the old definition explicitly before registering its replacement (`src/library.rs`).
 
 - [ ] **`TypeEntry` represents invalid enum attachment states.** Its public `decl`, `codec`, and `stamper` fields allow enum types to carry runtime attachments, and registration rejects those combinations only through fallible validation followed by a panic. The public model therefore permits states the registry cannot accept (`src/library.rs:13-64`, `src/library.rs:168-175`).
 

@@ -110,6 +110,7 @@ fn default_hooks() -> TestFuncHooks {
 fn mutate_func(library: &mut Library, name: &str, mutate: impl FnOnce(&mut Func)) {
     let mut func = library.by_name(name).unwrap().clone();
     mutate(&mut func);
+    library.remove(&func.id).unwrap();
     library.add(func);
 }
 

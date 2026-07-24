@@ -159,6 +159,10 @@ impl Library {
 
     pub fn add(&mut self, func: Func) {
         func.validate().expect("invalid function declaration");
+        assert!(
+            !self.funcs.contains_key(&func.id),
+            "duplicate function registration"
+        );
         self.funcs.insert(func.id, func);
     }
 
@@ -171,9 +175,13 @@ impl Library {
         self.graphs.get(id)
     }
 
-    /// Inserts a shared graph, replacing the graph with the same id.
+    /// Registers a shared graph.
     pub fn insert_graph(&mut self, id: GraphId, graph: Graph) {
         assert!(!id.is_nil());
+        assert!(
+            !self.graphs.contains_key(&id),
+            "duplicate graph registration"
+        );
         self.graphs.insert(id, graph);
     }
 
@@ -183,8 +191,11 @@ impl Library {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
         entry.validate().expect("invalid type declaration");
-        let prev = self.types.insert(type_id, entry);
-        assert!(prev.is_none(), "duplicate type registration");
+        assert!(
+            !self.types.contains_key(&type_id),
+            "duplicate type registration"
+        );
+        self.types.insert(type_id, entry);
     }
 
     pub fn type_decl(&self, type_id: &TypeId) -> Option<&TypeDecl> {
@@ -264,7 +275,7 @@ mod tests {
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
-    use crate::testing::{TestFuncHooks, test_func_lib};
+    use crate::testing::{self, TestFuncHooks, test_func_lib};
     use crate::{
         CancelToken, CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue,
         ResourceStamp, ResourceStamper, StaticValue, TypeId,
@@ -307,17 +318,34 @@ mod tests {
     }
 
     #[test]
-    fn insert_graph_replaces_definition_with_same_id() {
-        let id = GraphId::unique();
+    fn registration_rejects_duplicate_ids_without_replacing_entries() {
+        let func_id = FuncId::unique();
         let mut library = Library::default();
+        library.add(testing::with_stub_lambda(Func::new(func_id, "Before")));
+        let duplicate_func = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.add(testing::with_stub_lambda(Func::new(func_id, "After")));
+        }));
+        assert!(duplicate_func.is_err());
+        assert_eq!(library.by_id(&func_id).unwrap().name, "Before");
 
-        library.insert_graph(id, Graph::new("Before"));
-        assert_eq!(library.graphs.len(), 1);
-        assert_eq!(library.graph_by_id(&id).unwrap().name, "Before");
+        let graph_id = GraphId::unique();
+        library.insert_graph(graph_id, Graph::new("Before"));
+        let duplicate_graph = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.insert_graph(graph_id, Graph::new("After"));
+        }));
+        assert!(duplicate_graph.is_err());
+        assert_eq!(library.graph_by_id(&graph_id).unwrap().name, "Before");
 
-        library.insert_graph(id, Graph::new("After"));
-        assert_eq!(library.graphs.len(), 1);
-        assert_eq!(library.graph_by_id(&id).unwrap().name, "After");
+        let type_id = TypeId::unique();
+        library.register_type(type_id, TypeEntry::custom("Before"));
+        let duplicate_type = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.register_type(type_id, TypeEntry::custom("After"));
+        }));
+        assert!(duplicate_type.is_err());
+        assert_eq!(
+            library.type_decl(&type_id).unwrap().display_name(),
+            "Before"
+        );
     }
 
     #[test]
