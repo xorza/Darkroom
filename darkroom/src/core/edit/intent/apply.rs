@@ -129,7 +129,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             if let Some((graph_id, nested_graph)) = graph {
                 scope
                     .graph
-                    .insert_graph(*graph_id, (**nested_graph).clone());
+                    .insert_graph(*graph_id, nested_graph.verbatim_copy());
             }
             scope.graph.insert(*node_id, node.clone());
             for (port, binding) in bindings {
@@ -201,7 +201,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             graph,
             ..
         } => {
-            scope.graph.insert_graph(*to_id, (**graph).clone());
+            scope.graph.insert_graph(*to_id, graph.verbatim_copy());
             scope
                 .graph
                 .find_mut(node_id, NodeSearch::TopLevel)

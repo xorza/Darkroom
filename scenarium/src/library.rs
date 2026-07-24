@@ -98,7 +98,7 @@ impl TypeEntry {
 /// their disk codecs). This is runtime registry state, not a persistence format;
 /// authored graphs serialize function and type ids and resolve them against a
 /// process-assembled library.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct Library {
     funcs: HashMap<FuncId, Func>,
 

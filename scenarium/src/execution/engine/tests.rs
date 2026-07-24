@@ -3199,7 +3199,7 @@ mod composite_behavior {
 
     fn main_with_id(library: &Library, def_id: GraphId, def: Graph) -> Graph {
         let mut graph = Graph::default();
-        graph.insert_graph(def_id, def.clone());
+        graph.insert_graph(def_id, def.verbatim_copy());
         let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
         let p = func_node(library, "Print", "p");
         let p_id = graph.add(p);
@@ -3244,17 +3244,16 @@ mod composite_behavior {
     fn update_rejects_func_missing_inside_graph() {
         // The check descends composites: a func only the *interior*
         // references, absent from the lib, is still caught.
-        let library = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
         let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         let get_b = library.by_name("get_b").unwrap().id;
-        let mut incomplete_library = library.clone();
-        incomplete_library.remove(&get_b).unwrap();
+        library.remove(&get_b).unwrap();
 
         // A `Local` def resolves from the graph itself, so validation reaches
         // its interior while every top-level func remains resolvable.
         let mut eg = ExecutionEngine::default();
-        let CompileError { message } = eg.update(&graph, &incomplete_library).unwrap_err();
+        let CompileError { message } = eg.update(&graph, &library).unwrap_err();
         assert!(
             message.contains(&format!("{get_b:?}")),
             "message should name the interior's missing func, got: {message}"
@@ -3279,7 +3278,7 @@ mod composite_behavior {
             .id;
         let inner_def_id = GraphId::unique();
         let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
-        outer_interior.insert_graph(inner_def_id, inner_def.clone());
+        outer_interior.insert_graph(inner_def_id, inner_def.verbatim_copy());
         let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
         let so = Node::new(NodeKind::GraphOutput);
         let so_id = outer_interior.add(so);
@@ -3333,7 +3332,7 @@ mod composite_behavior {
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         let graph_id = GraphId::unique();
         let mut graph = Graph::default();
-        graph.insert_graph(graph_id, interior.clone());
+        graph.insert_graph(graph_id, interior.verbatim_copy());
         let first_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         for instance_id in [first_instance, second_instance] {

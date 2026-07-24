@@ -59,4 +59,39 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
         GraphLink::Local(*copied_child_id),
         "the instance's Local link follows the remapped def id"
     );
+
+    // The other copy mode is the exact inverse on every axis `fresh_copy`
+    // touches — that contrast is why `Graph` isn't `Clone`.
+    let verbatim = graph.verbatim_copy();
+    assert_eq!(verbatim, graph, "a verbatim copy is field-for-field equal");
+    assert_eq!(
+        verbatim.definition.as_ref().unwrap().origin,
+        Some(graph_origin),
+        "library lineage survives, where fresh_copy clears it"
+    );
+    assert_eq!(
+        verbatim.definition.as_ref().unwrap().events[0].emitter,
+        emitter
+    );
+    let (verbatim_child_id, verbatim_child) = verbatim.graphs.iter().next().unwrap();
+    assert_eq!(*verbatim_child_id, child_id, "nested def keeps its id");
+    assert_ne!(
+        *verbatim_child_id, *copied_child_id,
+        "the two copy modes disagree on nested identity"
+    );
+    assert_eq!(
+        verbatim_child.definition.as_ref().unwrap().origin,
+        Some(child_origin)
+    );
+    assert!(
+        verbatim_child
+            .find(&child_node, NodeSearch::TopLevel)
+            .is_some(),
+        "nested node ids are preserved, where fresh_copy remaps them"
+    );
+    assert_eq!(
+        verbatim.iter().find_map(|n| n.kind.as_graph()),
+        Some(GraphLink::Local(child_id)),
+        "the instance's Local link still names the original def"
+    );
 }

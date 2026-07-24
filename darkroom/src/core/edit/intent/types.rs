@@ -56,7 +56,7 @@ pub(crate) enum NodeProperty {
 ///   6. update `UndoStep::gesture_key` (also in
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in
 ///      undo history.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Intent {
     AddNode {
         /// Where the node lands on the canvas; its view item is created
@@ -222,7 +222,7 @@ pub(crate) enum Intent {
 /// target, while a [`DocStep`] mutates `Document` fields that live
 /// outside any single graph. The graph path therefore can't even *name*
 /// a document-global variant — no convention-only `unreachable!` arms.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
     Graph(GraphStep),
     Doc(DocStep),
@@ -230,7 +230,7 @@ pub(crate) enum UndoStep {
 
 /// Steps applied through an `EditScope` (graph + view) for the batch's
 /// `GraphRef` target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo removes the node by id and its new nested graph.
@@ -353,7 +353,7 @@ pub(crate) enum GraphStep {
 /// Document-global steps — they mutate fields that aren't scoped to a
 /// single graph (active tab, the tab list, a graph's interface), so
 /// they bypass the `EditScope` resolution entirely.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum DocStep {
     /// Whole-layout snapshot around one dock op (activate/close/move/
     /// resize) — the tree is a handful of nodes, so both halves ride the
