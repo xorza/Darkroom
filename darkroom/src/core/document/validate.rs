@@ -111,8 +111,7 @@ impl Document {
         for (id, view) in &self.local_views {
             let graph = self
                 .graph
-                .graphs
-                .get(id)
+                .find_graph(*id)
                 .ok_or(DocumentValidationError::MissingLocalGraph { graph_id: *id })?;
             view.validate(graph)
                 .map_err(|source| DocumentValidationError::LocalView {

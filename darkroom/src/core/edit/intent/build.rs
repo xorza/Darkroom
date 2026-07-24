@@ -40,7 +40,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }));
     }
     if let Intent::RenameGraph { id, to } = intent {
-        let from = doc.graph.graphs.get(&id)?.definition.as_ref()?.name.clone();
+        let from = doc.graph.find_graph(id)?.definition.as_ref()?.name.clone();
         return Some(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
     }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
@@ -67,7 +67,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         let GraphRef::Local(graph_id) = target else {
             return None;
         };
-        let definition = doc.graph.graphs.get(&graph_id)?.definition.as_ref()?;
+        let definition = doc.graph.find_graph(graph_id)?.definition.as_ref()?;
         let idx = match side {
             BoundarySide::Input => definition.inputs.len(),
             BoundarySide::Output => definition.outputs.len(),
@@ -84,13 +84,15 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         let GraphRef::Local(graph_id) = target else {
             return None;
         };
+        // Boundary snapshot/detach are *parent* methods (they sever the
+        // owner's instance bindings too), so resolve the def's parent —
+        // the root itself for a top-level def, an ancestor def otherwise.
+        let parent = doc.graph.find_graph_parent(graph_id)?;
         let detached = match side {
-            BoundarySide::Input => doc
-                .graph
+            BoundarySide::Input => parent
                 .snapshot_graph_input(graph_id, idx)
                 .map(DetachedBoundaryPort::Input),
-            BoundarySide::Output => doc
-                .graph
+            BoundarySide::Output => parent
                 .snapshot_graph_output(graph_id, idx)
                 .map(DetachedBoundaryPort::Output),
         }?;

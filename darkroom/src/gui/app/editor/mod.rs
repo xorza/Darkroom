@@ -399,9 +399,13 @@ impl Editor {
                     // history references the fresh graph, so the stack stays
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
-                    let id = open.document.create_graph();
-                    self.dirty = true;
-                    self.open_graph(open, GraphRef::Local(id));
+                    // Scoped to the active graph: a new graph made inside a
+                    // local tab nests there.
+                    let target = open.document.active_target().unwrap_or(GraphRef::Main);
+                    if let Some(id) = open.document.create_graph(target) {
+                        self.dirty = true;
+                        self.open_graph(open, GraphRef::Local(id));
+                    }
                 }
                 UiAction::OpenImageViewer(port) => self.open_image_viewer(open, port),
             }
@@ -657,8 +661,8 @@ mod tests {
     #[test]
     fn opening_a_graph_records_an_undoable_focus_switch() {
         let mut test = TestEditor::new(Document::default());
-        let a = test.open.document.create_graph();
-        let b = test.open.document.create_graph();
+        let a = test.open.document.create_graph(GraphRef::Main).unwrap();
+        let b = test.open.document.create_graph(GraphRef::Main).unwrap();
         let tabs = |test: &TestEditor| test.open.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |test: &TestEditor| test.open.document.layout.primary().active;
 

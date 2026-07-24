@@ -50,8 +50,8 @@ struct PublishSource {
 
 /// Point the local graph at the library entry `origin`. Lineage metadata —
 /// not routed through undo.
-fn set_origin(document: &mut Document, holder: GraphRef, graph_id: GraphId, origin: GraphId) {
-    if let Some(graph) = document.graph_mut(holder)
+fn set_origin(document: &mut Document, parent: GraphRef, graph_id: GraphId, origin: GraphId) {
+    if let Some(graph) = document.graph_mut(parent)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
         nested.definition.as_mut().unwrap().origin = Some(origin);
@@ -73,7 +73,7 @@ pub(crate) fn graph_template_to_export<'a>(
         ExportTarget::Node { graph, link } => {
             document.graph_for(graph)?.resolve_graph(link, library)
         }
-        ExportTarget::OpenTab { id } => document.graph.graphs.get(&id),
+        ExportTarget::OpenTab { id } => document.graph.find_graph(id),
     }
 }
 
@@ -96,10 +96,9 @@ fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
         }
     }
     match target {
-        GraphRef::Local(id) if document.graph.graphs.contains_key(&id) => {
-            Some(ExportTarget::OpenTab { id })
-        }
-        _ => None,
+        // `graph_for(target)` above already proved the def resolves.
+        GraphRef::Local(id) => Some(ExportTarget::OpenTab { id }),
+        GraphRef::Main => None,
     }
 }
 

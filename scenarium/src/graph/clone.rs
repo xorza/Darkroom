@@ -2,18 +2,36 @@ use std::collections::HashMap;
 
 use hashbrown::HashMap as NodeMap;
 
-use crate::graph::{Binding, Graph, InputPort, NodeId, OutputPort, Subscription};
+use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, OutputPort, Subscription};
 
 impl Graph {
-    /// Copy this graph with fresh node identities throughout its local graph
-    /// tree. The returned value has no library lineage.
+    /// Copy this graph with fresh node *and* nested-graph identities
+    /// throughout its local graph tree. The returned value has no library
+    /// lineage. Both id kinds are unique across a whole document, so every
+    /// copy boundary must sever both; `Local` links are rewritten per level
+    /// (a node references only its own graph's map — resolution is
+    /// parent-scoped). `Shared` links name library graphs and stay as-is.
     pub fn fresh_copy(&self) -> Graph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
+        let graph_id_map: HashMap<GraphId, GraphId> = self
+            .graphs
+            .keys()
+            .map(|graph_id| (*graph_id, GraphId::unique()))
+            .collect();
         let mut nodes = NodeMap::with_capacity(self.nodes.len());
         for (node_id, node) in &self.nodes {
             let new_id = NodeId::unique();
             id_map.insert(*node_id, new_id);
-            nodes.insert(new_id, node.clone());
+            let mut node = node.clone();
+            // A dangling link (def already missing) keeps its old id —
+            // drift tolerance, same as everywhere else.
+            if let NodeKind::Graph(GraphLink::Local(graph_id)) = &mut node.kind
+                && let Some(new_graph_id) = graph_id_map.get(graph_id)
+            {
+                *graph_id = *new_graph_id;
+            }
+            nodes.insert(new_id, node);
         }
         let remap = |id: NodeId| id_map.get(&id).copied().unwrap_or(id);
         let bindings = self
@@ -52,7 +70,7 @@ impl Graph {
         let graphs = self
             .graphs
             .iter()
-            .map(|(graph_id, graph)| (*graph_id, graph.fresh_copy()))
+            .map(|(graph_id, graph)| (graph_id_map[graph_id], graph.fresh_copy()))
             .collect();
         Graph {
             definition,

@@ -22,6 +22,10 @@ pub(crate) const MAX_NESTING_DEPTH: usize = 256;
 struct GraphChecker<'a> {
     library: Option<&'a Library>,
     node_ids: HashSet<NodeId>,
+    /// Every local-graph id seen across the walk — graph ids, like node
+    /// ids, must be unique across the whole reachable authoring tree so a
+    /// bare id is an unambiguous address.
+    graph_ids: HashSet<GraphId>,
     checked_shared: HashSet<GraphId>,
     shared_path: HashSet<GraphId>,
     depth: usize,
@@ -32,6 +36,7 @@ impl<'a> GraphChecker<'a> {
         Self {
             library,
             node_ids: HashSet::new(),
+            graph_ids: HashSet::new(),
             checked_shared: HashSet::new(),
             shared_path: HashSet::new(),
             depth: 0,
@@ -188,6 +193,11 @@ impl<'a> GraphChecker<'a> {
         for (graph_id, nested) in &graph.graphs {
             if graph_id.is_nil() {
                 return Err(GraphValidationError::NilLocalGraphId);
+            }
+            if !self.graph_ids.insert(*graph_id) {
+                return Err(GraphValidationError::DuplicateGraphId {
+                    graph_id: *graph_id,
+                });
             }
             self.depth += 1;
             let nested_result = self.validate_graph(nested, true);

@@ -343,8 +343,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
         TabRef::Graph(GraphRef::Main) => Cow::Borrowed("main"),
         TabRef::Graph(GraphRef::Local(id)) => doc
             .graph
-            .graphs
-            .get(&id)
+            .find_graph(id)
             .and_then(|graph| graph.definition.as_ref())
             .map(|definition| definition.name.as_str())
             .unwrap_or("graph")

@@ -25,7 +25,9 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
         emitter,
         emitter_event_idx: 0,
     });
+    let instance = Node::graph_instance(&child, GraphLink::Local(child_id));
     graph.insert_graph(child_id, child);
+    graph.add(instance);
 
     let copy = graph.fresh_copy();
     assert_eq!(copy.definition.as_ref().unwrap().origin, None);
@@ -35,7 +37,12 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
         copy.find(&copied_emitter, NodeSearch::TopLevel).is_some(),
         "event emitter follows the copied node"
     );
-    let copied_child = &copy.graphs[&child_id];
+    assert_eq!(copy.graphs.len(), 1, "the nested def travels with the copy");
+    let (copied_child_id, copied_child) = copy.graphs.iter().next().unwrap();
+    assert_ne!(
+        *copied_child_id, child_id,
+        "nested graph identities are remapped"
+    );
     assert_eq!(copied_child.definition.as_ref().unwrap().origin, None);
     assert!(
         copied_child
@@ -43,5 +50,13 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
             .is_none(),
         "nested node identities are remapped"
     );
-    assert_eq!(copy.graphs.len(), 1, "nested graph identity is the map key");
+    let linked = copy
+        .iter()
+        .find_map(|n| n.kind.as_graph())
+        .expect("instance node copied");
+    assert_eq!(
+        linked,
+        GraphLink::Local(*copied_child_id),
+        "the instance's Local link follows the remapped def id"
+    );
 }

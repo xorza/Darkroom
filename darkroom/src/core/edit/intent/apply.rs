@@ -72,7 +72,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             to,
         } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
         DocStep::RenameGraph { id, to, .. } => {
-            if let Some(graph) = doc.graph.graphs.get_mut(id) {
+            if let Some(graph) = doc.graph.find_graph_mut(*id) {
                 graph.definition.as_mut().unwrap().name = to.clone();
             }
         }
@@ -83,7 +83,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             name,
             data_type,
         } => {
-            if let Some(graph) = doc.graph.graphs.get_mut(graph_id) {
+            if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
                 let definition = graph.definition.as_mut().unwrap();
                 match side {
                     BoundarySide::Input => definition
@@ -96,14 +96,14 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             }
         }
         DocStep::RemoveBoundaryPort { graph_id, detached } => {
-            if doc.graph.graphs.contains_key(graph_id) {
+            if let Some(parent) = doc.graph.find_graph_parent_mut(*graph_id) {
                 match detached {
                     DetachedBoundaryPort::Input(input) => {
-                        let removed = doc.graph.detach_graph_input(*graph_id, input.idx);
+                        let removed = parent.detach_graph_input(*graph_id, input.idx);
                         assert_eq!(&removed, input, "removal diverged from the recorded step");
                     }
                     DetachedBoundaryPort::Output(output) => {
-                        let removed = doc.graph.detach_graph_output(*graph_id, output.idx);
+                        let removed = parent.detach_graph_output(*graph_id, output.idx);
                         assert_eq!(&removed, output, "removal diverged from the recorded step");
                     }
                 }
@@ -308,7 +308,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             to,
         } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
         DocStep::RenameGraph { id, from, .. } => {
-            if let Some(graph) = doc.graph.graphs.get_mut(id) {
+            if let Some(graph) = doc.graph.find_graph_mut(*id) {
                 graph.definition.as_mut().unwrap().name = from.clone();
             }
         }
@@ -318,7 +318,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             idx,
             ..
         } => {
-            if let Some(graph) = doc.graph.graphs.get_mut(graph_id) {
+            if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
                 let definition = graph.definition.as_mut().unwrap();
                 match side {
                     BoundarySide::Input => {
@@ -331,13 +331,13 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             }
         }
         DocStep::RemoveBoundaryPort { graph_id, detached } => {
-            if doc.graph.graphs.contains_key(graph_id) {
+            if let Some(parent) = doc.graph.find_graph_parent_mut(*graph_id) {
                 match detached.clone() {
                     DetachedBoundaryPort::Input(input) => {
-                        doc.graph.attach_graph_input(*graph_id, input);
+                        parent.attach_graph_input(*graph_id, input);
                     }
                     DetachedBoundaryPort::Output(output) => {
-                        doc.graph.attach_graph_output(*graph_id, output);
+                        parent.attach_graph_output(*graph_id, output);
                     }
                 }
             }
