@@ -358,22 +358,13 @@ impl Editor {
     /// points at. For a `Local` target, also hands the scene the enclosing
     /// `Graph` so the interior's boundary nodes can mirror its
     /// interface as their ports.
-    ///
-    /// Reconciles every graph's interface against its interior wiring
-    /// first (derived state, like the scene itself) so boundary nodes
-    /// render the right ports + placeholder and the doc is consistent
-    /// before any save — but only when normalization is pending (a
-    /// structural edit, undo/redo, or document replacement since the last
-    /// reconcile). Idle/selection/viewport frames skip it: the interface
-    /// can't have changed, and reconcile is idempotent there anyway.
     pub(crate) fn rebuild_scene(
         &mut self,
         ui: &mut Ui,
-        open: &mut OpenDocument,
+        open: &OpenDocument,
         target: GraphRef,
         library: &Library,
     ) {
-        open.prune(library);
         let graph = open
             .document
             .graph_for(target)
@@ -536,7 +527,6 @@ mod tests {
                 open: OpenDocument {
                     document,
                     path: None,
-                    prune_pending: true,
                 },
             }
         }

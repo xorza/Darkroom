@@ -26,8 +26,7 @@ pub(crate) struct TerminalSession {
 impl TerminalSession {
     pub(crate) fn new(script_config: &ScriptConfig, wake: Wake) -> Self {
         let mut preferences = Preferences::load();
-        let mut workspace = Workspace::new(script_config, wake, &mut preferences);
-        workspace.prune_document();
+        let workspace = Workspace::new(script_config, wake, &mut preferences);
         Self {
             workspace,
             quit: false,

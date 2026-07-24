@@ -14,24 +14,37 @@ use crate::core::status::StatusLog;
 use crate::core::workspace::{self as workspace_module, Workspace};
 
 #[test]
-fn normalization_is_shared_across_run_eviction_and_replacement_boundaries() {
+fn installing_a_document_prunes_its_stale_wiring() {
+    use scenarium::{Binding, Graph, InputPort};
+
     let mut preferences = Preferences::default();
     let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
-    assert!(workspace.open.prune_pending);
+    // A binding whose consumer node doesn't exist can never resolve; the
+    // single prune site (document install) must drop it, so runs and
+    // saves need no pruning of their own.
+    let mut graph = Graph::default();
+    graph.set_input_binding(
+        InputPort::new(NodeId::unique(), 0),
+        Binding::Const(StaticValue::Int(1)),
+    );
+    let stale = OpenDocument {
+        document: Document::from(graph),
+        path: None,
+    };
+    workspace.replace_document(stale);
+    assert!(
+        workspace.open.document.graph.bindings.is_empty(),
+        "replace_document prunes immediately"
+    );
     assert!(
         workspace.run_once(),
-        "the empty graph compiles and is queued"
+        "the pruned graph compiles and is queued"
     );
-    assert!(!workspace.open.prune_pending);
-
-    workspace.replace_document(OpenDocument::default());
-    assert!(workspace.open.prune_pending);
     assert!(
         workspace.evict_cache(NodeId::unique()),
-        "the empty graph compiles and queues an eviction"
+        "the pruned graph compiles and queues an eviction"
     );
-    assert!(!workspace.open.prune_pending);
 }
 
 #[test]

@@ -71,8 +71,8 @@ Root holds the entry point; implementation is grouped by responsibility:
 - **`core/terminal_session/`** — terminal/headless event interpretation and
   shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `open_document.rs` (`OpenDocument`: startup loading, active
-  path, and the deferred load-time wiring prune), `serde.rs` (custom ordered paint-stack
+  `EditScope`), `open_document.rs` (`OpenDocument`: startup loading and the
+  active path), `serde.rs` (custom ordered paint-stack
   wire format), and `validate.rs` (document/view structural validation).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
@@ -264,10 +264,10 @@ via scenarium's `detach_graph_input/output`, all recorded on the step so
 undo restores the exact wiring. Unwiring never deletes a port.
 
 Library drift (a func or shared graph that changed shape between sessions)
-is handled once per opened document: `OpenDocument::prune` (gated by
-`prune_pending`, set on load/replace) calls
-`Graph::prune` to drop bindings and subscriptions the
-current library can no longer resolve.
+is handled at the single point where a document meets the runtime library:
+`Workspace::new` / `Workspace::replace_document` call `Graph::prune` to
+drop bindings and subscriptions the library can no longer resolve. Nothing
+else prunes — scene rebuild, run, and save all see an already-clean graph.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
@@ -285,7 +285,7 @@ the active `GraphView` each rebuild; the gesture writes back via intents.
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
-- `App::run_graph` asks `Workspace::run_once` to prune (if pending) and compile
+- `App::run_graph` asks `Workspace::run_once` to compile
   the active graph against the library **on the UI thread**
   (`RuntimeHost::run_once` → the host-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the

@@ -60,42 +60,45 @@ impl Workspace {
         let open = load_preferred_document(preferences, &mut status);
         let mut runtime = RuntimeHost::new(script_config, wake, preferences, status);
         runtime.set_document_cache(open.path.as_deref());
-        Self { open, runtime }
+        let mut workspace = Self { open, runtime };
+        workspace.prune_document();
+        workspace
     }
 
     pub(crate) fn replace_document(&mut self, open: OpenDocument) {
         self.open = open;
         self.runtime.set_document_cache(self.open.path.as_deref());
+        self.prune_document();
     }
 
     pub(crate) fn run_once(&mut self) -> bool {
-        self.prune_document();
         self.runtime.run_once(&self.open.document.graph)
     }
 
     pub(crate) fn run_node(&mut self, node_id: NodeId) -> bool {
-        self.prune_document();
         self.runtime.run_node(&self.open.document.graph, node_id)
     }
 
     pub(crate) fn evict_cache(&mut self, node_id: NodeId) -> bool {
-        self.prune_document();
         self.runtime.evict_cache(&self.open.document.graph, node_id)
     }
 
     pub(crate) fn start_event_loop(&mut self) -> bool {
-        self.prune_document();
         self.runtime.start_event_loop(&self.open.document.graph)
     }
 
     pub(crate) fn save_to(&mut self, path: &Path) -> Result<(), DocumentSaveError> {
-        let library = self.runtime.library.published.load();
-        self.open.save_to(path, &library)?;
+        self.open.save_to(path)?;
         self.runtime.set_document_cache(self.open.path.as_deref());
         Ok(())
     }
 
-    pub(crate) fn prune_document(&mut self) {
-        self.open.prune(&self.runtime.library.published.load());
+    /// Drop wiring the runtime library can't resolve (see `Graph::prune`)
+    /// — the single prune site, run whenever a document is installed.
+    fn prune_document(&mut self) {
+        self.open
+            .document
+            .graph
+            .prune(&self.runtime.library.published.load());
     }
 }
