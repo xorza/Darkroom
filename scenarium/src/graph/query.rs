@@ -13,7 +13,7 @@ impl Graph {
     /// a boundary node (its arity mirrors the enclosing interface, with no
     /// per-port type here) or a missing func/graph. The caller treats `None` as
     /// the polymorphic `Any`.
-    pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
+    pub(crate) fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
     }
 
@@ -25,9 +25,9 @@ impl Graph {
         library: &'a Library,
         port: InputPort,
     ) -> Option<&'a FuncInput> {
-        let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
+        let node = self.find(port.node_id, NodeSearch::TopLevel)?;
         let inputs = match &node.kind {
-            NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
+            NodeKind::Func(func_id) => &library.by_id(*func_id)?.inputs,
             NodeKind::Graph(r) => &self.resolve_graph(*r, library)?.definition.inputs,
             NodeKind::Special(s) => &s.func().inputs,
             NodeKind::GraphInput | NodeKind::GraphOutput => return None,
@@ -37,7 +37,7 @@ impl Graph {
 
     pub(crate) fn output_count(&self, node: &Node, library: &Library) -> Option<usize> {
         match &node.kind {
-            NodeKind::Func(id) => library.by_id(id).map(|function| function.outputs.len()),
+            NodeKind::Func(id) => library.by_id(*id).map(|function| function.outputs.len()),
             NodeKind::Graph(reference) => self
                 .resolve_graph(*reference, library)
                 .map(|def| def.definition.outputs.len()),
@@ -54,7 +54,7 @@ impl Graph {
 
     pub(crate) fn event_count(&self, node: &Node, library: &Library) -> Option<usize> {
         match &node.kind {
-            NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
+            NodeKind::Func(id) => library.by_id(*id).map(|function| function.events.len()),
             NodeKind::Graph(reference) => self
                 .resolve_graph(*reference, library)
                 .map(|def| def.definition.events.len()),
@@ -113,7 +113,7 @@ impl Graph {
         node: &'a Node,
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
+            NodeKind::Func(func_id) => library.by_id(*func_id).map(|f| f.outputs.as_slice()),
             NodeKind::Graph(r) => self
                 .resolve_graph(*r, library)
                 .map(|def| def.definition.outputs.as_slice()),
@@ -126,7 +126,7 @@ impl Graph {
     /// or `None` for a boundary / unresolved node. The output-side mirror of
     /// [`Self::input_spec`].
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
-        let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
+        let node = self.find(port.node_id, NodeSearch::TopLevel)?;
         self.node_outputs(library, node)?.get(port.port_idx)
     }
 

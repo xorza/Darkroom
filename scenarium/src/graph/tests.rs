@@ -277,7 +277,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
     let mut graph = Graph::default();
     let id = graph.add_func_node(&hot);
     assert_eq!(
-        graph.find(&id, NodeSearch::TopLevel).unwrap().cache,
+        graph.find(id, NodeSearch::TopLevel).unwrap().cache,
         CacheMode::Both
     );
 
@@ -875,10 +875,7 @@ fn node_remove_test() -> TestResult {
     let mut graph = test_graph();
 
     let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph
-        .find_mut(&node_id, NodeSearch::TopLevel)
-        .unwrap()
-        .cache = CacheMode::Ram;
+    graph.find_mut(node_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Ram;
     assert_eq!(
         graph
             .find_by_name("sum", NodeSearch::TopLevel)
@@ -910,30 +907,12 @@ fn node_remove_test() -> TestResult {
 }
 
 #[test]
-fn node_kind_accessors() {
+fn only_boundary_kinds_are_boundaries() {
     let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
-    let func = NodeKind::Func(func_id);
-    assert_eq!(func.as_func(), Some(func_id));
-    assert_eq!(func.as_graph(), None);
-    assert!(!func.is_boundary());
-
-    let graph_id = GraphId::unique();
-    let sub = NodeKind::Graph(GraphLink::Local(graph_id));
-    assert_eq!(sub.as_func(), None);
-    assert_eq!(sub.as_graph().map(|r| r.id()), Some(graph_id));
-    assert!(!sub.is_boundary());
-
+    assert!(!NodeKind::Func(func_id).is_boundary());
+    assert!(!NodeKind::Graph(GraphLink::Local(GraphId::unique())).is_boundary());
     assert!(NodeKind::GraphInput.is_boundary());
     assert!(NodeKind::GraphOutput.is_boundary());
-    assert_eq!(NodeKind::GraphInput.as_func(), None);
-    assert_eq!(NodeKind::GraphOutput.as_graph(), None);
-}
-
-#[test]
-fn node_func_id_shims_kind() {
-    let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
-    assert_eq!(Node::new(NodeKind::Func(func_id)).func_id(), Some(func_id));
-    assert_eq!(Node::new(NodeKind::GraphInput).func_id(), None);
 }
 
 #[test]
@@ -947,21 +926,11 @@ fn typed_id_from_str_preserves_uuid_error() {
 }
 
 #[test]
-fn binding_accessors() {
-    let out = OutputPort::new(NodeId::unique(), 2);
-    let bind = Binding::Bind(out);
-    assert_eq!(bind.as_output_binding(), Some(&out));
-
-    let konst = Binding::from(5i64);
-    assert_eq!(konst.as_output_binding(), None);
-}
-
-#[test]
 fn binding_conversions() {
     let nid = NodeId::unique();
     let from_port: Binding = OutputPort::new(nid, 1).into();
     assert_eq!(from_port, Binding::bind(nid, 1));
-    assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
+    assert_eq!(from_port, Binding::Bind(OutputPort::new(nid, 1)));
 
     assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
 }
@@ -1151,8 +1120,8 @@ fn add_func_node_seeds_default_const_binding() {
     let id = graph.add_func_node(&func);
 
     assert_eq!(
-        graph.find(&id, NodeSearch::TopLevel).unwrap().func_id(),
-        Some(func.id)
+        graph.find(id, NodeSearch::TopLevel).unwrap().kind,
+        NodeKind::Func(func.id)
     );
     assert_eq!(
         graph.bindings.get(&InputPort::new(id, 0)),
@@ -1214,8 +1183,8 @@ fn node_search_scope_gates_graph_interiors() {
     graph.insert_graph(outer_id, outer_graph);
 
     // Top-level node: found either way.
-    assert!(graph.find(&top_id, NodeSearch::TopLevel).is_some());
-    assert!(graph.find(&top_id, NodeSearch::Recursive).is_some());
+    assert!(graph.find(top_id, NodeSearch::TopLevel).is_some());
+    assert!(graph.find(top_id, NodeSearch::Recursive).is_some());
     assert_eq!(
         graph.find_by_name("top", NodeSearch::TopLevel).unwrap().id,
         top_id
@@ -1226,8 +1195,8 @@ fn node_search_scope_gates_graph_interiors() {
     );
     // Interior node: invisible to TopLevel, found two levels down by
     // Recursive; an unknown id misses both ways.
-    assert!(graph.find(&deep_id, NodeSearch::TopLevel).is_none());
-    assert!(graph.find(&deep_id, NodeSearch::Recursive).is_some());
+    assert!(graph.find(deep_id, NodeSearch::TopLevel).is_none());
+    assert!(graph.find(deep_id, NodeSearch::Recursive).is_some());
     assert!(graph.find_by_name("deep", NodeSearch::TopLevel).is_none());
     assert_eq!(
         graph
@@ -1238,7 +1207,7 @@ fn node_search_scope_gates_graph_interiors() {
     );
     assert!(
         graph
-            .find(&NodeId::unique(), NodeSearch::Recursive)
+            .find(NodeId::unique(), NodeSearch::Recursive)
             .is_none()
     );
     assert!(
@@ -1247,10 +1216,7 @@ fn node_search_scope_gates_graph_interiors() {
             .is_none()
     );
 
-    graph
-        .find_mut(&deep_id, NodeSearch::Recursive)
-        .unwrap()
-        .name = "top".to_owned();
+    graph.find_mut(deep_id, NodeSearch::Recursive).unwrap().name = "top".to_owned();
     assert_eq!(
         graph.find_by_name("top", NodeSearch::Recursive).unwrap().id,
         top_id
@@ -1258,12 +1224,9 @@ fn node_search_scope_gates_graph_interiors() {
 
     // The mutable lookup resolves identically and its edit lands on the
     // nested node.
-    graph
-        .find_mut(&deep_id, NodeSearch::Recursive)
-        .unwrap()
-        .name = "renamed".to_owned();
+    graph.find_mut(deep_id, NodeSearch::Recursive).unwrap().name = "renamed".to_owned();
     assert_eq!(
-        graph.find(&deep_id, NodeSearch::Recursive).unwrap().name,
+        graph.find(deep_id, NodeSearch::Recursive).unwrap().name,
         "renamed"
     );
     assert!(graph.find_by_name("deep", NodeSearch::Recursive).is_none());
@@ -1274,7 +1237,7 @@ fn node_search_scope_gates_graph_interiors() {
             .id,
         deep_id
     );
-    assert!(graph.find_mut(&deep_id, NodeSearch::TopLevel).is_none());
+    assert!(graph.find_mut(deep_id, NodeSearch::TopLevel).is_none());
 }
 
 #[test]
@@ -1293,15 +1256,15 @@ fn port_arity_queries_answer_only_what_a_bare_body_knows() {
     let input = def.body.add(Node::new(NodeKind::GraphInput));
     let output = def.body.add(Node::new(NodeKind::GraphOutput));
     let body = &def.body;
-    let node = |id: &NodeId| body.find(id, NodeSearch::TopLevel).unwrap();
+    let node = |id: NodeId| body.find(id, NodeSearch::TopLevel).unwrap();
 
     // The inbound boundary's *outputs* mirror the interface's inputs, which
     // the body alone doesn't carry — the one genuinely unknowable arity.
-    assert_eq!(body.output_count(node(&input), &library), None);
+    assert_eq!(body.output_count(node(input), &library), None);
     // Everything else is structural, so the body answers it exactly.
-    assert_eq!(body.event_count(node(&input), &library), Some(1));
-    assert_eq!(body.output_count(node(&output), &library), Some(0));
-    assert_eq!(body.event_count(node(&output), &library), Some(0));
+    assert_eq!(body.event_count(node(input), &library), Some(1));
+    assert_eq!(body.output_count(node(output), &library), Some(0));
+    assert_eq!(body.event_count(node(output), &library), Some(0));
 
     // A graph *instance* reads its target's interface, so both arities are
     // known even though the instance's own body isn't involved.
@@ -1309,7 +1272,7 @@ fn port_arity_queries_answer_only_what_a_bare_body_knows() {
     let def_id = GraphId::unique();
     let instance = root.add_graph_node(&def, GraphLink::Local(def_id));
     root.insert_graph(def_id, def);
-    let instance = root.find(&instance, NodeSearch::TopLevel).unwrap();
+    let instance = root.find(instance, NodeSearch::TopLevel).unwrap();
     assert_eq!(root.output_count(instance, &library), Some(1));
     assert_eq!(root.event_count(instance, &library), Some(0));
 

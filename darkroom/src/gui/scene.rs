@@ -306,14 +306,14 @@ impl Scene {
                     continue;
                 }
             };
-            let Some(node) = graph.find(&id, NodeSearch::TopLevel) else {
+            let Some(node) = graph.find(id, NodeSearch::TopLevel) else {
                 continue;
             };
             // A node's interface comes from its func, its referenced
             // definition, or — for a boundary node — the enclosing
             // definition's own interface, which only a `GraphDef` carries.
             let interface = match &node.kind {
-                NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
+                NodeKind::Func(func_id) => library.by_id(*func_id).map(|f| NodeInterface {
                     kind_label: ui.intern(&f.name),
                     description: ui.intern(f.description.as_deref().unwrap_or_default()),
                     inputs: Cow::Borrowed(&f.inputs),
@@ -635,7 +635,7 @@ fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticVa
         // here so an enum port gets the same const affordance as a scalar.
         match &input.data_type {
             DataType::Enum(id) => library
-                .enum_variants(id)
+                .enum_variants(*id)
                 .and_then(|variants| variants.first())
                 .map(|first| StaticValue::Enum(first.clone())),
             // An untyped (`Any`) port has no concrete kind to seed; start it as
@@ -969,7 +969,7 @@ mod tests {
         // independently — events in their own pool, outputs unchanged.
         let library = worker_events_library();
         let mut graph = Graph::default();
-        let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
         let node_id = graph.add(node);
 
         let view = GraphView::for_graph(&graph);
@@ -1013,7 +1013,7 @@ mod tests {
         // both or neither.
         let library = worker_events_library();
         let mut graph = Graph::default();
-        let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
         let node_id = graph.add(node);
         let port = OutputPort::new(node_id, 1);
         graph.set_output_pinned(port, true);
@@ -1077,9 +1077,9 @@ mod tests {
         // event (event_idx 1). The projection must mirror that one edge.
         let library = worker_events_library();
         let mut graph = Graph::default();
-        let emitter: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let emitter: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
         let emitter_id = graph.add(emitter);
-        let subscriber: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let subscriber: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
         let subscriber_id = graph.add(subscriber);
         graph.subscribe(emitter_id, 1, subscriber_id);
 

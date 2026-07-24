@@ -91,7 +91,7 @@ where
             DynamicValue::Custom(value) => {
                 let type_id = value.type_id();
                 let codec = library
-                    .codec(&type_id)
+                    .codec(type_id)
                     .expect("custom output codec was checked while writing descriptors");
                 codec
                     .encode(value.as_ref(), writer, ctx)
@@ -174,7 +174,7 @@ where
             }
             OutputKind::Custom { type_id, .. } => {
                 let codec = library
-                    .codec(&type_id)
+                    .codec(type_id)
                     .expect("custom codec was validated while reading the header");
                 let mut payload = (&mut *reader).take(descriptor.payload_len);
                 let value = codec
@@ -238,7 +238,7 @@ where
             .ok_or_else(|| invalid_data("cache payload lengths overflow u64"))?;
         if let OutputKind::Custom { type_id, version } = descriptor.kind
             && !library
-                .codec(&type_id)
+                .codec(type_id)
                 .is_some_and(|codec| codec.version() == version)
         {
             return Ok(None);
@@ -302,7 +302,7 @@ fn descriptor_for(value: &DynamicValue, library: &Library) -> codec::Result<Outp
         DynamicValue::Custom(value) => {
             let type_id = value.type_id();
             let codec = library
-                .codec(&type_id)
+                .codec(type_id)
                 .ok_or(codec::Error::UnknownType(type_id))?;
             OutputKind::Custom {
                 type_id,

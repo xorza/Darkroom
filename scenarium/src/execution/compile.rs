@@ -231,7 +231,7 @@ mod tests {
         let mut graph = Graph::default();
         let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
         graph
-            .find_mut(&instance_id, NodeSearch::TopLevel)
+            .find_mut(instance_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
         graph.insert_graph(nested_id, nested);

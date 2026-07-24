@@ -133,7 +133,7 @@ impl ExecutionProgram {
             let e_node = &e_nodes[&port.e_node_id];
             let func = match e_node.special {
                 Some(special) => special.func(),
-                None => library.by_id(&e_node.func_id).expect(
+                None => library.by_id(e_node.func_id).expect(
                     "a compiled node's func is registered in the library \
                      (validated at validate_for_execution)",
                 ),

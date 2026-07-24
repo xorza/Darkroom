@@ -123,7 +123,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             bindings,
         } => {
             assert!(
-                scope.graph.find(node_id, NodeSearch::TopLevel).is_none(),
+                scope.graph.find(*node_id, NodeSearch::TopLevel).is_none(),
                 "apply AddNode expects node to be absent"
             );
             if let Some((graph_id, nested_graph)) = graph {
@@ -179,7 +179,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::RenameNode { node_id, to, .. } => {
             scope
                 .graph
-                .find_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(*node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .name = to.clone();
         }
@@ -204,7 +204,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.insert_graph(*to_id, graph.clone_verbatim());
             scope
                 .graph
-                .find_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(*node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .kind = NodeKind::Graph(GraphLink::Local(*to_id));
         }
@@ -246,7 +246,10 @@ fn set_subscription(
 /// Write one [`NodeProperty`] into its node field. Shared by `apply_graph`
 /// (writes `to`) and `revert_graph` (writes `from`).
 fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProperty) {
-    let node = scope.graph.find_mut(node_id, NodeSearch::TopLevel).unwrap();
+    let node = scope
+        .graph
+        .find_mut(*node_id, NodeSearch::TopLevel)
+        .unwrap();
     match prop {
         NodeProperty::Disabled(v) => node.disabled = v,
         NodeProperty::RuntimeCache(v) => node.cache = v,
@@ -401,7 +404,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::RenameNode { node_id, from, .. } => {
             scope
                 .graph
-                .find_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(*node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .name = from.clone();
         }
@@ -427,7 +430,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             scope
                 .graph
-                .find_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(*node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .kind = NodeKind::Graph(GraphLink::Local(*from_id));
             scope.graph.graphs.remove(to_id);

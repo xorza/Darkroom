@@ -147,7 +147,7 @@ pub(crate) fn show(
             // id-only `DataType` — without it (an unregistered type) we can't
             // populate the menu, so fall back to a read-only label. A drifted
             // non-`Enum` literal seeds the first variant; any pick repairs it.
-            let Some(variants) = library.enum_variants(type_id) else {
+            let Some(variants) = library.enum_variants(*type_id) else {
                 return read_only_label(ui, editor, id, value, width);
             };
             let current = value.as_enum().unwrap_or_default();

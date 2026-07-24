@@ -192,7 +192,7 @@ impl<'a> Run<'a> {
             let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
                 NodeKind::Func(func_id) => (
                     self.library
-                        .by_id(func_id)
+                        .by_id(*func_id)
                         .expect("func resolved by update's validate_for_execution validation"),
                     None,
                 ),
@@ -312,7 +312,7 @@ impl<'a> Run<'a> {
     /// it ultimately fires, following composite exposed-event mappings inward.
     fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<ExecutionEventPort> {
         let graph = self.current();
-        let node = graph.find(&node_id, NodeSearch::TopLevel)?;
+        let node = graph.find(node_id, NodeSearch::TopLevel)?;
         if node.disabled {
             return None; // a disabled node fires no events
         }
@@ -349,7 +349,7 @@ impl<'a> Run<'a> {
     /// trigger.
     fn resolve_subscriber(&mut self, node_id: NodeId, event: ExecutionEventPort) {
         let graph = self.current();
-        let Some(node) = graph.find(&node_id, NodeSearch::TopLevel) else {
+        let Some(node) = graph.find(node_id, NodeSearch::TopLevel) else {
             return;
         };
         // A disabled node runs nothing, so it receives no events.
@@ -391,7 +391,7 @@ impl<'a> Run<'a> {
         let OutputPort { node_id, port_idx } = port;
         let graph = self.current();
         let node = graph
-            .find(&node_id, NodeSearch::TopLevel)
+            .find(node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
         match &node.kind {
             NodeKind::Func(_) | NodeKind::Special(_) => {

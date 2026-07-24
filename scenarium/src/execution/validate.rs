@@ -99,7 +99,7 @@ impl CompiledGraph {
             // A special node's interface is its hardcoded spec, not a library func.
             let func = match e_node.special {
                 Some(special) => special.func(),
-                None => library.by_id(&e_node.func_id).ok_or(
+                None => library.by_id(e_node.func_id).ok_or(
                     CompiledGraphValidationError::MissingFunc {
                         e_node_id: *e_node_id,
                         func_id: e_node.func_id,

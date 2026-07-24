@@ -51,53 +51,49 @@ pub struct DetachedNode {
 }
 
 impl DetachedNode {
-    fn validate(&self) -> Result<(), &'static str> {
-        if self.node_id.is_nil() {
-            return Err("detached node id must not be nil");
-        }
-        if self
-            .bindings
-            .iter()
-            .any(|entry| !binding_touches(entry.port, &entry.binding, self.node_id))
-        {
-            return Err("detached bindings must touch the detached node");
-        }
-        if self
-            .bindings
-            .windows(2)
-            .any(|entries| entries[0].port >= entries[1].port)
-        {
-            return Err("detached bindings must have unique ordered ports");
-        }
-        if self
-            .subscriptions
-            .iter()
-            .any(|subscription| !subscription_touches(subscription, self.node_id))
-        {
-            return Err("detached subscriptions must touch the detached node");
-        }
-        if self
-            .subscriptions
-            .windows(2)
-            .any(|subscriptions| subscriptions[0] >= subscriptions[1])
-        {
-            return Err("detached subscriptions must be unique and ordered");
-        }
-        if self
-            .pinned_outputs
-            .iter()
-            .any(|port| port.node_id != self.node_id)
-        {
-            return Err("detached pins must belong to the detached node");
-        }
-        if self
-            .pinned_outputs
-            .windows(2)
-            .any(|ports| ports[0] >= ports[1])
-        {
-            return Err("detached pins must be unique and ordered");
-        }
-        Ok(())
+    /// Panic unless this record is well formed: a real node id, and wiring that
+    /// touches it, listed in the ascending order the graph's own side tables
+    /// keep. A malformed record is a caller logic error, never user input.
+    fn assert_valid(&self) {
+        assert!(!self.node_id.is_nil(), "detached node id must not be nil");
+        assert!(
+            self.bindings.iter().all(|entry| binding_touches(
+                entry.port,
+                &entry.binding,
+                self.node_id
+            )),
+            "detached bindings must touch the detached node"
+        );
+        assert!(
+            self.bindings
+                .windows(2)
+                .all(|entries| entries[0].port < entries[1].port),
+            "detached bindings must have unique ordered ports"
+        );
+        assert!(
+            self.subscriptions
+                .iter()
+                .all(|subscription| subscription_touches(subscription, self.node_id)),
+            "detached subscriptions must touch the detached node"
+        );
+        assert!(
+            self.subscriptions
+                .windows(2)
+                .all(|subscriptions| subscriptions[0] < subscriptions[1]),
+            "detached subscriptions must be unique and ordered"
+        );
+        assert!(
+            self.pinned_outputs
+                .iter()
+                .all(|port| port.node_id == self.node_id),
+            "detached pins must belong to the detached node"
+        );
+        assert!(
+            self.pinned_outputs
+                .windows(2)
+                .all(|ports| ports[0] < ports[1]),
+            "detached pins must be unique and ordered"
+        );
     }
 }
 
@@ -109,7 +105,7 @@ pub struct BindingEntry {
 
 impl Graph {
     pub fn snapshot_node(&self, node_id: NodeId) -> Option<DetachedNode> {
-        let node = self.find(&node_id, NodeSearch::TopLevel)?.clone();
+        let node = self.find(node_id, NodeSearch::TopLevel)?.clone();
         Some(DetachedNode {
             node_id,
             node,
@@ -144,9 +140,7 @@ impl Graph {
     }
 
     pub fn attach_node(&mut self, detached: DetachedNode) {
-        detached
-            .validate()
-            .expect("cannot attach an invalid detached node");
+        detached.assert_valid();
         assert!(
             !self.nodes.contains_key(&detached.node_id),
             "cannot attach a node that is already in the graph"

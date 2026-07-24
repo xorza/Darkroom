@@ -961,7 +961,7 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
         EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
     frame_event.events[1].event_lambda =
         EventLambda::new(|_state| Box::pin(std::future::pending()));
-    library.remove(&frame_event.id).unwrap();
+    library.remove(frame_event.id).unwrap();
     library.add(frame_event);
     let mut graph = log_frame_no_graph(&library);
     let frame_event_node_id = graph
@@ -1044,7 +1044,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     }
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph
-        .find_mut(&sum_id, NodeSearch::TopLevel)
+        .find_mut(sum_id, NodeSearch::TopLevel)
         .unwrap()
         .disabled = true;
     let get_a_id = graph
@@ -1090,7 +1090,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     expected.sort();
     assert_eq!(executed, expected, "only the disabled sum's cone ran");
     assert!(
-        graph.find(&sum_id, NodeSearch::TopLevel).unwrap().disabled,
+        graph.find(sum_id, NodeSearch::TopLevel).unwrap().disabled,
         "execution does not mutate the authoring graph"
     );
 }
@@ -1108,7 +1108,7 @@ async fn disabled_sink_stays_out_of_sink_runs() {
         .unwrap()
         .id;
     graph
-        .find_mut(&print_id, NodeSearch::TopLevel)
+        .find_mut(print_id, NodeSearch::TopLevel)
         .unwrap()
         .disabled = true;
 
@@ -2073,7 +2073,7 @@ async fn exit_waits_for_active_event_cleanup_and_idle_report() {
             })
         }
     });
-    library.remove(&frame_event.id).unwrap();
+    library.remove(frame_event.id).unwrap();
     library.add(frame_event);
 
     let graph = log_frame_no_graph(&library);
@@ -2239,10 +2239,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         .find_by_name("Print", NodeSearch::TopLevel)
         .unwrap()
         .id;
-    graph
-        .find_mut(&mult_id, NodeSearch::TopLevel)
-        .unwrap()
-        .cache = CacheMode::Disk;
+    graph.find_mut(mult_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
@@ -2342,10 +2339,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
         .find_by_name("Print", NodeSearch::TopLevel)
         .unwrap()
         .id;
-    graph
-        .find_mut(&mult_id, NodeSearch::TopLevel)
-        .unwrap()
-        .cache = CacheMode::Both;
+    graph.find_mut(mult_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Both;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 

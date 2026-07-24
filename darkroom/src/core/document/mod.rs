@@ -288,7 +288,7 @@ fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
         TabRef::Graph(GraphRef::Local(id)) => graph.find_graph(id).is_some(),
-        TabRef::ImageViewer(port) => graph.find(&port.node_id, NodeSearch::Recursive).is_some(),
+        TabRef::ImageViewer(port) => graph.find(port.node_id, NodeSearch::Recursive).is_some(),
     }
 }
 
@@ -611,7 +611,7 @@ mod tests {
             "copy records its library origin"
         );
         assert!(
-            doc.graph.find(&node_id, NodeSearch::TopLevel).is_some(),
+            doc.graph.find(node_id, NodeSearch::TopLevel).is_some(),
             "instance node added"
         );
 
@@ -621,7 +621,7 @@ mod tests {
             "undo removes the def"
         );
         assert!(
-            doc.graph.find(&node_id, NodeSearch::TopLevel).is_none(),
+            doc.graph.find(node_id, NodeSearch::TopLevel).is_none(),
             "undo removes the instance node"
         );
     }
@@ -677,7 +677,7 @@ mod tests {
             "the second fresh copy was dropped"
         );
         assert_eq!(
-            doc.graph.find(&node_b, NodeSearch::TopLevel).unwrap().kind,
+            doc.graph.find(node_b, NodeSearch::TopLevel).unwrap().kind,
             NodeKind::Graph(GraphLink::Local(def_a_id)),
             "second instance points at the first instance's local graph"
         );
@@ -712,7 +712,7 @@ mod tests {
 
         assert_eq!(doc.graph.graphs.len(), 2, "fork adds a second local graph");
         let NodeKind::Graph(GraphLink::Local(new_id)) =
-            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
+            doc.graph.find(node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local graph");
         };
@@ -726,7 +726,7 @@ mod tests {
         revert_step(&step, &mut doc, GraphRef::Main);
         assert_eq!(doc.graph.graphs.len(), 1, "undo drops the fork");
         let NodeKind::Graph(GraphLink::Local(restored)) =
-            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
+            doc.graph.find(node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local graph");
         };
@@ -764,7 +764,7 @@ mod tests {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         assert!(
-            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
+            !doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
             "starts enabled"
         );
 
@@ -779,13 +779,13 @@ mod tests {
         .expect("builds");
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
+            doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
             "apply disables"
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
+            !doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
             "revert re-enables (restores the captured `from`)"
         );
     }
@@ -927,7 +927,7 @@ mod tests {
                 .get(&inner)
                 .unwrap()
                 .body
-                .find(&node_id, NodeSearch::TopLevel)
+                .find(node_id, NodeSearch::TopLevel)
                 .is_some(),
             "node added inside the depth-2 def"
         );
