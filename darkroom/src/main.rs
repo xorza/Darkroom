@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aperture::{Image, WindowConfig, WinitHost};
+use aperture::{Image, WindowConfig, WinitHost, WinitHostError};
 use clap::{Parser, Subcommand};
 use common::is_debug;
 use tokio::runtime::Builder;
@@ -127,7 +127,12 @@ fn main() {
     let cli = Cli::parse();
     let script_cfg = cli.script.to_config();
     match cli.mode.unwrap_or(Mode::Gui) {
-        Mode::Gui => run_gui(script_cfg),
+        Mode::Gui => {
+            if let Err(error) = run_gui(script_cfg) {
+                tracing::error!("darkroom: {error}");
+                std::process::exit(1);
+            }
+        }
         Mode::Tui => run_terminal(Frontend::Tui, script_cfg),
         Mode::Headless => run_terminal(Frontend::Headless, script_cfg),
     }
@@ -135,7 +140,7 @@ fn main() {
 
 /// Launch the Aperture desktop editor. The winit event loop owns the main
 /// thread, so this doesn't return until the window closes.
-fn run_gui(script_cfg: ScriptConfig) {
+fn run_gui(script_cfg: ScriptConfig) -> Result<(), WinitHostError> {
     // Load preferences here, before the window exists, so a saved size /
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
@@ -157,8 +162,8 @@ fn run_gui(script_cfg: ScriptConfig) {
             ui.debug_overlay_mut().damage_rect = is_debug();
 
             App::new(ui, handle, script_cfg, preferences)
-        })
-        .run();
+        })?
+        .run()
 }
 
 /// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
