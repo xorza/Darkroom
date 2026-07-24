@@ -339,6 +339,39 @@ fn attach_rejects_a_pin_off_its_slot() {
 }
 
 #[test]
+fn a_rejected_attach_leaves_the_graph_untouched() {
+    // Every record check runs before the first mutation, so a malformed
+    // record can't half-apply and strand the interface mid-shift.
+    let fixture = input_fixture();
+    let mut graph = fixture.graph;
+    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
+    let after_detach = graph.clone_verbatim();
+    detached.pins.push(OutputPort::new(fixture.boundary, 5));
+
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        graph.attach_graph_input(fixture.graph_id, detached);
+    }));
+    assert!(refused.is_err(), "a malformed record must be refused");
+    assert_eq!(graph, after_detach, "refused before touching the graph");
+}
+
+#[test]
+#[should_panic(expected = "created after detachment")]
+fn attach_refuses_to_overwrite_a_binding_authored_after_detachment() {
+    // The severed interior edge's port was re-bound in the meantime; the
+    // shift can't vacate it (it renumbers boundary-fed *values*, not this
+    // consumer-keyed port), so restoring would destroy an authored wire.
+    let fixture = input_fixture();
+    let mut graph = fixture.graph;
+    let detached = graph.detach_graph_input(fixture.graph_id, 1);
+    let child = graph.graphs.get_mut(&fixture.graph_id).unwrap();
+    child
+        .body
+        .set_input_binding(InputPort::new(fixture.consumer, 1), const_int(99));
+    graph.attach_graph_input(fixture.graph_id, detached);
+}
+
+#[test]
 #[should_panic(expected = "does not read the detached output slot")]
 fn attach_rejects_a_consumer_binding_off_its_slot() {
     let fixture = output_fixture();

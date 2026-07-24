@@ -3,6 +3,13 @@
 //! reversible. The receiver is the *owning* graph — the one holding the
 //! local child in `graphs` and its instance nodes — because removing a port
 //! rewires both the child interior and the owner's instance bindings.
+//!
+//! Both sides run on the same two primitives, because an interface port is one
+//! port slot seen from two directions. An interface *input* is an output slot
+//! on the child's inbound boundary node and an input slot on every instance;
+//! an interface *output* is the exact swap. So `detach_graph_input` and
+//! `detach_graph_output` are the same pair of slot removals, applied to
+//! opposite sides.
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +50,78 @@ pub struct DetachedGraphOutput {
     pub parent: Vec<BindingEntry>,
 }
 
+impl DetachedGraphInput {
+    /// Panic unless every recorded edge sits on this record's slot: instance
+    /// bindings on instance input `idx`, interior edges fed by (and pins on)
+    /// the boundary output `idx`. A `None` boundary — no inbound boundary node
+    /// in the child body — admits only a record with no interior wiring. Runs
+    /// before `attach` mutates anything, so a malformed record can't
+    /// half-apply.
+    fn assert_targets_slot(&self, instances: &[NodeId], boundary: Option<NodeId>) {
+        for entry in &self.parent {
+            assert!(
+                entry.port.port_idx == self.idx && instances.contains(&entry.port.node_id),
+                "detached instance binding does not sit on the detached input slot"
+            );
+        }
+        let Some(boundary) = boundary else {
+            assert!(
+                self.interior.is_empty() && self.pins.is_empty(),
+                "detached interior wiring without a boundary node"
+            );
+            return;
+        };
+        let slot = OutputPort::new(boundary, self.idx);
+        for entry in &self.interior {
+            assert!(
+                matches!(&entry.binding, Binding::Bind(src) if *src == slot),
+                "detached interior edge is not fed by the detached input slot"
+            );
+        }
+        for pin in &self.pins {
+            assert!(
+                *pin == slot,
+                "detached pin does not sit on the detached input slot"
+            );
+        }
+    }
+}
+
+impl DetachedGraphOutput {
+    /// The output-side mirror of
+    /// [`DetachedGraphInput::assert_targets_slot`]: consumers must *read*
+    /// instance output `idx` and pins must sit on it, while the lone interior
+    /// binding sits *on* the boundary input `idx`.
+    fn assert_targets_slot(&self, instances: &[NodeId], boundary: Option<NodeId>) {
+        for entry in &self.parent {
+            assert!(
+                matches!(&entry.binding, Binding::Bind(src)
+                    if src.port_idx == self.idx && instances.contains(&src.node_id)),
+                "detached consumer binding does not read the detached output slot"
+            );
+        }
+        for pin in &self.pins {
+            assert!(
+                pin.port_idx == self.idx && instances.contains(&pin.node_id),
+                "detached pin does not sit on the detached output slot"
+            );
+        }
+        let Some(boundary) = boundary else {
+            assert!(
+                self.interior.is_empty(),
+                "detached interior wiring without a boundary node"
+            );
+            return;
+        };
+        for entry in &self.interior {
+            assert!(
+                entry.port == InputPort::new(boundary, self.idx),
+                "detached interior binding does not sit on the detached output slot"
+            );
+        }
+    }
+}
+
 impl Graph {
     /// What [`Self::detach_graph_input`] of `(graph_id, idx)` would remove —
     /// pure, for undo capture. `None` when the child graph, its definition,
@@ -54,29 +133,20 @@ impl Graph {
     ) -> Option<DetachedGraphInput> {
         let child = self.graphs.get(&graph_id)?;
         let spec = child.definition.inputs.get(idx)?.clone();
-        let mut interior = Vec::new();
-        let mut pins = Vec::new();
-        if let Some(boundary) = child.body.boundary_node(NodeKind::GraphInput) {
-            let port = OutputPort::new(boundary, idx);
-            interior = child.body.bindings_bound_to(port);
-            if child.body.is_output_pinned(port) {
-                pins.push(port);
-            }
-        }
+        let interior = match child.body.boundary_node(NodeKind::GraphInput) {
+            Some(boundary) => child.body.output_slot_wiring(boundary, idx),
+            None => OutputSlotWiring::default(),
+        };
         let parent = self
             .local_instances(graph_id)
             .into_iter()
-            .filter_map(|instance| {
-                let port = InputPort::new(instance, idx);
-                let binding = self.bindings.get(&port)?.clone();
-                Some(BindingEntry { port, binding })
-            })
+            .filter_map(|instance| self.input_slot_binding(instance, idx))
             .collect();
         Some(DetachedGraphInput {
             idx,
             spec,
-            interior,
-            pins,
+            interior: interior.consumers,
+            pins: interior.pins,
             parent,
         })
     }
@@ -94,15 +164,10 @@ impl Graph {
         let child = self.graphs.get_mut(&graph_id).unwrap();
         child.definition.inputs.remove(idx);
         if let Some(boundary) = child.body.boundary_node(NodeKind::GraphInput) {
-            child.body.bindings.retain(|_, binding| {
-                !matches!(binding, Binding::Bind(src) if *src == OutputPort::new(boundary, idx))
-            });
-            child.body.shift_bound_values(boundary, idx);
-            child.body.shift_pins(boundary, idx);
+            child.body.remove_output_slot(boundary, idx);
         }
         for instance in instances {
-            self.bindings.remove(&InputPort::new(instance, idx));
-            self.shift_binding_keys(instance, idx);
+            self.remove_input_slot(instance, idx);
         }
         detached
     }
@@ -112,6 +177,18 @@ impl Graph {
     /// Panics on a malformed record — one whose wiring doesn't reference the
     /// detached slot, or that overlaps wiring created after detachment.
     pub fn attach_graph_input(&mut self, graph_id: GraphId, detached: DetachedGraphInput) {
+        let instances = self.local_instances(graph_id);
+        let child = self
+            .graphs
+            .get(&graph_id)
+            .expect("cannot attach a graph input to a missing graph");
+        let boundary = child.body.boundary_node(NodeKind::GraphInput);
+        assert!(
+            detached.idx <= child.definition.inputs.len(),
+            "attach index out of range"
+        );
+        detached.assert_targets_slot(&instances, boundary);
+
         let DetachedGraphInput {
             idx,
             spec,
@@ -119,66 +196,17 @@ impl Graph {
             pins,
             parent,
         } = detached;
-        let instances = self.local_instances(graph_id);
-        for entry in &parent {
-            assert!(
-                entry.port.port_idx == idx && instances.contains(&entry.port.node_id),
-                "detached instance binding does not sit on the detached input slot"
-            );
-        }
         for instance in &instances {
-            self.unshift_binding_keys(*instance, idx);
+            self.insert_input_slot(*instance, idx);
         }
-        for entry in parent {
-            let previous = self.bindings.insert(entry.port, entry.binding);
-            assert!(
-                previous.is_none(),
-                "cannot attach over instance bindings created after detachment"
-            );
+        self.restore_bindings(parent);
+        let child = self.graphs.get_mut(&graph_id).unwrap();
+        child.definition.inputs.insert(idx, spec);
+        if let Some(boundary) = boundary {
+            child.body.insert_output_slot(boundary, idx);
         }
-        let child = self
-            .graphs
-            .get_mut(&graph_id)
-            .expect("cannot attach a graph input to a missing graph");
-        let definition = &mut child.definition;
-        assert!(idx <= definition.inputs.len(), "attach index out of range");
-        definition.inputs.insert(idx, spec);
-        match child.body.boundary_node(NodeKind::GraphInput) {
-            Some(boundary) => {
-                let slot = OutputPort::new(boundary, idx);
-                for entry in &interior {
-                    assert!(
-                        matches!(&entry.binding, Binding::Bind(src) if *src == slot),
-                        "detached interior edge is not fed by the detached input slot"
-                    );
-                }
-                for pin in &pins {
-                    assert!(
-                        *pin == slot,
-                        "detached pin does not sit on the detached input slot"
-                    );
-                }
-                child.body.unshift_bound_values(boundary, idx);
-                child.body.unshift_pins(boundary, idx);
-            }
-            None => assert!(
-                interior.is_empty() && pins.is_empty(),
-                "detached interior wiring without a boundary node"
-            ),
-        }
-        for entry in interior {
-            let previous = child.body.bindings.insert(entry.port, entry.binding);
-            assert!(
-                previous.is_none(),
-                "cannot attach over interior bindings created after detachment"
-            );
-        }
-        for pin in pins {
-            assert!(
-                child.body.pinned_outputs.insert(pin),
-                "cannot attach over pins created after detachment"
-            );
-        }
+        child.body.restore_bindings(interior);
+        child.body.restore_pins(pins);
     }
 
     /// What [`Self::detach_graph_output`] of `(graph_id, idx)` would remove —
@@ -191,36 +219,25 @@ impl Graph {
         let child = self.graphs.get(&graph_id)?;
         let spec = child.definition.outputs.get(idx)?.clone();
         let interior = match child.body.boundary_node(NodeKind::GraphOutput) {
-            Some(boundary) => {
-                let port = InputPort::new(boundary, idx);
-                child
-                    .body
-                    .bindings
-                    .get(&port)
-                    .map(|binding| BindingEntry {
-                        port,
-                        binding: binding.clone(),
-                    })
-                    .into_iter()
-                    .collect()
-            }
+            Some(boundary) => child
+                .body
+                .input_slot_binding(boundary, idx)
+                .into_iter()
+                .collect(),
             None => Vec::new(),
         };
-        let mut pins = Vec::new();
-        let mut parent = Vec::new();
+        let mut exterior = OutputSlotWiring::default();
         for instance in self.local_instances(graph_id) {
-            let port = OutputPort::new(instance, idx);
-            parent.extend(self.bindings_bound_to(port));
-            if self.is_output_pinned(port) {
-                pins.push(port);
-            }
+            let instance_slot = self.output_slot_wiring(instance, idx);
+            exterior.consumers.extend(instance_slot.consumers);
+            exterior.pins.extend(instance_slot.pins);
         }
         Some(DetachedGraphOutput {
             idx,
             spec,
             interior,
-            pins,
-            parent,
+            pins: exterior.pins,
+            parent: exterior.consumers,
         })
     }
 
@@ -234,15 +251,10 @@ impl Graph {
         let child = self.graphs.get_mut(&graph_id).unwrap();
         child.definition.outputs.remove(idx);
         if let Some(boundary) = child.body.boundary_node(NodeKind::GraphOutput) {
-            child.body.bindings.remove(&InputPort::new(boundary, idx));
-            child.body.shift_binding_keys(boundary, idx);
+            child.body.remove_input_slot(boundary, idx);
         }
         for instance in instances {
-            self.bindings.retain(|_, binding| {
-                !matches!(binding, Binding::Bind(src) if *src == OutputPort::new(instance, idx))
-            });
-            self.shift_bound_values(instance, idx);
-            self.shift_pins(instance, idx);
+            self.remove_output_slot(instance, idx);
         }
         detached
     }
@@ -251,6 +263,18 @@ impl Graph {
     /// record — one whose wiring doesn't reference the detached slot, or
     /// that overlaps wiring created after detachment.
     pub fn attach_graph_output(&mut self, graph_id: GraphId, detached: DetachedGraphOutput) {
+        let instances = self.local_instances(graph_id);
+        let child = self
+            .graphs
+            .get(&graph_id)
+            .expect("cannot attach a graph output to a missing graph");
+        let boundary = child.body.boundary_node(NodeKind::GraphOutput);
+        assert!(
+            detached.idx <= child.definition.outputs.len(),
+            "attach index out of range"
+        );
+        detached.assert_targets_slot(&instances, boundary);
+
         let DetachedGraphOutput {
             idx,
             spec,
@@ -258,66 +282,17 @@ impl Graph {
             pins,
             parent,
         } = detached;
-        let instances = self.local_instances(graph_id);
-        for entry in &parent {
-            assert!(
-                matches!(&entry.binding, Binding::Bind(src)
-                    if src.port_idx == idx && instances.contains(&src.node_id)),
-                "detached consumer binding does not read the detached output slot"
-            );
-        }
-        for pin in &pins {
-            assert!(
-                pin.port_idx == idx && instances.contains(&pin.node_id),
-                "detached pin does not sit on the detached output slot"
-            );
-        }
         for instance in &instances {
-            self.unshift_bound_values(*instance, idx);
-            self.unshift_pins(*instance, idx);
+            self.insert_output_slot(*instance, idx);
         }
-        for entry in parent {
-            let previous = self.bindings.insert(entry.port, entry.binding);
-            assert!(
-                previous.is_none(),
-                "cannot attach over instance-consumer bindings created after detachment"
-            );
+        self.restore_bindings(parent);
+        self.restore_pins(pins);
+        let child = self.graphs.get_mut(&graph_id).unwrap();
+        child.definition.outputs.insert(idx, spec);
+        if let Some(boundary) = boundary {
+            child.body.insert_input_slot(boundary, idx);
         }
-        for pin in pins {
-            assert!(
-                self.pinned_outputs.insert(pin),
-                "cannot attach over pins created after detachment"
-            );
-        }
-        let child = self
-            .graphs
-            .get_mut(&graph_id)
-            .expect("cannot attach a graph output to a missing graph");
-        let definition = &mut child.definition;
-        assert!(idx <= definition.outputs.len(), "attach index out of range");
-        definition.outputs.insert(idx, spec);
-        match child.body.boundary_node(NodeKind::GraphOutput) {
-            Some(boundary) => {
-                for entry in &interior {
-                    assert!(
-                        entry.port == InputPort::new(boundary, idx),
-                        "detached interior binding does not sit on the detached output slot"
-                    );
-                }
-                child.body.unshift_binding_keys(boundary, idx);
-            }
-            None => assert!(
-                interior.is_empty(),
-                "detached interior wiring without a boundary node"
-            ),
-        }
-        for entry in interior {
-            let previous = child.body.bindings.insert(entry.port, entry.binding);
-            assert!(
-                previous.is_none(),
-                "cannot attach over interior bindings created after detachment"
-            );
-        }
+        child.body.restore_bindings(interior);
     }
 
     /// Ids of this graph's `Graph(Local(graph_id))` instance nodes.
@@ -337,99 +312,176 @@ impl Graph {
             .map(|node| node.id)
     }
 
-    /// Every binding whose value is `Bind(source)`, as recorded entries.
-    fn bindings_bound_to(&self, source: OutputPort) -> Vec<BindingEntry> {
+    /// What [`Self::remove_output_slot`] would sever.
+    fn output_slot_wiring(&self, node: NodeId, idx: usize) -> OutputSlotWiring {
+        let slot = OutputPort::new(node, idx);
+        OutputSlotWiring {
+            consumers: self
+                .bindings
+                .iter()
+                .filter(|(_, binding)| matches!(binding, Binding::Bind(src) if *src == slot))
+                .map(|(port, binding)| BindingEntry {
+                    port: *port,
+                    binding: binding.clone(),
+                })
+                .collect(),
+            pins: self
+                .is_output_pinned(slot)
+                .then_some(slot)
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// What [`Self::remove_input_slot`] would drop.
+    fn input_slot_binding(&self, node: NodeId, idx: usize) -> Option<BindingEntry> {
+        let port = InputPort::new(node, idx);
+        self.bindings.get(&port).map(|binding| BindingEntry {
+            port,
+            binding: binding.clone(),
+        })
+    }
+
+    /// Sever output port `(node, idx)` — its consumers and its pin — and
+    /// compact the ports above it down onto the freed slot.
+    fn remove_output_slot(&mut self, node: NodeId, idx: usize) {
+        let slot = OutputPort::new(node, idx);
         self.bindings
-            .iter()
-            .filter(|(_, binding)| matches!(binding, Binding::Bind(src) if *src == source))
-            .map(|(port, binding)| BindingEntry {
-                port: *port,
-                binding: binding.clone(),
-            })
-            .collect()
+            .retain(|_, binding| !matches!(binding, Binding::Bind(src) if *src == slot));
+        self.pinned_outputs.remove(&slot);
+        self.shift_bound_values(node, idx, Shift::Down);
+        self.shift_pins(node, idx, Shift::Down);
     }
 
-    /// Rewrite binding *values* `Bind(node, j > idx)` to `j - 1`.
-    fn shift_bound_values(&mut self, node: NodeId, idx: usize) {
+    /// Open a free output slot at `(node, idx)`; the caller restores the
+    /// wiring it carried.
+    fn insert_output_slot(&mut self, node: NodeId, idx: usize) {
+        self.shift_bound_values(node, idx, Shift::Up);
+        self.shift_pins(node, idx, Shift::Up);
+    }
+
+    /// Drop the binding on input port `(node, idx)` and compact the ports
+    /// above it down onto the freed slot.
+    fn remove_input_slot(&mut self, node: NodeId, idx: usize) {
+        self.bindings.remove(&InputPort::new(node, idx));
+        self.shift_binding_keys(node, idx, Shift::Down);
+    }
+
+    /// Open a free input slot at `(node, idx)`.
+    fn insert_input_slot(&mut self, node: NodeId, idx: usize) {
+        self.shift_binding_keys(node, idx, Shift::Up);
+    }
+
+    /// Put severed bindings back, refusing to overwrite wiring authored after
+    /// the detachment.
+    fn restore_bindings(&mut self, entries: impl IntoIterator<Item = BindingEntry>) {
+        for entry in entries {
+            let port = entry.port;
+            let previous = self.bindings.insert(port, entry.binding);
+            assert!(
+                previous.is_none(),
+                "cannot attach over the binding on {port:?}, created after detachment"
+            );
+        }
+    }
+
+    /// [`Self::restore_bindings`] for pins.
+    fn restore_pins(&mut self, pins: impl IntoIterator<Item = OutputPort>) {
+        for pin in pins {
+            assert!(
+                self.pinned_outputs.insert(pin),
+                "cannot attach over the pin on {pin:?}, created after detachment"
+            );
+        }
+    }
+
+    /// Renumber binding *values* `Bind(node, j)` around slot `idx`.
+    fn shift_bound_values(&mut self, node: NodeId, idx: usize, shift: Shift) {
+        let first_moved = shift.first_moved(idx);
         for binding in self.bindings.values_mut() {
             if let Binding::Bind(src) = binding
                 && src.node_id == node
-                && src.port_idx > idx
+                && src.port_idx >= first_moved
             {
-                src.port_idx -= 1;
+                src.port_idx = shift.apply(src.port_idx);
             }
         }
     }
 
-    /// Rewrite binding *values* `Bind(node, j >= idx)` to `j + 1`.
-    fn unshift_bound_values(&mut self, node: NodeId, idx: usize) {
-        for binding in self.bindings.values_mut() {
-            if let Binding::Bind(src) = binding
-                && src.node_id == node
-                && src.port_idx >= idx
-            {
-                src.port_idx += 1;
-            }
-        }
-    }
-
-    /// Rekey bindings *on* `(node, j > idx)` to `j - 1`, ascending so each
-    /// insert lands in the slot the previous removal just vacated.
-    fn shift_binding_keys(&mut self, node: NodeId, idx: usize) {
-        let keys: Vec<InputPort> = self
+    /// Rekey bindings *on* `(node, j)` around slot `idx`.
+    fn shift_binding_keys(&mut self, node: NodeId, idx: usize, shift: Shift) {
+        let mut ports: Vec<InputPort> = self
             .bindings
-            .range(InputPort::new(node, idx + 1)..=InputPort::new(node, usize::MAX))
+            .range(InputPort::new(node, shift.first_moved(idx))..=InputPort::new(node, usize::MAX))
             .map(|(port, _)| *port)
             .collect();
-        for port in keys {
+        shift.order(&mut ports);
+        for port in ports {
             let binding = self.bindings.remove(&port).unwrap();
             self.bindings
-                .insert(InputPort::new(node, port.port_idx - 1), binding);
+                .insert(InputPort::new(node, shift.apply(port.port_idx)), binding);
         }
     }
 
-    /// Rekey bindings *on* `(node, j >= idx)` to `j + 1`, descending so the
-    /// target slot is always free.
-    fn unshift_binding_keys(&mut self, node: NodeId, idx: usize) {
-        let keys: Vec<InputPort> = self
-            .bindings
-            .range(InputPort::new(node, idx)..=InputPort::new(node, usize::MAX))
-            .map(|(port, _)| *port)
-            .collect();
-        for port in keys.into_iter().rev() {
-            let binding = self.bindings.remove(&port).unwrap();
-            self.bindings
-                .insert(InputPort::new(node, port.port_idx + 1), binding);
-        }
-    }
-
-    /// Drop the pin on `(node, idx)` and shift pins `(node, j > idx)` down.
-    fn shift_pins(&mut self, node: NodeId, idx: usize) {
-        self.pinned_outputs.remove(&OutputPort::new(node, idx));
-        let pins: Vec<OutputPort> = self
+    /// Renumber pins on `(node, j)` around slot `idx`.
+    fn shift_pins(&mut self, node: NodeId, idx: usize, shift: Shift) {
+        let mut pins: Vec<OutputPort> = self
             .pinned_outputs
-            .range(OutputPort::new(node, idx + 1)..=OutputPort::new(node, usize::MAX))
+            .range(
+                OutputPort::new(node, shift.first_moved(idx))..=OutputPort::new(node, usize::MAX),
+            )
             .copied()
             .collect();
+        shift.order(&mut pins);
         for pin in pins {
             self.pinned_outputs.remove(&pin);
             self.pinned_outputs
-                .insert(OutputPort::new(node, pin.port_idx - 1));
+                .insert(OutputPort::new(node, shift.apply(pin.port_idx)));
+        }
+    }
+}
+
+/// The wiring hanging off one output port. Pins are a zero-or-one list so the
+/// input and output sides accumulate them the same way.
+#[derive(Debug, Default)]
+struct OutputSlotWiring {
+    consumers: Vec<BindingEntry>,
+    pins: Vec<OutputPort>,
+}
+
+/// Which way a slot's removal or restoration renumbers the ports around it.
+/// The two are exact inverses, so one implementation serves both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shift {
+    /// A slot was removed: every port above it moves down one.
+    Down,
+    /// A slot is being restored: it and every port above it move up one.
+    Up,
+}
+
+impl Shift {
+    /// The lowest port index this shift moves, for a slot at `idx`.
+    fn first_moved(self, idx: usize) -> usize {
+        match self {
+            Shift::Down => idx + 1,
+            Shift::Up => idx,
         }
     }
 
-    /// Shift pins `(node, j >= idx)` up — the inverse of [`Self::shift_pins`]'s
-    /// shift half (the dropped pin itself is restored by the caller).
-    fn unshift_pins(&mut self, node: NodeId, idx: usize) {
-        let pins: Vec<OutputPort> = self
-            .pinned_outputs
-            .range(OutputPort::new(node, idx)..=OutputPort::new(node, usize::MAX))
-            .copied()
-            .collect();
-        for pin in pins.into_iter().rev() {
-            self.pinned_outputs.remove(&pin);
-            self.pinned_outputs
-                .insert(OutputPort::new(node, pin.port_idx + 1));
+    /// Where the port at `port_idx` lands.
+    fn apply(self, port_idx: usize) -> usize {
+        match self {
+            Shift::Down => port_idx - 1,
+            Shift::Up => port_idx + 1,
+        }
+    }
+
+    /// Reorder ports collected ascending so each destination is free when it's
+    /// written: compacting down writes low-to-high, opening up writes
+    /// high-to-low.
+    fn order<T>(self, ports: &mut [T]) {
+        if self == Shift::Up {
+            ports.reverse();
         }
     }
 }
