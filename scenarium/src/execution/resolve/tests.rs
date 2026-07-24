@@ -8,6 +8,7 @@ use crate::execution::program::index::OutputIdx;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::FuncLambda;
+use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue, async_lambda};
 
 #[derive(Debug)]
@@ -92,7 +93,13 @@ impl Fix {
         }
         let mut resolver = Resolver::default();
         resolver
-            .resolve(&self.program, &plan, &mut cache, &resource_stamps)
+            .resolve(
+                &self.program,
+                &plan,
+                &mut cache,
+                &resource_stamps,
+                &mut ContextStore::default(),
+            )
             .await;
         resolver.run
     }

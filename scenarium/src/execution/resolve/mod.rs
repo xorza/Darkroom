@@ -25,6 +25,7 @@ use crate::execution::program::index::{NodeMap, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::OutputDemand;
+use crate::runtime::context::ContextStore;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the states are mutually exclusive by
@@ -134,9 +135,10 @@ impl Resolver {
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
         resource_stamps: &RunResourceStamps,
+        ctx: &mut ContextStore,
     ) {
         stamp_digests(program, cache, resource_stamps, plan);
-        resolve_run(program, plan, cache, &mut self.run).await;
+        resolve_run(program, plan, cache, ctx, &mut self.run).await;
     }
 }
 
@@ -166,6 +168,7 @@ async fn resolve_run(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     cache: &mut RuntimeCache,
+    ctx: &mut ContextStore,
     run: &mut ResolvedRun,
 ) {
     run.reset_for_program(program);
@@ -189,7 +192,7 @@ async fn resolve_run(
         let outputs = program.e_nodes[&e_node_id].outputs;
         let demand = run.outputs.demand.slice(outputs);
         if !plan.event_sources.contains(&e_node_id)
-            && cache.check_reuse(program, e_node_id, demand).await
+            && cache.check_reuse(program, e_node_id, demand, ctx).await
         {
             *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Reuse;
             continue;

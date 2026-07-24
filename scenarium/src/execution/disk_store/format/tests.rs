@@ -15,7 +15,7 @@ use crate::execution::disk_store::format::{
     covers_outputs, header_len, read, write,
 };
 use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextManager;
+use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
 
 static BLOB_TYPE: LazyLock<TypeId> = LazyLock::new(TypeId::unique);
@@ -129,7 +129,7 @@ impl CustomValueCodec for BlobCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextManager,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<(), CodecError> {
         let blob = value
             .as_any()
@@ -143,6 +143,7 @@ impl CustomValueCodec for BlobCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
         self.decode_calls.fetch_add(1, Ordering::SeqCst);
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
@@ -175,8 +176,8 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
         &mut writer,
         digest,
         outputs,
-        library,
-        &mut ContextManager::default(),
+        &library.codecs(),
+        &mut ContextStore::default(),
     )
     .await
     .unwrap();
@@ -233,7 +234,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &library,
+            &library.codecs(),
         )
         .await
         .unwrap()
@@ -245,7 +246,8 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             &mut Cursor::new(&bytes),
             bytes.len() as u64,
             digest,
-            &library,
+            &library.codecs(),
+            &mut ContextStore::default(),
             outputs.len(),
             |index| index == 0,
         )
@@ -260,7 +262,8 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         &mut reader,
         bytes.len() as u64,
         digest,
-        &library,
+        &library.codecs(),
+        &mut ContextStore::default(),
         outputs.len(),
         |_| false,
     )
@@ -303,7 +306,8 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &complete_library,
+        &complete_library.codecs(),
+        &mut ContextStore::default(),
         outputs.len(),
         |_| false,
     )
@@ -322,7 +326,8 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &underread_library,
+        &underread_library.codecs(),
+        &mut ContextStore::default(),
         outputs.len(),
         |_| false,
     )
@@ -349,7 +354,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &registered,
+            &registered.codecs(),
         )
         .await
         .unwrap()
@@ -364,7 +369,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &partial,
-            &registered,
+            &registered.codecs(),
         )
         .await
         .unwrap()
@@ -379,7 +384,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &wrong_kind,
-            &registered,
+            &registered.codecs(),
         )
         .await
         .unwrap()
@@ -393,7 +398,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &changed,
+            &changed.codecs(),
         )
         .await
         .unwrap()
@@ -440,7 +445,7 @@ async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
                 bytes.len() as u64,
                 digest,
                 &outputs,
-                &library,
+                &library.codecs(),
             )
             .await
             .is_err()
@@ -453,7 +458,8 @@ async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
         &mut Cursor::new(&invalid_bool),
         invalid_bool.len() as u64,
         digest,
-        &library,
+        &library.codecs(),
+        &mut ContextStore::default(),
         outputs.len(),
         |_| false,
     )

@@ -51,7 +51,7 @@ pub use node::special::{SPECIAL_NODES, SpecialNode};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]
 pub use runtime::context::test_support::insert_context;
-pub use runtime::context::{ContextManager, ContextType};
+pub use runtime::context::{ContextManager, ContextStore, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
 pub use worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};

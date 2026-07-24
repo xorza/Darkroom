@@ -1832,7 +1832,7 @@ async fn cache_eviction_failure_uses_general_worker_error_report() {
     let blocked_path = dir.0.join(blocked_e_node_id.as_uuid().simple().to_string());
     std::fs::create_dir(&blocked_path).unwrap();
     let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-    let store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+    let store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
     let (report_tx, mut report_rx) = mpsc::unbounded_channel();
     let worker = Worker::new(move |report| {
         report_tx.send(report).unwrap();
@@ -2333,7 +2333,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         let (worker, mut rx) = completed_worker(4);
         // SetDiskStore shares the batch with Update, proving it's applied before
         // the install hydrates.
-        let cache = DiskStore::new(Arc::new(Library::default()), Some(root.to_path_buf()));
+        let cache = DiskStore::new(&Library::default(), Some(root.to_path_buf()));
         worker
             .send_many([
                 WorkerMessage::SetDiskStore(cache),
@@ -2445,7 +2445,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
 
     // Attaching the store must flush the resident Both value as a blob.
-    let store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+    let store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
     worker.send(WorkerMessage::SetDiskStore(store)).unwrap();
     let (sync_tx, sync_rx) = oneshot::channel();
     worker.send(WorkerMessage::Sync { reply: sync_tx }).unwrap();

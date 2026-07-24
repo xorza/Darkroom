@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
-use scenarium::ContextManager;
+use scenarium::ContextStore;
 use scenarium::CustomValue;
 use scenarium::CustomValueCodec;
 use scenarium::TypeEntry;
@@ -31,7 +31,7 @@ impl CustomValueCodec for ImageCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        ctx: &mut ContextManager,
+        ctx: &mut ContextStore,
     ) -> std::result::Result<(), BoxError> {
         let image = value
             .as_any()
@@ -59,6 +59,7 @@ impl CustomValueCodec for ImageCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<Arc<dyn CustomValue>, BoxError> {
         if byte_len < HEADER_LEN {
             return Err(format!("image cache payload is only {byte_len} bytes").into());

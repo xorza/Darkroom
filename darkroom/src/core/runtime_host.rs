@@ -117,7 +117,7 @@ impl RuntimeHost {
     /// library edit or a root change can't leave the other half stale.
     fn sync_worker_disk_store(&self) {
         self.worker.set_disk_store(DiskStore::new(
-            self.library.published.load(),
+            &self.library.published.load(),
             self.disk_root.clone(),
         ));
     }

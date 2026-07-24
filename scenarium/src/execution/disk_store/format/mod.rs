@@ -7,9 +7,9 @@ use tokio::io::{
 };
 
 use crate::execution::codec;
+use crate::execution::codec::Codecs;
 use crate::execution::digest::Digest;
-use crate::library::Library;
-use crate::runtime::context::ContextManager;
+use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
@@ -57,8 +57,8 @@ pub(crate) async fn write<W>(
     writer: &mut W,
     digest: Digest,
     outputs: &[DynamicValue],
-    library: &Library,
-    ctx: &mut ContextManager,
+    codecs: &Codecs,
+    ctx: &mut ContextStore,
 ) -> codec::Result<()>
 where
     W: AsyncWrite + AsyncSeek + Unpin + Send,
@@ -73,7 +73,7 @@ where
     writer.write_all(&fixed).await?;
 
     for value in outputs {
-        write_descriptor(writer, descriptor_for(value, library)?).await?;
+        write_descriptor(writer, descriptor_for(value, codecs)?).await?;
     }
 
     let body_start = u64::try_from(header_len(outputs.len()))
@@ -90,8 +90,8 @@ where
             DynamicValue::Static(value) => write_static(writer, value).await?,
             DynamicValue::Custom(value) => {
                 let type_id = value.type_id();
-                let codec = library
-                    .codec(type_id)
+                let codec = codecs
+                    .get(type_id)
                     .expect("custom output codec was checked while writing descriptors");
                 codec
                     .encode(value.as_ref(), writer, ctx)
@@ -125,12 +125,12 @@ pub(crate) async fn covers_outputs<R>(
     file_len: u64,
     digest: Digest,
     outputs: &[DynamicValue],
-    library: &Library,
+    codecs: &Codecs,
 ) -> codec::Result<bool>
 where
     R: AsyncRead + Unpin + Send,
 {
-    let prefix = scan_header(reader, file_len, digest, library, |index, descriptor| {
+    let prefix = scan_header(reader, file_len, digest, codecs, |index, descriptor| {
         outputs
             .get(index)
             .is_some_and(|value| descriptor_covers(descriptor, value))
@@ -143,7 +143,8 @@ pub(crate) async fn read<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
-    library: &Library,
+    codecs: &Codecs,
+    ctx: &mut ContextStore,
     expected_output_count: usize,
     mut output_required: impl FnMut(usize) -> bool,
 ) -> codec::Result<Option<Vec<DynamicValue>>>
@@ -154,7 +155,7 @@ where
         reader,
         file_len,
         digest,
-        library,
+        codecs,
         expected_output_count,
         &mut output_required,
     )
@@ -173,12 +174,12 @@ where
                 DynamicValue::Static(value)
             }
             OutputKind::Custom { type_id, .. } => {
-                let codec = library
-                    .codec(type_id)
+                let codec = codecs
+                    .get(type_id)
                     .expect("custom codec was validated while reading the header");
                 let mut payload = (&mut *reader).take(descriptor.payload_len);
                 let value = codec
-                    .decode(&mut payload, descriptor.payload_len)
+                    .decode(&mut payload, descriptor.payload_len, ctx)
                     .await
                     .map_err(|source| codec::Error::Decode { type_id, source })?;
                 require_consumed(&payload)?;
@@ -194,7 +195,7 @@ async fn read_header<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
-    library: &Library,
+    codecs: &Codecs,
     expected_output_count: usize,
     output_required: &mut impl FnMut(usize) -> bool,
 ) -> codec::Result<Option<BlobHeader>>
@@ -202,7 +203,7 @@ where
     R: AsyncRead + Unpin + Send,
 {
     let mut descriptors = Vec::new();
-    let prefix = scan_header(reader, file_len, digest, library, |index, descriptor| {
+    let prefix = scan_header(reader, file_len, digest, codecs, |index, descriptor| {
         if index >= expected_output_count
             || output_required(index) && matches!(descriptor.kind, OutputKind::Unbound)
         {
@@ -221,7 +222,7 @@ async fn scan_header<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
-    library: &Library,
+    codecs: &Codecs,
     mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
 ) -> io::Result<Option<HeaderPrefix>>
 where
@@ -237,8 +238,8 @@ where
             .checked_add(descriptor.payload_len)
             .ok_or_else(|| invalid_data("cache payload lengths overflow u64"))?;
         if let OutputKind::Custom { type_id, version } = descriptor.kind
-            && !library
-                .codec(type_id)
+            && !codecs
+                .get(type_id)
                 .is_some_and(|codec| codec.version() == version)
         {
             return Ok(None);
@@ -295,14 +296,14 @@ where
     }))
 }
 
-fn descriptor_for(value: &DynamicValue, library: &Library) -> codec::Result<OutputDescriptor> {
+fn descriptor_for(value: &DynamicValue, codecs: &Codecs) -> codec::Result<OutputDescriptor> {
     let kind = match value {
         DynamicValue::Unbound => OutputKind::Unbound,
         DynamicValue::Static(_) => OutputKind::Static,
         DynamicValue::Custom(value) => {
             let type_id = value.type_id();
-            let codec = library
-                .codec(type_id)
+            let codec = codecs
+                .get(type_id)
                 .ok_or(codec::Error::UnknownType(type_id))?;
             OutputKind::Custom {
                 type_id,

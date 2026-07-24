@@ -4,7 +4,6 @@ mod format;
 
 use std::io;
 use std::path::PathBuf;
-use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -14,16 +13,17 @@ use tokio::io::{AsyncWriteExt as _, BufWriter};
 use crate::DynamicValue;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::codec;
+use crate::execution::codec::Codecs;
 use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
 use crate::library::Library;
 use crate::node::lambda::OutputDemand;
-use crate::runtime::context::ContextManager;
+use crate::runtime::context::ContextStore;
 
 #[derive(Debug, Default)]
 pub struct DiskStore {
-    library: Arc<Library>,
+    codecs: Codecs,
     disk_root: Option<PathBuf>,
     #[cfg(test)]
     pub(crate) store_io: StoreIoCounts,
@@ -57,9 +57,9 @@ impl BlobTarget {
 }
 
 impl DiskStore {
-    pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
+    pub fn new(library: &Library, disk_root: Option<PathBuf>) -> Self {
         Self {
-            library,
+            codecs: library.codecs(),
             disk_root,
             #[cfg(test)]
             store_io: StoreIoCounts::default(),
@@ -107,7 +107,7 @@ impl DiskStore {
         let Some(file_len) = file.metadata().await.ok().map(|metadata| metadata.len()) else {
             return false;
         };
-        format::covers_outputs(&mut file, file_len, target.digest, outputs, &self.library)
+        format::covers_outputs(&mut file, file_len, target.digest, outputs, &self.codecs)
             .await
             .is_ok_and(|covers| covers)
     }
@@ -116,6 +116,7 @@ impl DiskStore {
         &self,
         target: &BlobTarget,
         demand: &[OutputDemand],
+        ctx: &mut ContextStore,
     ) -> Option<OutputSnapshot> {
         let mut file = match tokio::fs::File::open(&target.path).await {
             Ok(file) => file,
@@ -136,7 +137,8 @@ impl DiskStore {
             &mut file,
             file_len,
             target.digest,
-            &self.library,
+            &self.codecs,
+            ctx,
             demand.len(),
             |index| !demand[index].is_skip(),
         )
@@ -159,7 +161,7 @@ impl DiskStore {
         target: &BlobTarget,
         snapshot: &OutputSnapshot,
         policy: StorePolicy,
-        ctx: &mut ContextManager,
+        ctx: &mut ContextStore,
     ) {
         if policy == StorePolicy::PreserveCovering {
             #[cfg(test)]
@@ -197,7 +199,7 @@ impl DiskStore {
             &mut writer,
             target.digest,
             &snapshot.values,
-            &self.library,
+            &self.codecs,
             ctx,
         )
         .await

@@ -11,10 +11,8 @@ registration gates declared defaults, deep nesting is a validation
 error, and flattening keeps a resolved-graph stack instead of re-walking from
 the root. The highest-impact remaining problem is unchanged: `Worker::send_many`
 does not establish the batch boundary its callers rely on. The other open
-findings cluster around runtime state ownership (the `ContextManager`'s
-mixed lifetimes and the codec ABI), per-run orchestration costs, and
-the parallel representations (`SpecialNode` dispatch, detached-record
-vectors).
+findings cluster around per-run orchestration costs and the parallel
+representations (`SpecialNode` dispatch, detached-record vectors).
 
 ## Current flow
 
@@ -98,6 +96,20 @@ flattened execution identity when a new program is installed.
   top, `src/execution/executor/mod.rs`), so the `biased` select drains per
   node and a node's `Started`/`Finished` reach the host before the next
   lambda runs.
+- *The codec ABI was asymmetric and over-broad, and `ContextManager` mixed
+  persistent and per-run lifetimes for its consumers* — the persistent
+  resource half is now its own `ContextStore` (`src/runtime/context.rs`),
+  and both `CustomValueCodec::encode` **and** `decode` receive
+  `&mut ContextStore` — nothing else — threaded through resolve's disk
+  hydration (`Resolver::resolve` → `check_reuse` → `DiskStore::read`), so a
+  codec can reconstruct resource-backed values on read. Lambdas still get
+  the full `ContextManager` (contexts + logs + cancel), which is its
+  purpose.
+- *`DiskStore` retained the entire `Library` for codec lookup* — the store
+  now owns only a `Codecs` map (`TypeId → Arc<dyn CustomValueCodec>`,
+  `src/execution/codec.rs`) extracted from the library at construction;
+  format calls take `&Codecs`, and cache I/O no longer holds funcs, shared
+  graphs, or editor metadata.
 
 ## High: Worker lifecycle
 
@@ -113,32 +125,6 @@ flattened execution identity when a new program is installed.
   (`src/worker/task.rs:36`), which re-runs and restarts the event loop —
   repopulating exactly the cache entries the not-yet-arrived eviction and
   stop were meant to protect.
-
-## Medium: Cross-run state ownership
-
-- [ ] **`ContextManager` mixes persistent and per-run lifetimes.** The
-  manager simultaneously owns persistent resources, current-node
-  attribution, logs, and cancellation (`src/runtime/context.rs`,
-  `ContextManager` fields), and custom codecs receive that entire object
-  merely to access resources during encoding (`src/execution/codec.rs:19-24`,
-  `src/execution/disk_store/format/mod.rs:56-62`, `:96-99`).
-
-- [ ] **The codec ABI is asymmetric: `encode` receives the `ContextManager`,
-  `decode` receives nothing.** `CustomValueCodec::encode` takes
-  `&mut ContextManager` while `decode` gets only the reader and byte length
-  (`src/execution/codec.rs:19-31`). A custom type that needs a persistent
-  runtime resource (a device, an allocator held in the manager's store) to
-  reconstruct a value on read cannot obtain one, even though the same
-  resource is available on write.
-
-- [ ] **`DiskStore` retains the entire `Library` for codec lookup.** The store
-  owns an `Arc<Library>` (`src/execution/disk_store/mod.rs:24-30`, set at
-  `:60-67`) and every use passes it to format calls (`:110`, `:139`, `:200`)
-  that call nothing but `library.codec(type_id)`
-  (`src/execution/disk_store/format/mod.rs:93`, `:176`, `:240`, `:304`).
-  Cache I/O consequently retains unrelated functions, shared graphs, and
-  editor-facing type metadata, tying cache-store replacement to changes in
-  the broader registry.
 
 ## Medium: Per-run orchestration complexity
 

@@ -17,6 +17,7 @@ use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::test_support;
 use crate::node::lambda::{FuncLambda, OutputDemand};
+use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue};
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,
@@ -223,7 +224,13 @@ async fn run_with(
     let mut resolver = Resolver::default();
     let mut resource_stamps = RunResourceStamps::default();
     resolver
-        .resolve(program, plan, cache, &resource_stamps)
+        .resolve(
+            program,
+            plan,
+            cache,
+            &resource_stamps,
+            &mut ContextStore::default(),
+        )
         .await;
     let mut outcome = ExecutionOutcome::default();
     executor

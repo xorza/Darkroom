@@ -12,7 +12,7 @@ use crate::execution::digest::Digest;
 use crate::execution::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::library::{Library, TypeEntry};
 use crate::node::lambda::OutputDemand;
-use crate::runtime::context::ContextManager;
+use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
 
 #[derive(Debug)]
@@ -48,7 +48,9 @@ async fn read_snapshot(
     output_count: usize,
 ) -> Option<OutputSnapshot> {
     let demand = vec![OutputDemand::Skip; output_count];
-    store.read(target, &demand).await
+    store
+        .read(target, &demand, &mut ContextStore::default())
+        .await
 }
 
 fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
@@ -105,7 +107,7 @@ impl CustomValueCodec for VersionedCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextManager,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<(), CodecError> {
         let blob = value
             .as_any()
@@ -122,6 +124,7 @@ impl CustomValueCodec for VersionedCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
         reader.read_to_end(&mut bytes).await?;
@@ -147,10 +150,7 @@ fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bo
 }
 
 fn versioned_store(version: u32, decode_calls: Arc<AtomicU64>) -> DiskStore {
-    DiskStore::new(
-        Arc::new(versioned_library(version, decode_calls, false)),
-        None,
-    )
+    DiskStore::new(&versioned_library(version, decode_calls, false), None)
 }
 
 #[tokio::test]
@@ -172,7 +172,7 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
             &first_target,
             &first,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
@@ -193,7 +193,7 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
             &second_target,
             &second,
             StorePolicy::PreserveCovering,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 1);
@@ -227,7 +227,7 @@ async fn broader_same_digest_blob_is_preserved() {
             &target,
             &partial,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
@@ -236,7 +236,12 @@ async fn broader_same_digest_blob_is_preserved() {
         1
     );
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
-    assert!(store.read(&target, &second_output).await.is_none());
+    assert!(
+        store
+            .read(&target, &second_output, &mut ContextStore::default())
+            .await
+            .is_none()
+    );
     assert!(
         file.0.exists(),
         "an insufficient but valid blob is retained"
@@ -251,7 +256,7 @@ async fn broader_same_digest_blob_is_preserved() {
             &target,
             &complete,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 0);
@@ -266,7 +271,7 @@ async fn broader_same_digest_blob_is_preserved() {
             &target,
             &partial,
             StorePolicy::PreserveCovering,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(store.store_io.coverage_probes.load(Ordering::Relaxed), 1);
@@ -298,7 +303,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
             &target,
             &snapshot,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
 
@@ -320,7 +325,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
             &target,
             &snapshot,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert!(!old_store.covers(&target, &snapshot.values).await);
@@ -338,7 +343,7 @@ async fn unregistered_custom_value_is_not_written() {
             &target(&file.0, Digest([1; 32])),
             &snapshot,
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert!(!file.0.exists());
@@ -355,13 +360,13 @@ async fn failed_streaming_encode_preserves_previous_blob() {
             &original_target,
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     let original = std::fs::read(&file.0).unwrap();
 
     let failing_store = DiskStore::new(
-        Arc::new(versioned_library(1, Arc::new(AtomicU64::new(0)), true)),
+        &versioned_library(1, Arc::new(AtomicU64::new(0)), true),
         None,
     );
     failing_store
@@ -369,7 +374,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
             &target(&file.0, Digest([5; 32])),
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     assert_eq!(std::fs::read(&file.0).unwrap(), original);
@@ -393,7 +398,7 @@ async fn failed_publication_does_not_repeat_coverage_probe() {
             &target(&file.0, Digest([9; 32])),
             &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
             StorePolicy::PreserveCovering,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
 
@@ -418,7 +423,7 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
                 "payload".into(),
             ))]),
             StorePolicy::KnownMiss,
-            &mut ContextManager::default(),
+            &mut ContextStore::default(),
         )
         .await;
     let mut bytes = std::fs::read(&file.0).unwrap();

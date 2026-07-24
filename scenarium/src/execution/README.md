@@ -284,7 +284,8 @@ preserves opportunistic byproducts as one coherent cache entry.
 `DynamicValue` isn't `Serialize`: `Unbound`/`Static` are trivial, but
 `Custom(Arc<dyn CustomValue>)` is an opaque runtime payload. Each custom *type*
 registers a `CustomValueCodec` on its `Library` type-table entry; that one entry drives
-async, context-aware `encode` and async `decode` over bounded Tokio I/O streams. Every codec
+async `encode` and `decode` over bounded Tokio I/O streams, both receiving the runtime
+`ContextStore` so a codec can reach persistent resources on either side. Every codec
 also declares a `version`; each custom output descriptor records its actual type and version,
 so custom values flowing through an `Any` output are covered while unrelated codec changes
 leave the blob valid. The loader verifies every descriptor before decoding, then restricts
