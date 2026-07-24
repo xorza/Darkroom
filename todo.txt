@@ -31,6 +31,4 @@ subgraphs tabs movable
 
 what is resourcestamps  simplify
 
-inputintent
-
 contextmenu for boundary nodes
