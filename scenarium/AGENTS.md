@@ -19,9 +19,9 @@ body through `body`, since a whole-value operation (`validate`,
 serialization) must target the `GraphDef` — the body's own would silently skip
 the interface.
 Neither type is `Clone`: node and graph ids are document-unique, so every copy
-declares its intent — `Graph::fresh_copy`/`GraphDef::fresh` mint new
-identities (import, localize, detach, publish), `verbatim_copy`/`restore`
-preserve them (undo/redo replay, library composition).
+declares its intent — `clone_mapped` remaps them (import, localize, detach,
+publish), `clone_verbatim` preserves them (undo/redo replay, library
+composition). Both names are the same on `Graph` and `GraphDef`.
 Identity exists only in the map key; `Node` is authored data and does not store
 its id. Its cache mode is storage policy, not cache validity. `Graph` is the
 persisted model. `Graph::validate` enforces node-id *and* graph-id
@@ -56,7 +56,7 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `graph/serde.rs` | Custom graph wire formats |
 | `graph/validate.rs` | Standalone and execution-entry graph validation |
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
-| `graph/clone.rs` | Deep copies with fresh node ids |
+| `graph/clone.rs` | Deep clones: identity-remapping and identity-preserving |
 | `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
 | `graph/query.rs` | Type and reachability queries |
 | `graph/interface/` | Graph identity, instance links, and exposed events |

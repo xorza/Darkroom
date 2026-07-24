@@ -27,7 +27,7 @@ pub(crate) fn publish_graph(
             .filter(|id| graph_library.graphs.contains_key(id));
         Some(PublishSource {
             local_id,
-            graph: local.fresh(),
+            graph: local.clone_mapped(),
             existing_id: existing_lib,
         })
     })() else {

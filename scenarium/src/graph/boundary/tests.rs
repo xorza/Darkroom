@@ -79,7 +79,7 @@ fn detach_and_attach_graph_input_round_trip() {
         instance_a,
         instance_b,
     } = input_fixture();
-    let original = graph.verbatim_copy();
+    let original = graph.clone_verbatim();
 
     let snapshot = graph.snapshot_graph_input(graph_id, 1).unwrap();
     let detached = graph.detach_graph_input(graph_id, 1);
@@ -256,7 +256,7 @@ fn detach_and_attach_graph_output_round_trip() {
         consumer_a,
         consumer_b,
     } = output_fixture();
-    let original = graph.verbatim_copy();
+    let original = graph.clone_verbatim();
 
     let snapshot = graph.snapshot_graph_output(graph_id, 1).unwrap();
     let detached = graph.detach_graph_output(graph_id, 1);
@@ -386,7 +386,7 @@ fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
     graph.insert_graph(graph_id, child);
     graph.set_input_binding(InputPort::new(instance, 0), const_int(1));
     graph.set_input_binding(InputPort::new(instance, 1), const_int(2));
-    let original = graph.verbatim_copy();
+    let original = graph.clone_verbatim();
 
     let detached = graph.detach_graph_input(graph_id, 0);
     assert!(detached.interior.is_empty() && detached.pins.is_empty());

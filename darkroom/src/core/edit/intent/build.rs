@@ -240,7 +240,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 return None; // not a local graph instance — nothing to fork
             };
             let to_id = GraphId::unique();
-            let mut copy = graph.graphs.get(&from_id)?.fresh();
+            let mut copy = graph.graphs.get(&from_id)?.clone_mapped();
             copy.definition.origin = None;
             GraphStep::DetachGraph {
                 node_id,

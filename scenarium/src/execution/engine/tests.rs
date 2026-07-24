@@ -3203,7 +3203,7 @@ mod composite_behavior {
 
     fn main_with_id(library: &Library, def_id: GraphId, def: GraphDef) -> Graph {
         let mut graph = Graph::default();
-        graph.insert_graph(def_id, def.restore());
+        graph.insert_graph(def_id, def.clone_verbatim());
         let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
         let p = func_node(library, "Print", "p");
         let p_id = graph.add(p);
@@ -3285,7 +3285,7 @@ mod composite_behavior {
         let mut outer_interior = GraphDef::new("Outer").output(int_output("Out"));
         outer_interior
             .body
-            .insert_graph(inner_def_id, inner_def.restore());
+            .insert_graph(inner_def_id, inner_def.clone_verbatim());
         let inner_inst = outer_interior
             .body
             .add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
@@ -3345,7 +3345,7 @@ mod composite_behavior {
             .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         let graph_id = GraphId::unique();
         let mut graph = Graph::default();
-        graph.insert_graph(graph_id, interior.restore());
+        graph.insert_graph(graph_id, interior.clone_verbatim());
         let first_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
         for instance_id in [first_instance, second_instance] {

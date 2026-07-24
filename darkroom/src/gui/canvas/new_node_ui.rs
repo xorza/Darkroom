@@ -345,7 +345,7 @@ fn graph_entry(
         return None;
     }
     let local_id = GraphId::unique();
-    let mut local = graph.fresh();
+    let mut local = graph.clone_mapped();
     local.definition.origin = Some(shared_id);
     let node_id = NodeId::unique();
     let node = Node::graph_instance(&local, GraphLink::Local(local_id));

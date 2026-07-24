@@ -27,7 +27,7 @@ const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 /// Which graph an editor tab is pointed at. `Main` is the document root;
 /// `Local(id)` addresses a local graph *anywhere* in the document's nested
 /// graph tree — graph ids are document-unique (upheld by
-/// `Graph::fresh_copy` at every copy boundary and enforced by
+/// `Graph::clone_mapped` at every copy boundary and enforced by
 /// `Graph::validate`), so the bare id is a complete address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum GraphRef {
@@ -59,7 +59,7 @@ impl PortKind {
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
 /// the whole document (graph interiors included), so no graph ref is
-/// needed alongside — upheld by `Graph::fresh_copy` at every copy
+/// needed alongside — upheld by `Graph::clone_mapped` at every copy
 /// boundary (import/localize/detach) and enforced by
 /// [`Document::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -551,7 +551,7 @@ mod tests {
     fn validate_rejects_duplicate_node_ids_across_graphs() {
         // The same node id planted in the root graph and a def interior —
         // unreachable through the editor (import/localize/detach sever
-        // identity via `fresh_copy`), so it's corrupt input validation refuses.
+        // identity via `clone_mapped`), so it's corrupt input validation refuses.
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let graph_id = doc.create_graph(GraphRef::Main).unwrap();
@@ -580,7 +580,7 @@ mod tests {
         // (recording its `origin`) is added alongside the instance node, as
         // one undoable `AddNode`.
         let lib_id = GraphId::unique();
-        let mut local = leaf_graph("Lib").fresh();
+        let mut local = leaf_graph("Lib").clone_mapped();
         local.definition.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
@@ -634,7 +634,7 @@ mod tests {
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
 
-        let mut local = leaf_graph("Lib").fresh();
+        let mut local = leaf_graph("Lib").clone_mapped();
         local.definition.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));

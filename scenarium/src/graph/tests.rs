@@ -90,7 +90,7 @@ fn validate_rejects_node_ids_reused_across_graph_levels() {
 #[test]
 fn validate_rejects_graph_ids_reused_across_parents() {
     // The same def id planted under two parents — unreachable through
-    // `fresh_copy` (it remaps graph ids at every copy boundary), so it's
+    // `clone_mapped` (it remaps graph ids at every copy boundary), so it's
     // corrupt input validation refuses: a bare graph id must be an
     // unambiguous document-wide address.
     let graph_id = GraphId::unique();
@@ -1076,12 +1076,12 @@ fn set_output_pinned_and_is_output_pinned() {
 }
 
 #[test]
-fn fresh_copy_remaps_pinned_outputs() {
+fn clone_mapped_remaps_pinned_outputs() {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
 
-    let fresh = graph.fresh_copy();
+    let fresh = graph.clone_mapped();
     let new_sum_id = fresh.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
     assert!(!fresh.is_output_pinned(OutputPort::new(sum_id, 0)));
@@ -1106,7 +1106,7 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
 
     assert_eq!(bindings.len(), 3);
 
-    let before = graph.verbatim_copy();
+    let before = graph.clone_verbatim();
     let edges_before = graph.edges().count();
     let detached = graph.detach_node(sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
@@ -1124,7 +1124,7 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     for invalid in [nil_id, mismatched] {
         let serialized = serialize(&invalid, SerdeFormat::Json)?;
         let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Json)?;
-        let detached_graph = graph.verbatim_copy();
+        let detached_graph = graph.clone_verbatim();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             graph.attach_node(decoded_invalid);
         }));

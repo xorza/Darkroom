@@ -717,7 +717,7 @@ fn remove_boundary_port_round_trips_severed_wiring() {
     doc.graph
         .set_input_binding(InputPort::new(instance, 1), Binding::Const(2i64.into()));
     let target = GraphRef::Local(def_id);
-    let original = doc.graph.verbatim_copy();
+    let original = doc.graph.clone_verbatim();
 
     let step = build_step(
         Intent::RemoveBoundaryPort {
