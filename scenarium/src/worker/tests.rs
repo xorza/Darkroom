@@ -771,6 +771,91 @@ async fn worker_streams_node_patches_before_completion() {
     assert!(matches!(cleared, WorkerReport::Cleared));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn live_patches_reach_the_host_before_downstream_nodes_run() {
+    use std::sync::atomic::AtomicU64;
+
+    use crate::DataType;
+    use crate::node::definition::{FuncInput, FuncOutput};
+
+    // A → B with trivial sync lambdas: they give the run future no suspension
+    // point of their own, so only the executor's per-node yield lets the relay
+    // forward events mid-run. B records how many node-status patch entries the
+    // host callback has already seen — A's `Started` and `Finished` must both
+    // have reached the host before B is invoked.
+    let patch_entries = Arc::new(AtomicU64::new(0));
+    let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));
+
+    let mut library = Library::default();
+    library.add(
+        Func::new(FuncId::unique(), "first")
+            .output(FuncOutput::new("v", DataType::Int))
+            .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+                outputs[0] = StaticValue::Int(1).into();
+                Ok(())
+            })),
+    );
+    let second_seen = seen_by_second.clone();
+    let second_entries = patch_entries.clone();
+    library.add(
+        Func::new(FuncId::unique(), "second")
+            .sink()
+            .input(FuncInput::required("v", DataType::Int))
+            .lambda(async_lambda!(move |_, _, _, _, _, _| {
+                seen = second_seen.clone(),
+                entries = second_entries.clone()
+            } => {
+                seen.store(entries.load(Ordering::SeqCst), Ordering::SeqCst);
+                Ok(())
+            })),
+    );
+
+    let mut graph = Graph::default();
+    let first_id = graph.add(library.by_name("first").unwrap().into());
+    let second_id = graph.add(library.by_name("second").unwrap().into());
+    graph.set_input_binding(InputPort::new(second_id, 0), Binding::bind(first_id, 0));
+
+    let entries = patch_entries.clone();
+    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Status(status) = &report
+            && status.kind == WorkerStatusKind::Patch
+        {
+            entries.fetch_add(status.nodes.len() as u64, Ordering::SeqCst);
+        }
+        tx.try_send(report).ok();
+    });
+    let compiled: Arc<CompiledGraph> = Compiler::default()
+        .compile(&graph, &library)
+        .unwrap()
+        .into();
+    worker
+        .send_many([
+            WorkerMessage::Update { compiled },
+            WorkerMessage::Run {
+                seeds: RunSeeds::sinks(),
+            },
+        ])
+        .unwrap();
+
+    loop {
+        let report = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        if let WorkerReport::Status(status) = report
+            && matches!(status.kind, WorkerStatusKind::Completed { .. })
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        seen_by_second.load(Ordering::SeqCst),
+        2,
+        "the first node's Started and Finished patches must reach the host before the second node runs"
+    );
+}
+
 #[tokio::test]
 async fn installed_program_distinguishes_repeated_definition_instances() {
     use std::collections::HashSet;

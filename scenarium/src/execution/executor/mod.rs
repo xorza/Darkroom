@@ -24,6 +24,7 @@ mod value_flow;
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::task;
 
 use common::CancelToken;
 
@@ -135,6 +136,12 @@ impl Executor {
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
             for (process_idx, &e_node_id) in plan.process_order.iter().enumerate() {
+                // Drain point for the live-report relay: sync-completing lambdas
+                // give the worker's select no suspension point of their own, and
+                // without one per node the whole "live" stream would flush only
+                // after the run.
+                task::yield_now().await;
+
                 // Coarse cancel: stop scheduling further nodes and retire the tail's reads. A
                 // node already mid-invoke isn't interrupted, while unreached outcomes stay
                 // `Pending` and are omitted from the outcome.
