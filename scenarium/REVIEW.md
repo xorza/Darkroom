@@ -38,16 +38,17 @@ flattened execution identity when a new program is installed.
 - *Normalization covers only part of the graph state validation treats as
   structural* — there is no normalize/prune pass to disagree with validation,
   and `validate_for_execution` now tolerates binding/subscription/pin range
-  drift. The exposed-event remnant of this item survives as its own finding
-  below.
+  drift (while gaining two structural rejections: `EntryBoundaryNodes` and
+  `ConstOnlyBinding`). The exposed-event remnant of this item survives as its
+  own finding below.
 - *Composite-interface validity depends on an unenforced boundary-node
   convention* — recharacterized as design: the interface is authored, boundary
   nodes are optional, and both validation and flattening treat a port without
-  an interior counterpart as unbound (`graph/validate.rs:45-108`,
-  `execution/flatten/mod.rs:407-427`).
+  an interior counterpart as unbound (`graph/validate.rs:133-186`,
+  `execution/flatten/mod.rs:415-438`).
 - *Flattening repeatedly reconstructs the current graph from the root* — the
   per-build `Run` now keeps a `levels: Vec<&Graph>` stack parallel to `path`;
-  the current graph is one stack read (`execution/flatten/mod.rs:126-171`).
+  the current graph is one stack read (`execution/flatten/mod.rs:124-152`).
 - *Exposed-event drift hard-failed compilation* — the last drift class fell
   in line: `ExposedEventOutOfRange` was removed from `validate_for_execution`
   (flatten already wired the dangling event as nothing).
@@ -64,8 +65,8 @@ flattened execution identity when a new program is installed.
   lens's `Option`-field config reads) and still rejected on required ones.
 - *`DetachedGraphInput`/`Output` attach accepted malformed records* — attach
   now panics unless every recorded binding and pin references the detached
-  slot, and re-added pins assert like bindings do
-  (`graph/boundary/mod.rs`, attach fns).
+  slot (`assert_targets_slot`, `graph/boundary/mod.rs:60-122`, run before any
+  mutation), and re-added pins assert like bindings do.
 - *Open question: is the scalar-literal coercion intentionally loose?* —
   answered yes: it exactly mirrors the runtime `as_*` accessors and is now
   documented on `DataType::compatible_with`; declared defaults are the one
@@ -120,7 +121,7 @@ flattened execution identity when a new program is installed.
 - [ ] **Context declarations are advisory while `ContextManager` mixes
   persistent and per-run lifetimes.** `Func::required_contexts` has
   production writers but no production reader
-  (`src/node/definition.rs:236`, `:328-331`; writers in lens, zero reads
+  (`src/node/definition.rs:272`, `:364-367`; writers in lens, zero reads
   workspace-wide), and `ContextType::description` is only ever assigned
   `String::new()` (`src/runtime/context.rs:19`, `:114`). The manager
   simultaneously owns persistent resources, current-node attribution, logs,
@@ -140,7 +141,7 @@ flattened execution identity when a new program is installed.
 - [ ] **`DiskStore` retains the entire `Library` for codec lookup.** The store
   owns an `Arc<Library>` (`src/execution/disk_store/mod.rs:24-30`, set at
   `:60-67`) and every use passes it to format calls (`:110`, `:139`, `:200`)
-  that call nothing but `library.codec(&type_id)`
+  that call nothing but `library.codec(type_id)`
   (`src/execution/disk_store/format/mod.rs:93`, `:176`, `:240`, `:304`).
   Cache I/O consequently retains unrelated functions, shared graphs, and
   editor-facing type metadata, tying cache-store replacement to changes in
@@ -161,7 +162,7 @@ flattened execution identity when a new program is installed.
 
 - [ ] **Resolution serially hydrates every reusable disk frontier before
   execution starts.** The reverse sweep awaits `check_reuse` per live node
-  (`src/execution/resolve/mod.rs:131-140`, `:191-193`), and a disk hit
+  (`src/execution/resolve/mod.rs:176-204`, await at `:191-193`), and a disk hit
   immediately installs the decoded demand-scoped snapshot as resident
   (`src/execution/cache/runtime/mod.rs:246-253`). Independent disk reads
   accumulate into startup latency, and all accepted snapshots can occupy RAM
@@ -170,12 +171,12 @@ flattened execution identity when a new program is installed.
 - [ ] **Live reporting adds an unbounded same-task relay followed by
   copy-on-write status snapshots.** Each run creates an unbounded channel
   polled in a `biased` select beside the engine future
-  (`src/worker/task.rs:331`, `:335-343`) while the executor synchronously
+  (`src/worker/task.rs:352`, `:356-364`) while the executor synchronously
   queues progress and pinned payloads
   (`src/execution/executor/mod.rs:248-255`, `:330-338`,
   `src/execution/executor/value_flow.rs:66-87`). A ready-heavy run completes
   before the recv branch is ever polled, so the whole event stream buffers
-  and flushes only in the post-loop drain (`src/worker/task.rs:345-347`) —
+  and flushes only in the post-loop drain (`src/worker/task.rs:366-368`) —
   "live" updates arrive after completion. If an earlier published report
   remains queued, `Arc::make_mut` deep-clones the status vectors before the
   next update (`src/worker/status.rs:79`, `:188-192`).
@@ -198,7 +199,11 @@ flattened execution identity when a new program is installed.
   at 10 and event tasks block on `send().await`
   (`src/worker/event_loop.rs:13`, `:38`, `:63`). A continuous message stream
   keeps the message branch ready, so event ports are never drained and
-  event-lambda progress stalls until the host stream quiesces.
+  event-lambda progress stalls until the host stream quiesces. The bias is
+  intentional and test-locked in the opposite direction
+  (`commands_not_starved_by_fast_event_loop`, `src/worker/tests.rs:1863-1869`),
+  so any fix must preserve bounded-latency command observation rather than
+  simply removing `biased`.
 
 ## Medium: Parallel authoring representations
 
@@ -206,21 +211,29 @@ flattened execution identity when a new program is installed.
   the ordinary function model.** `SpecialNode` contains only `RunSinks` and
   immediately maps back to a normal `Func` (`src/node/special.rs:20-27`,
   `:32-39`), yet `NodeKind` gives it a distinct serialized variant
-  (`src/graph/mod.rs:139-150`) and every query, flattening, planning,
-  program, and program-validation path carries special-node branches
-  (`src/graph/query.rs:34`, `:47`, `:63`, `:119`,
-  `src/execution/flatten/mod.rs:198`, `:319`, `:367`, `:401`,
-  `src/execution/plan/mod.rs:268-283`, `src/execution/program/mod.rs:82`,
-  `src/execution/validate.rs:100`). One planner-specific behavior expands
-  the common authoring and execution state space across the crate.
+  (`src/graph/mod.rs:141-151`). The `NodePorts` unification collapsed the
+  four per-kind query matches into one branch (`src/graph/query.rs:124`),
+  but flattening, planning, the program, and program validation still carry
+  special-node branches (`src/execution/flatten/mod.rs:199`, `:320`, `:363`,
+  `:397`, `src/execution/plan/mod.rs:268-283`,
+  `src/execution/program/mod.rs:82`, `:134`,
+  `src/execution/validate.rs:100`), and authoring validation keeps a no-op
+  arm just to satisfy the match (`src/graph/validate.rs:113`). One
+  planner-specific behavior expands the common authoring and execution state
+  space across the crate.
 
 - [ ] **Detached undo records duplicate the graph's ordered side-tables as
   manually validated public vectors.** `DetachedNode` re-represents the
-  ordered map/set side-tables (`src/graph/mod.rs:257-271`) as public
-  serializable vectors, manually re-derives their invariants, and converts
-  back on attach (`src/graph/wiring.rs:44-101`, `:146-191`);
-  `DetachedGraphInput`/`Output` follow the same pattern
-  (`src/graph/boundary/mod.rs:18-44`, attach-time slot asserts). The second
-  serializable representation still admits malformed states that only the
-  attach-time panics reject, and every new detached kind re-derives the
-  invariants the canonical containers already encode.
+  ordered map/set side-tables (`src/graph/mod.rs:220-234`) as public
+  serializable vectors, manually re-derives their invariants (`assert_valid`
+  hand-asserts sortedness, `src/graph/wiring.rs:44-98`), and converts back
+  on attach (`src/graph/wiring.rs:142-185`); `DetachedGraphInput`/`Output`
+  follow the same pattern (`src/graph/boundary/mod.rs:21-51`,
+  `assert_targets_slot` at `:60-122`). The boundary refactor moved the
+  per-record asserts ahead of any mutation, but the overlap checks still
+  fire mid-mutation — `restore_bindings`/`restore_pins`
+  (`src/graph/boundary/mod.rs:377-396`) panic after the instance slots have
+  already shifted. The second serializable representation still admits
+  malformed states that only attach-time panics reject, and every new
+  detached kind re-derives the invariants the canonical containers already
+  encode.
