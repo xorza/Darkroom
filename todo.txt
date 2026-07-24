@@ -31,8 +31,6 @@ subgraphs tabs movable
 
 what is resourcestamps  simplify
 
-shaper.with_render_buffers(requests, |split| {
-
 inputintent
 
 contextmenu for boundary nodes
