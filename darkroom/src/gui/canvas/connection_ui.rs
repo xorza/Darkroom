@@ -611,7 +611,7 @@ mod tests {
     use crate::core::edit::intent::types::Intent;
     use crate::gui::canvas::connection_ui::commit_connection;
     use crate::gui::run_state::RunState;
-    use crate::gui::scene::Scene;
+    use crate::gui::scene::{Scene, SceneSource};
 
     #[derive(Debug)]
     struct Fixture {
@@ -641,7 +641,7 @@ mod tests {
         let mut ui = Ui::default();
         scene.rebuild(
             &mut ui,
-            (&graph).into(),
+            SceneSource::Def(&graph),
             &view,
             &library,
             &RunState::default(),
