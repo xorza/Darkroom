@@ -79,7 +79,7 @@ impl CompiledGraph {
 
         let mut consumers: HashMap<ExecutionNodeId, Vec<ExecutionNodeId>> = HashMap::new();
         for (consumer_id, e_node) in &self.program.e_nodes {
-            for input in self.program.node_inputs(e_node) {
+            for input in &self.program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
                     consumers
                         .entry(address.e_node_id)
@@ -141,8 +141,8 @@ impl Compiler {
             &mut program.e_nodes,
             Pools {
                 inputs: &mut program.inputs,
+                outputs: &mut program.outputs,
                 events: &mut program.events,
-                output_pinned: &mut program.output_pinned,
             },
             graph,
             library,

@@ -76,7 +76,7 @@ impl ResolvedOutputs {
         }
         for port_idx in 0..outputs.len as usize {
             let output_idx = program.output_idx(e_node_id, port_idx);
-            if program.is_output_pinned(output_idx) {
+            if program.outputs.values[output_idx.idx()].pinned {
                 self.demand[output_idx] = OutputDemand::Produce;
             }
         }
@@ -109,7 +109,7 @@ impl ResolvedRun {
                 .copied()
                 .map(|e_node_id| (e_node_id, Disposition::Cut)),
         );
-        self.outputs.reset(program.n_outputs());
+        self.outputs.reset(program.outputs.values.len());
     }
 }
 
@@ -192,7 +192,7 @@ async fn resolve_run(
             continue;
         }
         *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Run;
-        for input in &program.inputs[program.e_nodes[&e_node_id].inputs.range()] {
+        for input in &program.inputs[program.e_nodes[&e_node_id].inputs] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
                 *run.disposition.get_mut(&addr.e_node_id).unwrap() = Disposition::Run;
                 run.outputs

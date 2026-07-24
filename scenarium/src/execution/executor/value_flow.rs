@@ -61,23 +61,13 @@ impl ExecutionFrame<'_> {
         events: Option<&UnboundedSender<RunEvent>>,
     ) {
         let Some(events) = events else { return };
-        let output_count = self.program.e_nodes[&e_node_id].outputs.len as usize;
+        let outputs = self.program.e_nodes[&e_node_id].outputs;
         let pinned_root = self.plan.pinned.contains(&e_node_id);
-        let pinned_ports: Vec<_> = (0..output_count)
-            .filter(|&port_idx| {
-                pinned_root
-                    || self
-                        .program
-                        .is_output_pinned(self.program.output_idx(e_node_id, port_idx))
-            })
-            .collect();
-        if pinned_ports.is_empty() {
-            return;
-        }
-
-        let values = pinned_ports
-            .into_iter()
-            .map(|port_idx| {
+        let values: Vec<_> = self.program.outputs[outputs]
+            .iter()
+            .enumerate()
+            .filter(|(_, output)| pinned_root || output.pinned)
+            .map(|(port_idx, _)| {
                 let value = self
                     .cache
                     .read_output_port(self.program, e_node_id, port_idx, false)
@@ -85,6 +75,9 @@ impl ExecutionFrame<'_> {
                 PinnedOutput { port_idx, value }
             })
             .collect();
+        if values.is_empty() {
+            return;
+        }
         events
             .send(RunEvent::PinnedOutputs(PinnedOutputs { e_node_id, values }))
             .expect(EVENTS_OUTLIVE_RUN);
@@ -92,9 +85,8 @@ impl ExecutionFrame<'_> {
 
     pub(crate) fn collect_inputs(&mut self, e_node_id: ExecutionNodeId) {
         self.inputs.clear();
-        let input_range = self.program.e_nodes[&e_node_id].inputs.range();
-        for input_index in input_range {
-            let binding = &self.program.inputs[input_index].binding;
+        for input in &self.program.inputs[self.program.e_nodes[&e_node_id].inputs] {
+            let binding = &input.binding;
             let value = match binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
@@ -119,9 +111,8 @@ impl ExecutionFrame<'_> {
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
     pub(crate) fn abandon_input_reads(&mut self, consumer_id: ExecutionNodeId) {
-        let input_range = self.program.e_nodes[&consumer_id].inputs.range();
-        for input_index in input_range {
-            let address = match &self.program.inputs[input_index].binding {
+        for input in &self.program.inputs[self.program.e_nodes[&consumer_id].inputs] {
+            let address = match &input.binding {
                 ExecutionBinding::Bind(address) => Some(*address),
                 ExecutionBinding::None | ExecutionBinding::Const(_) => None,
             };

@@ -192,7 +192,7 @@ impl ResourceStampRequests {
         if node.behavior != FuncBehavior::Pure {
             return;
         }
-        for input in program.node_inputs(node) {
+        for input in &program.inputs[node.inputs] {
             match &input.binding {
                 ExecutionBinding::Const(StaticValue::FsPath(path)) => {
                     self.collect_fs_paths(stamps, std::slice::from_ref(path));

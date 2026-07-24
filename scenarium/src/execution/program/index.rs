@@ -1,9 +1,9 @@
 use std::ops::{Index, IndexMut};
 
-use common::Span;
 use hashbrown::{HashMap, HashSet};
 
 use crate::execution::identity::ExecutionNodeId;
+use crate::execution::program::OutputRange;
 
 /// A position in the program's flat output pool. It cannot be confused with a node
 /// id or a node-local port number.
@@ -27,7 +27,7 @@ impl From<usize> for OutputIdx {
 }
 
 /// A column aligned to the program's flat output pool. Node-local views are sliced by
-/// their compiled output span, while individual entries require an [`OutputIdx`].
+/// their compiled output range, while individual entries require an [`OutputIdx`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OutputColumn<T> {
     pub(crate) values: Vec<T>,
@@ -64,11 +64,11 @@ pub(crate) type NodeMap<T> = HashMap<ExecutionNodeId, T>;
 pub(crate) type NodeSet = HashSet<ExecutionNodeId>;
 
 impl<T> OutputColumn<T> {
-    pub(crate) fn slice(&self, outputs: Span) -> &[T] {
+    pub(crate) fn slice(&self, outputs: OutputRange) -> &[T] {
         &self.values[outputs.range()]
     }
 
-    pub(crate) fn slice_mut(&mut self, outputs: Span) -> &mut [T] {
+    pub(crate) fn slice_mut(&mut self, outputs: OutputRange) -> &mut [T] {
         &mut self.values[outputs.range()]
     }
 }

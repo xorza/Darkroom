@@ -264,14 +264,13 @@ pub(crate) fn node_digest(
         .write_pod(e_node.func_id.as_u128())
         .write_pod(e_node.version);
 
-    let out_types = program.node_output_types(e_node);
-    hasher.write_pod(out_types.len() as u64);
-    for ty in out_types {
-        hash_data_type(&mut hasher, ty);
+    let outputs = &program.outputs[e_node.outputs];
+    hasher.write_pod(outputs.len() as u64);
+    for output in outputs {
+        hash_data_type(&mut hasher, &output.data_type);
     }
 
-    for pool_idx in e_node.inputs.range() {
-        let input = &program.inputs[pool_idx];
+    for input in &program.inputs[e_node.inputs] {
         match &input.binding {
             ExecutionBinding::None => {
                 hasher.write_bytes(&[0]);

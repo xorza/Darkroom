@@ -3590,10 +3590,10 @@ mod invalidation {
 
         assert!(execution_graph.compiled.program.e_nodes.is_empty());
         assert!(execution_graph.plan.process_order.is_empty());
-        // The SoA pools are emptied too (not just the node list).
-        assert!(execution_graph.compiled.program.inputs.is_empty());
-        assert_eq!(execution_graph.compiled.program.n_outputs(), 0);
-        assert!(execution_graph.compiled.program.events.is_empty());
+        // The packed pools are emptied too (not just the node list).
+        assert!(execution_graph.compiled.program.inputs.values.is_empty());
+        assert!(execution_graph.compiled.program.outputs.values.is_empty());
+        assert!(execution_graph.compiled.program.events.values.is_empty());
 
         Ok(())
     }
@@ -5111,7 +5111,7 @@ mod topology {
     #[tokio::test(flavor = "multi_thread")]
     async fn repeated_structural_churn_stays_correct() -> TestResult {
         // Grow→shrink the graph repeatedly on ONE ExecutionEngine, re-executing
-        // each step. Stresses the SoA pool and ID-keyed node-map rebuild across many
+        // each step. Stresses the packed pools and ID-keyed node-map rebuild across many
         // updates (pools grow 2→4 then shrink 4→2 each round).
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let p = printed.clone();
@@ -5963,21 +5963,20 @@ mod compile_regressions {
     use super::*;
     use crate::async_lambda;
     use crate::execution::identity::ExecutionOutputPort;
-    use crate::execution::program::{ExecutionInput, ExecutionProgram};
+    use crate::execution::program::{ExecutionInput, ExecutionOutput, ExecutionProgram};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};
-    use common::Span;
     use std::sync::Mutex as StdMutex;
 
-    /// The output-type pool is span-addressed: when a consumer precedes its producer
+    /// The output pool is range-addressed: when a consumer precedes its producer
     /// in insertion order, flatten's `set_input` claims the producer's *index* early
-    /// while output spans are assigned in emit order — an index-order sequential fill
+    /// while output ranges are assigned in emit order — an index-order sequential fill
     /// would hand the two producers each other's types.
     #[test]
-    fn output_types_follow_spans_when_consumer_precedes_producer() {
+    fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
         let library: Library = [
             Func::new("7ab6d0c9-8c35-4364-b2e3-62ab1ba5a888", "make_int")
                 .category("Test")
@@ -6004,7 +6003,7 @@ mod compile_regressions {
         .into();
 
         // Insertion order: the consumer first, then the *other* producer, then the
-        // producer it binds — so `make_str` claims flat index 1 while its output span
+        // producer it binds — so `make_str` claims flat index 1 while its output range
         // is assigned last.
         let mut graph = Graph::default();
         graph.add(node(&library, "sink"));
@@ -6016,6 +6015,7 @@ mod compile_regressions {
             .unwrap()
             .id;
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(str_id, 0));
+        graph.set_output_pinned(OutputPort::new(str_id, 0), true);
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
@@ -6023,20 +6023,24 @@ mod compile_regressions {
         let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
         let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine
-                .compiled
-                .program
-                .node_output_types(&engine.compiled.program.e_nodes[&make_int]),
-            &[DataType::Int],
+            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_int].outputs][0]
+                .data_type,
+            DataType::Int,
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine
-                .compiled
-                .program
-                .node_output_types(&engine.compiled.program.e_nodes[&make_str]),
-            &[DataType::String],
+            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_str].outputs][0]
+                .data_type,
+            DataType::String,
             "make_str reads its own type, not its neighbor's"
+        );
+        assert!(
+            !engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_int].outputs][0]
+                .pinned
+        );
+        assert!(
+            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_str].outputs][0]
+                .pinned
         );
     }
 
@@ -6100,8 +6104,9 @@ mod compile_regressions {
                 "authoring resolution for {node_id}"
             );
             assert_eq!(
-                program.node_output_types(&program.e_nodes[&root_execution_node(node_id)]),
-                std::slice::from_ref(&expected),
+                program.outputs[program.e_nodes[&root_execution_node(node_id)].outputs][0]
+                    .data_type,
+                expected,
                 "compiled resolution for {node_id}"
             );
         }
@@ -6124,27 +6129,28 @@ mod compile_regressions {
 
         let mut program = ExecutionProgram::default();
         let e_node_id = root_execution_node(node_id);
-        program.inputs.push(ExecutionInput {
+        let inputs = program.inputs.append([ExecutionInput {
             required: true,
             stamper: None,
             binding: ExecutionBinding::Bind(ExecutionOutputPort {
                 e_node_id,
                 port_idx: 0,
             }),
-        });
+        }]);
+        let outputs = program.outputs.append([ExecutionOutput::default()]);
         program.e_nodes.insert(
             e_node_id,
             ExecutionNode {
                 func_id: passthrough.id,
-                inputs: Span::new(0, 1),
-                outputs: Span::new(0, 1),
+                inputs,
+                outputs,
                 ..Default::default()
             },
         );
         program.resolve_output_types(&library);
         assert_eq!(
-            program.node_output_types(&program.e_nodes[&e_node_id]),
-            &[DataType::Any]
+            program.outputs[program.e_nodes[&e_node_id].outputs][0].data_type,
+            DataType::Any
         );
     }
 

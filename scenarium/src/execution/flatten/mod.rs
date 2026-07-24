@@ -12,14 +12,14 @@
 //!
 //! See `README.md` Part A §5.
 
-use common::Span;
 use hashbrown::{HashMap, HashSet};
 
 use crate::execution::identity::{
     ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
 };
+use crate::execution::program::pool::Pool;
 use crate::execution::program::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, InputStamper,
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, InputStamper,
 };
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
@@ -49,23 +49,17 @@ pub(crate) struct Flattener {
     subs: Vec<ExecutionSubscription>,
 }
 
-/// The graph's SoA pools, rebuilt each `build`. Each node's output span is
-/// assigned from a running counter local to the build; `output_pinned`
-/// is the one output-indexed pool filled *during* that build (a plain lookup
-/// against the authoring graph, unlike `output_types`, which needs a second
-/// pass to follow wildcard mirrors).
+/// The graph's packed port pools, rebuilt each `build`.
 #[derive(Debug)]
 pub(crate) struct Pools<'a> {
-    pub inputs: &'a mut Vec<ExecutionInput>,
-    pub events: &'a mut Vec<ExecutionEvent>,
-    pub output_pinned: &'a mut Vec<bool>,
+    pub inputs: &'a mut Pool<ExecutionInput>,
+    pub outputs: &'a mut Pool<ExecutionOutput>,
+    pub events: &'a mut Pool<ExecutionEvent>,
 }
 
 impl Flattener {
-    /// Flatten `root` into `e_nodes`, rebuilding the SoA pools fresh from the
-    /// library. Output spans are assigned
-    /// from a running counter local to the build; the program's total output count
-    /// is then `output_types.len()`, resolved separately.
+    /// Flatten `root` into `e_nodes`, rebuilding the packed pools fresh from the
+    /// library.
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut HashMap<ExecutionNodeId, ExecutionNode>,
@@ -84,9 +78,9 @@ impl Flattener {
         self.scope_stack.clear();
         self.scope_stack.push(0);
 
-        pools.inputs.clear();
-        pools.events.clear();
-        pools.output_pinned.clear();
+        pools.inputs.values.clear();
+        pools.outputs.values.clear();
+        pools.events.values.clear();
         {
             let mut run = Run {
                 root,
@@ -99,22 +93,10 @@ impl Flattener {
                 e_nodes,
                 cur_id: ExecutionNodeId::default(),
                 inputs: pools.inputs,
-                n_outputs: 0,
+                outputs: pools.outputs,
                 events: pools.events,
-                output_pinned: pools.output_pinned,
             };
             run.emit(false);
-            // One entry pushed per pooled output port, in lockstep with `n_outputs`
-            // (see `emit`'s per-node loop) — this lets the planner index
-            // `output_pinned` in the same output-pool space as demand and readers.
-            // A hand-built `ExecutionProgram` (as in the
-            // executor's low-level tests, which never call `Flattener::build`) doesn't
-            // get this guarantee — that's a separate, already-tolerant read path.
-            debug_assert_eq!(
-                run.output_pinned.len(),
-                run.n_outputs as usize,
-                "output_pinned must have exactly one entry per pooled output port"
-            );
         }
 
         // Apply resolved event edges now that every flat emitter/subscriber exists and
@@ -124,8 +106,7 @@ impl Flattener {
                 continue;
             }
             if let Some(e_node) = e_nodes.get_mut(&subscription.event.e_node_id) {
-                let span = e_node.events.range();
-                pools.events[span][subscription.event.event_idx]
+                pools.events[e_node.events][subscription.event.event_idx]
                     .subscribers
                     .push(subscription.subscriber);
             }
@@ -196,14 +177,10 @@ struct Run<'a> {
     subs: &'a mut Vec<ExecutionSubscription>,
     e_nodes: &'a mut HashMap<ExecutionNodeId, ExecutionNode>,
     cur_id: ExecutionNodeId,
-    /// The inputs pool being built this update; `cur_id`'s span is its tail.
-    inputs: &'a mut Vec<ExecutionInput>,
-    /// Running total of outputs emitted so far; also the next output span start.
-    n_outputs: u32,
-    events: &'a mut Vec<ExecutionEvent>,
-    /// Parallel to the output pool (indexed the same way, built alongside it):
-    /// whether each pooled output port is pinned in the authoring graph.
-    output_pinned: &'a mut Vec<bool>,
+    /// The inputs pool being built this update; `cur_id`'s range is its tail.
+    inputs: &'a mut Pool<ExecutionInput>,
+    outputs: &'a mut Pool<ExecutionOutput>,
+    events: &'a mut Pool<ExecutionEvent>,
 }
 
 impl<'a> Run<'a> {
@@ -277,32 +254,30 @@ impl<'a> Run<'a> {
             let e_node_id = self.execution_node_id(node.id);
             let input_count = func.inputs.len();
 
-            let outputs_start = self.n_outputs;
-            self.n_outputs += func.outputs.len() as u32;
-            for port_idx in 0..func.outputs.len() {
-                self.output_pinned
-                    .push(graph.is_output_pinned(OutputPort::new(node.id, port_idx)));
-            }
-            let events_start = self.events.len() as u32;
-            for func_event in &func.events {
-                self.events.push(ExecutionEvent {
+            let outputs =
+                self.outputs
+                    .append((0..func.outputs.len()).map(|port_idx| ExecutionOutput {
+                        pinned: graph.is_output_pinned(OutputPort::new(node.id, port_idx)),
+                        ..Default::default()
+                    }));
+            let events = self
+                .events
+                .append(func.events.iter().map(|func_event| ExecutionEvent {
                     lambda: func_event.event_lambda.clone(),
                     ..Default::default()
-                });
-            }
+                }));
 
             // Rebuilt fresh from the func every build (never carried over from the
             // last build): the library can evolve between updates — a changed
             // `required` flag or a grown input list must land here, and the bindings
             // loop below visits every port anyway.
-            let inputs_start = self.inputs.len() as u32;
-            for func_input in &func.inputs {
-                self.inputs.push(ExecutionInput {
+            let inputs = self
+                .inputs
+                .append(func.inputs.iter().map(|func_input| ExecutionInput {
                     required: func_input.required,
                     stamper: input_stamper(&func_input.data_type, library),
                     ..Default::default()
-                });
-            }
+                }));
 
             let previous = self.e_nodes.insert(
                 e_node_id,
@@ -312,9 +287,9 @@ impl<'a> Run<'a> {
                     behavior: func.behavior,
                     cache: node.cache,
                     special,
-                    inputs: Span::new(inputs_start, input_count as u32),
-                    outputs: Span::new(outputs_start, func.outputs.len() as u32),
-                    events: Span::new(events_start, func.events.len() as u32),
+                    inputs,
+                    outputs,
+                    events,
                     func_id: func.id,
                     version: func.version,
                     lambda: func.lambda.clone(),
@@ -453,7 +428,7 @@ impl<'a> Run<'a> {
             Source::Const(v) => ExecutionBinding::Const(v),
             Source::Producer(address) => ExecutionBinding::Bind(address),
         };
-        self.inputs[pool_idx].binding = binding;
+        self.inputs.values[pool_idx].binding = binding;
     }
 
     /// Resolve an output reference in the current frame to a concrete flat

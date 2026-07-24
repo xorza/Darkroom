@@ -4,7 +4,7 @@
 
 Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Filesystem identity remains intentionally approximate, but runtime eviction now removes selected flattened cache cones from RAM and disk without mutating the authored graph. Eager hydration and pin delivery still make disk-backed reuse consume more RAM and I/O than the live schedule requires.
 
-The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, a wide positional lambda ABI, parallel compiled-data pools with distributed invariants, and large execution modules that own several distinct responsibilities. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
+The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
 ## Current flow
 
@@ -44,11 +44,11 @@ The main structural problems are late registry validation, mixed lifecycle state
 
 ## Medium: Execution structure
 
-- [ ] **The compiled program's parallel pools distribute structural invariants across the pipeline.** Each `ExecutionNode` stores spans into shared input, event, output-type, and pin vectors. Flattening maintains running offsets, output ownership is reconstructed later, and validation must cross-check every range, so a local node-shape change affects flattening, type resolution, planning, caching, and execution (`src/execution/program.rs:21-39`, `src/execution/program.rs:77-168`, `src/execution/flatten/mod.rs:52-110`, `src/execution/flatten/mod.rs:280-327`, `src/execution/validate.rs:16-68`).
+- [x] **Compiled port storage is packed without parallel output invariants.** `ExecutionNode` stores distinct typed ranges into shared input, output-metadata, and event pools, preserving one reusable vector per payload category instead of allocating vectors per node. A pool owns range creation and flattening appends directly into it, eliminating distributed offset bookkeeping. Output type and pin state now occupy one `ExecutionOutput` entry, so their lengths and indices cannot drift; type resolution uses node-local output addresses instead of reconstructing ownership or staging another type vector, and validation has one output range to check (`src/execution/program/mod.rs`, `src/execution/program/pool.rs`, `src/execution/flatten/mod.rs`, `src/execution/validate.rs`).
 
-- [ ] **`execution/mod.rs` owns unrelated execution layers.** The module root defines shared pool containers and aliases, public execution errors, run seeds, engine installation, orchestration, cache reporting, and resident-cache persistence. These responsibilities obscure the boundaries already represented by the execution submodules (`src/execution/mod.rs:20-120`, `src/execution/mod.rs:122-215`, `src/execution/mod.rs:217-379`).
+- [x] **The execution root is only pipeline documentation and module declarations.** Errors, seeds, compiled-program storage, engine orchestration, and reporting now live in their responsibility modules (`src/execution/mod.rs`, `src/execution/error.rs`, `src/execution/seeds.rs`, `src/execution/program/`, `src/execution/engine/`, `src/execution/report.rs`).
 
-- [ ] **Cache and executor modules each contain several independent state machines.** `cache/mod.rs` combines coverage encoding, snapshots, slot state, invocation mutation, disk policy, digest state, hydration, persistence, reclamation, and RAM reporting in 680 lines. `executor/mod.rs` combines frame hydration, reclamation, run scheduling, invocation, outcome classification, event reporting, and statistics projection in 638 lines, making local changes depend on distant invariants (`src/execution/cache/mod.rs:31-680`, `src/execution/executor/mod.rs:41-638`).
+- [x] **Cache and executor responsibilities are split at state-machine boundaries.** Cache slot/value state lives in `cache/slot.rs` while cross-run policy and persistence live in `cache/runtime/`. Executor value flow and reclamation live in `executor/value_flow.rs`, outcome projection in `executor/outcomes.rs`, and the run loop remains in `executor/mod.rs` (`src/execution/cache/`, `src/execution/executor/`).
 
 ## Low: Public surface and dependency boundaries
 

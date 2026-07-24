@@ -1,14 +1,14 @@
-use crate::DataType;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
 use crate::execution::program::index::NodeSet;
-use crate::execution::program::{ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode};
+use crate::execution::program::{
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
+};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
-use common::Span;
 
 /// Hand-built compile artifact for planner tests. Every node gets a root
 /// attribution leaf. Inputs are `(required, binding)`.
@@ -28,25 +28,16 @@ impl Fix {
         if program.e_nodes.is_empty() {
             self.compiled.flatten_map.reset();
         }
-        let inputs_start = program.inputs.len() as u32;
-        for (required, binding) in inputs {
-            program.inputs.push(ExecutionInput {
+        let inputs = program
+            .inputs
+            .append(inputs.iter().map(|(required, binding)| ExecutionInput {
                 required: *required,
                 stamper: None,
                 binding: binding.clone(),
-            });
-        }
-        let outputs_start = program.output_types.len() as u32;
-        program
-            .output_types
-            .resize(outputs_start as usize + outputs as usize, DataType::Any);
-        // Kept in lockstep with `output_types` (same index space) so
-        // `output_pinned.len() == n_outputs` holds here exactly as
-        // `Flattener::build` guarantees for a real compile — the planner's fold
-        // over both pools relies on this, not just a defensive fallback.
-        program
-            .output_pinned
-            .resize(outputs_start as usize + outputs as usize, false);
+            }));
+        let outputs = program
+            .outputs
+            .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = program.e_nodes.len();
         let id = ExecutionNodeId::from_u128(idx as u128 + 1);
         program.e_nodes.insert(
@@ -54,8 +45,8 @@ impl Fix {
             ExecutionNode {
                 sink,
                 func_id: FuncId::from_u128(idx as u128 + 1),
-                inputs: Span::new(inputs_start, inputs.len() as u32),
-                outputs: Span::new(outputs_start, outputs),
+                inputs,
+                outputs,
                 ..Default::default()
             },
         );
@@ -203,7 +194,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
 fn node_seed_is_both_a_root_and_pinned() {
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
-    f.compiled.program.output_pinned[0] = true;
+    f.compiled.program.outputs.values[0].pinned = true;
 
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
@@ -295,12 +286,11 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
     let mut f = Fix::default();
     let emitter = f.node(false, &[], 0);
     let subscriber = f.node(false, &[], 0);
-    let event_start = f.compiled.program.events.len() as u32;
-    f.compiled.program.events.push(ExecutionEvent {
+    let events = f.compiled.program.events.append([ExecutionEvent {
         subscribers: vec![subscriber],
         ..Default::default()
-    });
-    f.compiled.program.e_nodes.get_mut(&emitter).unwrap().events = Span::new(event_start, 1);
+    }]);
+    f.compiled.program.e_nodes.get_mut(&emitter).unwrap().events = events;
 
     let event = ExecutionEventPort {
         e_node_id: emitter,

@@ -3,15 +3,14 @@ use crate::StaticValue;
 use crate::execution::cache::runtime::test_support::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
-use crate::execution::program::{ExecutionInput, ExecutionNode};
+use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::resource::test_support::prepare_node;
 use crate::node::definition::FuncId;
-use common::Span;
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
-/// go straight into `program.output_types` — each output defaults to `Int`,
+/// go straight into the packed output metadata — each output defaults to `Int`,
 /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
 #[derive(Debug, Default)]
 struct Prog {
@@ -53,7 +52,7 @@ impl Prog {
     /// to none) — gates the Bind-side referent-identity fold.
     fn stamp_input(&mut self, idx: usize, input_idx: usize, stamper: InputStamper) {
         let pool = self.program.e_nodes[&e_node_id(idx)].inputs.start as usize + input_idx;
-        self.program.inputs[pool].stamper = Some(stamper);
+        self.program.inputs.values[pool].stamper = Some(stamper);
     }
 
     fn add_with(
@@ -63,25 +62,30 @@ impl Prog {
         types: &[DataType],
         bindings: &[ExecutionBinding],
     ) -> usize {
-        let inputs_start = self.program.inputs.len() as u32;
-        for binding in bindings {
-            self.program.inputs.push(ExecutionInput {
+        let inputs = self
+            .program
+            .inputs
+            .append(bindings.iter().map(|binding| ExecutionInput {
                 required: false,
                 stamper: None,
                 binding: binding.clone(),
-            });
-        }
+            }));
         let idx = self.program.e_nodes.len();
-        let outputs_start = self.program.output_types.len() as u32;
-        self.program.output_types.extend_from_slice(types);
+        let outputs = self
+            .program
+            .outputs
+            .append(types.iter().cloned().map(|data_type| ExecutionOutput {
+                data_type,
+                pinned: false,
+            }));
         let e_node_id = e_node_id(idx);
         self.program.e_nodes.insert(
             e_node_id,
             ExecutionNode {
                 behavior,
                 func_id: FuncId::from_u128(func),
-                inputs: Span::new(inputs_start, bindings.len() as u32),
-                outputs: Span::new(outputs_start, types.len() as u32),
+                inputs,
+                outputs,
                 ..Default::default()
             },
         );

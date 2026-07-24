@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use common::{CancelToken, Span};
+use common::CancelToken;
 use tokio::sync::Notify;
 
 use crate::execution::cache::runtime::RuntimeCache;
@@ -15,7 +15,8 @@ use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::index::{NodeMap, NodeSet};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionProgram, InputStamper,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
+    InputStamper,
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -98,29 +99,39 @@ struct ConstPathFixture {
 fn const_path_fixture(path: &str) -> ConstPathFixture {
     let first = ExecutionNodeId::from_u128(1);
     let second = ExecutionNodeId::from_u128(2);
-    let mut program = ExecutionProgram {
-        inputs: vec![
-            ExecutionInput {
-                binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
-                ..Default::default()
-            },
-            ExecutionInput {
-                binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
-                ..Default::default()
-            },
-        ],
-        output_types: vec![DataType::Int, DataType::Int],
-        output_pinned: vec![false, false],
-        ..Default::default()
-    };
-    for (e_node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
+    let mut program = ExecutionProgram::default();
+    let input_ranges = [
+        program.inputs.append([ExecutionInput {
+            binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
+            ..Default::default()
+        }]),
+        program.inputs.append([ExecutionInput {
+            binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
+            ..Default::default()
+        }]),
+    ];
+    let output_ranges = [
+        program.outputs.append([ExecutionOutput {
+            data_type: DataType::Int,
+            ..Default::default()
+        }]),
+        program.outputs.append([ExecutionOutput {
+            data_type: DataType::Int,
+            ..Default::default()
+        }]),
+    ];
+    for ((e_node_id, inputs), outputs) in [first, second]
+        .into_iter()
+        .zip(input_ranges)
+        .zip(output_ranges)
+    {
         program.e_nodes.insert(
             e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(10),
-                inputs: Span::new(input_start, 1),
-                outputs: Span::new(output_start, 1),
+                inputs,
+                outputs,
                 ..Default::default()
             },
         );
@@ -254,41 +265,47 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         e_node_id: producer,
         port_idx: 0,
     };
-    let mut program = ExecutionProgram {
-        inputs: vec![
-            ExecutionInput {
-                stamper: Some(InputStamper::Custom(stamper.clone())),
-                binding: ExecutionBinding::Bind(address),
-                ..Default::default()
-            },
-            ExecutionInput {
-                stamper: Some(InputStamper::Custom(stamper)),
-                binding: ExecutionBinding::Bind(address),
-                ..Default::default()
-            },
-        ],
-        output_types: vec![DataType::Int, DataType::Int, DataType::Int],
-        output_pinned: vec![false, false, false],
+    let mut program = ExecutionProgram::default();
+    let consumer_inputs = [
+        program.inputs.append([ExecutionInput {
+            stamper: Some(InputStamper::Custom(stamper.clone())),
+            binding: ExecutionBinding::Bind(address),
+            ..Default::default()
+        }]),
+        program.inputs.append([ExecutionInput {
+            stamper: Some(InputStamper::Custom(stamper)),
+            binding: ExecutionBinding::Bind(address),
+            ..Default::default()
+        }]),
+    ];
+    let producer_outputs = program.outputs.append([ExecutionOutput {
+        data_type: DataType::Int,
         ..Default::default()
-    };
+    }]);
     program.e_nodes.insert(
         producer,
         ExecutionNode {
             behavior: FuncBehavior::Pure,
             func_id: FuncId::from_u128(1),
-            outputs: Span::new(0, 1),
+            outputs: producer_outputs,
             ..Default::default()
         },
     );
-    for (e_node_id, input_start, output_start) in [(first_consumer, 0, 1), (second_consumer, 1, 2)]
+    for (e_node_id, inputs) in [first_consumer, second_consumer]
+        .into_iter()
+        .zip(consumer_inputs)
     {
+        let outputs = program.outputs.append([ExecutionOutput {
+            data_type: DataType::Int,
+            ..Default::default()
+        }]);
         program.e_nodes.insert(
             e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(2),
-                inputs: Span::new(input_start, 1),
-                outputs: Span::new(output_start, 1),
+                inputs,
+                outputs,
                 ..Default::default()
             },
         );

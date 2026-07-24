@@ -18,7 +18,9 @@ use `DetachedNode`, which keeps the id, node, all touching wiring, subscriptions
 and pins together.
 
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
-are dissolved into flat function nodes and SoA pools. Top-level nodes retain
+are dissolved into flat function nodes and packed input, output-metadata, and
+event pools. Each node stores typed ranges into those shared vectors, avoiding
+per-node port allocations. Top-level nodes retain
 the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
 BLAKE3 from the enclosing instance ids and interior node id. `FlattenMap`
@@ -50,7 +52,7 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `execution/compile.rs` | Host-side compiler and compiled artifact |
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
-| `execution/program.rs` | Private flat runtime program |
+| `execution/program/` | Private flat runtime program and typed packed pools |
 | `execution/plan/` | Structural scheduling and missing-input verdicts |
 | `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |

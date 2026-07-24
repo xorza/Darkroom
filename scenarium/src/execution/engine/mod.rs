@@ -311,14 +311,13 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
-            self.compiled
-                .program
-                .node_inputs(&self.compiled.program.e_nodes[&e_node_id])
+            let program = &self.compiled.program;
+            &program.inputs[program.e_nodes[&e_node_id].inputs]
         }
 
         pub(crate) fn node_events(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
             let events = self.compiled.program.e_nodes[&e_node_id].events;
-            &self.compiled.program.events[events.range()]
+            &self.compiled.program.events[events]
         }
 
         pub(crate) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
@@ -359,7 +358,7 @@ pub(crate) mod test_support {
         fn argument_values_at(&self, e_node_id: ExecutionNodeId) -> ArgumentValues {
             let e_node = &self.compiled.program.e_nodes[&e_node_id];
 
-            let inputs = self.compiled.program.inputs[e_node.inputs.range()]
+            let inputs = self.compiled.program.inputs[e_node.inputs]
                 .iter()
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,

@@ -4,17 +4,18 @@
 //! between the per-run plan/resolver/executor and the cross-run runtime cache.
 
 pub(crate) mod index;
+pub(crate) mod pool;
 
 use std::sync::Arc;
 
-use common::Span;
 use hashbrown::HashMap;
 
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::index::OutputIdx;
+use crate::execution::program::pool::{Pool, PoolRange};
 use crate::graph::CacheMode;
 use crate::library::Library;
-use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
+use crate::node::definition::{FuncBehavior, FuncId, OutputType};
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
 use crate::node::output_type::{OutputTypeResolver, OutputTypeSource};
@@ -56,6 +57,16 @@ pub(crate) struct ExecutionEvent {
     pub lambda: EventLambda,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct ExecutionOutput {
+    pub(crate) data_type: DataType,
+    pub(crate) pinned: bool,
+}
+
+pub(crate) type InputRange = PoolRange<ExecutionInput>;
+pub(crate) type OutputRange = PoolRange<ExecutionOutput>;
+pub(crate) type EventRange = PoolRange<ExecutionEvent>;
+
 /// Topology + code for one flat node. Immutable across runs; all mutable
 /// per-run/cross-run state is keyed by the node id in the executor.
 #[derive(Default, Debug)]
@@ -85,9 +96,9 @@ pub(crate) struct ExecutionNode {
     /// See `README.md` Part C.
     pub special: Option<SpecialNode>,
 
-    pub inputs: Span,
-    pub outputs: Span,
-    pub events: Span,
+    pub inputs: InputRange,
+    pub outputs: OutputRange,
+    pub events: EventRange,
 
     pub func_id: FuncId,
     /// Copied from `Func`; changing it invalidates this pure node's cache key.
@@ -99,32 +110,19 @@ pub(crate) struct ExecutionNode {
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
     pub(crate) e_nodes: HashMap<ExecutionNodeId, ExecutionNode>,
-    pub(crate) inputs: Vec<ExecutionInput>,
-    pub(crate) events: Vec<ExecutionEvent>,
-    /// The output pool: each node's resolved declared output types (wildcards
-    /// followed), flat and indexed like the plan's output columns — `e_node.outputs.range()` is
-    /// the node's slice. Resolved once at flatten by [`Self::resolve_output_types`]
+    pub(crate) inputs: Pool<ExecutionInput>,
+    pub(crate) events: Pool<ExecutionEvent>,
+    /// Each node's resolved declared output types (wildcards followed) and pin bits,
+    /// packed in the same index space as the plan's output columns. Resolved once at flatten
+    /// by [`Self::resolve_output_types`]
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
     /// re-keys). An unresolved wildcard port is
-    /// `DataType::Any`. Its `len()` is the program's total output count
-    /// ([`Self::n_outputs`]).
-    pub(crate) output_types: Vec<DataType>,
-    /// Whether each pooled output port is pinned — copied from
-    /// [`Graph::pinned_outputs`](crate::graph::Graph) at flatten, same
-    /// indexing as `output_types`. The resolver reads this to mark a
-    /// pinned port as used even with no in-graph binding.
-    pub(crate) output_pinned: Vec<bool>,
+    /// `DataType::Any`. Its length is the program's total output count.
+    pub(crate) outputs: Pool<ExecutionOutput>,
 }
 
 impl ExecutionProgram {
-    /// The program's total output count: the length of the `output_types` pool and the
-    /// resolved run's output columns (every node's output span summed). Derived from
-    /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
-    pub(crate) fn n_outputs(&self) -> usize {
-        self.output_types.len()
-    }
-
     pub(crate) fn output_idx(&self, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputIdx {
         let outputs = self.e_nodes[&e_node_id].outputs;
         debug_assert!(
@@ -138,81 +136,51 @@ impl ExecutionProgram {
         OutputIdx(outputs.start.wrapping_add(port_idx as u32))
     }
 
-    pub(crate) fn is_output_pinned(&self, output_idx: OutputIdx) -> bool {
-        self.output_pinned[output_idx.idx()]
-    }
-
-    /// `e_node`'s slice of the shared input pool.
-    pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[ExecutionInput] {
-        &self.inputs[e_node.inputs.range()]
-    }
-
-    /// `e_node`'s slice of the resolved output-type pool.
-    pub(crate) fn node_output_types(&self, e_node: &ExecutionNode) -> &[DataType] {
-        &self.output_types[e_node.outputs.range()]
-    }
-
-    /// Fill the `output_types` pool by resolving each node's declared output types
+    /// Fill the output metadata pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
     /// flatten, where every compiled node's func is guaranteed present
-    /// (`validate_for_execution` resolved them). Results are memoized by [`OutputIdx`];
-    /// unresolved and cyclic wildcard ports store `DataType::Any`.
+    /// (`validate_for_execution` resolved them). Results are memoized by
+    /// [`ExecutionOutputPort`]; unresolved and cyclic wildcard ports store `DataType::Any`.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
-        let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
-        let mut owners = vec![None; total];
-        for e_node_id in self.e_nodes.keys().copied() {
-            let span = self.e_nodes[&e_node_id].outputs;
-            for output_idx in span.range() {
-                owners[output_idx] = Some(e_node_id);
-            }
-        }
-        let types = {
-            let source = |output_idx: OutputIdx| {
-                let e_node_id =
-                    owners[output_idx.idx()].expect("every output pool entry must have an owner");
-                let e_node = &self.e_nodes[&e_node_id];
-                let port = (output_idx.0 - e_node.outputs.start) as usize;
-                let func = node_func(self, library, e_node_id).expect(
+        let e_nodes = &self.e_nodes;
+        let inputs = &self.inputs;
+        let source = |port: ExecutionOutputPort| {
+            let e_node = &e_nodes[&port.e_node_id];
+            let func = match e_node.special {
+                Some(special) => special.func(),
+                None => library.by_id(&e_node.func_id).expect(
                     "a compiled node's func is registered in the library \
                      (validated at validate_for_execution)",
-                );
-                match &func.outputs[port].ty {
-                    OutputType::Fixed(data_type) => OutputTypeSource::Fixed(data_type.clone()),
-                    OutputType::Wildcard { mirrors } => {
-                        let input = &self.inputs[e_node.inputs.range()][*mirrors];
-                        let declared = &func.inputs[*mirrors].data_type;
-                        match &input.binding {
-                            ExecutionBinding::Bind(address) => OutputTypeSource::Bind(
-                                self.output_idx(address.e_node_id, address.port_idx),
-                            ),
-                            ExecutionBinding::Const(value) => OutputTypeSource::Const {
-                                declared: declared.clone(),
-                                value: value.clone(),
-                            },
-                            ExecutionBinding::None => OutputTypeSource::Unresolved,
-                        }
+                ),
+            };
+            match &func.outputs[port.port_idx].ty {
+                OutputType::Fixed(data_type) => OutputTypeSource::Fixed(data_type.clone()),
+                OutputType::Wildcard { mirrors } => {
+                    let input = &inputs[e_node.inputs][*mirrors];
+                    let declared = &func.inputs[*mirrors].data_type;
+                    match &input.binding {
+                        ExecutionBinding::Bind(address) => OutputTypeSource::Bind(*address),
+                        ExecutionBinding::Const(value) => OutputTypeSource::Const {
+                            declared: declared.clone(),
+                            value: value.clone(),
+                        },
+                        ExecutionBinding::None => OutputTypeSource::Unresolved,
                     }
                 }
-            };
-            let mut resolver = OutputTypeResolver::new(total);
-            (0..total)
-                .map(|idx| resolver.resolve(OutputIdx::from(idx), &source))
-                .collect()
+            }
         };
-        self.output_types = types;
-    }
-}
-
-/// The func backing `e_node_id`: a special node's hardcoded spec, else the library
-/// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
-/// for the program's own (`validate_for_execution`-validated) library, never happens.
-fn node_func<'a>(
-    program: &'a ExecutionProgram,
-    library: &'a Library,
-    e_node_id: ExecutionNodeId,
-) -> Option<&'a Func> {
-    match program.e_nodes[&e_node_id].special {
-        Some(special) => Some(special.func()),
-        None => library.by_id(&program.e_nodes[&e_node_id].func_id),
+        let mut resolver = OutputTypeResolver::new(self.outputs.values.len());
+        for (e_node_id, e_node) in e_nodes {
+            for port_idx in 0..e_node.outputs.len as usize {
+                let data_type = resolver.resolve(
+                    ExecutionOutputPort {
+                        e_node_id: *e_node_id,
+                        port_idx,
+                    },
+                    &source,
+                );
+                self.outputs.values[e_node.outputs.start as usize + port_idx].data_type = data_type;
+            }
+        }
     }
 }

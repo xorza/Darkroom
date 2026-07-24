@@ -40,6 +40,15 @@ Compilation lowers the authoring graph into an immutable `ExecutionProgram`.
 Composite instances and boundaries disappear, leaving only flat func nodes for
 scheduling, caching, pruning, and cycle detection.
 
+The compiled representation keeps one reusable packed vector for each distinct
+port payload: inputs, output metadata, and events. `ExecutionNode` stores typed
+`(start, len)` ranges into those vectors. Output type and pin state share one
+metadata entry, so they cannot drift and do not require parallel allocations.
+Flattening appends directly to the pools and retains their capacity across
+recompiles; it does not allocate a vector per node. Output-type resolution uses
+node-local output addresses directly, so it does not rebuild a flat-index owner
+table or stage resolved types in another vector.
+
 ## A.2 Interfaces and boundary nodes
 
 A graph interface reuses `FuncInput` and `FuncOutput`, so graph and func instances

@@ -5,12 +5,11 @@ use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
-use crate::execution::program::{ExecutionNode, ExecutionProgram};
+use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
 use crate::graph::CacheMode;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::{DynamicValue, RamUsage, StaticValue};
-use common::Span;
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
@@ -372,10 +371,13 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
 
     let e_node_id = ExecutionNodeId::from_u128(1);
     let mut program = ExecutionProgram::default();
+    let outputs = program
+        .outputs
+        .append([ExecutionOutput::default(), ExecutionOutput::default()]);
     program.e_nodes.insert(
         e_node_id,
         ExecutionNode {
-            outputs: Span::new(0, 2),
+            outputs,
             ..Default::default()
         },
     );

@@ -9,7 +9,7 @@ use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::index::{NodeSet, OutputColumn, OutputIdx};
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::PinnedOutputs;
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
@@ -17,8 +17,7 @@ use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::test_support;
 use crate::node::lambda::{FuncLambda, OutputDemand};
-use crate::{DataType, DynamicValue, StaticValue};
-use common::Span;
+use crate::{DynamicValue, StaticValue};
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,
 /// so `bind` lines up. Inputs are all optional here (the planner gates required
@@ -35,29 +34,26 @@ impl Prog {
         outputs: u32,
         lambda: FuncLambda,
     ) -> ExecutionNodeId {
-        let inputs_start = self.program.inputs.len() as u32;
-        for binding in inputs {
-            self.program.inputs.push(ExecutionInput {
+        let inputs = self
+            .program
+            .inputs
+            .append(inputs.iter().map(|binding| ExecutionInput {
                 required: false,
                 stamper: None,
                 binding: binding.clone(),
-            });
-        }
-        let outputs_start = self.program.output_types.len() as u32;
-        self.program
-            .output_types
-            .resize(outputs_start as usize + outputs as usize, DataType::Any);
-        self.program
-            .output_pinned
-            .resize(outputs_start as usize + outputs as usize, false);
+            }));
+        let outputs = self
+            .program
+            .outputs
+            .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = self.program.e_nodes.len();
         let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
         self.program.e_nodes.insert(
             e_node_id,
             ExecutionNode {
                 func_id: FuncId::from_u128(idx as u128 + 1),
-                inputs: Span::new(inputs_start, inputs.len() as u32),
-                outputs: Span::new(outputs_start, outputs),
+                inputs,
+                outputs,
                 lambda,
                 // `CacheMode` now defaults to `None`; these tests assume outputs are
                 // retained (`Ram`) unless a case flips it via `set_cache`.
@@ -77,7 +73,7 @@ impl Prog {
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
     fn set_output_pinned(&mut self, e_node_id: ExecutionNodeId, port: usize, pinned: bool) {
         let start = self.program.e_nodes[&e_node_id].outputs.start as usize;
-        self.program.output_pinned[start + port] = pinned;
+        self.program.outputs.values[start + port].pinned = pinned;
     }
 }
 
@@ -92,7 +88,7 @@ struct TestRun {
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
 fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
-    assert_eq!(readers.len(), program.n_outputs());
+    assert_eq!(readers.len(), program.outputs.values.len());
     let demand: Vec<OutputDemand> = readers
         .iter()
         .map(|count| {
@@ -141,7 +137,7 @@ fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
 fn straight_run(program: &ExecutionProgram) -> TestRun {
-    run_with_readers(program, vec![1; program.n_outputs()])
+    run_with_readers(program, vec![1; program.outputs.values.len()])
 }
 
 fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
@@ -171,7 +167,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     let e_node_id = p.node(&[], 1, FuncLambda::default());
     assert!(
         catch_unwind(AssertUnwindSafe(|| p.program.output_idx(e_node_id, 1))).is_err(),
-        "a node-local output outside its compiled span must trip in debug"
+        "a node-local output outside its compiled range must trip in debug"
     );
 
     if let Ok(index) = usize::try_from(u64::from(u32::MAX) + 1) {

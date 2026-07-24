@@ -1,16 +1,14 @@
 use super::*;
-use crate::DataType;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::index::NodeSet;
 use crate::execution::program::index::OutputIdx;
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::FuncLambda;
 use crate::{DynamicValue, StaticValue, async_lambda};
-use common::Span;
 
 #[derive(Debug)]
 struct CachedNode {
@@ -26,21 +24,18 @@ struct Fix {
 
 impl Fix {
     fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
-        let inputs_start = self.program.inputs.len() as u32;
-        for (required, binding) in inputs {
-            self.program.inputs.push(ExecutionInput {
+        let inputs = self
+            .program
+            .inputs
+            .append(inputs.iter().map(|(required, binding)| ExecutionInput {
                 required: *required,
                 stamper: None,
                 binding: binding.clone(),
-            });
-        }
-        let outputs_start = self.program.output_types.len() as u32;
-        self.program
-            .output_types
-            .resize(outputs_start as usize + outputs as usize, DataType::Any);
-        self.program
-            .output_pinned
-            .resize(outputs_start as usize + outputs as usize, false);
+            }));
+        let outputs = self
+            .program
+            .outputs
+            .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = self.program.e_nodes.len();
         let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
         self.order.push(e_node_id);
@@ -49,8 +44,8 @@ impl Fix {
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(idx as u128 + 1),
-                inputs: Span::new(inputs_start, inputs.len() as u32),
-                outputs: Span::new(outputs_start, outputs),
+                inputs,
+                outputs,
                 lambda: async_lambda!(|_ctx, _state, _events, _inputs, _demand, _outputs| {
                     Ok(())
                 }),
@@ -284,7 +279,7 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
     let graph_pinned = fix.node(&[], 2);
     let node_pinned = fix.node(&[], 2);
     let output_idx = fix.program.output_idx(graph_pinned, 1);
-    fix.program.output_pinned[output_idx.idx()] = true;
+    fix.program.outputs.values[output_idx.idx()].pinned = true;
 
     let run = fix
         .resolve(

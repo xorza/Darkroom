@@ -32,14 +32,12 @@ pub(crate) enum CompiledGraphValidationError {
     OutputArity { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} event arity does not match its function")]
     EventArity { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} input span is out of range")]
-    InputSpan { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} output span is out of range")]
-    OutputSpan { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} pinned-output span is out of range")]
-    PinnedOutputSpan { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} event span is out of range")]
-    EventSpan { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} input range is out of bounds")]
+    InputRange { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} output range is out of bounds")]
+    OutputRange { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} event range is out of bounds")]
+    EventRange { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} binds to missing node {target:?}")]
     MissingBindingTarget {
         e_node_id: ExecutionNodeId,
@@ -69,8 +67,8 @@ pub(crate) enum ExecutionPlanValidationError {
     OrderTooLong,
     #[error("execution order contains missing node {e_node_id:?}")]
     MissingNode { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} input span is out of range")]
-    InputSpan { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} input range is out of bounds")]
+    InputRange { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} appears before dependency {dependency:?}")]
     BeforeDependency {
         e_node_id: ExecutionNodeId,
@@ -124,23 +122,18 @@ impl CompiledGraph {
                     e_node_id: *e_node_id,
                 });
             }
-            let inputs = program.inputs.get(e_node.inputs.range()).ok_or(
-                CompiledGraphValidationError::InputSpan {
+            let inputs = program.inputs.values.get(e_node.inputs.range()).ok_or(
+                CompiledGraphValidationError::InputRange {
                     e_node_id: *e_node_id,
                 },
             )?;
-            if program.output_types.get(e_node.outputs.range()).is_none() {
-                return Err(CompiledGraphValidationError::OutputSpan {
+            if program.outputs.values.get(e_node.outputs.range()).is_none() {
+                return Err(CompiledGraphValidationError::OutputRange {
                     e_node_id: *e_node_id,
                 });
             }
-            if program.output_pinned.get(e_node.outputs.range()).is_none() {
-                return Err(CompiledGraphValidationError::PinnedOutputSpan {
-                    e_node_id: *e_node_id,
-                });
-            }
-            if program.events.get(e_node.events.range()).is_none() {
-                return Err(CompiledGraphValidationError::EventSpan {
+            if program.events.values.get(e_node.events.range()).is_none() {
+                return Err(CompiledGraphValidationError::EventRange {
                     e_node_id: *e_node_id,
                 });
             }
@@ -234,8 +227,9 @@ impl ExecutionPlan {
                 .ok_or(ExecutionPlanValidationError::MissingNode { e_node_id })?;
             let inputs = program
                 .inputs
+                .values
                 .get(e_node.inputs.range())
-                .ok_or(ExecutionPlanValidationError::InputSpan { e_node_id })?;
+                .ok_or(ExecutionPlanValidationError::InputRange { e_node_id })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     let disabled_dependency = program

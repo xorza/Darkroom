@@ -344,7 +344,7 @@ impl Executor {
                 if succeeded {
                     if plan.event_sources.contains(&e_node_id) {
                         outcome.event_triggers.extend(
-                            program.events[e_node.events.range()]
+                            program.events[e_node.events]
                                 .iter()
                                 .enumerate()
                                 .filter(|(_, event)| {

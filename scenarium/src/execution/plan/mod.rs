@@ -193,8 +193,7 @@ impl Planner {
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
-                    let missing = program
-                        .node_inputs(&program.e_nodes[&e_node_id])
+                    let missing = program.inputs[program.e_nodes[&e_node_id].inputs]
                         .iter()
                         .any(|e_input| input_missing(e_input, &plan.verdicts));
                     *plan.verdicts.get_mut(&e_node_id).unwrap() = if missing {
@@ -226,7 +225,7 @@ impl Planner {
             *self.color.get_mut(&e_node_id).unwrap() = Color::Gray;
             self.stack.push(Visit::Done(e_node_id));
 
-            for e_input in program.node_inputs(e_node) {
+            for e_input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     self.stack.push(Visit::Discover(addr.e_node_id));
                 }
@@ -271,7 +270,7 @@ fn collect_roots(
         let Some(e_node) = program.e_nodes.get(&event.e_node_id) else {
             return Err(Error::EventSeedNotFound { event });
         };
-        let Some(e_event) = program.events[e_node.events.range()].get(event.event_idx) else {
+        let Some(e_event) = program.events[e_node.events].get(event.event_idx) else {
             return Err(Error::EventSeedNotFound { event });
         };
         let subs = &e_event.subscribers;
@@ -299,7 +298,7 @@ fn collect_roots(
             plan.roots.insert(e_node_id);
         }
         if seeds.event_sources
-            && program.events[e_node.events.range()]
+            && program.events[e_node.events]
                 .iter()
                 .any(|event| !event.subscribers.is_empty())
         {
