@@ -9,7 +9,7 @@ use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior};
 use crate::node::lambda::test_support;
 use crate::node::lambda::{InvokeError, OutputDemand};
-use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
 use tokio::sync::Mutex;
@@ -5475,12 +5475,12 @@ mod graph {
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
     /// emitter; instantiate it by name with `fnode`.
     fn add_ticker(library: &mut Library) {
-        library.add(
+        library.add(testing::with_stub_lambda(
             Func::new(FuncId::unique(), "ticker")
                 .category("Test")
                 .sink()
                 .event("tick", EventLambda::default()),
-        );
+        ));
     }
 
     fn func_lib_with_ticker() -> Library {
@@ -6046,15 +6046,20 @@ mod compile_regressions {
 
     #[test]
     fn compiled_output_types_match_authoring_resolution() {
-        let fixed =
-            Func::new(FuncId::unique(), "fixed").output(FuncOutput::new("Value", DataType::Int));
-        let passthrough = Func::new(FuncId::unique(), "passthrough")
-            .input(FuncInput::required("Value", DataType::Any))
-            .wildcard_output("Value", 0);
+        let fixed = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "fixed").output(FuncOutput::new("Value", DataType::Int)),
+        );
+        let passthrough = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "passthrough")
+                .input(FuncInput::required("Value", DataType::Any))
+                .wildcard_output("Value", 0),
+        );
         let path_type = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
-        let typed_path = Func::new(FuncId::unique(), "typed_path")
-            .input(FuncInput::required("Value", path_type.clone()))
-            .wildcard_output("Value", 0);
+        let typed_path = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "typed_path")
+                .input(FuncInput::required("Value", path_type.clone()))
+                .wildcard_output("Value", 0),
+        );
         let mut library = Library::default();
         library.add(fixed.clone());
         library.add(passthrough.clone());
@@ -6114,9 +6119,11 @@ mod compile_regressions {
 
     #[test]
     fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
-        let passthrough = Func::new(FuncId::unique(), "passthrough")
-            .input(FuncInput::required("Value", DataType::Any))
-            .wildcard_output("Value", 0);
+        let passthrough = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "passthrough")
+                .input(FuncInput::required("Value", DataType::Any))
+                .wildcard_output("Value", 0),
+        );
         let mut library = Library::default();
         library.add(passthrough.clone());
         let mut graph = Graph::default();

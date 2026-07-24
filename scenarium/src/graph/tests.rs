@@ -5,7 +5,7 @@ use crate::graph::{
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
-use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
 
@@ -14,9 +14,11 @@ type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Sen
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
 fn passthrough_func() -> Func {
-    Func::new(FuncId::unique(), "pass")
-        .input(FuncInput::required("x", DataType::Any))
-        .wildcard_output("o", 0)
+    testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "pass")
+            .input(FuncInput::required("x", DataType::Any))
+            .wildcard_output("o", 0),
+    )
 }
 
 #[test]
@@ -242,9 +244,11 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     let validate = |const_only: bool| -> Result<(), GraphValidationError> {
         let port = FuncInput::required("locked", DataType::Int);
         let port = if const_only { port.const_only() } else { port };
-        let func = Func::new(FuncId::unique(), "f")
-            .input(port)
-            .output(FuncOutput::new("out", DataType::Int));
+        let func = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "f")
+                .input(port)
+                .output(FuncOutput::new("out", DataType::Int)),
+        );
         let mut library = Library::default();
         library.add(func.clone());
 
@@ -274,14 +278,19 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
-    let int_src =
-        Func::new(FuncId::unique(), "int_src").output(FuncOutput::new("o", DataType::Int));
-    let str_sink = Func::new(FuncId::unique(), "str_sink")
-        .input(FuncInput::required("x", DataType::String))
-        .output(FuncOutput::new("o", DataType::String));
-    let int_sink = Func::new(FuncId::unique(), "int_sink")
-        .input(FuncInput::required("x", DataType::Int))
-        .output(FuncOutput::new("o", DataType::Int));
+    let int_src = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "int_src").output(FuncOutput::new("o", DataType::Int)),
+    );
+    let str_sink = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "str_sink")
+            .input(FuncInput::required("x", DataType::String))
+            .output(FuncOutput::new("o", DataType::String)),
+    );
+    let int_sink = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "int_sink")
+            .input(FuncInput::required("x", DataType::Int))
+            .output(FuncOutput::new("o", DataType::Int)),
+    );
     let pass_func = passthrough_func();
     let mut library = Library::default();
     library.add(int_src.clone());
@@ -353,18 +362,22 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
         "a numeric constant satisfies a numeric input"
     );
 
-    let single_path = Func::new(FuncId::unique(), "single_path")
-        .input(FuncInput::required(
-            "path",
-            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
-        ))
-        .output(FuncOutput::new("o", DataType::Int));
-    let path_list = Func::new(FuncId::unique(), "path_list")
-        .input(FuncInput::required(
-            "paths",
-            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
-        ))
-        .output(FuncOutput::new("o", DataType::Int));
+    let single_path = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "single_path")
+            .input(FuncInput::required(
+                "path",
+                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
+            ))
+            .output(FuncOutput::new("o", DataType::Int)),
+    );
+    let path_list = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "path_list")
+            .input(FuncInput::required(
+                "paths",
+                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+            ))
+            .output(FuncOutput::new("o", DataType::Int)),
+    );
     library.add(single_path.clone());
     library.add(path_list.clone());
 
@@ -405,7 +418,9 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
 fn validate_for_execution_rejects_out_of_range_pinned_output() {
     use crate::library::Library;
 
-    let func = Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int));
+    let func = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int)),
+    );
     let mut library = Library::default();
     library.add(func.clone());
 
@@ -429,7 +444,9 @@ fn resolve_output_type_follows_passthrough_chain() {
 
     // Int-out producer → pass1 → pass2. Both passthroughs declare a `Any`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
-    let producer = Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int));
+    let producer = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int)),
+    );
     let pass_func = passthrough_func();
     let mut library = Library::default();
     library.add(producer.clone());
@@ -508,11 +525,13 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
     // A reroute func with *typed* inputs, each mirrored by a wildcard output.
     let fs_ty = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
     let enum_ty = DataType::Enum(TypeId::from_u128(0x5e));
-    let func = Func::new(FuncId::unique(), "reroute")
-        .input(FuncInput::required("path", fs_ty.clone()))
-        .input(FuncInput::required("mode", enum_ty.clone()))
-        .wildcard_output("path_out", 0)
-        .wildcard_output("mode_out", 1);
+    let func = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "reroute")
+            .input(FuncInput::required("path", fs_ty.clone()))
+            .input(FuncInput::required("mode", enum_ty.clone()))
+            .wildcard_output("path_out", 0)
+            .wildcard_output("mode_out", 1),
+    );
     let mut library = Library::default();
     library.add(func.clone());
 
@@ -545,13 +564,17 @@ fn edges_invalidated_by_follows_wildcard_chains() {
     use crate::DataType;
     use crate::library::Library;
 
-    let float_src =
-        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
-    let str_src =
-        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
-    let float_sink = Func::new(FuncId::unique(), "fsink")
-        .input(FuncInput::required("x", DataType::Float))
-        .output(FuncOutput::new("o", DataType::Float));
+    let float_src = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
+    );
+    let str_src = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String)),
+    );
+    let float_sink = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "fsink")
+            .input(FuncInput::required("x", DataType::Float))
+            .output(FuncOutput::new("o", DataType::Float)),
+    );
     let pass_func = passthrough_func();
     let mut library = Library::default();
     library.add(float_src.clone());
@@ -656,9 +679,11 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
     use crate::DataType;
     use crate::library::Library;
 
-    let consumer = Func::new(FuncId::unique(), "dst")
-        .input(FuncInput::required("x", DataType::Float))
-        .output(FuncOutput::new("out", DataType::Float));
+    let consumer = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "dst")
+            .input(FuncInput::required("x", DataType::Float))
+            .output(FuncOutput::new("out", DataType::Float)),
+    );
     let mut library = Library::default();
     library.add(consumer.clone());
 

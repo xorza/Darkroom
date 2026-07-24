@@ -33,6 +33,10 @@ impl Default for TestFuncHooks {
     }
 }
 
+pub fn with_stub_lambda(func: Func) -> Func {
+    func.lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
+}
+
 pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
     let TestFuncHooks {
         get_a,

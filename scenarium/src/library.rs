@@ -327,6 +327,7 @@ mod tests {
             Func::new(FuncId::unique(), "wildcard")
                 .input(FuncInput::required("value", DataType::Any))
                 .wildcard_output("value", 1),
+            Func::new(FuncId::unique(), "missing"),
         ] {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Library::default().add(func);

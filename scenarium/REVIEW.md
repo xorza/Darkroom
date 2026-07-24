@@ -4,7 +4,7 @@
 
 Scenarium retains a strong top-level split between authoring graphs, compiled programs, planning, cache-aware resolution, and execution. Filesystem identity remains intentionally approximate, but runtime eviction now removes selected flattened cache cones from RAM and disk without mutating the authored graph. Eager hydration and pin delivery still make disk-backed reuse consume more RAM and I/O than the live schedule requires.
 
-The main structural problems are late registry validation, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
+The main structural problems are inconsistent registry semantics, mixed lifecycle state in `ContextManager`, and a wide positional lambda ABI. The public surface also exposes worker coordination and execution-internal types that have no external production consumer.
 
 ## Current flow
 
@@ -16,7 +16,7 @@ The main structural problems are late registry validation, mixed lifecycle state
 
 ## High: Registry and runtime validity
 
-- [ ] **`Library` admits functions without implementations.** `Func` defaults to `FuncLambda::None`, and `Func::validate` does not reject that state. The invalid registration survives compilation and becomes a per-node `RunError::MissingLambda`, leaving a host configuration error on the execution hot path (`src/node/definition.rs:186-224`, `src/node/definition.rs:313-349`, `src/node/lambda.rs:93-124`, `src/execution/mod.rs:146-171`).
+- [x] **`Library` rejects functions without implementations.** `Func::validate` reports `MissingLambda`, and every registration path (`add`, `from`, and `merge`) passes through that validation before inserting each function. Declaration-only tests attach an explicit stub implementation rather than constructing a runtime-invalid library (`src/node/definition.rs`, `src/library.rs`).
 
 - [ ] **Registry collisions have incompatible semantics.** Function and shared-graph insertion silently replace an existing identity, while duplicate type registration panics; `Library::merge` applies all three behaviors implicitly. Accidental function replacement is particularly dangerous because `FuncId` is also part of persistent cache identity (`src/library.rs:148-175`, `src/library.rs:214-224`).
 

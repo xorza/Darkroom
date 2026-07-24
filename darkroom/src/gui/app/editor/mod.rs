@@ -514,6 +514,7 @@ mod tests {
 
     use glam::Vec2;
     use scenarium::DataType;
+    use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
     use scenarium::{Graph, InputPort, Library, Node, NodeKind};
 
@@ -735,16 +736,22 @@ mod tests {
 
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
-        let float_src =
-            Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
-        let string_src =
-            Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
-        let float_sink = Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("o", DataType::Float));
-        let pass_func = Func::new(FuncId::unique(), "pass")
-            .input(FuncInput::required("x", DataType::Any))
-            .wildcard_output("o", 0);
+        let float_src = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
+        );
+        let string_src = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String)),
+        );
+        let float_sink = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "fsink")
+                .input(FuncInput::required("x", DataType::Float))
+                .output(FuncOutput::new("o", DataType::Float)),
+        );
+        let pass_func = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "pass")
+                .input(FuncInput::required("x", DataType::Any))
+                .wildcard_output("o", 0),
+        );
         let library = Library::from([
             float_src.clone(),
             string_src.clone(),

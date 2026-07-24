@@ -4,6 +4,7 @@ use crate::core::runtime_library::{PublishedLibrary, test_support};
 use glam::Vec2;
 use rhai::Array;
 use scenarium::Library;
+use scenarium::testing;
 use scenarium::{Binding, InputPort, NodeId, NodeKind, OutputPort};
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
@@ -37,12 +38,14 @@ fn list_funcs_returns_full_func_objects_sorted_by_name() {
     use scenarium::{EventLambda, Func, FuncId};
 
     let mut lib = Library::default();
-    lib.add(Func::new(FuncId::unique(), "beta").category("io"));
-    lib.add(
+    lib.add(testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "beta").category("io"),
+    ));
+    lib.add(testing::with_stub_lambda(
         Func::new(FuncId::unique(), "alpha")
             .category("math")
             .event("changed", EventLambda::default()),
-    );
+    ));
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
@@ -81,7 +84,10 @@ fn list_funcs_returns_full_func_objects_sorted_by_name() {
     assert_eq!(beta_events_len, 0);
 
     let mut replacement = Library::default();
-    replacement.add(Func::new(FuncId::unique(), "gamma"));
+    replacement.add(testing::with_stub_lambda(Func::new(
+        FuncId::unique(),
+        "gamma",
+    )));
     test_support::replace(&library, replacement);
     let names: Array = engine.eval("list_funcs().map(|f| f.name)").unwrap();
     let names: Vec<String> = names
@@ -137,7 +143,7 @@ fn create_node_known_id_enqueues_add_node() {
 
     let alpha_id = FuncId::unique();
     let mut lib = Library::default();
-    lib.add(Func::new(alpha_id, "alpha"));
+    lib.add(testing::with_stub_lambda(Func::new(alpha_id, "alpha")));
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
@@ -173,7 +179,7 @@ fn create_node_known_id_enqueues_add_node() {
 
     let beta_id = FuncId::unique();
     let mut replacement = Library::default();
-    replacement.add(Func::new(beta_id, "beta"));
+    replacement.add(testing::with_stub_lambda(Func::new(beta_id, "beta")));
     test_support::replace(&library, replacement);
     let script = format!(r#"create_node("{beta_id}", 1.0, 2.0)"#);
     engine.eval::<String>(&script).unwrap();

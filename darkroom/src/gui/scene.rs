@@ -679,6 +679,7 @@ mod tests {
     use crate::gui::scene::test_support::scene_node_stub;
     use scenarium::DataType;
     use scenarium::Graph;
+    use scenarium::testing;
     use scenarium::{GraphId, InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
@@ -1090,21 +1091,21 @@ mod tests {
         // Both have an output, so `impure` is the sole
         // differentiator the header gate reads.
         let mut library = Library::default();
-        library.add(
+        library.add(testing::with_stub_lambda(
             Func::new("bbebd119-82d8-45cc-a710-cdaa45426521", "pure_src")
                 .pure()
                 .output(FuncOutput::new("out", DataType::Int)),
-        );
-        library.add(
+        ));
+        library.add(testing::with_stub_lambda(
             Func::new("9a97bb06-2c2e-443a-a836-6a11e29cbea7", "impure_src")
                 .output(FuncOutput::new("out", DataType::Int)),
-        );
-        library.add(
+        ));
+        library.add(testing::with_stub_lambda(
             Func::new(FuncId::unique(), "self_cached")
                 .pure()
                 .uncacheable()
                 .output(FuncOutput::new("out", DataType::Int)),
-        );
+        ));
 
         let mut graph = Graph::default();
         let pure_id = graph.add_func_node(library.by_name("pure_src").unwrap());

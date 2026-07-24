@@ -188,6 +188,8 @@ pub enum FuncValidationError {
     NilId,
     #[error("Function with no outputs should be impure")]
     PureWithoutOutputs,
+    #[error("function {func_id:?} has no implementation")]
+    MissingLambda { func_id: FuncId },
     #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
     NilInputType { func_id: FuncId, input_idx: usize },
     #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]
@@ -374,6 +376,9 @@ impl Func {
                 OutputType::Fixed(_) => {}
             }
         }
+        if self.lambda.is_none() {
+            return Err(FuncValidationError::MissingLambda { func_id: self.id });
+        }
         Ok(())
     }
 }
@@ -395,6 +400,7 @@ mod tests {
         let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 1);
+        let missing_lambda = Func::new(FuncId::unique(), "missing");
         let invalid = [
             (
                 "function id must not be nil".to_owned(),
@@ -421,6 +427,10 @@ mod tests {
                 ),
                 invalid_wildcard,
             ),
+            (
+                format!("function {:?} has no implementation", missing_lambda.id),
+                missing_lambda,
+            ),
         ];
 
         for (expected, func) in invalid {
@@ -430,6 +440,7 @@ mod tests {
         Func::new(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 0)
+            .lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
             .validate()
             .unwrap();
     }

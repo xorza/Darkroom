@@ -60,6 +60,7 @@ mod tests {
     use std::path::PathBuf;
 
     use scenarium::Graph;
+    use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, InputPort, Library, StaticValue};
 
     use crate::core::document::Document;
@@ -91,7 +92,7 @@ mod tests {
         let func_id = FuncId::unique();
         let previous = Func::new(func_id, "changed")
             .input(FuncInput::required("removed", scenarium::DataType::Float));
-        let library = Library::from([Func::new(func_id, "changed")]);
+        let library = Library::from([testing::with_stub_lambda(Func::new(func_id, "changed"))]);
         let document = || {
             let mut graph = Graph::default();
             let node_id = graph.add_func_node(&previous);

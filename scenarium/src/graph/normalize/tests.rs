@@ -5,7 +5,7 @@ use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::node::event::EventLambda;
-use crate::testing::{TestFuncHooks, test_func_lib};
+use crate::testing::{self, TestFuncHooks, test_func_lib};
 
 fn lib() -> Library {
     test_func_lib(TestFuncHooks::default())
@@ -356,9 +356,11 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     // exposed graph output must report `sum`'s real output type, resolved
     // through it — otherwise wrapping a value in a passthrough would erase its
     // type for the whole composite.
-    let pass_func = Func::new(FuncId::unique(), "pass")
-        .input(FuncInput::required("x", DataType::Any))
-        .wildcard_output("o", 0);
+    let pass_func = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "pass")
+            .input(FuncInput::required("x", DataType::Any))
+            .wildcard_output("o", 0),
+    );
     let mut library = lib();
     library.add(pass_func.clone());
     let sum_id = library.by_name("sum").unwrap().id;
@@ -406,7 +408,9 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
 fn normalize_drops_out_of_range_and_missing_emitter_subscriptions() {
     let func_id = FuncId::from_u128(0xe0e0);
     let mut library = Library::default();
-    library.add(Func::new(func_id, "emitter").event("tick", EventLambda::default()));
+    library.add(testing::with_stub_lambda(
+        Func::new(func_id, "emitter").event("tick", EventLambda::default()),
+    ));
 
     let mut graph = Graph::default();
     let emitter_id = graph.add(Node::new(NodeKind::Func(func_id)));
@@ -435,11 +439,11 @@ fn normalize_drops_out_of_range_and_missing_emitter_subscriptions() {
 fn normalize_drops_out_of_range_and_missing_binding_endpoints() {
     let func_id = FuncId::from_u128(0xb12d);
     let mut library = Library::default();
-    library.add(
+    library.add(testing::with_stub_lambda(
         Func::new(func_id, "op")
             .input(FuncInput::optional("in", DataType::Int))
             .output(FuncOutput::new("out", DataType::Int)),
-    );
+    ));
 
     let mut graph = Graph::default();
     let ids: Vec<NodeId> = (0..5)
