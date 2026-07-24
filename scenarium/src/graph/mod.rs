@@ -20,7 +20,6 @@ id_type!(NodeId);
 pub(crate) mod boundary;
 pub(crate) mod clone;
 pub(crate) mod interface;
-mod prune;
 mod query;
 mod serde;
 #[cfg(test)]

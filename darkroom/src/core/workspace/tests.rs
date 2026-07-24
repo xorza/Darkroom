@@ -14,36 +14,41 @@ use crate::core::status::StatusLog;
 use crate::core::workspace::{self as workspace_module, Workspace};
 
 #[test]
-fn installing_a_document_prunes_its_stale_wiring() {
+fn stale_wiring_survives_install_and_still_compiles() {
     use scenarium::{Binding, Graph, InputPort};
 
     let mut preferences = Preferences::default();
     let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
-    // A binding whose consumer node doesn't exist can never resolve; the
-    // single prune site (document install) must drop it, so runs and
-    // saves need no pruning of their own.
+    // Library drift: a wire into an output the func doesn't declare.
+    // Nothing prunes it — the document keeps the authored wiring (it
+    // revives if the library gets the port back) and compilation
+    // tolerates it as an unbound input.
+    let library = workspace.runtime.library.published.load();
+    let func = library.by_name("ML Denoise").expect("built-in present");
     let mut graph = Graph::default();
-    graph.set_input_binding(
-        InputPort::new(NodeId::unique(), 0),
-        Binding::Const(StaticValue::Int(1)),
-    );
-    let stale = OpenDocument {
+    let producer = graph.add_func_node(func);
+    let consumer = graph.add_func_node(func);
+    let dangling = InputPort::new(consumer, 0);
+    graph.set_input_binding(dangling, Binding::bind(producer, 99));
+    drop(library);
+
+    workspace.replace_document(OpenDocument {
         document: Document::from(graph),
         path: None,
-    };
-    workspace.replace_document(stale);
-    assert!(
-        workspace.open.document.graph.bindings.is_empty(),
-        "replace_document prunes immediately"
+    });
+    assert_eq!(
+        workspace.open.document.graph.bindings.get(&dangling),
+        Some(&Binding::bind(producer, 99)),
+        "the dangling wire is preserved, not pruned"
     );
     assert!(
         workspace.run_once(),
-        "the pruned graph compiles and is queued"
+        "the drifted graph compiles and is queued"
     );
     assert!(
         workspace.evict_cache(NodeId::unique()),
-        "the pruned graph compiles and queues an eviction"
+        "the drifted graph compiles and queues an eviction"
     );
 }
 

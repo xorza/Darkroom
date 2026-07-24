@@ -107,53 +107,46 @@ impl<'a> GraphChecker<'a> {
             });
         }
 
+        // Library-range drift is tolerated everywhere below: a binding,
+        // subscription, or pin referencing a port the current library no
+        // longer declares stays valid and degrades to unbound at
+        // flatten/plan time (a required input surfaces as a missing-input
+        // verdict). Deleting it would destroy authored wiring that
+        // revives when the library gets the port back. Out-of-range
+        // specs also resolve to no `input_spec`/`input_type`, so the
+        // const-only and type checks skip dangling ports naturally.
         for (destination, binding) in &graph.bindings {
-            let consumer = graph.nodes.get(&destination.node_id).ok_or(
-                GraphValidationError::BindingMissingNode {
+            if !graph.nodes.contains_key(&destination.node_id) {
+                return Err(GraphValidationError::BindingMissingNode {
                     node_id: destination.node_id,
-                },
-            )?;
-            if let Some(library) = self.library {
-                let input_count = graph
-                    .input_count(consumer, library)
-                    .expect("node reference resolved before binding validation");
-                if destination.port_idx >= input_count {
-                    return Err(GraphValidationError::BindingInputOutOfRange {
-                        port: *destination,
-                    });
-                }
-                if matches!(binding, Binding::Bind(_))
-                    && graph
-                        .input_spec(library, *destination)
-                        .is_some_and(|input| input.const_only)
-                {
-                    return Err(GraphValidationError::ConstOnlyBinding { port: *destination });
-                }
+                });
+            }
+            if let Some(library) = self.library
+                && matches!(binding, Binding::Bind(_))
+                && graph
+                    .input_spec(library, *destination)
+                    .is_some_and(|input| input.const_only)
+            {
+                return Err(GraphValidationError::ConstOnlyBinding { port: *destination });
             }
 
             if let Binding::Bind(src) = binding {
-                let producer = graph.nodes.get(&src.node_id).ok_or(
-                    GraphValidationError::BindingMissingProducer {
+                if !graph.nodes.contains_key(&src.node_id) {
+                    return Err(GraphValidationError::BindingMissingProducer {
                         destination: *destination,
                         producer: *src,
-                    },
-                )?;
-                if let Some(library) = self.library {
-                    let output_count = graph
-                        .output_count(producer, library)
-                        .expect("node reference resolved before binding validation");
-                    if src.port_idx >= output_count {
-                        return Err(GraphValidationError::BindingOutputOutOfRange { port: *src });
-                    }
-                    if let Some(sink_ty) = graph.input_type(library, *destination) {
-                        let source_ty = graph.resolve_output_type(library, *src);
-                        if !sink_ty.compatible_with(&source_ty) {
-                            return Err(GraphValidationError::IncompatibleBinding {
-                                destination: *destination,
-                                expected: sink_ty,
-                                actual: source_ty,
-                            });
-                        }
+                    });
+                }
+                if let Some(library) = self.library
+                    && let Some(sink_ty) = graph.input_type(library, *destination)
+                {
+                    let source_ty = graph.resolve_output_type(library, *src);
+                    if !sink_ty.compatible_with(&source_ty) {
+                        return Err(GraphValidationError::IncompatibleBinding {
+                            destination: *destination,
+                            expected: sink_ty,
+                            actual: source_ty,
+                        });
                     }
                 }
             }
@@ -170,11 +163,11 @@ impl<'a> GraphChecker<'a> {
         }
 
         for subscription in &graph.subscriptions {
-            let emitter = graph.nodes.get(&subscription.emitter).ok_or(
-                GraphValidationError::MissingSubscriptionEmitter {
+            if !graph.nodes.contains_key(&subscription.emitter) {
+                return Err(GraphValidationError::MissingSubscriptionEmitter {
                     node_id: subscription.emitter,
-                },
-            )?;
+                });
+            }
             if !graph.nodes.contains_key(&subscription.subscriber) {
                 return Err(GraphValidationError::MissingSubscriber {
                     emitter: subscription.emitter,
@@ -182,32 +175,13 @@ impl<'a> GraphChecker<'a> {
                     subscriber: subscription.subscriber,
                 });
             }
-            if let Some(library) = self.library {
-                let event_count = graph
-                    .event_count(emitter, library)
-                    .expect("node reference resolved before subscription validation");
-                if subscription.event_idx >= event_count {
-                    return Err(GraphValidationError::SubscriptionEventOutOfRange {
-                        emitter: subscription.emitter,
-                        event_idx: subscription.event_idx,
-                    });
-                }
-            }
         }
 
         for port in &graph.pinned_outputs {
-            let node = graph.nodes.get(&port.node_id).ok_or(
-                GraphValidationError::PinnedOutputMissingNode {
+            if !graph.nodes.contains_key(&port.node_id) {
+                return Err(GraphValidationError::PinnedOutputMissingNode {
                     node_id: port.node_id,
-                },
-            )?;
-            if let Some(library) = self.library {
-                let output_count = graph
-                    .output_count(node, library)
-                    .expect("node reference resolved before pinned-output validation");
-                if port.port_idx >= output_count {
-                    return Err(GraphValidationError::PinnedOutputOutOfRange { port: *port });
-                }
+                });
             }
         }
 

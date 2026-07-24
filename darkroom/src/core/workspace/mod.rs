@@ -60,15 +60,12 @@ impl Workspace {
         let open = load_preferred_document(preferences, &mut status);
         let mut runtime = RuntimeHost::new(script_config, wake, preferences, status);
         runtime.set_document_cache(open.path.as_deref());
-        let mut workspace = Self { open, runtime };
-        workspace.prune_document();
-        workspace
+        Self { open, runtime }
     }
 
     pub(crate) fn replace_document(&mut self, open: OpenDocument) {
         self.open = open;
         self.runtime.set_document_cache(self.open.path.as_deref());
-        self.prune_document();
     }
 
     pub(crate) fn run_once(&mut self) -> bool {
@@ -91,14 +88,5 @@ impl Workspace {
         self.open.save_to(path)?;
         self.runtime.set_document_cache(self.open.path.as_deref());
         Ok(())
-    }
-
-    /// Drop wiring the runtime library can't resolve (see `Graph::prune`)
-    /// — the single prune site, run whenever a document is installed.
-    fn prune_document(&mut self) {
-        self.open
-            .document
-            .graph
-            .prune(&self.runtime.library.published.load());
     }
 }

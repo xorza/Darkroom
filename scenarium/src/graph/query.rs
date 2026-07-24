@@ -37,22 +37,6 @@ impl Graph {
         inputs.get(port.port_idx)
     }
 
-    pub(crate) fn input_count(&self, node: &Node, library: &Library) -> Option<usize> {
-        match &node.kind {
-            NodeKind::Func(id) => library.by_id(id).map(|function| function.inputs.len()),
-            NodeKind::Graph(reference) => self
-                .resolve_graph(*reference, library)
-                .and_then(|graph| graph.definition.as_ref())
-                .map(|definition| definition.inputs.len()),
-            NodeKind::Special(special) => Some(special.func().inputs.len()),
-            NodeKind::GraphInput => Some(0),
-            NodeKind::GraphOutput => self
-                .definition
-                .as_ref()
-                .map(|definition| definition.outputs.len()),
-        }
-    }
-
     pub(crate) fn output_count(&self, node: &Node, library: &Library) -> Option<usize> {
         match &node.kind {
             NodeKind::Func(id) => library.by_id(id).map(|function| function.outputs.len()),

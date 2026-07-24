@@ -1,7 +1,4 @@
 //! The document currently open in a frontend, with its persistence path.
-//! Stale-wiring pruning against the runtime library happens where a
-//! document is installed — `Workspace::new` / `Workspace::replace_document`
-//! — not here (loading has no library at hand).
 
 use std::path::{Path, PathBuf};
 

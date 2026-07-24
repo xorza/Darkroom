@@ -4137,6 +4137,45 @@ mod stats {
         Ok(())
     }
 
+    /// Library drift: wiring that references ports/events the library no
+    /// longer declares must still compile — the dangling binding degrades
+    /// to unbound (a required input reports missing), a dangling
+    /// subscription and pin wire nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dangling_wiring_compiles_and_reports_missing_input() -> TestResult {
+        let mut graph = test_graph();
+        let library = test_func_lib(default_hooks());
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+
+        // sum's required input 0 bound to an output get_a doesn't have,
+        // plus a subscription to an event it doesn't emit and a pin on the
+        // vanished output — the drift a changed library leaves behind.
+        graph.set_input_binding(InputPort::new(sum_id, 0), Binding::bind(get_a_id, 9));
+        graph.subscribe(get_a_id, 9, sum_id);
+        graph.set_output_pinned(OutputPort::new(get_a_id, 9), true);
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph
+            .update(&graph, &library)
+            .expect("dangling wiring must not fail compilation");
+        let stats = execution_graph.execute_sinks().await?;
+
+        assert!(
+            stats
+                .missing_inputs
+                .iter()
+                .any(|p| p.e_node_id == root_execution_node(sum_id) && p.port_idx == 0),
+            "the dangling binding degrades to a missing input, got: {:?}",
+            stats.missing_inputs
+        );
+
+        Ok(())
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn executed_nodes_reported() -> TestResult {
         let graph = test_graph();

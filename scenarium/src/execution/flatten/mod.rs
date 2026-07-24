@@ -331,10 +331,20 @@ impl<'a> Run<'a> {
             return None; // a disabled node fires no events
         }
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => Some(ExecutionEventPort {
-                e_node_id: self.execution_node_id(node_id),
-                event_idx,
-            }),
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                // Drift tolerance: a subscription to an event the func no
+                // longer declares wires nothing.
+                if graph
+                    .event_count(node, self.library)
+                    .is_some_and(|count| event_idx >= count)
+                {
+                    return None;
+                }
+                Some(ExecutionEventPort {
+                    e_node_id: self.execution_node_id(node_id),
+                    event_idx,
+                })
+            }
             NodeKind::Graph(r) => {
                 let nested = graph.resolve_graph(*r, self.library)?;
                 let exposed = nested
@@ -431,10 +441,22 @@ impl<'a> Run<'a> {
             .find(&node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(ExecutionOutputPort {
-                e_node_id: self.execution_node_id(node_id),
-                port_idx,
-            }),
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                // Library drift can leave a binding to an output the func
+                // no longer declares — degrade to unbound rather than
+                // addressing a vanished slot (the planner reports the
+                // consumer's missing input).
+                if graph
+                    .output_count(node, self.library)
+                    .is_some_and(|count| port_idx >= count)
+                {
+                    return Source::None;
+                }
+                Source::Producer(ExecutionOutputPort {
+                    e_node_id: self.execution_node_id(node_id),
+                    port_idx,
+                })
+            }
             // Follow into the composite: its output `port_idx` is wired by the
             // GraphOutput node's input `port_idx`.
             NodeKind::Graph(r) => {

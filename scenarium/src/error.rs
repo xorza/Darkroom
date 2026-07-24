@@ -41,12 +41,6 @@ pub enum GraphValidationError {
     #[error("binding on missing node {node_id:?}")]
     BindingMissingNode { node_id: NodeId },
     #[error(
-        "binding on node {node_id:?} input {port_idx} is out of range",
-        node_id = .port.node_id,
-        port_idx = .port.port_idx
-    )]
-    BindingInputOutOfRange { port: InputPort },
-    #[error(
         "input {port_idx} on node {node_id:?} is const-only and cannot be wired to an upstream output",
         node_id = .port.node_id,
         port_idx = .port.port_idx
@@ -62,12 +56,6 @@ pub enum GraphValidationError {
         destination: InputPort,
         producer: OutputPort,
     },
-    #[error(
-        "binding from node {node_id:?} output {port_idx} is out of range",
-        node_id = .port.node_id,
-        port_idx = .port.port_idx
-    )]
-    BindingOutputOutOfRange { port: OutputPort },
     #[error(
         "node {node_id:?} input {port_idx} expects {expected:?} but is wired from an incompatible {actual:?}",
         node_id = .destination.node_id,
@@ -95,16 +83,8 @@ pub enum GraphValidationError {
         event_idx: usize,
         subscriber: NodeId,
     },
-    #[error("subscription event index {event_idx} out of range on {emitter:?}")]
-    SubscriptionEventOutOfRange { emitter: NodeId, event_idx: usize },
     #[error("pinned output on missing node {node_id:?}")]
     PinnedOutputMissingNode { node_id: NodeId },
-    #[error(
-        "pinned output on node {node_id:?} output {port_idx} is out of range",
-        node_id = .port.node_id,
-        port_idx = .port.port_idx
-    )]
-    PinnedOutputOutOfRange { port: OutputPort },
     #[error("exposed event {name:?} names missing emitter {emitter:?}")]
     ExposedEventMissingEmitter { name: String, emitter: NodeId },
     #[error("exposed event index {event_idx} out of range on {emitter:?}")]

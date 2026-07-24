@@ -478,7 +478,7 @@ fn validate_for_execution_rejects_type_mismatched_bindings_through_passthroughs(
 }
 
 #[test]
-fn validate_for_execution_rejects_out_of_range_pinned_output() {
+fn validate_for_execution_tolerates_library_range_drift() {
     use crate::library::Library;
 
     let func = testing::with_stub_lambda(
@@ -489,15 +489,17 @@ fn validate_for_execution_rejects_out_of_range_pinned_output() {
 
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
-
     graph.set_output_pinned(OutputPort::new(id, 0), true);
     assert!(graph.validate_for_execution(&library).is_ok());
 
+    // Wiring the current library can't resolve — a pin, binding, and
+    // subscription past the declared ranges — stays valid: drift is
+    // tolerated (it degrades to unbound at flatten/plan time), never a
+    // compile error. See `engine::tests::dangling_wiring_compiles_and_reports_missing_input`.
     graph.set_output_pinned(OutputPort::new(id, 1), true);
-    let err = graph
-        .validate_for_execution(&library)
-        .expect_err("output 1 doesn't exist on a one-output func");
-    assert!(err.to_string().contains("out of range"), "{err}");
+    graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
+    graph.subscribe(id, 3, id);
+    assert!(graph.validate_for_execution(&library).is_ok());
 }
 
 #[test]

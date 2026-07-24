@@ -250,7 +250,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   reports the persistence outcome and re-pushes the worker's `DiskStore` (its
   codec table rides a library snapshot).
 
-### Authored graph interfaces + the load-time prune
+### Authored graph interfaces + drift tolerance
 A subgraph's interface (`SubgraphDefinition.inputs/outputs`) is **authored
 state**, mutated only through recorded intents — nothing derives it from
 wiring. Wiring a boundary node's trailing "+" placeholder emits
@@ -264,10 +264,12 @@ via scenarium's `detach_graph_input/output`, all recorded on the step so
 undo restores the exact wiring. Unwiring never deletes a port.
 
 Library drift (a func or shared graph that changed shape between sessions)
-is handled at the single point where a document meets the runtime library:
-`Workspace::new` / `Workspace::replace_document` call `Graph::prune` to
-drop bindings and subscriptions the library can no longer resolve. Nothing
-else prunes — scene rebuild, run, and save all see an already-clean graph.
+is *tolerated*, never repaired: Scenarium's compile accepts wiring whose
+ports/events the current library no longer declares, degrading it to
+unbound at flatten time — a required input surfaces as a plan-level
+missing-input verdict (the port's warning glow). The document keeps the
+authored wiring, which revives if the library gets the port back; the
+canvas simply doesn't draw a wire whose endpoint has no rendered port.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
