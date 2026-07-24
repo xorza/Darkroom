@@ -20,7 +20,7 @@ The main structural problems are mixed lifecycle state in `ContextManager` and a
 
 - [x] **Registry collisions panic consistently without replacing the existing entry.** Function, shared-graph, and type registration check for an occupied identity before insertion, and `Library::merge` inherits the same behavior through those methods. Callers that intentionally evolve a test function remove the old definition explicitly before registering its replacement (`src/library.rs`).
 
-- [x] **`TypeEntry` makes invalid enum attachment states unrepresentable.** A private tagged representation stores codecs and stampers only in the custom variant, while enum entries physically contain only their display name and variants. Registration no longer needs fallible validation for combinations callers cannot construct (`src/library.rs`).
+- [x] **`TypeEntry` makes invalid enum attachment states unrepresentable.** A private tagged representation stores codecs only in the custom variant, while enum entries physically contain only their display name and variants. Registration no longer needs fallible validation for combinations callers cannot construct (`src/library.rs`).
 
 - [ ] **Context lookup is dynamically typed while context declarations are advisory.** `ContextType` does not retain its value type, so callers can request the wrong `T` and panic during downcast. Its public `description` is unread, and `Func::required_contexts` has production writers but no production reader, exposing metadata that does not enforce or describe runtime behavior (`src/runtime/context.rs:16-20`, `src/runtime/context.rs:105-137`, `src/node/definition.rs:207-212`, `src/node/definition.rs:303-305`).
 

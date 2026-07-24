@@ -36,7 +36,6 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `data/type_system.rs` | `TypeId`, `DataType`, enum metadata, filesystem path configuration |
 | `data/static_value.rs` | Serializable authored constants |
 | `data/dynamic_value.rs` | Runtime values, custom values, and RAM accounting |
-| `data/resource.rs` | External-resource stamps and stampers |
 | `node/definition.rs` | Function declarations and port metadata |
 | `node/output_type.rs` | Shared wildcard-output type resolution |
 | `node/lambda.rs` | Function invocation ABI and output demand |
@@ -60,7 +59,7 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
 | `execution/disk_store/` | Indexed on-disk cache format and atomic persistence |
 | `execution/report.rs` | Internal live progress and pinned-output transport |
-| `execution/resource/` | Off-thread, memoized per-run external-resource stamps |
+| `execution/resource/` | Off-thread, memoized per-run filesystem identities |
 | `execution/outcome.rs` | Private completed-run outcome |
 | `worker/protocol.rs` | Host/worker messages and reports |
 | `worker/status.rs` | Shared worker activity and node-status snapshots |
@@ -87,10 +86,10 @@ and prepares triggers only for sources that complete successfully. The worker
 takes those exact runtime triggers from `ExecutionOutcome` and moves them into
 event tasks; fired-event runs do not rebuild unrelated triggers.
 
-Before resolution, `RunResourceStamps` collects filesystem identities and custom
-resource stamps on Tokio's blocking pool. It memoizes each resource for one run
-and is reused by late bound-resource restamps after producers settle, keeping
-`node_digest` itself synchronous and I/O-free.
+Before resolution, `RunResourceStamps` collects filesystem identities on Tokio's
+blocking pool. It memoizes each path for one run and is reused by late bound-path
+restamps after producers settle, keeping `node_digest` itself synchronous and
+I/O-free.
 
 A cache slot is valid only when its digest matches and its
 `OutputSnapshot` coverage contains every currently demanded output. Invocation
@@ -98,15 +97,12 @@ clears the output buffer first, so an output the lambda skips cannot retain a
 stale value. Disk frames persist the same coverage; a same-digest write replaces
 an older frame when the new result covers more outputs.
 
-Only `FuncBehavior::Pure` cones receive reusable content digests. Resource
-inputs fold the current referent identity through `ResourceStamper`; filesystem
-paths have built-in stamping. Explicit cache eviction is a worker operation:
-authored ids resolve through `CompiledGraph`, expand through transitive data
-consumers, release resident outputs, and delete their node-keyed disk blobs.
-Stampers receive the run's cooperative `CancelToken`. Custom runtime values are
-not serializable.
-Downstream types attach a `CustomValueCodec` explicitly when they want disk
-cache support.
+Only `FuncBehavior::Pure` cones receive reusable content digests. Filesystem-path
+inputs fold the current referent's metadata identity. Explicit cache eviction is
+a worker operation: authored ids resolve through `CompiledGraph`, expand through
+transitive data consumers, release resident outputs, and delete their node-keyed
+disk blobs. Custom runtime values receive disk-cache support only when their type
+attaches a `CustomValueCodec`.
 
 ## Worker
 

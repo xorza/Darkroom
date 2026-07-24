@@ -48,11 +48,10 @@ impl Prog {
         )
     }
 
-    /// Mark input `input_idx` of node `idx` resource-typed with `stamper` (inputs default
-    /// to none) — gates the Bind-side referent-identity fold.
-    fn stamp_input(&mut self, idx: usize, input_idx: usize, stamper: InputStamper) {
+    /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
+    fn stamp_fs_path_input(&mut self, idx: usize, input_idx: usize) {
         let pool = self.program.e_nodes[&e_node_id(idx)].inputs.start as usize + input_idx;
-        self.program.inputs[pool].stamper = Some(stamper);
+        self.program.inputs[pool].stamps_fs_path = true;
     }
 
     fn add_with(
@@ -67,7 +66,7 @@ impl Prog {
             .inputs
             .append(bindings.iter().map(|binding| ExecutionInput {
                 required: false,
-                stamper: None,
+                stamps_fs_path: false,
                 binding: binding.clone(),
             }));
         let idx = self.program.e_nodes.len();
@@ -335,7 +334,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     p.add(10, 1, &[]);
     p.add(20, 1, &[bind(0, 0)]);
     p.add(20, 1, &[bind(0, 0)]);
-    p.stamp_input(1, 0, InputStamper::FsPath);
+    p.stamp_fs_path_input(1, 0);
 
     // Stamp the producer and install `value` as its delivered output (`None` leaves the
     // slot empty — an unreadable value), then fold both consumers.
@@ -450,84 +449,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
     assert_eq!(
         node_digest(&p.program, e_node_id(1), &cache, &resource_stamps),
         None,
-        "a resource value produced under an old producer digest is unreadable"
+        "a path value produced under an old producer digest is unreadable"
     );
-}
-
-/// A registered [`ResourceStamper`] keys a consumer on the *referent's* state, not the
-/// reference value: bumping the external version re-keys the stamped consumer while the
-/// producer and an unstamped sibling stay put — each test fold prepares fresh run stamps.
-#[test]
-fn custom_stamper_folds_referent_version() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use crate::{DynamicValue, ResourceStamp, ResourceStamper};
-
-    #[derive(Debug)]
-    struct VersionStamper(Arc<AtomicU64>);
-    impl ResourceStamper for VersionStamper {
-        fn stamp(&self, _value: &DynamicValue, _cancel: &crate::CancelToken) -> ResourceStamp {
-            ResourceStamp::from_bytes(&self.0.load(Ordering::SeqCst).to_le_bytes())
-        }
-    }
-
-    let version = Arc::new(AtomicU64::new(1));
-
-    // producer (0) → stamped consumer (1); control consumer (2) reads the same port
-    // unstamped. The delivered value is an ordinary resident value — what identity it
-    // yields is the stamper's business, not the framework's.
-    let mut p = Prog::default();
-    p.add(10, 1, &[]);
-    p.add(20, 1, &[bind(0, 0)]);
-    p.add(20, 1, &[bind(0, 0)]);
-    p.stamp_input(
-        1,
-        0,
-        InputStamper::Custom(Arc::new(VersionStamper(version.clone()))),
-    );
-
-    let digests = || {
-        let mut cache = RuntimeCache::default();
-        cache.reconcile(&p.program);
-        let mut resource_stamps = RunResourceStamps::default();
-        let producer = node_digest(&p.program, e_node_id(0), &cache, &resource_stamps).unwrap();
-        cache.slots.get_mut(&e_node_id(0)).unwrap().current_digest = Some(producer);
-        hydrate(
-            &mut cache,
-            e_node_id(0),
-            OutputSnapshot::new(vec![StaticValue::Int(42).into()]),
-            producer,
-        );
-        prepare_node(&mut resource_stamps, &p.program, &cache, e_node_id(1));
-        prepare_node(&mut resource_stamps, &p.program, &cache, e_node_id(2));
-        DigestPair {
-            typed: node_digest(&p.program, e_node_id(1), &cache, &resource_stamps),
-            plain: node_digest(&p.program, e_node_id(2), &cache, &resource_stamps),
-        }
-    };
-
-    let DigestPair {
-        typed: stamped_v1,
-        plain: plain_v1,
-    } = digests();
-    assert!(stamped_v1.is_some());
-    assert_eq!(
-        digests().typed,
-        stamped_v1,
-        "an unchanged referent folds identically"
-    );
-
-    version.store(2, Ordering::SeqCst);
-    let DigestPair {
-        typed: stamped_v2,
-        plain: plain_v2,
-    } = digests();
-    assert_ne!(
-        stamped_v1, stamped_v2,
-        "a referent version bump re-keys the stamped consumer"
-    );
-    assert_eq!(plain_v1, plain_v2, "the unstamped sibling is untouched");
 }
 
 #[test]

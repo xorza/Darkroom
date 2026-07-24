@@ -207,11 +207,11 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 A node's output is a pure function of its `func_id`, function `version`, resolved input
 values, upstream outputs, and the identity of any external resources it reads.
 `node_digest` (`digest.rs`) folds that into a 256-bit BLAKE3 `Digest`. Before the fold,
-`RunResourceStamps` (`resource.rs`) resolves filesystem identities and custom resource
-stamps on Tokio's blocking pool, memoizing each identity for the run. The resolver then
-computes node digests producer-first from prepared resource identities and each `Bind`
-producer's *already-stamped* `current_digest`, with no recursive digest traversal or I/O
-inside `node_digest`.
+`RunResourceStamps` (`resource.rs`) resolves filesystem identities on Tokio's blocking
+pool, memoizing each path for the run. The resolver then computes node digests
+producer-first from prepared filesystem identities and each `Bind` producer's
+*already-stamped* `current_digest`, with no recursive digest traversal or I/O inside
+`node_digest`.
 
 - **Function implementation.** A pure `Func`'s `version` is folded beside its stable
   `FuncId`; incrementing it invalidates that function and every downstream digest without
@@ -225,21 +225,17 @@ inside `node_digest`.
   input therefore invalidates only for selected files, while a directory input invalidates
   when any direct entry changes. A same-size edit hidden by mtime granularity requires
   explicit runtime cache eviction.
-- **Wired resource inputs.** A **resource reference** arriving over a `Bind` edge — an
-  `FsPath`/`FsPaths` value, or a value of a custom type with a registered
-  `ResourceStamper` (`TypeEntry::with_stamper`) — folds the *referent's* live identity,
-  read off the **delivered value** (`hash_bound_resource`). The fold is gated on the
-  consumer's *declared* input type (the contract "this node dereferences the reference"),
-  resolved onto the input at flatten (`InputStamper`). The value must exist first: pre-run
+- **Wired path inputs.** An `FsPath`/`FsPaths` value arriving over a `Bind` edge folds the
+  referent's live identity, read off the **delivered value** (`hash_bound_fs_path`). The
+  fold is gated on the consumer's declared `FsPath` input type, recorded as
+  `ExecutionInput::stamps_fs_path` during flattening. The value must exist first: pre-run
   the fold taints the digest `None` ("uncacheable, must run", keeping the cone alive), and
-  the run loop prepares the newly available identity through the same blocking-pool
-  stamp set and **re-stamps** such a node at reach time — its producers settled by then —
-  serving the cache on a hit. So a loader fed by any path- or handle-producing node
-  re-keys when the referent changes and still caches when it doesn't.
-- **One coherent resource identity per run.** Repeated references to the same path, or
-  repeated consumers of the same custom resource, reuse one prepared identity. The next
-  run clears and refreshes the stamps. `ResourceStamper` receives the run's cooperative
-  cancel token so long-running custom identity work can stop promptly.
+  the run loop prepares the newly available identity through the same blocking-pool path
+  set and **re-stamps** such a node at reach time — its producers settled by then —
+  serving the cache on a hit. A loader fed by a path-producing node therefore re-keys
+  when the referent changes and still caches when it doesn't.
+- **One coherent filesystem identity per run.** Repeated references to the same path
+  reuse one prepared identity. The next run clears and refreshes the path map.
 - **Output ports** of a multi-output node are disambiguated (`port_digest_of`); a
   `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
@@ -316,9 +312,9 @@ implementation therefore cut their entire upstream cone. A reached missing imple
 remains an error, but its cache is not probed. A disk-cached node's now-unneeded upstream —
 a memory-only source, say — isn't recomputed on reopen.
 
-A digest folding a Bind-delivered resource value it can't read yet (§B.2 wired resource
-inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop prepares that
-identity off-thread and re-stamps it at reach time, serving the cache on a hit. Cache
+A digest folding a Bind-delivered path value it can't read yet (§B.2 wired path inputs)
+stamps `None` — resolved `Run`, cone kept alive — and the run loop prepares that identity
+off-thread and re-stamps it at reach time, serving the cache on a hit. Cache
 resolution and execution then follow this lifecycle:
 
 1. **resident hit?** — reuse only when the digest matches and every demanded resident

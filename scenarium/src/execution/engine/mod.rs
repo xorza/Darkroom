@@ -55,8 +55,8 @@ pub(crate) struct ExecutionEngine {
     /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
     /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
     resolver: Resolver,
-    /// Per-run external-resource identities, collected off-thread and shared by initial
-    /// resolution and late bound-resource restamps.
+    /// Per-run filesystem identities, collected off-thread and shared by initial
+    /// resolution and late bound-path restamps.
     resource_stamps: RunResourceStamps,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
@@ -117,8 +117,8 @@ impl ExecutionEngine {
         // cache/digest state. Node seeds already identify exact compiled roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
-        // Phase 2a: prepare external identities away from the async worker. The stamps are
-        // reused for repeated resources and any late bound-resource restamp this run.
+        // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
+        // reused for repeated paths and any late bound-path restamp this run.
         self.resource_stamps
             .prepare_run(
                 &self.compiled.program,

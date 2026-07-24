@@ -6,8 +6,6 @@
 pub(crate) mod index;
 pub(crate) mod pool;
 
-use std::sync::Arc;
-
 use hashbrown::HashMap;
 
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
@@ -20,7 +18,7 @@ use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
 use crate::node::output_type::{OutputTypeResolver, OutputTypeSource};
 use crate::node::special::SpecialNode;
-use crate::{DataType, ResourceStamper, StaticValue};
+use crate::{DataType, StaticValue};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
@@ -30,24 +28,11 @@ pub(crate) enum ExecutionBinding {
     Bind(ExecutionOutputPort),
 }
 
-/// How an input's delivered value folds its **referent's** identity into the consumer's
-/// content digest — present iff the input is *declared* with a resource-reference type
-/// (the contract "this node dereferences the reference"), resolved from the func spec +
-/// library at flatten. `FsPath` is structural (a `DataType` variant) and folds through the
-/// digest's built-in file/dir identity; a nominal custom type folds through the
-/// [`ResourceStamper`] registered on its library entry.
-#[derive(Debug, Clone)]
-pub(crate) enum InputStamper {
-    FsPath,
-    Custom(Arc<dyn ResourceStamper>),
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ExecutionInput {
     pub required: bool,
-    /// `Some` iff this input is declared with a resource-reference type (see
-    /// [`InputStamper`]). Resolved from the library at every flatten.
-    pub stamper: Option<InputStamper>,
+    /// Whether a bound value's filesystem referent contributes to this input's digest.
+    pub stamps_fs_path: bool,
     pub binding: ExecutionBinding,
 }
 

@@ -14,7 +14,7 @@
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
 //! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported
 //! without probing its cache or retaining its input cone. The one verdict the loop *improves*
-//! is a `Run` whose stamped digest is `None` because a Bind-delivered resource value exists
+//! is a `Run` whose stamped digest is `None` because a Bind-delivered path value exists
 //! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
@@ -177,8 +177,8 @@ impl Executor {
                 // The resolver's pre-run verdict is authoritative — a `Reuse` is never
                 // re-derived here, since its producers may already be pruned (see `resolve.rs`).
                 // The one sanctioned improvement is a `Run` whose stamped digest is `None`: the
-                // resolver taints a node whose digest folds a Bind-delivered resource value it
-                // couldn't read yet (`hash_bound_resource`). Its producers settled earlier in
+                // resolver taints a node whose digest folds a Bind-delivered path value it
+                // couldn't read yet (`hash_bound_fs_path`). Its producers settled earlier in
                 // this walk (the `Run` verdict kept them alive), so re-stamp it now and serve
                 // the cache on a hit — a genuinely uncacheable node (an impure cone) just
                 // re-folds to `None` and runs as before. Reuse is served *before* the

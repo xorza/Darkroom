@@ -11,9 +11,9 @@
 //! node against the demand accumulated from running consumers, and stops at cache hits,
 //! missing-input nodes, and funcs without an implementation.
 //!
-//! Every node's digest is structural (a fold of its inputs and the run's prepared resource
+//! Every node's digest is structural (a fold of its inputs and the run's prepared filesystem
 //! snapshot), so the sweep stamps the *whole* graph ahead of the run. The one stamp it can
-//! leave imprecise is a digest folding a Bind-delivered *resource* value it can't read yet:
+//! leave imprecise is a digest folding a Bind-delivered path value it can't read yet:
 //! that folds to `None` here — "uncacheable, must run", which keeps the node's cone alive —
 //! and the run loop prepares the identity and re-stamps at reach time once its producers
 //! have settled, possibly improving `Run` to a reuse.
@@ -31,7 +31,7 @@ use crate::node::lambda::OutputDemand;
 /// construction (a pruned reuse hit can't also read as `Reuse`). Authoritative for the whole
 /// run: a `Reuse` is never re-derived after the cut may have pruned its producers. The safe
 /// direction is allowed once: the run loop prepares and re-stamps a `Run` node whose bound
-/// resource value was not yet readable — its cone was kept alive, so improving it to reuse
+/// path value was not yet readable — its cone was kept alive, so improving it to reuse
 /// at reach time contradicts nothing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Disposition {
@@ -142,8 +142,8 @@ impl Resolver {
 
 /// Producer-first digest pass, so a consumer folds an already-stamped producer digest.
 /// Reuse is deliberately not probed here because exact demand exists only in the reverse
-/// sweep. A Bind-delivered resource value that is not resident yet stamps `None`; the run
-/// loop can improve that node to reuse after its producers settle.
+/// sweep. A Bind-delivered path value that is not resident yet stamps `None`; the run loop
+/// can improve that node to reuse after its path producer settles.
 fn stamp_digests(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,

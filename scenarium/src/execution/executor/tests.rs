@@ -39,7 +39,7 @@ impl Prog {
             .inputs
             .append(inputs.iter().map(|binding| ExecutionInput {
                 required: false,
-                stamper: None,
+                stamps_fs_path: false,
                 binding: binding.clone(),
             }));
         let outputs = self

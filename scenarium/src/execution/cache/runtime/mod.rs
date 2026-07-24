@@ -217,7 +217,7 @@ impl RuntimeCache {
 
     /// Whether an unchanged output can satisfy this run's exact demand — already resident in
     /// RAM ([`is_resident_hit`](Self::is_resident_hit)) or successfully hydrated from disk. A
-    /// `None` digest (an impure cone, or a bound resource not yet readable) never reuses.
+    /// `None` digest (an impure cone, or a bound path not yet readable) never reuses.
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced

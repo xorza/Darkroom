@@ -1,23 +1,21 @@
-//! Per-run external-resource identity collection.
+//! Per-run filesystem identity collection.
 //!
-//! Filesystem metadata walks and custom [`ResourceStamper`](crate::ResourceStamper)
-//! calls run on Tokio's blocking pool. The resulting [`RunResourceStamps`] is shared by
-//! the producer-first digest pass and late bound-resource restamps, so each resource is
-//! observed once per run and digest folding itself performs no I/O.
+//! Filesystem metadata walks run on Tokio's blocking pool. The resulting
+//! [`RunResourceStamps`] is shared by the producer-first digest pass and late bound-path
+//! restamps, so each path is observed once per run and digest folding itself performs no I/O.
 
 use std::future::Future;
-use std::sync::Arc;
 
 use common::CancelToken;
 use hashbrown::{HashMap, HashSet};
 
+use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::DigestHasher;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, InputStamper};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::node::definition::FuncBehavior;
-use crate::{DynamicValue, ResourceStamp, ResourceStamper, StaticValue};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct FileId {
@@ -126,64 +124,34 @@ impl FsPathId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct CustomResourceKey {
-    stamper: usize,
-    value: CustomValueKey,
-}
-
-impl CustomResourceKey {
-    fn new(
-        address: &ExecutionOutputPort,
-        stamper: &Arc<dyn ResourceStamper>,
-        value: &DynamicValue,
-    ) -> Self {
-        Self {
-            stamper: Arc::as_ptr(stamper) as *const () as usize,
-            value: match value {
-                DynamicValue::Custom(value) => {
-                    CustomValueKey::Custom(Arc::as_ptr(value) as *const () as usize)
-                }
-                _ => CustomValueKey::Source(*address),
-            },
-        }
+fn resolve_paths(paths: HashSet<String>, cancel: &CancelToken) -> HashMap<String, FsPathId> {
+    let mut resolved = HashMap::new();
+    for path in paths {
+        let Some(identity) = FsPathId::collect(&path, cancel) else {
+            break;
+        };
+        resolved.insert(path, identity);
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum CustomValueKey {
-    Custom(usize),
-    Source(ExecutionOutputPort),
-}
-
-#[derive(Debug)]
-struct CustomRequest {
-    stamper: Arc<dyn ResourceStamper>,
-    value: DynamicValue,
+    resolved
 }
 
 #[derive(Debug, Default)]
-struct ResourceStampRequests {
-    fs_paths: HashSet<String>,
-    custom: HashMap<CustomResourceKey, CustomRequest>,
+pub(crate) struct RunResourceStamps {
+    fs_paths: HashMap<String, FsPathId>,
 }
 
-impl ResourceStampRequests {
-    fn is_empty(&self) -> bool {
-        self.fs_paths.is_empty() && self.custom.is_empty()
-    }
-
-    fn collect_fs_paths(&mut self, stamps: &RunResourceStamps, paths: &[String]) {
+impl RunResourceStamps {
+    fn collect_fs_paths(&self, requests: &mut HashSet<String>, paths: &[String]) {
         for path in paths {
-            if !stamps.fs_paths.contains_key(path) {
-                self.fs_paths.insert(path.clone());
+            if !self.fs_paths.contains_key(path) {
+                requests.insert(path.clone());
             }
         }
     }
 
-    fn collect_node(
-        &mut self,
-        stamps: &RunResourceStamps,
+    fn collect_node_paths(
+        &self,
+        requests: &mut HashSet<String>,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
         e_node_id: ExecutionNodeId,
@@ -195,40 +163,26 @@ impl ResourceStampRequests {
         for input in &program.inputs[node.inputs] {
             match &input.binding {
                 ExecutionBinding::Const(StaticValue::FsPath(path)) => {
-                    self.collect_fs_paths(stamps, std::slice::from_ref(path));
+                    self.collect_fs_paths(requests, std::slice::from_ref(path));
                 }
                 ExecutionBinding::Const(StaticValue::FsPaths(paths)) => {
-                    self.collect_fs_paths(stamps, paths);
+                    self.collect_fs_paths(requests, paths);
                 }
-                ExecutionBinding::Bind(address) => {
-                    let Some(stamper) = &input.stamper else {
-                        continue;
-                    };
+                ExecutionBinding::Bind(address) if input.stamps_fs_path => {
                     let Some(value) = cache.slots[&address.e_node_id]
                         .output_values()
                         .and_then(|values| values.get(address.port_idx))
                     else {
                         continue;
                     };
-                    match stamper {
-                        InputStamper::FsPath => match value.as_static() {
-                            Some(StaticValue::FsPath(path)) => {
-                                self.collect_fs_paths(stamps, std::slice::from_ref(path))
-                            }
-                            Some(StaticValue::FsPaths(paths)) => {
-                                self.collect_fs_paths(stamps, paths);
-                            }
-                            _ => {}
-                        },
-                        InputStamper::Custom(stamper) => {
-                            let key = CustomResourceKey::new(address, stamper, value);
-                            if !stamps.custom.contains_key(&key) {
-                                self.custom.entry(key).or_insert_with(|| CustomRequest {
-                                    stamper: stamper.clone(),
-                                    value: value.clone(),
-                                });
-                            }
+                    match value.as_static() {
+                        Some(StaticValue::FsPath(path)) => {
+                            self.collect_fs_paths(requests, std::slice::from_ref(path));
                         }
+                        Some(StaticValue::FsPaths(paths)) => {
+                            self.collect_fs_paths(requests, paths);
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -236,41 +190,6 @@ impl ResourceStampRequests {
         }
     }
 
-    fn resolve(self, cancel: &CancelToken) -> PreparedResourceStamps {
-        let mut prepared = PreparedResourceStamps::default();
-        for path in self.fs_paths {
-            let Some(identity) = FsPathId::collect(&path, cancel) else {
-                break;
-            };
-            prepared.fs_paths.insert(path, identity);
-        }
-        if cancel.is_cancelled() {
-            return prepared;
-        }
-        for (key, request) in self.custom {
-            let stamp = request.stamper.stamp(&request.value, cancel);
-            if cancel.is_cancelled() {
-                break;
-            }
-            prepared.custom.insert(key, stamp);
-        }
-        prepared
-    }
-}
-
-#[derive(Debug, Default)]
-struct PreparedResourceStamps {
-    fs_paths: HashMap<String, FsPathId>,
-    custom: HashMap<CustomResourceKey, ResourceStamp>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct RunResourceStamps {
-    fs_paths: HashMap<String, FsPathId>,
-    custom: HashMap<CustomResourceKey, ResourceStamp>,
-}
-
-impl RunResourceStamps {
     /// Request collection finishes before await so the non-`Sync` cache borrow stays synchronous.
     pub(crate) fn prepare_run<'a>(
         &'a mut self,
@@ -280,11 +199,10 @@ impl RunResourceStamps {
         cancel: CancelToken,
     ) -> impl Future<Output = ()> + 'a {
         self.fs_paths.clear();
-        self.custom.clear();
-        let mut requests = ResourceStampRequests::default();
+        let mut requests = HashSet::new();
         for &e_node_id in &plan.process_order {
             if plan.verdicts[&e_node_id].wants_execute() {
-                requests.collect_node(self, program, cache, e_node_id);
+                self.collect_node_paths(&mut requests, program, cache, e_node_id);
             }
         }
         self.prepare(requests, cancel)
@@ -297,34 +215,23 @@ impl RunResourceStamps {
         e_node_id: ExecutionNodeId,
         cancel: CancelToken,
     ) -> impl Future<Output = ()> + 'a {
-        let requests = self.collect_node_requests(program, cache, e_node_id);
+        let mut requests = HashSet::new();
+        self.collect_node_paths(&mut requests, program, cache, e_node_id);
         self.prepare(requests, cancel)
     }
 
-    fn collect_node_requests(
-        &self,
-        program: &ExecutionProgram,
-        cache: &RuntimeCache,
-        e_node_id: ExecutionNodeId,
-    ) -> ResourceStampRequests {
-        let mut requests = ResourceStampRequests::default();
-        requests.collect_node(self, program, cache, e_node_id);
-        requests
-    }
-
-    async fn prepare(&mut self, requests: ResourceStampRequests, cancel: CancelToken) {
+    async fn prepare(&mut self, requests: HashSet<String>, cancel: CancelToken) {
         if requests.is_empty() || cancel.is_cancelled() {
             return;
         }
         let worker_cancel = cancel.clone();
-        let prepared = tokio::task::spawn_blocking(move || requests.resolve(&worker_cancel))
+        let prepared = tokio::task::spawn_blocking(move || resolve_paths(requests, &worker_cancel))
             .await
             .expect("resource stamping task panicked");
         if cancel.is_cancelled() {
             return;
         }
-        self.fs_paths.extend(prepared.fs_paths);
-        self.custom.extend(prepared.custom);
+        self.fs_paths.extend(prepared);
     }
 
     pub(crate) fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
@@ -334,31 +241,18 @@ impl RunResourceStamps {
         }
         Some(())
     }
-
-    pub(crate) fn hash_custom(
-        &self,
-        hasher: &mut DigestHasher,
-        address: &ExecutionOutputPort,
-        stamper: &Arc<dyn ResourceStamper>,
-        value: &DynamicValue,
-    ) -> Option<()> {
-        let stamp = self
-            .custom
-            .get(&CustomResourceKey::new(address, stamper, value))?;
-        hasher.write_len_prefixed(stamp.as_bytes());
-        Some(())
-    }
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
     use common::CancelToken;
+    use hashbrown::HashSet;
 
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
 
-    use crate::execution::resource::RunResourceStamps;
+    use crate::execution::resource::{RunResourceStamps, resolve_paths};
 
     pub(crate) fn prepare_node(
         stamps: &mut RunResourceStamps,
@@ -366,10 +260,10 @@ pub(crate) mod test_support {
         cache: &RuntimeCache,
         e_node_id: ExecutionNodeId,
     ) {
-        let requests = stamps.collect_node_requests(program, cache, e_node_id);
-        let prepared = requests.resolve(&CancelToken::never());
-        stamps.fs_paths.extend(prepared.fs_paths);
-        stamps.custom.extend(prepared.custom);
+        let mut requests = HashSet::new();
+        stamps.collect_node_paths(&mut requests, program, cache, e_node_id);
+        let prepared = resolve_paths(requests, &CancelToken::never());
+        stamps.fs_paths.extend(prepared);
     }
 }
 

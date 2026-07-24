@@ -1832,17 +1832,14 @@ mod cache_persistence {
 }
 
 mod resource_binds {
-    use std::any::Any;
-    use std::fmt;
     use std::path::PathBuf;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use super::*;
     use crate::async_lambda;
-    use crate::library::TypeEntry;
     use crate::node::definition::{Func, FuncInput, FuncOutput};
-    use crate::{CustomValue, FsPathConfig, FsPathMode, ResourceStamp, ResourceStamper, TypeId};
+    use crate::{FsPathConfig, FsPathMode};
 
     const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
     const LOAD_TEXT: &str = "5abcd2e7-f023-4122-8215-f6305c8b4a7e";
@@ -2187,153 +2184,6 @@ mod resource_binds {
             !ran(&stats, fx.make_id),
             "the path producer is served from its blob, not recomputed"
         );
-    }
-
-    const STORE_TYPE: &str = "cbedef18-3a26-4a61-bdf4-5ec651e304d9";
-    const MAKE_HANDLE: &str = "94dcaefc-c7aa-40ea-a297-33bfbfe68f72";
-    const READ_STORE: &str = "bf9e0a40-a2ad-411c-8144-a8ae8f5ab491";
-
-    /// The external state a [`StoreHandle`] names: versioned mutable content — the
-    /// referent the stamper folds and the reader dereferences.
-    #[derive(Debug, Default)]
-    struct Store {
-        version: AtomicU64,
-        content: StdMutex<String>,
-    }
-
-    /// A custom resource-reference value: names the store, contains nothing.
-    #[derive(Debug)]
-    struct StoreHandle;
-    impl fmt::Display for StoreHandle {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "StoreHandle")
-        }
-    }
-    impl CustomValue for StoreHandle {
-        fn type_id(&self) -> TypeId {
-            STORE_TYPE.into()
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-    }
-
-    #[derive(Debug)]
-    struct StoreStamper(Arc<Store>);
-    impl ResourceStamper for StoreStamper {
-        fn stamp(&self, _value: &DynamicValue, _cancel: &CancelToken) -> ResourceStamp {
-            ResourceStamp::from_bytes(&self.0.version.load(Ordering::SeqCst).to_le_bytes())
-        }
-    }
-
-    /// End-to-end wiring of a **registered** resource type: `TypeEntry` stamper →
-    /// flatten resolves the input's stamper → digest folds the referent version →
-    /// reach-time re-stamp keeps the reader cacheable. Bumping the store's version is the
-    /// only change between runs — no value, const, or structural digest moves — and the
-    /// reader must recompute exactly then.
-    #[tokio::test]
-    async fn registered_resource_type_rekeys_reader_on_referent_change() {
-        let store = Arc::new(Store {
-            version: AtomicU64::new(1),
-            content: StdMutex::new("v1".into()),
-        });
-        let reads = Arc::new(AtomicUsize::new(0));
-        let captured = Arc::new(StdMutex::new(String::new()));
-
-        let mut lib = Library::default();
-        lib.register_type(
-            STORE_TYPE,
-            TypeEntry::custom_with_stamper("StoreHandle", Arc::new(StoreStamper(store.clone()))),
-        );
-        lib.add(
-            Func::new(MAKE_HANDLE, "make_handle")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new(
-                    "Handle",
-                    DataType::Custom(STORE_TYPE.into()),
-                ))
-                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
-                    outputs[0] = DynamicValue::from_custom(StoreHandle);
-                    Ok(())
-                })),
-        );
-        let (lambda_store, lambda_reads) = (store.clone(), reads.clone());
-        lib.add(
-            Func::new(READ_STORE, "read_store")
-                .category("Test")
-                .pure()
-                .input(FuncInput::required(
-                    "Handle",
-                    DataType::Custom(STORE_TYPE.into()),
-                ))
-                .output(FuncOutput::new("Text", DataType::String))
-                .lambda(async_lambda!(
-                    move |_, _, _, _inputs, _, outputs| {
-                        store = lambda_store.clone(),
-                        reads = lambda_reads.clone()
-                    } => {
-                        reads.fetch_add(1, Ordering::SeqCst);
-                        outputs[0] =
-                            StaticValue::String(store.content.lock().unwrap().clone()).into();
-                        Ok(())
-                    }
-                )),
-        );
-        lib.add(capture_func(captured.clone()));
-
-        // make_handle(Ram) → read_store(Ram) → capture.
-        let mut graph = Graph::default();
-        let mut make = node(&lib, "make_handle");
-        make.cache = CacheMode::Ram;
-        graph.add(make);
-        let mut read = node(&lib, "read_store");
-        read.cache = CacheMode::Ram;
-        graph.add(read);
-        graph.add(node(&lib, "capture"));
-        let make_id = graph
-            .find_by_name("make_handle", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let read_id = graph
-            .find_by_name("read_store", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        bind(&mut graph, "read_store", 0, Binding::bind(make_id, 0));
-        bind(&mut graph, "capture", 0, Binding::bind(read_id, 0));
-
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &lib).unwrap();
-
-        // Cold run computes; a second run with the referent unchanged is a cache hit.
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(reads.load(Ordering::SeqCst), 1);
-        assert_eq!(*captured.lock().unwrap(), "v1");
-        let stats = engine.execute_sinks().await.unwrap();
-        assert_eq!(
-            reads.load(Ordering::SeqCst),
-            1,
-            "unchanged referent ⇒ the reader stays cached"
-        );
-        assert!(stats.cached_nodes.contains(&root_execution_node(read_id)));
-
-        // Mutate the referent: version bump + new content. Nothing structural changed —
-        // only the stamper sees it — and the reader recomputes while the handle producer
-        // stays a RAM hit.
-        store.version.store(2, Ordering::SeqCst);
-        *store.content.lock().unwrap() = "v2".into();
-        let stats = engine.execute_sinks().await.unwrap();
-        assert_eq!(
-            reads.load(Ordering::SeqCst),
-            2,
-            "a referent version bump re-keys the reader"
-        );
-        assert_eq!(*captured.lock().unwrap(), "v2");
-        assert!(!ran(&stats, make_id), "the handle producer stays cached");
-        assert!(ran(&stats, read_id));
     }
 }
 
@@ -6139,7 +5989,7 @@ mod compile_regressions {
         let e_node_id = root_execution_node(node_id);
         let inputs = program.inputs.append([ExecutionInput {
             required: true,
-            stamper: None,
+            stamps_fs_path: false,
             binding: ExecutionBinding::Bind(ExecutionOutputPort {
                 e_node_id,
                 port_idx: 0,

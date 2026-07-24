@@ -29,7 +29,7 @@ impl Fix {
             .inputs
             .append(inputs.iter().map(|(required, binding)| ExecutionInput {
                 required: *required,
-                stamper: None,
+                stamps_fs_path: false,
                 binding: binding.clone(),
             }));
         let outputs = self

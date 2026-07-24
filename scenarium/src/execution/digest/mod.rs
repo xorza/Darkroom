@@ -24,14 +24,10 @@
 //!   folder-reading node can be `Pure` and still re-key when its contents change. A
 //!   same-size edit within mtime granularity can slip through; explicit runtime cache
 //!   eviction removes the affected node and downstream blobs. The same tier holds
-//!   for any registered [`ResourceStamper`](crate::ResourceStamper): a stamp is
-//!   cheap referent *metadata*, and stamps are machine-local (mtimes, local versions),
-//!   so resource-keyed blobs don't transfer across machines.
 //! - **A reference is dereferenced only through an input declared with its resource
 //!   type.** Const and Bind-delivered references both fold the referent's identity, but
-//!   only where the consumer's input is declared `FsPath` (or a stamper-registered custom
-//!   type) — a lambda that reads a file through an `Any`/`String` input keys nothing and
-//!   can serve stale content. Declare the type.
+//!   only where the consumer's input is declared `FsPath` — a lambda that reads a file
+//!   through an `Any`/`String` input keys nothing and can serve stale content. Declare the type.
 //! - **Custom-value blob format** is disk identity, not value identity. Each blob separately
 //!   stamps the versions of the codecs its values use; changing one invalidates only relevant
 //!   disk blobs without discarding semantically unchanged RAM values or downstream digests.
@@ -40,7 +36,7 @@ use blake3::Hasher;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, InputStamper};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
@@ -292,8 +288,8 @@ pub(crate) fn node_digest(
                 // the Bind-side counterpart of the `Const` arm's `hash_fs_content`. Needs
                 // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
-                if let Some(stamper) = &input.stamper {
-                    hash_bound_resource(&mut hasher, cache, resource_stamps, addr, stamper)?;
+                if input.stamps_fs_path {
+                    hash_bound_fs_path(&mut hasher, cache, resource_stamps, addr)?;
                 }
             }
         }
@@ -302,43 +298,33 @@ pub(crate) fn node_digest(
 }
 
 /// Fold the referent identity behind a **Bind-delivered** resource input: read the
-/// delivered value off the producer's resident slot and fold what the input's
-/// [`InputStamper`] derives from it — the built-in prepared `FsPath` file/dir identity,
-/// or a registered [`ResourceStamper`](crate::ResourceStamper)'s prepared stamp bytes
-/// (length-prefixed, so its internal encoding can't collide across calls) — so a wired
-/// reference re-keys its consumer exactly like a const path does. The producer's value
-/// must exist first: an unreadable value (producer not resident) is `None`, tainting the
-/// node's digest — the pre-run sweep stamps it "uncacheable, must run", and the run loop
-/// then *re-stamps* at reach time, when the producers have settled and any disk-backed
-/// resource producer was hydrated (`executor.rs`). A value the built-in path stamper
-/// can't read as a path (a mis-typed wire) folds a distinct marker instead.
-fn hash_bound_resource(
+/// delivered value off the producer's resident slot and fold its prepared file/directory
+/// identity, so a wired path re-keys its consumer exactly like a const path does. The
+/// producer's value must exist first: an unreadable value (producer not resident) is
+/// `None`, tainting the node's digest — the pre-run sweep stamps it "uncacheable, must
+/// run", and the run loop then re-stamps at reach time, when the producers have settled
+/// and any disk-backed path producer was hydrated (`executor.rs`). A mis-typed delivered
+/// value folds a distinct marker instead.
+fn hash_bound_fs_path(
     hasher: &mut DigestHasher,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
     addr: &ExecutionOutputPort,
-    stamper: &InputStamper,
 ) -> Option<()> {
     let value = cache.slots[&addr.e_node_id]
         .current_output_values()?
         .get(addr.port_idx)?;
-    match stamper {
-        InputStamper::FsPath => match value.as_static() {
-            Some(StaticValue::FsPath(path)) => {
-                hasher.write_bytes(&[3]);
-                resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
-            }
-            Some(StaticValue::FsPaths(paths)) => {
-                hasher.write_bytes(&[3]);
-                resource_stamps.hash_fs_paths(hasher, paths)?;
-            }
-            _ => {
-                hasher.write_bytes(&[4]);
-            }
-        },
-        InputStamper::Custom(stamper) => {
-            hasher.write_bytes(&[5]);
-            resource_stamps.hash_custom(hasher, addr, stamper, value)?;
+    match value.as_static() {
+        Some(StaticValue::FsPath(path)) => {
+            hasher.write_bytes(&[3]);
+            resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
+        }
+        Some(StaticValue::FsPaths(paths)) => {
+            hasher.write_bytes(&[3]);
+            resource_stamps.hash_fs_paths(hasher, paths)?;
+        }
+        _ => {
+            hasher.write_bytes(&[4]);
         }
     }
     Some(())

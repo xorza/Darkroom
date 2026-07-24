@@ -8,7 +8,7 @@
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
-//! 3. **execute** — [`RunResourceStamps`](resource::RunResourceStamps) prepares external
+//! 3. **execute** — [`RunResourceStamps`](resource::RunResourceStamps) prepares filesystem
 //!    identities on the blocking pool; the [`Resolver`](resolve::Resolver) stamps content
 //!    digests, then derives cache-aware liveness, exact output demand, and reader counts in
 //!    one consumer-first sweep. The [`Executor`](executor::Executor) walks the surviving

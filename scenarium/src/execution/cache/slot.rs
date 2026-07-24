@@ -59,7 +59,7 @@ pub(crate) struct RuntimeSlot {
     pub(crate) event_state: SharedAnyState,
     /// The node's current content digest — its cache-validity key (`None` when not
     /// reproducible), stamped producer-first by the resolver and refreshed at execution
-    /// reach only for a late bound-resource identity ([`digest::node_digest`]). A resident
+    /// reach only for a late bound-path identity ([`digest::node_digest`]). A resident
     /// value hits iff its
     /// `produced_under` equals this — so a flipped-back input can't serve a stale value.
     pub(crate) current_digest: Option<Digest>,

@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::CustomValueCodec;
 use crate::graph::Graph;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
-use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
 use hashbrown::HashMap as GraphMap;
 
@@ -14,7 +14,6 @@ enum TypeEntryKind {
     Custom {
         display_name: String,
         codec: Option<Arc<dyn CustomValueCodec>>,
-        stamper: Option<Arc<dyn ResourceStamper>>,
     },
     Enum {
         display_name: String,
@@ -22,31 +21,29 @@ enum TypeEntryKind {
     },
 }
 
-/// A registered nominal type. A custom type may carry a disk codec and resource
-/// stamper; an enum carries only its display metadata and variants.
+/// A registered nominal type. A custom type may carry a disk codec; an enum
+/// carries only its display metadata and variants.
 #[derive(Clone, Debug)]
 pub struct TypeEntry {
     kind: TypeEntryKind,
 }
 
 impl TypeEntry {
-    fn custom_with_attachments(
+    fn custom_entry(
         display_name: impl Into<String>,
         codec: Option<Arc<dyn CustomValueCodec>>,
-        stamper: Option<Arc<dyn ResourceStamper>>,
     ) -> Self {
         Self {
             kind: TypeEntryKind::Custom {
                 display_name: display_name.into(),
                 codec,
-                stamper,
             },
         }
     }
 
     /// A custom type with no disk codec (not cacheable).
     pub fn custom(display_name: impl Into<String>) -> Self {
-        Self::custom_with_attachments(display_name, None, None)
+        Self::custom_entry(display_name, None)
     }
 
     /// A custom type with a disk codec.
@@ -54,24 +51,7 @@ impl TypeEntry {
         display_name: impl Into<String>,
         codec: Arc<dyn CustomValueCodec>,
     ) -> Self {
-        Self::custom_with_attachments(display_name, Some(codec), None)
-    }
-
-    /// A custom resource-reference type with no disk codec.
-    pub fn custom_with_stamper(
-        display_name: impl Into<String>,
-        stamper: Arc<dyn ResourceStamper>,
-    ) -> Self {
-        Self::custom_with_attachments(display_name, None, Some(stamper))
-    }
-
-    /// A disk-cacheable custom resource-reference type.
-    pub fn custom_with_codec_and_stamper(
-        display_name: impl Into<String>,
-        codec: Arc<dyn CustomValueCodec>,
-        stamper: Arc<dyn ResourceStamper>,
-    ) -> Self {
-        Self::custom_with_attachments(display_name, Some(codec), Some(stamper))
+        Self::custom_entry(display_name, Some(codec))
     }
 
     /// An enum type with the variant names taken from `E` (via strum).
@@ -108,13 +88,6 @@ impl TypeEntry {
     fn codec(&self) -> Option<&dyn CustomValueCodec> {
         match &self.kind {
             TypeEntryKind::Custom { codec, .. } => codec.as_deref(),
-            TypeEntryKind::Enum { .. } => None,
-        }
-    }
-
-    pub(crate) fn stamper(&self) -> Option<&Arc<dyn ResourceStamper>> {
-        match &self.kind {
-            TypeEntryKind::Custom { stamper, .. } => stamper.as_ref(),
             TypeEntryKind::Enum { .. } => None,
         }
     }
@@ -270,8 +243,7 @@ mod tests {
     use crate::runtime::shared_any_state::SharedAnyState;
     use crate::testing::{self, TestFuncHooks, test_func_lib};
     use crate::{
-        CancelToken, CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue,
-        ResourceStamp, ResourceStamper, StaticValue, TypeId,
+        CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue, StaticValue, TypeId,
     };
 
     #[derive(Debug)]
@@ -298,15 +270,6 @@ mod tests {
             _byte_len: u64,
         ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
             unreachable!()
-        }
-    }
-
-    #[derive(Debug)]
-    struct StubStamper;
-
-    impl ResourceStamper for StubStamper {
-        fn stamp(&self, _value: &DynamicValue, _cancel: &CancelToken) -> ResourceStamp {
-            ResourceStamp::default()
         }
     }
 
@@ -355,23 +318,17 @@ mod tests {
     }
 
     #[test]
-    fn type_entry_kinds_expose_only_valid_runtime_attachments() {
-        let custom = TypeEntry::custom_with_codec_and_stamper(
-            "Custom",
-            Arc::new(StubCodec),
-            Arc::new(StubStamper),
-        );
+    fn type_entry_kinds_expose_only_valid_codec_attachments() {
+        let custom = TypeEntry::custom_with_codec("Custom", Arc::new(StubCodec));
         assert_eq!(custom.display_name(), "Custom");
         assert!(custom.variants().is_none());
         assert!(custom.codec().is_some());
-        assert!(custom.stamper().is_some());
 
         let variants = vec!["A".to_string()];
         let enum_entry = TypeEntry::enum_with_variants("Enum", variants.clone());
         assert_eq!(enum_entry.display_name(), "Enum");
         assert_eq!(enum_entry.variants(), Some(variants.as_slice()));
         assert!(enum_entry.codec().is_none());
-        assert!(enum_entry.stamper().is_none());
 
         let mut library = Library::default();
         let custom_id = TypeId::unique();
@@ -379,9 +336,7 @@ mod tests {
         let enum_id = TypeId::unique();
         library.register_type(enum_id, enum_entry);
         assert!(library.codec(&custom_id).is_some());
-        assert!(library.types[&custom_id].stamper().is_some());
         assert!(library.codec(&enum_id).is_none());
-        assert!(library.types[&enum_id].stamper().is_none());
     }
 
     #[tokio::test]
