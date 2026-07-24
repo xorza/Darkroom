@@ -27,7 +27,7 @@ impl TerminalSession {
     pub(crate) fn new(script_config: &ScriptConfig, wake: Wake) -> Self {
         let mut preferences = Preferences::load();
         let mut workspace = Workspace::new(script_config, wake, &mut preferences);
-        workspace.normalize_document();
+        workspace.prune_document();
         Self {
             workspace,
             quit: false,
@@ -45,8 +45,7 @@ impl TerminalSession {
                 }
                 ScriptMessage::Apply(intents) => {
                     let library = self.workspace.runtime.library.published.load();
-                    self.workspace.open.normalization_pending |=
-                        apply_intents(&mut self.workspace.open.document, intents, &library);
+                    apply_intents(&mut self.workspace.open.document, intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
                 ScriptMessage::Shutdown => self.quit = true,
@@ -107,13 +106,9 @@ impl TerminalSession {
     }
 }
 
-fn apply_intents(document: &mut Document, intents: Vec<Intent>, library: &Library) -> bool {
+fn apply_intents(document: &mut Document, intents: Vec<Intent>, library: &Library) {
     let target = document.active_target().unwrap_or(GraphRef::Main);
-    let mut normalization_pending = false;
     for intent in intents {
-        for step in commit_intent_cascading(intent, document, target, library) {
-            normalization_pending |= step.requires_reconcile();
-        }
+        commit_intent_cascading(intent, document, target, library);
     }
-    normalization_pending
 }

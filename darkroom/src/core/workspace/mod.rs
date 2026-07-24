@@ -69,22 +69,22 @@ impl Workspace {
     }
 
     pub(crate) fn run_once(&mut self) -> bool {
-        self.normalize_document();
+        self.prune_document();
         self.runtime.run_once(&self.open.document.graph)
     }
 
     pub(crate) fn run_node(&mut self, node_id: NodeId) -> bool {
-        self.normalize_document();
+        self.prune_document();
         self.runtime.run_node(&self.open.document.graph, node_id)
     }
 
     pub(crate) fn evict_cache(&mut self, node_id: NodeId) -> bool {
-        self.normalize_document();
+        self.prune_document();
         self.runtime.evict_cache(&self.open.document.graph, node_id)
     }
 
     pub(crate) fn start_event_loop(&mut self) -> bool {
-        self.normalize_document();
+        self.prune_document();
         self.runtime.start_event_loop(&self.open.document.graph)
     }
 
@@ -95,7 +95,7 @@ impl Workspace {
         Ok(())
     }
 
-    pub(crate) fn normalize_document(&mut self) {
-        self.open.normalize(&self.runtime.library.published.load());
+    pub(crate) fn prune_document(&mut self) {
+        self.open.prune(&self.runtime.library.published.load());
     }
 }

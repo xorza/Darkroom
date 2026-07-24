@@ -331,10 +331,10 @@ impl Scene {
                     })
                 }
                 // Inbound boundary: no inputs; one output per graph input,
-                // plus a trailing placeholder output. Dragging from the
-                // placeholder commits a normal `SetInput` binding to its
-                // index; document normalization then grows the definition's
-                // inputs to match and a fresh placeholder appears next frame.
+                // plus a trailing placeholder output. Wiring the
+                // placeholder emits `AddBoundaryPort` + `SetInput` as one
+                // batch (see `connection_ui::commit_connection`), so a
+                // fresh placeholder appears next frame.
                 NodeKind::GraphInput => graph.definition.as_ref().map(|definition| {
                     let mut outputs: Vec<FuncOutput> =
                         definition.inputs.iter().map(boundary_output).collect();
@@ -636,8 +636,9 @@ fn placeholder_output() -> FuncOutput {
 const PLACEHOLDER_PORT: &str = "+";
 
 /// The placeholder input port for a `GraphOutput`: unbound, untyped
-/// until something connects (at which point reconcile materializes a real
-/// definition output from the wired producer's type).
+/// until something connects (at which point the commit's
+/// `AddBoundaryPort` materializes a real definition output typed from
+/// the wired producer).
 fn placeholder_input() -> FuncInput {
     FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }

@@ -72,7 +72,7 @@ Root holds the entry point; implementation is grouped by responsibility:
   shutdown state over a `Workspace`.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
   `EditScope`), `open_document.rs` (`OpenDocument`: startup loading, active
-  path, and pending normalization), `serde.rs` (custom ordered paint-stack
+  path, and the deferred load-time wiring prune), `serde.rs` (custom ordered paint-stack
   wire format), and `validate.rs` (document/view structural validation).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
@@ -132,8 +132,7 @@ workspace's `OpenDocument`:
 - `action_stack: ActionStack`, `scene: Scene`,
   `main_window: MainWindow`, `run_state: RunState`.
 - `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`, and
-  `needs_relayout` flags. Structural edits set
-  `OpenDocument.normalization_pending`.
+  `needs_relayout` flags.
 - `intents: Vec<Intent>` and `actions: Vec<UiAction>` — reused scratch buffers,
   cleared each record pass (no cross-frame state).
 
@@ -155,9 +154,8 @@ One record pass:
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
    they apply *before* the record.
-6. **drain (pre-record)** + canvas shortcuts + file-op chords. The next scene
-   rebuild normalizes the open document when structural edits made it pending;
-   the drain sets `scene_dirty` if it applied anything.
+6. **drain (pre-record)** + canvas shortcuts + file-op chords. The drain
+   sets `scene_dirty` if it applied anything.
 7. **rebuild #2 (pre-record)** — `rebuild_scene` again **only if `scene_dirty`**.
    An idle frame or bare tab switch skips it.
 8. **record** — draw the tree; widgets push more intents (clicks, edit commits,
@@ -217,7 +215,8 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   paint-stack item — node body or pin preview), `SetNodeProperty`
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
-  `DetachGraph`, `SetViewport`, `RenameBoundaryPort`, `RenameGraph`,
+  `DetachGraph`, `SetViewport`, `RenameBoundaryPort`, `AddBoundaryPort`,
+  `RemoveBoundaryPort`, `RenameGraph`,
   plus document-global `Dock(DockOp)` (`ActivateTab` / `CloseTab` /
   `MoveTab` / `SetRatio` — activations coalesce as a switch burst, one
   divider's drag coalesces per `DockPath`).
@@ -251,14 +250,24 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   reports the persistence outcome and re-pushes the worker's `DiskStore` (its
   codec table rides a library snapshot).
 
-### Graph normalization (`scenarium::Graph::normalize`)
-Derived graph state lives in Scenarium. `OpenDocument::normalize` gates the
-operation on its pending flag before scene rebuild, execution, cache save, or
-document save. `Graph::normalize` recursively synchronizes each local graph's
-interface against its interior wiring, compacts unused boundary slots, remaps
-the owning graph's instance bindings, then prunes bindings and subscriptions
-left dangling against the resulting interfaces and current library. It is
-idempotent on an already-canonical graph tree.
+### Authored graph interfaces + the load-time prune
+A subgraph's interface (`SubgraphDefinition.inputs/outputs`) is **authored
+state**, mutated only through recorded intents — nothing derives it from
+wiring. Wiring a boundary node's trailing "+" placeholder emits
+`Intent::AddBoundaryPort` + the `SetInput` as one batch
+(`connection_ui::commit_connection`), so add + bind undo together; the new
+port's name is synthesized (`input{N}`) and its type captured from the
+opposite endpoint at creation. Removing a port is the boundary port row's
+context-menu action (`Intent::RemoveBoundaryPort`), which detaches the slot
+plus every binding it severs — interior edges, instance bindings, pins —
+via scenarium's `detach_graph_input/output`, all recorded on the step so
+undo restores the exact wiring. Unwiring never deletes a port.
+
+Library drift (a func or shared graph that changed shape between sessions)
+is handled once per opened document: `OpenDocument::prune` (gated by
+`prune_pending`, set on load/replace) calls
+`Graph::prune_dangling_wiring` to drop bindings and subscriptions the
+current library can no longer resolve.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
@@ -276,8 +285,8 @@ the active `GraphView` each rebuild; the gesture writes back via intents.
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
-- `App::run_graph` asks `Workspace::run_once` to normalize and compile the
-  active graph against the library **on the UI thread**
+- `App::run_graph` asks `Workspace::run_once` to prune (if pending) and compile
+  the active graph against the library **on the UI thread**
   (`RuntimeHost::run_once` → the host-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the
   `Arc<CompiledGraph>` to the worker, followed by a separate
