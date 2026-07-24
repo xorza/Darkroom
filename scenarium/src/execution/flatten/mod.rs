@@ -337,7 +337,12 @@ impl<'a> Run<'a> {
             }),
             NodeKind::Graph(r) => {
                 let nested = graph.resolve_graph(*r, self.library)?;
-                let exposed = nested.events.get(event_idx)?;
+                let exposed = nested
+                    .definition
+                    .as_ref()
+                    .expect("nested graph requires a subgraph definition")
+                    .events
+                    .get(event_idx)?;
                 let (interior, interior_idx) = (exposed.emitter, exposed.emitter_event_idx);
                 self.push_level(node_id);
                 let resolved = self.resolve_emitter(interior, interior_idx);

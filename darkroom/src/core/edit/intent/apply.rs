@@ -129,7 +129,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
         DocStep::RenameGraph { id, to, .. } => {
             if let Some(graph) = doc.graph.graphs.get_mut(id) {
-                graph.name = to.clone();
+                graph.definition.as_mut().unwrap().name = to.clone();
             }
         }
     }
@@ -333,7 +333,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
         DocStep::RenameGraph { id, from, .. } => {
             if let Some(graph) = doc.graph.graphs.get_mut(id) {
-                graph.name = from.clone();
+                graph.definition.as_mut().unwrap().name = from.clone();
             }
         }
     }

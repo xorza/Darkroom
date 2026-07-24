@@ -16,25 +16,28 @@ design home that the module's `//!` docs point at. Two parts:
 
 ## A.1 Authoring and execution representations
 
-`Graph` is the only authoring graph entity. It owns its nodes and wiring, its
-exposed interface (`inputs`, `outputs`, and `events`), its editor metadata, and a
-map of nested local graphs:
+`Graph` is the only authoring graph entity. It owns nodes, wiring, and a map of
+nested local graphs. Reusable-only metadata is grouped separately:
 
 ```text
 Graph {
+    definition: Option<SubgraphDefinition>,
+    nodes, bindings, subscriptions,
+    graphs: HashMap<GraphId, Graph>,
+}
+
+SubgraphDefinition {
     name, category,
     inputs: Vec<FuncInput>,
     outputs: Vec<FuncOutput>,
     events: Vec<GraphEvent>,
     origin: Option<GraphId>,
-    nodes, bindings, subscriptions,
-    graphs: HashMap<GraphId, Graph>,
 }
 ```
 
-The root document value is a `Graph` with no exposed interface or boundary nodes.
-A reusable graph is the same type stored under an external `GraphId`. There is no
-definition wrapper and no duplicate id inside the mapped value.
+The root document value has `definition: None` and no boundary nodes. A reusable
+graph has `definition: Some(_)` and is stored under an external `GraphId`; the
+definition does not duplicate that registry id.
 
 Compilation lowers the authoring graph into an immutable `ExecutionProgram`.
 Composite instances and boundaries disappear, leaving only flat func nodes for
@@ -57,12 +60,12 @@ instead of being stored independently.
 
 Two node kinds route values across a reusable graph's boundary:
 
-- `NodeKind::GraphInput` has one output per `Graph.inputs` entry.
-- `NodeKind::GraphOutput` has one input per `Graph.outputs` entry.
+- `NodeKind::GraphInput` has one output per definition input.
+- `NodeKind::GraphOutput` has one input per definition output.
 
 Either boundary may be absent when that side of the interface is empty. Boundaries
 are routing only and emit no execution node. Validation reads their arity directly
-from the containing `Graph`; it does not require an enclosing definition object.
+from the containing graph's `SubgraphDefinition`.
 
 ## A.3 Graph instances and lookup
 
@@ -99,18 +102,20 @@ An instance has one outgoing event port per entry. Incoming events use ordinary
 subscriptions; flattening expands a composite subscriber into the interior nodes
 subscribed to its `GraphInput` trigger.
 
-`Graph::fresh_copy()` preserves metadata and interface while assigning fresh node
-ids throughout the copied graph tree and remapping event emitters. The caller
-chooses a fresh `GraphId` when inserting that value. `origin: Option<GraphId>` is
-editor-only lineage pointing from a local graph to its shared source.
+`Graph::fresh_copy()` preserves definition metadata and interface while assigning
+fresh node ids throughout the copied graph tree and remapping event emitters. The
+caller chooses a fresh `GraphId` when inserting that value.
+`SubgraphDefinition::origin` is editor-only lineage pointing from a local graph to
+its shared source.
 
 ## A.5 Validation and recursion
 
-`Graph::validate()` validates any graph, including its interface, boundaries, nested
-graphs, and exposed events. `Graph::validate_for_execution()` additionally resolves
-the complete local/shared graph tree against the library and requires the entry
-graph to have no interface or boundary nodes. The document boundary applies the
-same entry constraints without requiring a runtime library.
+`Graph::validate()` validates either graph form, including boundaries, nested graphs,
+and exposed events. `Graph::validate_subgraph()` additionally requires a definition.
+`Graph::validate_for_execution()` resolves the complete local/shared graph tree
+against the library and requires the entry graph to have no definition or boundary
+nodes. The document boundary applies the same entry constraints without requiring a
+runtime library.
 
 Compilation validates links against the library and rejects recursive composition.
 Flattening also tracks graph ids on the active descent path, while a hard depth cap

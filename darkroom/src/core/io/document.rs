@@ -257,7 +257,7 @@ mod tests {
     use std::io::Read as _;
 
     use common::test_utils::test_output_path;
-    use scenarium::GraphId;
+    use scenarium::{GraphId, SubgraphDefinition};
 
     use super::*;
 
@@ -347,7 +347,10 @@ mod tests {
 
         let invalid = test_output_path("darkroom_document/invalid.darkroom");
         let mut document = Document::default();
-        document.graph.origin = Some(GraphId::nil());
+        document.graph.definition = Some(SubgraphDefinition {
+            origin: Some(GraphId::nil()),
+            ..Default::default()
+        });
         let json = serde_json::to_vec(&document).unwrap();
         write_test_archive(&invalid, DOCUMENT_ENTRY, &json);
         assert!(

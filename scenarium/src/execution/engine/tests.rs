@@ -5359,11 +5359,16 @@ mod graph {
         let emitter = fnode(&library, "ticker");
         let mut def_graph = Graph::new("Exposer").category("Test");
         let emitter_id = def_graph.add(emitter);
-        def_graph.events.push(GraphEvent {
-            name: "tick".into(),
-            emitter: emitter_id,
-            emitter_event_idx: 0,
-        });
+        def_graph
+            .definition
+            .as_mut()
+            .unwrap()
+            .events
+            .push(GraphEvent {
+                name: "tick".into(),
+                emitter: emitter_id,
+                emitter_event_idx: 0,
+            });
 
         // parent: composite C, and `listener` subscribing to C's event 0.
         let listener = fnode(&library, "Print");

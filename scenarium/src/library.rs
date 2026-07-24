@@ -149,6 +149,10 @@ impl Library {
     pub fn insert_graph(&mut self, id: GraphId, graph: Graph) {
         assert!(!id.is_nil());
         assert!(
+            graph.definition.is_some(),
+            "shared graph requires a subgraph definition"
+        );
+        assert!(
             !self.graphs.contains_key(&id),
             "duplicate graph registration"
         );
@@ -290,7 +294,23 @@ mod tests {
             library.insert_graph(graph_id, Graph::new("After"));
         }));
         assert!(duplicate_graph.is_err());
-        assert_eq!(library.graph_by_id(&graph_id).unwrap().name, "Before");
+        assert_eq!(
+            library
+                .graph_by_id(&graph_id)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .name,
+            "Before"
+        );
+        let missing_definition = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Library::default().insert_graph(GraphId::unique(), Graph::default());
+        }));
+        assert!(
+            missing_definition.is_err(),
+            "a shared graph cannot omit its definition"
+        );
 
         let type_id = TypeId::unique();
         library.register_type(type_id, TypeEntry::custom("Before"));

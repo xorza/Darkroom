@@ -219,7 +219,7 @@ pub enum NodeSearch {
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Graph {
+pub struct SubgraphDefinition {
     pub name: String,
     pub category: String,
 
@@ -238,6 +238,14 @@ pub struct Graph {
     /// Shared-library graph this value was copied from, if any.
     #[serde(default)]
     pub origin: Option<GraphId>,
+}
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Graph {
+    /// Definition metadata for a reusable graph. Entry graphs have no
+    /// definition because they cannot be instantiated or expose an interface.
+    #[serde(default)]
+    pub definition: Option<SubgraphDefinition>,
 
     pub(crate) nodes: HashMap<NodeId, Node>,
 
@@ -269,55 +277,63 @@ pub struct Graph {
 }
 
 impl Graph {
+    /// Create an empty reusable graph with a subgraph definition.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            definition: Some(SubgraphDefinition {
+                name: name.into(),
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
 
     pub fn category(mut self, category: impl Into<String>) -> Self {
-        self.category = category.into();
+        self.definition.as_mut().unwrap().category = category.into();
         self
     }
 
     pub fn input(mut self, input: FuncInput) -> Self {
-        self.inputs.push(input);
+        self.definition.as_mut().unwrap().inputs.push(input);
         self
     }
 
     pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
-        self.inputs.extend(inputs);
+        self.definition.as_mut().unwrap().inputs.extend(inputs);
         self
     }
 
     pub fn output(mut self, output: FuncOutput) -> Self {
-        self.outputs.push(output);
+        self.definition.as_mut().unwrap().outputs.push(output);
         self
     }
 
     pub fn outputs(mut self, outputs: impl IntoIterator<Item = FuncOutput>) -> Self {
-        self.outputs.extend(outputs);
+        self.definition.as_mut().unwrap().outputs.extend(outputs);
         self
     }
 
     pub fn event(mut self, event: GraphEvent) -> Self {
-        self.events.push(event);
+        self.definition.as_mut().unwrap().events.push(event);
         self
     }
 
     pub fn events(mut self, events: impl IntoIterator<Item = GraphEvent>) -> Self {
-        self.events.extend(events);
+        self.definition.as_mut().unwrap().events.extend(events);
         self
     }
 
     pub fn origin(mut self, origin: GraphId) -> Self {
-        self.origin = Some(origin);
+        self.definition.as_mut().unwrap().origin = Some(origin);
         self
     }
 
     pub fn insert_graph(&mut self, graph_id: GraphId, graph: Graph) {
         assert!(!graph_id.is_nil(), "cannot insert a graph with a nil id");
+        assert!(
+            graph.definition.is_some(),
+            "local graph requires a subgraph definition"
+        );
         self.graphs.insert(graph_id, graph);
     }
 
@@ -446,7 +462,11 @@ impl Graph {
     pub fn add_graph_node(&mut self, graph: &Graph, link: GraphLink) -> NodeId {
         let node = Node::graph_instance(graph, link);
         let node_id = self.add(node);
-        for (port_idx, io) in graph.inputs.iter().enumerate() {
+        let definition = graph
+            .definition
+            .as_ref()
+            .expect("graph instance requires a subgraph definition");
+        for (port_idx, io) in definition.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
                     InputPort::new(node_id, port_idx),
@@ -478,9 +498,13 @@ impl Node {
 
     /// A graph instance node shaped from the referenced graph.
     pub fn graph_instance(graph: &Graph, link: GraphLink) -> Self {
+        let definition = graph
+            .definition
+            .as_ref()
+            .expect("graph instance requires a subgraph definition");
         Node {
             kind: NodeKind::Graph(link),
-            name: graph.name.clone(),
+            name: definition.name.clone(),
             cache: CacheMode::None,
             disabled: false,
         }

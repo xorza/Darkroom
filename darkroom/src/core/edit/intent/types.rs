@@ -150,8 +150,7 @@ pub(crate) enum Intent {
     /// the whole layout before/after (it's tiny), so every dock op is
     /// one uniform, trivially reversible step.
     Dock(DockOp),
-    /// Rename a graph interface port (`graph.inputs[idx]` for
-    /// `side = Input`, `graph.outputs[idx]` for `Output`). Scoped to the
+    /// Rename a subgraph definition's interface port. Scoped to the
     /// active `Local` target — `build_step` reads the `GraphId` from
     /// the drain `target`, so the intent only carries the side + index +
     /// new name. Dropped when the target isn't a graph interior.
@@ -160,7 +159,7 @@ pub(crate) enum Intent {
         idx: usize,
         to: String,
     },
-    /// Rename a local graph (`graph.graphs[id].name`).
+    /// Rename a local graph's subgraph definition.
     /// Document-global (not scoped to any one graph) so it works
     /// regardless of which tab is active. Drives the tab-strip's
     /// double-click-to-rename label.

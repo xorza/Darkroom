@@ -77,7 +77,7 @@ pub(crate) fn load(path: &Path) -> Result<Graph, GraphTemplateLoadError> {
         }
     })?;
     graph
-        .validate()
+        .validate_subgraph()
         .map_err(|error| GraphTemplateLoadError::Invalid {
             path: path.to_path_buf(),
             reason: format!("{error:#}"),

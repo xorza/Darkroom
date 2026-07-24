@@ -22,6 +22,8 @@ pub(crate) fn publish_graph(
         };
         let local = scope.graph.graphs.get(&local_id)?;
         let existing_lib = local
+            .definition
+            .as_ref()?
             .origin
             .filter(|id| graph_library.graphs.contains_key(id));
         Some(PublishSource {
@@ -52,7 +54,7 @@ fn set_origin(document: &mut Document, holder: GraphRef, graph_id: GraphId, orig
     if let Some(graph) = document.graph_mut(holder)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
-        nested.origin = Some(origin);
+        nested.definition.as_mut().unwrap().origin = Some(origin);
     }
 }
 
@@ -130,7 +132,7 @@ mod tests {
 
     fn graph(name: &str, origin: Option<GraphId>) -> Graph {
         let mut graph = Graph::new(name);
-        graph.origin = origin;
+        graph.definition.as_mut().unwrap().origin = origin;
         graph
     }
 
@@ -156,12 +158,26 @@ mod tests {
             "update in place — no new library entry"
         );
         assert_eq!(
-            graph_library.graphs.get(&lib_id).unwrap().name,
+            graph_library
+                .graphs
+                .get(&lib_id)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .name,
             "New",
             "library graph took the local graph's content"
         );
         assert_eq!(
-            doc.graph.graphs.get(&local.graph_id).unwrap().origin,
+            doc.graph
+                .graphs
+                .get(&local.graph_id)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .origin,
             Some(lib_id),
             "lineage preserved"
         );
@@ -188,6 +204,9 @@ mod tests {
             .graph
             .graphs
             .get(&local.graph_id)
+            .unwrap()
+            .definition
+            .as_ref()
             .unwrap()
             .origin
             .expect("local graph linked to the new entry");

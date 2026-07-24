@@ -10,6 +10,9 @@ crate-private, so downstream crates import public concepts directly from
 
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
 bindings, event subscriptions, pinned outputs, and local graphs.
+Entry graphs have no definition; reusable local/shared graphs carry an optional
+`SubgraphDefinition` containing their name, category, interface, and library
+lineage.
 Identity exists only in the map key; `Node` is authored data and does not store
 its id. Its cache mode is storage policy, not cache validity. `Graph` is the
 persisted model. `Graph::validate` enforces node-id

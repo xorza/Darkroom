@@ -105,11 +105,19 @@ fn normalize_local_graph(parent: &mut Graph, graph_id: GraphId, library: &Librar
     let graph = parent.graphs.get_mut(&graph_id).unwrap();
     if let Some(plan) = &inputs {
         remap_source_edges(graph, plan.boundary, &plan.remap);
-        graph.inputs = plan.interface.clone();
+        graph
+            .definition
+            .as_mut()
+            .expect("local graph requires a subgraph definition")
+            .inputs = plan.interface.clone();
     }
     if let Some(plan) = &outputs {
         remap_target_bindings(graph, plan.boundary, &plan.remap);
-        graph.outputs = plan.interface.clone();
+        graph
+            .definition
+            .as_mut()
+            .expect("local graph requires a subgraph definition")
+            .outputs = plan.interface.clone();
     }
 
     for node_id in instances {
@@ -123,6 +131,10 @@ fn normalize_local_graph(parent: &mut Graph, graph_id: GraphId, library: &Librar
 }
 
 fn plan_inputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncInput>> {
+    let definition = graph
+        .definition
+        .as_ref()
+        .expect("local graph requires a subgraph definition");
     let boundary = graph
         .iter()
         .find(|node| matches!(node.kind, NodeKind::GraphInput))
@@ -137,7 +149,7 @@ fn plan_inputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncInput>> 
     for (new_idx, &old_idx) in used.iter().enumerate() {
         remap.insert(old_idx, new_idx);
         let data_type = infer_used_input_type(graph, library, boundary, old_idx);
-        interface.push(match graph.inputs.get(old_idx) {
+        interface.push(match definition.inputs.get(old_idx) {
             Some(existing) => FuncInput {
                 data_type,
                 ..existing.clone()
@@ -145,7 +157,7 @@ fn plan_inputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncInput>> 
             None => synth_input(new_idx, data_type),
         });
     }
-    let changed = interface != graph.inputs || remap.iter().any(|(old, new)| old != new);
+    let changed = interface != definition.inputs || remap.iter().any(|(old, new)| old != new);
     Some(SidePlan {
         boundary,
         interface,
@@ -155,6 +167,10 @@ fn plan_inputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncInput>> 
 }
 
 fn plan_outputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncOutput>> {
+    let definition = graph
+        .definition
+        .as_ref()
+        .expect("local graph requires a subgraph definition");
     let boundary = graph
         .iter()
         .find(|node| matches!(node.kind, NodeKind::GraphOutput))
@@ -170,13 +186,13 @@ fn plan_outputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncOutput>
     for (new_idx, &old_idx) in used.iter().enumerate() {
         remap.insert(old_idx, new_idx);
         let data_type = infer_used_output_type(graph, library, boundary, old_idx);
-        let name = graph
+        let name = definition
             .outputs
             .get(old_idx)
             .map_or_else(|| format!("output{new_idx}"), |output| output.name.clone());
         interface.push(FuncOutput::new(name, data_type));
     }
-    let changed = interface != graph.outputs || remap.iter().any(|(old, new)| old != new);
+    let changed = interface != definition.outputs || remap.iter().any(|(old, new)| old != new);
     Some(SidePlan {
         boundary,
         interface,

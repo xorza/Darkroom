@@ -487,9 +487,10 @@ impl Document {
         idx: usize,
     ) -> Option<&str> {
         let graph = self.graph.graphs.get(&graph_id)?;
+        let definition = graph.definition.as_ref()?;
         let name = match side {
-            BoundarySide::Input => &graph.inputs.get(idx)?.name,
-            BoundarySide::Output => &graph.outputs.get(idx)?.name,
+            BoundarySide::Input => &definition.inputs.get(idx)?.name,
+            BoundarySide::Output => &definition.outputs.get(idx)?.name,
         };
         Some(name)
     }
@@ -513,14 +514,17 @@ impl Document {
         let Some(graph) = self.graph.graphs.get_mut(&graph_id) else {
             return;
         };
+        let Some(definition) = graph.definition.as_mut() else {
+            return;
+        };
         let slot = match side {
             BoundarySide::Input => {
-                resolve_named_slot(&graph.inputs, idx_hint, expected, |i| &i.name)
-                    .map(|i| &mut graph.inputs[i].name)
+                resolve_named_slot(&definition.inputs, idx_hint, expected, |i| &i.name)
+                    .map(|i| &mut definition.inputs[i].name)
             }
             BoundarySide::Output => {
-                resolve_named_slot(&graph.outputs, idx_hint, expected, |o| &o.name)
-                    .map(|i| &mut graph.outputs[i].name)
+                resolve_named_slot(&definition.outputs, idx_hint, expected, |o| &o.name)
+                    .map(|i| &mut definition.outputs[i].name)
             }
         };
         if let Some(slot) = slot {
@@ -547,8 +551,8 @@ impl From<CoreGraph> for Document {
 mod tests {
     use super::*;
     use crate::core::document::validate::{DocumentValidationError, GraphViewValidationError};
-    use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
+    use scenarium::{FuncId, SubgraphDefinition};
 
     fn leaf_graph(name: &str) -> CoreGraph {
         CoreGraph::new(name)
@@ -587,7 +591,7 @@ mod tests {
         // one undoable `AddNode`.
         let lib_id = GraphId::unique();
         let mut local = leaf_graph("Lib").fresh_copy();
-        local.origin = Some(lib_id);
+        local.definition.as_mut().unwrap().origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -612,7 +616,14 @@ mod tests {
             "local graph added alongside the instance"
         );
         assert_eq!(
-            doc.graph.graphs.get(&local_id).unwrap().origin,
+            doc.graph
+                .graphs
+                .get(&local_id)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .origin,
             Some(lib_id),
             "copy records its library origin"
         );
@@ -641,7 +652,7 @@ mod tests {
         use crate::core::edit::intent::types::Intent;
 
         let mut local = leaf_graph("Lib").fresh_copy();
-        local.origin = Some(lib_id);
+        local.definition.as_mut().unwrap().origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
@@ -700,7 +711,7 @@ mod tests {
         let lib_id = GraphId::unique();
         let mut doc = Document::default();
         let mut local = leaf_graph("Lib");
-        local.origin = Some(lib_id);
+        local.definition.as_mut().unwrap().origin = Some(lib_id);
         let local_id = GraphId::unique();
         doc.graph.insert_graph(local_id, local);
         let node = Node::graph_instance(
@@ -724,7 +735,14 @@ mod tests {
         };
         assert_ne!(new_id, local_id, "node now points at the fork");
         assert_eq!(
-            doc.graph.graphs.get(&new_id).unwrap().origin,
+            doc.graph
+                .graphs
+                .get(&new_id)
+                .unwrap()
+                .definition
+                .as_ref()
+                .unwrap()
+                .origin,
             None,
             "detach clears the library lineage"
         );
@@ -816,7 +834,8 @@ mod tests {
                 .count(),
             1
         );
-        assert!(def.inputs.is_empty() && def.outputs.is_empty());
+        let definition = def.definition.as_ref().unwrap();
+        assert!(definition.inputs.is_empty() && definition.outputs.is_empty());
 
         // Boundary nodes are placed input-left / output-right, level.
         let input_id = def
@@ -1036,7 +1055,10 @@ mod tests {
         assert_roundtrip();
 
         let mut invalid = build_test_doc();
-        invalid.graph.origin = Some(GraphId::nil());
+        invalid.graph.definition = Some(SubgraphDefinition {
+            origin: Some(GraphId::nil()),
+            ..Default::default()
+        });
         let serialized = serde_json::to_vec(&invalid).unwrap();
         let invalid: Document = serde_json::from_slice(&serialized).unwrap();
         let error = invalid.validate().unwrap_err().to_string();

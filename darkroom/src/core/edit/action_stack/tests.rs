@@ -6,9 +6,8 @@ use crate::core::document::{Document, ItemRef, TabRef};
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
-use scenarium::GraphId;
-use scenarium::NodeSearch;
 use scenarium::testing::test_graph;
+use scenarium::{GraphId, NodeSearch, SubgraphDefinition};
 
 /// Three tabs with distinct `Local` targets in the primary group so an
 /// activation/close at a given index is observable. Dock steps are
@@ -481,6 +480,20 @@ fn doc_with_def() -> (Document, GraphRef) {
     (doc, GraphRef::Local(id))
 }
 
+fn definition(doc: &Document, id: GraphId) -> &SubgraphDefinition {
+    doc.graph.graphs[&id].definition.as_ref().unwrap()
+}
+
+fn definition_mut(doc: &mut Document, id: GraphId) -> &mut SubgraphDefinition {
+    doc.graph
+        .graphs
+        .get_mut(&id)
+        .unwrap()
+        .definition
+        .as_mut()
+        .unwrap()
+}
+
 #[test]
 fn rename_boundary_port_applies_and_reverts() {
     use crate::core::document::BoundarySide;
@@ -502,14 +515,11 @@ fn rename_boundary_port_applies_and_reverts() {
     .expect("rename builds against a Local target");
 
     apply_step(&step, &mut doc, target);
-    assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
-        "alpha"
-    );
+    assert_eq!(definition(&doc, def_id).inputs[0].name, "alpha");
 
     revert_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
+        definition(&doc, def_id).inputs[0].name,
         "A",
         "revert restores the captured `from` name"
     );
@@ -534,10 +544,7 @@ fn rename_boundary_port_renames_outputs_side() {
     )
     .unwrap();
     apply_step(&step, &mut doc, target);
-    assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().outputs[0].name,
-        "result"
-    );
+    assert_eq!(definition(&doc, def_id).outputs[0].name, "result");
 }
 
 #[test]
@@ -602,22 +609,16 @@ fn rename_undo_survives_interface_compaction() {
     )
     .unwrap();
     apply_step(&step, &mut doc, target);
-    assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().inputs[1].name,
-        "beta"
-    );
+    assert_eq!(definition(&doc, def_id).inputs[1].name, "beta");
 
     // Simulate normalization compacting after input 0 ("A")
     // was disconnected: the survivor "beta" shifts from index 1 to 0.
-    doc.graph.graphs.get_mut(&def_id).unwrap().inputs.remove(0);
-    assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
-        "beta"
-    );
+    definition_mut(&mut doc, def_id).inputs.remove(0);
+    assert_eq!(definition(&doc, def_id).inputs[0].name, "beta");
 
     // Undo: the step's `idx` (1) is now stale, but it resolves "beta"
     // by name at its new index 0 and restores "B" — not a no-op, not
     // the wrong slot.
     revert_step(&step, &mut doc, target);
-    assert_eq!(doc.graph.graphs.get(&def_id).unwrap().inputs[0].name, "B");
+    assert_eq!(definition(&doc, def_id).inputs[0].name, "B");
 }

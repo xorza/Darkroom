@@ -39,7 +39,7 @@ impl PaletteEntry<'_> {
         match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Graph(_, graph) => &graph.name,
+            PaletteEntry::Graph(_, graph) => &graph.definition.as_ref().unwrap().name,
         }
     }
 }
@@ -239,7 +239,10 @@ fn category_column(
             ctx.library
                 .graphs
                 .iter()
-                .filter(|(_, graph)| graph.category == category && shows(&graph.name))
+                .filter(|(_, graph)| {
+                    let definition = graph.definition.as_ref().unwrap();
+                    definition.category == category && shows(&definition.name)
+                })
                 .map(|(id, graph)| PaletteEntry::Graph(*id, graph)),
         )
         .collect();
@@ -294,7 +297,7 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
             ctx.library
                 .graphs
                 .values()
-                .map(|graph| graph.category.as_str()),
+                .map(|graph| graph.definition.as_ref().unwrap().category.as_str()),
         )
         .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
@@ -333,15 +336,20 @@ fn graph_entry(
     shared_id: GraphId,
     graph: &Graph,
 ) -> Option<ChosenNode> {
-    if !MenuItem::new(&graph.name).show(ui, popup).left.clicked() {
+    let definition = graph.definition.as_ref().unwrap();
+    if !MenuItem::new(&definition.name)
+        .show(ui, popup)
+        .left
+        .clicked()
+    {
         return None;
     }
     let local_id = GraphId::unique();
     let mut local = graph.fresh_copy();
-    local.origin = Some(shared_id);
+    local.definition.as_mut().unwrap().origin = Some(shared_id);
     let node_id = NodeId::unique();
     let node = Node::graph_instance(&local, GraphLink::Local(local_id));
-    let bindings = default_bindings(node_id, &local.inputs);
+    let bindings = default_bindings(node_id, &local.definition.as_ref().unwrap().inputs);
     Some(ChosenNode {
         node_id,
         node,

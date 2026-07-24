@@ -33,7 +33,7 @@ installed.
 
 ## High: Authoring and compilation invariants
 
-- [ ] **Output normalization destroys authored output descriptions.** `FuncOutput` stores a description, and input normalization preserves the full existing `FuncInput`, but output normalization reconstructs every entry from only its name and inferred type before replacing `graph.outputs` (`src/node/definition.rs:151-174`, `src/graph/normalize/mod.rs:105-113`, `src/graph/normalize/mod.rs:125-186`). Any local-graph output description makes the reconstructed interface differ and is silently erased during normalization.
+- [ ] **Output normalization destroys authored output descriptions.** `FuncOutput` stores a description, and input normalization preserves the full existing `FuncInput`, but output normalization reconstructs every entry from only its name and inferred type before replacing the definition outputs (`src/node/definition.rs:151-174`, `src/graph/normalize/mod.rs:105-121`, `src/graph/normalize/mod.rs:164-202`). Any local-graph output description makes the reconstructed interface differ and is silently erased during normalization.
 
 - [ ] **Normalization covers only part of the graph state that validation later treats as structural.** The pruning pass examines bindings and subscriptions but not pinned outputs or exposed events, and `subscription_live` does not check that the subscriber exists (`src/graph/normalize/mod.rs:38-50`, `src/graph/normalize/mod.rs:67-74`). Validation rejects stale pins, exposed events, and missing subscribers afterward (`src/graph/validate.rs:165-224`), so library or interface evolution can leave a normalized document structurally invalid and uncompilable.
 

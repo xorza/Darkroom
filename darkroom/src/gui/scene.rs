@@ -290,22 +290,29 @@ impl Scene {
                     uncacheable: f.uncacheable,
                     impure: f.behavior == FuncBehavior::Impure,
                 }),
-                NodeKind::Graph(r) => graph.resolve_graph(*r, library).map(|d| NodeInterface {
-                    kind_label: ui.intern(&d.name),
-                    description: ui.intern(""),
-                    inputs: Cow::Borrowed(&d.inputs),
-                    outputs: Cow::Borrowed(&d.outputs),
-                    events: d.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                    graph: Some(*r),
-                    // A composite's sink-ness is derived at flatten
-                    // time, not stored separately; treat "no exposed
-                    // outputs" as the visible sink signal.
-                    sink: d.outputs.is_empty(),
-                    uncacheable: false,
-                    // Aggregate purity of a composite isn't known here, so the
-                    // cache chips stay available for it (unlike a func).
-                    impure: false,
-                }),
+                NodeKind::Graph(r) => graph
+                    .resolve_graph(*r, library)
+                    .and_then(|graph| graph.definition.as_ref())
+                    .map(|definition| NodeInterface {
+                        kind_label: ui.intern(&definition.name),
+                        description: ui.intern(""),
+                        inputs: Cow::Borrowed(&definition.inputs),
+                        outputs: Cow::Borrowed(&definition.outputs),
+                        events: definition
+                            .events
+                            .iter()
+                            .map(|event| ui.intern(&event.name))
+                            .collect(),
+                        graph: Some(*r),
+                        // A composite's sink-ness is derived at flatten
+                        // time, not stored separately; treat "no exposed
+                        // outputs" as the visible sink signal.
+                        sink: definition.outputs.is_empty(),
+                        uncacheable: false,
+                        // Aggregate purity of a composite isn't known here, so the
+                        // cache chips stay available for it (unlike a func).
+                        impure: false,
+                    }),
                 // A built-in special node: its interface is the hardcoded spec.
                 // Any wildcard output it declares is resolved below, with every
                 // other node's, in one place.
@@ -326,13 +333,13 @@ impl Scene {
                 // Inbound boundary: no inputs; one output per graph input,
                 // plus a trailing placeholder output. Dragging from the
                 // placeholder commits a normal `SetInput` binding to its
-                // index; document normalization then grows `graph.inputs` to
-                // match and a fresh placeholder appears next frame.
-                NodeKind::GraphInput => {
+                // index; document normalization then grows the definition's
+                // inputs to match and a fresh placeholder appears next frame.
+                NodeKind::GraphInput => graph.definition.as_ref().map(|definition| {
                     let mut outputs: Vec<FuncOutput> =
-                        graph.inputs.iter().map(boundary_output).collect();
+                        definition.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
-                    Some(NodeInterface {
+                    NodeInterface {
                         kind_label: ui.intern("Input"),
                         description: ui.intern(""),
                         inputs: Cow::Borrowed(&[]),
@@ -342,17 +349,17 @@ impl Scene {
                         sink: false,
                         uncacheable: true,
                         impure: false,
-                    })
-                }
+                    }
+                }),
                 // Outbound boundary: one input per graph output (synthesized
                 // as `FuncInput`s for names + zero defaults), plus a
                 // trailing placeholder input. Symmetric to the inbound
-                // case — wiring the placeholder grows `graph.outputs`.
-                NodeKind::GraphOutput => {
+                // case — wiring the placeholder grows the definition's outputs.
+                NodeKind::GraphOutput => graph.definition.as_ref().map(|definition| {
                     let mut inputs: Vec<FuncInput> =
-                        graph.outputs.iter().map(boundary_input).collect();
+                        definition.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
-                    Some(NodeInterface {
+                    NodeInterface {
                         kind_label: ui.intern("Output"),
                         description: ui.intern(""),
                         inputs: Cow::Owned(inputs),
@@ -362,8 +369,8 @@ impl Scene {
                         sink: false,
                         uncacheable: true,
                         impure: false,
-                    })
-                }
+                    }
+                }),
             };
             // A func or graph node whose target is absent
             // has no interface to project. Dropping it would make it
@@ -630,7 +637,7 @@ const PLACEHOLDER_PORT: &str = "+";
 
 /// The placeholder input port for a `GraphOutput`: unbound, untyped
 /// until something connects (at which point reconcile materializes a real
-/// `graph.outputs` entry from the wired producer's type).
+/// definition output from the wired producer's type).
 fn placeholder_input() -> FuncInput {
     FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }

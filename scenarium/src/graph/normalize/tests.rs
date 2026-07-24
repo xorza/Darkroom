@@ -1,7 +1,7 @@
 use crate::data::static_value::StaticValue;
 use crate::data::type_system::DataType;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, SubgraphDefinition};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::node::event::EventLambda;
@@ -13,6 +13,10 @@ fn lib() -> Library {
 
 fn int_input(name: &str) -> FuncInput {
     FuncInput::optional(name, DataType::Int)
+}
+
+fn definition(graph: &Graph) -> &SubgraphDefinition {
+    graph.definition.as_ref().unwrap()
 }
 
 #[derive(Debug)]
@@ -69,10 +73,15 @@ fn connecting_placeholder_grows_input_with_inferred_type() {
     graph.normalize(&library);
 
     let graph = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(graph.inputs.len(), 1, "placeholder use materialized a slot");
-    assert_eq!(graph.inputs[0].name, "input0");
     assert_eq!(
-        graph.inputs[0].data_type, want_ty,
+        definition(graph).inputs.len(),
+        1,
+        "placeholder use materialized a slot"
+    );
+    assert_eq!(definition(graph).inputs[0].name, "input0");
+    assert_eq!(
+        definition(graph).inputs[0].data_type,
+        want_ty,
         "new slot inherits the consumer's type"
     );
 }
@@ -91,9 +100,9 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
     graph.normalize(&library);
 
     let graph = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(graph.outputs.len(), 1);
-    assert_eq!(graph.outputs[0].name, "output0");
-    assert_eq!(graph.outputs[0].ty.declared(), want_ty);
+    assert_eq!(definition(graph).outputs.len(), 1);
+    assert_eq!(definition(graph).outputs[0].name, "output0");
+    assert_eq!(definition(graph).outputs[0].ty.declared(), want_ty);
 }
 
 #[test]
@@ -113,6 +122,9 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
         .graphs
         .get(&graph_id)
         .unwrap()
+        .definition
+        .as_ref()
+        .unwrap()
         .inputs
         .iter()
         .map(|i| i.name.clone())
@@ -120,9 +132,13 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     assert_eq!(names, ["A", "B"], "authored names survive");
 
     // Idempotent: a second pass changes nothing.
-    let before = graph.graphs.get(&graph_id).unwrap().inputs.clone();
+    let before = definition(graph.graphs.get(&graph_id).unwrap())
+        .inputs
+        .clone();
     graph.normalize(&library);
-    let after = graph.graphs.get(&graph_id).unwrap().inputs.clone();
+    let after = definition(graph.graphs.get(&graph_id).unwrap())
+        .inputs
+        .clone();
     assert_eq!(before, after);
 }
 
@@ -163,6 +179,9 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     let names: Vec<String> = graph
         .graphs
         .get(&graph_id)
+        .unwrap()
+        .definition
+        .as_ref()
         .unwrap()
         .inputs
         .iter()
@@ -246,8 +265,8 @@ fn nested_local_graphs_normalize_within_their_owning_scope() {
     root.normalize(&library);
 
     let direct = root.graphs.get(&repeated_id).unwrap();
-    assert_eq!(direct.inputs[0].name, "Direct B");
-    assert_eq!(direct.inputs.len(), 1);
+    assert_eq!(definition(direct).inputs[0].name, "Direct B");
+    assert_eq!(definition(direct).inputs.len(), 1);
     assert_eq!(
         root.bindings.get(&InputPort::new(direct_instance, 0)),
         Some(&Binding::Const(StaticValue::Int(11))),
@@ -256,7 +275,7 @@ fn nested_local_graphs_normalize_within_their_owning_scope() {
 
     let outer = root.graphs.get(&outer_id).unwrap();
     let nested = outer.graphs.get(&repeated_id).unwrap();
-    let nested_names: Vec<&str> = nested
+    let nested_names: Vec<&str> = definition(nested)
         .inputs
         .iter()
         .map(|input| input.name.as_str())
@@ -288,7 +307,7 @@ fn unused_graph_input_shrinks_interface() {
 
     graph.normalize(&library);
 
-    let inputs = &graph.graphs.get(&graph_id).unwrap().inputs;
+    let inputs = &definition(graph.graphs.get(&graph_id).unwrap()).inputs;
     assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].name, "A");
 }
@@ -308,7 +327,7 @@ fn existing_port_type_is_rederived_from_wiring() {
 
     graph.normalize(&library);
 
-    let input = &graph.graphs.get(&graph_id).unwrap().inputs[0];
+    let input = &definition(graph.graphs.get(&graph_id).unwrap()).inputs[0];
     assert_eq!(input.name, "A", "authored name preserved");
     assert_eq!(
         input.data_type,
@@ -325,13 +344,11 @@ fn passthrough_ports_are_null_typed() {
     let library = lib();
     let sgin = Node::new(NodeKind::GraphInput);
     let sgout = Node::new(NodeKind::GraphOutput);
-    let mut interior = Graph::default();
+    let mut interior = Graph::new("Pass").category("Graph");
     let sgin_id = interior.add(sgin);
     let sgout_id = interior.add(sgout);
     // sgout.in0 <- sgin.out0
     interior.set_input_binding(InputPort::new(sgout_id, 0), Binding::bind(sgin_id, 0));
-    interior.name = "Pass".into();
-    interior.category = "Graph".into();
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, interior);
@@ -339,14 +356,14 @@ fn passthrough_ports_are_null_typed() {
     graph.normalize(&library);
 
     let graph = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(graph.inputs.len(), 1);
-    assert_eq!(graph.outputs.len(), 1);
+    assert_eq!(definition(graph).inputs.len(), 1);
+    assert_eq!(definition(graph).outputs.len(), 1);
     assert_eq!(
-        graph.inputs[0].data_type,
+        definition(graph).inputs[0].data_type,
         DataType::Any,
         "a passthrough graph input is polymorphic (Null)"
     );
-    assert_eq!(graph.outputs[0].ty.declared(), DataType::Any);
+    assert_eq!(definition(graph).outputs[0].ty.declared(), DataType::Any);
 }
 
 #[test]
@@ -375,7 +392,7 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     let sum = Node::new(NodeKind::Func(sum_id));
     let pass = Node::from(&pass_func);
     let sgout = Node::new(NodeKind::GraphOutput);
-    let mut interior = Graph::default();
+    let mut interior = Graph::new("PassSum").category("Graph");
     let sgin_id = interior.add(sgin);
     let sum_n = interior.add(sum);
     let pass_id = interior.add(pass);
@@ -387,8 +404,6 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     bind(&mut interior, pass_id, 0, sum_n, 0);
     bind(&mut interior, sgout_id, 0, pass_id, 0);
 
-    interior.name = "PassSum".into();
-    interior.category = "Graph".into();
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, interior);
@@ -396,9 +411,9 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
     graph.normalize(&library);
 
     let graph = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(graph.outputs.len(), 1);
+    assert_eq!(definition(graph).outputs.len(), 1);
     assert_eq!(
-        graph.outputs[0].ty.declared(),
+        definition(graph).outputs[0].ty.declared(),
         want_ty,
         "the exposed output must keep the type resolved through the passthrough"
     );
@@ -445,14 +460,24 @@ fn normalize_drops_out_of_range_and_missing_binding_endpoints() {
             .output(FuncOutput::new("out", DataType::Int)),
     ));
 
-    let mut graph = Graph::default();
+    let mut graph = Graph::new("test");
     let ids: Vec<NodeId> = (0..5)
         .map(|_| graph.add(Node::new(NodeKind::Func(func_id))))
         .collect();
     let (a, b, c, d, e) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
     let missing_node = NodeId::unique();
-    graph.inputs.push(FuncInput::optional("in", DataType::Int));
-    graph.outputs.push(FuncOutput::new("out", DataType::Int));
+    graph
+        .definition
+        .as_mut()
+        .unwrap()
+        .inputs
+        .push(FuncInput::optional("in", DataType::Int));
+    graph
+        .definition
+        .as_mut()
+        .unwrap()
+        .outputs
+        .push(FuncOutput::new("out", DataType::Int));
     let graph_input = graph.add(Node::new(NodeKind::GraphInput));
     let graph_output = graph.add(Node::new(NodeKind::GraphOutput));
 

@@ -28,8 +28,8 @@ pub(crate) enum GraphViewValidationError {
 pub(crate) enum DocumentValidationError {
     #[error(transparent)]
     Graph(#[from] GraphValidationError),
-    #[error("entry graph cannot expose an interface")]
-    EntryInterface,
+    #[error("entry graph cannot have a subgraph definition")]
+    EntryDefinition,
     #[error("entry graph cannot contain interface boundary nodes")]
     EntryBoundaryNodes,
     #[error("main view: {source}")]
@@ -98,11 +98,8 @@ impl Document {
     /// Full structural validation for untrusted documents.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
-        if !self.graph.inputs.is_empty()
-            || !self.graph.outputs.is_empty()
-            || !self.graph.events.is_empty()
-        {
-            return Err(DocumentValidationError::EntryInterface);
+        if self.graph.definition.is_some() {
+            return Err(DocumentValidationError::EntryDefinition);
         }
         if self.graph.iter().any(|node| node.kind.is_boundary()) {
             return Err(DocumentValidationError::EntryBoundaryNodes);

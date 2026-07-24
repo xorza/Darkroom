@@ -2,6 +2,7 @@ use crate::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    SubgraphDefinition,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
@@ -10,6 +11,10 @@ use crate::{DataType, DetachedNode, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+fn definition(graph: &Graph) -> &SubgraphDefinition {
+    graph.definition.as_ref().unwrap()
+}
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
@@ -31,6 +36,35 @@ fn roundtrip_serialization() -> TestResult {
         assert_eq!(graph, deserialized);
     }
 
+    let entry_json = serde_json::to_value(&graph)?;
+    assert_eq!(entry_json["definition"], serde_json::Value::Null);
+
+    let subgraph = Graph::new("Reusable")
+        .category("Test")
+        .input(FuncInput::optional("value", DataType::Int))
+        .output(FuncOutput::new("result", DataType::Int));
+    let subgraph_json = serde_json::to_value(&subgraph)?;
+    assert!(
+        subgraph_json.get("name").is_none(),
+        "definition fields do not leak onto Graph"
+    );
+    assert_eq!(subgraph_json["definition"]["name"], "Reusable");
+    assert_eq!(subgraph_json["definition"]["category"], "Test");
+    assert_eq!(
+        subgraph_json["definition"]["inputs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        subgraph_json["definition"]["outputs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
     Ok(())
 }
 
@@ -38,10 +72,9 @@ fn roundtrip_serialization() -> TestResult {
 fn validate_rejects_node_ids_reused_across_graph_levels() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let node_id = NodeId::unique();
-    let mut interior = Graph::default();
+    let mut interior = Graph::new("duplicate id");
     interior.insert(node_id, node.clone());
     let graph_id = GraphId::unique();
-    interior.name = "duplicate id".into();
 
     let mut graph = Graph::default();
     graph.insert(node_id, node);
@@ -57,7 +90,15 @@ fn insert_graph_replaces_existing_graph() {
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, Graph::new("original"));
     graph.insert_graph(graph_id, Graph::new("replacement"));
-    assert_eq!(graph.graphs[&graph_id].name, "replacement");
+    assert_eq!(definition(&graph.graphs[&graph_id]).name, "replacement");
+
+    let missing_definition = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        graph.insert_graph(GraphId::unique(), Graph::default());
+    }));
+    assert!(
+        missing_definition.is_err(),
+        "a local graph cannot omit its definition"
+    );
 }
 
 #[test]
@@ -82,18 +123,40 @@ fn validate_passes_for_valid_graph() {
 }
 
 #[test]
-fn validate_accepts_reusable_graph_while_compile_validation_rejects_it_as_entry() {
+fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
+    let entry = Graph::default();
+    assert!(entry.definition.is_none());
+    assert!(entry.validate_for_execution(&Library::default()).is_ok());
+    assert!(matches!(
+        entry.validate_subgraph(),
+        Err(GraphValidationError::MissingSubgraphDefinition)
+    ));
+
     let mut graph = Graph::new("reusable")
         .input(FuncInput::optional("value", DataType::Int))
         .output(FuncOutput::new("result", DataType::Int));
     graph.add(Node::new(NodeKind::GraphInput));
     graph.add(Node::new(NodeKind::GraphOutput));
 
-    assert!(graph.validate().is_ok());
+    let definition = definition(&graph);
+    assert_eq!(definition.name, "reusable");
+    assert_eq!(definition.inputs.len(), 1);
+    assert_eq!(definition.outputs.len(), 1);
+    assert!(graph.validate_subgraph().is_ok());
     let error = graph
         .validate_for_execution(&Default::default())
         .unwrap_err();
-    assert!(error.to_string().contains("entry graph"));
+    assert!(matches!(error, GraphValidationError::EntryDefinition));
+
+    let graph_id = GraphId::unique();
+    let mut entry = Graph::default();
+    entry.graphs.insert(graph_id, Graph::default());
+    let error = entry.validate().unwrap_err();
+    assert!(matches!(
+        error,
+        GraphValidationError::LocalGraph { source, .. }
+            if matches!(*source, GraphValidationError::MissingSubgraphDefinition)
+    ));
 }
 
 #[test]
@@ -729,10 +792,7 @@ fn deserialize_rejects_corrupt_graph() {
         Err(GraphDeserializeError::InvalidGraph(_))
     ));
 
-    let nil_origin = Graph {
-        origin: Some(GraphId::nil()),
-        ..Graph::default()
-    };
+    let nil_origin = Graph::new("nil origin").origin(GraphId::nil());
     let bytes = nil_origin.serialize(SerdeFormat::Bitcode).unwrap();
     let error = Graph::deserialize(&bytes, SerdeFormat::Bitcode)
         .unwrap_err()
@@ -1080,17 +1140,15 @@ fn add_graph_node_seeds_default_const_binding() {
 fn node_search_scope_gates_graph_interiors() {
     // A top-level node plus one two-levels-deep: a local graph whose
     // interior holds another local graph with the target node inside.
-    let mut inner_graph = Graph::default();
+    let mut inner_graph = Graph::new("Inner");
     let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
     deep.name = "deep".to_owned();
     let deep_id = inner_graph.add(deep);
     let inner_id = GraphId::unique();
-    inner_graph.name = "Inner".into();
 
-    let mut outer_graph = Graph::default();
+    let mut outer_graph = Graph::new("Outer");
     outer_graph.insert_graph(inner_id, inner_graph);
     let outer_id = GraphId::unique();
-    outer_graph.name = "Outer".into();
 
     let mut graph = Graph::default();
     let mut top = Node::new(NodeKind::Func(FuncId::unique()));
@@ -1177,12 +1235,18 @@ fn resolve_graph_picks_local_or_linked_source() {
         graph
             .resolve_graph(GraphLink::Local(local_id), &library)
             .unwrap()
+            .definition
+            .as_ref()
+            .unwrap()
             .name,
         "Local"
     );
     assert_eq!(
         graph
             .resolve_graph(GraphLink::Shared(linked_id), &library)
+            .unwrap()
+            .definition
+            .as_ref()
             .unwrap()
             .name,
         "Linked"

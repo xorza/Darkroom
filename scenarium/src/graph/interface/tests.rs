@@ -20,7 +20,7 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
     let graph_origin = GraphId::unique();
     let mut graph = Graph::new("parent").origin(graph_origin);
     let emitter = graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    graph.events.push(GraphEvent {
+    graph.definition.as_mut().unwrap().events.push(GraphEvent {
         name: "done".into(),
         emitter,
         emitter_event_idx: 0,
@@ -28,15 +28,15 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
     graph.insert_graph(child_id, child);
 
     let copy = graph.fresh_copy();
-    assert_eq!(copy.origin, None);
-    let copied_emitter = copy.events[0].emitter;
+    assert_eq!(copy.definition.as_ref().unwrap().origin, None);
+    let copied_emitter = copy.definition.as_ref().unwrap().events[0].emitter;
     assert_ne!(copied_emitter, emitter);
     assert!(
         copy.find(&copied_emitter, NodeSearch::TopLevel).is_some(),
         "event emitter follows the copied node"
     );
     let copied_child = &copy.graphs[&child_id];
-    assert_eq!(copied_child.origin, None);
+    assert_eq!(copied_child.definition.as_ref().unwrap().origin, None);
     assert!(
         copied_child
             .find(&child_node, NodeSearch::TopLevel)
