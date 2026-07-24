@@ -158,7 +158,6 @@ impl Editor {
             // the now-incompatible downstream wires — all one undo entry.
             for step in commit_intent_cascading(intent, &mut open.document, target, library) {
                 self.needs_relayout |= step.requires_relayout();
-                open.normalization_pending |= step.requires_reconcile();
                 self.dirty |= step.dirties_document();
                 batch.push(step);
             }
@@ -374,7 +373,7 @@ impl Editor {
         target: GraphRef,
         library: &Library,
     ) {
-        open.normalize(library);
+        open.prune(library);
         let graph = open
             .document
             .graph_for(target)
@@ -424,7 +423,6 @@ impl Editor {
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
                     let id = open.document.create_graph();
-                    open.normalization_pending = true;
                     self.dirty = true;
                     self.open_graph(open, GraphRef::Local(id));
                 }
@@ -538,7 +536,7 @@ mod tests {
                 open: OpenDocument {
                     document,
                     path: None,
-                    normalization_pending: true,
+                    prune_pending: true,
                 },
             }
         }

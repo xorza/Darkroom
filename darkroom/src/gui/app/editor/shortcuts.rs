@@ -52,11 +52,9 @@ impl Editor {
             return;
         }
         let mut relayout = false;
-        let mut reconcile = false;
         let mut dirtied = false;
         let mut on_step = |step: &UndoStep| {
             relayout |= step.requires_relayout();
-            reconcile |= step.requires_reconcile();
             dirtied |= step.dirties_document();
         };
         if undo {
@@ -65,7 +63,6 @@ impl Editor {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
         self.needs_relayout |= relayout;
-        open.normalization_pending |= reconcile;
         // A content edit undone/redone leaves the doc differing from the
         // last save (barring the exact round-trip back to it — we accept a
         // stale "dirty" there rather than tracking saved state precisely).

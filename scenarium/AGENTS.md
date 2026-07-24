@@ -48,7 +48,8 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `graph/validate.rs` | Standalone and execution-entry graph validation |
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
 | `graph/clone.rs` | Deep copies with fresh node ids |
-| `graph/normalize/` | Recursive local-interface normalization and stale-library wiring cleanup |
+| `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
+| `graph/prune/` | Recursive stale-library dangling-wiring cleanup |
 | `graph/query.rs` | Type and reachability queries |
 | `graph/interface/` | Graph identity, instance links, and exposed events |
 | `execution/compile.rs` | Host-side compiler and compiled artifact |

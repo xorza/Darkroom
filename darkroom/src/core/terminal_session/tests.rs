@@ -17,7 +17,7 @@ fn empty_document() -> Document {
 }
 
 #[test]
-fn apply_intents_adds_node_and_flags_reconcile() {
+fn apply_intents_adds_node() {
     let mut doc = empty_document();
     assert_eq!(doc.graph.len(), 0);
 
@@ -31,13 +31,12 @@ fn apply_intents_adds_node_and_flags_reconcile() {
         bindings: vec![],
     };
 
-    let reconcile = apply_intents(&mut doc, vec![intent], &Library::default());
+    apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(doc.graph.len(), 1);
     assert!(
         doc.graph.find(&id, NodeSearch::TopLevel).is_some(),
         "node landed in the graph"
     );
-    assert!(reconcile, "AddNode can change the interface → reconcile");
 }
 
 #[test]
@@ -67,19 +66,18 @@ fn apply_intents_drops_stale_intent() {
     let mut doc = empty_document();
     // RemoveNode targeting a node that isn't in the graph: `build_step`
     // returns None, so it's dropped without touching the document.
-    let reconcile = apply_intents(
+    apply_intents(
         &mut doc,
         vec![Intent::RemoveNode {
             node_id: NodeId::unique(),
         }],
         &Library::default(),
     );
-    assert!(!reconcile);
     assert_eq!(doc.graph.len(), 0);
 }
 
 #[test]
-fn apply_intents_selection_skips_reconcile() {
+fn apply_intents_selects_existing_node() {
     let mut doc = empty_document();
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = doc.graph.add(node);
@@ -87,16 +85,13 @@ fn apply_intents_selection_skips_reconcile() {
         .item_placements
         .insert(ItemRef::Node(id), Vec2::ZERO);
 
-    // Selecting an existing node is a real change but a pure view edit —
-    // no interface impact, so it must not request a reconcile.
-    let reconcile = apply_intents(
+    apply_intents(
         &mut doc,
         vec![Intent::SetSelection {
             to: [ItemRef::Node(id)].into_iter().collect(),
         }],
         &Library::default(),
     );
-    assert!(!reconcile);
     assert!(doc.main_view.selected.contains(&ItemRef::Node(id)));
 }
 
@@ -116,9 +111,8 @@ fn apply_intents_batches_multiple() {
         })
         .collect();
 
-    let reconcile = apply_intents(&mut doc, intents, &Library::default());
+    apply_intents(&mut doc, intents, &Library::default());
     assert_eq!(doc.graph.len(), 3, "all three nodes applied in one batch");
-    assert!(reconcile);
 }
 
 #[test]

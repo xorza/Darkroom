@@ -581,7 +581,7 @@ fn rename_boundary_port_dropped_off_local_target_or_oob() {
 }
 
 #[test]
-fn rename_undo_survives_interface_compaction() {
+fn stale_rename_step_no_ops_instead_of_clobbering() {
     use crate::core::document::BoundarySide;
     use crate::core::edit::intent::apply::revert_step;
     use scenarium::DataType;
@@ -611,14 +611,176 @@ fn rename_undo_survives_interface_compaction() {
     apply_step(&step, &mut doc, target);
     assert_eq!(definition(&doc, def_id).inputs[1].name, "beta");
 
-    // Simulate normalization compacting after input 0 ("A")
-    // was disconnected: the survivor "beta" shifts from index 1 to 0.
+    // An out-of-band edit removes input 0, shifting "beta" to index 0.
+    // The step's slot addressing is now stale: its idx (1) is out of
+    // range, so undo no-ops instead of touching the wrong slot.
     definition_mut(&mut doc, def_id).inputs.remove(0);
+    revert_step(&step, &mut doc, target);
     assert_eq!(definition(&doc, def_id).inputs[0].name, "beta");
 
-    // Undo: the step's `idx` (1) is now stale, but it resolves "beta"
-    // by name at its new index 0 and restores "B" — not a no-op, not
-    // the wrong slot.
+    // Same guard by name: a slot at the recorded index but holding an
+    // unexpected name is left alone.
+    definition_mut(&mut doc, def_id)
+        .inputs
+        .push(finput("other"));
     revert_step(&step, &mut doc, target);
+    assert_eq!(definition(&doc, def_id).inputs[0].name, "beta");
+    assert_eq!(definition(&doc, def_id).inputs[1].name, "other");
+}
+
+#[test]
+fn add_boundary_port_applies_and_reverts_on_both_sides() {
+    use crate::core::document::BoundarySide;
+    use crate::core::edit::intent::apply::revert_step;
+    use scenarium::DataType;
+
+    let (mut doc, target) = doc_with_def();
+    let GraphRef::Local(def_id) = target else {
+        unreachable!()
+    };
+    for (side, name) in [
+        (BoundarySide::Input, "input1"),
+        (BoundarySide::Output, "output1"),
+    ] {
+        let step = build_step(
+            Intent::AddBoundaryPort {
+                side,
+                name: name.into(),
+                data_type: DataType::Float,
+            },
+            &doc,
+            target,
+        )
+        .expect("add builds against a Local target");
+        apply_step(&step, &mut doc, target);
+        let definition = definition(&doc, def_id);
+        match side {
+            BoundarySide::Input => {
+                assert_eq!(definition.inputs.len(), 2, "appended after A");
+                assert_eq!(definition.inputs[1].name, name);
+                assert_eq!(definition.inputs[1].data_type, DataType::Float);
+            }
+            BoundarySide::Output => {
+                assert_eq!(definition.outputs.len(), 2, "appended after R");
+                assert_eq!(definition.outputs[1].name, name);
+                assert_eq!(definition.outputs[1].ty.declared(), DataType::Float);
+            }
+        }
+        revert_step(&step, &mut doc, target);
+    }
+    // Both reverts leave the original one-in/one-out interface.
+    assert_eq!(definition(&doc, def_id).inputs.len(), 1);
+    assert_eq!(definition(&doc, def_id).outputs.len(), 1);
+    // Off a Local target the intent drops.
+    assert!(
+        build_step(
+            Intent::AddBoundaryPort {
+                side: BoundarySide::Input,
+                name: "x".into(),
+                data_type: DataType::Int,
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn remove_boundary_port_round_trips_severed_wiring() {
+    use crate::core::document::BoundarySide;
+    use crate::core::edit::intent::apply::revert_step;
+    use scenarium::DataType;
+    use scenarium::Graph;
+    use scenarium::{Binding, FuncInput, InputPort, Node, NodeKind};
+
+    // Child [A, B] with a GraphInput boundary feeding an interior
+    // consumer from both slots; the root instance binds both slots.
+    let finput = |n: &str| FuncInput::optional(n, DataType::Int);
+    let mut child = Graph::new("S")
+        .category("Graph")
+        .inputs([finput("A"), finput("B")]);
+    let boundary = child.add(Node::new(NodeKind::GraphInput));
+    let consumer = child.add(Node::new(NodeKind::Func(scenarium::FuncId::unique())));
+    child.set_input_binding(InputPort::new(consumer, 0), Binding::bind(boundary, 0));
+    child.set_input_binding(InputPort::new(consumer, 1), Binding::bind(boundary, 1));
+
+    let mut doc: Document = test_graph().into();
+    let def_id: GraphId = "00000000-0000-0000-0000-0000000000dd".into();
+    let instance = doc.graph.add(Node::graph_instance(
+        &child,
+        scenarium::GraphLink::Local(def_id),
+    ));
+    doc.main_view
+        .item_placements
+        .insert(ItemRef::Node(instance), glam::Vec2::ZERO);
+    doc.graph.insert_graph(def_id, child);
+    doc.graph
+        .set_input_binding(InputPort::new(instance, 0), Binding::Const(1i64.into()));
+    doc.graph
+        .set_input_binding(InputPort::new(instance, 1), Binding::Const(2i64.into()));
+    let target = GraphRef::Local(def_id);
+    let original = doc.graph.clone();
+
+    let step = build_step(
+        Intent::RemoveBoundaryPort {
+            side: BoundarySide::Input,
+            idx: 0,
+        },
+        &doc,
+        target,
+    )
+    .expect("remove builds against an existing slot");
+    apply_step(&step, &mut doc, target);
+
+    // "B" survives at index 0 on both sides of the boundary; the removed
+    // slot's wiring is gone.
+    assert_eq!(definition(&doc, def_id).inputs.len(), 1);
     assert_eq!(definition(&doc, def_id).inputs[0].name, "B");
+    let child = &doc.graph.graphs[&def_id];
+    assert_eq!(child.bindings.get(&InputPort::new(consumer, 0)), None);
+    assert_eq!(
+        child.bindings.get(&InputPort::new(consumer, 1)),
+        Some(&Binding::bind(boundary, 0)),
+        "surviving interior edge shifted 1 -> 0"
+    );
+    assert_eq!(
+        doc.graph.bindings.get(&InputPort::new(instance, 0)),
+        Some(&Binding::Const(2i64.into())),
+        "surviving instance binding shifted 1 -> 0"
+    );
+    assert_eq!(doc.graph.bindings.get(&InputPort::new(instance, 1)), None);
+
+    revert_step(&step, &mut doc, target);
+    assert_eq!(doc.graph, original, "undo restores the exact wiring");
+
+    // A slot that doesn't exist drops the intent.
+    assert!(
+        build_step(
+            Intent::RemoveBoundaryPort {
+                side: BoundarySide::Input,
+                idx: 9,
+            },
+            &doc,
+            target,
+        )
+        .is_none()
+    );
+    // A pinned boundary output refuses removal (unpin first).
+    doc.graph
+        .graphs
+        .get_mut(&def_id)
+        .unwrap()
+        .set_output_pinned(scenarium::OutputPort::new(boundary, 0), true);
+    assert!(
+        build_step(
+            Intent::RemoveBoundaryPort {
+                side: BoundarySide::Input,
+                idx: 0,
+            },
+            &doc,
+            target,
+        )
+        .is_none()
+    );
 }

@@ -30,6 +30,7 @@ pub use execution::identity::{
 pub use execution::outcome::{LogEntry, LogLevel};
 pub use execution::report::{PinnedOutput, PinnedOutputs};
 pub use execution::seeds::RunSeeds;
+pub use graph::boundary::{DetachedGraphInput, DetachedGraphOutput};
 pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{

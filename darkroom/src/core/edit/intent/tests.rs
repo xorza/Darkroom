@@ -465,8 +465,8 @@ fn set_node_property_commits_and_reverts() {
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
         }
         assert!(
-            !step.requires_relayout() && !step.requires_reconcile(),
-            "a node-property toggle neither remeasures nor reshapes the interface"
+            !step.requires_relayout(),
+            "a node-property toggle does not remeasure"
         );
         assert!(
             step.gesture_key().is_none(),
@@ -523,10 +523,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
         vec![ItemRef::Node(id), key],
         "a fresh pin's item lands at the top of the paint stack"
     );
-    assert!(
-        !step.requires_relayout() && !step.requires_reconcile(),
-        "a pin toggle neither remeasures nor reshapes the interface"
-    );
+    assert!(!step.requires_relayout(), "a pin toggle does not remeasure");
     assert!(step.dirties_document(), "a real graph edit worth saving");
     assert!(
         step.gesture_key().is_none(),
@@ -661,8 +658,8 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     .expect("first drag off the seeded default is a real change");
     assert_eq!(pin_pos(&doc, port), Some(Vec2::new(30.0, -12.0)));
     assert!(
-        !step.requires_relayout() && !step.requires_reconcile(),
-        "repositioning a decoration (no nodes in the group) neither remeasures nor reshapes the interface"
+        !step.requires_relayout(),
+        "repositioning a decoration (no nodes in the group) does not remeasure"
     );
     assert!(step.dirties_document(), "a real, persisted edit");
     assert_eq!(
@@ -811,7 +808,6 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
         "a bare restack shouldn't nag on save"
     );
     assert!(!step.requires_relayout());
-    assert!(!step.requires_reconcile());
     assert!(
         step.gesture_key().is_none(),
         "each raise is its own undo entry"

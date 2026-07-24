@@ -18,20 +18,20 @@ fn normalization_is_shared_across_run_eviction_and_replacement_boundaries() {
     let mut preferences = Preferences::default();
     let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
 
-    assert!(workspace.open.normalization_pending);
+    assert!(workspace.open.prune_pending);
     assert!(
         workspace.run_once(),
         "the empty graph compiles and is queued"
     );
-    assert!(!workspace.open.normalization_pending);
+    assert!(!workspace.open.prune_pending);
 
     workspace.replace_document(OpenDocument::default());
-    assert!(workspace.open.normalization_pending);
+    assert!(workspace.open.prune_pending);
     assert!(
         workspace.evict_cache(NodeId::unique()),
         "the empty graph compiles and queues an eviction"
     );
-    assert!(!workspace.open.normalization_pending);
+    assert!(!workspace.open.prune_pending);
 }
 
 #[test]
