@@ -251,7 +251,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   codec table rides a library snapshot).
 
 ### Authored graph interfaces + drift tolerance
-A subgraph's interface (`SubgraphDefinition.inputs/outputs`) is **authored
+A subgraph's interface (`GraphInterface.inputs/outputs`) is **authored
 state**, mutated only through recorded intents — nothing derives it from
 wiring. Wiring a boundary node's trailing "+" placeholder emits
 `Intent::AddBoundaryPort` + the `SetInput` as one batch

@@ -10,7 +10,7 @@ use scenarium::Library;
 use scenarium::{
     Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
-use scenarium::{DataType, GraphDef, RamUsage, StaticValue, SubgraphDefinition};
+use scenarium::{DataType, GraphDef, GraphInterface, RamUsage, StaticValue};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
 use crate::core::document::{GraphView, ItemRef, Viewport};
@@ -257,10 +257,10 @@ impl<'a> SceneSource<'a> {
     }
 
     /// The interface a boundary node mirrors, if this source has one.
-    pub(crate) fn interface(self) -> Option<&'a SubgraphDefinition> {
+    pub(crate) fn interface(self) -> Option<&'a GraphInterface> {
         match self {
             SceneSource::Entry(_) => None,
-            SceneSource::Def(def) => Some(&def.definition),
+            SceneSource::Def(def) => Some(&def.interface),
         }
     }
 }
@@ -346,9 +346,9 @@ impl Scene {
                 // placeholder emits `AddBoundaryPort` + `SetInput` as one
                 // batch (see `connection_ui::commit_connection`), so a
                 // fresh placeholder appears next frame.
-                NodeKind::GraphInput => interface.map(|definition| {
+                NodeKind::GraphInput => interface.map(|interface| {
                     let mut outputs: Vec<FuncOutput> =
-                        definition.inputs.iter().map(boundary_output).collect();
+                        interface.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
                     NodeInterface {
                         kind_label: ui.intern("Input"),
@@ -366,9 +366,9 @@ impl Scene {
                 // as `FuncInput`s for names + zero defaults), plus a
                 // trailing placeholder input. Symmetric to the inbound
                 // case — wiring the placeholder grows the definition's outputs.
-                NodeKind::GraphOutput => interface.map(|definition| {
+                NodeKind::GraphOutput => interface.map(|interface| {
                     let mut inputs: Vec<FuncInput> =
-                        definition.outputs.iter().map(boundary_input).collect();
+                        interface.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
                     NodeInterface {
                         kind_label: ui.intern("Output"),

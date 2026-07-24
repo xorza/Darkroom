@@ -257,7 +257,7 @@ mod tests {
     use std::io::Read as _;
 
     use common::test_utils::test_output_path;
-    use scenarium::{GraphDef, GraphId, SubgraphDefinition};
+    use scenarium::{GraphDef, GraphId, GraphInterface};
 
     use super::*;
 
@@ -350,7 +350,7 @@ mod tests {
         document.graph.insert_graph(
             GraphId::unique(),
             GraphDef {
-                definition: SubgraphDefinition {
+                interface: GraphInterface {
                     origin: Some(GraphId::nil()),
                     ..Default::default()
                 },

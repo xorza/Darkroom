@@ -11,10 +11,11 @@ crate-private, so downstream crates import public concepts directly from
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
 bindings, event subscriptions, pinned outputs, and local graph definitions.
 A `Graph` is an *entry* graph: no interface, not instantiable. A reusable
-local/shared definition is a `GraphDef` — a `SubgraphDefinition` (name,
-category, interface, library lineage) plus the `Graph` `body` implementing it,
-so "a definition has an interface" is a type fact rather than a validated
-invariant. `GraphDef` is deliberately not `Deref<Target = Graph>`: reach the
+local/shared definition is a `GraphDef` — a `GraphInterface` (name, category,
+ports, library lineage) plus the `Graph` `body` implementing it, so "a
+definition has an interface" is a type fact rather than a validated invariant.
+`GraphInterface` lives beside the identity and link types it composes, in
+`graph/interface/`. `GraphDef` is deliberately not `Deref<Target = Graph>`: reach the
 body through `body`, since a whole-value operation (`validate`,
 serialization) must target the `GraphDef` — the body's own would silently skip
 the interface.
@@ -58,8 +59,8 @@ use exact `ExecutionNodeId`s; the host projects them through the installed
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
 | `graph/clone.rs` | Deep clones: identity-remapping and identity-preserving |
 | `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
-| `graph/query.rs` | Type and reachability queries |
-| `graph/interface/` | Graph identity, instance links, and exposed events |
+| `graph/query.rs` | Node-port resolution (`NodePorts`), type and reachability queries |
+| `graph/interface/` | Graph identity, instance links, exposed events, and the `GraphInterface` they compose |
 | `execution/compile.rs` | Host-side compiler and compiled artifact |
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |

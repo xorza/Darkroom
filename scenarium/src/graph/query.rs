@@ -102,11 +102,11 @@ impl GraphDef {
     /// it declares.
     pub fn ports(&self) -> NodePorts<'_> {
         NodePorts {
-            name: &self.definition.name,
+            name: &self.interface.name,
             description: None,
-            inputs: &self.definition.inputs,
-            outputs: &self.definition.outputs,
-            events: NodeEvents::Graph(&self.definition.events),
+            inputs: &self.interface.inputs,
+            outputs: &self.interface.outputs,
+            events: NodeEvents::Graph(&self.interface.events),
             func: None,
         }
     }

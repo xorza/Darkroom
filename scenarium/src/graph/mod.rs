@@ -8,7 +8,7 @@ use hashbrown::hash_map::Entry;
 
 use crate::StaticValue;
 use crate::error::GraphDeserializeError;
-use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
+use crate::graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
 use crate::graph::query::NodePorts;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
@@ -197,33 +197,17 @@ pub enum NodeSearch {
     Recursive,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SubgraphDefinition {
-    pub name: String,
-    pub category: String,
-
-    /// Interface in port order. `inputs[i]` corresponds to `GraphInput`
-    /// output port `i`; `outputs[j]` corresponds to `GraphOutput` input port
-    /// `j`.
-    #[serde(default)]
-    pub inputs: Vec<FuncInput>,
-    #[serde(default)]
-    pub outputs: Vec<FuncOutput>,
-
-    /// Exposed outgoing events re-exported from interior emitters.
-    #[serde(default)]
-    pub events: Vec<GraphEvent>,
-
-    /// Shared-library graph this value was copied from, if any.
-    #[serde(default)]
-    pub origin: Option<GraphId>,
-}
-
 /// Deliberately not `Clone`: node and graph ids are unique across a whole
 /// document, so duplicating a graph is never a neutral act. Clone through
 /// [`Graph::clone_mapped`] (identities remapped) or
 /// [`Graph::clone_verbatim`] (identities preserved — undo/redo replay and
 /// library composition only).
+///
+/// The side tables split on how they're reached, not on how sensitive they
+/// are: `bindings` and `graphs` are plain maps a caller keys into directly, so
+/// they're public rather than fronted by trivial accessors; `nodes`,
+/// `subscriptions`, and `pinned_outputs` are `pub(crate)` because every way in
+/// does real work — fresh-id insertion, recursive lookup, or a range query.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     pub(crate) nodes: HashMap<NodeId, Node>,
@@ -268,7 +252,7 @@ pub struct Graph {
 /// Reach the body explicitly through `body`.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphDef {
-    pub definition: SubgraphDefinition,
+    pub interface: GraphInterface,
     pub body: Graph,
 }
 
@@ -276,7 +260,7 @@ impl GraphDef {
     /// An empty definition named `name`, with no interface ports yet.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            definition: SubgraphDefinition {
+            interface: GraphInterface {
                 name: name.into(),
                 ..Default::default()
             },
@@ -285,47 +269,53 @@ impl GraphDef {
     }
 
     pub fn category(mut self, category: impl Into<String>) -> Self {
-        self.definition.category = category.into();
+        self.interface.category = category.into();
         self
     }
 
     pub fn input(mut self, input: FuncInput) -> Self {
-        self.definition.inputs.push(input);
+        self.interface.inputs.push(input);
         self
     }
 
     pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
-        self.definition.inputs.extend(inputs);
+        self.interface.inputs.extend(inputs);
         self
     }
 
     pub fn output(mut self, output: FuncOutput) -> Self {
-        self.definition.outputs.push(output);
+        self.interface.outputs.push(output);
         self
     }
 
     pub fn outputs(mut self, outputs: impl IntoIterator<Item = FuncOutput>) -> Self {
-        self.definition.outputs.extend(outputs);
+        self.interface.outputs.extend(outputs);
         self
     }
 
     pub fn event(mut self, event: GraphEvent) -> Self {
-        self.definition.events.push(event);
+        self.interface.events.push(event);
         self
     }
 
     pub fn events(mut self, events: impl IntoIterator<Item = GraphEvent>) -> Self {
-        self.definition.events.extend(events);
+        self.interface.events.extend(events);
         self
     }
 
     pub fn origin(mut self, origin: GraphId) -> Self {
-        self.definition.origin = Some(origin);
+        self.interface.origin = Some(origin);
         self
     }
 }
 
 impl Graph {
+    /// Insert a local definition, *replacing* any existing one under `graph_id`
+    /// — map semantics, which undo/redo replay depends on when it re-applies a
+    /// recorded step. Contrast
+    /// [`Library::register_graph`](crate::library::Library::register_graph),
+    /// which refuses a duplicate. Document-wide graph-id uniqueness is
+    /// [`Graph::validate`]'s job, not this call's.
     pub fn insert_graph(&mut self, graph_id: GraphId, graph: GraphDef) {
         assert!(!graph_id.is_nil(), "cannot insert a graph with a nil id");
         self.graphs.insert(graph_id, graph);
@@ -516,7 +506,7 @@ impl Node {
     pub fn graph_instance(def: &GraphDef, link: GraphLink) -> Self {
         Node {
             kind: NodeKind::Graph(link),
-            name: def.definition.name.clone(),
+            name: def.interface.name.clone(),
             cache: CacheMode::None,
             disabled: false,
         }

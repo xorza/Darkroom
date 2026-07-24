@@ -17,7 +17,7 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
     let current = library.published.load();
     assert!(current.by_name("Watch Directory").is_some());
     assert!(current.by_name("Random").is_some());
-    assert_eq!(current.graphs[&graph_id].definition.name, "shared");
+    assert_eq!(current.graphs[&graph_id].interface.name, "shared");
     assert!(!library.update_ml_model_paths(&defaults));
 
     let paths = MlModelPaths {
@@ -42,5 +42,5 @@ fn runtime_library_recomposes_builtins_graphs_and_ml_defaults() {
             paths.star_removal.display().to_string()
         ))
     );
-    assert_eq!(published.graphs[&graph_id].definition.name, "shared");
+    assert_eq!(published.graphs[&graph_id].interface.name, "shared");
 }

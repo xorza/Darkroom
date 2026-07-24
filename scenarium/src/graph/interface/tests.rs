@@ -28,7 +28,7 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     let graph_origin = GraphId::unique();
     let mut graph = GraphDef::new("parent").origin(graph_origin);
     let emitter = graph.body.add(Node::new(NodeKind::Func(FuncId::unique())));
-    graph.definition.events.push(GraphEvent {
+    graph.interface.events.push(GraphEvent {
         name: "done".into(),
         emitter,
         emitter_event_idx: 0,
@@ -38,8 +38,8 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     graph.body.add(instance);
 
     let copy = graph.clone_mapped();
-    assert_eq!(copy.definition.origin, None);
-    let copied_emitter = copy.definition.events[0].emitter;
+    assert_eq!(copy.interface.origin, None);
+    let copied_emitter = copy.interface.events[0].emitter;
     assert_ne!(copied_emitter, emitter);
     assert!(
         copy.body
@@ -57,7 +57,7 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
         *copied_child_id, child_id,
         "nested graph identities are remapped"
     );
-    assert_eq!(copied_child.definition.origin, None);
+    assert_eq!(copied_child.interface.origin, None);
     assert!(
         copied_child
             .body
@@ -77,18 +77,18 @@ fn clone_mapped_remaps_nodes_events_and_nested_graphs() {
     let verbatim = graph.clone_verbatim();
     assert_eq!(verbatim, graph, "a verbatim copy is field-for-field equal");
     assert_eq!(
-        verbatim.definition.origin,
+        verbatim.interface.origin,
         Some(graph_origin),
         "library lineage survives, where clone_mapped clears it"
     );
-    assert_eq!(verbatim.definition.events[0].emitter, emitter);
+    assert_eq!(verbatim.interface.events[0].emitter, emitter);
     let (verbatim_child_id, verbatim_child) = verbatim.body.graphs.iter().next().unwrap();
     assert_eq!(*verbatim_child_id, child_id, "nested def keeps its id");
     assert_ne!(
         *verbatim_child_id, *copied_child_id,
         "the two copy modes disagree on nested identity"
     );
-    assert_eq!(verbatim_child.definition.origin, Some(child_origin));
+    assert_eq!(verbatim_child.interface.origin, Some(child_origin));
     assert!(
         verbatim_child
             .body

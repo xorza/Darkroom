@@ -2,8 +2,8 @@ use crate::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::graph::query::NodePorts;
 use crate::graph::{
-    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
-    SubgraphDefinition,
+    Binding, CacheMode, Graph, GraphDef, GraphInterface, InputPort, Node, NodeId, NodeKind,
+    NodeSearch, OutputPort,
 };
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
@@ -14,8 +14,8 @@ use common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-fn definition(def: &GraphDef) -> &SubgraphDefinition {
-    &def.definition
+fn interface(def: &GraphDef) -> &GraphInterface {
+    &def.interface
 }
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
@@ -40,7 +40,7 @@ fn roundtrip_serialization() -> TestResult {
 
     let entry_json = serde_json::to_value(&graph)?;
     assert!(
-        entry_json.get("definition").is_none(),
+        entry_json.get("interface").is_none(),
         "an entry graph has no interface to serialize"
     );
 
@@ -51,19 +51,19 @@ fn roundtrip_serialization() -> TestResult {
     let subgraph_json = serde_json::to_value(&subgraph)?;
     assert!(
         subgraph_json.get("name").is_none(),
-        "definition fields do not leak onto Graph"
+        "interface fields do not leak onto Graph"
     );
-    assert_eq!(subgraph_json["definition"]["name"], "Reusable");
-    assert_eq!(subgraph_json["definition"]["category"], "Test");
+    assert_eq!(subgraph_json["interface"]["name"], "Reusable");
+    assert_eq!(subgraph_json["interface"]["category"], "Test");
     assert_eq!(
-        subgraph_json["definition"]["inputs"]
+        subgraph_json["interface"]["inputs"]
             .as_array()
             .unwrap()
             .len(),
         1
     );
     assert_eq!(
-        subgraph_json["definition"]["outputs"]
+        subgraph_json["interface"]["outputs"]
             .as_array()
             .unwrap()
             .len(),
@@ -115,7 +115,7 @@ fn insert_graph_replaces_existing_graph() {
     let mut graph = Graph::default();
     graph.insert_graph(graph_id, GraphDef::new("original"));
     graph.insert_graph(graph_id, GraphDef::new("replacement"));
-    assert_eq!(definition(&graph.graphs[&graph_id]).name, "replacement");
+    assert_eq!(interface(&graph.graphs[&graph_id]).name, "replacement");
 }
 
 #[test]
@@ -152,9 +152,9 @@ fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
         .output(FuncOutput::new("result", DataType::Int));
     def.body.add(Node::new(NodeKind::GraphInput));
     def.body.add(Node::new(NodeKind::GraphOutput));
-    assert_eq!(def.definition.name, "reusable");
-    assert_eq!(def.definition.inputs.len(), 1);
-    assert_eq!(def.definition.outputs.len(), 1);
+    assert_eq!(def.interface.name, "reusable");
+    assert_eq!(def.interface.inputs.len(), 1);
+    assert_eq!(def.interface.outputs.len(), 1);
     assert!(def.body.validate().is_ok());
 
     // The boundary nodes that make it a definition are exactly what an
@@ -175,7 +175,7 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
         .add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
     let mut library = Library::default();
-    library.insert_graph(graph_id, shared);
+    library.register_graph(graph_id, shared);
 
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
@@ -192,7 +192,7 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     shared.body.add(Node::new(NodeKind::GraphInput));
 
     let mut library = Library::default();
-    library.insert_graph(graph_id, shared);
+    library.register_graph(graph_id, shared);
 
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
@@ -472,7 +472,7 @@ fn validate_for_execution_tolerates_library_range_drift() {
     graph.subscribe(id, 3, id);
     let mut child = GraphDef::new("child");
     let interior = child.body.add_func_node(&func);
-    child.definition.events.push(GraphEvent {
+    child.interface.events.push(GraphEvent {
         name: "drifted".into(),
         emitter: interior,
         emitter_event_idx: 9,
@@ -1336,7 +1336,7 @@ fn resolve_graph_picks_local_or_linked_source() {
     let mut library = test_func_lib(TestFuncHooks::default());
 
     let linked_id = GraphId::unique();
-    library.insert_graph(linked_id, GraphDef::new("Linked").category("Test"));
+    library.register_graph(linked_id, GraphDef::new("Linked").category("Test"));
 
     let mut graph = Graph::default();
     let local_id = GraphId::unique();
@@ -1346,7 +1346,7 @@ fn resolve_graph_picks_local_or_linked_source() {
         graph
             .resolve_graph(GraphLink::Local(local_id), &library)
             .unwrap()
-            .definition
+            .interface
             .name,
         "Local"
     );
@@ -1354,7 +1354,7 @@ fn resolve_graph_picks_local_or_linked_source() {
         graph
             .resolve_graph(GraphLink::Shared(linked_id), &library)
             .unwrap()
-            .definition
+            .interface
             .name,
         "Linked"
     );
@@ -1381,7 +1381,7 @@ fn resolve_graph_picks_local_or_linked_source() {
         "parent-scoped resolution does not see nested defs"
     );
     assert_eq!(
-        definition(graph.find_graph(deep_id).unwrap()).name,
+        interface(graph.find_graph(deep_id).unwrap()).name,
         "Deep",
         "find_graph reaches a depth-2 def by bare id"
     );
@@ -1396,9 +1396,9 @@ fn resolve_graph_picks_local_or_linked_source() {
         std::ptr::eq(graph.find_graph_parent(local_id).unwrap(), &graph),
         "a top-level def's parent is the root itself"
     );
-    graph.find_graph_mut(deep_id).unwrap().definition.name = "Renamed".into();
+    graph.find_graph_mut(deep_id).unwrap().interface.name = "Renamed".into();
     assert_eq!(
-        definition(graph.find_graph(deep_id).unwrap()).name,
+        interface(graph.find_graph(deep_id).unwrap()).name,
         "Renamed",
         "find_graph_mut writes through to the nested def"
     );

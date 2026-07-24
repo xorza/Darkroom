@@ -45,10 +45,10 @@ impl<'a> GraphChecker<'a> {
 
     /// Validate a definition: its interface, then the body implementing it.
     fn validate_def(&mut self, def: &GraphDef) -> ValidationResult<()> {
-        if def.definition.origin.is_some_and(|origin| origin.is_nil()) {
+        if def.interface.origin.is_some_and(|origin| origin.is_nil()) {
             return Err(GraphValidationError::NilOrigin);
         }
-        for event in &def.definition.events {
+        for event in &def.interface.events {
             if !def.body.nodes.contains_key(&event.emitter) {
                 return Err(GraphValidationError::ExposedEventMissingEmitter {
                     name: event.name.clone(),
@@ -198,7 +198,7 @@ impl<'a> GraphChecker<'a> {
             let nested_result = self.validate_def(nested);
             self.depth -= 1;
             nested_result.map_err(|source| GraphValidationError::LocalGraph {
-                name: nested.definition.name.clone(),
+                name: nested.interface.name.clone(),
                 source: Box::new(source),
             })?;
         }
@@ -212,14 +212,14 @@ impl<'a> GraphChecker<'a> {
         }
         if !self.shared_path.insert(graph_id) {
             return Err(GraphValidationError::RecursiveGraph {
-                name: graph.definition.name.clone(),
+                name: graph.interface.name.clone(),
             });
         }
         self.depth += 1;
         let result = self
             .validate_def(graph)
             .map_err(|source| GraphValidationError::SharedGraph {
-                name: graph.definition.name.clone(),
+                name: graph.interface.name.clone(),
                 source: Box::new(source),
             });
         self.depth -= 1;

@@ -73,7 +73,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
         DocStep::RenameGraph { id, to, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.definition.name = to.clone();
+                graph.interface.name = to.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -84,7 +84,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             data_type,
         } => {
             if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = &mut graph.definition;
+                let definition = &mut graph.interface;
                 match side {
                     BoundarySide::Input => definition
                         .inputs
@@ -312,7 +312,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
         DocStep::RenameGraph { id, from, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.definition.name = from.clone();
+                graph.interface.name = from.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -322,7 +322,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             ..
         } => {
             if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = &mut graph.definition;
+                let definition = &mut graph.interface;
                 match side {
                     BoundarySide::Input => {
                         definition.inputs.remove(*idx);

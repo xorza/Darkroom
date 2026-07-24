@@ -5315,7 +5315,7 @@ mod graph {
         let mut library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
         let def_id = GraphId::unique();
-        library.insert_graph(def_id, def);
+        library.register_graph(def_id, def);
 
         let mut graph = Graph::default();
         let def_ref = library.graph_by_id(def_id).unwrap();
@@ -5417,7 +5417,7 @@ mod graph {
         let emitter = fnode(&library, "ticker");
         let mut def_graph = GraphDef::new("Exposer").category("Test");
         let emitter_id = def_graph.body.add(emitter);
-        def_graph.definition.events.push(GraphEvent {
+        def_graph.interface.events.push(GraphEvent {
             name: "tick".into(),
             emitter: emitter_id,
             emitter_event_idx: 0,
@@ -5492,7 +5492,7 @@ mod graph {
         let mut library = test_func_lib(hooks);
         let def = wrap_sum_def(&library);
         let def_id = GraphId::unique();
-        library.insert_graph(def_id, def);
+        library.register_graph(def_id, def);
 
         // Two linked instances with const inputs, each feeding a print.
         let def_ref = library.graph_by_id(def_id).unwrap();
