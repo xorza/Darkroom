@@ -178,9 +178,8 @@ mod cache_persistence {
     /// empty library is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::library::Library;
-        use std::sync::Arc;
         let mut engine = ExecutionEngine::default();
-        engine.cache.disk_store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
         engine
     }
 
@@ -792,8 +791,7 @@ mod cache_persistence {
         );
 
         let empty_dir = TempDir::new("chain-empty");
-        engine.cache.disk_store =
-            DiskStore::new(Arc::new(Library::default()), Some(empty_dir.0.clone()));
+        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(empty_dir.0.clone()));
         assert!(
             engine.cache.slots[&root_execution_node(mult_id)]
                 .output_values()
@@ -889,8 +887,7 @@ mod cache_persistence {
 
         // An empty replacement store proves the later hit comes from retained RAM, not disk.
         let empty_dir = TempDir::new("both-retained-empty");
-        engine.cache.disk_store =
-            DiskStore::new(Arc::new(Library::default()), Some(empty_dir.0.clone()));
+        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(empty_dir.0.clone()));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         engine.update(&graph, &lib).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
@@ -1554,7 +1551,7 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.cache.disk_store = DiskStore::new(Arc::new(lib), Some(dir.0.clone()));
+            eg.cache.disk_store = DiskStore::new(&lib, Some(dir.0.clone()));
             eg
         };
 
@@ -1697,10 +1694,18 @@ mod cache_persistence {
         use crate::async_lambda;
         use crate::library::{Library, TypeEntry};
         use crate::node::definition::{Func, FuncOutput};
-        use crate::runtime::context::ContextManager;
+        use crate::runtime::context::{ContextStore, ContextType};
         use crate::{CustomValue, TypeId};
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
+
+        /// Decode-side context resource: proves a codec can reach the runtime
+        /// store while reconstructing a value read from disk.
+        #[derive(Debug, Default)]
+        struct DecodeProbe {
+            decodes: usize,
+        }
+        const DECODE_PROBE: ContextType<DecodeProbe> = ContextType::new(DecodeProbe::default);
 
         const BLOB_TYPE: &str = "50be7976-6d55-4567-8389-13107b1698ba";
         const FUNC_ID: &str = "b1ddc0bf-5f92-4e0c-9481-23e48c65004b";
@@ -1735,7 +1740,7 @@ mod cache_persistence {
                 &self,
                 value: &dyn CustomValue,
                 writer: &mut (dyn AsyncWrite + Unpin + Send),
-                _ctx: &mut ContextManager,
+                _ctx: &mut ContextStore,
             ) -> std::result::Result<(), CodecError> {
                 writer
                     .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
@@ -1746,7 +1751,9 @@ mod cache_persistence {
                 &self,
                 reader: &mut (dyn AsyncRead + Unpin + Send),
                 byte_len: u64,
+                ctx: &mut ContextStore,
             ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+                ctx.get(DECODE_PROBE).decodes += 1;
                 let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
                 reader.read_to_end(&mut bytes).await?;
                 Ok(Arc::new(Blob(bytes)))
@@ -1784,7 +1791,7 @@ mod cache_persistence {
 
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
             let mut engine = ExecutionEngine::default();
-            engine.cache.disk_store = DiskStore::new(Arc::new(library), Some(dir.0.clone()));
+            engine.cache.disk_store = DiskStore::new(&library, Some(dir.0.clone()));
             engine
         };
 
@@ -1818,6 +1825,16 @@ mod cache_persistence {
         assert!(
             stats.cached_nodes.contains(&root_execution_node(blob_id)),
             "blob node disk-cached"
+        );
+        assert_eq!(
+            engine
+                .executor
+                .ctx_manager
+                .contexts
+                .get(DECODE_PROBE)
+                .decodes,
+            1,
+            "the hydration decode reached the engine's runtime context store"
         );
 
         // Reopen WITHOUT codec: blob present but undecodable ⇒ not flagged available
@@ -1900,7 +1917,7 @@ mod resource_binds {
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::execution::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
-        engine.cache.disk_store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
         engine
     }
 

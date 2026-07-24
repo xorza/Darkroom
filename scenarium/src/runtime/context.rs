@@ -35,9 +35,31 @@ impl<T: Any + Send + Sync> ContextType<T> {
     }
 }
 
+/// The persistent typed-resource half of the runtime context: one lazily
+/// constructed payload per [`ContextType`]. Split from [`ContextManager`] so
+/// resource consumers (codecs, offloaded work) receive only resources — never
+/// the per-run attribution, logs, or cancellation the manager adds for lambdas.
+#[derive(Debug, Default)]
+pub struct ContextStore {
+    store: HashMap<TypeId, Box<dyn Any + Send>>,
+}
+
+impl ContextStore {
+    /// The context of type `T`, created by the handle's constructor on first
+    /// access. Infallible: every store writer keys `TypeId::of::<T>` with a
+    /// `T`, so the slot cannot hold anything else.
+    pub fn get<T: Any + Send + Sync>(&mut self, ctx_type: ContextType<T>) -> &mut T {
+        self.store
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new((ctx_type.ctor)()))
+            .downcast_mut::<T>()
+            .unwrap()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ContextManager {
-    store: HashMap<TypeId, Box<dyn Any + Send>>,
+    pub contexts: ContextStore,
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
     pub(crate) current_node: Option<ExecutionNodeId>,
@@ -52,15 +74,9 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
-    /// The context of type `T`, created by the handle's constructor on first
-    /// access. Infallible: every store writer keys `TypeId::of::<T>` with a
-    /// `T`, so the slot cannot hold anything else.
+    /// Sugar for [`ContextStore::get`] on [`Self::contexts`].
     pub fn get<T: Any + Send + Sync>(&mut self, ctx_type: ContextType<T>) -> &mut T {
-        self.store
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Box::new((ctx_type.ctor)()))
-            .downcast_mut::<T>()
-            .unwrap()
+        self.contexts.get(ctx_type)
     }
 
     /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
@@ -108,19 +124,19 @@ impl ContextManager {
 pub(crate) mod test_support {
     use std::any::{Any, TypeId};
 
-    use crate::runtime::context::ContextManager;
+    use crate::runtime::context::ContextStore;
 
-    pub fn insert_context<T>(manager: &mut ContextManager, value: T)
+    pub fn insert_context<T>(contexts: &mut ContextStore, value: T)
     where
         T: Any + Send + Sync,
     {
-        manager.store.insert(TypeId::of::<T>(), Box::new(value));
+        contexts.store.insert(TypeId::of::<T>(), Box::new(value));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::context::{ContextManager, ContextType};
+    use crate::runtime::context::{ContextStore, ContextType};
 
     #[derive(Debug, Default)]
     struct TestCtx {
@@ -137,7 +153,7 @@ mod tests {
 
     #[test]
     fn contexts_are_keyed_and_reused_by_payload_type() {
-        let mut manager = ContextManager::default();
+        let mut manager = ContextStore::default();
         let ctx = manager.get(TEST_CTX);
         assert_eq!(ctx.value, 0, "first access runs the handle's constructor");
         ctx.value = 42;

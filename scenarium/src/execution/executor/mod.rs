@@ -208,7 +208,10 @@ impl Executor {
                             .cache
                             .stamp_digest(program, frame.resource_stamps, e_node_id);
                         let demand = resolved.outputs.demand.slice(e_node.outputs);
-                        let reused = frame.cache.check_reuse(program, e_node_id, demand).await;
+                        let reused = frame
+                            .cache
+                            .check_reuse(program, e_node_id, demand, &mut self.ctx_manager.contexts)
+                            .await;
                         if reused {
                             frame.abandon_input_reads(e_node_id);
                         }
@@ -376,7 +379,7 @@ impl Executor {
                             program,
                             e_node_id,
                             StorePolicy::KnownMiss,
-                            &mut self.ctx_manager,
+                            &mut self.ctx_manager.contexts,
                         )
                         .await;
                     frame.release_drained_outputs(e_node_id);

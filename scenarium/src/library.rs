@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::CustomValueCodec;
+use crate::execution::codec::Codecs;
 use crate::graph::GraphDef;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
@@ -85,9 +86,9 @@ impl TypeEntry {
         }
     }
 
-    fn codec(&self) -> Option<&dyn CustomValueCodec> {
+    fn codec(&self) -> Option<&Arc<dyn CustomValueCodec>> {
         match &self.kind {
-            TypeEntryKind::Custom { codec, .. } => codec.as_deref(),
+            TypeEntryKind::Custom { codec, .. } => codec.as_ref(),
             TypeEntryKind::Enum { .. } => None,
         }
     }
@@ -234,10 +235,16 @@ impl Library {
         }
     }
 
-    /// The disk codec registered for `type_id`, if any. Used by the output
-    /// cache's serialize/deserialize.
-    pub(crate) fn codec(&self, type_id: TypeId) -> Option<&dyn CustomValueCodec> {
-        self.types.get(&type_id)?.codec()
+    /// Snapshot of the registered disk codecs — everything the output cache's
+    /// serialize/deserialize needs from the library.
+    pub(crate) fn codecs(&self) -> Codecs {
+        Codecs {
+            by_type: self
+                .types
+                .iter()
+                .filter_map(|(id, entry)| Some((*id, Arc::clone(entry.codec()?))))
+                .collect(),
+        }
     }
 
     pub fn merge<T: Into<Library>>(&mut self, other: T) {
@@ -279,7 +286,7 @@ mod tests {
     use crate::node::definition::{Func, FuncId, FuncInput};
     use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
-    use crate::runtime::context::ContextManager;
+    use crate::runtime::context::{ContextManager, ContextStore};
     use crate::runtime::shared_any_state::SharedAnyState;
     use crate::testing::{self, TestFuncHooks, test_func_lib};
     use crate::{
@@ -299,7 +306,7 @@ mod tests {
             &self,
             _value: &dyn CustomValue,
             _writer: &mut (dyn AsyncWrite + Unpin + Send),
-            _ctx: &mut ContextManager,
+            _ctx: &mut ContextStore,
         ) -> std::result::Result<(), CodecError> {
             unreachable!()
         }
@@ -308,6 +315,7 @@ mod tests {
             &self,
             _reader: &mut (dyn AsyncRead + Unpin + Send),
             _byte_len: u64,
+            _ctx: &mut ContextStore,
         ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
             unreachable!()
         }
@@ -424,8 +432,8 @@ mod tests {
         library.register_type(custom_id, custom);
         let enum_id = TypeId::unique();
         library.register_type(enum_id, enum_entry);
-        assert!(library.codec(custom_id).is_some());
-        assert!(library.codec(enum_id).is_none());
+        assert!(library.codecs().get(custom_id).is_some());
+        assert!(library.codecs().get(enum_id).is_none());
     }
 
     #[tokio::test]

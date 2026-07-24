@@ -137,6 +137,7 @@ impl ExecutionEngine {
                 &self.plan,
                 &mut self.cache,
                 &self.resource_stamps,
+                &mut self.executor.ctx_manager.contexts,
             )
             .await;
 
@@ -187,7 +188,7 @@ impl ExecutionEngine {
                     &self.compiled.program,
                     e_node_id,
                     StorePolicy::PreserveCovering,
-                    &mut self.executor.ctx_manager,
+                    &mut self.executor.ctx_manager.contexts,
                 )
                 .await;
         }
@@ -305,6 +306,7 @@ pub(crate) mod test_support {
                     &self.plan,
                     &mut self.cache,
                     &self.resource_stamps,
+                    &mut self.executor.ctx_manager.contexts,
                 )
                 .await;
             Ok(())

@@ -1,5 +1,5 @@
 use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, ProcessingContext};
-use scenarium::{ContextManager, CustomValueCodec, Library};
+use scenarium::{ContextStore, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
 use crate::image::context::VisionCtx;
@@ -18,8 +18,8 @@ fn sample() -> Sample {
     }
 }
 
-fn cpu_context() -> ContextManager {
-    let mut context = ContextManager::default();
+fn cpu_context() -> ContextStore {
+    let mut context = ContextStore::default();
     scenarium::insert_context(
         &mut context,
         VisionCtx {
@@ -43,7 +43,7 @@ async fn cpu_image_streams_round_trip_pixel_exact() {
     let byte_len = bytes.len() as u64;
     let mut reader = std::io::Cursor::new(bytes);
     let decoded = ImageCodec
-        .decode(&mut reader, byte_len)
+        .decode(&mut reader, byte_len, &mut cpu_context())
         .await
         .expect("image decodes");
     let decoded = decoded
@@ -67,7 +67,11 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
         let byte_len = bytes.len() as u64;
         assert!(
             ImageCodec
-                .decode(&mut std::io::Cursor::new(bytes), byte_len)
+                .decode(
+                    &mut std::io::Cursor::new(bytes),
+                    byte_len,
+                    &mut cpu_context()
+                )
                 .await
                 .is_err()
         );
@@ -84,7 +88,11 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     let byte_len = bytes.len() as u64;
     assert!(
         ImageCodec
-            .decode(&mut std::io::Cursor::new(bytes), byte_len)
+            .decode(
+                &mut std::io::Cursor::new(bytes),
+                byte_len,
+                &mut cpu_context()
+            )
             .await
             .is_err()
     );
@@ -100,6 +108,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
             .decode(
                 &mut std::io::Cursor::new(&overflowing),
                 overflowing.len() as u64,
+                &mut cpu_context(),
             )
             .await
             .is_err()

@@ -27,7 +27,7 @@ use crate::execution::program::ExecutionProgram;
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
-use crate::runtime::context::ContextManager;
+use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
 #[cfg(test)]
@@ -240,6 +240,7 @@ impl RuntimeCache {
         program: &ExecutionProgram,
         e_node_id: ExecutionNodeId,
         demand: &[OutputDemand],
+        ctx: &mut ContextStore,
     ) -> bool {
         if self.slots[&e_node_id].current_digest.is_none() {
             return false;
@@ -254,7 +255,7 @@ impl RuntimeCache {
         ) else {
             return false;
         };
-        let Some(snapshot) = self.disk_store.read(&target, demand).await else {
+        let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
             return false;
         };
         self.slots.get_mut(&e_node_id).unwrap().value = ValueState::Resident {
@@ -282,7 +283,7 @@ impl RuntimeCache {
         program: &ExecutionProgram,
         e_node_id: ExecutionNodeId,
         policy: StorePolicy,
-        ctx: &'a mut ContextManager,
+        ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.disk_store.blob_target(
             e_node_id,
