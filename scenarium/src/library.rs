@@ -174,8 +174,10 @@ impl Library {
         // membership gate runs from both directions: `add` checks against
         // types already present, and a fresh enum entry re-checks the funcs
         // already added.
-        for func in self.funcs.values() {
-            self.assert_enum_defaults(func);
+        if self.enum_variants(&type_id).is_some() {
+            for func in self.funcs.values() {
+                self.assert_enum_defaults(func);
+            }
         }
     }
 
