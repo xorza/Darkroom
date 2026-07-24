@@ -5,7 +5,7 @@ use aperture::{
 use glam::Vec2;
 use scenarium::NodeId;
 use scenarium::{Binding, InputPort, Node, NodeKind};
-use scenarium::{Func, FuncInput};
+use scenarium::{Func, NodePorts};
 use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
@@ -317,7 +317,7 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
     clicked.then(|| {
         let node_id = NodeId::unique();
         let node: Node = func.into();
-        let bindings = default_bindings(node_id, &func.inputs);
+        let bindings = NodePorts::from(func).default_bindings(node_id).collect();
         ChosenNode {
             node_id,
             node,
@@ -349,7 +349,7 @@ fn graph_entry(
     local.definition.origin = Some(shared_id);
     let node_id = NodeId::unique();
     let node = Node::graph_instance(&local, GraphLink::Local(local_id));
-    let bindings = default_bindings(node_id, &local.definition.inputs);
+    let bindings = local.ports().default_bindings(node_id).collect();
     Some(ChosenNode {
         node_id,
         node,
@@ -375,7 +375,7 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     let node_id = NodeId::unique();
     let mut node = Node::new(NodeKind::Special(special));
     node.name = func.name.clone();
-    let bindings = default_bindings(node_id, &func.inputs);
+    let bindings = NodePorts::from(func).default_bindings(node_id).collect();
     Some(ChosenNode {
         node_id,
         node,
@@ -384,59 +384,9 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     })
 }
 
-/// Seed each input that declares a func default with a matching
-/// `Binding::Const`, so a freshly dropped node starts with its defaults
-/// filled in (a sigma of `5.0`, a preset already chosen, …) instead of
-/// every port unbound. Inputs without a declared default (images, required
-/// custom inputs) are left for the user to wire.
-fn default_bindings(node_id: NodeId, inputs: &[FuncInput]) -> Vec<(InputPort, Binding)> {
-    inputs
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, input)| {
-            input
-                .default_value
-                .clone()
-                .map(|value| (InputPort::new(node_id, idx), Binding::Const(value)))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use scenarium::{DataType, StaticValue};
-
     use super::*;
-
-    fn finput(default: Option<StaticValue>) -> FuncInput {
-        let mut input = FuncInput::required("p", DataType::Float);
-        input.default_value = default;
-        input
-    }
-
-    #[test]
-    fn default_bindings_seeds_only_declared_defaults_at_original_indices() {
-        let node = NodeId::unique();
-        let inputs = vec![
-            finput(None),                          // 0: no default → skipped
-            finput(Some(StaticValue::Float(0.0))), // 1
-            finput(None),                          // 2: skipped
-            finput(Some(StaticValue::Float(1.0))), // 3
-        ];
-        assert_eq!(
-            default_bindings(node, &inputs),
-            vec![
-                (
-                    InputPort::new(node, 1),
-                    Binding::Const(StaticValue::Float(0.0))
-                ),
-                (
-                    InputPort::new(node, 3),
-                    Binding::Const(StaticValue::Float(1.0))
-                ),
-            ]
-        );
-    }
 
     #[test]
     fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {

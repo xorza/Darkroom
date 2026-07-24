@@ -9,6 +9,7 @@ use hashbrown::hash_map::Entry;
 use crate::StaticValue;
 use crate::error::GraphDeserializeError;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
+use crate::graph::query::NodePorts;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
 use crate::node::definition::{FuncInput, FuncOutput};
@@ -20,7 +21,7 @@ id_type!(NodeId);
 pub(crate) mod boundary;
 pub(crate) mod clone;
 pub(crate) mod interface;
-mod query;
+pub(crate) mod query;
 mod serde;
 #[cfg(test)]
 mod tests;
@@ -477,31 +478,18 @@ impl Graph {
     /// Add a func instance and seed its inputs' default const bindings.
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
-        let node = Node::from(func);
-        let node_id = self.add(node);
-        for (port_idx, func_input) in func.inputs.iter().enumerate() {
-            if let Some(default) = &func_input.default_value {
-                self.set_input_binding(
-                    InputPort::new(node_id, port_idx),
-                    Binding::Const(default.clone()),
-                );
-            }
-        }
-        node_id
+        self.add_instance(Node::from(func), NodePorts::from(func))
     }
 
     /// Add a graph instance and seed its inputs' default const bindings.
     pub fn add_graph_node(&mut self, def: &GraphDef, link: GraphLink) -> NodeId {
-        let node = Node::graph_instance(def, link);
+        self.add_instance(Node::graph_instance(def, link), def.ports())
+    }
+
+    /// Add `node` and seed the const bindings its declaration defaults to.
+    fn add_instance(&mut self, node: Node, ports: NodePorts<'_>) -> NodeId {
         let node_id = self.add(node);
-        for (port_idx, io) in def.definition.inputs.iter().enumerate() {
-            if let Some(default) = &io.default_value {
-                self.set_input_binding(
-                    InputPort::new(node_id, port_idx),
-                    Binding::Const(default.clone()),
-                );
-            }
-        }
+        self.bindings.extend(ports.default_bindings(node_id));
         node_id
     }
 }
