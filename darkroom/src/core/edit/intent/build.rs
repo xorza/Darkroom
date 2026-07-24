@@ -5,9 +5,9 @@
 use scenarium::{Graph, GraphId, GraphLink, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, EditScopeRef, GraphRef, ItemRef};
+use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
 use crate::core::edit::intent::types::{
-    DocStep, GestureKey, GraphStep, Intent, NodeProperty, UndoStep,
+    DetachedBoundaryPort, DocStep, GestureKey, GraphStep, Intent, NodeProperty, UndoStep,
 };
 
 /// Read pre-mutation state from `doc` and fold it with `intent`
@@ -58,9 +58,63 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             to,
         }));
     }
+    if let Intent::AddBoundaryPort {
+        side,
+        name,
+        data_type,
+    } = intent
+    {
+        let GraphRef::Local(graph_id) = target else {
+            return None;
+        };
+        let definition = doc.graph.graphs.get(&graph_id)?.definition.as_ref()?;
+        let idx = match side {
+            BoundarySide::Input => definition.inputs.len(),
+            BoundarySide::Output => definition.outputs.len(),
+        };
+        return Some(UndoStep::Doc(DocStep::AddBoundaryPort {
+            graph_id,
+            side,
+            idx,
+            name,
+            data_type,
+        }));
+    }
+    if let Intent::RemoveBoundaryPort { side, idx } = intent {
+        let GraphRef::Local(graph_id) = target else {
+            return None;
+        };
+        let detached = match side {
+            BoundarySide::Input => doc
+                .graph
+                .snapshot_graph_input(graph_id, idx)
+                .map(DetachedBoundaryPort::Input),
+            BoundarySide::Output => doc
+                .graph
+                .snapshot_graph_output(graph_id, idx)
+                .map(DetachedBoundaryPort::Output),
+        }?;
+        // A pinned port keeps a preview widget in some GraphView; refuse
+        // the removal (unpin first) rather than reconcile view items.
+        let pinned = match &detached {
+            DetachedBoundaryPort::Input(input) => !input.pins.is_empty(),
+            DetachedBoundaryPort::Output(output) => !output.pins.is_empty(),
+        };
+        if pinned {
+            return None;
+        }
+        return Some(UndoStep::Doc(DocStep::RemoveBoundaryPort {
+            graph_id,
+            detached,
+        }));
+    }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     let step = match intent {
-        Intent::Dock(_) | Intent::RenameBoundaryPort { .. } | Intent::RenameGraph { .. } => {
+        Intent::Dock(_)
+        | Intent::RenameBoundaryPort { .. }
+        | Intent::AddBoundaryPort { .. }
+        | Intent::RemoveBoundaryPort { .. }
+        | Intent::RenameGraph { .. } => {
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode {

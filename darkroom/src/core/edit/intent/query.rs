@@ -35,10 +35,13 @@ impl UndoStep {
         match self {
         // A dock change reshapes panes/strips (and can swap which graph
         // the scene renders); a port rename changes a label's width so
-        // the node remeasures — all relayout the canvas.
+        // the node remeasures; adding/removing an interface port resizes
+        // the boundary node and shifts wires — all relayout the canvas.
         UndoStep::Doc(
             DocStep::Dock { .. }
             | DocStep::RenameBoundaryPort { .. }
+            | DocStep::AddBoundaryPort { .. }
+            | DocStep::RemoveBoundaryPort { .. }
             // Graph rename changes the tab-strip label's width.
             | DocStep::RenameGraph { .. },
         ) => true,
@@ -88,40 +91,6 @@ impl UndoStep {
     }
     }
 
-    /// Whether applying this step can change a subgraph's *derived interface*,
-    /// so document normalization must rerun
-    /// before the next scene rebuild. Only interior boundary wiring and
-    /// instance bindings feed that derivation, so any edit that touches a
-    /// binding or the node set qualifies; pure view/selection/cache/tab edits
-    /// (and boundary-port *renames*, which reconcile preserves) never do.
-    /// Conservative on `SetInput` — a const-value edit on a plain func port
-    /// can't change an interface, but filtering that needs a doc lookup, and
-    /// reconcile is an idempotent no-op there anyway. Exhaustive on purpose.
-    pub(crate) fn requires_reconcile(&self) -> bool {
-        match self {
-            UndoStep::Graph(
-                GraphStep::AddNode { .. }
-                | GraphStep::RemoveNode { .. }
-                | GraphStep::DuplicateNodes { .. }
-                | GraphStep::SetInput { .. }
-                | GraphStep::DetachGraph { .. },
-            ) => true,
-            UndoStep::Graph(
-                GraphStep::MoveSelection { .. }
-                | GraphStep::RenameNode { .. }
-                | GraphStep::SetSelection { .. }
-                | GraphStep::Raise { .. }
-                | GraphStep::SetNodeProperty { .. }
-                | GraphStep::SetViewport { .. }
-                // Subscriptions don't feed a graph's derived interface.
-                | GraphStep::SetSubscription { .. }
-                // Nor does pinning an output — it's not wiring at all.
-                | GraphStep::SetOutputPinned { .. },
-            )
-            | UndoStep::Doc(_) => false,
-        }
-    }
-
     /// Whether applying or reverting this step changes *saved* document
     /// content — graph data or node layout — as opposed to pure
     /// navigation (camera, selection, tab focus), which isn't worth
@@ -156,9 +125,12 @@ impl UndoStep {
                 | GraphStep::SetSubscription { .. }
                 | GraphStep::SetOutputPinned { .. },
             )
-            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameGraph { .. }) => {
-                true
-            }
+            | UndoStep::Doc(
+                DocStep::RenameBoundaryPort { .. }
+                | DocStep::AddBoundaryPort { .. }
+                | DocStep::RemoveBoundaryPort { .. }
+                | DocStep::RenameGraph { .. },
+            ) => true,
         }
     }
 
@@ -190,9 +162,12 @@ impl UndoStep {
                 | GraphStep::SetSubscription { .. }
                 | GraphStep::SetOutputPinned { .. },
             )
-            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameGraph { .. }) => {
-                None
-            }
+            | UndoStep::Doc(
+                DocStep::RenameBoundaryPort { .. }
+                | DocStep::AddBoundaryPort { .. }
+                | DocStep::RemoveBoundaryPort { .. }
+                | DocStep::RenameGraph { .. },
+            ) => None,
         }
     }
 
@@ -301,6 +276,9 @@ impl DocStep {
             DocStep::Dock { from, to, .. } => from == to,
             DocStep::RenameBoundaryPort { from, to, .. } => from == to,
             DocStep::RenameGraph { from, to, .. } => from == to,
+            // Adding/removing an interface port is never a no-op — the
+            // slot's existence flip is the change.
+            DocStep::AddBoundaryPort { .. } | DocStep::RemoveBoundaryPort { .. } => false,
         }
     }
 }

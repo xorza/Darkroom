@@ -292,6 +292,16 @@ fn input_label_cell(
             {
                 out.push(set_input(port, None));
             }
+            // Interface ports are authored — removal is this explicit
+            // action, never a side effect of unwiring.
+            if let Some(side) = rename
+                && MenuItem::new("Remove port").show(ui, popup).left.clicked()
+            {
+                out.push(Intent::RemoveBoundaryPort {
+                    side,
+                    idx: port.port_idx,
+                });
+            }
         });
 }
 
@@ -421,6 +431,16 @@ fn output_cell(
                         port_center + pin_ui::default_pin_offset(theme),
                     ));
                 }
+            }
+            // Interface ports are authored — removal is this explicit
+            // action, never a side effect of unwiring.
+            if let Some(side) = rename
+                && MenuItem::new("Remove port").show(ui, popup).left.clicked()
+            {
+                out.push(Intent::RemoveBoundaryPort {
+                    side,
+                    idx: port.port_idx,
+                });
             }
         });
 }

@@ -1,5 +1,6 @@
 //! The document currently open in a frontend, including its persistence path
-//! and whether derived graph state needs normalization.
+//! and whether stale wiring still needs a one-time prune against the
+//! runtime library (deferred from load, when no library is available yet).
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 pub(crate) struct OpenDocument {
     pub(crate) document: Document,
     pub(crate) path: Option<PathBuf>,
-    pub(crate) normalization_pending: bool,
+    pub(crate) prune_pending: bool,
 }
 
 impl OpenDocument {
@@ -21,16 +22,19 @@ impl OpenDocument {
         Ok(Self {
             document,
             path: Some(path),
-            normalization_pending: true,
+            prune_pending: true,
         })
     }
 
-    pub(crate) fn normalize(&mut self, library: &Library) {
-        if !self.normalization_pending {
+    /// Drop wiring the current library can no longer resolve (see
+    /// `Graph::prune_dangling_wiring`) — once per opened document, the
+    /// first time a library is at hand.
+    pub(crate) fn prune(&mut self, library: &Library) {
+        if !self.prune_pending {
             return;
         }
-        self.document.graph.normalize(library);
-        self.normalization_pending = false;
+        self.document.graph.prune_dangling_wiring(library);
+        self.prune_pending = false;
     }
 
     pub(crate) fn save_to(
@@ -38,7 +42,7 @@ impl OpenDocument {
         path: &Path,
         library: &Library,
     ) -> Result<(), DocumentSaveError> {
-        self.normalize(library);
+        self.prune(library);
         document::save(&self.document, path)?;
         self.path = Some(path.to_path_buf());
         Ok(())
@@ -50,7 +54,7 @@ impl Default for OpenDocument {
         Self {
             document: Document::default(),
             path: None,
-            normalization_pending: true,
+            prune_pending: true,
         }
     }
 }
@@ -71,7 +75,7 @@ mod tests {
         OpenDocument {
             document,
             path: None,
-            normalization_pending: true,
+            prune_pending: true,
         }
     }
 
@@ -88,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn normalization_prunes_stale_wiring_once_for_each_open_document() {
+    fn prune_drops_stale_wiring_once_for_each_open_document() {
         let func_id = FuncId::unique();
         let previous = Func::new(func_id, "changed")
             .input(FuncInput::required("removed", scenarium::DataType::Float));
@@ -102,17 +106,17 @@ mod tests {
         };
         let mut open = from_document(document());
 
-        assert!(open.normalization_pending);
+        assert!(open.prune_pending);
         assert_eq!(open.document.graph.bindings.len(), 1);
-        open.normalize(&library);
-        assert!(!open.normalization_pending);
+        open.prune(&library);
+        assert!(!open.prune_pending);
         assert!(open.document.graph.bindings.is_empty());
 
         open = from_document(document());
-        assert!(open.normalization_pending);
+        assert!(open.prune_pending);
         assert_eq!(open.document.graph.bindings.len(), 1);
-        open.normalize(&library);
-        assert!(!open.normalization_pending);
+        open.prune(&library);
+        assert!(!open.prune_pending);
         assert!(open.document.graph.bindings.is_empty());
     }
 
@@ -122,6 +126,6 @@ mod tests {
 
         assert!(open.path.is_none());
         assert_eq!(open.document.layout.all_tabs().count(), 1);
-        assert!(open.normalization_pending);
+        assert!(open.prune_pending);
     }
 }

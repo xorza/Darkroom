@@ -9,10 +9,13 @@ use glam::Vec2;
 use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
+use scenarium::{FuncInput, FuncOutput};
 
-use crate::core::document::{Document, EditScope, GraphRef, ItemRef};
+use crate::core::document::{BoundarySide, Document, EditScope, GraphRef, ItemRef};
 use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::{DocStep, GraphStep, Intent, NodeProperty, UndoStep};
+use crate::core::edit::intent::types::{
+    DetachedBoundaryPort, DocStep, GraphStep, Intent, NodeProperty, UndoStep,
+};
 
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
 /// call. The per-intent core of [`commit_intent_cascading`] (the entry the
@@ -132,6 +135,39 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
                 graph.definition.as_mut().unwrap().name = to.clone();
             }
         }
+        DocStep::AddBoundaryPort {
+            graph_id,
+            side,
+            idx,
+            name,
+            data_type,
+        } => {
+            if let Some(graph) = doc.graph.graphs.get_mut(graph_id) {
+                let definition = graph.definition.as_mut().unwrap();
+                match side {
+                    BoundarySide::Input => definition
+                        .inputs
+                        .insert(*idx, FuncInput::optional(name.clone(), data_type.clone())),
+                    BoundarySide::Output => definition
+                        .outputs
+                        .insert(*idx, FuncOutput::new(name.clone(), data_type.clone())),
+                }
+            }
+        }
+        DocStep::RemoveBoundaryPort { graph_id, detached } => {
+            if doc.graph.graphs.contains_key(graph_id) {
+                match detached {
+                    DetachedBoundaryPort::Input(input) => {
+                        let removed = doc.graph.detach_graph_input(*graph_id, input.idx);
+                        assert_eq!(&removed, input, "removal diverged from the recorded step");
+                    }
+                    DetachedBoundaryPort::Output(output) => {
+                        let removed = doc.graph.detach_graph_output(*graph_id, output.idx);
+                        assert_eq!(&removed, output, "removal diverged from the recorded step");
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -186,12 +222,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.selected = to_selection.clone();
         }
         GraphStep::RemoveNode { detached, .. } => {
-            let current = scope
-                .graph
-                .snapshot_node(detached.node_id)
-                .expect("apply RemoveNode expects node to be present");
-            assert_eq!(&current, detached, "removal snapshot changed before apply");
-            scope.remove_node(&detached.node_id);
+            let removed = scope.remove_node(&detached.node_id);
+            assert_eq!(
+                &removed, detached,
+                "removal diverged from the recorded step"
+            );
         }
         GraphStep::MoveSelection { moves, .. } => {
             for (key, _, to) in moves {
@@ -334,6 +369,36 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
         DocStep::RenameGraph { id, from, .. } => {
             if let Some(graph) = doc.graph.graphs.get_mut(id) {
                 graph.definition.as_mut().unwrap().name = from.clone();
+            }
+        }
+        DocStep::AddBoundaryPort {
+            graph_id,
+            side,
+            idx,
+            ..
+        } => {
+            if let Some(graph) = doc.graph.graphs.get_mut(graph_id) {
+                let definition = graph.definition.as_mut().unwrap();
+                match side {
+                    BoundarySide::Input => {
+                        definition.inputs.remove(*idx);
+                    }
+                    BoundarySide::Output => {
+                        definition.outputs.remove(*idx);
+                    }
+                }
+            }
+        }
+        DocStep::RemoveBoundaryPort { graph_id, detached } => {
+            if doc.graph.graphs.contains_key(graph_id) {
+                match detached.clone() {
+                    DetachedBoundaryPort::Input(input) => {
+                        doc.graph.attach_graph_input(*graph_id, input);
+                    }
+                    DetachedBoundaryPort::Output(output) => {
+                        doc.graph.attach_graph_output(*graph_id, output);
+                    }
+                }
             }
         }
     }

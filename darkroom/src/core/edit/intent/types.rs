@@ -14,8 +14,8 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscription};
-use scenarium::{DetachedNode, Graph, GraphId};
+use scenarium::{Binding, CacheMode, DataType, InputPort, Node, NodeId, OutputPort, Subscription};
+use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, Graph, GraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
@@ -158,6 +158,25 @@ pub(crate) enum Intent {
         side: BoundarySide,
         idx: usize,
         to: String,
+    },
+    /// Append a new interface port to the active graph interior's
+    /// definition. Emitted right before the `SetInput` that wires the
+    /// boundary placeholder it stands for — same batch, one undo entry.
+    /// Scoped to the active `Local` target like
+    /// [`Intent::RenameBoundaryPort`]; dropped elsewhere.
+    AddBoundaryPort {
+        side: BoundarySide,
+        name: String,
+        data_type: DataType,
+    },
+    /// Remove an interface port (the boundary port row's context menu).
+    /// The step captures every binding and pin the removal severs — on
+    /// both sides of the boundary — so undo restores the exact wiring.
+    /// Dropped when the slot doesn't exist or its ports are pinned
+    /// (unpin first; refusing beats reconciling preview widgets).
+    RemoveBoundaryPort {
+        side: BoundarySide,
+        idx: usize,
     },
     /// Rename a local graph's subgraph definition.
     /// Document-global (not scoped to any one graph) so it works
@@ -351,22 +370,33 @@ pub(crate) enum DocStep {
         structural: bool,
     },
     /// `graph_id` is resolved at build time so apply/revert are
-    /// self-contained (don't need the drain target). Carries both names.
-    ///
-    /// `idx` is only a *hint*: apply/revert resolve the slot by name
-    /// (`from`/`to`) via [`Document::rename_boundary_port`], so undo/redo
-    /// survive document normalization compacting the interface — it
-    /// renumbers indices but preserves names. If the slot was
-    /// disconnected away entirely the name is gone and the step no-ops
-    /// (can't restore a name on a port that no longer exists). Residual
-    /// ambiguity only under duplicate names *and* compaction together —
-    /// rare and user-created.
+    /// self-contained (don't need the drain target). Carries both names;
+    /// the slot is addressed by `idx` directly (interface indices only
+    /// move through recorded steps, so LIFO replay keeps them valid), with
+    /// the expected current name as a stale-step guard.
     RenameBoundaryPort {
         graph_id: GraphId,
         side: BoundarySide,
         idx: usize,
         from: String,
         to: String,
+    },
+    /// Append (`apply`) / pop (`revert`) one interface port. `idx` is the
+    /// list length at build time — the placeholder is always the trailing
+    /// slot — so no remapping is involved on either half.
+    AddBoundaryPort {
+        graph_id: GraphId,
+        side: BoundarySide,
+        idx: usize,
+        name: String,
+        data_type: DataType,
+    },
+    /// Detach (`apply`) / attach (`revert`) one interface port with all
+    /// the wiring it severs, via the scenarium detach/attach pair — the
+    /// interface-port sibling of [`GraphStep::RemoveNode`].
+    RemoveBoundaryPort {
+        graph_id: GraphId,
+        detached: DetachedBoundaryPort,
     },
     /// Rename a local graph. Self-contained on the step (both
     /// names) so apply/revert don't need to re-read the doc.
@@ -375,6 +405,15 @@ pub(crate) enum DocStep {
         from: String,
         to: String,
     },
+}
+
+/// The removed interface port a [`DocStep::RemoveBoundaryPort`] carries —
+/// scenarium's detached record, tagged by side (the two sides detach
+/// different spec types).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum DetachedBoundaryPort {
+    Input(DetachedGraphInput),
+    Output(DetachedGraphOutput),
 }
 
 /// Serde because [`DocStep::Dock`] stores its key on the step (the undo

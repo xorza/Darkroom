@@ -5,7 +5,7 @@ use glam::Vec2;
 use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::{BoundarySide, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
@@ -120,7 +120,9 @@ impl ConnectionUI {
             DragMode::Held => {
                 self.resolve_held(ui, scene, geometry, state.start, state.snap_end, out)
             }
-            DragMode::Floating => self.resolve_floating(ui, state.start, state.snap_end, out),
+            DragMode::Floating => {
+                self.resolve_floating(ui, scene, state.start, state.snap_end, out)
+            }
         }
     }
 
@@ -161,7 +163,7 @@ impl ConnectionUI {
             return;
         }
         if let Some(end) = snap_end {
-            commit_connection(start, end, out);
+            commit_connection(scene, start, end, out);
         } else if let Some(intent) = self.const_drop(ui, scene, start) {
             out.push(intent);
         } else if dropped_on_empty_canvas(ui, scene) {
@@ -181,6 +183,7 @@ impl ConnectionUI {
     fn resolve_floating(
         &mut self,
         ui: &mut Ui,
+        scene: &Scene,
         start: PortRef,
         snap_end: Option<PortRef>,
         out: &mut Vec<Intent>,
@@ -201,7 +204,7 @@ impl ConnectionUI {
         match ended {
             Some(PointerButton::Left) => {
                 if let Some(end) = snap_end {
-                    commit_connection(start, end, out);
+                    commit_connection(scene, start, end, out);
                 }
                 self.state = None;
             }
@@ -525,14 +528,201 @@ pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
 /// and dropping the downstream wires it invalidates is handled centrally when the
 /// batch commits (`commit_intent_cascading`), so this stays a plain binding.
-fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
+///
+/// An endpoint that is a boundary node's trailing "+" placeholder first
+/// materializes the interface port it stands for (`Intent::AddBoundaryPort`)
+/// in the same batch, so add + bind undo as one entry.
+fn commit_connection(scene: &Scene, start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
         _ => return, // unreachable — scan_snap_target enforces opposite kinds
     };
+    out.extend(add_boundary_port_intent(scene, output, input));
+    out.extend(add_boundary_port_intent(scene, input, output));
     out.push(Intent::SetInput {
         input: InputPort::new(input.node_id, input.port_idx),
         to: Some(Binding::bind(output.node_id, output.port_idx)),
     });
+}
+
+/// When `port` is a boundary node's trailing placeholder, the
+/// `Intent::AddBoundaryPort` that materializes its interface slot. Named
+/// `input{N}`/`output{N}` (first free N over the node's existing ports)
+/// and typed from `opposite` — the placeholder itself is untyped; the
+/// other endpoint carries the type (a consumer's declared input type, a
+/// producer's resolved output type). `None` for ordinary ports.
+fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> Option<Intent> {
+    let node = scene.nodes.get(&port.node_id)?;
+    if !node.boundary {
+        return None;
+    }
+    // A boundary node mirrors the interface: the `GraphInput` node's
+    // *output* column is the graph's `Input` side and vice versa.
+    let (count, side, prefix) = match port.kind {
+        PortKind::Output => (
+            scene.outputs(node.outputs).len(),
+            BoundarySide::Input,
+            "input",
+        ),
+        PortKind::Input => (
+            scene.inputs(node.inputs).len(),
+            BoundarySide::Output,
+            "output",
+        ),
+    };
+    if port.port_idx + 1 != count {
+        return None; // an existing interface port, not the trailing placeholder
+    }
+    let taken: Vec<String> = match port.kind {
+        PortKind::Output => scene.outputs(node.outputs)[..port.port_idx]
+            .iter()
+            .map(|output| String::from(&*output.name.borrow_str()))
+            .collect(),
+        PortKind::Input => scene.inputs(node.inputs)[..port.port_idx]
+            .iter()
+            .map(|input| String::from(&*input.name.borrow_str()))
+            .collect(),
+    };
+    let name = (0..)
+        .map(|n| format!("{prefix}{n}"))
+        .find(|candidate| !taken.contains(candidate))
+        .unwrap();
+    Some(Intent::AddBoundaryPort {
+        side,
+        name,
+        data_type: port_data_type(scene, opposite).unwrap_or_default(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use aperture::Ui;
+    use scenarium::testing::{TestFuncHooks, test_func_lib};
+    use scenarium::{Binding, DataType, Graph, InputPort, Node, NodeId, NodeKind};
+
+    use crate::core::document::{BoundarySide, GraphView, PortKind, PortRef};
+    use crate::core::edit::intent::types::Intent;
+    use crate::gui::canvas::connection_ui::commit_connection;
+    use crate::gui::run_state::RunState;
+    use crate::gui::scene::Scene;
+
+    #[derive(Debug)]
+    struct Fixture {
+        scene: Scene,
+        boundary_in: NodeId,
+        boundary_out: NodeId,
+        mult: NodeId,
+    }
+
+    /// Interior scene of a graph with authored inputs `[input0]` (wired to
+    /// mult.A) and no outputs: the `GraphInput` node shows ports
+    /// `[input0, +]`, the `GraphOutput` node just `[+]`.
+    fn fixture() -> Fixture {
+        let library = test_func_lib(TestFuncHooks::default());
+        let mult_id = library.by_name("mult").unwrap().id;
+        let mut graph =
+            Graph::new("S").input(scenarium::FuncInput::optional("input0", DataType::Int));
+        let boundary_in = graph.add(Node::new(NodeKind::GraphInput));
+        let boundary_out = graph.add(Node::new(NodeKind::GraphOutput));
+        let mult = graph.add(Node::new(NodeKind::Func(mult_id)));
+        graph.set_input_binding(InputPort::new(mult, 0), Binding::bind(boundary_in, 0));
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        let mut ui = Ui::default();
+        scene.rebuild(
+            &mut ui,
+            &graph,
+            &view,
+            &library,
+            &RunState::default(),
+            false,
+        );
+        Fixture {
+            scene,
+            boundary_in,
+            boundary_out,
+            mult,
+        }
+    }
+
+    fn port(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortRef {
+        PortRef {
+            node_id,
+            kind,
+            port_idx,
+        }
+    }
+
+    #[test]
+    fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
+        let fixture = fixture();
+
+        // GraphInput placeholder (output idx 1, past authored input0) →
+        // mult.B: materialize a fresh input named past the taken "input0",
+        // typed from the consumer, then bind.
+        let mut out = Vec::new();
+        commit_connection(
+            &fixture.scene,
+            port(fixture.boundary_in, PortKind::Output, 1),
+            port(fixture.mult, PortKind::Input, 1),
+            &mut out,
+        );
+        assert_eq!(out.len(), 2, "add + bind, one batch");
+        match &out[0] {
+            Intent::AddBoundaryPort {
+                side,
+                name,
+                data_type,
+            } => {
+                assert_eq!(*side, BoundarySide::Input);
+                assert_eq!(name, "input1", "\"input0\" is taken");
+                assert_eq!(*data_type, DataType::Int, "typed from mult.B");
+            }
+            other => panic!("expected AddBoundaryPort, got {other:?}"),
+        }
+        match &out[1] {
+            Intent::SetInput { input, to } => {
+                assert_eq!(*input, InputPort::new(fixture.mult, 1));
+                assert_eq!(*to, Some(Binding::bind(fixture.boundary_in, 1)));
+            }
+            other => panic!("expected SetInput, got {other:?}"),
+        }
+
+        // mult.Prod → GraphOutput placeholder (input idx 0): symmetric,
+        // typed from the producer's resolved output.
+        let mut out = Vec::new();
+        commit_connection(
+            &fixture.scene,
+            port(fixture.mult, PortKind::Output, 0),
+            port(fixture.boundary_out, PortKind::Input, 0),
+            &mut out,
+        );
+        assert_eq!(out.len(), 2);
+        match &out[0] {
+            Intent::AddBoundaryPort {
+                side,
+                name,
+                data_type,
+            } => {
+                assert_eq!(*side, BoundarySide::Output);
+                assert_eq!(name, "output0");
+                assert_eq!(*data_type, DataType::Int, "typed from mult.Prod");
+            }
+            other => panic!("expected AddBoundaryPort, got {other:?}"),
+        }
+
+        // An existing interface port (input0, idx 0) is not a placeholder:
+        // rewiring it emits only the binding.
+        let mut out = Vec::new();
+        commit_connection(
+            &fixture.scene,
+            port(fixture.boundary_in, PortKind::Output, 0),
+            port(fixture.mult, PortKind::Input, 1),
+            &mut out,
+        );
+        assert_eq!(out.len(), 1, "no interface change for an existing port");
+        assert!(matches!(&out[0], Intent::SetInput { .. }));
+    }
 }
