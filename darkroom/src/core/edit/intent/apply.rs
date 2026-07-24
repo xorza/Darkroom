@@ -8,8 +8,8 @@
 use glam::Vec2;
 use scenarium::GraphLink;
 use scenarium::Library;
-use scenarium::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 use scenarium::{FuncInput, FuncOutput};
+use scenarium::{NodeId, NodeKind, NodeSearch, OutputPort};
 
 use crate::core::document::{BoundarySide, Document, EditScope, GraphRef, ItemRef};
 use crate::core::edit::intent::build::build_step;
@@ -23,31 +23,16 @@ use crate::core::edit::intent::types::{
 /// intents through the same path.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
-/// `requires_*` signals), or `None` when the intent was invalid or stale, a
-/// no-op, or a bind that would close a data cycle — in all cases nothing was
-/// written. `build_step` / `apply_step` stay separate for the undo-stack redo
-/// path, which applies a stored step without rebuilding it (a redo replays
-/// already-valid history, so it needs no cycle check).
+/// `requires_*` signals), or `None` when `build_step` dropped the intent
+/// (invalid, stale, or a cycle-forming bind) or the step was a no-op — in
+/// all cases nothing was written. `build_step` / `apply_step` stay separate
+/// for the undo-stack redo path, which applies a stored step without
+/// rebuilding it (a redo replays already-valid history).
 pub(crate) fn commit_intent(
     intent: Intent,
     doc: &mut Document,
     target: GraphRef,
 ) -> Option<UndoStep> {
-    // Reject a bind that would close a data cycle: the planner rejects a cyclic
-    // graph outright (`Error::CycleDetected`), so the edit must never land. The
-    // GUI snap filter normally stops this earlier; this is the authoritative
-    // guard covering every binding path, including any that bypass the canvas.
-    if let Intent::SetInput {
-        input,
-        to: Some(Binding::Bind(src)),
-        ..
-    } = &intent
-        && doc
-            .graph_for(target)
-            .is_some_and(|g| g.would_create_cycle(src.node_id, input.node_id))
-    {
-        return None;
-    }
     let step = build_step(intent, doc, target)?;
     if step.is_noop() {
         return None;

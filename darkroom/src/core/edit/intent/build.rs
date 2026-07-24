@@ -2,7 +2,7 @@
 //! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
 //! intent pipeline. Pure: never writes to the graph.
 
-use scenarium::{Graph, GraphId, GraphLink, Node, NodeKind, NodeSearch};
+use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
@@ -192,6 +192,16 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         },
         Intent::SetInput { input, to } => {
             graph.find(&input.node_id, NodeSearch::TopLevel)?;
+            // Reject a bind that would close a data cycle: the planner
+            // rejects a cyclic graph outright (`Error::CycleDetected`), so
+            // the edit must never land. The GUI snap filter normally stops
+            // this earlier; this is the authoritative guard covering every
+            // binding path, including any that bypass the canvas.
+            if let Some(Binding::Bind(src)) = &to
+                && graph.would_create_cycle(src.node_id, input.node_id)
+            {
+                return None;
+            }
             GraphStep::SetInput {
                 from: graph.bindings.get(&input).cloned(),
                 input,
