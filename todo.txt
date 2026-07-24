@@ -34,4 +34,5 @@ what is resourcestamps  simplify
 shaper.with_render_buffers(requests, |split| {
 
 inputintent
-consolidate prunedocument
+
+contextmenu for boundary nodes
