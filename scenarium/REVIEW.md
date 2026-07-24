@@ -63,18 +63,15 @@ flattened execution identity when a new program is installed.
 
 ## High: Authoring and compilation invariants
 
-- [ ] **Function registration accepts defaults that immediately create invalid
-  nodes.** `FuncInput` carries an unconstrained `default_value` and
-  `value_variants` (`src/node/definition.rs:65-68`, builder at `:100-103`);
-  `Func::validate` checks neither (`src/node/definition.rs:339-383`) and
-  `Library::add` treats that validation as the registration gate
-  (`src/library.rs:130-131`). `Graph::add_func_node` and `add_graph_node`
-  install the unchecked default as a `Const` binding
-  (`src/graph/mod.rs:447-459`, `:462-478`), which `validate_for_execution`
-  can then reject via `const_satisfies` (`src/graph/validate.rs:154-162`,
-  `:310-334`) — e.g. any default on a `Custom`-typed input, or a default not
-  among a nonempty `value_variants`. A valid registered function therefore
-  does not imply its standard constructor produces a compilable node.
+- [ ] **A registered `Enum`-typed default can still name an unregistered
+  variant.** `Func::validate` now holds declared defaults to exact kinds and
+  picker-variant membership (`src/node/definition.rs`, `default_fits`), so
+  the kind-mismatch half of the old "registration accepts invalid defaults"
+  finding is closed — but variant membership for an `Enum` default needs the
+  `Library`'s registered variant list, which `Func::validate` doesn't have.
+  `Library::add` (`src/library.rs:130-131`) could check it and doesn't, so
+  `add_func_node` can still seed a `Const` an eventual
+  `const_satisfies` rejects (`src/graph/validate.rs:327-331`).
 
 - [ ] **Exposed-event drift is the one remaining drift class that hard-fails
   compilation, with no repair path.** `validate_for_execution` still rejects
@@ -257,9 +254,18 @@ flattened execution identity when a new program is installed.
 
 ## Open questions
 
-- [ ] **Is `const_satisfies`' scalar coercion intentionally this loose?** An
-  `Int`-typed port accepts a `Bool` or `Float` literal and vice versa
-  (`src/graph/validate.rs:316-320`), mirroring
-  `DataType::compatible_with`'s numeric coercion. It looks deliberate, but it
-  means the const check cannot catch an authored `Bool` default on an `Int`
-  config port, which reads as a stricter check than it is.
+- [ ] **`const_satisfies` rejects `Null` consts that the runtime deliberately
+  understands.** Lens's config machinery reads a `Const(Null)` on an
+  optional (`Option`-field) input as "explicitly unset"
+  (`../lens/src/config_node.rs:218-222`) and can author `Null` field
+  defaults (`../lens/src/config_node.rs:183`), but `const_satisfies` has no
+  `Null` arm — a `Null` literal on any typed port is an
+  `IncompatibleConstant` compile error (`src/graph/validate.rs:310-334`).
+  No production config currently declares an `Option` field, so the
+  mismatch is latent; the first one added would compile-fail. (The former
+  open question here — whether the scalar coercion is intentionally loose —
+  is answered: yes; it exactly mirrors the runtime `as_*` accessors, is now
+  documented on `DataType::compatible_with`, and declared defaults are held
+  to exact kinds at registration. The stored-kind leak in darkroom's value
+  editor, including an `unreachable!` on drifted path literals, is a
+  darkroom issue outside this crate's scope.)

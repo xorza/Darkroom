@@ -88,6 +88,17 @@ impl DataType {
         })
     }
 
+    /// Whether a value of type `source` may feed a port of type `self`.
+    ///
+    /// Deliberately looser than type equality: `Any` accepts everything, and
+    /// the three scalar kinds (`Float`/`Int`/`Bool`) form one coercion class
+    /// because runtime reads coerce freely between them
+    /// (`StaticValue::as_f64`/`as_i64`/`as_bool` — `Bool` reads as `0`/`1`,
+    /// `Float` truncates to int, any nonzero reads as `true`). The const
+    /// half of the compile-boundary check (`const_satisfies`) mirrors the
+    /// same class, so wiring and literals are exactly as permissive as what
+    /// executes. Declared *defaults* are the one place held to exact kinds
+    /// (`Func::validate`), catching authoring mistakes at registration.
     pub fn compatible_with(&self, source: &DataType) -> bool {
         if matches!(self, DataType::Any) || matches!(source, DataType::Any) {
             return true;
@@ -98,6 +109,7 @@ impl DataType {
         self == source
     }
 
+    /// One coercion class: see [`Self::compatible_with`].
     fn is_numeric_scalar(&self) -> bool {
         matches!(self, DataType::Float | DataType::Int | DataType::Bool)
     }

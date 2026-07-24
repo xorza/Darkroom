@@ -3,7 +3,7 @@ use crate::runtime::context::ContextType;
 use crate::graph::CacheMode;
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
-use crate::{DataType, StaticValue};
+use crate::{DataType, FsPathMode, StaticValue};
 use common::id_type;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -120,6 +120,36 @@ impl FuncInput {
         self.value_variants = variants;
         self
     }
+
+    /// Whether `value` is a well-formed *declared default* for this input:
+    /// one of the picker variants when the input offers them, else a literal
+    /// of exactly the declared kind (`Null` doubles as "explicitly unset" on
+    /// an optional input). Declaration-time strictness on purpose — the
+    /// looser runtime scalar coercion (see `DataType::compatible_with`) is
+    /// for document consts, not specs.
+    fn default_fits(&self, value: &StaticValue) -> bool {
+        if !self.value_variants.is_empty() {
+            return self.value_variants.iter().any(|v| v.value == *value);
+        }
+        if matches!(value, StaticValue::Null) {
+            return !self.required;
+        }
+        match &self.data_type {
+            DataType::Any => true,
+            DataType::Float => matches!(value, StaticValue::Float(_)),
+            DataType::Int => matches!(value, StaticValue::Int(_)),
+            DataType::Bool => matches!(value, StaticValue::Bool(_)),
+            DataType::String => matches!(value, StaticValue::String(_)),
+            DataType::FsPath(config) => match config.mode {
+                FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                    matches!(value, StaticValue::FsPath(_))
+                }
+            },
+            DataType::Enum(_) => matches!(value, StaticValue::Enum(_)),
+            DataType::Custom(_) => false,
+        }
+    }
 }
 
 /// An output port's type: either a fixed [`DataType`], or a *wildcard* that
@@ -203,6 +233,10 @@ pub enum FuncValidationError {
         input_idx: usize,
         input_count: usize,
     },
+    #[error(
+        "function {func_id:?} input {input_idx} declares a default that matches neither its type nor its picker variants"
+    )]
+    InvalidDefault { func_id: FuncId, input_idx: usize },
 }
 
 #[derive(Default, Clone, Debug)]
@@ -352,6 +386,14 @@ impl Func {
                     input_idx,
                 });
             }
+            if let Some(default) = &input.default_value
+                && !input.default_fits(default)
+            {
+                return Err(FuncValidationError::InvalidDefault {
+                    func_id: self.id,
+                    input_idx,
+                });
+            }
         }
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.ty {
@@ -385,12 +427,14 @@ impl Func {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::graph::CacheMode;
-    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
-    use crate::{DataType, TypeId};
+    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput, ValueVariant};
+    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
 
     #[test]
-    fn validate_rejects_invalid_identities_and_wildcard_indices() {
+    fn validate_rejects_invalid_identities_wildcards_and_defaults() {
         let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
             "value",
             DataType::Custom(TypeId::nil()),
@@ -437,8 +481,57 @@ mod tests {
             assert_eq!(func.validate().unwrap_err().to_string(), expected);
         }
 
-        Func::new(FuncId::unique(), "wildcard")
-            .input(FuncInput::required("value", DataType::Any))
+        // Declared defaults are held to exact kinds (no scalar coercion) —
+        // an authoring mismatch fails at registration, not in a document.
+        let default_mismatch = |input: FuncInput| {
+            let func = Func::new(FuncId::unique(), "default").input(input);
+            let expected = format!(
+                "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
+                func.id
+            );
+            assert_eq!(func.validate().unwrap_err().to_string(), expected);
+        };
+        default_mismatch(FuncInput::optional("v", DataType::Int).default(StaticValue::Bool(true)));
+        default_mismatch(FuncInput::optional("v", DataType::Bool).default(1.0));
+        default_mismatch(
+            FuncInput::optional("v", DataType::Custom(TypeId::unique()))
+                .default(StaticValue::Enum("preset".into())),
+        );
+        // Null means "explicitly unset" — only an optional input may declare it.
+        default_mismatch(FuncInput::required("v", DataType::Int).default(StaticValue::Null));
+        // With picker variants the default must be one of the offered picks.
+        default_mismatch(
+            FuncInput::optional("v", DataType::Int)
+                .variants(vec![ValueVariant::new("one", StaticValue::Int(1))])
+                .default(2i64),
+        );
+        // A single-path literal doesn't satisfy a multi-file picker port.
+        default_mismatch(
+            FuncInput::optional(
+                "v",
+                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+            )
+            .default(StaticValue::FsPath("a.fits".into())),
+        );
+
+        // Well-formed declarations: exact kinds, a variant member, Null on an
+        // optional input, `Any` accepting any literal, and a valid wildcard.
+        Func::new(FuncId::unique(), "ok")
+            .input(FuncInput::optional("int", DataType::Int).default(2i64))
+            .input(FuncInput::optional("any", DataType::Any).default("text"))
+            .input(FuncInput::optional("unset", DataType::Int).default(StaticValue::Null))
+            .input(
+                FuncInput::optional("pick", DataType::Int)
+                    .variants(vec![ValueVariant::new("one", StaticValue::Int(1))])
+                    .default(1i64),
+            )
+            .input(
+                FuncInput::optional(
+                    "paths",
+                    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
+                )
+                .default(StaticValue::FsPaths(vec!["a.fits".into()])),
+            )
             .wildcard_output("value", 0)
             .lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
             .validate()
