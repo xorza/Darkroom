@@ -1,163 +1,364 @@
-# Darkroom architecture and simplification review
+# Darkroom architecture review — 2026-07-24
 
-## Executive summary
+## Scope and flow
 
-Darkroom has a strong broad shape: `Document` is the persisted source of truth, `Workspace` coordinates it with runtime services, edits flow through explicit intents and undo steps, and `Scene` is a read-only render projection. The main weaknesses are at the seams where delayed work is later interpreted against mutable “current” state, and where ostensibly frontend-neutral code depends on GUI navigation or preference types.
+This review covers production code in `darkroom`; tests, fixtures, and benchmark
+code were ignored. Aperture and Scenarium were followed only where Darkroom's
+correctness or ownership claims depend on them.
 
-The highest-risk issues are:
+`Document` owns the authored graph, graph views, and dock layout. GUI and script
+inputs become `Intent`s, which the edit layer turns into reversible `UndoStep`s
+and stores in `ActionStack`. `Workspace` pairs the open document with
+`RuntimeHost`; the latter composes the runtime library, compiles graphs, sends
+commands to the worker, and surfaces worker/script reports. The GUI projects the
+active graph into a rebuilt `Scene`, then records dock, canvas, node, inspector,
+and viewer surfaces. TUI and headless modes drive the same workspace through
+`TerminalSession`.
 
-- A bare `GraphRef::Local(GraphId)` cannot identify nested local graphs in Scenarium's recursive graph model.
-- Worker reports are correlated through ordered installed compile acknowledgements and retain exact execution occurrences until Darkroom deliberately attributes them for presentation.
-- Undoing graph creation/detachment can remove a local graph while leaving its persisted view behind, producing a document that validation and save reject.
-- Connection rules are duplicated in the canvas while the authoritative intent path accepts dangling or otherwise invalid bindings.
-- Delayed tab and node-menu actions resolve positional or mutable selection state, so intervening edits can retarget them.
-- New, Load, and script shutdown bypass the only unsaved-document transition policy.
-- Script resource caps do not bound host-side output/effect buffers or outbound replies.
+The most serious weaknesses are at trust and identity boundaries: recursive
+graphs are addressed with an insufficient identifier, externally decoded edits
+are trusted as if they came from constrained widgets, destructive document
+transitions do not share one dirty-state policy, and script-side limits do not
+bound host-side memory.
 
-The broadest structural costs come from the flat indexed dock tree, graph/runtime booleans that collapse distinct outcomes, graph construction and interface semantics living in GUI code, and the mutually dependent `gui/canvas` and `gui/node` trees. No direct dependency is entirely unused, but the single-entry ZIP document format, mandatory script compression, unconditional GUI/scripting compilation, and duplicate Tokio runtimes add disproportionate dependency or resource weight.
+## Critical
 
-A second full pass (2026-07-22) re-verified these findings against HEAD — none were invalidated — and added Batches 9–12 plus corroborating evidence; see “Second pass” below.
+- [ ] **A bare local-graph ID cannot address Darkroom's recursive graph model.**
+  `GraphRef::Local(GraphId)` resolves only through the root graph's `graphs` map,
+  while adding a graph instance inside a local graph inserts its definition into
+  that local graph's own map (`src/core/document/mod.rs:25-31`,
+  `src/core/document/mod.rs:293-326`, `src/core/edit/intent/apply.rs:177-200`).
+  The node badge still emits only the bare ID, and opening then silently fails
+  root lookup (`src/gui/node/prepass.rs:33-41`,
+  `src/gui/app/editor/mod.rs:459-475`). `Graph::fresh_copy` preserves nested
+  graph IDs, so copied recursive subgraphs can also make the same ID ambiguous
+  across different holders (`../scenarium/src/graph/clone.rs:54-56`). Nested
+  composites deeper than one level are consequently present in the authored
+  model but cannot be navigated or edited reliably.
 
-## Current flow
+- [ ] **The remote scripting surface exposes every internal intent while the
+  edit layer trusts widget-enforced invariants.** `apply` and `apply_all`
+  deserialize arbitrary Rhai values into any `Intent` variant
+  (`src/core/script/engine.rs:130-155`). `AddNode` accepts an existing node ID
+  during step construction and then asserts that it is absent during apply
+  (`src/core/edit/intent/build.rs:120-135`,
+  `src/core/edit/intent/apply.rs:177-187`). `SetInput` validates only the
+  destination node before accepting any producer, and `SetSelection` accepts
+  arbitrary item identities (`src/core/edit/intent/build.rs:193-204`,
+  `src/core/edit/intent/apply.rs:245-250`). A syntactically valid remote request
+  can therefore panic the GUI/headless host or create graph/view state rejected
+  by Darkroom's own validator (`src/core/document/validate.rs:75-90`).
 
-`App` and `TerminalSession` both own a `Workspace`; `Workspace` pairs an `OpenDocument` with `RuntimeHost`. GUI edits are collected by `Editor`, converted from `Intent` to reversible `UndoStep`, applied to `Document`, and packed into `ActionStack`. Before rendering, `Scene` projects the active graph and its `GraphView` into flat retained pools. `RuntimeHost` compiles a graph, installs a shared `CompiledGraph` in `WorkerBridge`, and frontends retain it only after the ordered `WorkerReport::Installed` acknowledgement before consuming subsequent runtime reports.
+- [ ] **Script resource limits do not bound host-side output, effect queues, or
+  replies.** Each `print` appends to an uncapped host `String` and clones the
+  message into an unbounded host channel (`src/core/script/engine.rs:82-96`,
+  `src/core/script/mod.rs:147-173`). One script may execute ten million Rhai
+  operations, allowing a print/effect loop to queue millions of allocations
+  while the host is not draining (`src/core/script/engine.rs:18-29`). The TCP
+  reader enforces `MAX_FRAME_BYTES`, but reply serialization and compression
+  have only a `u32` length conversion and no corresponding cap
+  (`src/core/script/tcp/mod.rs:408-443`). A valid client can exhaust host memory
+  and produce outbound frames far larger than the protocol's stated limit.
 
-## Batch 1 — Critical: graph identity and invariant violations
+- [ ] **Dirty-document protection is fragmented across destructive
+  transitions.** New and Load replace the entire editor/document without
+  consulting dirty state (`src/gui/app/commands/file.rs:25-70`), and script
+  `shutdown()` calls the host quit path directly
+  (`src/gui/app/mod.rs:155-177`). In the exit dialog, “Don't ask again” is
+  persisted before Save succeeds, so a cancelled or failed Save As leaves a
+  dirty document open with future confirmation disabled
+  (`src/gui/app/mod.rs:247-263`, `src/gui/app/commands/file.rs:77-103`).
+  Ordinary UI and authenticated script actions can therefore discard authored
+  work without a final confirmation.
 
-- [ ] **A bare local-graph ID cannot identify graphs in the recursive graph model.** `GraphRef::Local(GraphId)` is resolved only through the root graph's `graphs` map, but adding a shared graph while editing a local graph inserts the copied definition into that active graph's own nested map (`src/core/document/mod.rs:307-353`, `src/core/document/mod.rs:394-410`, `src/core/edit/intent/apply.rs:138-165`). The badge still emits only the bare ID and opening silently stops when root lookup fails (`src/gui/node/prepass.rs:27-41`, `src/gui/app/editor/mod.rs:494-506`). Because `fresh_copy` preserves nested graph IDs, two instances can also contain identical IDs, making the bare reference both unresolvable for nested graphs and ambiguous across copies (`../scenarium/src/graph/clone.rs:54-70`).
+## High
 
-- [ ] **Undo can leave local-graph definitions, views, and tabs inconsistent.** `Document` stores `graph.graphs`, `local_views`, and layout tabs independently (`src/core/document/mod.rs:258-274`), but reverting `AddNode` and `DetachGraph` removes only the nested graph from an `EditScope` (`src/core/edit/intent/apply.rs:343-350`, `src/core/edit/intent/apply.rs:415-428`). `ensure_valid_layout` prunes dead tabs but never removes orphaned views (`src/core/document/mod.rs:413-452`), while validation rejects an orphaned `local_views` entry, so an ordinary undo sequence can leave a document that cannot validate or save (`src/core/document/validate.rs:75-82`).
+- [ ] **Undo can split local-graph definitions from their persisted views.**
+  `Document` stores graph definitions, `local_views`, and layout independently
+  (`src/core/document/mod.rs:260-274`). Reverting `AddNode` or `DetachGraph`
+  removes a nested graph but leaves any lazily created `local_views` entry
+  (`src/core/edit/intent/apply.rs:410-414`,
+  `src/core/edit/intent/apply.rs:481-493`). Layout repair prunes dead tabs but
+  never orphaned views (`src/core/document/mod.rs:407-435`), while validation
+  rejects an orphan view (`src/core/document/validate.rs:111-121`). A normal
+  open-then-undo sequence can leave the document structurally invalid.
 
-- [ ] **Connection validity is duplicated in the canvas and incomplete at the authoritative intent boundary.** Canvas code independently checks const-only inputs, boundary passthrough, data types, and cycles, while the intent boundary checks only cycles and can accept a missing producer or invalid port after a mid-drag edit or from scripting (`src/gui/canvas/connection_ui.rs:403-487`, `src/core/edit/intent/apply.rs:28-47`, `src/core/edit/intent/build.rs:139-145`). The two paths can therefore disagree, and non-GUI or stale GUI intents can commit bindings the canvas itself considers invalid.
+- [ ] **Release saves can persist documents that the next load refuses.**
+  Saving calls only `validate_debug` before serialization
+  (`src/core/io/document.rs:180-189`), and that method returns immediately in a
+  non-debug build (`src/core/document/validate.rs:133-140`). Loading always runs
+  full validation (`src/core/io/document.rs:166-177`). Any latent invariant
+  violation can therefore be written as an apparently successful project and
+  discovered only when the file is reopened.
 
-- [ ] **Delayed GUI actions resolve unstable positional or mutable targets.** Navigation applies undo/redo before scanning last-frame responses, but tab IDs and `DockOp::{ActivateTab, CloseTab}` use `(TabGroupId, index)`, so a stale click can target a new occupant (`src/gui/app/editor/mod.rs:323-349`, `src/gui/dock/mod.rs:82-128`, `src/core/document/dock.rs:151-168`). Node-menu picks similarly carry only an action and later apply it to whatever selection is then live, allowing intervening selection changes to retarget an already chosen action (`src/gui/canvas/node_menu.rs:21-39`, `src/gui/app/editor/mod.rs:291-320`).
+- [ ] **Graph-library mutations become live before durable persistence
+  succeeds.** Import mutates the owned library map first, while publish mutates
+  both the library and the document's lineage metadata
+  (`src/core/runtime_library/mod.rs:70-84`,
+  `src/core/edit/publish.rs:10-41`). The finish path records a save error but
+  still recomposes and publishes the changed runtime library
+  (`src/core/runtime_library/mod.rs:88-99`). A graph can work for the rest of
+  the session and disappear on restart, while the open document retains an
+  origin for an entry that never reached disk.
 
-## Batch 2 — Critical: unbounded external control and unsafe destructive transitions
+- [ ] **The process-global graph library has a lost-update race across
+  Darkroom instances.** Each process retains a private library snapshot
+  (`src/core/runtime_library/mod.rs:37-68`). Before writing, the persistence
+  path re-reads the file only to prove it is parseable, discards that newer
+  value, and replaces the whole file with the caller's snapshot
+  (`src/core/io/graph_library/mod.rs:144-159`). Two live instances can both
+  report a successful import/publication while the later save silently erases
+  the other process's changes.
 
-- [ ] **Unsaved-document protection covers Quit but not other destructive transitions.** New and Load immediately replace the editor/document, while only Quit consults dirty state (`src/gui/app/commands/file.rs:25-71`, `src/gui/app/mod.rs:64-67`, `src/gui/app/mod.rs:238-295`); script `Shutdown` calls `quit` directly (`src/gui/app/mod.rs:183-187`). “Don't ask again” is also persisted before Save succeeds, so a cancelled or failed Save As can leave a dirty document whose next close discards changes without prompting (`src/gui/app/mod.rs:264-273`, `src/gui/app/commands/file.rs:77-110`).
+- [ ] **Worker command delivery failures are discarded while runtime methods
+  report success.** Install, run, cache, and event-loop sends drop their
+  `Result`s (`src/core/worker.rs:59-115`). `RuntimeHost` returns `true` solely
+  because compilation succeeded (`src/core/runtime_host.rs:150-186`,
+  `src/core/runtime_host.rs:195-205`). If the worker task has exited, callers
+  are told that work was queued, local cache projections may be cleared, and no
+  report can arrive to reconcile or expose the failure.
 
-- [ ] **Script resource caps omit host-side output, effect buffers, and outbound replies.** Rhai caps its own strings, collections, and operations, but every `print` grows an uncapped host `String`, every `apply` sends through an unbounded channel, and a panic can leak shared print state into the next request (`src/core/script/engine.rs:18-96`, `src/core/script/mod.rs:153-172`, `src/core/script/mod.rs:251-279`, `src/core/script/mod.rs:331-339`). The claimed bidirectional 1 MiB frame limit is only checked inbound; replies serialize an arbitrarily large nested result before `write_frame`, which checks only `u32` length (`src/core/script/tcp/mod.rs:52-55`, `src/core/script/tcp/mod.rs:388-395`, `src/core/script/tcp/mod.rs:437-443`). A valid client can therefore drive unbounded host memory growth or receive an outbound frame far above the advertised cap.
+- [ ] **Retained canvas gestures can commit identities invalidated after the
+  gesture began.** Rubber-band selection snapshots the initial selection and
+  writes it back verbatim on release
+  (`src/gui/canvas/selection_ui.rs:24-29`,
+  `src/gui/canvas/selection_ui.rs:89-140`); undo runs before the gesture
+  prepass and can remove one of those items (`src/gui/app/editor/mod.rs:314-321`).
+  A held wire similarly retains only its starting `PortRef`, treats missing type
+  information as compatible, and can emit a binding after that producer was
+  removed (`src/gui/canvas/connection_ui.rs:39-48`,
+  `src/gui/canvas/connection_ui.rs:451-473`,
+  `src/gui/canvas/connection_ui.rs:525-547`). The edit boundary accepts both
+  payloads, producing missing selection members or dangling producers that
+  graph validation rejects.
 
-- [ ] **The automation API exposes all internal intents and infers its edit target from GUI state.** Rhai's generic `apply`/`apply_all` deserialize every current and future `Intent`, including selection, viewport, and dock operations (`src/core/script/engine.rs:98-158`, `src/core/script/prelude.rhai:1-11`); terminal/headless then chooses the target from the persisted GUI dock's active tab (`src/core/terminal_session/mod.rs:103-114`, `src/core/document/mod.rs:360-365`). Automation can therefore mutate GUI-only state, and headless edits depend nondeterministically on whichever tab a previous GUI session left active.
+- [ ] **Pinned-output identity collapses distinct execution occurrences.**
+  Worker output identity is reduced from `ExecutionNodeId` to the authored leaf
+  `NodeId`, then stored solely by authored `OutputPort`
+  (`src/gui/run_state.rs:288-302`,
+  `src/gui/pinned_output.rs:57-75`). Multiple instances of the same local graph
+  therefore race into one preview/viewer entry; the displayed value is whichever
+  occurrence reported last, with no stable indication of which instance
+  produced it.
 
-- [ ] **Script CLI configuration silently ignores or rewrites invalid input.** Script flags are ignored without `--script-tcp`, and an invalid bind specification logs a warning then changes behavior to the default address (`src/main.rs:54-90`, `src/main.rs:110-121`). A mistyped or incomplete invocation can therefore start with materially different network and authentication behavior than requested.
+- [ ] **All viewer tabs eagerly retain full images, including inactive panes.**
+  Reconciliation enumerates every dock tab and materializes every viewer source
+  (`src/core/document/mod.rs:362-370`,
+  `src/gui/pinned_output.rs:78-111`). Materialization performs GPU readback,
+  CPU conversion/downscaling, and texture registration synchronously on the GUI
+  thread (`src/gui/pinned_output.rs:115-159`) and retains textures up to
+  8192×8192 RGBA, roughly 256 MiB each
+  (`src/gui/pinned_output.rs:18-19`). Restored or dormant tabs can stall a frame
+  and exhaust memory without ever becoming visible.
 
-## Batch 3 — High: overcomplicated state and misleading outcomes
+- [ ] **Live status patches overwrite rather than aggregate repeated authored
+  nodes.** `RunState` states that an authored interior node represents every
+  flattened occurrence, but patch handling directly assigns each occurrence's
+  status (`src/gui/run_state.rs:5-11`,
+  `src/gui/run_state.rs:163-187`). Completed snapshots use the separate merged
+  path (`src/gui/run_state.rs:238-258`). During a run, a later `Running` or
+  `Executed` patch can hide an earlier `Errored` or `MissingInputs` occurrence
+  until completion, making the definition tab's live status misleading.
 
-- [ ] **The dock layout pays indexed-arena complexity for a tree capped at 31 nodes.** A depth-four cap bounds the layout to at most 31 nodes, yet the representation serializes `NodeIdx` edges, maintains canonical preorder storage, repacks after structural changes, and validates reachability and index topology (`src/core/document/dock.rs:9-26`, `src/core/document/dock.rs:41-105`, `src/core/document/dock.rs:198-223`, `src/core/document/dock.rs:486-609`). This creates substantial mutation, serialization, and validation machinery disproportionate to the maximum structure size.
+- [ ] **Delayed dock actions use positional identities after history may have
+  changed the layout.** Navigation applies undo/redo before scanning
+  last-frame tab responses (`src/gui/app/editor/mod.rs:314-331`), while close
+  and activation actions carry `(TabGroupId, index)`
+  (`src/gui/dock/mod.rs:82-112`,
+  `src/core/document/dock.rs:185-195`). A stale click can act on a new occupant.
+  An in-flight tab drag also retains the old group/index and polls that
+  index-derived widget after undo can move the tab
+  (`src/gui/dock/drag.rs:19-27`, `src/gui/dock/mod.rs:130-149`), leaving the
+  gesture latched against a widget that no longer exists.
 
-- [ ] **One shared sticky-error slot lets unrelated success erase a failure.** `StatusLog` documents same-family clearing, but any run, file, library, or compile success can assign `None` to the single slot and erase an unrelated failure (`src/core/status.rs:14-23`, `src/core/runtime_host.rs:107-118`, `src/core/runtime_host.rs:137-149`, `src/gui/app/mod.rs:126-149`). Successful load/save is worse: it calls `save_preferences`, which can set a new error, and then immediately clears it, hiding a failed preferences write (`src/gui/app/commands/file.rs:55-72`, `src/gui/app/commands/file.rs:91-110`, `src/gui/app/commands/prefs.rs:52-58`).
+## Medium
 
-- [ ] **Graph publication collapses distinct outcomes into a boolean and mutates memory before persistence.** The boolean conflates an invalid target, library change, document-lineage change, and persistence failure, so the GUI knowingly marks update-in-place publication dirty (`src/core/runtime_library/mod.rs:43-47`, `src/core/runtime_library/mod.rs:78-99`, `src/core/runtime_host.rs:97-118`, `src/gui/app/commands/graph.rs:88-105`). Publication also mutates the document origin before durable graph-library persistence completes, so a save failure can leave in-memory document and library state inconsistent with disk (`src/core/edit/publish.rs:10-39`).
+- [ ] **Automation infers graph scope from persisted GUI navigation state.**
+  The same generic script API exposes graph edits together with selection,
+  viewport, and dock intents (`src/core/script/engine.rs:130-158`).
+  Terminal/headless execution chooses a target from the document's active
+  primary tab and falls back to Main (`src/core/terminal_session/mod.rs:103-114`,
+  `src/core/document/mod.rs:343-351`). A headless edit can therefore target a
+  different graph solely because of whichever tab a previous GUI session left
+  open, and automation can mutate presentation-only state.
 
-- [ ] **Coarse preference and terminal outcomes trigger unrelated work and misreport failures.** `PrefsCommand::Changed` makes a viewer filter or background edit rebuild the theme, clone the Aperture theme, check ML configuration, and save (`src/gui/main_window.rs:123-135`, `src/gui/app/commands/prefs.rs:16-49`). `TerminalSession::save` returns `false` for both untitled and I/O failure, so TUI prints “nothing to save” after a real failure, and `run` prints “run queued” while ignoring compile failure (`src/core/terminal_session/mod.rs:61-74`, `src/tui/mod.rs:61-70`).
+- [ ] **One untyped sticky-error slot lets unrelated success erase unresolved
+  failures.** `StatusLog` promises same-family clearing but stores only one
+  `Option<String>` (`src/core/status.rs:14-23`). Compile success, library
+  success, completed runs, and file success all assign `None` directly
+  (`src/core/runtime_host.rs:101-109`,
+  `src/core/runtime_host.rs:125-136`,
+  `src/core/terminal_session/mod.rs:74-99`,
+  `src/gui/app/commands/file.rs:55-103`). A successful unrelated action can
+  hide a persistence or runtime failure whose underlying condition remains.
 
-- [ ] **Edit side effects depend on the input path instead of the edits actually applied.** `commit_batch` centrally observes relayout, reconciliation, and dirty effects, but cache flushing is inferred earlier by scanning raw GUI intents (`src/gui/app/editor/mod.rs:123-176`, `src/gui/app/editor/mod.rs:403-425`). Stale or no-op intents can therefore flush, while script/external edits and undo/redo of cache changes do not (`src/gui/app/editor/shortcuts.rs:48-72`, `src/gui/app/mod.rs:339-341`).
+- [ ] **The frame-wide `Option<AppCommand>` drops co-occurring valid
+  actions.** Independent surfaces repeatedly overwrite the same optional
+  command, and App dispatches only the survivor
+  (`src/gui/main_window.rs:76-136`, `src/gui/app/mod.rs:328-330`). In one
+  concrete path, committing an edited ML path stores `Changed`, then clicking
+  Browse overwrites it with `PickMlModel`
+  (`src/gui/preferences_view.rs:273-298`). Cancelling the picker leaves the
+  in-memory path changed without the reconfiguration or persistence attached to
+  the lost command.
 
-## Batch 4 — High: ambiguous persisted and retained state
+- [ ] **Viewer tabs persist port references that are not validated as live
+  outputs.** `TabRef::ImageViewer` stores a general `PortRef`, but tab liveness
+  checks only node existence (`src/core/document/mod.rs:61-84`,
+  `src/core/document/mod.rs:280-287`). Document validation consequently accepts
+  input-kind and out-of-range viewer tabs
+  (`src/core/document/validate.rs:123-129`). Resource retention ignores an
+  input-kind tab while rendering reinterprets the same index as an output
+  (`src/core/document/mod.rs:362-370`,
+  `src/gui/main_window.rs:122-136`), so persisted state has contradictory
+  meanings across subsystems.
 
-- [ ] **Configuration reads conflate absence with failure and mutate recovery state.** `Preferences::load` maps missing, unreadable, and malformed TOML to the same defaults, so a later normal save can overwrite a recoverable file; preferred-document load failure immediately clears and saves the path even for a transient missing drive or permission (`src/core/io/preferences.rs:148-155`, `src/core/workspace/mod.rs:21-42`). Graph-library quarantine also reuses one `.broken` target and can overwrite or fail on a second recovery (`src/core/io/graph_library/mod.rs:77-84`, `src/core/io/graph_library/mod.rs:124-134`).
+- [ ] **Canvas geometry caches can both leak identities and make stale bounds
+  self-perpetuating.** Persistent node-size and port-offset maps survive graph
+  switches and clear only their live subsets
+  (`src/gui/canvas/geometry.rs:45-70`,
+  `src/gui/canvas/geometry.rs:176-188`). Repeated node/interface churn grows
+  those maps for the editor's lifetime. Culling uses the cached node size before
+  recording (`src/gui/node/mod.rs:144-153`), so an off-screen node whose dynamic
+  content grows into the viewport can remain skipped forever and never refresh
+  the stale size.
 
-- [ ] **Persistent inspector state is pruned against only the active graph.** `GraphUI` promises pinned inspectors survive navigation, but `Inspectors::apply` retains only IDs in the active `Scene`, so the first frame after A→B deletes every pinned inspector from A (`src/gui/canvas/inspector.rs:16-21`, `src/gui/canvas/inspector.rs:98-120`, `src/gui/canvas/mod.rs:70-83`, `src/gui/canvas/mod.rs:259-262`). Inspector storage also uses nondeterministic `HashMap` iteration where overlapping-panel paint and hit order may matter (`src/gui/canvas/inspector.rs:141-162`).
+- [ ] **Pinned inspectors are deleted on a graph switch despite living outside
+  resettable gesture state.** `GraphUI` keeps inspector state across target
+  resets (`src/gui/canvas/mod.rs:76-108`), but `Inspectors::apply` retains only
+  node IDs in the currently active `Scene`
+  (`src/gui/canvas/inspector.rs:98-120`). Visiting another graph permanently
+  removes every pinned inspector from the previous graph.
 
-- [ ] **Retained geometry lacks graph ownership, liveness pruning, and layout revisioning.** `CanvasGeometry` clears live maps but never invalidates or prunes persistent node-size and port-offset caches (`src/gui/canvas/geometry.rs:45-70`, `src/gui/canvas/geometry.rs:176-215`). The caches can grow across graph and node lifetimes, and culling uses a cached size before a node can record again, so an off-screen node that grows into the viewport can remain permanently culled (`src/gui/node/mod.rs:144-153`, `src/gui/canvas/cull.rs:46-49`).
+- [ ] **Idle graph frames rebuild semantic projection state and allocate in
+  proportion to graph size.** `Editor` unconditionally rebuilds the active
+  scene (`src/gui/app/editor/mod.rs:206-217`); `Scene::rebuild` clears and
+  repopulates every pool, rematches every `NodeKind`, clones constants/types,
+  and creates temporary event vectors (`src/gui/scene.rs:251-330`,
+  `src/gui/scene.rs:410-449`). Visible node recording adds fresh row, tooltip,
+  and option vectors/strings (`src/gui/node/port_row/mod.rs:57-88`,
+  `src/gui/node/port_row/mod.rs:208-218`,
+  `src/gui/node/value_editor.rs:62-84`). During execution this work is forced at
+  roughly 20 fps, so canvas culling reduces drawing but not the graph-sized
+  projection and allocator load (`src/gui/app/mod.rs:308-314`).
 
-- [ ] **Image-viewer tabs accept input and out-of-range port references.** `TabRef::ImageViewer` stores a general `PortRef`, while validation checks only node existence and allows input-kind or out-of-range viewer tabs (`src/core/document/mod.rs:52-83`, `src/core/document/mod.rs:282-287`, `src/core/document/validate.rs:84-90`). Resource retention ignores input tabs, but rendering converts the same index to an `OutputPort` anyway, so persisted state is interpreted inconsistently across retention and rendering (`src/core/document/mod.rs:379-388`, `src/gui/main_window.rs:122-131`).
+- [ ] **The new-node palette rebuilds its catalogue with
+  category-times-entry work on every open frame.** It reconstructs and sorts
+  categories, then rescans every function, special node, and graph once per
+  category into fresh vectors with allocated lowercase keys
+  (`src/gui/canvas/new_node_ui.rs:189-196`,
+  `src/gui/canvas/new_node_ui.rs:217-252`,
+  `src/gui/canvas/new_node_ui.rs:289-296`). Catalogue work is `O(C·N)` per
+  repaint and creates transient memory proportional to the library even when
+  neither the library nor query changed.
 
-- [ ] **Mutable, non-unique boundary-port names are used as fallback identity.** After interface compaction, boundary-port lookup falls back from an index hint to the first matching name, while duplicate names are permitted (`src/core/document/mod.rs:290-305`, `src/core/document/mod.rs:497-528`, `src/core/edit/intent/types.rs:354-370`). Undo/redo can therefore resolve the wrong same-named port and rename a different interface entry than the original edit targeted.
+- [ ] **Core's declared frontend boundary is violated by persisted GUI
+  preferences.** `core` promises no Aperture dependency, but its preference
+  schema imports and serializes `aperture::ImageFilter`
+  (`src/core/mod.rs:1-5`, `src/core/io/preferences.rs:1-3`,
+  `src/core/io/preferences.rs:67-75`). `TerminalSession` must load the same
+  GUI-coupled type (`src/core/terminal_session/mod.rs:26-30`), tying headless
+  startup and the persistent core schema to a GUI library enum.
 
-## Batch 5 — Medium: frontend, runtime, and storage coupling
+- [ ] **The dock model pays indexed-arena complexity for a tree capped at 31
+  nodes.** A depth-four cap bounds the layout, yet the representation
+  serializes `NodeIdx` edges, requires canonical preorder storage, repacks after
+  structural changes, and validates reachability/index topology
+  (`src/core/document/dock.rs:9-26`,
+  `src/core/document/dock.rs:245-267`,
+  `src/core/document/dock.rs:396-456`,
+  `src/core/document/dock.rs:548-677`). The mutation and persistence surface is
+  disproportionate to the small maximum structure and makes positional-address
+  bugs harder to isolate.
 
-- [ ] **Core startup and configuration depend on GUI preferences.** The core module promises no Aperture dependency, but `core::io::preferences` stores `aperture::ImageFilter`, and `Workspace`/`RuntimeHost` accept the entire `Preferences` object merely to load a path and derive ML model paths (`src/core/mod.rs:1-5`, `src/core/io/preferences.rs:1-5`, `src/core/io/preferences.rs:67-83`, `src/core/workspace/mod.rs:47-62`, `src/core/runtime_host.rs:52-86`). This leaks GUI types and unrelated preference state into otherwise frontend-neutral ownership boundaries.
+- [ ] **Configuration recovery conflates absence, transient failure, and
+  corruption, then mutates recovery state.** Preferences map missing,
+  unreadable, and malformed files to defaults
+  (`src/core/io/preferences.rs:148-155`), and preferred-document load failure
+  clears and persists the remembered path even for a temporarily unavailable
+  drive or permission error (`src/core/workspace/mod.rs:18-43`). Graph-library
+  quarantine always uses one `.broken` target
+  (`src/core/io/graph_library/mod.rs:77-84`,
+  `src/core/io/graph_library/mod.rs:124-140`), so a second failure can overwrite
+  the first recovery copy on platforms where rename replaces destinations or
+  fail to quarantine at all on others.
 
-- [ ] **GUI, TUI, headless, and scripting stacks compile with unconditional direct dependencies.** The single binary declares every frontend and script module together, and all direct dependencies are unconditional (`src/main.rs:1-16`, `Cargo.toml:7-39`). Headless and non-script builds therefore retain avoidable desktop or scripting compile edges, although some transitive packages would remain because `common` independently depends on LZ4, `imaginarium` depends on `image`, and headless installs Lens image/astro functions (`../common/Cargo.toml:16-24`, `src/core/runtime_library/mod.rs:117-128`).
+- [ ] **Edit-time graph algorithms scale poorly on interactive paths.**
+  Multi-selection drag coalescing maps every previous move and linearly scans
+  the current moves for its partner, yielding `O(N²)` comparisons per input
+  frame (`src/core/edit/action_stack/mod.rs:99-105`,
+  `src/core/edit/intent/query.rs:193-217`). First-open auto-layout may scan all
+  edges up to `V−1` times and runs synchronously while opening a local graph
+  (`src/core/document/auto_layout.rs:31-46`,
+  `src/core/document/mod.rs:377-393`). Large selections and reverse-ordered
+  graphs can therefore stall otherwise direct manipulation/navigation.
 
-- [ ] **Background runtime ownership is duplicated and synchronous scripts can occupy async workers.** `WorkerBridge` and optional `ScriptHost` each create a default multi-thread Tokio runtime and retain dead-read lifetime-holder fields even though `RuntimeHost` owns both (`src/core/background_runtime.rs:1-35`, `src/core/worker.rs:37-67`, `src/core/script/mod.rs:343-396`, `src/core/runtime_host.rs:24-46`). The duplicated ownership complicates lifetime and drop order, while Rhai evaluation runs synchronously inside an async task and may intentionally take seconds, creating a worker-starvation risk on small-core systems (`src/core/script/mod.rs:285-329`, `src/core/script/engine.rs:18-23`).
+- [ ] **Every frontend and optional scripting stack is compiled into one
+  unconditional binary dependency graph.** `main.rs` declares GUI, TUI, and
+  headless modules together, while desktop, Rhai, TCP compression, and tracing
+  dependencies are unconditional (`src/main.rs:1-16`, `Cargo.toml:7-39`).
+  Headless and non-script builds retain avoidable desktop/script compile edges;
+  `WorkerBridge` and optional `ScriptHost` also each own a separate multithread
+  Tokio runtime (`src/core/background_runtime.rs:1-35`,
+  `src/core/worker.rs:37-50`, `src/core/script/mod.rs:343-396`), multiplying
+  threads and shutdown ownership inside one process.
 
-- [ ] **The one-entry document format carries a full ZIP parser and validation surface.** `.darkroom` contains exactly one `document.json`, so loading spends substantial code validating archive topology, duplicate entries, overlap, entry kinds, and two sizes before parsing the only payload (`src/core/io/document.rs:1-16`, `src/core/io/document.rs:18-71`, `src/core/io/document.rs:74-147`, `src/core/io/document.rs:210-224`). The archive machinery and direct `zip` dependency are disproportionate to the format's single bounded JSON value.
+## Low
 
-- [ ] **System-theme detection duplicates platform ownership for one call.** Darkroom imports a portal/platform discovery stack for one `dark_light::detect()` call (`Cargo.toml:26`, `src/gui/theme.rs:307-315`), while Aperture already owns the Winit window and event boundary (`../aperture/src/host/winit/mod.rs:603-690`). This adds a second platform-integration dependency path without handling live theme changes through the existing window host.
+- [ ] **Terminal commands collapse distinct outcomes into misleading
+  messages.** `TerminalSession::save` returns the same `false` for an untitled
+  document and an I/O failure (`src/core/terminal_session/mod.rs:58-70`), while
+  TUI always reports “nothing to save.” `run` ignores whether compilation and
+  queueing succeeded and always prints “run queued”
+  (`src/tui/mod.rs:60-69`). Operators receive success/no-op text for real
+  failures unless they separately inspect status history.
 
-## Batch 6 — Medium: blurred module responsibilities
+- [ ] **Script CLI input is silently ignored or rewritten.** Script bind,
+  token, auth, and token-file flags have no effect unless `--script-tcp` is
+  also present, and an invalid bind specification logs a warning then falls
+  back to the default address (`src/main.rs:55-99`). A mistyped invocation can
+  start with materially different listener/authentication behavior than its
+  arguments imply.
 
-- [ ] **The node-palette widget owns core graph-construction semantics.** `NewNodeUi` handles graph-copy lineage, fresh IDs, graph-instance construction, and default binding seeding, then repackages the result into `Intent::AddNode` (`src/gui/canvas/new_node_ui.rs:19-26`, `src/gui/canvas/new_node_ui.rs:120-133`, `src/gui/canvas/new_node_ui.rs:306-394`). Core edit behavior is therefore coupled to an Aperture widget and cannot be exercised or reused without the GUI layer.
+- [ ] **Terminal errors bypass the teardown structure built around runtime
+  drop order.** `run_terminal` deliberately keeps `TerminalSession` outside the
+  async block so worker/script runtimes drop in synchronous context, but its
+  error branch calls `std::process::exit(1)`
+  (`src/main.rs:195-218`). Destructors never run on that path, abandoning the
+  cooperative task, socket, and runtime cleanup the surrounding ownership was
+  designed to provide.
 
-- [ ] **`Scene` duplicates node-interface resolution owned partly by Scenarium.** `Scene::rebuild` re-matches every `NodeKind`, resolves functions, graphs, and special nodes, synthesizes boundary specs, and derives semantic flags even though Scenarium already owns partial interface and port-type queries (`src/gui/scene.rs:258-478`, `../scenarium/src/graph/query.rs:13-73`). The duplicated semantic logic can drift between framework and editor, and rebuilding also allocates a temporary event `Vec` per node before copying it into retained storage (`src/gui/scene.rs:273-316`, `src/gui/scene.rs:549-569`).
-
-- [ ] **The graph editor is split across mutually dependent modules with leaky state and lossy effects.** Top-level `gui/node` imports canvas types while canvas imports node scanners and renderers, and callers bypass both through public `MainWindow` fields and submodules (`src/gui/canvas/mod.rs:46-98`, `src/gui/node/mod.rs:12-19`, `src/gui/main_window.rs:31-58`). Canvas leaves accept an application-wide context although most need only `Theme`, and `Option<AppCommand>` is repeatedly overwritten across visible surfaces or implicitly wins over a simultaneous shortcut, so valid same-frame commands can be lost (`src/gui/app/mod.rs:24-43`, `src/gui/main_window.rs:75-136`, `src/gui/app/editor/mod.rs:236-264`). `image_viewers` and `ImageViewer` also duplicate key/value identity, while generic node rendering hard-codes Lens's image type (`src/gui/main_window.rs:123-135`, `src/gui/image_viewer.rs:44-88`, `src/gui/node/port_color.rs:57-69`).
-
-- [ ] **Reusable UI primitives live in feature-owned modules and create reverse dependencies.** The image viewer imports generic pan/zoom state from `canvas::pan_zoom`, pin preview imports `Badge` from `node::header`, inspector imports elapsed formatting from the same header, and port coloring imports interpolation from wire rendering (`src/gui/image_viewer.rs:26`, `src/gui/canvas/pin_preview.rs:27`, `src/gui/canvas/inspector.rs:37`, `src/gui/node/port_color.rs:20-22`). Generic viewport, widget, formatting, and color behavior is consequently coupled to unrelated graph-editor features.
-
-- [ ] **Large modules remain responsibility hubs.** `document/mod.rs` mixes reference types, views, edit scope, output-resource queries, local-graph lifecycle, and the root model (`src/core/document/mod.rs:28-274`, `src/core/document/mod.rs:307-530`). `script/mod.rs` mixes wire DTOs, effect transport, cancellable tasks, executor loop, result capture, and host lifecycle (`src/core/script/mod.rs:91-181`, `src/core/script/mod.rs:183-341`, `src/core/script/mod.rs:343-408`). `gui/theme.rs` combines palette data, Aperture translation, serialization, and geometry metrics, including invariant scalars copied into every preset (`src/gui/theme.rs:7-35`, `src/gui/theme.rs:350-400`, `src/gui/theme.rs:840-870`).
-
-## Batch 7 — Medium: duplicate hot-path work and transient allocations
-
-- [ ] **Breaker targeting repeats accumulated work and loses targets during a gesture.** Four `Vec` target lists are cleared and every visible target is retested against every accumulated scribble segment each frame; cubic wires multiply that by their sample count (`src/gui/canvas/breaker.rs:109-163`, `src/gui/canvas/breaker.rs:219-238`). Pin rendering also probes the same output twice, and targets disappear if pan/zoom culls them before release, making cost grow with gesture history and results depend on later viewport visibility (`src/gui/canvas/pin_ui.rs:248-251`, `src/gui/canvas/pin_ui.rs:307-309`, `src/gui/canvas/mod.rs:60-65`).
-
-- [ ] **Steady-state recording performs avoidable allocations and maintains parallel-order invariants.** Visible nodes allocate `Vec<Track>` for repeated grid rows, enum and preset editors allocate `Vec<&str>` adapters, dock rendering allocates `Vec<TabLabel>` parallel to `group.tabs`, and drop classification repeatedly collects chip rectangles (`src/gui/node/port_row/mod.rs:57-88`, `src/gui/node/value_editor.rs:62-84`, `src/gui/node/value_editor.rs:122-145`, `src/gui/dock/mod.rs:232-295`, `src/gui/dock/strip.rs:157-183`). These costs recur on warmed frames, and the parallel tab-label vector must remain positionally synchronized with the source tabs.
-
-- [ ] **Every open viewer tab synchronously materializes its full image before rendering.** `Editor::frame` reconciles every persisted viewer tab and performs CPU conversion plus texture registration, including inactive and restored tabs (`src/gui/app/editor/mod.rs:209-215`, `src/core/document/mod.rs:379-387`, `src/gui/pinned_output.rs:72-102`, `src/gui/pinned_output.rs:125-132`). This blocks the UI on content the current frame may not display, while a debug-only “Deferred is unreachable” assumption leaves the temporal state implicit and resource retention builds a per-frame set for the same tabs.
-
-## Batch 8 — Low: dormant surfaces and overly wide APIs
-
-- [ ] **A hidden graph menu retains an unreachable import/export chain.** `graph_menu` is explicitly retained under `#[allow(dead_code)]` and is never called, keeping otherwise unreachable command variants, dialogs, graph-template I/O, and orchestration alive (`src/gui/menu_bar.rs:80-104`, `src/gui/app/commands/graph.rs:13-83`, `src/gui/dialogs.rs:14-19`, `src/gui/dialogs.rs:42-56`).
-
-- [ ] **A hidden new-tab widget retains a complete unreachable semantic chain.** `new_tab_chip`, its constants and IDs, and a dead scan remain for possible future use; the unreachable surface also retains `UiAction::NewGraph` and a special direct, non-undoable document mutation (`src/gui/dock/strip.rs:86-130`, `src/gui/dock/mod.rs:126-128`, `src/gui/mod.rs:43-54`, `src/gui/app/editor/mod.rs:439-453`).
-
-- [ ] **Production APIs are wider than their production callers require.** Dock mutations are exposed crate-wide even though production uses only `DockLayout::apply`, TCP seams are wider than their subtree requires, and breaker state and geometry helpers are crate-visible largely for cross-module tests (`src/core/document/dock.rs:314-451`, `src/core/script/tcp/mod.rs:69-131`, `src/gui/canvas/breaker.rs:118-246`). The extra visibility enlarges the supported internal surface and lets tests, rather than production ownership, shape module boundaries.
-
-- [ ] **Terminal frontend errors bypass normal teardown.** `run_terminal` deliberately scopes `TerminalSession` and runtimes so they drop in synchronous context, but its error branch calls `std::process::exit(1)`, which skips every destructor and can abandon task and runtime cleanup (`src/main.rs:185-212`).
-
-- [ ] **Floating-point document state makes its manual `Eq` implementations invalid.** `GraphView` and `Document` contain `f32` viewport coordinates and dock ratios, so NaN violates the reflexivity required by `Eq` (`src/core/document/mod.rs:125-198`, `src/core/document/mod.rs:258-274`, `src/core/document/mod.rs:532`, `src/core/document/dock.rs:204-212`). No production bound requires either claim, leaving an unsound trait contract with no production benefit.
+- [ ] **Floating-point document state claims `Eq`.** `GraphView` contains
+  `f32` viewport and position values but manually implements `Eq`; `Document`
+  then does the same and also contains dock split ratios
+  (`src/core/document/mod.rs:130-198`,
+  `src/core/document/mod.rs:514`,
+  `src/core/document/dock.rs:232-237`). NaN violates `Eq` reflexivity, so these
+  trait implementations promise a contract the persisted value domain does not
+  satisfy.
 
 ## Open questions
 
-- [ ] **The packed undo representation has substantial complexity without cited measurements that justify it.** `ActionStack` serializes and deserializes every entry into a 1 MiB byte arena while maintaining byte ranges, a head offset, lazy compaction, and parallel metadata (`src/core/edit/action_stack/mod.rs:1-64`, `src/core/edit/action_stack/mod.rs:71-267`). The report found no benchmark showing a material memory or allocation benefit on realistic large edits, so it is unclear whether this machinery earns its correctness and maintenance cost.
+- [ ] **The packed undo arena has substantial complexity without cited
+  workload measurements.** Every history entry is serialized/deserialized into
+  a one-MiB byte arena with byte ranges, head offsets, lazy compaction, and
+  parallel metadata (`src/core/edit/action_stack/mod.rs:1-64`,
+  `src/core/edit/action_stack/mod.rs:71-267`). No benchmark in the reviewed
+  module establishes that this representation materially improves memory or
+  latency for realistic edits.
 
-- [ ] **Mandatory LZ4 adds protocol and dependency weight without measured local-transport benefit.** The protocol requires LZ4, but only requests enforce the advertised 1 MiB limit and replies allocate before framing (`src/core/script/tcp/mod.rs:17-29`, `src/core/script/tcp/mod.rs:388-443`, `Cargo.toml:31-35`). No representative loopback measurements establish that compression savings justify the extra framing complexity and Darkroom's direct dependency edge.
+- [ ] **The one-entry project archive carries a full ZIP parsing and validation
+  surface.** `.darkroom` contains exactly one bounded `document.json`, but load
+  validates archive topology, duplicate entries, overlap, entry kind, and two
+  sizes before parsing it (`src/core/io/document.rs:1-16`,
+  `src/core/io/document.rs:74-147`). The reviewed code contains no product
+  requirement for additional archive entries that explains this format and
+  dependency weight.
 
-- [ ] **Production theme types carry a broad serialization contract with no visible product surface.** The UI exposes only System, Dark, and Light, yet production theme types retain serde derives, field-order constraints, and a serialized Aperture theme (`src/gui/theme.rs:301-329`, `src/gui/theme.rs:346-428`, `src/gui/preferences_view.rs:57-79`). It is unclear whether any runtime consumer requires this contract beyond maintaining the checked-in reference asset.
-
-- [ ] **Persistent Rhai scopes leave retained script state unbounded.** Each of up to 32 sessions retains an unrestricted `Scope` for ten idle minutes, so bounded request data does not bound memory retained across otherwise valid requests (`src/core/script/session/mod.rs:17-26`, `src/core/script/session/mod.rs:51-81`). The product requirement for persistence is unclear, but the current behavior permits a client to accumulate values until expiry without a retained-state budget.
-
----
-
-# Second pass — 2026-07-22
-
-Full re-read of all 108 production files, focused on data-structure simplification, single responsibility, dependency reduction, API surface, and file organization. Every first-pass batch was re-checked against current code and stands (the pin double-probe, the dead graph-menu chain, the flat dock tree, and the `aperture::ImageFilter` leak into `core::io::preferences` were all re-confirmed at their cited sites). The findings below are new; overlaps with Batches 1–8 are recorded as corroborations, not duplicated as new items.
-
-## Corroborations (new evidence for existing items, no new checkboxes)
-
-- **Batch 2, destructive transitions:** the exit-confirmation raise is duplicated between the titlebar close path and File ▸ Quit (`src/gui/app/mod.rs:242-250` vs `src/gui/app/commands/shell.rs:32-38`), with slightly different preference-persistence behavior for the same destructive action.
-- **Batch 3, sticky errors:** `StatusLog.error` is a bare `pub(crate)` field assigned `None` directly at seven production sites (`src/core/runtime_host.rs:111`, `src/core/runtime_host.rs:144`, `src/core/terminal_session/mod.rs:82`, `src/gui/app/mod.rs:141`, `src/gui/app/commands/file.rs:71`, `src/gui/app/commands/file.rs:96`, `src/gui/app/commands/graph.rs:56`), so the unsafe clear-on-success idiom is duplicated across handlers.
-- **Batch 3, edit effects:** cache-flush inference scans raw intents in `drain_intents` (`src/gui/app/editor/mod.rs:407-421`) while every other effect is derived from applied steps in `commit_batch`, confirming inconsistent effect semantics across input paths.
-- **Batch 6, one graph-editor domain:** the canvas↔node boundary is fully bidirectional: `gui/node/mod.rs` imports six canvas submodules (`breaker`, `cull`, `drag_anchor`, `geometry`, `inspector`, `pin_ui`), `gui/canvas/mod.rs` imports `node::{NodeUI, RecordCtx}` and three `node::prepass` scanners, `canvas/geometry.rs` reaches into three node modules for widget-id fns, `node/header.rs` imports `canvas::inspector`, and `node/port_row/mod.rs` imports `canvas::pin_ui`. `RecordCtx` is defined in `node/mod.rs:43-61` but consumed by canvas files.
-- **Batch 8, hidden new-tab chip:** the chip itself is `#[allow(dead_code)]` (`src/gui/dock/strip.rs:103`), but its click scan is still live in `DockUi::scan` (`src/gui/dock/mod.rs:126-128`), retaining `UiAction::NewGraph` and the direct `create_graph` mutation branch for an unreachable widget.
-
-## Batch 9 — High: correctness and edit-model problems
-
-- [ ] **Release saves skip structural document validation.** `io::document::load` runs `document.validate()` unconditionally (`src/core/io/document.rs:144`), but `save` only calls `validate_debug()` (`src/core/io/document.rs:154`), which is a no-op outside debug. A release build can persist a structurally invalid document that the next load rejects, turning an in-memory bug into a lost file.
-- [ ] **The flat `Intent` enum mixes graph-scoped and document-global edits.** `UndoStep` separates `Graph(GraphStep)` from `Doc(DocStep)` so no convention-only `unreachable!` arms exist (`src/core/edit/intent/types.rs:202-211`), yet `Intent` forces `build_step` to special-case `Dock`, `RenameGraph`, and `RenameBoundaryPort` before scope lookup and retain an `unreachable!` arm inside the scoped match (`src/core/edit/intent/build.rs:23-65`). The maintenance checklist is also inaccurate: it claims only `is_noop` and `requires_relayout` are exhaustive, although `requires_reconcile` and `dirties_document` are too (`src/core/edit/intent/types.rs:41-58`, `src/core/edit/intent/query.rs:100-163`).
-- [ ] **`GraphStep::DuplicateNodes` stores selection state derivable from its node payload.** `to_selection` is computed from `nodes` at build time (`src/core/edit/intent/build.rs:87-90`) and merely assigned at apply time (`src/core/edit/intent/apply.rs:186`). The duplicated field can disagree with the nodes in the same step, creating an internally inconsistent selection (`src/core/edit/intent/types.rs:231-238`).
-- [ ] **The edit layer exposes unused APIs and return values.** `commit_intent` has no callers outside `apply.rs`; only `commit_intent_cascading` is used by `editor` and `terminal_session` (`src/core/edit/intent/apply.rs:28`). `EditScope::remove_node` returns a `DetachedNode` that all three production call sites discard (`src/core/document/mod.rs:248-255`, `src/core/edit/intent/apply.rs:194`, `:346`, `:360`). These surfaces imply capabilities and data dependencies that production does not use.
-
-## Batch 10 — Medium: over-broad and inconsistent API signatures
-
-- [ ] **`Editor::frame` takes an unstructured seven-parameter environment.** The signature is hidden behind `#[allow(clippy::too_many_arguments)]` (`src/gui/app/editor/mod.rs:188-198`), and five parameters—`library`, `theme`, `preferences`, `events_running`, and `status_error`—are one read-mostly environment already assembled by `App`. The loose signature obscures which values belong to shared frame context and makes call-site evolution brittle.
-- [ ] **Run-control routing bypasses `Workspace` for stopping and duplicates post-start bookkeeping.** Starting goes through `Workspace::{run_once, run_node, start_event_loop}`, which normalize first, but `handle_run` calls `self.workspace.runtime.cancel_run()` and `.stop_event_loop()` directly (`src/gui/app/commands/run.rs:30`, `:72`). `run_graph` and `run_node` also duplicate `begin_run` plus `events_running = false` (`src/gui/app/commands/run.rs:41-58`). The split leaves normalization and state-transition ownership inconsistent across closely related operations.
-- [ ] **Dead returns and over-visible helpers enlarge API surfaces.** `App::load_document -> bool` has one caller that discards the value (`src/gui/app/commands/file.rs:33`, `:55`). `Theme::port_radius` is `pub(crate)` with zero external callers and is used only by `port_overhang` (`src/gui/theme.rs:718`, `:740`).
-- [ ] **Functions take many loose arguments despite existing context bundles.** `Inspectors::draw_panels` takes six parameters even though the file defines `PanelDraw` for exactly that set (`src/gui/canvas/inspector.rs:63-69`, `:126`). The same signature sprawl appears in `pin_preview::draw_widget` with 11 parameters (`src/gui/canvas/pin_preview.rs:108`) and `glyph::circle_frame` with seven (`src/gui/node/port_row/glyph.rs:58`), obscuring cohesive context and increasing call-site churn.
-- [ ] **`TabDrag.source` re-declares an existing named address as a tuple.** `TabAddress` already represents `(TabGroupId, usize)` (`src/core/document/dock.rs:243-247`), but drag state repeats the pair structurally (`src/gui/dock/drag.rs:19-27`). This violates the project's no-tuple convention and hides the semantic relationship between drag sources and dock addresses.
-
-## Batch 11 — Medium: duplicated behavior and computation
-
-- [ ] **Preference handlers duplicate the same reconfiguration and persistence tail.** `apply_preferences` and `set_ml_model_path` both end with `configure_ml_model_defaults(&self.preferences)` followed by `save_preferences()` (`src/gui/app/commands/prefs.rs:43-53`, `:69-81`). The copied effect sequence can drift and compounds the coarse preference-effect semantics described in Batch 3.
-- [ ] **I/O helpers duplicate size checks, durable publication, and error shapes.** `ensure_document_size` and `ensure_load_document_size` differ only in error type (`src/core/io/document.rs:191-208`). The serialize-to-`publish_bytes(Durable)` tail is repeated in three savers (`src/core/io/preferences.rs:161-165`, `src/core/io/graph_library/mod.rs:144-156`, `src/core/io/graph_template/mod.rs:50-60`) behind three error enums with identical `{path}: {source}` shapes, multiplying maintenance for the same persistence mechanism.
-- [ ] **Per-frame classifications are recomputed against unchanged inputs.** `classify_canvas_gesture(ui)` runs in both `prepass` and `frame` against the same responses (`src/gui/canvas/mod.rs:146`, `:181`). `drop_target(ui, doc)` likewise runs twice per drag frame, once in `scan` and once in `draw_drag_feedback` (`src/gui/dock/mod.rs:144`, `:294`), duplicating hot-path work and risking drift between interaction and rendering decisions.
-- [ ] **Small mappings and state models are duplicated within individual files.** `ensure_valid_layout` writes the missing-view predicate twice in one function (`src/core/document/mod.rs:435-447`). The image-viewer backdrop-to-fill mapping appears independently in `show` and `draw_swatch` (`src/gui/image_viewer.rs:151-155`, `:555-560`). `main.rs` maintains parallel `Mode` and private `Frontend` enums for the same frontend distinction (`src/main.rs:39-48`, `:180-183`).
-
-## Batch 12 — Low: file-organization violations and stale docs
-
-- [ ] **Large inline test modules violate the project's file-splitting rule and dominate production files.** The worst offenders are `src/core/document/mod.rs` (~616 test lines of 1162), `src/core/document/dock.rs` (~588 of 1243), `src/gui/scene.rs` (~397 of 1057), `src/gui/app/editor/mod.rs` (~297 of 831), `src/gui/canvas/pan_zoom.rs` (~260 of 562), `src/gui/run_state.rs` (~241 of 494), and `src/gui/pinned_output.rs` (~177 of 336). Each exceeds the stated >150-line threshold, and several create misleading thousand-line production modules whose size is mostly tests.
-- [ ] **An 11-line top-level module fragments ownership without adding a boundary.** `core/graph_library.rs` contains only the `GraphLibrary` `HashMap` struct (`src/core/graph_library.rs:7-11`), which is owned by `RuntimeLibrary` and persisted by `io/graph_library`. The separate module adds an import path and top-level concept for a type with one clear owner.
-- [ ] **`AGENTS.md` describes types, commands, paths, and inspector behavior that no longer exist.** It names `MenuCommand::CancelRun` and `MenuCommand::InvertColors`, although the code uses `AppCommand` and has no invert-colors stub. Paths such as `src/scene.rs`, `src/theme.rs`, `src/edit/intent.rs`, and `src/document/dock.rs` have moved under `src/gui` or `src/core`. The inspector section still describes live fetched input values after that pipeline was removed (`src/gui/canvas/inspector.rs:1-21`). These inaccuracies make the project instructions actively misleading.
+- [ ] **Persistent Rhai sessions have no retained-memory budget.** Up to 32
+  sessions keep their `Scope` for ten idle minutes
+  (`src/core/script/session/mod.rs:17-26`,
+  `src/core/script/session/mod.rs:51-81`). Per-evaluation string/collection and
+  variable-count limits do not bound the aggregate object graph retained across
+  successive valid requests, and no workload requirement in the module
+  establishes the needed persistence window or memory envelope.
