@@ -72,8 +72,7 @@ impl PendingRun {
 #[derive(Debug)]
 enum WorkerWake {
     Ready,
-    Shutdown,
-    MessagesClosed,
+    Stopped,
     EventLoopPanicked(LambdaPanic),
 }
 
@@ -135,9 +134,9 @@ where
             self.event_buffer.clear();
             let wake = tokio::select! {
                 biased;
-                _ = self.shutdown.cancelled() => WorkerWake::Shutdown,
+                _ = self.shutdown.cancelled() => WorkerWake::Stopped,
                 count = self.message_rx.recv_many(&mut self.messages, usize::MAX) => match count {
-                    0 => WorkerWake::MessagesClosed,
+                    0 => WorkerWake::Stopped,
                     _ => WorkerWake::Ready,
                 },
                 wake = async {
@@ -150,7 +149,7 @@ where
 
             match wake {
                 WorkerWake::Ready => {}
-                WorkerWake::Shutdown | WorkerWake::MessagesClosed => return None,
+                WorkerWake::Stopped => return None,
                 WorkerWake::EventLoopPanicked(panic) => {
                     self.fail_event_loop(panic).await;
                     continue;

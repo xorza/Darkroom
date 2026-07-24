@@ -29,7 +29,7 @@ installed.
 
 ## High: Worker lifecycle
 
-- [ ] **`Worker::send_many` does not create the worker commit boundary its API consumers rely on.** It sends messages one at a time, while the worker reduces only whichever messages happen to be ready when `recv_many` wakes (`src/worker/mod.rs:52-60`, `src/worker/task.rs:132-162`, `src/worker/batch.rs:39-72`). The worker can process the first message before the remaining sends arrive, so logically coupled operations can be split across intents; Darkroom explicitly treats update, eviction, and event-loop stop as one commit (`../darkroom/src/core/worker.rs:65-75`). That split can rebuild or run an event loop between the update and the stop/eviction that was meant to accompany it.
+- [ ] **`Worker::send_many` does not create the worker commit boundary its API consumers rely on.** It sends messages one at a time, while the worker reduces only whichever messages happen to be ready when `recv_many` wakes (`src/worker/mod.rs:52-60`, `src/worker/task.rs:131-161`, `src/worker/batch.rs:39-72`). The worker can process the first message before the remaining sends arrive, so logically coupled operations can be split across intents; Darkroom explicitly treats update, eviction, and event-loop stop as one commit (`../darkroom/src/core/worker.rs:65-75`). That split can rebuild or run an event loop between the update and the stop/eviction that was meant to accompany it.
 
 ## High: Authoring and compilation invariants
 
