@@ -270,7 +270,7 @@ mod tests {
     use super::*;
     use crate::common::color_format::{ALL_FORMATS, ColorFormat};
     use crate::common::image_diff::pixels_equal;
-    use crate::common::test_utils::create_test_image;
+    use crate::common::internals::create_test_image;
     use crate::image::ImageDesc;
     use crate::ops::transform::{FilterMode, Transform};
 
@@ -539,7 +539,7 @@ mod tests {
     mod gpu_cross_check {
         use super::*;
         use crate::common::image_diff::max_pixel_diff;
-        use crate::common::test_utils::{load_lena_rgba_u8_61x38, test_gpu};
+        use crate::common::internals::{gpu::test_gpu, load_lena_rgba_u8_61x38};
         use crate::gpu::gpu_image::GpuImage;
         use crate::ops::transform::pipeline::GpuTransformPipeline;
 

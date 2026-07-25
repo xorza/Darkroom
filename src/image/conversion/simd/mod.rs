@@ -7,12 +7,12 @@ use crate::common::color_format::ColorFormat;
 use crate::cpu_features;
 
 cfg_x86_64! {
-    pub(crate) mod avx;
-    pub(crate) mod sse;
+    mod avx;
+    mod sse;
 }
 
 cfg_aarch64! {
-    pub(crate) mod neon;
+    mod neon;
 }
 
 #[cfg(test)]
@@ -21,11 +21,11 @@ mod tests;
 use super::{LUMA_8BIT, LUMA_B, LUMA_G, LUMA_R};
 
 /// Row conversion function type
-pub(crate) type RowConvertFn = fn(src: &[u8], dst: &mut [u8], width: usize);
+type RowConvertFn = fn(src: &[u8], dst: &mut [u8], width: usize);
 
 /// Get the SIMD row conversion function for a format pair, if available.
 /// Returns None if no SIMD path exists for this conversion.
-pub(crate) fn get_simd_row_converter(
+pub(super) fn get_simd_row_converter(
     from_fmt: ColorFormat,
     to_fmt: ColorFormat,
 ) -> Option<RowConvertFn> {

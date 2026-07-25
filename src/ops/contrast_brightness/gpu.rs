@@ -140,7 +140,7 @@ impl Params {
 mod tests {
     use super::*;
     use crate::common::color_format::ColorFormat;
-    use crate::common::test_utils::{create_test_image, create_test_image_f32, test_gpu};
+    use crate::common::internals::{create_test_image, create_test_image_f32, gpu::test_gpu};
     use crate::image::{Image, ImageDesc};
 
     #[test]

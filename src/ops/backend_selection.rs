@@ -4,7 +4,7 @@ use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Backend {
+pub(super) enum Backend {
     Cpu,
     #[cfg(feature = "wgpu")]
     Gpu,
@@ -13,7 +13,7 @@ pub(crate) enum Backend {
 /// Picks CPU or GPU for an op given the buffers' current location, the format,
 /// and which backends support that format. Returns `Err` if formats don't match
 /// or no backend supports the format.
-pub(crate) fn select_backend(
+pub(super) fn select_backend(
     ctx: &ProcessingContext,
     buffers: &[&ImageBuffer],
     cpu_formats: &[ColorFormat],

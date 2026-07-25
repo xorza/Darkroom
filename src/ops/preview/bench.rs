@@ -7,7 +7,7 @@ use quickbench::quick_bench;
 
 use super::Preview;
 use crate::common::color_format::ALL_FORMATS;
-use crate::common::test_utils::create_test_image;
+use crate::common::internals::create_test_image;
 
 const SRC_W: usize = 6144;
 const SRC_H: usize = 4096;

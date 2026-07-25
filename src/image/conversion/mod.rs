@@ -6,21 +6,21 @@
 //! interleaved); changing *layout* is the separate
 //! [`transpose`](crate::image::transpose).
 
-pub(crate) mod scalar;
-pub(crate) mod simd;
+pub(super) mod scalar;
+mod simd;
 
 // Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
 // R: 0.2126 * 65536 = 13933
 // G: 0.7152 * 65536 = 46871
 // B: 0.0722 * 65536 = 4732
 // Total: 65536 (allows shift by 16 instead of divide)
-pub(crate) const LUMA_R: u32 = 13933;
-pub(crate) const LUMA_G: u32 = 46871;
-pub(crate) const LUMA_B: u32 = 4732;
+const LUMA_R: u32 = 13933;
+const LUMA_G: u32 = 46871;
+const LUMA_B: u32 = 4732;
 
 // Rec. 709 weights scaled to 8-bit fixed point (sum 256, allows >>8 instead of divide).
 // Used by the SIMD integer luminance kernels; [R, G, B].
-pub(crate) const LUMA_8BIT: [u16; 3] = [54, 183, 19];
+const LUMA_8BIT: [u16; 3] = [54, 183, 19];
 
 #[cfg(test)]
 mod bench;
@@ -37,7 +37,7 @@ use simd::get_simd_row_converter;
 /// Convert `from` into `to`'s format, using SIMD acceleration when available.
 /// `from` and `to` must share dimensions; every format pair is handled (SIMD
 /// fast paths fall back to the scalar reference), so this is infallible.
-pub(crate) fn convert_image(from: &Image, to: &mut Image) {
+pub(super) fn convert_image(from: &Image, to: &mut Image) {
     assert_eq!(from.desc().width, to.desc().width);
     assert_eq!(from.desc().height, to.desc().height);
 

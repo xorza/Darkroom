@@ -101,7 +101,7 @@ macro_rules! dispatch_tiff {
     };
 }
 
-pub(crate) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
+pub(super) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
     dispatch_tiff!(image, filename, {
         // L (grayscale)
         (L, _8bit, UInt) => Gray8U,

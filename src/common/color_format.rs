@@ -37,7 +37,7 @@ impl ChannelCount {
     pub fn channel_count(&self) -> u8 {
         *self as u8
     }
-    pub fn byte_count(&self, channel_size: ChannelSize) -> u8 {
+    fn byte_count(&self, channel_size: ChannelSize) -> u8 {
         self.channel_count() * channel_size.byte_count()
     }
 }
@@ -63,11 +63,11 @@ impl ColorFormat {
         self.channel_count.byte_count(self.channel_size)
     }
 
-    pub fn is_supported(&self) -> bool {
+    fn is_supported(&self) -> bool {
         ALL_FORMATS.contains(self)
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if !self.is_supported() {
             return Err(Error::InvalidColorFormat(format!(
                 "unsupported color format: {self:?}"

@@ -721,7 +721,7 @@ mod tests {
     use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 
     use crate::common::image_diff::max_pixel_diff;
-    use crate::common::test_utils::{create_test_image, load_lena_rgba_u8_61x38};
+    use crate::common::internals::{create_test_image, load_lena_rgba_u8_61x38};
     use crate::image::Image;
 
     #[test]

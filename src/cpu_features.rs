@@ -6,13 +6,17 @@
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy)]
-pub struct X86Features {
-    pub sse2: bool,
-    pub sse3: bool,
-    pub ssse3: bool,
-    pub sse4_1: bool,
-    pub avx2: bool,
-    pub fma: bool,
+pub(crate) struct X86Features {
+    pub(crate) sse2: bool,
+    // Only read by x86_64-gated code (SIMD dispatch, tests below); looks dead when
+    // checking/building for other targets since those reads vanish under cfg.
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    sse3: bool,
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    pub(crate) ssse3: bool,
+    pub(crate) sse4_1: bool,
+    avx2: bool,
+    fma: bool,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -20,7 +24,7 @@ static FEATURES: OnceLock<X86Features> = OnceLock::new();
 
 #[cfg(target_arch = "x86_64")]
 #[inline]
-pub fn get() -> X86Features {
+pub(crate) fn get() -> X86Features {
     *FEATURES.get_or_init(|| X86Features {
         sse2: is_x86_feature_detected!("sse2"),
         sse3: is_x86_feature_detected!("sse3"),
@@ -33,7 +37,7 @@ pub fn get() -> X86Features {
 
 #[cfg(not(target_arch = "x86_64"))]
 #[inline]
-pub fn get() -> X86Features {
+pub(crate) fn get() -> X86Features {
     X86Features {
         sse2: false,
         sse3: false,

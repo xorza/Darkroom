@@ -14,7 +14,7 @@ pub struct Gpu {
 
 impl Gpu {
     /// Creates a new GPU context, initializing wgpu with default settings.
-    pub fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -49,7 +49,7 @@ impl Gpu {
     }
 
     /// Polls the device, blocking until all pending operations complete.
-    pub fn wait(&self) {
+    fn wait(&self) {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .unwrap();
@@ -67,6 +67,18 @@ impl Gpu {
                 break;
             }
             tokio::task::yield_now().await;
+        }
+    }
+}
+
+#[cfg(any(test, feature = "internals"))]
+pub(crate) mod internals {
+    use crate::common::error::Result;
+    use crate::gpu::Gpu;
+
+    impl Gpu {
+        pub fn new_for_internals() -> Result<Self> {
+            Self::new()
         }
     }
 }

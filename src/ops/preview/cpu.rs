@@ -125,7 +125,7 @@ fn write_rgba8<const N: usize>(out: &mut [u8], sum: [f32; 4], scale: f32) {
 mod tests {
     use super::*;
     use crate::common::color_format::ALL_FORMATS;
-    use crate::common::test_utils::create_test_image;
+    use crate::common::internals::create_test_image;
 
     fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
         Image::new_with_data(ImageDesc::new(w, h, fmt), bytes).unwrap()

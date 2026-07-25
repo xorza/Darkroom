@@ -8,7 +8,7 @@ use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorF
 use crate::common::error::{Error, Result};
 use crate::image::{Image, ImageDesc};
 
-pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
+pub(super) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let img = image_lib::open(filename)?;
 
     let (channel_count, channel_size, channel_type) = match img.color() {
@@ -35,7 +35,7 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     Image::new_with_data(desc, img.into_bytes())
 }
 
-pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
+pub(super) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     // Use unlimited to support large astrophotography images
     let limits = Limits::unlimited();
     let mut decoder = Decoder::new(File::open(filename)?)?.with_limits(limits);
@@ -88,7 +88,7 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     Image::new_with_data(desc, bytes)
 }
 
-pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
+pub(super) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
     if image.desc().color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "JPEG channel type: {:?}",
@@ -129,7 +129,7 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     Ok(())
 }
 
-pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
+pub(super) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
     if image.desc().color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "PNG channel type: {:?}",

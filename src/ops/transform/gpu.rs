@@ -164,7 +164,9 @@ struct Params {
 mod tests {
     use super::*;
     use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
-    use crate::common::test_utils::{load_lena_rgba_u8_61x38, load_lena_rgba_u8_895x551, test_gpu};
+    use crate::common::internals::{
+        gpu::test_gpu, load_lena_rgba_u8_61x38, load_lena_rgba_u8_895x551,
+    };
     use crate::image::ImageDesc;
     use glam::Vec2;
     use std::f32::consts::PI;

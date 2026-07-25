@@ -9,7 +9,7 @@ use quickbench::quick_bench;
 
 use super::{FilterMode, Transform};
 use crate::common::color_format::ALL_FORMATS;
-use crate::common::test_utils::create_test_image;
+use crate::common::internals::create_test_image;
 use crate::image::Image;
 
 // 6K-class frame (~25 MP) — large enough to dominate per-call overhead and

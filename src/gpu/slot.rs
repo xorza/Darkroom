@@ -5,13 +5,13 @@ use tokio::sync::Notify;
 
 #[derive(Debug, Error)]
 #[error("Cannot take value: other references exist")]
-pub(crate) struct TakeError;
+pub(super) struct TakeError;
 
 /// Lockless single-value slot for cross-thread handoff.
 /// Only the latest value is retained; `send` overwrites any previous value.
 /// Cheap to clone — all clones share the same underlying storage.
 #[derive(Debug)]
-pub(crate) struct Slot<T> {
+pub(super) struct Slot<T> {
     value: Arc<ArcSwapOption<T>>,
     notify: Arc<Notify>,
 }
@@ -35,7 +35,7 @@ impl<T> Clone for Slot<T> {
 }
 
 impl<T> Slot<T> {
-    pub(crate) fn send(&self, val: T) {
+    pub(super) fn send(&self, val: T) {
         self.value.store(Some(Arc::new(val)));
         self.notify.notify_waiters();
     }
@@ -43,11 +43,11 @@ impl<T> Slot<T> {
     /// Non-blocking take. Kept for API completeness with the waiting variants;
     /// production currently only uses those.
     #[allow(dead_code)]
-    pub(crate) fn take(&self) -> Option<T> {
+    fn take(&self) -> Option<T> {
         self.value.swap(None).and_then(Arc::into_inner)
     }
 
-    pub(crate) async fn take_async(&self) -> Result<T, TakeError> {
+    pub(super) async fn take_async(&self) -> Result<T, TakeError> {
         loop {
             // Register for notification BEFORE checking value to avoid lost-wakeup.
             let notified = self.notify.notified();
@@ -59,7 +59,7 @@ impl<T> Slot<T> {
     }
 
     /// Blocking counterpart of `take_async` for sync callers; parks the thread.
-    pub(crate) fn take_blocking(&self) -> Result<T, TakeError> {
+    pub(super) fn take_blocking(&self) -> Result<T, TakeError> {
         pollster::block_on(self.take_async())
     }
 }

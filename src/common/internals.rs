@@ -2,12 +2,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
-#[cfg(feature = "wgpu")]
-use crate::gpu::Gpu;
 use crate::image::Image;
 use crate::processing_context::ProcessingContext;
-#[cfg(feature = "wgpu")]
-use crate::processing_context::gpu_context::GpuContext;
 
 fn workspace_root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
@@ -73,22 +69,14 @@ pub(crate) fn load_lena_rgba_u8_61x38() -> Image {
         .clone()
 }
 
-/// Returns a shared GPU context for tests.
-/// This avoids the ~2 second initialization overhead per test.
-#[cfg(feature = "wgpu")]
-pub(crate) fn test_gpu() -> Option<Gpu> {
-    static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
-    TEST_GPU.get_or_init(|| Gpu::new().ok()).clone()
-}
-
 /// Returns a shared ProcessingContext for tests.
 /// This avoids the ~2 second GPU initialization overhead per test.
 pub(crate) fn test_processing_context() -> ProcessingContext {
     #[cfg(feature = "wgpu")]
     {
-        match test_gpu() {
+        match gpu::test_gpu() {
             Some(gpu) => ProcessingContext {
-                gpu_context: Some(GpuContext::new(gpu)),
+                gpu_context: Some(crate::processing_context::gpu_context::GpuContext::new(gpu)),
             },
             None => ProcessingContext::cpu_only(),
         }
@@ -159,4 +147,18 @@ pub(crate) fn create_test_image_f32(
         chunk.copy_from_slice(&val_bytes);
     }
     img
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) mod gpu {
+    use std::sync::OnceLock;
+
+    use crate::gpu::Gpu;
+
+    /// Returns a shared GPU context for tests.
+    /// This avoids the ~2 second initialization overhead per test.
+    pub(crate) fn test_gpu() -> Option<Gpu> {
+        static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
+        TEST_GPU.get_or_init(|| Gpu::new().ok()).clone()
+    }
 }

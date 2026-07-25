@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use glam::Vec2;
 
 use crate::common::color_format::ColorFormat;
-use crate::common::test_utils::{load_lena_rgba_u8_895x551, test_processing_context};
+use crate::common::internals::{load_lena_rgba_u8_895x551, test_processing_context};
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
 use crate::ops::contrast_brightness::ContrastBrightness;

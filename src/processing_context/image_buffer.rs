@@ -19,7 +19,7 @@ pub struct ImageMemory {
 
 /// Storage location for image data.
 #[derive(Debug)]
-pub(crate) enum Storage {
+enum Storage {
     /// Image data is on the CPU.
     Cpu(Image),
     /// Image data is on the GPU.
@@ -56,7 +56,7 @@ impl ImageBuffer {
     /// Creates a new ImageBuffer from a GPU image. The buffer's descriptor is
     /// the packed logical layout; the `GpuImage` keeps its own aligned stride.
     #[cfg(feature = "wgpu")]
-    pub(crate) fn from_gpu(image: GpuImage) -> Self {
+    fn from_gpu(image: GpuImage) -> Self {
         let d = image.desc;
         Self {
             desc: ImageDesc::new(d.width, d.height, d.color_format),

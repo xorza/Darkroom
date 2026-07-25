@@ -36,7 +36,7 @@ I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unli
 
 `convert_image(from, to)` (`src/image/conversion/mod.rs`) changes an interleaved image's **format** (element type and/or channel count), processing rows in parallel (`rayon`): it tries `get_simd_row_converter(from_fmt, to_fmt)` first and falls back to the scalar reference. SIMD lives in `simd/` (sse/avx/neon submodules); the converter type is `fn(&[u8], &mut [u8], usize)`. The scalar path is `scalar.rs`. Covered fast paths: RGBA↔RGB, RGB→L, L→RGB, U8↔U16, U16↔F32. `bench.rs` and `tests.rs` sit alongside. (Changing *layout* rather than format is `src/image/transpose.rs` — see below.)
 
-`error.rs`: `Error` enum (`Io`, `InvalidExtension`, `UnsupportedColorType`, `UnsupportedFormat`, `InvalidColorFormat`, `SizeMismatch`, `Conversion`, `Encoding`, `Gpu`, `NoGpuContext`) + `Result<T>`. `image_diff.rs`: `max_pixel_diff`/`pixels_equal` for tests. `test_utils.rs`: cached lena fixtures + shared `test_gpu()`/`test_processing_context()` (GPU init is ~2s, so it's shared across tests).
+`error.rs`: `Error` enum (`Io`, `InvalidExtension`, `UnsupportedColorType`, `UnsupportedFormat`, `InvalidColorFormat`, `SizeMismatch`, `Conversion`, `Encoding`, `Gpu`, `NoGpuContext`) + `Result<T>`. `image_diff.rs`: `max_pixel_diff`/`pixels_equal` for tests. `internals.rs`: cached lena fixtures + shared `test_gpu()`/`test_processing_context()` (GPU init is ~2s, so it's shared across tests).
 
 ### Processing context & buffers (`src/processing_context/`)
 
@@ -72,12 +72,12 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 
 ### Misc
 
-`cpu_features.rs` — public `X86Features { sse2, sse3, ssse3, sse4_1, avx2, fma }` cached in a `OnceLock`; `has_*` helpers, including combined `has_avx2_fma`, gate Imaginarium and Lumos x86 SIMD dispatch at runtime (all-false off x86_64). `drawing.rs` — `draw_circle`/`draw_dot`/`draw_cross`/`draw_line` on f32 images (`L_F32`/`RGB_F32`); grayscale uses `Color::luminance()`, pixel access via `bytemuck::cast_slice_mut`.
+`cpu_features.rs` — crate-private `X86Features { sse2, sse3, ssse3, sse4_1, avx2, fma }` cached in a `OnceLock`; the public surface is the `has_*` helpers, including combined `has_avx2_fma`, gate Imaginarium and Lumos x86 SIMD dispatch at runtime (all-false off x86_64). `drawing.rs` — `draw_circle`/`draw_dot`/`draw_cross`/`draw_line` on f32 images (`L_F32`/`RGB_F32`); grayscale uses `Color::luminance()`, pixel access via `bytemuck::cast_slice_mut`.
 
 ## Project layout
 
 - `src/lib.rs` — crate root: `cfg_x86_64!`/`cfg_aarch64!` macros, module decls, and the published surface (`pub use`s). GPU items are re-exported only under `#[cfg(feature = "wgpu")]`.
-- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both pixel layouts and `lumos`'s `LinearImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
+- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both pixel layouts and `lumos`'s `LinearImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `internals.rs`.
 - `src/image/` — `mod.rs` (`Image`/`ImageDesc`); `pixels/` (`interleaved.rs` = private `InterleavedPixels<N,T>`, `planar.rs` = public `PlanarPixels<N,T>`, `image_pixels.rs` = private runtime-format `ImagePixels`); `transpose.rs` (interleave ⟷ planar); `conversion/` (format conversion: `mod.rs` dispatch + `scalar.rs` + `simd/` + `bench.rs` + `tests.rs`); `io.rs`, `tiff.rs`, `tests.rs`.
 - `src/processing_context/` — `mod.rs` (`ProcessingContext`), `image_buffer.rs`, `gpu_context.rs`, `tests.rs`.
 - `src/gpu/` — `mod.rs` (`Gpu`), `gpu_image.rs`, `slot.rs` (all `wgpu`-gated).

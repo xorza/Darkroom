@@ -164,7 +164,7 @@ impl ImageDesc {
     }
 
     /// Validates the descriptor: positive dimensions, valid format.
-    pub fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         self.color_format.validate()?;
         if self.width == 0 || self.height == 0 {
             return Err(Error::SizeMismatch(format!(

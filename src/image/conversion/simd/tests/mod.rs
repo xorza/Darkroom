@@ -34,10 +34,10 @@ use crate::image::{Image, ImageDesc};
 /// - 33: One more than AVX2 width
 /// - 100: Arbitrary non-aligned
 /// - 256: Multiple of all SIMD widths
-pub(crate) const TEST_WIDTHS: [usize; 9] = [1, 15, 16, 17, 31, 32, 33, 100, 256];
+const TEST_WIDTHS: [usize; 9] = [1, 15, 16, 17, 31, 32, 33, 100, 256];
 
 /// Helper to create a test image with specific pixel pattern
-pub(crate) fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Image {
+fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Image {
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bpp = format.byte_count() as usize;
@@ -59,7 +59,7 @@ pub(crate) fn create_test_image(width: usize, height: usize, format: ColorFormat
 }
 
 /// Helper to create a test image with f32 values
-pub(crate) fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -> Image {
+fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -> Image {
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
@@ -83,7 +83,7 @@ pub(crate) fn create_test_image_f32(width: usize, height: usize, format: ColorFo
 }
 
 /// Helper to create a test image with u16 values
-pub(crate) fn create_test_image_u16(width: usize, height: usize, format: ColorFormat) -> Image {
+fn create_test_image_u16(width: usize, height: usize, format: ColorFormat) -> Image {
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
@@ -107,30 +107,30 @@ pub(crate) fn create_test_image_u16(width: usize, height: usize, format: ColorFo
 }
 
 /// Create a row buffer for testing direct row conversion functions
-pub(crate) fn create_test_row_u8(width: usize, channels: usize) -> Vec<u8> {
+fn create_test_row_u8(width: usize, channels: usize) -> Vec<u8> {
     (0..width * channels).map(|i| (i % 256) as u8).collect()
 }
 
 /// Create a row buffer with f32 values for testing
-pub(crate) fn create_test_row_f32(width: usize, channels: usize) -> Vec<f32> {
+fn create_test_row_f32(width: usize, channels: usize) -> Vec<f32> {
     (0..width * channels)
         .map(|i| (i % 256) as f32 / 255.0)
         .collect()
 }
 
 /// Create a row buffer with u16 values for testing
-pub(crate) fn create_test_row_u16(width: usize, channels: usize) -> Vec<u16> {
+fn create_test_row_u16(width: usize, channels: usize) -> Vec<u16> {
     (0..width * channels)
         .map(|i| ((i % 256) as u16) * 257)
         .collect()
 }
 
 /// Compute expected luminance from RGB values using Rec. 709 weights
-pub(crate) fn expected_luminance(r: u8, g: u8, b: u8) -> u8 {
+fn expected_luminance(r: u8, g: u8, b: u8) -> u8 {
     (r as f32 * 0.2126 + g as f32 * 0.7152 + b as f32 * 0.0722).round() as u8
 }
 
 /// Check if two u8 values are within tolerance (for luminance calculations)
-pub(crate) fn within_tolerance(a: u8, b: u8, tolerance: i32) -> bool {
+fn within_tolerance(a: u8, b: u8, tolerance: i32) -> bool {
     (a as i32 - b as i32).abs() <= tolerance
 }

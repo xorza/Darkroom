@@ -4,19 +4,19 @@ use bytemuck::Pod;
 
 use crate::common::color_format::*;
 
-pub(crate) trait ChannelConvert<To>: Copy {
+pub(in crate::image) trait ChannelConvert<To>: Copy {
     fn convert(self) -> To;
 }
 
 /// Trait for computing luminance from RGB channels.
 /// Uses Rec. 709 (sRGB) weights: 0.2126*R + 0.7152*G + 0.0722*B
-pub(crate) trait RgbToLuminance: Copy {
+trait RgbToLuminance: Copy {
     fn luminance(r: Self, g: Self, b: Self) -> Self;
 }
 
 /// Trait for getting the opaque alpha value for a channel type.
 /// For integers this is max value (255, 65535), for floats it's 1.0.
-pub(crate) trait OpaqueAlpha: Copy {
+pub(super) trait OpaqueAlpha: Copy {
     fn opaque_alpha() -> Self;
 }
 
@@ -140,7 +140,7 @@ impl OpaqueAlpha for f32 {
 /// Convert a single row of pixels using scalar code.
 /// This is the fallback when SIMD is not available.
 #[inline]
-pub(crate) fn convert_row_scalar<From, To>(
+fn convert_row_scalar<From, To>(
     from_row: &[u8],
     to_row: &mut [u8],
     width: usize,
@@ -204,15 +204,15 @@ pub(crate) fn convert_row_scalar<From, To>(
 
 /// Get the Rust type size and conversion function for a given channel size/type pair.
 #[derive(Clone, Copy)]
-pub(crate) struct ConversionInfo {
-    pub from_channels: usize,
-    pub to_channels: usize,
-    pub from_size: ChannelSize,
-    pub to_size: ChannelSize,
+pub(super) struct ConversionInfo {
+    from_channels: usize,
+    to_channels: usize,
+    from_size: ChannelSize,
+    to_size: ChannelSize,
 }
 
 impl ConversionInfo {
-    pub(crate) fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
+    pub(super) fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
         fn validate_size_type(size: ChannelSize, typ: ChannelType) {
             match (size, typ) {
                 (ChannelSize::_8bit | ChannelSize::_16bit, ChannelType::UInt) => {}
@@ -234,7 +234,7 @@ impl ConversionInfo {
 
 /// Dispatch row conversion based on channel sizes.
 /// This calls the appropriate generic convert_row_scalar with the right types.
-pub(crate) fn dispatch_convert_row_scalar(
+pub(super) fn dispatch_convert_row_scalar(
     from_row: &[u8],
     to_row: &mut [u8],
     width: usize,

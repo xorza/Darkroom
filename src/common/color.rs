@@ -11,7 +11,7 @@ pub struct Color {
 
 impl Color {
     /// Create a new color from RGBA components.
-    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+    const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
@@ -41,7 +41,7 @@ impl Color {
     }
 
     /// Convert to luminance (grayscale) using Rec. 709 weights.
-    pub fn luminance(&self) -> f32 {
+    pub(crate) fn luminance(&self) -> f32 {
         0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
     }
 

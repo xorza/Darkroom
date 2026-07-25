@@ -14,6 +14,7 @@ items_after_test_module = "deny"
 [features]
 default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
+internals = []
 
 [dependencies]
 wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"], optional = true }
@@ -40,7 +41,8 @@ quickbench = "0.1"
 
 [[example]]
 name = "transform"
-required-features = ["wgpu"]
+# Drives GpuImage/Gpu directly, whose constructors are `internals`-gated.
+required-features = ["wgpu", "internals"]
 
 [[example]]
 name = "pipeline"
