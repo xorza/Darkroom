@@ -358,7 +358,7 @@ impl Document {
     }
 
     /// Every pinned output across the graph tree, collected in one walk.
-    pub(crate) fn pinned_outputs(&self) -> HashSet<OutputPort> {
+    fn pinned_outputs(&self) -> HashSet<OutputPort> {
         fn collect(graph: &CoreGraph, out: &mut HashSet<OutputPort>) {
             out.extend(graph.pinned_outputs());
             for nested in graph.graphs.values() {
@@ -381,11 +381,26 @@ impl Document {
         retained
     }
 
+    /// Every open viewer tab's port, visible or not — the retention half:
+    /// a hidden tab still expects its value to be there when it is shown.
     pub(crate) fn viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
         self.layout.all_tabs().filter_map(|tab| match tab {
             TabRef::ImageViewer(port) => Some(port),
             _ => None,
         })
+    }
+
+    /// The viewer ports a record pass will actually draw: each group renders
+    /// its *visible* tab and nothing else. Scopes full-resolution texture
+    /// uploads to what's on screen — a viewer stacked behind another tab in
+    /// the same pane costs nothing until it's activated.
+    pub(crate) fn visible_viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
+        self.layout
+            .groups()
+            .filter_map(|group| match group.active_tab() {
+                TabRef::ImageViewer(port) => Some(port),
+                _ => None,
+            })
     }
 
     /// Ensure a `GraphView` exists for a local graph interior,
@@ -1042,24 +1057,66 @@ mod tests {
         let mut doc = Document::default();
         let root_node = add_node_at(&mut doc, Vec2::ZERO);
         let root_port = OutputPort::new(root_node, 0);
-        assert!(!doc.retained_output_ports().contains(&root_port));
+        assert!(doc.retained_output_ports().is_empty());
 
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
-        assert!(doc.retained_output_ports().contains(&root_port));
+        assert_eq!(
+            doc.retained_output_ports(),
+            HashSet::from([root_port]),
+            "an open viewer tab retains exactly its own port"
+        );
+
+        // Retention and visibility are different questions: the tab is open
+        // (so its value must be kept) but the pane still shows the graph tab,
+        // so nothing draws it and no full-resolution texture is owed.
+        assert_eq!(doc.visible_viewer_outputs().count(), 0);
+        doc.layout.apply(DockOp::ActivateTab {
+            tab: TabRef::ImageViewer(out_port(root_node)),
+        });
+        assert_eq!(
+            doc.visible_viewer_outputs().collect::<Vec<_>>(),
+            vec![root_port],
+            "activating the tab makes it the pane's drawn viewer"
+        );
+        assert_eq!(
+            doc.retained_output_ports(),
+            HashSet::from([root_port]),
+            "activation moves nothing in or out of the retained set"
+        );
 
         let def_id = doc.create_graph(GraphRef::Main).unwrap();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
         let definition = doc.graph.graphs.get_mut(&def_id).unwrap();
         let nested_node_id = definition.body.add(nested_node);
         let nested_port = OutputPort::new(nested_node_id, 0);
+        let nested_sibling = OutputPort::new(nested_node_id, 1);
         definition.body.set_output_pinned(nested_port, true);
-        assert!(
-            doc.pinned_outputs().contains(&nested_port),
-            "pins in nested authoring graphs retain their presentation resource"
+        assert_eq!(
+            doc.retained_output_ports(),
+            HashSet::from([root_port, nested_port]),
+            "pins in nested authoring graphs retain their presentation resource, \
+             an unpinned sibling port does not"
         );
-        assert!(doc.retained_output_ports().contains(&nested_port));
+
+        // Pins are per port: dropping one drops exactly its retention.
+        let body = &mut doc.graph.graphs.get_mut(&def_id).unwrap().body;
+        body.set_output_pinned(nested_sibling, true);
+        body.set_output_pinned(nested_port, false);
+        assert_eq!(
+            doc.retained_output_ports(),
+            HashSet::from([root_port, nested_sibling])
+        );
+
+        doc.layout.apply(DockOp::CloseTab {
+            tab: TabRef::ImageViewer(out_port(root_node)),
+        });
+        assert_eq!(
+            doc.retained_output_ports(),
+            HashSet::from([nested_sibling]),
+            "closing the viewer leaves only the nested pin retained"
+        );
     }
 
     #[test]

@@ -5,7 +5,10 @@
 //! shows an already-received value without an editor-driven notification path.
 //!
 //! The store materializes the full RGBA8 texture before the viewer records and
-//! releases the source value immediately after registration.
+//! releases the source value immediately after registration. It does that only
+//! for the ports a pane will actually show
+//! (`Document::visible_viewer_outputs`), so a viewer stacked behind another tab
+//! holds no full-resolution texture until it is activated.
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
@@ -135,7 +138,16 @@ impl ImageViewer {
                 ),
                 FullImage::Failed(message) => (None, Some(message.as_str())),
                 FullImage::Deferred(_) => {
-                    debug_assert!(false, "open image viewer source was not materialized");
+                    // This pane is its group's visible tab, so the reconcile
+                    // pass covered it — unless something changed which tab is
+                    // visible, or pushed a value, without asking the store to
+                    // reconcile (`UndoStep::requires_reconcile` and the
+                    // non-undoable tab-open path are the signal sites).
+                    debug_assert!(
+                        false,
+                        "visible image viewer source was not materialized: \
+                         a reconcile request is missing"
+                    );
                     (None, Some("image is being prepared"))
                 }
             },

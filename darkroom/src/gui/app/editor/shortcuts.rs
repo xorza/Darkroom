@@ -53,9 +53,11 @@ impl Editor {
         }
         let mut relayout = false;
         let mut dirtied = false;
+        let mut reconcile = false;
         let mut on_step = |step: &UndoStep| {
             relayout |= step.requires_relayout();
             dirtied |= step.dirties_document();
+            reconcile |= step.requires_reconcile();
         };
         if undo {
             self.action_stack.undo(&mut open.document, &mut on_step);
@@ -63,6 +65,11 @@ impl Editor {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
         self.needs_relayout |= relayout;
+        // Replay moves pins and viewer tabs in both directions, so the
+        // store's retained set has to be re-derived either way.
+        if reconcile {
+            self.run_state.pinned_outputs.request_reconcile();
+        }
         // A content edit undone/redone leaves the doc differing from the
         // last save (barring the exact round-trip back to it — we accept a
         // stale "dirty" there rather than tracking saved state precisely).

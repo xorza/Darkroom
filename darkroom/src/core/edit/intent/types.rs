@@ -72,8 +72,9 @@ pub(crate) enum Refusal {
 ///      between an untrusted payload and the document,
 ///   4. add an arm to the matching `apply_*` / `revert_*` fn in
 ///      [`crate::core::edit::intent::apply`],
-///   5. add arms to `UndoStep::is_noop` and `UndoStep::requires_relayout` in
-///      [`crate::core::edit::intent::query`] (both exhaustive — they won't
+///   5. add arms to `UndoStep::is_noop`, `UndoStep::requires_relayout`, and
+///      `UndoStep::requires_reconcile` in
+///      [`crate::core::edit::intent::query`] (all exhaustive — they won't
 ///      compile until you do),
 ///   6. update `UndoStep::gesture_key` (also in
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in

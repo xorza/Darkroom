@@ -505,6 +505,10 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     assert!(!step.requires_relayout(), "a pin toggle does not remeasure");
     assert!(step.dirties_document(), "a real graph edit worth saving");
     assert!(
+        step.requires_reconcile(),
+        "the pin joins the retained set, so the store must re-derive it"
+    );
+    assert!(
         step.gesture_key().is_none(),
         "each toggle is its own undo entry"
     );
@@ -580,6 +584,153 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
         .is_err(),
         "already bound → writes nothing"
     );
+}
+
+#[test]
+fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
+    use crate::core::document::{BoundarySide, TabRef};
+    use scenarium::DataType;
+
+    let mut doc = Document::default();
+    let node = add_node_at(&mut doc, Vec2::ZERO);
+    let port = OutputPort::new(node, 0);
+    let primary = doc.layout.primary().id;
+    doc.layout
+        .find_or_insert(TabRef::ImageViewer(port), primary);
+    let def_id = GraphId::unique();
+
+    // Steps that can move `Document::retained_output_ports`, so the store
+    // has to re-derive it and release or upload accordingly.
+    let movers = [
+        build_step(
+            Intent::SetOutputPinned {
+                output: port,
+                pinned: true,
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("pinning an unpinned port builds"),
+        // Removal takes the node's pins with it; undo puts them back.
+        build_step(Intent::RemoveNode { node_id: node }, &doc, GraphRef::Main)
+            .expect("removing a live node builds"),
+        // Any dock op is a whole-layout swap, so it can open, close, or
+        // relocate a viewer tab.
+        build_step(
+            Intent::Dock(DockOp::CloseTab {
+                tab: TabRef::ImageViewer(port),
+            }),
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("closing an open viewer tab builds"),
+        // A node arriving with its own definition brings that definition's
+        // interior pins along.
+        UndoStep::Graph(GraphStep::AddNode {
+            pos: Vec2::ZERO,
+            node_id: NodeId::unique(),
+            node: Node::new(NodeKind::Graph(GraphLink::Local(def_id))),
+            graph: Some((def_id, Box::new(GraphDef::new("brought along")))),
+            bindings: Vec::new(),
+        }),
+        // Forking a definition copies its interior pins into the fork.
+        UndoStep::Graph(GraphStep::DetachGraph {
+            node_id: node,
+            from_id: def_id,
+            to_id: GraphId::unique(),
+            graph: Box::new(GraphDef::new("fork")),
+        }),
+    ];
+    for step in &movers {
+        assert!(
+            step.requires_reconcile(),
+            "step can move the retained set: {step:?}",
+        );
+    }
+
+    // Everything else leaves the retained set exactly as it was — including
+    // dragging a *pin's* preview widget (it moves, it doesn't stop being
+    // retained) and duplicating a selection (copies carry fresh ids, no
+    // definition payload, and duplication drops pin keys).
+    let others = [
+        UndoStep::Graph(GraphStep::AddNode {
+            pos: Vec2::ZERO,
+            node_id: NodeId::unique(),
+            node: func_node(),
+            graph: None,
+            bindings: Vec::new(),
+        }),
+        UndoStep::Graph(GraphStep::DuplicateNodes {
+            nodes: vec![(Vec2::ZERO, NodeId::unique(), func_node())],
+            bindings: Vec::new(),
+            subscriptions: Vec::new(),
+            from_selection: BTreeSet::new(),
+            to_selection: BTreeSet::from([ItemRef::Node(node)]),
+        }),
+        UndoStep::Graph(GraphStep::MoveSelection {
+            grabbed: ItemRef::Pin(port),
+            moves: vec![(ItemRef::Pin(port), Vec2::ZERO, Vec2::new(9.0, 9.0))],
+        }),
+        UndoStep::Graph(GraphStep::Raise {
+            key: ItemRef::Pin(port),
+            from_index: 0,
+            to_index: 1,
+        }),
+        UndoStep::Graph(GraphStep::RenameNode {
+            node_id: node,
+            from: "a".into(),
+            to: "b".into(),
+        }),
+        UndoStep::Graph(GraphStep::SetInput {
+            input: InputPort::new(node, 0),
+            from: None,
+            to: Some(Binding::Const(StaticValue::Int(1))),
+        }),
+        UndoStep::Graph(GraphStep::SetSelection {
+            from: BTreeSet::new(),
+            to: BTreeSet::from([ItemRef::Pin(port)]),
+        }),
+        UndoStep::Graph(GraphStep::SetNodeProperty {
+            node_id: node,
+            from: NodeProperty::RuntimeCache(CacheMode::None),
+            to: NodeProperty::RuntimeCache(CacheMode::Ram),
+        }),
+        UndoStep::Graph(GraphStep::SetSubscription {
+            emitter: node,
+            event_idx: 0,
+            subscriber: NodeId::unique(),
+            from: false,
+            to: true,
+        }),
+        UndoStep::Graph(GraphStep::SetViewport {
+            from: Viewport {
+                pan: Vec2::ZERO,
+                zoom: 1.0,
+            },
+            to: Viewport {
+                pan: Vec2::splat(4.0),
+                zoom: 2.0,
+            },
+        }),
+        UndoStep::Doc(DocStep::RenameGraph {
+            id: def_id,
+            from: "s".into(),
+            to: "t".into(),
+        }),
+        UndoStep::Doc(DocStep::AddBoundaryPort {
+            graph_id: def_id,
+            side: BoundarySide::Input,
+            idx: 0,
+            name: "input0".into(),
+            data_type: DataType::Int,
+        }),
+    ];
+    for step in &others {
+        assert!(
+            !step.requires_reconcile(),
+            "step cannot move the retained set: {step:?}",
+        );
+    }
 }
 
 /// A lone-pin `MoveSelection` intent: `grabbed`/`moves` target `port`,
@@ -1255,6 +1406,50 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         "only the surviving member is recorded"
     );
     doc.validate().expect("document stays valid");
+}
+
+/// The premise `UndoStep::requires_reconcile` rests on for the boundary-port
+/// steps: a removal that would sever a pin is refused outright, so no
+/// interface edit can drop a port out of the retained set.
+#[test]
+fn removing_a_pinned_boundary_port_is_refused_until_it_is_unpinned() {
+    use crate::core::document::BoundarySide;
+    use scenarium::{DataType, FuncInput};
+
+    let mut doc = Document::default();
+    let id = GraphId::unique();
+    let mut def = GraphDef::new("S").inputs([FuncInput::optional("A", DataType::Int)]);
+    let boundary = def.body.add(Node::new(NodeKind::GraphInput));
+    let pin = OutputPort::new(boundary, 0);
+    def.body.set_output_pinned(pin, true);
+    doc.graph
+        .add(Node::graph_instance(&def, GraphLink::Local(id)));
+    doc.graph.insert_graph(id, def);
+    assert!(doc.ensure_sub_view(id));
+    let target = GraphRef::Local(id);
+    let remove = || Intent::RemoveBoundaryPort {
+        side: BoundarySide::Input,
+        idx: 0,
+    };
+
+    assert!(
+        matches!(build_step(remove(), &doc, target), Err(Refusal::Quiet)),
+        "the slot's boundary port is pinned — refuse rather than reconcile \
+         the preview widget away"
+    );
+
+    doc.graph
+        .graphs
+        .get_mut(&id)
+        .unwrap()
+        .body
+        .set_output_pinned(pin, false);
+    let step = build_step(remove(), &doc, target).expect("an unpinned slot removes");
+    assert!(
+        !step.requires_reconcile(),
+        "with the pin refusal upstream, a boundary-port removal can never \
+         change the retained set"
+    );
 }
 
 #[test]
