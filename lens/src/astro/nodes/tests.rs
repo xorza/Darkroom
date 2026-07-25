@@ -1,13 +1,14 @@
 //! Registration tests for the astro library.
 
+use scenarium::Invocation;
 use std::fs;
 use std::path::PathBuf;
 
 use imaginarium::Image as RawImage;
 use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
-    AnyState, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior, InvokeInput,
-    Library, OutputDemand, SharedAnyState, StaticValue,
+    AnyState, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior, Library,
+    OutputDemand, SharedAnyState, StaticValue,
 };
 
 use crate::astro::config::processing::{
@@ -427,25 +428,23 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
         .collect();
     assert_eq!(modes, ["subtract", "divide"]);
 
-    let mut inputs: Vec<InvokeInput> = builder
+    let mut inputs: Vec<DynamicValue> = builder
         .inputs
         .iter()
-        .map(|input| InvokeInput {
-            value: input.default_value.clone().unwrap().into(),
-        })
+        .map(|input| input.default_value.clone().unwrap().into())
         .collect();
-    inputs[0].value = StaticValue::Int(-1).into();
+    inputs[0] = StaticValue::Int(-1).into();
     let mut outputs = vec![DynamicValue::Unbound; builder.outputs.len()];
     let error = builder
         .lambda
-        .invoke(
-            &mut ContextManager::default(),
-            &mut AnyState::default(),
-            &SharedAnyState::default(),
-            &mut inputs,
-            &[OutputDemand::Produce],
-            &mut outputs,
-        )
+        .invoke(Invocation {
+            ctx: &mut ContextManager::default(),
+            state: &mut AnyState::default(),
+            event_state: &SharedAnyState::default(),
+            inputs: &mut inputs,
+            demand: &[OutputDemand::Produce],
+            outputs: &mut outputs,
+        })
         .await
         .unwrap_err();
     assert_eq!(

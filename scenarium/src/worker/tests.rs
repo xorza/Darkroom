@@ -20,6 +20,7 @@ use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambd
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
+use crate::node::lambda::Invocation;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake};
@@ -789,7 +790,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     library.add(
         Func::new(FuncId::unique(), "first")
             .output(FuncOutput::new("v", DataType::Int))
-            .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+            .lambda(async_lambda!(|Invocation { outputs, .. }| {
                 outputs[0] = StaticValue::Int(1).into();
                 Ok(())
             })),
@@ -800,7 +801,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
         Func::new(FuncId::unique(), "second")
             .sink()
             .input(FuncInput::required("v", DataType::Int))
-            .lambda(async_lambda!(move |_, _, _, _, _, _| {
+            .lambda(async_lambda!(move |_| {
                 seen = second_seen.clone(),
                 entries = second_entries.clone()
             } => {
@@ -2031,7 +2032,7 @@ async fn fired_event_does_not_reinitialize_event_sources() {
                 }),
             )
             .lambda(async_lambda!(
-                move |_, _, _, _, _, _| { calls = Arc::clone(&source_a_calls_for_lambda) } => {
+                move |_| { calls = Arc::clone(&source_a_calls_for_lambda) } => {
                     calls.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 }
@@ -2050,7 +2051,7 @@ async fn fired_event_does_not_reinitialize_event_sources() {
                 }),
             )
             .lambda(async_lambda!(
-                move |_, _, _, _, _, _| { calls = Arc::clone(&source_b_calls_for_lambda) } => {
+                move |_| { calls = Arc::clone(&source_b_calls_for_lambda) } => {
                     calls.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 }
@@ -2058,7 +2059,7 @@ async fn fired_event_does_not_reinitialize_event_sources() {
     );
     library.add(
         Func::new(FuncId::unique(), "subscriber").lambda(async_lambda!(
-            move |_, _, _, _, _, _| { calls = Arc::clone(&subscriber_calls_for_lambda) } => {
+            move |_| { calls = Arc::clone(&subscriber_calls_for_lambda) } => {
                 calls.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
@@ -2209,7 +2210,7 @@ async fn exit_cancels_active_execution_before_joining() {
         .lambda(FuncLambda::new({
             let entered = Arc::clone(&entered);
             let observed_cancel = Arc::clone(&observed_cancel);
-            move |context, _state, _event_state, _inputs, _output_demand, _outputs| {
+            move |Invocation { ctx: context, .. }| {
                 let cancel = context.cancel_flag();
                 let entered = Arc::clone(&entered);
                 let observed_cancel = Arc::clone(&observed_cancel);

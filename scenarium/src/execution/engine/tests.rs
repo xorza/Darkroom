@@ -14,6 +14,7 @@ use crate::graph::{
 use crate::library::Library;
 use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncBehavior};
+use crate::node::lambda::Invocation;
 use crate::node::lambda::internals;
 use crate::node::lambda::{InvokeError, OutputDemand};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
@@ -198,7 +199,7 @@ mod cache_persistence {
                 .category("Test")
                 .pure()
                 .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(move |_, state, _, _, _, outputs| {
+                .lambda(async_lambda!(move |Invocation { state, outputs, .. }| {
                     invocation_calls = invocation_calls.clone()
                 } => {
                     invocation_calls.fetch_add(1, Ordering::SeqCst);
@@ -1617,52 +1618,53 @@ mod cache_persistence {
         // value are `Int` when `as_float` is false, `Float` when true. The func id and
         // inputs stay unchanged, isolating output-signature invalidation. `consume`
         // (sink) reads it and records the value as f64.
-        let build_lib =
-            |as_float: bool| -> Library {
-                let mut lib = Library::default();
-                let produce = Func::new(PRODUCE, "produce")
-                    .category("Test")
-                    .pure()
-                    .output(FuncOutput::new(
-                        "out",
-                        if as_float {
-                            DataType::Float
-                        } else {
-                            DataType::Int
-                        },
-                    ));
-                let runs = produce_runs.clone();
-                let produce = if as_float {
-                    produce.lambda(
-                        async_lambda!(move |_, _, _, _, _, outputs| { runs = runs.clone() } => {
-                            runs.fetch_add(1, Ordering::SeqCst);
-                            outputs[0] = DynamicValue::Static(StaticValue::Float(1.5));
-                            Ok(())
-                        }),
-                    )
-                } else {
-                    produce.lambda(
-                        async_lambda!(move |_, _, _, _, _, outputs| { runs = runs.clone() } => {
-                            runs.fetch_add(1, Ordering::SeqCst);
-                            outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-                            Ok(())
-                        }),
-                    )
-                };
-                lib.add(produce);
-                let recv = received.clone();
-                lib.add(
+        let build_lib = |as_float: bool| -> Library {
+            let mut lib = Library::default();
+            let produce = Func::new(PRODUCE, "produce")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new(
+                    "out",
+                    if as_float {
+                        DataType::Float
+                    } else {
+                        DataType::Int
+                    },
+                ));
+            let runs = produce_runs.clone();
+            let produce = if as_float {
+                produce.lambda(
+                    async_lambda!(move |Invocation { outputs, .. }| { runs = runs.clone() } => {
+                        runs.fetch_add(1, Ordering::SeqCst);
+                        outputs[0] = DynamicValue::Static(StaticValue::Float(1.5));
+                        Ok(())
+                    }),
+                )
+            } else {
+                produce.lambda(
+                    async_lambda!(move |Invocation { outputs, .. }| { runs = runs.clone() } => {
+                        runs.fetch_add(1, Ordering::SeqCst);
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                        Ok(())
+                    }),
+                )
+            };
+            lib.add(produce);
+            let recv = received.clone();
+            lib.add(
                 Func::new(CONSUME, "consume")
                     .category("Test")
                     .sink()
                     .input(FuncInput::required("in", DataType::Any))
-                    .lambda(async_lambda!(move |_, _, _, inputs, _, _| { recv = recv.clone() } => {
-                        *recv.lock().unwrap() = inputs[0].value.as_f64().unwrap_or(f64::NAN);
-                        Ok(())
-                    })),
+                    .lambda(
+                        async_lambda!(move |Invocation { inputs, .. }| { recv = recv.clone() } => {
+                            *recv.lock().unwrap() = inputs[0].as_f64().unwrap_or(f64::NAN);
+                            Ok(())
+                        }),
+                    ),
             );
-                lib
-            };
+            lib
+        };
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
@@ -1894,7 +1896,7 @@ mod cache_persistence {
                     .sink()
                     .output(FuncOutput::new("out", DataType::Custom(BLOB_TYPE.into())))
                     .lambda(async_lambda!(
-                        move |_, _, _, _, _, outputs| { counter = recompute.clone() } => {
+                        move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
                             counter.fetch_add(1, Ordering::SeqCst);
                             outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![9, 9, 9])));
                             Ok(())
@@ -2043,9 +2045,9 @@ mod resource_binds {
             .sink()
             .input(FuncInput::required("Value", DataType::Any))
             .lambda(async_lambda!(
-                move |_, _, _, inputs, _, _| { captured = captured.clone() } => {
+                move |Invocation { inputs, .. }| { captured = captured.clone() } => {
                     *captured.lock().unwrap() =
-                        inputs[0].value.as_string().unwrap_or_default().to_string();
+                        inputs[0].as_string().unwrap_or_default().to_string();
                     Ok(())
                 }
             ))
@@ -2072,11 +2074,15 @@ mod resource_binds {
                     "Path",
                     DataType::FsPath(Arc::new(FsPathConfig::default())),
                 ))
-                .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                    let path = inputs[0].value.as_string().unwrap().to_string();
-                    outputs[0] = StaticValue::FsPath(path).into();
-                    Ok(())
-                })),
+                .lambda(async_lambda!(
+                    move |Invocation {
+                              inputs, outputs, ..
+                          }| {
+                        let path = inputs[0].as_string().unwrap().to_string();
+                        outputs[0] = StaticValue::FsPath(path).into();
+                        Ok(())
+                    }
+                )),
         );
         lib.add(
             Func::new(LOAD_TEXT, "load_text")
@@ -2088,9 +2094,9 @@ mod resource_binds {
                 ))
                 .output(FuncOutput::new("Text", DataType::String))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, outputs| { loads = loads.clone() } => {
+                    move |Invocation { inputs, outputs, .. }| { loads = loads.clone() } => {
                         loads.fetch_add(1, Ordering::SeqCst);
-                        let path = inputs[0].value.as_fs_path().unwrap().to_string();
+                        let path = inputs[0].as_fs_path().unwrap().to_string();
                         let text =
                             std::fs::read_to_string(&path).map_err(InvokeError::external)?;
                         outputs[0] = StaticValue::String(text).into();
@@ -2105,9 +2111,9 @@ mod resource_binds {
                 .input(FuncInput::required("Text", DataType::String))
                 .output(FuncOutput::new("Text", DataType::String))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, outputs| { annotates = annotates.clone() } => {
+                    move |Invocation { inputs, outputs, .. }| { annotates = annotates.clone() } => {
                         annotates.fetch_add(1, Ordering::SeqCst);
-                        let text = inputs[0].value.as_string().unwrap();
+                        let text = inputs[0].as_string().unwrap();
                         outputs[0] = StaticValue::String(format!("[{text}]")).into();
                         Ok(())
                     }
@@ -3155,7 +3161,7 @@ mod behavior {
             .sink()
             .output(FuncOutput::new("out", DataType::Int))
             .lambda(async_lambda!(
-                move |ctx, _, _, _, _, outputs| { cancel_first = Arc::clone(&cancel_first) } => {
+                move |Invocation { ctx, outputs, .. }| { cancel_first = Arc::clone(&cancel_first) } => {
                     if cancel_first.swap(false, Ordering::Relaxed) {
                         // Stand in for the user hitting Cancel while this node runs.
                         ctx.cancel_flag().cancel();
@@ -3247,9 +3253,7 @@ mod behavior {
                 .pure()
                 .sink()
                 .output(FuncOutput::new("out", DataType::Int))
-                .lambda(async_lambda!(move |_, _, _, _, _, _| {
-                    Err(InvokeError::Cancelled)
-                })),
+                .lambda(async_lambda!(move |_| { Err(InvokeError::Cancelled) })),
         ]
         .into();
 
@@ -3820,7 +3824,7 @@ mod execution {
         .output(FuncOutput::new("a", DataType::Int))
         .output(FuncOutput::new("b", DataType::Int))
         .lambda(async_lambda!(
-            move |_, _, _, _, _, outputs| { invocations = Arc::clone(&invocations) } => {
+            move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
                 let run = invocations.fetch_add(1, Ordering::Relaxed);
                 outputs[0] = DynamicValue::Static(StaticValue::Int(100 + run as i64));
                 if run == 0 {
@@ -4447,7 +4451,7 @@ mod events {
                 .output(FuncOutput::new("out", DataType::Int))
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
+                    move |Invocation { outputs, .. }| { calls = emit_calls_l.clone() } => {
                         let mut n = calls.lock().await;
                         *n += 1;
                         outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
@@ -4459,8 +4463,8 @@ mod events {
             Func::new(RECV_FUNC, "recv")
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
-                        values.lock().await.push(inputs[0].value.as_i64().unwrap());
+                    move |Invocation { inputs, .. }| { values = recv_values_l.clone() } => {
+                        values.lock().await.push(inputs[0].as_i64().unwrap());
                         Ok(())
                     }
                 )),
@@ -4627,7 +4631,7 @@ mod events {
     async fn failed_event_source_prepares_no_trigger() -> TestResult {
         let mut f = build();
         mutate_func(&mut f.library, "emit", |func| {
-            func.lambda = async_lambda!(|_, _, _, _, _, _| {
+            func.lambda = async_lambda!(|_| {
                 Err(InvokeError::external(std::io::Error::other(
                     "bootstrap failed",
                 )))
@@ -4682,7 +4686,7 @@ mod events {
             Func::new(EMIT_FUNC, "emit")
                 .output(FuncOutput::new("out", DataType::Int))
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
-                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                .lambda(async_lambda!(move |Invocation { outputs, .. }| {
                     outputs[0] = DynamicValue::Static(StaticValue::Int(0));
                     Ok(())
                 })),
@@ -4692,7 +4696,7 @@ mod events {
             Func::new(SOURCE_FUNC, "source")
                 .output(FuncOutput::new("out", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, _, outputs| { calls = source_l.clone() } => {
+                    move |Invocation { outputs, .. }| { calls = source_l.clone() } => {
                         let mut n = calls.lock().await;
                         *n += 1;
                         outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
@@ -4706,8 +4710,8 @@ mod events {
                 .sink()
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, _| { values = sink_l.clone() } => {
-                        values.lock().await.push(inputs[0].value.as_i64().unwrap());
+                    move |Invocation { inputs, .. }| { values = sink_l.clone() } => {
+                        values.lock().await.push(inputs[0].as_i64().unwrap());
                         Ok(())
                     }
                 )),
@@ -4775,13 +4779,13 @@ mod events {
         library.add(
             Func::new(EMIT_FUNC, "emit")
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
-                .lambda(async_lambda!(move |_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(move |_| { Ok(()) })),
         );
         library.add(
             Func::new(SOURCE_FUNC, "source")
                 .output(FuncOutput::new("out", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, _, outputs| { calls = source_l.clone() } => {
+                    move |Invocation { outputs, .. }| { calls = source_l.clone() } => {
                         *calls.lock().await += 1;
                         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
                         Ok(())
@@ -4792,7 +4796,7 @@ mod events {
             Func::new(SINK_FUNC, "sink")
                 .sink()
                 .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(move |_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(move |_| { Ok(()) })),
         );
 
         let emit_id = NodeId::unique();
@@ -4841,7 +4845,7 @@ mod output_demand {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, demand, outputs| { seen = seen_demand_l.clone() } => {
+                    move |Invocation { demand, outputs, .. }| { seen = seen_demand_l.clone() } => {
                         seen.lock().await.extend_from_slice(demand);
                         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
                         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
@@ -4853,7 +4857,7 @@ mod output_demand {
             Func::new(SINK_FUNC, "sink")
                 .sink()
                 .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(|_| { Ok(()) })),
         );
 
         let split_id = NodeId::unique();
@@ -4898,7 +4902,7 @@ mod output_demand {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, demand, outputs| { seen = seen_demand_l.clone() } => {
+                    move |Invocation { demand, outputs, .. }| { seen = seen_demand_l.clone() } => {
                         seen.lock().await.extend_from_slice(demand);
                         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
                         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
@@ -4910,7 +4914,7 @@ mod output_demand {
             Func::new(SINK_FUNC, "sink")
                 .sink()
                 .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(|_| { Ok(()) })),
         );
 
         let split_id = NodeId::unique();
@@ -4963,7 +4967,7 @@ mod output_demand {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, demand, outputs| { calls = split_calls_l.clone() } => {
+                    move |Invocation { demand, outputs, .. }| { calls = split_calls_l.clone() } => {
                         *calls.lock().await += 1;
                         if !demand[0].is_skip() {
                             outputs[0] = StaticValue::Int(10).into();
@@ -4980,8 +4984,8 @@ mod output_demand {
                 .sink()
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, _| { received = received_l.clone() } => {
-                        received.lock().await.push(inputs[0].value.as_i64().unwrap());
+                    move |Invocation { inputs, .. }| { received = received_l.clone() } => {
+                        received.lock().await.push(inputs[0].as_i64().unwrap());
                         Ok(())
                     }
                 )),
@@ -5898,7 +5902,7 @@ mod mid_run_release {
                     DataType::Custom(TRACKED_TYPE.into()),
                 ))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, _, outputs| { tracker = tracker_l.clone() } => {
+                    move |Invocation { outputs, .. }| { tracker = tracker_l.clone() } => {
                         outputs[0] = DynamicValue::Custom(Arc::new(Tracked::new(tracker.clone())));
                         Ok(())
                     }
@@ -5912,7 +5916,7 @@ mod mid_run_release {
                     "in",
                     DataType::Custom(TRACKED_TYPE.into()),
                 ))
-                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(|_| { Ok(()) })),
         );
         library
     }
@@ -5982,8 +5986,8 @@ mod mid_run_release {
                     DataType::Custom(TRACKED_TYPE.into()),
                 ))
                 .lambda(async_lambda!(
-                    move |_, _, _, inputs, _, _| { reads = unique_reads.clone() } => {
-                        let value = std::mem::take(&mut inputs[0].value);
+                    move |Invocation { inputs, .. }| { reads = unique_reads.clone() } => {
+                        let value = std::mem::take(&mut inputs[0]);
                         reads
                             .lock()
                             .unwrap()
@@ -6084,7 +6088,7 @@ mod compile_regressions {
                 .category("Test")
                 .pure()
                 .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+                .lambda(async_lambda!(|Invocation { outputs, .. }| {
                     outputs[0] = StaticValue::Int(1).into();
                     Ok(())
                 })),
@@ -6092,7 +6096,7 @@ mod compile_regressions {
                 .category("Test")
                 .pure()
                 .output(FuncOutput::new("V", DataType::String))
-                .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+                .lambda(async_lambda!(|Invocation { outputs, .. }| {
                     outputs[0] = StaticValue::String("s".into()).into();
                     Ok(())
                 })),
@@ -6100,7 +6104,7 @@ mod compile_regressions {
                 .category("Test")
                 .sink()
                 .input(FuncInput::required("In", DataType::Any))
-                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+                .lambda(async_lambda!(|_| { Ok(()) })),
         ]
         .into();
 
@@ -6279,7 +6283,7 @@ mod compile_regressions {
                 .category("Test")
                 .pure()
                 .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                .lambda(async_lambda!(move |Invocation { outputs, .. }| {
                     outputs[0] = StaticValue::Int(result).into();
                     Ok(())
                 }));

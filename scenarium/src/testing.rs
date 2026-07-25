@@ -9,6 +9,7 @@ use crate::async_lambda;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::lambda::Invocation;
 use crate::node::lambda::InvokeResult;
 
 pub struct TestFuncHooks {
@@ -34,7 +35,7 @@ impl Default for TestFuncHooks {
 }
 
 pub fn with_stub_lambda(func: Func) -> Func {
-    func.lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
+    func.lambda(crate::async_lambda!(|_| { Ok(()) }))
 }
 
 pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
@@ -56,12 +57,17 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
             .output(FuncOutput::new("Prod", DataType::Int))
-            .lambda(async_lambda!(move |_, state, _, inputs, _, outputs| {
+            .lambda(async_lambda!(move |Invocation {
+                                            state,
+                                            inputs,
+                                            outputs,
+                                            ..
+                                        }| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: i64 = inputs[0].value.as_i64().unwrap();
-                let b: i64 = inputs[1].value.as_i64().unwrap_or(1);
+                let a: i64 = inputs[0].as_i64().unwrap();
+                let b: i64 = inputs[1].as_i64().unwrap_or(1);
                 outputs[0] = (a * b).into();
                 state.set(a * b);
 
@@ -74,7 +80,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .pure()
             .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
-                move |_, _, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
+                move |Invocation { outputs, .. }| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a()? as f64).into();
                     Ok(())
@@ -87,7 +93,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .pure()
             .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
-                move |_, _, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
+                move |Invocation { outputs, .. }| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
@@ -101,11 +107,16 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
             .output(FuncOutput::new("Sum", DataType::Int))
-            .lambda(async_lambda!(move |_, state, _, inputs, _, outputs| {
+            .lambda(async_lambda!(move |Invocation {
+                                            state,
+                                            inputs,
+                                            outputs,
+                                            ..
+                                        }| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].value.as_i64().unwrap();
-                let b: i64 = inputs[1].value.as_i64().unwrap_or_default();
+                let a: i64 = inputs[0].as_i64().unwrap();
+                let b: i64 = inputs[1].as_i64().unwrap_or_default();
                 state.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
@@ -117,9 +128,9 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .sink()
             .input(FuncInput::required("message", DataType::Int))
             .lambda(async_lambda!(
-                move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {
+                move |Invocation { inputs, .. }| { print = Arc::clone(&print) } => {
                     assert_eq!(inputs.len(), 1);
-                    print(inputs[0].value.as_i64().unwrap());
+                    print(inputs[0].as_i64().unwrap());
                     Ok(())
                 }
             )),

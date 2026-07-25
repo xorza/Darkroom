@@ -1,14 +1,14 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use scenarium::Invocation;
 use scenarium::{
-    DataType, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, InvokeInput, Library,
+    DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
 };
 
-fn float_input(inputs: &[InvokeInput], index: usize) -> Result<f64, InvokeError> {
+fn float_input(inputs: &[DynamicValue], index: usize) -> Result<f64, InvokeError> {
     inputs[index]
-        .value
         .as_f64()
-        .ok_or_else(|| InvokeError::invalid_input(index, "a number", &inputs[index].value))
+        .ok_or_else(|| InvokeError::invalid_input(index, "a number", &inputs[index]))
 }
 
 fn scale_random(unit: f64, min: f64, max: f64) -> f64 {
@@ -32,17 +32,24 @@ fn random_func() -> Func {
         .output(
             FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."),
         )
-        .lambda(FuncLambda::new(move |_, cache, _, inputs, _, outputs| {
-            Box::pin(async move {
-                debug_assert_eq!(inputs.len(), 2);
-                debug_assert_eq!(outputs.len(), 1);
-                let rng = cache.get_or_default_with(|| StdRng::from_rng(&mut rand::rng()));
-                let min = float_input(inputs, 0)?;
-                let max = float_input(inputs, 1)?;
-                outputs[0] = scale_random(rng.random::<f64>(), min, max).into();
-                Ok(())
-            })
-        }))
+        .lambda(FuncLambda::new(
+            move |Invocation {
+                      state: cache,
+                      inputs,
+                      outputs,
+                      ..
+                  }| {
+                Box::pin(async move {
+                    debug_assert_eq!(inputs.len(), 2);
+                    debug_assert_eq!(outputs.len(), 1);
+                    let rng = cache.get_or_default_with(|| StdRng::from_rng(&mut rand::rng()));
+                    let min = float_input(inputs, 0)?;
+                    let max = float_input(inputs, 1)?;
+                    outputs[0] = scale_random(rng.random::<f64>(), min, max).into();
+                    Ok(())
+                })
+            },
+        ))
 }
 
 pub fn random_library() -> Library {

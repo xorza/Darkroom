@@ -1,7 +1,7 @@
 use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
 use scenarium::StaticValue;
 use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
-use scenarium::{DynamicValue, InvokeError, InvokeInput, OutputDemand, SharedAnyState};
+use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
@@ -24,20 +24,21 @@ async fn try_invoke_watch(
     recursive: bool,
 ) -> Result<DynamicValue, InvokeError> {
     let mut inputs = [
-        InvokeInput {
-            value: StaticValue::FsPath(path.to_string()).into(),
-        },
-        InvokeInput {
-            value: StaticValue::Bool(recursive).into(),
-        },
-        InvokeInput {
-            value: StaticValue::Int(250).into(),
-        },
+        StaticValue::FsPath(path.to_string()).into(),
+        StaticValue::Bool(recursive).into(),
+        StaticValue::Int(250).into(),
     ];
     let demand = [OutputDemand::Produce];
     let mut outputs = [DynamicValue::Unbound];
     lambda
-        .invoke(ctx, state, event_state, &mut inputs, &demand, &mut outputs)
+        .invoke(Invocation {
+            ctx,
+            state,
+            event_state,
+            inputs: &mut inputs,
+            demand: &demand,
+            outputs: &mut outputs,
+        })
         .await?;
     Ok(outputs[0].clone())
 }

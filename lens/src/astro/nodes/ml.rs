@@ -10,6 +10,7 @@ use scenarium::{Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
 use crate::astro::nodes::MlModelPaths;
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use scenarium::Invocation;
 
 const DENOISE_FUNC_ID: FuncId = FuncId::from_u128(0xace786f98a024ed193a0ad67bf0680f8);
 const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::from_u128(0x60c31a76eed4467c9ba35c89d294a91b);
@@ -40,25 +41,28 @@ fn register_denoise(library: &mut Library, model_path: &std::path::Path) {
             .output(
                 FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image."),
             )
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 2);
-                    debug_assert_eq!(outputs.len(), 1);
-                    let model = PathBuf::from(
-                        inputs[1]
-                            .value
-                            .as_fs_path()
-                            .expect("model input type is validated at the compile boundary"),
-                    );
-                    let output =
-                        runtime::run_ml(std::mem::take(&mut inputs[0].value), move |image| {
-                            ml_denoise(&image, &TiledOnnxConfig::new(model))
-                        })
-                        .await?;
-                    outputs[0] = DynamicValue::from_custom(Image::from(output));
-                    Ok(())
-                })
-            })),
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          inputs, outputs, ..
+                      }| {
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 2);
+                        debug_assert_eq!(outputs.len(), 1);
+                        let model = PathBuf::from(
+                            inputs[1]
+                                .as_fs_path()
+                                .expect("model input type is validated at the compile boundary"),
+                        );
+                        let output =
+                            runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
+                                ml_denoise(&image, &TiledOnnxConfig::new(model))
+                            })
+                            .await?;
+                        outputs[0] = DynamicValue::from_custom(Image::from(output));
+                        Ok(())
+                    })
+                },
+            )),
     );
 }
 
@@ -79,33 +83,35 @@ fn register_star_removal(library: &mut Library, model_path: &std::path::Path) {
                     .description("The recovered star layer."),
             )
             .lambda(FuncLambda::new(
-                move |_, _, _, inputs, output_demand, outputs| {
+                move |Invocation {
+                          inputs,
+                          demand: output_demand,
+                          outputs,
+                          ..
+                      }| {
                     let need_stars = !output_demand[1].is_skip();
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 2);
                         let model = PathBuf::from(
                             inputs[1]
-                                .value
                                 .as_fs_path()
                                 .expect("model input type is validated at the compile boundary"),
                         );
                         if need_stars {
-                            let result = runtime::run_ml(
-                                std::mem::take(&mut inputs[0].value),
-                                move |image| remove_stars(image, &TiledOnnxConfig::new(model)),
-                            )
-                            .await?;
+                            let result =
+                                runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
+                                    remove_stars(image, &TiledOnnxConfig::new(model))
+                                })
+                                .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
                             outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
                         } else {
-                            let starless = runtime::run_ml(
-                                std::mem::take(&mut inputs[0].value),
-                                move |image| {
+                            let starless =
+                                runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
                                     remove_stars_starless_only(&image, &TiledOnnxConfig::new(model))
-                                },
-                            )
-                            .await?;
+                                })
+                                .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(starless));
                         }
                         Ok(())

@@ -27,12 +27,13 @@ use tokio::task;
 
 use common::CancelToken;
 
+use crate::DynamicValue;
 use crate::execution::event::EventTrigger;
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
-use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
+use crate::node::lambda::{Invocation, InvokeError, OutputDemand};
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
@@ -52,7 +53,7 @@ use crate::execution::resource::RunResourceStamps;
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
-    inputs: Vec<InvokeInput>,
+    inputs: Vec<DynamicValue>,
     /// The run's mutable copy of the resolver's live binding counts. Input consumption or
     /// retirement decrements it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
@@ -118,9 +119,6 @@ impl Executor {
                 inputs: &mut self.inputs,
                 node_outcomes: &mut self.outcomes,
                 ctx: &mut self.ctx_manager,
-                // Reborrowed rather than moved: a `&mut dyn` is invariant, so handing the
-                // caller's own borrow to the frame would pin every other field to the
-                // caller's lifetime for the whole call.
                 reporter,
                 outcome,
             };
@@ -128,10 +126,10 @@ impl Executor {
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
             for (process_idx, &node_idx) in plan.process_order.iter().enumerate() {
-                // Drain point for the live-report relay: sync-completing lambdas
-                // give the worker's select no suspension point of their own, and
-                // without one per node the whole "live" stream would flush only
-                // after the run.
+                // A schedule of sync-completing lambdas never suspends on its own, so
+                // without this it would hold its executor thread from the first node to the
+                // last — starving everything sharing that thread (event-loop lambdas, and
+                // every other task under a current-thread runtime).
                 task::yield_now().await;
 
                 if frame.ctx.cancel.is_cancelled() {
@@ -168,7 +166,7 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
     cache: &'a mut RuntimeCache,
     resource_stamps: &'a mut RunResourceStamps,
     remaining_reads: &'a mut RemainingOutputReads,
-    inputs: &'a mut Vec<InvokeInput>,
+    inputs: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
     node_outcomes: &'a mut NodeColumn<NodeOutcome>,
     ctx: &'a mut ContextManager,
@@ -313,20 +311,23 @@ impl ExecutionFrame<'_, '_> {
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
         self.ctx.current_node = Some(e_node_id);
         let invoke_start = Instant::now();
-        self.report_progress(e_node_id, RunPhase::Started { at: invoke_start });
+        self.reporter.progress(RunProgress {
+            e_node_id,
+            phase: RunPhase::Started { at: invoke_start },
+        });
 
         let result = {
             let slot = self.cache.slots[node_idx].invoke_slot(e_node.outputs.len as usize);
             e_node
                 .lambda
-                .invoke(
-                    self.ctx,
-                    slot.state,
-                    &event_state,
-                    self.inputs,
+                .invoke(Invocation {
+                    ctx: self.ctx,
+                    state: slot.state,
+                    event_state: &event_state,
+                    inputs: self.inputs,
                     demand,
-                    slot.outputs,
-                )
+                    outputs: slot.outputs,
+                })
                 .await
                 .map_err(|e| match e {
                     // A lambda that bailed on cancel reports it truthfully;
@@ -375,12 +376,12 @@ impl ExecutionFrame<'_, '_> {
         // No `Finished` for the cancelled node — it didn't complete; the consumer would
         // otherwise paint it executed live.
         if !cancelled {
-            self.report_progress(
+            self.reporter.progress(RunProgress {
                 e_node_id,
-                RunPhase::Finished {
+                phase: RunPhase::Finished {
                     elapsed_secs: run_time,
                 },
-            );
+            });
         }
         if !succeeded {
             return;
@@ -425,10 +426,6 @@ impl ExecutionFrame<'_, '_> {
                     state: event_state.clone(),
                 }),
         );
-    }
-
-    fn report_progress(&mut self, e_node_id: ExecutionNodeId, phase: RunPhase) {
-        self.reporter.progress(RunProgress { e_node_id, phase });
     }
 }
 

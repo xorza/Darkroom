@@ -11,6 +11,7 @@ use lumos::{
     CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext,
     StackConfig, stack_cfa_master,
 };
+use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
@@ -83,37 +84,41 @@ pub(crate) fn register(library: &mut Library) {
                 FuncOutput::new("Masters", MASTERS_DATA_TYPE.clone())
                     .description("Calibration masters for the wired roles."),
             )
-            .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
-                let cancel = ctx.cancel_flag();
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 6);
-                    debug_assert_eq!(outputs.len(), 1);
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          ctx,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
+                    let cancel = ctx.cancel_flag();
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 6);
+                        debug_assert_eq!(outputs.len(), 1);
 
-                    let frames = |index: usize| {
-                        inputs[index]
-                            .value
-                            .as_fs_paths()
-                            .map(|paths| paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>())
-                    };
-                    let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
-                    let sigma = inputs[4]
-                        .value
-                        .as_f64()
-                        .map(|value| value as f32)
-                        .expect("sigma input type is validated at the compile boundary");
-                    let cache = inputs[5]
-                        .value
-                        .as_bool()
-                        .expect("cache input type is validated at the compile boundary");
+                        let frames = |index: usize| {
+                            inputs[index].as_fs_paths().map(|paths| {
+                                paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>()
+                            })
+                        };
+                        let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
+                        let sigma = inputs[4]
+                            .as_f64()
+                            .map(|value| value as f32)
+                            .expect("sigma input type is validated at the compile boundary");
+                        let cache = inputs[5]
+                            .as_bool()
+                            .expect("cache input type is validated at the compile boundary");
 
-                    let masters = runtime::run_cancellable(cancel, move |cancel| {
-                        build_masters_cached(frame_sets, sigma, cache, cancel)
+                        let masters = runtime::run_cancellable(cancel, move |cancel| {
+                            build_masters_cached(frame_sets, sigma, cache, cancel)
+                        })
+                        .await?;
+                        outputs[0] = DynamicValue::from_custom(Masters::from(masters));
+                        Ok(())
                     })
-                    .await?;
-                    outputs[0] = DynamicValue::from_custom(Masters::from(masters));
-                    Ok(())
-                })
-            })),
+                },
+            )),
     );
 }
 

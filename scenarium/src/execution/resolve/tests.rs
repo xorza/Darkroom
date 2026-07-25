@@ -45,9 +45,7 @@ impl Fix {
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs,
                 outputs,
-                lambda: async_lambda!(|_ctx, _state, _events, _inputs, _demand, _outputs| {
-                    Ok(())
-                }),
+                lambda: async_lambda!(|_| { Ok(()) }),
                 ..Default::default()
             },
         );

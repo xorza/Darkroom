@@ -1,8 +1,10 @@
 use crate::DataType;
+use crate::DynamicValue;
 use crate::async_lambda;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
-use crate::node::lambda::{InvokeError, InvokeInput};
+use crate::node::lambda::Invocation;
+use crate::node::lambda::InvokeError;
 
 #[derive(Debug, Clone, Copy)]
 struct FloatInputSpec {
@@ -17,11 +19,10 @@ struct FloatOutputSpec {
     description: &'static str,
 }
 
-fn float_input(inputs: &[InvokeInput], idx: usize) -> Result<f64, InvokeError> {
+fn float_input(inputs: &[DynamicValue], idx: usize) -> Result<f64, InvokeError> {
     inputs[idx]
-        .value
         .as_f64()
-        .ok_or_else(|| InvokeError::invalid_input(idx, "a number", &inputs[idx].value))
+        .ok_or_else(|| InvokeError::invalid_input(idx, "a number", &inputs[idx]))
 }
 
 fn declared_input(spec: FloatInputSpec) -> FuncInput {
@@ -48,7 +49,9 @@ fn unary_float_func(
         .pure()
         .input(declared_input(input))
         .output(declared_output(output))
-        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+        .lambda(async_lambda!(move |Invocation {
+                                        inputs, outputs, ..
+                                    }| {
             assert_eq!(inputs.len(), 1);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(float_input(inputs, 0)?).into();
@@ -71,7 +74,9 @@ fn binary_float_func(
         .input(declared_input(inputs[0]))
         .input(declared_input(inputs[1]))
         .output(declared_output(output))
-        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+        .lambda(async_lambda!(move |Invocation {
+                                        inputs, outputs, ..
+                                    }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(float_input(inputs, 0)?, float_input(inputs, 1)?).into();
@@ -335,7 +340,9 @@ fn divide_func() -> Func {
             name: "Remainder",
             description: "A mod B.",
         }))
-        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+        .lambda(async_lambda!(move |Invocation {
+                                        inputs, outputs, ..
+                                    }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 2);
             let dividend = float_input(inputs, 0)?;
@@ -358,22 +365,18 @@ mod tests {
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
         let library = math_library();
         let func = library.by_name(name).unwrap();
-        let mut inputs = values
-            .iter()
-            .cloned()
-            .map(|value| InvokeInput { value })
-            .collect::<Vec<_>>();
+        let mut inputs = values.to_vec();
         let demand = vec![OutputDemand::Produce; func.outputs.len()];
         let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
         func.lambda
-            .invoke(
-                &mut ContextManager::default(),
-                &mut AnyState::default(),
-                &SharedAnyState::default(),
-                &mut inputs,
-                &demand,
-                &mut outputs,
-            )
+            .invoke(Invocation {
+                ctx: &mut ContextManager::default(),
+                state: &mut AnyState::default(),
+                event_state: &SharedAnyState::default(),
+                inputs: &mut inputs,
+                demand: &demand,
+                outputs: &mut outputs,
+            })
             .await?;
         Ok(outputs)
     }

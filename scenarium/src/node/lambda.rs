@@ -60,44 +60,34 @@ impl InvokeError {
 
 pub type InvokeResult<T> = Result<T, InvokeError>;
 
-/// One resolved input handed to a lambda. The slice is `&mut` so a lambda can
-/// `std::mem::take` a value it wants to own (the executor never reads `inputs`
-/// again after the invoke); a taken `Custom` value is uniquely held whenever the
-/// producer was non-RAM single-consumer (see the executor's move-on-last-use).
+/// Everything a lambda is handed for one call: the shared context, its own persistent and
+/// event state, the resolved inputs, what the run demands of each output, and the buffer to
+/// write them into. One bundle rather than six ordered borrows, so adding invocation state
+/// doesn't rewrite every registered lambda.
+///
+/// `inputs` is `&mut` so a lambda can `std::mem::take` a value it wants to own — the
+/// executor never reads them again after the invoke, and a taken `Custom` value is uniquely
+/// held whenever the producer was non-RAM single-consumer (see the executor's
+/// move-on-last-use).
 #[derive(Debug)]
-pub struct InvokeInput {
-    pub value: DynamicValue,
+pub struct Invocation<'a> {
+    pub ctx: &'a mut ContextManager,
+    pub state: &'a mut AnyState,
+    pub event_state: &'a SharedAnyState,
+    pub inputs: &'a mut [DynamicValue],
+    pub demand: &'a [OutputDemand],
+    pub outputs: &'a mut [DynamicValue],
 }
 
 type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
 
 pub trait AsyncLambdaFn:
-    for<'a> Fn(
-        &'a mut ContextManager,
-        &'a mut AnyState,
-        &'a SharedAnyState,
-        &'a mut [InvokeInput],
-        &'a [OutputDemand],
-        &'a mut [DynamicValue],
-    ) -> AsyncLambdaFuture<'a>
-    + Send
-    + Sync
-    + 'static
+    for<'a> Fn(Invocation<'a>) -> AsyncLambdaFuture<'a> + Send + Sync + 'static
 {
 }
 
 impl<T> AsyncLambdaFn for T where
-    T: for<'a> Fn(
-            &'a mut ContextManager,
-            &'a mut AnyState,
-            &'a SharedAnyState,
-            &'a mut [InvokeInput],
-            &'a [OutputDemand],
-            &'a mut [DynamicValue],
-        ) -> AsyncLambdaFuture<'a>
-        + Send
-        + Sync
-        + 'static
+    T: for<'a> Fn(Invocation<'a>) -> AsyncLambdaFuture<'a> + Send + Sync + 'static
 {
 }
 
@@ -122,30 +112,12 @@ impl FuncLambda {
         matches!(self, Self::None)
     }
 
-    pub async fn invoke(
-        &self,
-        ctx_manager: &mut ContextManager,
-        state: &mut AnyState,
-        event_state: &SharedAnyState,
-        inputs: &mut [InvokeInput],
-        output_demand: &[OutputDemand],
-        outputs: &mut [DynamicValue],
-    ) -> InvokeResult<()> {
+    pub async fn invoke(&self, invocation: Invocation<'_>) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
                 panic!("Func missing lambda");
             }
-            FuncLambda::Lambda(inner) => {
-                (inner)(
-                    ctx_manager,
-                    state,
-                    event_state,
-                    inputs,
-                    output_demand,
-                    outputs,
-                )
-                .await
-            }
+            FuncLambda::Lambda(inner) => (inner)(invocation).await,
         }
     }
 }

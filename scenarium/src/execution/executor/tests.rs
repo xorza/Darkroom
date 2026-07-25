@@ -16,6 +16,7 @@ use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resol
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
+use crate::node::lambda::Invocation;
 use crate::node::lambda::internals;
 use crate::node::lambda::{FuncLambda, OutputDemand};
 use crate::{DynamicValue, StaticValue};
@@ -292,12 +293,14 @@ async fn run_with_pinned(
 #[tokio::test]
 async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
-        let v = inputs[0].value.as_i64().unwrap();
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        let v = inputs[0].as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
     });
@@ -324,19 +327,19 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
 #[tokio::test]
 async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
-        Err(internals::failure("boom"))
-    });
-    let skipped = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let failing = async_lambda!(|_| { Err(internals::failure("boom")) });
+    let skipped = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         Ok(())
     });
-    let live = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+    let live = async_lambda!(|Invocation {
+                                  inputs, outputs, ..
+                              }| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].as_i64().unwrap()));
         Ok(())
     });
     let healthy = p.node(&[], 1, producer);
@@ -393,17 +396,15 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
 #[tokio::test]
 async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let cancel = async_lambda!(|ctx, _state, _ev, _inputs, _demand, _outputs| {
+    let cancel = async_lambda!(|Invocation { ctx, .. }| {
         ctx.cancel_flag().cancel();
         Ok(())
     });
-    let pending = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
-        panic!("a cancelled tail consumer must not run")
-    });
+    let pending = async_lambda!(|_| { panic!("a cancelled tail consumer must not run") });
     let source = p.node(&[], 1, producer);
     p.node(&[], 0, cancel);
     p.node(&[bind(&p.program, source, 0)], 0, pending);
@@ -445,8 +446,8 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 #[tokio::test]
 async fn unbound_output_errors_only_when_demanded() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| { Ok(()) });
-    let consumer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|_| { Ok(()) });
+    let consumer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         Ok(())
     });
@@ -479,11 +480,7 @@ async fn unbound_output_errors_only_when_demanded() {
     ));
 
     let mut p = Prog::default();
-    let skipped = p.node(
-        &[],
-        1,
-        async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| { Ok(()) }),
-    );
+    let skipped = p.node(&[], 1, async_lambda!(|_| { Ok(()) }));
     let plan = run_with_readers(&p.program, vec![0]);
     let (cache, stats) = run(&p.program, &plan).await;
 
@@ -504,12 +501,14 @@ async fn unbound_output_errors_only_when_demanded() {
 #[tokio::test]
 async fn frees_none_cache_output_once_last_consumer_reads() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
-        let v = inputs[0].value.as_i64().unwrap();
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        let v = inputs[0].as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
     });
@@ -539,12 +538,14 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
 #[tokio::test]
 async fn pinned_delivery_does_not_create_a_reader() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
-        let v = inputs[0].value.as_i64().unwrap();
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        let v = inputs[0].as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
     });
@@ -576,7 +577,7 @@ async fn pinned_root_demands_output_without_retaining_it() {
     let probe_seen = Arc::clone(&seen);
     let mut p = Prog::default();
     let probe = async_lambda!(
-        move |_ctx, _s, _ev, _inputs, demand, outputs| { seen = Arc::clone(&probe_seen) } => {
+        move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&probe_seen) } => {
             *seen.lock().unwrap() = Some(demand[0]);
             outputs[0] = DynamicValue::Static(StaticValue::Int(7));
             Ok(())
@@ -613,7 +614,7 @@ async fn pinned_root_demands_output_without_retaining_it() {
 #[tokio::test]
 async fn pinned_output_pushes_right_after_it_runs() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -635,7 +636,7 @@ async fn pinned_output_pushes_right_after_it_runs() {
 #[tokio::test]
 async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -658,9 +659,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
 #[tokio::test]
 async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
-        panic!("a reused node must not invoke its lambda")
-    });
+    let producer = async_lambda!(|_| { panic!("a reused node must not invoke its lambda") });
     let a = p.node(&[], 1, producer);
     p.set_cache(a, CacheMode::Disk);
     p.set_output_pinned(a, 0, true);
@@ -715,7 +714,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
 #[tokio::test]
 async fn pinned_root_pushes_every_output() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
         Ok(())
@@ -747,7 +746,7 @@ async fn pinned_root_pushes_every_output() {
 #[tokio::test]
 async fn non_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -768,9 +767,7 @@ async fn non_pinned_node_pushes_nothing() {
 #[tokio::test]
 async fn failed_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
-    let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, _outputs| {
-        Err(internals::failure("boom"))
-    });
+    let failing = async_lambda!(|_| { Err(internals::failure("boom")) });
     let a = p.node(&[], 1, failing);
     p.set_output_pinned(a, 0, true);
 
@@ -788,12 +785,14 @@ async fn failed_pinned_node_pushes_nothing() {
 #[tokio::test]
 async fn keeps_ram_cache_output_after_all_consumers_read() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].as_i64().unwrap()));
         Ok(())
     });
     let a = p.node(&[], 1, producer);
@@ -817,12 +816,14 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
 #[tokio::test]
 async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].as_i64().unwrap()));
         Ok(())
     });
     let a = p.node(&[], 1, producer);
@@ -864,7 +865,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
 async fn frees_zero_consumer_output_right_after_it_runs() {
     let mut p = Prog::default();
     let producer = || {
-        async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
+        async_lambda!(|Invocation { outputs, .. }| {
             outputs[0] = DynamicValue::Static(StaticValue::Int(7));
             Ok(())
         })
@@ -897,14 +898,16 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
 #[tokio::test]
 async fn missing_lambda_reports_error_and_skips_consumers() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+    let producer = async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
     let source = p.node(&[], 1, producer);
     let missing = p.node(&[bind(&p.program, source, 0)], 1, FuncLambda::None);
-    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+    let consumer = async_lambda!(|Invocation {
+                                      inputs, outputs, ..
+                                  }| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].as_i64().unwrap()));
         Ok(())
     });
     let downstream = p.node(&[bind(&p.program, missing, 0)], 1, consumer);
@@ -960,7 +963,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     let a = p.node(
         &[],
         1,
-        async_lambda!(|_ctx, state, _ev, _inputs, _demand, outputs| {
+        async_lambda!(|Invocation { state, outputs, .. }| {
             if state.get::<bool>().is_some() {
                 return Err(internals::failure("transient failure"));
             }
@@ -970,8 +973,10 @@ async fn reuse_survives_failed_upstream_rerun() {
         }),
     );
     let consumer = || {
-        async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
-            let v = inputs[0].value.as_i64().unwrap();
+        async_lambda!(|Invocation {
+                           inputs, outputs, ..
+                       }| {
+            let v = inputs[0].as_i64().unwrap();
             outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
             Ok(())
         })

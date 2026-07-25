@@ -42,7 +42,7 @@ fn build_func() -> Func {
              node — re-evaluating the whole graph. Has no inputs or outputs; \
              wire an event (e.g. a Frame Event) into it to drive periodic runs.",
         )
-        .lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
+        .lambda(crate::async_lambda!(|_| { Ok(()) }))
 }
 
 #[cfg(test)]
