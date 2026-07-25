@@ -33,7 +33,7 @@ pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
 }
 
 /// Estimate transformation from point correspondences.
-pub(in crate::stacking::registration) fn estimate_transform(
+pub(crate) fn estimate_transform(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform_type: TransformType,

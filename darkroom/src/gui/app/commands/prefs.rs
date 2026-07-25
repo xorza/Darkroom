@@ -1,5 +1,5 @@
 //! Preferences edits through the `Changed` synchronization sink and model picker.
-//! `set_confirm_exit` is the one preference `App` also writes
+//! `set_confirm_unsaved` is the one preference `App` also writes
 //! from outside the tab (the exit dialog's "Don't ask again").
 
 use std::path::PathBuf;
@@ -51,7 +51,7 @@ impl App {
     /// Persist the preferences, surfacing a failed write in the status
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
-    pub(in crate::gui::app) fn save_preferences(&mut self) {
+    pub(crate) fn save_preferences(&mut self) {
         if let Err(err) = self.preferences.save() {
             self.workspace.runtime.status.error(err);
         }
@@ -74,11 +74,11 @@ impl App {
         self.save_preferences();
     }
 
-    /// Persist whether quitting with unsaved changes prompts to save.
-    /// Shared by the Preferences checkbox (via `Changed`) and the exit
-    /// dialog's "Don't ask again", which calls this directly.
-    pub(in crate::gui::app) fn set_confirm_exit(&mut self, on: bool) {
-        self.preferences.confirm_unsaved_on_exit = on;
+    /// Persist whether discarding unsaved changes prompts to save.
+    /// Shared by the Preferences checkbox (via `Changed`) and the prompt's
+    /// "Don't ask again", which calls this directly.
+    pub(crate) fn set_confirm_unsaved(&mut self, on: bool) {
+        self.preferences.confirm_unsaved_changes = on;
         self.save_preferences();
     }
 }

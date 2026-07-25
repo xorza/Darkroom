@@ -88,8 +88,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                         {
                             command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                         }
-                        if Checkbox::new(&mut prefs.confirm_unsaved_on_exit)
-                            .label("Ask to save changes before quitting")
+                        if Checkbox::new(&mut prefs.confirm_unsaved_changes)
+                            .label("Ask to save unsaved changes")
                             .show(ui)
                             .left
                             .clicked()

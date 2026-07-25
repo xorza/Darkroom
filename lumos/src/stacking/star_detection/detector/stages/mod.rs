@@ -5,11 +5,11 @@
 
 pub(super) mod detect;
 #[cfg(test)]
-pub(in crate::stacking::star_detection) mod detect_test_utils;
+pub(crate) mod detect_test_utils;
 pub(super) mod filter;
-pub(in crate::stacking::star_detection) mod fwhm;
+pub(crate) mod fwhm;
 pub(super) mod measure;
-pub(in crate::stacking::star_detection) mod prepare;
+pub(crate) mod prepare;
 
 /// Floor for a MAD-scaled FWHM rejection threshold, as a fraction of the median FWHM.
 /// Prevents a zero threshold when the FWHM distribution is near-uniform (MAD ≈ 0).

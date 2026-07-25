@@ -32,13 +32,13 @@ const FWHM_MAD_MULTIPLIER: f32 = 3.0;
 
 /// Result of FWHM estimation stage.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::stacking::star_detection) struct FwhmResult {
+pub(crate) struct FwhmResult {
     /// FWHM value if matched filtering should be used, None if disabled.
-    pub(in crate::stacking::star_detection) fwhm: Option<f32>,
+    pub(crate) fwhm: Option<f32>,
     /// Number of stars that actually contributed to `fwhm`'s value: 0 if manual,
     /// disabled, or auto-estimation fell back to a value with no star provenance —
     /// so non-zero means exactly "fwhm came from a genuine auto-estimate".
-    pub(in crate::stacking::star_detection) stars_used: usize,
+    pub(crate) stars_used: usize,
 }
 
 /// Determine the effective FWHM for matched filtering.
@@ -50,7 +50,7 @@ pub(in crate::stacking::star_detection) struct FwhmResult {
 /// - `fwhm: Some(value)` if auto-estimation runs or a fixed `expected_fwhm` is set
 /// - `fwhm: None` if matched filtering is disabled (auto off and `expected_fwhm == 0`)
 /// - `stars_used` is non-zero only when auto-estimation was performed
-pub(in crate::stacking::star_detection) fn estimate_fwhm(
+pub(crate) fn estimate_fwhm(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     config: &FwhmConfig,

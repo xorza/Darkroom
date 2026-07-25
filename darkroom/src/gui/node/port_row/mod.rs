@@ -149,7 +149,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
 /// `(node_id, kind, port_idx)` so prepass can look up
 /// `response_for(port_circle_wid(..))` without threading the cache —
 /// every port's id is reconstructible from its domain coordinates.
-pub(in crate::gui) fn port_circle_wid(port: PortRef) -> WidgetId {
+pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "graph.node.port_circle",
         port.node_id,
@@ -491,9 +491,9 @@ fn event_cell(
 
 /// Stable widget id for an event port glyph. A separate id space from data
 /// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs. `pub(in crate::gui)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
+/// outputs. `pub(crate)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
 /// from domain coords (`EventRef`) to poll the drag.
-pub(in crate::gui) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
+pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
 }
 

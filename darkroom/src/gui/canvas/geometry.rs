@@ -253,7 +253,7 @@ pub(crate) mod internals {
     impl CanvasGeometry {
         /// Seed the cross-frame size cache directly, standing in for a
         /// past frame's record of the node.
-        pub(in crate::gui::canvas) fn seed_node_size(&mut self, id: NodeId, size: Size) {
+        pub(crate) fn seed_node_size(&mut self, id: NodeId, size: Size) {
             self.node_sizes.insert(id, size);
         }
     }

@@ -33,7 +33,7 @@ mod bench;
 /// candidates if the component contains multiple peaks.
 ///
 /// Uses `ArrayVec` to avoid heap allocation.
-pub(in crate::stacking::star_detection) fn deblend_local_maxima(
+pub(crate) fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,

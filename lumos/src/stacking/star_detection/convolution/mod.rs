@@ -371,11 +371,11 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
 }
 
 #[cfg(test)]
-pub(in crate::stacking::star_detection) mod internals {
+pub(super) mod internals {
     use imaginarium::Buffer2;
 
     /// Proxy for `synthetic_tests`, a cousin module of `convolution` under `star_detection`.
-    pub(in crate::stacking::star_detection) fn gaussian_convolve(
+    pub(crate) fn gaussian_convolve(
         pixels: &Buffer2<f32>,
         sigma: f32,
         output: &mut Buffer2<f32>,

@@ -82,13 +82,13 @@ pub fn warp(
 }
 
 #[cfg(test)]
-pub(in crate::stacking::registration) mod internals {
+pub(super) mod internals {
     use crate::stacking::registration::config::WarpParams;
     use crate::stacking::registration::resample::plane;
     use crate::stacking::registration::transform::WarpTransform;
     use imaginarium::Buffer2;
 
-    pub(in crate::stacking::registration) fn warp_plane(
+    pub(crate) fn warp_plane(
         input: &Buffer2<f32>,
         output: &mut Buffer2<f32>,
         transform: &WarpTransform,

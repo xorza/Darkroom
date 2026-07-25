@@ -265,10 +265,10 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-pub(in crate::astro::nodes) mod internals {
+pub(super) mod internals {
     use std::path::PathBuf;
 
-    pub(in crate::astro::nodes) fn frame_set_key(frames: &[PathBuf]) -> Result<String, String> {
+    pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, String> {
         super::frame_set_key(frames).map_err(|error| error.to_string())
     }
 }
