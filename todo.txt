@@ -28,6 +28,7 @@ save caches on cache click
 subgraph to newnodeui
 
 subgraphs tabs movable
+intents target graph
 
 what is resourcestamps  simplify
 
