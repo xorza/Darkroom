@@ -11,7 +11,7 @@ use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::StorePolicy;
 use crate::execution::error::Result;
-use crate::execution::executor::Executor;
+use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::plan::{ExecutionPlan, Planner};
 use crate::execution::program::index::NodeIdx;
@@ -135,13 +135,15 @@ impl ExecutionEngine {
         // caches are durable even if a later node fails or the run is cancelled.
         self.executor
             .run(
-                &self.compiled.program,
-                &self.plan,
-                &self.resolver.run,
-                &mut self.cache,
-                &mut self.resource_stamps,
-                events,
-                cancel,
+                RunRequest {
+                    program: &self.compiled.program,
+                    plan: &self.plan,
+                    resolved: &self.resolver.run,
+                    cache: &mut self.cache,
+                    resource_stamps: &mut self.resource_stamps,
+                    events,
+                    cancel,
+                },
                 outcome,
             )
             .await;

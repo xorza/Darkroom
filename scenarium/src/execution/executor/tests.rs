@@ -213,13 +213,15 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
-            program,
-            &run.plan,
-            &run.resolved,
-            &mut cache,
-            &mut resource_stamps,
-            None,
-            CancelToken::never(),
+            RunRequest {
+                program,
+                plan: &run.plan,
+                resolved: &run.resolved,
+                cache: &mut cache,
+                resource_stamps: &mut resource_stamps,
+                events: None,
+                cancel: CancelToken::never(),
+            },
             &mut stats,
         )
         .await;
@@ -244,13 +246,15 @@ async fn run_with(
     let mut outcome = ExecutionOutcome::default();
     executor
         .run(
-            program,
-            plan,
-            &resolver.run,
-            cache,
-            &mut resource_stamps,
-            None,
-            CancelToken::never(),
+            RunRequest {
+                program,
+                plan,
+                resolved: &resolver.run,
+                cache,
+                resource_stamps: &mut resource_stamps,
+                events: None,
+                cancel: CancelToken::never(),
+            },
             &mut outcome,
         )
         .await;
@@ -271,13 +275,15 @@ async fn run_with_pinned(
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
-            program,
-            &run.plan,
-            &run.resolved,
-            &mut cache,
-            &mut resource_stamps,
-            Some(&tx),
-            CancelToken::never(),
+            RunRequest {
+                program,
+                plan: &run.plan,
+                resolved: &run.resolved,
+                cache: &mut cache,
+                resource_stamps: &mut resource_stamps,
+                events: Some(&tx),
+                cancel: CancelToken::never(),
+            },
             &mut stats,
         )
         .await;
@@ -419,13 +425,15 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
-            &p.program,
-            &run.plan,
-            &run.resolved,
-            &mut cache,
-            &mut resource_stamps,
-            None,
-            CancelToken::new(),
+            RunRequest {
+                program: &p.program,
+                plan: &run.plan,
+                resolved: &run.resolved,
+                cache: &mut cache,
+                resource_stamps: &mut resource_stamps,
+                events: None,
+                cancel: CancelToken::new(),
+            },
             &mut stats,
         )
         .await;
@@ -686,13 +694,15 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
-            &p.program,
-            &run.plan,
-            &run.resolved,
-            &mut cache,
-            &mut resource_stamps,
-            Some(&tx),
-            CancelToken::never(),
+            RunRequest {
+                program: &p.program,
+                plan: &run.plan,
+                resolved: &run.resolved,
+                cache: &mut cache,
+                resource_stamps: &mut resource_stamps,
+                events: Some(&tx),
+                cancel: CancelToken::never(),
+            },
             &mut stats,
         )
         .await;

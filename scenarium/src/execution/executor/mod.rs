@@ -29,12 +29,13 @@ use tokio::task;
 use common::CancelToken;
 
 use crate::execution::event::EventTrigger;
-use crate::execution::identity::ExecutionEventPort;
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::program::index::NodeColumn;
+use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::report::{RunEvent, RunPhase, RunProgress};
-use crate::node::lambda::{InvokeError, InvokeInput};
+use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
 use crate::runtime::context::ContextManager;
+use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::disk_store::StorePolicy;
@@ -42,7 +43,7 @@ use crate::execution::error::RunError;
 use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
 };
-use crate::execution::executor::value_flow::{ExecutionFrame, RemainingOutputReads};
+use crate::execution::executor::value_flow::RemainingOutputReads;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::{Disposition, ResolvedRun};
@@ -72,24 +73,36 @@ pub(crate) struct Executor {
     outcomes: NodeColumn<NodeOutcome>,
 }
 
+/// Everything one run borrows from the engine. A parameter struct rather than eight
+/// positional arguments, so the call site names each collaborator and a new one doesn't
+/// become another slot to count.
+#[derive(Debug)]
+pub(crate) struct RunRequest<'a> {
+    pub(crate) program: &'a ExecutionProgram,
+    pub(crate) plan: &'a ExecutionPlan,
+    pub(crate) resolved: &'a ResolvedRun,
+    pub(crate) cache: &'a mut RuntimeCache,
+    pub(crate) resource_stamps: &'a mut RunResourceStamps,
+    /// When set, live per-node feedback streams ahead of the final outcome.
+    pub(crate) events: Option<&'a UnboundedSender<RunEvent>>,
+    pub(crate) cancel: CancelToken,
+}
+
 impl Executor {
-    /// Walk `plan.process_order` (producer-first). For each node: skip it as
-    /// [`NodeOutcome::Cut`] if the resolver pruned its cone, report a missing implementation,
-    /// serve it from RAM/disk on [`Disposition::Reuse`], or invoke its lambda and persist the
-    /// result to disk right away (so a long run's earlier caches survive a later failure or
-    /// cancel). The `program`, `plan`, and `resolved` run are read-only.
-    #[allow(clippy::too_many_arguments)] // Each argument is a distinct run collaborator.
-    pub(crate) async fn run(
-        &mut self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        resolved: &ResolvedRun,
-        cache: &mut RuntimeCache,
-        resource_stamps: &mut RunResourceStamps,
-        events: Option<&UnboundedSender<RunEvent>>,
-        cancel: CancelToken,
-        outcome: &mut ExecutionOutcome,
-    ) {
+    /// Walk `plan.process_order` (producer-first), giving each node one turn. The loop
+    /// itself owns only the two decisions that end it early or skip it wholesale — the
+    /// per-node work is [`ExecutionFrame::run_node`].
+    pub(crate) async fn run(&mut self, request: RunRequest<'_>, outcome: &mut ExecutionOutcome) {
+        let RunRequest {
+            program,
+            plan,
+            resolved,
+            cache,
+            resource_stamps,
+            events,
+            cancel,
+        } = request;
+
         outcome.clear();
         let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
@@ -99,17 +112,21 @@ impl Executor {
         self.ctx_manager.logs.clear();
         self.outcomes
             .reset(program.e_nodes.len(), NodeOutcome::Pending);
-
         self.remaining_reads.seed(resolved);
 
         {
             let mut frame = ExecutionFrame {
                 program,
                 plan,
+                resolved,
                 cache,
                 resource_stamps,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
+                node_outcomes: &mut self.outcomes,
+                ctx: &mut self.ctx_manager,
+                events,
+                outcome: &mut *outcome,
             };
 
             // The producer-first schedule excludes unseeded disabled nodes; the
@@ -121,270 +138,11 @@ impl Executor {
                 // after the run.
                 task::yield_now().await;
 
-                // Coarse cancel: stop scheduling further nodes and retire the tail's reads. A
-                // node already mid-invoke isn't interrupted, while unreached outcomes stay
-                // `Pending` and are omitted from the outcome.
-                if self.ctx_manager.cancel.is_cancelled() {
-                    for &pending_idx in &plan.process_order[process_idx..] {
-                        if resolved.disposition[pending_idx] == Disposition::Run {
-                            frame.abandon_input_reads(pending_idx);
-                        }
-                    }
+                if frame.ctx.cancel.is_cancelled() {
+                    frame.retire_cancelled_tail(process_idx);
                     break;
                 }
-                let e_node = &program[node_idx];
-                let e_node_id = program.e_node_ids[node_idx];
-                if !plan.verdicts[node_idx].wants_execute() {
-                    continue;
-                }
-                match resolved.disposition[node_idx] {
-                    Disposition::Cut => {
-                        // Pruned by the pre-run cut: every consumer that would read this node reused
-                        // a cache, so its output is never read. Report only a current resident value;
-                        // unneeded disk blobs remain unprobed.
-                        self.outcomes[node_idx] = NodeOutcome::Cut {
-                            cached: frame.cache.is_resident_current(node_idx),
-                        };
-                        continue;
-                    }
-                    Disposition::MissingLambda => {
-                        mark_skipped(
-                            frame.cache,
-                            &mut self.outcomes,
-                            node_idx,
-                            RunError::MissingLambda {
-                                func_id: e_node.func_id,
-                            },
-                        );
-                        continue;
-                    }
-                    Disposition::Reuse | Disposition::Run => {}
-                }
-
-                let demand = resolved.outputs.demand.slice(e_node.outputs);
-
-                // The resolver's pre-run verdict is authoritative — a `Reuse` is never
-                // re-derived here, since its producers may already be pruned (see `resolve.rs`).
-                // The one sanctioned improvement is a `Run` whose stamped digest is `None`: the
-                // resolver taints a node whose digest folds a Bind-delivered path value it
-                // couldn't read yet (`hash_bound_fs_path`). Its producers settled earlier in
-                // this walk (the `Run` verdict kept them alive), so re-stamp it now and serve
-                // the cache on a hit — a genuinely uncacheable node (an impure cone) just
-                // re-folds to `None` and runs as before. Reuse is served *before* the
-                // errored-dependency check: a digest-valid cached value stays valid even when an
-                // upstream re-ran for another consumer and failed, so it must not be cleared as
-                // skipped.
-                let reused = match resolved.disposition[node_idx] {
-                    Disposition::Reuse => true,
-                    Disposition::Run if frame.cache.slots[node_idx].current_digest.is_none() => {
-                        frame
-                            .resource_stamps
-                            .prepare_node(
-                                program,
-                                frame.cache,
-                                node_idx,
-                                self.ctx_manager.cancel.clone(),
-                            )
-                            .await;
-                        frame
-                            .cache
-                            .stamp_digest(program, frame.resource_stamps, node_idx);
-                        let reused = frame
-                            .cache
-                            .hydrate_reuse(
-                                program,
-                                node_idx,
-                                demand,
-                                &mut self.ctx_manager.contexts,
-                            )
-                            .await;
-                        if reused {
-                            frame.abandon_input_reads(node_idx);
-                        }
-                        reused
-                    }
-                    Disposition::Run => false,
-                    Disposition::Cut | Disposition::MissingLambda => {
-                        unreachable!("cut and missing-lambda dispositions were handled above")
-                    }
-                };
-                if reused {
-                    // The resolver only *probed* a disk hit, so the decode happens here, at
-                    // the node's own turn: producer-first order puts it ahead of every
-                    // consumer that reads it, and `release_drained_outputs` below frees it
-                    // on the same last-read bookkeeping a computed value gets. A no-op for a
-                    // resident value and for the re-stamp arm above, which already loaded.
-                    // A blob that stopped loading since the probe can't fall back to running
-                    // — the cut already pruned this node's producers — so it fails the node
-                    // and its consumers skip as errored-upstream.
-                    if !frame
-                        .cache
-                        .hydrate_reuse(program, node_idx, demand, &mut self.ctx_manager.contexts)
-                        .await
-                    {
-                        mark_skipped(
-                            frame.cache,
-                            &mut self.outcomes,
-                            node_idx,
-                            RunError::CacheLoadFailed {
-                                func_id: e_node.func_id,
-                            },
-                        );
-                        continue;
-                    }
-                    self.outcomes[node_idx] = NodeOutcome::Reused;
-                    frame.emit_pinned_values(node_idx, events);
-                    frame.release_drained_outputs(node_idx);
-                    continue;
-                }
-
-                debug_assert!(!e_node.lambda.is_none());
-                let func_id = e_node.func_id;
-
-                if has_errored_dependency(program, &self.outcomes, node_idx) {
-                    frame.abandon_input_reads(node_idx);
-                    mark_skipped(
-                        frame.cache,
-                        &mut self.outcomes,
-                        node_idx,
-                        RunError::SkippedUpstream { func_id },
-                    );
-                    continue;
-                }
-
-                // Read already-resolved inputs and release each producer whose last read this
-                // satisfies. A disk-reused producer was decoded at its own earlier turn.
-                frame.collect_inputs(node_idx);
-
-                let output_count = e_node.outputs.len as usize;
-                let event_state = frame.cache.slots[node_idx].event_state.clone();
-                debug_assert!(matches!(self.outcomes[node_idx], NodeOutcome::Pending));
-
-                // Attribute any logs this node emits to it (read by
-                // `ContextManager::log`).
-                self.ctx_manager.current_node = Some(e_node_id);
-                let invoke_start = Instant::now();
-                if let Some(events) = events {
-                    events
-                        .send(RunEvent::Progress(RunProgress {
-                            e_node_id,
-                            phase: RunPhase::Started { at: invoke_start },
-                        }))
-                        .expect(EVENTS_OUTLIVE_RUN);
-                }
-                let result = {
-                    let slot = frame.cache.slots[node_idx].invoke_slot(output_count);
-                    e_node
-                        .lambda
-                        .invoke(
-                            &mut self.ctx_manager,
-                            slot.state,
-                            &event_state,
-                            frame.inputs,
-                            demand,
-                            slot.outputs,
-                        )
-                        .await
-                        .map_err(|e| match e {
-                            // A lambda that bailed on cancel reports it truthfully;
-                            // surface it as a cancel rather than a generic invoke error.
-                            InvokeError::Cancelled => RunError::Cancelled { func_id },
-                            other => RunError::Invoke {
-                                func_id,
-                                message: other.to_string(),
-                            },
-                        })
-                };
-
-                let run_time = invoke_start.elapsed().as_secs_f64();
-                // A cancellable lambda reports a cancel itself (→ `RunError::Cancelled`
-                // above). This is the safety net for the rest: a lambda that doesn't
-                // poll the token (a builtin, a single decode) but ran while the run
-                // was cancelled returns `Ok` with a result from an aborted run — map
-                // that to `Cancelled` too so its output isn't cached. A genuine
-                // error stands on its own, even mid-cancel.
-                let result = match result {
-                    Ok(()) if self.ctx_manager.cancel.is_cancelled() => {
-                        Err(RunError::Cancelled { func_id })
-                    }
-                    Ok(()) => {
-                        let outputs = frame.cache.slots[node_idx].unbound_demanded_outputs(demand);
-                        if outputs.is_empty() {
-                            Ok(())
-                        } else {
-                            Err(RunError::OutputsNotProduced { func_id, outputs })
-                        }
-                    }
-                    other => other,
-                };
-                let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
-                let slot = &mut frame.cache.slots[node_idx];
-                let succeeded = match result {
-                    // The fresh output now corresponds to this node's current digest; record
-                    // it so the next run's reuse check is a RAM hit.
-                    Ok(()) => {
-                        slot.stamp_produced();
-                        self.outcomes[node_idx] = NodeOutcome::Ran { secs: run_time };
-                        true
-                    }
-                    Err(error) => {
-                        slot.clear_output();
-                        self.outcomes[node_idx] = NodeOutcome::Failed {
-                            secs: run_time,
-                            error,
-                        };
-                        false
-                    }
-                };
-                // No `Finished` for the cancelled node — it didn't complete; the
-                // consumer would otherwise paint it executed live.
-                if !cancelled && let Some(events) = events {
-                    events
-                        .send(RunEvent::Progress(RunProgress {
-                            e_node_id,
-                            phase: RunPhase::Finished {
-                                elapsed_secs: run_time,
-                            },
-                        }))
-                        .expect(EVENTS_OUTLIVE_RUN);
-                }
-                // Persist this node's cache the moment it finishes (durable as the run
-                // progresses), not at the end of the whole run. The snapshot is taken
-                // synchronously inside `store_node`; only the write awaits, so the cache
-                // borrow doesn't cross it.
-                if succeeded {
-                    if plan.event_sources.contains(node_idx) {
-                        outcome.event_triggers.extend(
-                            program.events[e_node.events]
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, event)| {
-                                    !event.subscribers.is_empty() && !event.lambda.is_none()
-                                })
-                                .map(|(event_idx, event)| EventTrigger {
-                                    event: ExecutionEventPort {
-                                        e_node_id,
-                                        event_idx,
-                                    },
-                                    lambda: event.lambda.clone(),
-                                    state: event_state.clone(),
-                                }),
-                        );
-                    }
-                    // Deliver before later consumers can release values; host delivery is not a reader.
-                    frame.emit_pinned_values(node_idx, events);
-                    // The preceding reuse miss proves that no blob can cover this result.
-                    frame
-                        .cache
-                        .store_node(
-                            program,
-                            node_idx,
-                            StorePolicy::KnownMiss,
-                            &mut self.ctx_manager.contexts,
-                        )
-                        .await;
-                    frame.release_drained_outputs(node_idx);
-                }
+                frame.run_node(node_idx).await;
             }
         }
 
@@ -392,6 +150,289 @@ impl Executor {
         collect_execution_outcome(program, plan, &self.outcomes, start, outcome);
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
+    }
+}
+
+/// One run's live state: the read-only schedule, the cache and per-invoke scratch it
+/// mutates, and the sinks it reports through. Bundled so every step of the loop is a method
+/// taking a node index rather than a closure over ten borrows — and so the disjoint-field
+/// borrows the run needs (cache vs. contexts vs. outcomes) are expressed once, here.
+///
+/// Value movement — input collection, pinned delivery, and the last-read releases — lives in
+/// [`value_flow`].
+#[derive(Debug)]
+pub(crate) struct ExecutionFrame<'a> {
+    program: &'a ExecutionProgram,
+    plan: &'a ExecutionPlan,
+    resolved: &'a ResolvedRun,
+    cache: &'a mut RuntimeCache,
+    resource_stamps: &'a mut RunResourceStamps,
+    remaining_reads: &'a mut RemainingOutputReads,
+    inputs: &'a mut Vec<InvokeInput>,
+    /// Per-node results for this run, distinct from the whole-run `outcome` below.
+    node_outcomes: &'a mut NodeColumn<NodeOutcome>,
+    ctx: &'a mut ContextManager,
+    events: Option<&'a UnboundedSender<RunEvent>>,
+    outcome: &'a mut ExecutionOutcome,
+}
+
+impl ExecutionFrame<'_> {
+    /// One node's turn. The resolver's disposition decides which of the four things happens,
+    /// and it is authoritative — a [`Disposition::Reuse`] is never re-derived here, since its
+    /// producers may already be pruned (see `resolve.rs`).
+    async fn run_node(&mut self, node_idx: NodeIdx) {
+        if !self.plan.verdicts[node_idx].wants_execute() {
+            return;
+        }
+        let e_node = &self.program[node_idx];
+        let demand = self.resolved.outputs.demand.slice(e_node.outputs);
+        match self.resolved.disposition[node_idx] {
+            // Pruned by the pre-run cut: every consumer that would read this node reused a
+            // cache, so its output is never read. Report only a current resident value;
+            // unneeded disk blobs remain unprobed.
+            Disposition::Cut => {
+                self.node_outcomes[node_idx] = NodeOutcome::Cut {
+                    cached: self.cache.is_resident_current(node_idx),
+                };
+            }
+            Disposition::MissingLambda => {
+                let error = RunError::MissingLambda {
+                    func_id: e_node.func_id,
+                };
+                mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+            }
+            Disposition::Reuse => self.serve_reuse(node_idx, demand).await,
+            // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
+            // digest-valid cached value stays valid even when an upstream re-ran for another
+            // consumer and failed, so it must not be cleared as skipped.
+            Disposition::Run => {
+                if !self.improved_to_reuse(node_idx, demand).await {
+                    self.invoke_node(node_idx, demand).await;
+                }
+            }
+        }
+    }
+
+    /// Coarse cancel: stop scheduling further nodes and retire the tail's reads. A node
+    /// already mid-invoke isn't interrupted, while unreached outcomes stay `Pending` and are
+    /// omitted from the outcome.
+    fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
+        let plan = self.plan;
+        for &node_idx in &plan.process_order[from_process_idx..] {
+            if self.resolved.disposition[node_idx] == Disposition::Run {
+                self.abandon_input_reads(node_idx);
+            }
+        }
+    }
+
+    /// Serve a resolved reuse. The resolver only *probed* a disk hit, so the decode happens
+    /// here, at the node's own turn: producer-first order puts it ahead of every consumer
+    /// that reads it, and the release below frees it on the same last-read bookkeeping a
+    /// computed value gets.
+    ///
+    /// A blob that stopped loading since the probe cannot fall back to running — the cut
+    /// already pruned this node's producers — so it fails the node and its consumers skip as
+    /// errored-upstream.
+    async fn serve_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
+        let program = self.program;
+        if !self
+            .cache
+            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
+            .await
+        {
+            let error = RunError::CacheLoadFailed {
+                func_id: program[node_idx].func_id,
+            };
+            mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+            return;
+        }
+        self.deliver_reused(node_idx);
+    }
+
+    /// The one verdict the loop *improves*: a `Run` whose stamped digest is `None` because it
+    /// folds a Bind-delivered path value the resolver couldn't read yet
+    /// (`hash_bound_fs_path`). Its producers settled earlier in this walk — the `Run` verdict
+    /// kept them alive — so re-stamp it now and serve the cache on a hit. A genuinely
+    /// uncacheable node (an impure cone) just re-folds to `None` and runs as before.
+    ///
+    /// Loading *before* retiring this node's input reads is what lets a failed load fall
+    /// through to a normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
+    async fn improved_to_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
+        if self.cache.slots[node_idx].current_digest.is_some() {
+            return false;
+        }
+        let program = self.program;
+        let cancel = self.ctx.cancel.clone();
+        self.resource_stamps
+            .prepare_node(program, self.cache, node_idx, cancel)
+            .await;
+        self.cache
+            .stamp_digest(program, self.resource_stamps, node_idx);
+        if !self
+            .cache
+            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
+            .await
+        {
+            return false;
+        }
+        self.abandon_input_reads(node_idx);
+        self.deliver_reused(node_idx);
+        true
+    }
+
+    /// The tail both reuse paths share, once the value is readable.
+    fn deliver_reused(&mut self, node_idx: NodeIdx) {
+        self.node_outcomes[node_idx] = NodeOutcome::Reused;
+        self.emit_pinned_values(node_idx);
+        self.release_drained_outputs(node_idx);
+    }
+
+    /// Invoke the node's lambda and record what came of it, persisting a success to disk
+    /// right away — so a long run's earlier caches survive a later failure or cancel.
+    async fn invoke_node(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
+        let program = self.program;
+        let e_node = &program[node_idx];
+        let e_node_id = program.e_node_ids[node_idx];
+        let func_id = e_node.func_id;
+        debug_assert!(!e_node.lambda.is_none());
+
+        if has_errored_dependency(program, self.node_outcomes, node_idx) {
+            self.abandon_input_reads(node_idx);
+            let error = RunError::SkippedUpstream { func_id };
+            mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+            return;
+        }
+
+        // Read already-resolved inputs and release each producer whose last read this
+        // satisfies. A disk-reused producer was decoded at its own earlier turn.
+        self.collect_inputs(node_idx);
+
+        let event_state = self.cache.slots[node_idx].event_state.clone();
+        debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
+
+        // Attribute any logs this node emits to it (read by `ContextManager::log`).
+        self.ctx.current_node = Some(e_node_id);
+        let invoke_start = Instant::now();
+        self.report_progress(e_node_id, RunPhase::Started { at: invoke_start });
+
+        let result = {
+            let slot = self.cache.slots[node_idx].invoke_slot(e_node.outputs.len as usize);
+            e_node
+                .lambda
+                .invoke(
+                    self.ctx,
+                    slot.state,
+                    &event_state,
+                    self.inputs,
+                    demand,
+                    slot.outputs,
+                )
+                .await
+                .map_err(|e| match e {
+                    // A lambda that bailed on cancel reports it truthfully;
+                    // surface it as a cancel rather than a generic invoke error.
+                    InvokeError::Cancelled => RunError::Cancelled { func_id },
+                    other => RunError::Invoke {
+                        func_id,
+                        message: other.to_string(),
+                    },
+                })
+        };
+        let run_time = invoke_start.elapsed().as_secs_f64();
+
+        // A cancellable lambda reports a cancel itself (→ `RunError::Cancelled` above). This
+        // is the safety net for the rest: a lambda that doesn't poll the token (a builtin, a
+        // single decode) but ran while the run was cancelled returns `Ok` with a result from
+        // an aborted run — map that to `Cancelled` too so its output isn't cached. A genuine
+        // error stands on its own, even mid-cancel.
+        let result = match result {
+            Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled { func_id }),
+            Ok(()) => match self.cache.slots[node_idx].unbound_demanded_outputs(demand) {
+                outputs if outputs.is_empty() => Ok(()),
+                outputs => Err(RunError::OutputsNotProduced { func_id, outputs }),
+            },
+            other => other,
+        };
+        let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
+        let slot = &mut self.cache.slots[node_idx];
+        let succeeded = match result {
+            // The fresh output now corresponds to this node's current digest; record it so
+            // the next run's reuse check is a RAM hit.
+            Ok(()) => {
+                slot.stamp_produced();
+                self.node_outcomes[node_idx] = NodeOutcome::Ran { secs: run_time };
+                true
+            }
+            Err(error) => {
+                slot.clear_output();
+                self.node_outcomes[node_idx] = NodeOutcome::Failed {
+                    secs: run_time,
+                    error,
+                };
+                false
+            }
+        };
+        // No `Finished` for the cancelled node — it didn't complete; the consumer would
+        // otherwise paint it executed live.
+        if !cancelled {
+            self.report_progress(
+                e_node_id,
+                RunPhase::Finished {
+                    elapsed_secs: run_time,
+                },
+            );
+        }
+        if !succeeded {
+            return;
+        }
+
+        if self.plan.event_sources.contains(node_idx) {
+            self.collect_event_triggers(node_idx, &event_state);
+        }
+        // Deliver before later consumers can release values; host delivery is not a reader.
+        self.emit_pinned_values(node_idx);
+        // Persist this node's cache the moment it finishes (durable as the run progresses),
+        // not at the end of the whole run. The snapshot is taken synchronously inside
+        // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
+        // preceding reuse miss proves that no blob can cover this result.
+        self.cache
+            .store_node(
+                program,
+                node_idx,
+                StorePolicy::KnownMiss,
+                &mut self.ctx.contexts,
+            )
+            .await;
+        self.release_drained_outputs(node_idx);
+    }
+
+    /// Hand the run's outcome the triggers a freshly initialized event source owns — only
+    /// events that have a subscriber and an implementation can fire.
+    fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
+        let program = self.program;
+        let e_node_id = program.e_node_ids[node_idx];
+        self.outcome.event_triggers.extend(
+            program.events[program[node_idx].events]
+                .iter()
+                .enumerate()
+                .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
+                .map(|(event_idx, event)| EventTrigger {
+                    event: ExecutionEventPort {
+                        e_node_id,
+                        event_idx,
+                    },
+                    lambda: event.lambda.clone(),
+                    state: event_state.clone(),
+                }),
+        );
+    }
+
+    fn report_progress(&self, e_node_id: ExecutionNodeId, phase: RunPhase) {
+        if let Some(events) = self.events {
+            events
+                .send(RunEvent::Progress(RunProgress { e_node_id, phase }))
+                .expect(EVENTS_OUTLIVE_RUN);
+        }
     }
 }
 

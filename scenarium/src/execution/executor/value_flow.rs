@@ -1,14 +1,14 @@
-use tokio::sync::mpsc::UnboundedSender;
+//! How values move through one run: a node's inputs in, its pinned outputs out to the host,
+//! and the last-read releases in between. The state they act on is
+//! [`ExecutionFrame`](crate::execution::executor::ExecutionFrame), whose loop steps live
+//! beside it in the parent module.
 
 use crate::DynamicValue;
-use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::executor::EVENTS_OUTLIVE_RUN;
-use crate::execution::plan::ExecutionPlan;
+use crate::execution::executor::{EVENTS_OUTLIVE_RUN, ExecutionFrame};
 use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent};
 use crate::execution::resolve::ResolvedRun;
-use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::InvokeInput;
 
 #[derive(Default, Debug)]
@@ -43,23 +43,9 @@ impl RemainingOutputReads {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct ExecutionFrame<'a> {
-    pub(super) program: &'a ExecutionProgram,
-    pub(super) plan: &'a ExecutionPlan,
-    pub(super) cache: &'a mut RuntimeCache,
-    pub(super) resource_stamps: &'a mut RunResourceStamps,
-    pub(super) remaining_reads: &'a mut RemainingOutputReads,
-    pub(super) inputs: &'a mut Vec<InvokeInput>,
-}
-
 impl ExecutionFrame<'_> {
-    pub(super) fn emit_pinned_values(
-        &mut self,
-        node_idx: NodeIdx,
-        events: Option<&UnboundedSender<RunEvent>>,
-    ) {
-        let Some(events) = events else { return };
+    pub(super) fn emit_pinned_values(&mut self, node_idx: NodeIdx) {
+        let Some(events) = self.events else { return };
         let outputs = self.program[node_idx].outputs;
         let pinned_root = self.plan.pinned.contains(node_idx);
         let values: Vec<_> = self.program.outputs[outputs]
