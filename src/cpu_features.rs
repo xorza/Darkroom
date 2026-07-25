@@ -11,8 +11,6 @@ pub(crate) struct X86Features {
     // Only read by x86_64-gated code (SIMD dispatch, tests below); looks dead when
     // checking/building for other targets since those reads vanish under cfg.
     #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
-    sse3: bool,
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
     pub(crate) ssse3: bool,
     pub(crate) sse4_1: bool,
     avx2: bool,
@@ -27,7 +25,6 @@ static FEATURES: OnceLock<X86Features> = OnceLock::new();
 pub(crate) fn get() -> X86Features {
     *FEATURES.get_or_init(|| X86Features {
         sse2: is_x86_feature_detected!("sse2"),
-        sse3: is_x86_feature_detected!("sse3"),
         ssse3: is_x86_feature_detected!("ssse3"),
         sse4_1: is_x86_feature_detected!("sse4.1"),
         avx2: is_x86_feature_detected!("avx2"),
@@ -40,7 +37,6 @@ pub(crate) fn get() -> X86Features {
 pub(crate) fn get() -> X86Features {
     X86Features {
         sse2: false,
-        sse3: false,
         ssse3: false,
         sse4_1: false,
         avx2: false,
@@ -79,7 +75,6 @@ mod tests {
         let features = cpu_features::get();
 
         assert_eq!(features.sse2, is_x86_feature_detected!("sse2"));
-        assert_eq!(features.sse3, is_x86_feature_detected!("sse3"));
         assert_eq!(features.ssse3, is_x86_feature_detected!("ssse3"));
         assert_eq!(features.sse4_1, is_x86_feature_detected!("sse4.1"));
         assert_eq!(features.avx2, is_x86_feature_detected!("avx2"));
@@ -96,7 +91,6 @@ mod tests {
         let features = cpu_features::get();
 
         assert!(!features.sse2);
-        assert!(!features.sse3);
         assert!(!features.ssse3);
         assert!(!features.sse4_1);
         assert!(!features.avx2);

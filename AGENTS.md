@@ -72,7 +72,7 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 
 ### Misc
 
-`cpu_features.rs` — crate-private `X86Features { sse2, sse3, ssse3, sse4_1, avx2, fma }` cached in a `OnceLock`; the public surface is the `has_*` helpers, including combined `has_avx2_fma`, gate Imaginarium and Lumos x86 SIMD dispatch at runtime (all-false off x86_64). `drawing.rs` — `draw_circle`/`draw_dot`/`draw_cross`/`draw_line` on f32 images (`L_F32`/`RGB_F32`); grayscale uses `Color::luminance()`, pixel access via `bytemuck::cast_slice_mut`.
+`cpu_features.rs` — crate-private `X86Features { sse2, ssse3, sse4_1, avx2, fma }` cached in a `OnceLock`; the public surface is the `has_*` helpers, including combined `has_avx2_fma`, gate Imaginarium and Lumos x86 SIMD dispatch at runtime (all-false off x86_64). `drawing.rs` — `draw_circle`/`draw_dot`/`draw_cross`/`draw_line` on f32 images (`L_F32`/`RGB_F32`); grayscale uses `Color::luminance()`, pixel access via `bytemuck::cast_slice_mut`.
 
 ## Project layout
 
