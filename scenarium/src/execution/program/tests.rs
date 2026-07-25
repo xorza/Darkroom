@@ -1,7 +1,7 @@
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram, PendingBind,
 };
 
 /// Flatten's emit-order buffer: three producers with two output ports each, then
@@ -76,20 +76,20 @@ fn intern_bindings_resolves_ids_to_dense_addresses_over_emit_ordered_pools() {
     // The consumer owns input-pool slots 0 and 1; bind them to id 1 port 1 and
     // id 3 port 0, which adoption placed at indices 0 and 2.
     program.intern_bindings(&[
-        (
-            0,
-            ExecutionOutputPort {
+        PendingBind {
+            input_idx: 0,
+            producer: ExecutionOutputPort {
                 e_node_id: ExecutionNodeId::from_u128(1),
                 port_idx: 1,
             },
-        ),
-        (
-            1,
-            ExecutionOutputPort {
+        },
+        PendingBind {
+            input_idx: 1,
+            producer: ExecutionOutputPort {
                 e_node_id: ExecutionNodeId::from_u128(3),
                 port_idx: 0,
             },
-        ),
+        },
     ]);
 
     let consumer = program.by_id(ExecutionNodeId::from_u128(4));
@@ -123,13 +123,13 @@ fn intern_bindings_resolves_ids_to_dense_addresses_over_emit_ordered_pools() {
     // panics here rather than degrading to an unbound input.
     let unemitted = ExecutionNodeId::from_u128(9);
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        program.intern_bindings(&[(
-            0,
-            ExecutionOutputPort {
+        program.intern_bindings(&[PendingBind {
+            input_idx: 0,
+            producer: ExecutionOutputPort {
                 e_node_id: unemitted,
                 port_idx: 0,
             },
-        )]);
+        }]);
     }));
     let payload = panic.expect_err("interning an unemitted producer must panic");
     let message = payload

@@ -8,7 +8,7 @@
 use hashbrown::{HashMap, HashSet};
 use thiserror::Error;
 
-use crate::execution::flatten::{Flattener, Pools};
+use crate::execution::flatten::Flattener;
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
 use crate::execution::program::index::{NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
@@ -147,27 +147,8 @@ impl Compiler {
         // `Graph`. Everything downstream is boundary-agnostic (func nodes only).
         let mut program = ExecutionProgram::default();
         let mut flatten_map = FlattenMap::default();
-        self.flattener.build(
-            Pools {
-                inputs: &mut program.inputs,
-                outputs: &mut program.outputs,
-                events: &mut program.events,
-            },
-            graph,
-            library,
-            &mut flatten_map,
-        );
-
-        // Assign dense node indices, then intern the id-based edge fixups —
-        // the only id hashing the compiled program ever pays.
-        program.adopt_nodes(&mut self.flattener.e_nodes);
-        program.intern_bindings(&self.flattener.pending_binds);
-        program.apply_subscriptions(
-            self.flattener
-                .subs
-                .iter()
-                .map(|sub| (sub.event, sub.subscriber)),
-        );
+        self.flattener
+            .build(&mut program, graph, library, &mut flatten_map);
 
         // Resolve types here so runtime digesting does not retain the function library.
         program.resolve_output_types(library);
@@ -237,8 +218,8 @@ mod tests {
     use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
     use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::test_support::FlattenMapBuilder;
-    use crate::execution::program::ExecutionNode;
     use crate::execution::program::index::OutputAddr;
+    use crate::execution::program::{ExecutionNode, PendingSubscription};
     use crate::execution::validate::CompiledGraphValidationError;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::graph::{GraphDef, NodeSearch};
@@ -275,13 +256,13 @@ mod tests {
 
         // An unemitted subscriber is a flatten bug, not drift to absorb.
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            compiled.program.apply_subscriptions([(
-                ExecutionEventPort {
+            compiled.program.apply_subscriptions(&[PendingSubscription {
+                event: ExecutionEventPort {
                     e_node_id: ExecutionNodeId::from_authoring(&[emitter]),
                     event_idx: 0,
                 },
-                ExecutionNodeId::unique(),
-            )]);
+                subscriber: ExecutionNodeId::unique(),
+            }]);
         }));
         assert!(
             panic.is_err(),

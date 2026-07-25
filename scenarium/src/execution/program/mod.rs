@@ -48,6 +48,24 @@ pub(crate) struct ExecutionOutput {
     pub(crate) pinned: bool,
 }
 
+/// A resolved data edge awaiting interning: the input-pool slot to write, and
+/// the id-based producer it binds to. Flatten records these instead of dense
+/// addresses because a `Bind` can name a node emitted later in the walk —
+/// [`ExecutionProgram::intern_bindings`] resolves them once the node set is adopted.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PendingBind {
+    pub(crate) input_idx: u32,
+    pub(crate) producer: ExecutionOutputPort,
+}
+
+/// A resolved event edge awaiting wiring — the [`PendingBind`] counterpart for
+/// subscriptions, applied by [`ExecutionProgram::apply_subscriptions`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PendingSubscription {
+    pub(crate) event: ExecutionEventPort,
+    pub(crate) subscriber: ExecutionNodeId,
+}
+
 pub(crate) type InputRange = PoolRange<ExecutionInput>;
 pub(crate) type OutputRange = PoolRange<ExecutionOutput>;
 pub(crate) type EventRange = PoolRange<ExecutionEvent>;
@@ -158,15 +176,15 @@ impl ExecutionProgram {
     /// Intern flatten's id-based binding fixups into dense [`OutputAddr`]s —
     /// the one place producer ids are hashed, once per compile instead of per
     /// run. Every target exists: flatten only records producers it emitted.
-    pub(crate) fn intern_bindings(&mut self, binds: &[(u32, ExecutionOutputPort)]) {
-        for &(input_idx, port) in binds {
+    pub(crate) fn intern_bindings(&mut self, binds: &[PendingBind]) {
+        for bind in binds {
             let node_idx = *self
                 .e_node_index
-                .get(&port.e_node_id)
+                .get(&bind.producer.e_node_id)
                 .expect("flatten only binds producers it emitted");
-            self.inputs[input_idx as usize].binding = ExecutionBinding::Bind(OutputAddr {
+            self.inputs[bind.input_idx as usize].binding = ExecutionBinding::Bind(OutputAddr {
                 node_idx,
-                port_idx: port.port_idx as u32,
+                port_idx: bind.producer.port_idx as u32,
             });
         }
     }
@@ -176,25 +194,22 @@ impl ExecutionProgram {
     /// nodes it emitted, and drops the edge itself when either side is missing
     /// or the emitter no longer declares the event. So a miss here is a flatten
     /// bug, and panics rather than silently unwiring an event the graph asked for.
-    pub(crate) fn apply_subscriptions(
-        &mut self,
-        subs: impl IntoIterator<Item = (ExecutionEventPort, ExecutionNodeId)>,
-    ) {
-        for (event, subscriber) in subs {
+    pub(crate) fn apply_subscriptions(&mut self, subs: &[PendingSubscription]) {
+        for sub in subs {
             let subscriber_idx = *self
                 .e_node_index
-                .get(&subscriber)
+                .get(&sub.subscriber)
                 .expect("flatten only subscribes nodes it emitted");
             let emitter_idx = *self
                 .e_node_index
-                .get(&event.e_node_id)
+                .get(&sub.event.e_node_id)
                 .expect("flatten only subscribes to emitters it emitted");
             let events = self[emitter_idx].events;
             assert!(
-                event.event_idx < events.len as usize,
+                sub.event.event_idx < events.len as usize,
                 "flatten only subscribes to events the emitter declares"
             );
-            self.events[events][event.event_idx]
+            self.events[events][sub.event.event_idx]
                 .subscribers
                 .push(subscriber_idx);
         }

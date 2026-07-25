@@ -20,6 +20,7 @@ use crate::execution::identity::{
 use crate::execution::program::pool::Pool;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
+    ExecutionProgram, PendingBind, PendingSubscription,
 };
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies};
@@ -42,35 +43,25 @@ pub(crate) struct Flattener {
     /// Shared graphs currently on the emit-descent path. Reused across builds.
     seen_shared: HashSet<GraphId>,
     /// Resolved flat event edges (with flattened ids), collected during the
-    /// walk; the compiler applies them once the program has adopted the node
-    /// set ([`ExecutionProgram::apply_subscriptions`]). Reused across builds.
-    pub(crate) subs: Vec<ExecutionSubscription>,
-    /// Resolved `Bind` fixups: input-pool slot → id-based producer address.
-    /// Bindings can reference nodes emitted later in the walk, so the dense
-    /// [`OutputAddr`](crate::execution::program::OutputAddr) form is interned
-    /// by the compiler after adoption
-    /// ([`ExecutionProgram::intern_bindings`]). Reused across builds.
-    pub(crate) pending_binds: Vec<(u32, ExecutionOutputPort)>,
+    /// walk and wired once the program has adopted the node set. Reused across builds.
+    subs: Vec<PendingSubscription>,
+    /// Resolved `Bind` fixups, interned to dense
+    /// [`OutputAddr`](crate::execution::program::index::OutputAddr)es after
+    /// adoption for the same reason. Reused across builds.
+    pending_binds: Vec<PendingBind>,
     /// Flat nodes in emit order. Nothing in the walk looks one up, so this is a
-    /// plain vector; the compiler sorts and drains it into the program
-    /// ([`ExecutionProgram::adopt_nodes`]). Reused across builds.
-    pub(crate) e_nodes: Vec<(ExecutionNodeId, ExecutionNode)>,
-}
-
-/// The graph's packed port pools, rebuilt each `build`.
-#[derive(Debug)]
-pub(crate) struct Pools<'a> {
-    pub inputs: &'a mut Pool<ExecutionInput>,
-    pub outputs: &'a mut Pool<ExecutionOutput>,
-    pub events: &'a mut Pool<ExecutionEvent>,
+    /// plain vector; adoption sorts and drains it. Reused across builds.
+    e_nodes: Vec<(ExecutionNodeId, ExecutionNode)>,
 }
 
 impl Flattener {
-    /// Flatten `root` into [`Self::e_nodes`], rebuilding the packed pools fresh
-    /// from the library.
+    /// Flatten `root` into `program`: rebuild the packed pools fresh from the
+    /// library, adopt the emitted nodes in id order, then resolve the edge
+    /// fixups the walk deferred. Every buffer here is scratch the next build
+    /// reuses, so nothing leaves this call but the populated `program`.
     pub(crate) fn build(
         &mut self,
-        pools: Pools<'_>,
+        program: &mut ExecutionProgram,
         root: &Graph,
         library: &Library,
         flatten: &mut FlattenMap,
@@ -86,9 +77,9 @@ impl Flattener {
         self.scope_stack.clear();
         self.scope_stack.push(0);
 
-        pools.inputs.clear();
-        pools.outputs.clear();
-        pools.events.clear();
+        program.inputs.clear();
+        program.outputs.clear();
+        program.events.clear();
         {
             let mut run = Run {
                 library,
@@ -100,19 +91,19 @@ impl Flattener {
                 subs: &mut self.subs,
                 pending_binds: &mut self.pending_binds,
                 e_nodes: &mut self.e_nodes,
-                inputs: pools.inputs,
-                outputs: pools.outputs,
-                events: pools.events,
+                inputs: &mut program.inputs,
+                outputs: &mut program.outputs,
+                events: &mut program.events,
             };
             run.emit(false);
         }
-    }
-}
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ExecutionSubscription {
-    pub(crate) event: ExecutionEventPort,
-    pub(crate) subscriber: ExecutionNodeId,
+        // Assign dense node indices, then resolve the id-based edge fixups —
+        // the only id hashing a compiled program ever pays.
+        program.adopt_nodes(&mut self.e_nodes);
+        program.intern_bindings(&self.pending_binds);
+        program.apply_subscriptions(&self.subs);
+    }
 }
 
 /// An id-based resolved binding — flatten's intermediate form. `Bind` targets
@@ -143,8 +134,8 @@ struct Run<'a> {
     /// pushed per composite descent.
     flatten: &'a mut FlattenMap,
     seen_shared: &'a mut HashSet<GraphId>,
-    subs: &'a mut Vec<ExecutionSubscription>,
-    pending_binds: &'a mut Vec<(u32, ExecutionOutputPort)>,
+    subs: &'a mut Vec<PendingSubscription>,
+    pending_binds: &'a mut Vec<PendingBind>,
     e_nodes: &'a mut Vec<(ExecutionNodeId, ExecutionNode)>,
     /// The inputs pool being built this update.
     inputs: &'a mut Pool<ExecutionInput>,
@@ -296,9 +287,11 @@ impl<'a> Run<'a> {
                         self.inputs[inputs_start + port_idx].binding =
                             ExecutionBinding::Const(value);
                     }
-                    FlatBinding::Bind(target) => {
-                        self.pending_binds
-                            .push(((inputs_start + port_idx) as u32, target));
+                    FlatBinding::Bind(producer) => {
+                        self.pending_binds.push(PendingBind {
+                            input_idx: (inputs_start + port_idx) as u32,
+                            producer,
+                        });
                     }
                 }
             }
@@ -381,7 +374,7 @@ impl<'a> Run<'a> {
             // this edge so the planner sees it among a fired event's subscribers.
             NodeKind::Func(_) | NodeKind::Special(_) => {
                 let e_node_id = self.execution_node_id(node_id);
-                self.subs.push(ExecutionSubscription {
+                self.subs.push(PendingSubscription {
                     event,
                     subscriber: e_node_id,
                 });
