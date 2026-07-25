@@ -7,7 +7,7 @@ use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
-use crate::gui::canvas::node_ports;
+use crate::gui::canvas::{node_events, node_ports};
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -98,6 +98,21 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
             .get(&key)
             .and_then(|i| i.screen_rect)
             .is_some_and(|r| r.contains(pointer))
+    }
+
+    /// First key in `keys` whose widget contains `pointer`, or `None` — the
+    /// "which glyph is the in-flight wire hovering" scan every snap-target
+    /// search needs, differing only in the candidate sequence it feeds in
+    /// and whatever acceptance test it then applies to the winner.
+    /// Geometrically at most one glyph sits under the pointer, so a
+    /// rejected winner means "no snap", not "keep looking". Sibling of
+    /// [`Self::first_drag_started`].
+    pub(super) fn first_containing(
+        &self,
+        pointer: Vec2,
+        mut keys: impl Iterator<Item = K>,
+    ) -> Option<K> {
+        keys.find(|k| self.contains_pointer(*k, pointer))
     }
 
     /// `true` on the one-frame edge of a drag-start on this widget.
@@ -197,12 +212,8 @@ impl CanvasGeometry {
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
-            for event_idx in 0..n.events.len as usize {
-                let ev = EventRef {
-                    node_id: n.id,
-                    event_idx,
-                };
-                let r = ui.response_for(event_glyph_wid(n.id, event_idx));
+            for ev in node_events(n) {
+                let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
                 self.events.record(ev, r, node_min, n.pos);
             }
             // The subscription pin only exists on sink nodes (only they

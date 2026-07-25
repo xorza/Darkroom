@@ -5,28 +5,11 @@ use scenarium::NodeId;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pointer_world;
-use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, WireEmphasis, add_cubic_wire};
+use crate::gui::canvas::wire::{Wire, WirePass};
+use crate::gui::canvas::{free_end, node_events};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
-
-/// Control points for an event wire from emitter `p0` (a triangle on the
-/// right of its node) to subscriber pin `p3` (the top-left pin). The emitter
-/// handle leaves rightward like a data output; the subscriber handle points
-/// **up-left**, matching the pin's outward-pointing triangle so the wire
-/// meets it head-on.
-fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
-    let d = (p0.distance(p3) * 0.4).max(MIN_HANDLE);
-    // (-1, -1) is up-left in screen space (y grows downward).
-    let up_left = Vec2::new(-1.0, -1.0).normalize();
-    CubicHandles {
-        p1: p0 + Vec2::new(d, 0.0),
-        p2: p3 + up_left * d,
-    }
-}
 
 /// Owns the in-flight subscription wire (an emitter *or* subscriber drag)
 /// plus the committed subscription-wire renderer. One wire at a time, so a
@@ -170,55 +153,43 @@ impl SubscriptionUI {
     }
 
     /// Paint every committed subscription wire on the current scene retained
-    /// by `cull`, marking those the active breaker crosses as
-    /// broken via `probe.mark_broken_subscription` for the breaker's
-    /// release-frame drain. A culled wire skips the breaker probe too — the
-    /// scribble is always on-screen, so it can't cross an off-screen curve.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn draw(
-        &self,
-        ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        scene: &Scene,
-        geometry: &CanvasGeometry,
-        cull: CullRegion,
-        probe: &mut BreakerProbe<'_>,
-        emphasis: &WireEmphasis,
-    ) {
-        let width = ctx.theme.connection_width;
+    /// by the pass's cull region, marking those the active breaker crosses
+    /// as broken via `probe.mark_broken_subscription` for the breaker's
+    /// release-frame drain.
+    pub(super) fn draw(&self, ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+        let (theme, scene) = (pass.theme, pass.scene);
         for s in &scene.subscriptions {
             let emitter = EventRef {
                 node_id: s.emitter,
                 event_idx: s.event_idx,
             };
             let (Some(p0), Some(p3)) = (
-                geometry.events.center(emitter),
-                geometry.subs.center(s.subscriber),
+                pass.geometry.events.center(emitter),
+                pass.geometry.subs.center(s.subscriber),
             ) else {
                 continue;
             };
-            let handles = event_handles(p0, p3);
-            if !cull.keeps_wire(p0, &handles, p3) {
+            let wire = Wire::event(p0, p3);
+            let endpoint_hover = pass.geometry.events.is_hovered(emitter)
+                || pass.geometry.subs.is_hovered(s.subscriber);
+            let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
                 continue;
-            }
-            let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
-            if broken {
-                probe.mark_broken_subscription(*s);
-            }
-            // Emphasis tiers resolve through the shared `WireEmphasis` (see
-            // wire.rs). Event wires share the breaker-alarm hue, so the
-            // alarm read on a broken wire is full strength + full width
-            // against the breaker-faded rest of the set.
-            let endpoint_hover =
-                geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
-            let hovered = !broken && emphasis.hovered(endpoint_hover);
-            let brush = if broken {
-                CurveBrush::Solid(ctx.theme.colors.connection_broken)
-            } else {
-                CurveBrush::Solid(emphasis.tint(event_color(ctx.theme, false), hovered))
             };
-            let w = emphasis.width(width, hovered || broken);
-            add_cubic_wire(ui, p0, p3, handles, w, brush);
+            if stroke.broken {
+                pass.probe.mark_broken_subscription(*s);
+            }
+            // Event wires share the breaker-alarm hue, so a broken one paints
+            // flat rather than tinted — full strength against the
+            // breaker-faded rest of the set.
+            let brush = if stroke.broken {
+                CurveBrush::Solid(theme.colors.connection_broken)
+            } else {
+                CurveBrush::Solid(
+                    pass.emphasis
+                        .tint(event_color(theme, false), stroke.hovered),
+                )
+            };
+            wire.add(ui, stroke.width, brush);
         }
     }
 
@@ -241,11 +212,9 @@ impl SubscriptionUI {
                 let Some(p0) = geometry.events.center(emitter) else {
                     return;
                 };
-                let free = match snap_sub {
-                    Some(sub) => geometry.subs.center(sub),
-                    None => pointer_world(ui, scene, canvas_origin),
+                let Some(p3) = free_end(ui, scene, canvas_origin, &geometry.subs, snap_sub) else {
+                    return;
                 };
-                let Some(p3) = free else { return };
                 (p0, p3)
             }
             Some(InFlight::FromSubscriber {
@@ -255,19 +224,15 @@ impl SubscriptionUI {
                 let Some(p3) = geometry.subs.center(subscriber) else {
                     return;
                 };
-                let free = match snap_emitter {
-                    Some(e) => geometry.events.center(e),
-                    None => pointer_world(ui, scene, canvas_origin),
+                let Some(p0) = free_end(ui, scene, canvas_origin, &geometry.events, snap_emitter)
+                else {
+                    return;
                 };
-                let Some(p0) = free else { return };
                 (p0, p3)
             }
         };
-        add_cubic_wire(
+        Wire::event(p0, p3).add(
             ui,
-            p0,
-            p3,
-            event_handles(p0, p3),
             ctx.theme.connection_width,
             CurveBrush::Solid(event_color(ctx.theme, false)),
         );
@@ -276,12 +241,7 @@ impl SubscriptionUI {
 
 /// First emitter event glyph whose drag started this frame, or `None`.
 fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
-    let keys = scene.nodes.values().flat_map(|n| {
-        (0..n.events.len as usize).map(move |event_idx| EventRef {
-            node_id: n.id,
-            event_idx,
-        })
-    });
+    let keys = scene.nodes.values().flat_map(node_events);
     geometry.events.first_drag_started(keys)
 }
 
@@ -303,15 +263,12 @@ fn scan_sub_target(
     emitter: EventRef,
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    for n in scene.nodes.values() {
-        if n.id == emitter.node_id || !n.sink {
-            continue;
-        }
-        if geometry.subs.contains_pointer(n.id, pointer) {
-            return Some(n.id);
-        }
-    }
-    None
+    let candidates = scene
+        .nodes
+        .values()
+        .filter(|n| n.id != emitter.node_id && n.sink)
+        .map(|n| n.id);
+    geometry.subs.first_containing(pointer, candidates)
 }
 
 /// Emitter event glyph under the pointer that's a valid drop for a wire
@@ -325,19 +282,10 @@ fn scan_emitter_target(
     subscriber: NodeId,
 ) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;
-    for n in scene.nodes.values() {
-        if n.id == subscriber {
-            continue;
-        }
-        for event_idx in 0..n.events.len as usize {
-            let e = EventRef {
-                node_id: n.id,
-                event_idx,
-            };
-            if geometry.events.contains_pointer(e, pointer) {
-                return Some(e);
-            }
-        }
-    }
-    None
+    let candidates = scene
+        .nodes
+        .values()
+        .filter(|n| n.id != subscriber)
+        .flat_map(node_events);
+    geometry.events.first_containing(pointer, candidates)
 }

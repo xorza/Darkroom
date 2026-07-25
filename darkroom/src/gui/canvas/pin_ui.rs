@@ -37,7 +37,6 @@ use scenarium::{NodeId, OutputPort};
 use crate::core::document::{ItemRef, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::{GroupDragAnchor, selected_group_positions};
@@ -47,7 +46,7 @@ use crate::gui::canvas::pin_preview::{
     self, PREVIEW_HEIGHT, PREVIEW_WIDTH, pin_preview_wid, preview_image_wid, preview_title,
     refresh_badge_wid,
 };
-use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
+use crate::gui::canvas::wire::{Wire, WirePass};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::{RecordCtx, click_intents, set_output_pinned};
@@ -240,20 +239,12 @@ impl PinUi {
     /// points in the pass. Only the wire draws here; the port-circle
     /// glyph and the card paint at their own slot in the shared paint
     /// stack (see [`draw_pin`](Self::draw_pin)).
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn draw_wire(
-        &self,
-        ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        scene: &Scene,
-        geometry: &CanvasGeometry,
-        cull: CullRegion,
-        probe: &mut BreakerProbe<'_>,
-        emphasis: &WireEmphasis,
-    ) {
-        let theme = ctx.theme;
+    pub(super) fn draw_wire(&self, ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+        let (theme, scene, geometry) = (pass.theme, pass.scene, pass.geometry);
         for pin in scene.pinned_outputs() {
-            let Some(g) = resolve_pin_geometry(ui, geometry, probe, cull, pin.port, pin.pos) else {
+            let Some(g) =
+                resolve_pin_geometry(ui, geometry, pass.probe, pass.cull, pin.port, pin.pos)
+            else {
                 continue;
             };
             let port_ref = PortRef {
@@ -261,23 +252,19 @@ impl PinUi {
                 kind: PortKind::Output,
                 port_idx: pin.port.port_idx,
             };
-            let hovered =
-                !g.broken && emphasis.hovered(geometry.ports.is_hovered(port_ref) || g.box_hover);
+            // A pin resolves its own `broken` (its card counts as part of
+            // the glyph), so only the emphasis tier comes off the pass.
+            let endpoint_hover = geometry.ports.is_hovered(port_ref) || g.box_hover;
+            let stroke = pass
+                .emphasis
+                .stroke(theme.connection_width, g.broken, endpoint_hover);
             let base = port_color(theme, &pin.output.ty, PortKind::Output, false);
-            let wire_color = if g.broken {
+            let color = if stroke.broken {
                 theme.colors.connection_broken
             } else {
-                emphasis.tint(base, hovered)
+                pass.emphasis.tint(base, stroke.hovered)
             };
-            let width = emphasis.width(theme.connection_width, hovered || g.broken);
-            add_cubic_wire(
-                ui,
-                g.port_center,
-                g.top_left,
-                g.handles,
-                width,
-                CurveBrush::Solid(wire_color),
-            );
+            g.wire.add(ui, stroke.width, CurveBrush::Solid(color));
         }
     }
 
@@ -324,13 +311,10 @@ impl PinUi {
         } else {
             port_color(theme, &output.ty, PortKind::Output, g.box_hover)
         };
-        dot(
-            ui,
-            g.top_left.x,
-            g.top_left.y,
-            theme.port_size * 0.5,
-            accent,
-        );
+        // The wire's far end *is* the card's top-left corner, so the glyph
+        // lands exactly where the bezier arrives.
+        let top_left = g.wire.p3;
+        dot(ui, top_left.x, top_left.y, theme.port_size * 0.5, accent);
 
         // Same broken/selected/resting decision a node body draws
         // (`Theme::card_border`), so "in the selection" reads as one
@@ -356,7 +340,7 @@ impl PinUi {
             ui,
             theme,
             g.out_port,
-            g.top_left,
+            top_left,
             &title,
             border.color,
             border.width,
@@ -383,9 +367,10 @@ impl PinUi {
 #[derive(Debug)]
 struct PinGeometry {
     out_port: OutputPort,
-    port_center: Vec2,
-    top_left: Vec2,
-    handles: CubicHandles,
+    /// The connecting bezier: from the port center (`p0`) to the preview
+    /// card's own top-left corner (`p3`), where the port-circle glyph peeks
+    /// out from under it.
+    wire: Wire,
     box_hover: bool,
     /// Whether the active breaker gesture crosses this pin's bezier or its
     /// widget rect — already folded into `probe.mark_broken_pin` here, so
@@ -411,21 +396,19 @@ fn resolve_pin_geometry(
         port_idx: out_port.port_idx,
     };
     let port_center = geometry.ports.center(port_ref)?;
-    let handles = cubic_handles(port_center, top_left);
-    let box_rect = pin_preview_rect(top_left);
-    if !cull.keeps_pin(box_rect, port_center, &handles, top_left) {
+    let wire = Wire::data(port_center, top_left);
+    let card = pin_preview_rect(top_left);
+    if !cull.keeps_pin(card, &wire) {
         return None;
     }
-    let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
+    let broken = pin_targeted(probe, &wire, card);
     if broken {
         probe.mark_broken_pin(out_port);
     }
     let box_hover = preview_hovered(ui, out_port);
     Some(PinGeometry {
         out_port,
-        port_center,
-        top_left,
-        handles,
+        wire,
         box_hover,
         broken,
     })
@@ -434,17 +417,8 @@ fn resolve_pin_geometry(
 /// True if the active breaker gesture crosses the pin's glyph — either the
 /// connecting bezier or the preview widget's rect (matching how a node
 /// body's breaker hit-test uses its rect rather than an exact shape).
-fn pin_targeted(
-    probe: &BreakerProbe<'_>,
-    port_center: Vec2,
-    handles: &CubicHandles,
-    wire_end: Vec2,
-    box_rect: Rect,
-) -> bool {
-    if probe.crosses_cubic(port_center, handles.p1, handles.p2, wire_end) {
-        return true;
-    }
-    probe.crosses_rect(box_rect)
+fn pin_targeted(probe: &BreakerProbe<'_>, wire: &Wire, card: Rect) -> bool {
+    probe.crosses_wire(wire) || probe.crosses_rect(card)
 }
 
 /// First output port whose circle's drag started this frame, or `None`.
@@ -504,19 +478,19 @@ mod tests {
         let theme = Theme::default();
         let port_center = Vec2::ZERO;
         let top_left = port_center + default_pin_offset(&theme);
-        let handles = cubic_handles(port_center, top_left);
+        let wire = Wire::data(port_center, top_left);
         let rect = box_rect_at(top_left);
         let box_center = top_left + Vec2::new(PREVIEW_WIDTH, PREVIEW_HEIGHT) * 0.5;
 
         let mut hit = BreakerState::start(box_center, PointerButton::Right);
         assert!(
-            pin_targeted(&probe_for(&mut hit), port_center, &handles, top_left, rect),
+            pin_targeted(&probe_for(&mut hit), &wire, rect),
             "a breaker sample landing dead-center in the preview widget must register"
         );
 
         let mut miss = BreakerState::start(Vec2::new(1000.0, 1000.0), PointerButton::Right);
         assert!(
-            !pin_targeted(&probe_for(&mut miss), port_center, &handles, top_left, rect),
+            !pin_targeted(&probe_for(&mut miss), &wire, rect),
             "a breaker far from the glyph must not register"
         );
     }
@@ -528,18 +502,12 @@ mod tests {
         // this test exercises the bezier-crossing path, not the box-rect one.
         let port_center = Vec2::ZERO;
         let top_left = Vec2::new(300.0, 0.0);
-        let handles = cubic_handles(port_center, top_left);
+        let wire = Wire::data(port_center, top_left);
         let rect = box_rect_at(top_left);
-        let mid = cubic_point(port_center, handles.p1, handles.p2, top_left, 0.53);
+        let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
 
         let mut state = BreakerState::start(mid + Vec2::new(0.0, -80.0), PointerButton::Right);
         state.add_point(mid + Vec2::new(0.0, 80.0));
-        assert!(pin_targeted(
-            &probe_for(&mut state),
-            port_center,
-            &handles,
-            top_left,
-            rect
-        ));
+        assert!(pin_targeted(&probe_for(&mut state), &wire, rect));
     }
 }

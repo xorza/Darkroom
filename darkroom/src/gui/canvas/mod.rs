@@ -21,10 +21,12 @@ use aperture::{
 };
 use glam::Vec2;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 
 use crate::core::document::Viewport;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
+use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
@@ -33,7 +35,7 @@ use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::geometry::{CanvasGeometry, PortLayer};
 use crate::gui::canvas::graph_menu::GraphMenuUi;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
@@ -42,7 +44,7 @@ use crate::gui::canvas::pan_zoom::PanAnchor;
 use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
-use crate::gui::canvas::wire::WireEmphasis;
+use crate::gui::canvas::wire::{WireEmphasis, WirePass};
 use crate::gui::node::prepass::{
     emit_cache_evictions, emit_path_picks, emit_play_clicks, emit_port_dblclicks,
 };
@@ -358,17 +360,25 @@ impl GraphUI {
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
-                            connection_ui
-                                .draw(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
-                            // Subscription wires sit under the node bodies
-                            // like data wires (drawn before `draw_all`), and
-                            // share the breaker probe so they're cuttable too.
-                            subscription_ui
-                                .draw(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
-                            // Pin wires too — same z-order as every other
-                            // wire, so one passing behind an unrelated node
-                            // goes under it rather than drawing on top.
-                            pin_ui.draw_wire(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
+                            // All three wire renderers share these inputs, so
+                            // they're bundled once and reborrowed into each.
+                            // Subscription and pin wires sit under the node
+                            // bodies like data wires (drawn before
+                            // `draw_all`), and share the breaker probe so
+                            // they're all cuttable — one passing behind an
+                            // unrelated node goes under it rather than
+                            // drawing on top.
+                            let mut wires = WirePass {
+                                theme: ctx.theme,
+                                scene,
+                                geometry,
+                                cull,
+                                probe: &mut probe,
+                                emphasis: &emphasis,
+                            };
+                            connection_ui.draw(ui, &mut wires);
+                            subscription_ui.draw(ui, &mut wires);
+                            pin_ui.draw_wire(ui, &mut wires);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -469,6 +479,17 @@ fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
     None
 }
 
+/// Every `EventRef` of `node`, in declaration order — the emitter-glyph
+/// counterpart of [`node_ports`], shared by `CanvasGeometry::rebuild` and
+/// the subscription-wire scans so record order and scan order can't drift
+/// apart.
+pub(crate) fn node_events(node: &SceneNode) -> impl Iterator<Item = EventRef> + '_ {
+    (0..node.events.len as usize).map(|event_idx| EventRef {
+        node_id: node.id,
+        event_idx,
+    })
+}
+
 /// Every `PortRef` of `node` on the given side, in port order. Single
 /// source for the "iterate a node's ports by kind" loop that
 /// `CanvasGeometry::rebuild` and the connection scans all need, so scan order
@@ -499,6 +520,25 @@ fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
 fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
     ui.pointer_pos()
         .map(|p| to_world(p - canvas_origin, &scene.viewport))
+}
+
+/// The moving end of an in-flight wire preview: the snapped glyph's center
+/// once the gesture has a target, else the bare pointer. `None` on a frame
+/// where neither resolves (pointer off-window, or a snap target that hasn't
+/// measured yet) — the preview simply doesn't paint that frame. Shared by
+/// both wire controllers, which differ only in the glyph domain they snap
+/// within.
+fn free_end<K: Eq + Hash + Copy>(
+    ui: &mut Ui,
+    scene: &Scene,
+    canvas_origin: Vec2,
+    layer: &PortLayer<K>,
+    snap: Option<K>,
+) -> Option<Vec2> {
+    match snap {
+        Some(key) => layer.center(key),
+        None => pointer_world(ui, scene, canvas_origin),
+    }
 }
 
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes

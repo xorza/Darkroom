@@ -5,6 +5,7 @@ use scenarium::{InputPort, OutputPort, Subscription};
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;
 
@@ -40,13 +41,13 @@ impl BreakerProbe<'_> {
         }
     }
 
-    /// True if the active breaker polyline crosses the cubic `p0..p3`. A
-    /// no-op (false) when no breaker gesture is live, so wire renderers can
-    /// call it unconditionally before deciding whether to record a cut.
-    pub(super) fn crosses_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+    /// True if the active breaker polyline crosses `wire`. A no-op (false)
+    /// when no breaker gesture is live, so wire renderers can call it
+    /// unconditionally before deciding whether to record a cut.
+    pub(super) fn crosses_wire(&self, wire: &Wire) -> bool {
         self.state
             .as_deref()
-            .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3))
+            .is_some_and(|b| b.intersects_cubic(wire.p0, wire.p1, wire.p2, wire.p3))
     }
 
     /// True if the active breaker polyline crosses `rect`. A no-op (false)
