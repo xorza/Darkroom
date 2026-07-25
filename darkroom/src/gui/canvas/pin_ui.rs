@@ -21,8 +21,9 @@
 //! together, via the same [`crate::core::edit::intent::types::Intent::MoveSelection`]
 //! [`crate::gui::node::NodeUI`]'s node-body drag emits). Both commit
 //! continuously — every frame the drag is held, not just on release —
-//! exactly like a node body drag (see `NodeUI`'s `DragAnchor`/`prepass`),
-//! coalesced by `GestureKey::SelectionDrag` into one undo entry. Since the
+//! exactly like a node body drag — it *is* that drag, run through the shared
+//! [`crate::gui::canvas::drag_anchor::GroupDrag`] — and coalesced by
+//! `GestureKey::SelectionDrag` into one undo entry. Since the
 //! position lands in `Document` (and `Scene` rebuilds) before the record
 //! pass, there's no separate in-flight preview to paint — the widget's
 //! real position already reflects the live drag by the time
@@ -39,7 +40,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::drag_anchor::{GroupDragAnchor, selected_group_positions};
+use crate::gui::canvas::drag_anchor::{GroupDrag, selected_group_positions};
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_preview::{
@@ -126,24 +127,14 @@ pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiA
     )));
 }
 
-/// The pin (or brand-new pin) a drag latched onto, and every member moving
-/// with it — `key` is the grabbed pin's port. Shares its shape with
-/// `NodeUI`'s `DragAnchor` (see [`GroupDragAnchor`]): every later frame's
-/// committed position is `start + drag_delta`, not a running integration
-/// over the moving widget. `start_positions` includes the grabbed pin
-/// itself — the port center for a freshly created pin (so it "grows out of"
-/// the port circle as the user drags), or the widget's already-resolved
-/// position for a reposition (so it continues from where it visually sits
-/// instead of jumping). `widget_id` is captured at latch so later frames
-/// can `ui.response_for(widget_id)` directly: the port circle for a fresh
-/// pin, the preview widget for a reposition.
-type PinDragAnchor = GroupDragAnchor<OutputPort>;
-
 /// Pinned outputs' drag gesture plus this frame's resolved pin geometry.
 #[derive(Default, Debug)]
 pub(crate) struct PinUi {
-    /// Only one pin drag is ever in flight, so a single slot.
-    drag: Option<PinDragAnchor>,
+    /// The card drag, shared with `NodeUI`'s body drag: whichever kind of
+    /// member the pointer grabbed, the whole selection moves together.
+    /// Latched from either the port circle (a fresh pin) or the preview
+    /// widget (a reposition); [`GroupDrag`] takes it from there.
+    drag: GroupDrag,
     /// Every on-screen pin's geometry, refilled by [`Self::resolve`] once per
     /// frame and read by both halves of the pin draw.
     ///
@@ -178,26 +169,10 @@ impl PinUi {
         selected: &BTreeSet<ItemRef>,
         out: &mut Vec<Intent>,
     ) {
-        if let Some(anchor) = self.drag.clone() {
-            if !scene.nodes.contains_key(&anchor.key.node_id) {
-                // Stale: the node vanished mid-drag (breaker/undo). Drop
-                // rather than build an intent against a missing node.
-                self.drag = None;
-            } else {
-                let resp = ui.response_for(anchor.widget_id);
-                if resp.left.drag.started() {
-                    // A fresh gesture just replaced this one on the same
-                    // widget; drop rather than fire with stale start data.
-                    self.drag = None;
-                } else if let Some(delta) = resp.left.drag.delta() {
-                    out.push(anchor.resolve(delta, ItemRef::Pin(anchor.key)));
-                    return;
-                } else {
-                    // No delta means the drag isn't latched anymore
-                    // (release or pointer-left-surface).
-                    self.drag = None;
-                }
-            }
+        // A live drag owns the frame; only once it ends do the latch scans
+        // below get a look at this frame's presses.
+        if self.drag.advance(ui, scene, out) {
+            return;
         }
         if ui.modifiers().ctrl
             && let Some(port_ref) = scan_port_drag_start(geometry, scene)
@@ -215,11 +190,8 @@ impl PinUi {
             // is needed.
             if let Some(port_center) = geometry.ports.center(port_ref) {
                 out.push(seed_pin_position_intent(port, port_center));
-                self.drag = Some(PinDragAnchor {
-                    key: port,
-                    start_positions: vec![(ItemRef::Pin(port), port_center)],
-                    widget_id,
-                });
+                let key = ItemRef::Pin(port);
+                self.drag.latch(key, vec![(key, port_center)], widget_id);
             }
         } else if let Some((port, start_position)) = scan_widget_drag_start(ui, scene) {
             // Grabbing a pin already in the selection drags the whole
@@ -235,11 +207,7 @@ impl PinUi {
                 out.push(Intent::Raise { key });
                 vec![(key, start_position)]
             };
-            self.drag = Some(PinDragAnchor {
-                key: port,
-                start_positions,
-                widget_id: pin_preview_wid(port),
-            });
+            self.drag.latch(key, start_positions, pin_preview_wid(port));
         }
     }
 

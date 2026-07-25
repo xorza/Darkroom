@@ -11,7 +11,7 @@ use crate::core::document::PortRef;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::drag_anchor::GroupDragAnchor;
+use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
@@ -71,7 +71,10 @@ pub(crate) struct RecordCtx<'a> {
 /// from last-frame's responses.
 #[derive(Default, Debug)]
 pub(super) struct NodeUI {
-    drag_anchor: Option<DragAnchor>,
+    /// The body/title drag, latched in `draw_one` and stepped by
+    /// [`Self::prepass`]. Shared with `PinUi`'s card drag — grabbing either
+    /// kind moves the whole selection the same way.
+    drag: GroupDrag,
     /// The node kept recorded by the focus cull-exemption last frame.
     /// Focus clears during input, *before* the record, so on the blur
     /// frame `focus_within` is already false — but that frame is exactly
@@ -81,14 +84,6 @@ pub(super) struct NodeUI {
     /// aperture sweep the draft unseen.
     focus_kept_last: Option<NodeId>,
 }
-
-/// A node-body drag anchor: `key` is the grabbed node's id, always present
-/// in `start_positions`. Captured from the `drag_started` frame's
-/// `Response::widget_id()` so subsequent frames can `ui.response_for
-/// (widget_id)` *before* recording and bake the current `drag_delta` into
-/// `.position(...)` — letting the node paint at the cursor's location in
-/// Pass A directly, with no need to wait for Pass B's relayout to catch up.
-type DragAnchor = GroupDragAnchor<NodeId>;
 
 impl NodeUI {
     /// Record the widget tree of every scene item — node bodies and
@@ -156,14 +151,9 @@ impl NodeUI {
             self.draw_one(ui, rcx, n, probe, out);
         }
         self.focus_kept_last = focus_kept;
-        // Drop the anchor if its target node vanished from the graph
-        // (mid-drag delete). Without this, the slot would linger and
-        // could fire when a fresh node reused the id.
-        if let Some(a) = &self.drag_anchor
-            && !rcx.scene.nodes.contains_key(&a.key)
-        {
-            self.drag_anchor = None;
-        }
+        // Belt-and-braces against a node deleted mid-drag; `prepass` makes
+        // the same check before it can emit anything against it.
+        self.drag.drop_if_owner_gone(rcx.scene);
     }
 
     fn draw_one(
@@ -279,11 +269,11 @@ impl NodeUI {
                 click_intents(false, rcx.scene, ItemRef::Node(node.id), out);
                 vec![(ItemRef::Node(node.id), node.pos)]
             };
-            self.drag_anchor = Some(DragAnchor {
-                key: node.id,
+            self.drag.latch(
+                ItemRef::Node(node.id),
                 start_positions,
-                widget_id: if title_drag { title_wid } else { body_wid },
-            });
+                if title_drag { title_wid } else { body_wid },
+            );
         }
     }
 
@@ -294,45 +284,7 @@ impl NodeUI {
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
     pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-        // `key`/`widget_id` are `Copy`, so pull them out and drop the
-        // borrow — that lets the early returns below reassign
-        // `self.drag_anchor` without cloning the `start_*_positions` `Vec`s,
-        // which are only read in the success path (where the anchor isn't
-        // cleared and can be re-borrowed).
-        let Some(&DragAnchor { key, widget_id, .. }) = self.drag_anchor.as_ref() else {
-            return;
-        };
-        // Drop a stale anchor whose node was removed last frame (e.g.
-        // breaker swipe deleted the dragged node). Without this, the
-        // emitted `MoveSelection` would target a missing node and panic in
-        // `build_step`. `draw_all` also clears stale anchors, but only
-        // after this prepass runs.
-        if !scene.nodes.contains_key(&key) {
-            self.drag_anchor = None;
-            return;
-        }
-        let resp = ui.response_for(widget_id);
-        // `drag_started` on a still-active anchor means a *new* gesture
-        // just latched on the same widget — `record` will replace the
-        // anchor this frame; emitting now with the stale start positions
-        // makes the nodes snap to the previous gesture's start point.
-        if resp.left.drag.started() {
-            self.drag_anchor = None;
-            return;
-        }
-        // No `drag_delta` means the drag isn't latched anymore (release
-        // or pointer-left-surface). Drop the anchor so the next gesture
-        // starts fresh.
-        let Some(delta) = resp.left.drag.delta() else {
-            self.drag_anchor = None;
-            return;
-        };
-        // Aperture reports drag deltas in the widget's pre-transform frame,
-        // which is the same canvas-world coordinate space as node positions.
-        // Anchor still present (success path never cleared it); re-borrow
-        // to read the start positions without cloning.
-        let anchor = self.drag_anchor.as_ref().unwrap();
-        out.push(anchor.resolve(delta, ItemRef::Node(key)));
+        self.drag.advance(ui, scene, out);
     }
 }
 
