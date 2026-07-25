@@ -66,14 +66,15 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
         .gap(5.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            dot(ui, hue);
+            dot_cell(ui, hue);
             labeled_value(ui, theme, label, fmt_bytes(bytes));
         });
 }
 
 /// A small filled circle occupying `DOT`×`DOT` of layout so the label flows
-/// after it.
-fn dot(ui: &mut Ui, hue: Color) {
+/// after it. Named apart from `widgets::support::dot`, which emits a bare
+/// `Shape` and takes no layout space — same picture, opposite contract.
+fn dot_cell(ui: &mut Ui, hue: Color) {
     Panel::zstack()
         .id_salt("node_mem_dot")
         .size((Sizing::fixed(DOT), Sizing::fixed(DOT)))

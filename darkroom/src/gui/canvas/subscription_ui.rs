@@ -5,11 +5,11 @@ use scenarium::NodeId;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::free_end;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{Wire, WirePass};
-use crate::gui::canvas::{free_end, node_events};
 use crate::gui::node::port_color::event_color;
-use crate::gui::scene::Scene;
+use crate::gui::scene::{Scene, SceneNode};
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -244,7 +244,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 
 /// First emitter event glyph whose drag started this frame, or `None`.
 fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
-    let keys = scene.nodes.values().flat_map(node_events);
+    let keys = scene.nodes.values().flat_map(SceneNode::events);
     geometry.events.first_drag_started(keys)
 }
 
@@ -289,6 +289,6 @@ fn scan_emitter_target(
         .nodes
         .values()
         .filter(|n| n.id != subscriber)
-        .flat_map(node_events);
+        .flat_map(SceneNode::events);
     geometry.events.first_containing(pointer, candidates)
 }

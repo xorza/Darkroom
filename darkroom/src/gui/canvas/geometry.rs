@@ -7,7 +7,6 @@ use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
-use crate::gui::canvas::{node_events, node_ports};
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -91,33 +90,27 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
         self.live.get(&key)?.layout_center
     }
 
-    /// `true` when `pointer` (screen coords) falls inside this widget's
-    /// post-transform/clip rect.
-    pub(super) fn contains_pointer(&self, key: K, pointer: Vec2) -> bool {
-        self.live
-            .get(&key)
-            .and_then(|i| i.screen_rect)
-            .is_some_and(|r| r.contains(pointer))
-    }
-
-    /// First key in `keys` whose widget contains `pointer`, or `None` — the
-    /// "which glyph is the in-flight wire hovering" scan every snap-target
-    /// search needs, differing only in the candidate sequence it feeds in
-    /// and whatever acceptance test it then applies to the winner.
-    /// Geometrically at most one glyph sits under the pointer, so a
-    /// rejected winner means "no snap", not "keep looking". Sibling of
+    /// First key in `keys` whose widget contains `pointer` (screen coords),
+    /// or `None` — the "which glyph is the in-flight wire hovering" scan
+    /// every snap-target search needs, differing only in the candidate
+    /// sequence it feeds in and whatever acceptance test it then applies to
+    /// the winner. Geometrically at most one glyph sits under the pointer, so
+    /// a rejected winner means "no snap", not "keep looking". Sibling of
     /// [`Self::first_drag_started`].
+    ///
+    /// Tests the post-transform/clip rect, so it sees through aperture's
+    /// drag-capture hover suppression.
     pub(super) fn first_containing(
         &self,
         pointer: Vec2,
         mut keys: impl Iterator<Item = K>,
     ) -> Option<K> {
-        keys.find(|k| self.contains_pointer(*k, pointer))
-    }
-
-    /// `true` on the one-frame edge of a drag-start on this widget.
-    fn drag_started(&self, key: K) -> bool {
-        self.live.get(&key).is_some_and(|i| i.drag_started)
+        keys.find(|k| {
+            self.live
+                .get(k)
+                .and_then(|i| i.screen_rect)
+                .is_some_and(|r| r.contains(pointer))
+        })
     }
 
     /// First key in `keys` whose drag started this frame, or `None` — the
@@ -126,7 +119,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     /// in the key sequence it feeds in (a node's ports, its events, or its
     /// subscription pin).
     pub(super) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
-        keys.find(|k| self.drag_started(*k))
+        keys.find(|k| self.live.get(k).is_some_and(|i| i.drag_started))
     }
 
     /// `true` while a drag started on this widget is still live.
@@ -206,13 +199,13 @@ impl CanvasGeometry {
             }
             let node_min = node_rect.map(|r| r.min);
             for kind in [PortKind::Input, PortKind::Output] {
-                for port in node_ports(n, kind) {
+                for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
                     self.ports.record(port, r, node_min, n.pos);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
-            for ev in node_events(n) {
+            for ev in n.events() {
                 let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
                 self.events.record(ev, r, node_min, n.pos);
             }

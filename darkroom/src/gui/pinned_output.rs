@@ -6,7 +6,7 @@
 //! upload. Non-image values are formatted on receipt and dropped immediately.
 
 use std::collections::HashMap;
-use std::mem::take;
+use std::mem::{replace, take};
 
 use aperture::{Image as AptImage, ImageHandle, Ui};
 use glam::UVec2;
@@ -124,27 +124,32 @@ impl PinnedOutputStore {
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
-        let Some(content) = self.entries.remove(&port) else {
+        let Some(slot) = self.entries.get_mut(&port) else {
             return;
         };
-        let content = match content {
+        // `PinnedImage::materialize_full` consumes its receiver, so swap an
+        // empty placeholder in to take ownership — the entry never moves, and
+        // removing plus re-inserting cost two lookups and a possible rehash.
+        let content = replace(slot, StoredContent::Text(String::new()));
+        *slot = match content {
             StoredContent::Image(image) => StoredContent::Image(image.materialize_full(ui)),
             content => content,
         };
-        self.entries.insert(port, content);
     }
 }
 
 impl PinnedImage {
     fn materialize_full(self, ui: &Ui) -> Self {
         let full = match self.full {
-            FullImage::Deferred(value) => match prepare_image(&value, FULL_TEXTURE_DIM) {
-                Ok(prepared) => match ui.register_image(prepared.raster) {
-                    Ok(handle) => FullImage::Resident(handle),
-                    Err(error) => FullImage::Failed(error.to_string()),
-                },
-                Err(message) => FullImage::Failed(message),
-            },
+            FullImage::Deferred(value) => {
+                match as_image(&value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
+                    Ok(prepared) => match ui.register_image(prepared.raster) {
+                        Ok(handle) => FullImage::Resident(handle),
+                        Err(error) => FullImage::Failed(error.to_string()),
+                    },
+                    Err(message) => FullImage::Failed(message),
+                }
+            }
             full => full,
         };
         Self { full, ..self }
@@ -152,10 +157,17 @@ impl PinnedImage {
 }
 
 fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
-    if value.as_custom::<LensImage>().is_none() {
-        return StoredContent::Text(value.to_string());
-    }
-    match prepare_image(&value, PREVIEW_TEXTURE_DIM) {
+    // Scoped so the borrow ends before `value` moves into `Deferred` below.
+    // One downcast serves both the "is this an image at all?" test and the
+    // conversion — a non-image renders as text, an image that fails to
+    // convert as an error, and those are different outcomes.
+    let prepared = {
+        let Some(image) = value.as_custom::<LensImage>() else {
+            return StoredContent::Text(value.to_string());
+        };
+        prepare_image(image, PREVIEW_TEXTURE_DIM)
+    };
+    match prepared {
         Ok(prepared) => match ui.register_image(prepared.raster) {
             Ok(preview) => {
                 let source_bytes = value.ram_usage().total();
@@ -173,10 +185,14 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
     }
 }
 
-fn prepare_image(value: &DynamicValue, max_dim: u32) -> Result<PreparedImage, String> {
-    let image = value
+/// The image behind a pinned value, or the message to show in its place.
+fn as_image(value: &DynamicValue) -> Result<&LensImage, String> {
+    value
         .as_custom::<LensImage>()
-        .ok_or_else(|| "value is not an image".to_owned())?;
+        .ok_or_else(|| "value is not an image".to_owned())
+}
+
+fn prepare_image(image: &LensImage, max_dim: u32) -> Result<PreparedImage, String> {
     let cpu = image
         .buffer
         .make_cpu(&ProcessingContext::cpu_only())
@@ -265,7 +281,7 @@ mod tests {
         let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
         let raw = RawImage::new_with_data(desc, bytes.clone()).unwrap();
         let value = DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)));
-        let prepared = prepare_image(&value, FULL_TEXTURE_DIM).unwrap();
+        let prepared = prepare_image(as_image(&value).unwrap(), FULL_TEXTURE_DIM).unwrap();
         assert_eq!(prepared.native_size, UVec2::new(2, 1));
         assert_eq!(prepared.native_format, ColorFormat::RGBA_U8);
         assert_eq!(prepared.raster, AptImage::from_rgba8(2, 1, bytes));
@@ -273,14 +289,14 @@ mod tests {
         let desc = ImageDesc::new(1, 1, ColorFormat::RGB_F32);
         let raw = RawImage::new_with_data(desc, vec![0; 12]).unwrap();
         let value = DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)));
-        let prepared = prepare_image(&value, FULL_TEXTURE_DIM).unwrap();
+        let prepared = prepare_image(as_image(&value).unwrap(), FULL_TEXTURE_DIM).unwrap();
         assert_eq!(prepared.native_format, ColorFormat::RGB_F32);
         assert_eq!(
             prepared.raster,
             AptImage::from_rgba8(1, 1, vec![0, 0, 0, 255])
         );
 
-        let error = prepare_image(&DynamicValue::from(42i64), FULL_TEXTURE_DIM).unwrap_err();
+        let error = as_image(&DynamicValue::from(42i64)).unwrap_err();
         assert_eq!(error, "value is not an image");
     }
 

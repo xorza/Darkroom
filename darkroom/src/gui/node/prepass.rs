@@ -18,7 +18,6 @@ use crate::core::document::GraphRef;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
-use crate::gui::canvas::node_ports;
 use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
@@ -146,7 +145,7 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
                 _ => out.push(set_input(port, None)),
             }
         }
-        for port in node_ports(node, PortKind::Output) {
+        for port in node.ports(PortKind::Output) {
             if ui.response_for(port_circle_wid(port)).left.double_clicked() {
                 // An output may feed many inputs — clear each consumer.
                 for c in &scene.connections {

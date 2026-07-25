@@ -241,17 +241,22 @@ impl RuntimeHost {
     }
 
     /// Non-blocking drain of worker results posted since the last frame.
-    pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerReport> + '_ {
-        self.worker.drain()
+    ///
+    /// Owned rather than an iterator, matching [`Self::drain_script`]: both
+    /// callers write back through `self` while handling a report, so a
+    /// borrowing iterator would have to be collected at every call site
+    /// anyway.
+    pub(crate) fn drain_worker(&self) -> Vec<WorkerReport> {
+        self.worker.drain().collect()
     }
 
     /// Non-blocking drain of everything scripts have pushed since the last
     /// frame (empty when no listener is running).
     pub(crate) fn drain_script(&mut self) -> Vec<ScriptMessage> {
-        match &mut self.script {
-            Some(script) => script.drain(),
-            None => Vec::new(),
-        }
+        self.script
+            .as_mut()
+            .map(ScriptHost::drain)
+            .unwrap_or_default()
     }
 }
 

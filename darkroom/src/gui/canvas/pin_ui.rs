@@ -42,7 +42,6 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::{GroupDrag, selected_group_positions};
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_preview::{
     self, PREVIEW_HEIGHT, PREVIEW_WIDTH, pin_preview_wid, preview_image_wid, preview_title,
     refresh_badge_wid,
@@ -427,7 +426,7 @@ fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Port
         .nodes
         .values()
         .filter(|node| node.run_available)
-        .flat_map(|n| node_ports(n, PortKind::Output));
+        .flat_map(|n| n.ports(PortKind::Output));
     geometry.ports.first_drag_started(keys)
 }
 

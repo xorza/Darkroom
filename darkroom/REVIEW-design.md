@@ -315,14 +315,6 @@ edit.
 
 ## Low
 
-- [ ] **`Theme::port_radius` is `pub(crate)` but used once, inside its own
-  impl** — called only from `port_overhang`. Narrowest-visibility rule says
-  private.
-
-- [ ] **Two different `dot` helpers with the same name.**
-  `widgets/support.rs::dot` emits a `Shape`; `node/memory_row.rs::dot` builds a
-  `Panel` that occupies layout. Same name, different contract.
-
 - [ ] **The default dark theme makes one of `card_border`'s three tiers inert.**
   `dark::NODE_BORDER` is `Color::TRANSPARENT`, and `colors.node_border` has
   exactly one consumer — the resting arm of `Theme::card_border`. On the default
@@ -331,54 +323,9 @@ edit.
 - [ ] **`palette_struct!` is a declarative macro with one invocation**
   (`PaletteColors`). Its whole benefit is avoiding one duplicated field list.
 
-- [ ] **`GraphView`'s manual `PartialEq` hand-rolls `Iterator::eq`** — `len ==`
-  plus `zip(..).all(..)`, where the order-sensitivity it exists for is exactly
-  `iter().eq(other.iter())`.
-
-- [ ] **`materialize_full` removes and re-inserts a map entry to get an owned
-  value** — two hash lookups plus a potential rehash for what `get_mut` +
-  `mem::replace` does in place.
-
-- [ ] **`RuntimeHost`'s two drains have asymmetric shapes.** `drain_worker`
-  returns an iterator, `drain_script` returns a `Vec`, so both call sites
-  collect anyway.
-
-- [ ] **`prepare_content` probes the same downcast twice** — it checks
-  `value.as_custom::<LensImage>().is_none()` and then `prepare_image`
-  immediately re-does the same downcast.
-
-- [ ] **`build_duplicate_intent_for` asks for all bindings touching a node, then
-  discards the half it didn't want** — it iterates `graph.bindings_touching(old_id)`
-  and `continue`s on `port.node_id != old_id`, i.e. it wants only the node's own
-  inputs.
-
 - [ ] **`tui::run` and `headless::run` are the same loop** — tick → break on
   `quit` → `select!` on `notify`, differing only in the second `select!` arm
   (stdin line vs Ctrl-C) and the prompt.
-
-- [ ] **`node_ports` / `node_events` are free functions that want to be
-  methods.** Both take `&SceneNode` and return an iterator of that node's refs —
-  `SceneNode::ports(kind)` / `SceneNode::events()`. Five call sites import them
-  up from the canvas root into `geometry.rs`, `connection_ui.rs`, `pin_ui.rs`,
-  `subscription_ui.rs`, `node/prepass.rs`.
-
-- [ ] **Test-heavy files past the project's own split threshold** (`foo/{mod.rs,
-  tests.rs}` at >40% or >150 test lines): `canvas/pan_zoom.rs` (260 test lines /
-  46%), `canvas/connection_ui.rs` (185), `canvas/cull.rs` (119 / 64%).
-  Precedent exists throughout (`core/workspace/`, `core/edit/intent/`,
-  `aperture/src/layout/*/tests.rs`).
-
-- [ ] **`PortLayer`'s singular accessors exist only to serve their plural
-  wrappers.** `contains_pointer` has exactly one caller, `first_containing` five
-  lines below; `drag_started` has exactly one caller, `first_drag_started` nine
-  lines below. Visibility across the impl is also mixed with no stated rule:
-  `center` and `is_hovered` are `pub(crate)`, five others `pub(super)`, two
-  private.
-
-- [ ] **`scan_drag_start`'s "skip outputs while Cmd is held" is a filter inside a
-  nested `flat_map`** — `[Input, Output].into_iter().filter(move |&kind|
-  !(kind == Output && cmd_reserved_for_pin)).flat_map(..)` to express a two-case
-  choice of which port kinds to scan.
 
 - [ ] **`PinUi::apply` can pin an output without seeding its position.** It
   pushes `set_output_pinned(port_ref, true)` unconditionally, but the
@@ -386,9 +333,6 @@ edit.
   geometry.ports.center(port_ref)`. On the `None` branch the pin exists at the
   zero default the adjacent comment explicitly says it's avoiding, with no drag
   latched to place it.
-
-- [ ] **`PaletteEntry` has no `#[derive(Debug)]`** (`new_node_ui.rs`) — the only
-  type in the module without one, against the project's blanket rule.
 
 - [ ] **`background::build_tile` produces a hard-edged dot** — a binary
   `dx*dx + dy*dy <= r2` test with no coverage falloff, so the tile is aliased

@@ -76,7 +76,7 @@ impl TerminalSession {
     }
 
     fn drain_worker(&mut self) {
-        let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
+        let events = self.workspace.runtime.drain_worker();
         for report in events {
             match report {
                 WorkerReport::Status(status) => {

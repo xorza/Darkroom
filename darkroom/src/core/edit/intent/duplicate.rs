@@ -97,19 +97,22 @@ pub(crate) fn build_duplicate_intent_for(
         let Some(&new_id) = id_map.get(old_id) else {
             continue; // skipped above (vanished, or a boundary node)
         };
-        for entry in graph.bindings_touching(*old_id) {
-            let port = entry.port;
-            let binding = entry.binding;
-            if port.node_id != *old_id {
-                continue;
-            }
+        // This node's *own* inputs. `bindings_touching` would also hand back
+        // every binding that *reads* the node — cloned into a fresh `Vec`,
+        // then discarded by a `continue`. `InputPort` orders by
+        // `(node_id, port_idx)`, so a node's inputs sit contiguously.
+        let own_inputs = graph
+            .bindings
+            .range(InputPort::new(*old_id, 0)..)
+            .take_while(|(port, _)| port.node_id == *old_id);
+        for (port, binding) in own_inputs {
             let new_binding = match binding {
                 Binding::Bind(src) => match id_map.get(&src.node_id) {
                     Some(&new_src) => Binding::bind(new_src, src.port_idx),
-                    None if include_incoming => Binding::Bind(src),
+                    None if include_incoming => Binding::Bind(*src),
                     None => continue,
                 },
-                other => other,
+                other => other.clone(),
             };
             bindings.push((InputPort::new(new_id, port.port_idx), new_binding));
         }

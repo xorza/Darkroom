@@ -715,7 +715,7 @@ impl Theme {
     /// a method instead of a stored field so the two can't drift if
     /// someone bumps `port_size` and forgets the radius.
     #[inline]
-    pub(crate) fn port_radius(&self) -> f32 {
+    fn port_radius(&self) -> f32 {
         self.port_size * 0.5
     }
 

@@ -13,7 +13,8 @@ use scenarium::{
 use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, StaticValue};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
-use crate::core::document::{GraphView, ItemRef, Viewport};
+use crate::core::document::{GraphView, ItemRef, PortKind, PortRef, Viewport};
+use crate::gui::EventRef;
 use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug, Default)]
@@ -204,6 +205,32 @@ pub(crate) struct SceneNode {
 }
 
 impl SceneNode {
+    /// Every `PortRef` on the given side, in port order. Single source for
+    /// the "iterate a node's ports by kind" loop `CanvasGeometry::rebuild`
+    /// and the connection scans all need, so scan order and paint order
+    /// can't drift apart.
+    pub(crate) fn ports(&self, kind: PortKind) -> impl Iterator<Item = PortRef> + '_ {
+        let span = match kind {
+            PortKind::Input => self.inputs,
+            PortKind::Output => self.outputs,
+        };
+        (0..span.len as usize).map(move |port_idx| PortRef {
+            node_id: self.id,
+            kind,
+            port_idx,
+        })
+    }
+
+    /// Every `EventRef`, in declaration order — the emitter-glyph
+    /// counterpart of [`Self::ports`], shared by `CanvasGeometry::rebuild`
+    /// and the subscription-wire scans for the same reason.
+    pub(crate) fn events(&self) -> impl Iterator<Item = EventRef> + '_ {
+        (0..self.events.len as usize).map(|event_idx| EventRef {
+            node_id: self.id,
+            event_idx,
+        })
+    }
+
     fn executable_kind(&self) -> bool {
         !self.boundary && !self.missing && self.graph.is_none()
     }
