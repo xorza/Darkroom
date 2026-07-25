@@ -159,18 +159,24 @@ impl ExecutionProgram {
         node_idx
     }
 
-    /// Adopt the flattened node set, assigning dense indices in id order so the
-    /// compiled artifact is deterministic regardless of flatten's walk. Drains
-    /// `e_nodes` (sorting it in place) so the flattener keeps the allocation for
-    /// the next compile.
-    pub(crate) fn adopt_nodes(&mut self, e_nodes: &mut Vec<(ExecutionNodeId, ExecutionNode)>) {
+    /// Adopt the flattened node set, assigning dense indices in the order
+    /// received. Callers hand over an id-sorted sequence — the debug assert
+    /// below is the contract — so the compiled artifact is deterministic
+    /// regardless of flatten's walk order.
+    pub(crate) fn adopt_nodes(
+        &mut self,
+        e_nodes: impl IntoIterator<Item = (ExecutionNodeId, ExecutionNode)>,
+    ) {
         self.e_nodes.clear();
         self.e_node_ids.clear();
         self.e_node_index.clear();
-        e_nodes.sort_unstable_by_key(|(id, _)| *id);
-        for (id, e_node) in e_nodes.drain(..) {
+        for (id, e_node) in e_nodes {
             self.push(id, e_node);
         }
+        debug_assert!(
+            self.e_node_ids.iter().is_sorted(),
+            "dense indices must be assigned in id order"
+        );
     }
 
     /// Intern flatten's id-based binding fixups into dense [`OutputAddr`]s —
