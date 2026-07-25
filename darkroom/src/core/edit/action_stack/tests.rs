@@ -556,7 +556,7 @@ fn rename_boundary_port_dropped_off_local_target_or_oob() {
             &doc,
             GraphRef::Main,
         )
-        .is_none()
+        .is_err()
     );
     // Out-of-range index on the right target also drops.
     assert!(
@@ -569,7 +569,7 @@ fn rename_boundary_port_dropped_off_local_target_or_oob() {
             &doc,
             target,
         )
-        .is_none()
+        .is_err()
     );
 }
 
@@ -672,7 +672,7 @@ fn add_boundary_port_applies_and_reverts_on_both_sides() {
             &doc,
             GraphRef::Main,
         )
-        .is_none()
+        .is_err()
     );
 }
 
@@ -759,7 +759,7 @@ fn remove_boundary_port_round_trips_severed_wiring() {
             &doc,
             target,
         )
-        .is_none()
+        .is_err()
     );
     // A pinned boundary output refuses removal (unpin first).
     doc.graph
@@ -777,6 +777,6 @@ fn remove_boundary_port_round_trips_severed_wiring() {
             &doc,
             target,
         )
-        .is_none()
+        .is_err()
     );
 }

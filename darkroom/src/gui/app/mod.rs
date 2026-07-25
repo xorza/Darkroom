@@ -165,8 +165,15 @@ impl App {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    self.editor
+                    let rejected = self
+                        .editor
                         .apply_external_intents(&mut self.workspace.open, intents);
+                    for reason in rejected {
+                        self.workspace
+                            .runtime
+                            .status
+                            .error(format!("script edit refused: {reason}"));
+                    }
                 }
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch

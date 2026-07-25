@@ -2,23 +2,38 @@
 //! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
 //! intent pipeline. Pure: never writes to the graph.
 
-use scenarium::{Binding, Graph, GraphDef, GraphId, GraphLink, Node, NodeKind, NodeSearch};
+use std::collections::HashSet;
+
+use scenarium::{Binding, Graph, GraphDef, GraphId, GraphLink, Node, NodeKind};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
 use crate::core::edit::intent::types::{
-    DetachedBoundaryPort, DocStep, GestureKey, GraphStep, Intent, NodeProperty, UndoStep,
+    DetachedBoundaryPort, DocStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
 };
+use crate::core::edit::intent::validate;
 
-/// Read pre-mutation state from `doc` and fold it with `intent`
-/// into a complete [`UndoStep`]. Pure — does not write to the graph.
-/// Returns `None` when the intent targets a node that no longer exists
-/// (e.g. a `RemoveNode`/`SetInput` whose anchor lingered one frame past a
-/// `RemoveNode` applied earlier in the same frame) or carries an invalid
-/// viewport. Callers should treat a `None` result as "invalid or stale intent,
-/// drop it". (`MoveSelection` instead skips vanished nodes/pins individually
-/// rather than dropping the whole batch.)
-pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
+/// Read pre-mutation state from `doc` and fold it with `intent` into a
+/// complete [`UndoStep`]. Pure — does not write to the graph.
+///
+/// This is the only gate between a caller and the document, so each arm
+/// establishes the full precondition set its `apply` half assumes: an `Ok`
+/// result is a proof that applying the step trips no assert on the way and
+/// leaves the document passing [`Document::validate`]. Widgets only ever
+/// violate the staleness half — they read the identities they emit out of
+/// the live document — but a script's decoded payload reaches this same
+/// entry with arbitrary contents.
+///
+/// [`Refusal::Quiet`] covers what a gesture spanning frames does normally:
+/// the anchor node vanished, or the edit is refused by design.
+/// [`Refusal::Invalid`] means the payload could never have applied.
+/// (`MoveSelection` and `SetSelection` instead drop vanished members
+/// individually rather than refusing the whole intent.)
+pub(crate) fn build_step(
+    intent: Intent,
+    doc: &Document,
+    target: GraphRef,
+) -> Result<UndoStep, Refusal> {
     // Document-global intents don't resolve a graph scope.
     if let Intent::Dock(op) = intent {
         let key = match op {
@@ -32,7 +47,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         to.apply(op);
         // Refused/degenerate ops leave `to == from`; the is_noop filter
         // drops the step.
-        return Some(UndoStep::Doc(DocStep::Dock {
+        return Ok(UndoStep::Doc(DocStep::Dock {
             from,
             to,
             key,
@@ -40,17 +55,26 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }));
     }
     if let Intent::RenameGraph { id, to } = intent {
-        let from = doc.graph.find_graph(id)?.interface.name.clone();
-        return Some(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
+        let from = doc
+            .graph
+            .find_graph(id)
+            .ok_or(Refusal::Quiet)?
+            .interface
+            .name
+            .clone();
+        return Ok(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
     }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
         // Boundary ports only exist in a graph interior; the graph is
         // the active `Local` target's. Drop the rename otherwise.
         let GraphRef::Local(graph_id) = target else {
-            return None;
+            return Err(Refusal::Quiet);
         };
-        let from = doc.boundary_port_name(graph_id, side, idx)?.to_owned();
-        return Some(UndoStep::Doc(DocStep::RenameBoundaryPort {
+        let from = doc
+            .boundary_port_name(graph_id, side, idx)
+            .ok_or(Refusal::Quiet)?
+            .to_owned();
+        return Ok(UndoStep::Doc(DocStep::RenameBoundaryPort {
             graph_id,
             side,
             idx,
@@ -65,14 +89,18 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
     } = intent
     {
         let GraphRef::Local(graph_id) = target else {
-            return None;
+            return Err(Refusal::Quiet);
         };
-        let interface = &doc.graph.find_graph(graph_id)?.interface;
+        let interface = &doc
+            .graph
+            .find_graph(graph_id)
+            .ok_or(Refusal::Quiet)?
+            .interface;
         let idx = match side {
             BoundarySide::Input => interface.inputs.len(),
             BoundarySide::Output => interface.outputs.len(),
         };
-        return Some(UndoStep::Doc(DocStep::AddBoundaryPort {
+        return Ok(UndoStep::Doc(DocStep::AddBoundaryPort {
             graph_id,
             side,
             idx,
@@ -82,12 +110,15 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
     }
     if let Intent::RemoveBoundaryPort { side, idx } = intent {
         let GraphRef::Local(graph_id) = target else {
-            return None;
+            return Err(Refusal::Quiet);
         };
         // Boundary snapshot/detach are *parent* methods (they sever the
         // owner's instance bindings too), so resolve the def's parent —
         // the root itself for a top-level def, an ancestor def otherwise.
-        let parent = doc.graph.find_graph_parent(graph_id)?;
+        let parent = doc
+            .graph
+            .find_graph_parent(graph_id)
+            .ok_or(Refusal::Quiet)?;
         let detached = match side {
             BoundarySide::Input => parent
                 .snapshot_graph_input(graph_id, idx)
@@ -95,7 +126,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             BoundarySide::Output => parent
                 .snapshot_graph_output(graph_id, idx)
                 .map(DetachedBoundaryPort::Output),
-        }?;
+        }
+        .ok_or(Refusal::Quiet)?;
         // A pinned port keeps a preview widget in some GraphView; refuse
         // the removal (unpin first) rather than reconcile view items.
         let pinned = match &detached {
@@ -103,14 +135,14 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             DetachedBoundaryPort::Output(output) => !output.pins.is_empty(),
         };
         if pinned {
-            return None;
+            return Err(Refusal::Quiet);
         }
-        return Some(UndoStep::Doc(DocStep::RemoveBoundaryPort {
+        return Ok(UndoStep::Doc(DocStep::RemoveBoundaryPort {
             graph_id,
             detached,
         }));
     }
-    let EditScopeRef { graph, view } = doc.scope(target)?;
+    let EditScopeRef { graph, view } = doc.scope(target).ok_or(Refusal::Quiet)?;
     let step = match intent {
         Intent::Dock(_)
         | Intent::RenameBoundaryPort { .. }
@@ -126,7 +158,20 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             graph: nested_graph,
             bindings,
         } => {
+            let mut added = HashSet::new();
+            validate::fresh_node_id(doc, node_id, &mut added)?;
+            validate::finite_position(pos, "AddNode")?;
+            if let Some((graph_id, definition)) = &nested_graph {
+                validate::fresh_local_graph(doc, *graph_id, definition)?;
+            }
             let nested_graph = reuse_local_graph(graph, &mut node, nested_graph);
+            validate::insertable_kind(
+                graph,
+                target,
+                &node,
+                nested_graph.as_ref().map(|(id, _)| *id),
+            )?;
+            validate::insertable_bindings(graph, &added, &bindings)?;
             GraphStep::AddNode {
                 pos,
                 node_id,
@@ -140,6 +185,29 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             bindings,
             subscriptions,
         } => {
+            let mut added = HashSet::with_capacity(nodes.len());
+            for (pos, node_id, node) in &nodes {
+                validate::fresh_node_id(doc, *node_id, &mut added)?;
+                validate::finite_position(*pos, "DuplicateNodes")?;
+                // A clone shares its original's local definition rather
+                // than bringing one, so there's never a pending graph.
+                validate::insertable_kind(graph, target, node, None)?;
+            }
+            validate::insertable_bindings(graph, &added, &bindings)?;
+            for subscription in &subscriptions {
+                validate::present_node(
+                    graph,
+                    &added,
+                    subscription.emitter,
+                    "subscription emitter",
+                )?;
+                validate::present_node(
+                    graph,
+                    &added,
+                    subscription.subscriber,
+                    "subscription subscriber",
+                )?;
+            }
             let to_selection = nodes
                 .iter()
                 .map(|(_, node_id, _)| ItemRef::Node(*node_id))
@@ -153,7 +221,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::RemoveNode { node_id } => {
-            let detached = graph.snapshot_node(node_id)?;
+            validate::live_node(graph, node_id, "RemoveNode")?;
+            let detached = graph.snapshot_node(node_id).ok_or(Refusal::Quiet)?;
             // The node's own item plus its pinned outputs', each with its
             // paint-stack slot — ascending by construction (enumerate).
             let item_placements = view
@@ -176,33 +245,43 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::MoveSelection { grabbed, moves } => {
-            // Drag-sourced (spans frames): a member whose item vanished
-            // mid-gesture (node removed, port unpinned) drops quietly.
-            let moves = moves
-                .into_iter()
-                .filter_map(|(key, to)| {
-                    let from = *view.item_placements.get(&key)?;
-                    Some((key, from, to))
-                })
-                .collect();
-            GraphStep::MoveSelection { grabbed, moves }
+            let mut placed = Vec::with_capacity(moves.len());
+            for (key, to) in moves {
+                validate::finite_position(to, "MoveSelection")?;
+                // Drag-sourced (spans frames): a member whose item vanished
+                // mid-gesture (node removed, port unpinned) drops quietly.
+                let Some(&from) = view.item_placements.get(&key) else {
+                    continue;
+                };
+                placed.push((key, from, to));
+            }
+            GraphStep::MoveSelection {
+                grabbed,
+                moves: placed,
+            }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
-            from: graph.find(node_id, NodeSearch::TopLevel)?.name.clone(),
+            from: validate::live_node(graph, node_id, "RenameNode")?
+                .name
+                .clone(),
             node_id,
             to,
         },
         Intent::SetInput { input, to } => {
-            graph.find(input.node_id, NodeSearch::TopLevel)?;
-            // Reject a bind that would close a data cycle: the planner
-            // rejects a cyclic graph outright (`Error::CycleDetected`), so
-            // the edit must never land. The GUI snap filter normally stops
-            // this earlier; this is the authoritative guard covering every
-            // binding path, including any that bypass the canvas.
-            if let Some(Binding::Bind(src)) = &to
-                && graph.would_create_cycle(src.node_id, input.node_id)
-            {
-                return None;
+            validate::live_node(graph, input.node_id, "SetInput destination")?;
+            if let Some(Binding::Bind(src)) = &to {
+                // A wire held across frames can outlive its producer, and a
+                // script can name one that was never there; either way the
+                // bind would leave the graph with a dangling edge.
+                validate::live_node(graph, src.node_id, "SetInput producer")?;
+                // Reject a bind that would close a data cycle: the planner
+                // rejects a cyclic graph outright (`Error::CycleDetected`), so
+                // the edit must never land. The GUI snap filter normally stops
+                // this earlier; this is the authoritative guard covering every
+                // binding path, including any that bypass the canvas.
+                if graph.would_create_cycle(src.node_id, input.node_id) {
+                    return Err(Refusal::Quiet);
+                }
             }
             GraphStep::SetInput {
                 from: graph.bindings.get(&input).cloned(),
@@ -212,10 +291,21 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::SetSelection { to } => GraphStep::SetSelection {
             from: view.selected.clone(),
-            to,
+            // The rubber band snapshots identities when the drag starts, so
+            // an interleaved undo can remove one before release; a script can
+            // name an item that never existed. Keep the members that still
+            // have a widget rather than recording a selection the view
+            // can't render.
+            to: to
+                .into_iter()
+                .filter(|key| view.item_placements.contains_key(key))
+                .collect(),
         },
         Intent::Raise { key } => {
-            let from_index = view.item_placements.get_index_of(&key)?;
+            let from_index = view
+                .item_placements
+                .get_index_of(&key)
+                .ok_or(Refusal::Quiet)?;
             // Top of the stack is the last slot — painted last, drawn in front.
             let to_index = view.item_placements.len() - 1;
             GraphStep::Raise {
@@ -225,7 +315,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::SetNodeProperty { node_id, to } => {
-            let node = graph.find(node_id, NodeSearch::TopLevel)?;
+            let node = validate::live_node(graph, node_id, "SetNodeProperty")?;
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
@@ -235,12 +325,16 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::DetachGraph { node_id } => {
             let NodeKind::Graph(GraphLink::Local(from_id)) =
-                graph.find(node_id, NodeSearch::TopLevel)?.kind
+                validate::live_node(graph, node_id, "DetachGraph")?.kind
             else {
-                return None; // not a local graph instance — nothing to fork
+                return Err(Refusal::Quiet); // not a local graph instance — nothing to fork
             };
             let to_id = GraphId::unique();
-            let mut copy = graph.graphs.get(&from_id)?.clone_mapped();
+            let mut copy = graph
+                .graphs
+                .get(&from_id)
+                .ok_or(Refusal::Quiet)?
+                .clone_mapped();
             copy.interface.origin = None;
             GraphStep::DetachGraph {
                 node_id,
@@ -251,7 +345,9 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::SetViewport { to } => {
             if !to.is_valid() {
-                return None;
+                return Err(Refusal::Invalid(
+                    "viewport needs finite pan and positive finite zoom".to_owned(),
+                ));
             }
             GraphStep::SetViewport {
                 from: view.viewport,
@@ -264,13 +360,18 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             subscriber,
             subscribe,
         } => {
+            if emitter.is_nil() || subscriber.is_nil() {
+                return Err(Refusal::Invalid(
+                    "SetSubscription carries a nil node id".to_owned(),
+                ));
+            }
             // A subscribe needs both endpoints present; a stale drag onto a
             // vanished node drops rather than recording a dangling subscription.
             // An unsubscribe of a vanished node no-ops naturally (nothing is
             // subscribed → from == to == false), so it needs no existence check.
             if subscribe {
-                graph.find(emitter, NodeSearch::TopLevel)?;
-                graph.find(subscriber, NodeSearch::TopLevel)?;
+                validate::live_node(graph, emitter, "SetSubscription emitter")?;
+                validate::live_node(graph, subscriber, "SetSubscription subscriber")?;
             }
             GraphStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
@@ -281,12 +382,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::SetOutputPinned { output, pinned } => {
-            // From the GUI this only ever targets a port rendered in the
-            // current frame's Scene — but `core::script::register_mutations`
-            // also reaches this variant directly, unchecked, from a script's
-            // generic `apply()`/`apply_all()`, so a stale or bogus `node_id`
-            // must drop like every other intent here, not assert.
-            graph.find(output.node_id, NodeSearch::TopLevel)?;
+            validate::live_node(graph, output.node_id, "SetOutputPinned")?;
             let key = ItemRef::Pin(output);
             // Present iff currently pinned; captured so reverting an unpin
             // puts the widget back in its exact paint-stack slot.
@@ -303,7 +399,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
     };
-    Some(UndoStep::Graph(step))
+    Ok(UndoStep::Graph(step))
 }
 
 /// Reuse an existing local copy when it has the same shared origin.

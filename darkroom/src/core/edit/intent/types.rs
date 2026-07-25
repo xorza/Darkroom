@@ -1,5 +1,6 @@
 //! The [`Intent`] / [`UndoStep`] / [`GraphStep`] / [`DocStep`] /
-//! [`GestureKey`] type model.
+//! [`GestureKey`] type model, plus the [`Refusal`] a commit answers with
+//! when no step comes out of it.
 //!
 //! An [`Intent`] is "what the caller wants the graph to look like
 //! after"; it carries no history. To make the change reversible, we
@@ -33,6 +34,25 @@ pub(crate) enum NodeProperty {
     RuntimeCache(CacheMode),
 }
 
+/// Why an intent never became an [`UndoStep`]. The split is by who is at
+/// fault.
+///
+/// [`Quiet`](Self::Quiet) is the ordinary outcome of input that spans
+/// frames: the item the intent named is gone, the change is already in
+/// place, or the edit is refused by design. Callers drop it without a word.
+///
+/// [`Invalid`](Self::Invalid) means the payload could never have applied —
+/// a nil or colliding identity, a non-finite position, a link to state the
+/// document doesn't hold. No widget can build one, because widgets read the
+/// identities they emit out of the live document; a script decoded straight
+/// into an `Intent` can (see `core::script::register_mutations`), so the
+/// reason travels back to its caller instead of vanishing.
+#[derive(Debug)]
+pub(crate) enum Refusal {
+    Quiet,
+    Invalid(String),
+}
+
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous
 /// Y at commit time via
@@ -47,7 +67,9 @@ pub(crate) enum NodeProperty {
 ///   3. add an arm to
 ///      [`build_step`](crate::core::edit::intent::build::build_step) (read
 ///      `from` from `&Document` and combine with the intent's `to` into a
-///      complete step),
+///      complete step) — and establish there *every* precondition the
+///      variant's `apply` half assumes, since that arm is the only gate
+///      between an untrusted payload and the document,
 ///   4. add an arm to the matching `apply_*` / `revert_*` fn in
 ///      [`crate::core::edit::intent::apply`],
 ///   5. add arms to `UndoStep::is_noop` and `UndoStep::requires_relayout` in
@@ -202,9 +224,9 @@ pub(crate) enum Intent {
     /// computed and read even with no in-graph consumer (e.g. a GUI
     /// inspector reading it live). Idempotent — a no-op when the flag
     /// already matches. Cmd(/Ctrl)+click on an output port circle, or its
-    /// context-menu toggle — but also reachable unchecked from a script's
-    /// generic `apply()` (see `core::script::register_mutations`), so a
-    /// stale or bogus `node_id` must drop quietly, not crash.
+    /// context-menu toggle — but also reachable from a script's generic
+    /// `apply()` (see `core::script::register_mutations`), so `build_step`
+    /// resolves `node_id` rather than trusting it.
     SetOutputPinned {
         output: OutputPort,
         pinned: bool,

@@ -18,7 +18,7 @@ use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::duplicate::{
     build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::{Intent, Refusal};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
@@ -39,6 +39,30 @@ mod shortcuts;
 /// memory rather than entry count — a single large edit can't be
 /// undone away, but the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
+
+/// What one `Editor::commit_batch` did: whether anything applied, plus the
+/// reason for each intent the edit layer refused as malformed. `rejected`
+/// stays empty for every widget-sourced batch — widgets read the identities
+/// they emit out of the live document, so the worst they produce is a stale
+/// reference, which refuses quietly.
+#[derive(Debug)]
+struct BatchOutcome {
+    applied: bool,
+    rejected: Vec<String>,
+}
+
+impl BatchOutcome {
+    /// Log the malformed intents this batch dropped. The widget-sourced
+    /// paths use this: a rejection there is our own bug, with no user
+    /// action to suggest, so the structured log is the whole record. The
+    /// script path instead hands `rejected` to `StatusLog`, so the remote
+    /// client learns its request was refused.
+    fn warn_rejected(&self) {
+        for reason in &self.rejected {
+            tracing::warn!(target: "darkroom::edit", "rejected intent: {reason}");
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct Editor {
@@ -116,7 +140,7 @@ impl Editor {
     /// drain.
     pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, [intent]);
+        self.commit_batch(open, target, [intent]).warn_rejected();
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -124,36 +148,49 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(super) fn apply_external_intents(&mut self, open: &mut OpenDocument, intents: Vec<Intent>) {
+    ///
+    /// Returns the reason for each intent the edit layer refused as
+    /// malformed, for the caller to surface. A script's payload is decoded
+    /// straight into an [`Intent`], so a bad one has to answer back rather
+    /// than vanish the way a stale widget intent does.
+    pub(super) fn apply_external_intents(
+        &mut self,
+        open: &mut OpenDocument,
+        intents: Vec<Intent>,
+    ) -> Vec<String> {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, intents);
+        self.commit_batch(open, target, intents).rejected
     }
 
     /// Build, apply, and record `intents` against `target` as one undo
-    /// entry, accumulating the frame's relayout/reconcile signals. Returns
-    /// whether anything applied. Shared core of [`Self::apply_edit`],
-    /// [`Self::apply_external_intents`], and [`Self::drain_intents`]: no-op
-    /// and stale intents (anchor node already gone) are dropped per-intent,
-    /// and an empty batch records nothing.
+    /// entry, accumulating the frame's relayout/reconcile signals. Shared
+    /// core of [`Self::apply_edit`], [`Self::apply_external_intents`], and
+    /// [`Self::drain_intents`]: no-op and stale intents (anchor node already
+    /// gone) are dropped per-intent, and an empty batch records nothing.
     fn commit_batch(
         &mut self,
         open: &mut OpenDocument,
         target: GraphRef,
         intents: impl IntoIterator<Item = Intent>,
-    ) -> bool {
+    ) -> BatchOutcome {
         let mut batch = Vec::new();
+        let mut rejected = Vec::new();
         for intent in intents {
-            if let Some(step) = commit_intent(intent, &mut open.document, target) {
-                self.needs_relayout |= step.requires_relayout();
-                self.dirty |= step.dirties_document();
-                batch.push(step);
+            match commit_intent(intent, &mut open.document, target) {
+                Ok(step) => {
+                    self.needs_relayout |= step.requires_relayout();
+                    self.dirty |= step.dirties_document();
+                    batch.push(step);
+                }
+                Err(Refusal::Quiet) => {}
+                Err(Refusal::Invalid(reason)) => rejected.push(reason),
             }
         }
         let applied = !batch.is_empty();
         if applied {
             self.action_stack.push_current(target, &batch);
         }
-        applied
+        BatchOutcome { applied, rejected }
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime
@@ -385,7 +422,9 @@ impl Editor {
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
-        if self.commit_batch(open, target, scratch.drain(..)) {
+        let outcome = self.commit_batch(open, target, scratch.drain(..));
+        outcome.warn_rejected();
+        if outcome.applied {
             self.scene_dirty = true;
         }
         self.intents = scratch;

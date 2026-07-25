@@ -60,17 +60,45 @@ fn apply_add_node_seeds_initial_bindings() {
 }
 
 #[test]
-fn apply_intents_drops_stale_intent() {
+fn apply_intents_drops_stale_intents_silently_but_reports_malformed_ones() {
     let mut doc = empty_document();
-    // RemoveNode targeting a node that isn't in the graph: `build_step`
-    // returns None, so it's dropped without touching the document.
-    apply_intents(
+    // RemoveNode targeting a node that isn't in the graph: ordinary
+    // staleness, so it's dropped without touching the document *and*
+    // without a word — the same drop widgets rely on every frame.
+    let reported = apply_intents(
         &mut doc,
         vec![Intent::RemoveNode {
             node_id: NodeId::unique(),
         }],
     );
     assert_eq!(doc.graph.len(), 0);
+    assert!(reported.is_empty(), "a stale intent refuses quietly");
+
+    // A payload that could never have applied answers back instead: a
+    // script is the only thing that can build one, and it needs to learn
+    // its request was refused rather than watch it vanish.
+    let live = doc.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+    doc.main_view
+        .item_placements
+        .insert(ItemRef::Node(live), Vec2::ZERO);
+    let reported = apply_intents(
+        &mut doc,
+        vec![Intent::AddNode {
+            pos: Vec2::ZERO,
+            node_id: live,
+            node: Node::new(NodeKind::Func(FuncId::unique())),
+            graph: None,
+            bindings: vec![],
+        }],
+    );
+    assert_eq!(doc.graph.len(), 1, "the collision never reached the graph");
+    assert_eq!(reported.len(), 1, "the caller is told once");
+    assert!(
+        reported[0].contains("already exists"),
+        "the reason names the collision: {}",
+        reported[0]
+    );
+    doc.validate().expect("document survives a refused batch");
 }
 
 #[test]
