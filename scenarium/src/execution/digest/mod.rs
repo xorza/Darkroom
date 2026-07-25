@@ -283,7 +283,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
                 // is set; a `None` taints this node.
-                let producer = cache.slots[&program.e_node_ids[addr.node_idx]].current_digest?;
+                let producer = cache.slots[addr.node_idx].current_digest?;
                 hasher
                     .write_bytes(&[2])
                     .write_digest(&port_digest_of(producer, addr.port_idx as usize));
@@ -293,7 +293,7 @@ pub(crate) fn node_digest(
                 // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
                 if input.stamps_fs_path {
-                    hash_bound_fs_path(&mut hasher, program, cache, resource_stamps, addr)?;
+                    hash_bound_fs_path(&mut hasher, cache, resource_stamps, addr)?;
                 }
             }
         }
@@ -311,12 +311,11 @@ pub(crate) fn node_digest(
 /// value folds a distinct marker instead.
 fn hash_bound_fs_path(
     hasher: &mut DigestHasher,
-    program: &ExecutionProgram,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
     addr: &OutputAddr,
 ) -> Option<()> {
-    let value = cache.slots[&program.e_node_ids[addr.node_idx]]
+    let value = cache.slots[addr.node_idx]
         .current_output_values()?
         .get(addr.port_idx as usize)?;
     match value.as_static() {

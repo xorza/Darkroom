@@ -56,8 +56,6 @@ pub(crate) enum CompiledGraphValidationError {
 pub(crate) enum InstalledGraphValidationError {
     #[error("runtime cache node set does not match the compiled program")]
     NodeSet,
-    #[error("runtime cache is missing node {e_node_id:?}")]
-    MissingNode { e_node_id: ExecutionNodeId },
     #[error("runtime cache output arity does not match node {e_node_id:?}")]
     OutputArity { e_node_id: ExecutionNodeId },
     #[error("runtime cache state owner does not match node {e_node_id:?}")]
@@ -94,8 +92,8 @@ impl CompiledGraph {
     pub(crate) fn validate(&self, library: &Library) -> Result<(), CompiledGraphValidationError> {
         let program = &self.program;
         self.flatten_map
-            .validate(program.e_node_ids.values.iter().copied())?;
-        for (e_node_id, e_node) in program.e_node_ids.values.iter().zip(&program.e_nodes) {
+            .validate(program.e_node_ids.iter().copied())?;
+        for (e_node_id, e_node) in program.e_node_ids.iter().zip(&program.e_nodes) {
             if e_node.func_id.is_nil() {
                 return Err(CompiledGraphValidationError::NilFuncId {
                     e_node_id: *e_node_id,
@@ -171,8 +169,8 @@ impl CompiledGraph {
             .expect("compiled graph invariant violated");
     }
 
-    /// The engine's runtime `cache` has exactly this artifact's node ids after
-    /// `reconcile` — the install-side half of the checks;
+    /// The engine's runtime `cache` is index-aligned to exactly this artifact
+    /// after `reconcile` — the install-side half of the checks;
     /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
     pub(crate) fn validate_installed(
         &self,
@@ -182,20 +180,13 @@ impl CompiledGraph {
             return Err(InstalledGraphValidationError::NodeSet);
         }
 
-        for (e_node_id, e_node) in self
+        for ((e_node_id, e_node), slot) in self
             .program
             .e_node_ids
-            .values
             .iter()
             .zip(&self.program.e_nodes)
+            .zip(cache.slots.iter())
         {
-            let slot =
-                cache
-                    .slots
-                    .get(e_node_id)
-                    .ok_or(InstalledGraphValidationError::MissingNode {
-                        e_node_id: *e_node_id,
-                    })?;
             if let Some(output_values) = slot.output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {
@@ -257,8 +248,7 @@ impl ExecutionPlan {
                         .is_some_and(|e_node| e_node.disabled)
                         && self
                             .verdicts
-                            .values
-                            .get(addr.node_idx.idx())
+                            .get(addr.node_idx)
                             .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(ExecutionPlanValidationError::BeforeDependency {

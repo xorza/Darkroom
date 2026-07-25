@@ -202,7 +202,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
 async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile(program);
+    cache.reconcile(&ExecutionProgram::default(), program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let mut stats = ExecutionOutcome::default();
@@ -265,7 +265,7 @@ async fn run_with_pinned(
     run: &TestRun,
 ) -> (RuntimeCache, ExecutionOutcome, Vec<PinnedOutputs>) {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(program);
+    cache.reconcile(&ExecutionProgram::default(), program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
@@ -311,12 +311,12 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert_eq!(
-        cache.slots[&a].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(a)].output_values().unwrap()[0].as_i64(),
         Some(7),
         "producer wrote 7"
     );
     assert_eq!(
-        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(b)].output_values().unwrap()[0].as_i64(),
         Some(8),
         "consumer read 7 and wrote 7+1"
     );
@@ -352,20 +352,20 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert!(
-        cache.slots[&failed].output_values().is_none(),
+        cache.slots[nx(failed)].output_values().is_none(),
         "an errored node's output is dropped (so it re-runs)"
     );
     assert!(
-        cache.slots[&blocked].output_values().is_none(),
+        cache.slots[nx(blocked)].output_values().is_none(),
         "the dependent is skipped, producing nothing"
     );
     assert_eq!(
-        cache.slots[&surviving].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(surviving)].output_values().unwrap()[0].as_i64(),
         Some(7),
         "retiring the blocked read leaves the healthy value for its live reader"
     );
     assert!(
-        matches!(cache.slots[&healthy].value, ValueState::Empty),
+        matches!(cache.slots[nx(healthy)].value, ValueState::Empty),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
     let error_of = |e_node_id: ExecutionNodeId| {
@@ -400,7 +400,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     let run = run_with_readers(&p.program, vec![1]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile(&ExecutionProgram::default(), &p.program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let mut stats = ExecutionOutcome::default();
@@ -424,7 +424,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
         "the pending consumer's read was retired"
     );
     assert!(
-        matches!(cache.slots[&source].value, ValueState::Empty),
+        matches!(cache.slots[nx(source)].value, ValueState::Empty),
         "tail retirement reclaims the source before the engine's final sweep"
     );
 }
@@ -450,8 +450,8 @@ async fn unbound_output_errors_only_when_demanded() {
             .map(|error| &error.error)
     };
 
-    assert!(cache.slots[&a].output_values().is_none());
-    assert!(cache.slots[&b].output_values().is_none());
+    assert!(cache.slots[nx(a)].output_values().is_none());
+    assert!(cache.slots[nx(b)].output_values().is_none());
     assert!(matches!(
         error_of(a),
         Some(RunError::OutputsNotProduced { outputs, .. }) if outputs == &[0, 1]
@@ -472,7 +472,7 @@ async fn unbound_output_errors_only_when_demanded() {
 
     assert!(stats.node_errors.is_empty());
     assert!(matches!(
-        cache.slots[&skipped].output_values().unwrap().as_slice(),
+        cache.slots[nx(skipped)].output_values().unwrap().as_slice(),
         [DynamicValue::Unbound]
     ));
 }
@@ -503,12 +503,12 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "A (None) is freed the moment its last consumer B reads it: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
     assert_eq!(
-        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(b)].output_values().unwrap()[0].as_i64(),
         Some(8),
         "B (Ram) keeps its own output (7+1)"
     );
@@ -538,9 +538,9 @@ async fn pinned_delivery_does_not_create_a_reader() {
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "A is released after its only binding reader despite host delivery: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
     assert_eq!(pushes.len(), 1);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
@@ -571,9 +571,9 @@ async fn pinned_root_demands_output_without_retaining_it() {
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "unpinned Skip root is drained at store time: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
 
     let mut plan = run_with_readers(&p.program, vec![0]);
@@ -582,9 +582,9 @@ async fn pinned_root_demands_output_without_retaining_it() {
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "targeting controls demand, not RAM retention: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
 }
 
@@ -629,9 +629,9 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
 
     assert_eq!(pushes.len(), 1, "the value was still pushed");
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "reclaimed right after the push, not left resident to end-of-run eviction: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
 }
 
@@ -650,8 +650,8 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     run.resolved.disposition[nx(a)] = Disposition::Reuse;
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
-    cache.slots.get_mut(&a).unwrap().value = ValueState::Resident {
+    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.slots[nx(a)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
         produced_under: None,
     };
@@ -683,7 +683,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     assert_eq!(pushes.len(), 1);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "the reused value is released immediately after delivery"
     );
 }
@@ -715,7 +715,7 @@ async fn pinned_root_pushes_every_output() {
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));
     assert_eq!(pushes[0].values[1].port_idx, 1);
     assert_eq!(pushes[0].values[1].value.as_i64(), Some(2));
-    assert!(matches!(cache.slots[&a].value, ValueState::Empty));
+    assert!(matches!(cache.slots[nx(a)].value, ValueState::Empty));
 }
 
 /// Neither an individually-pinned port nor a pinned root: no push at all,
@@ -782,7 +782,7 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
-        cache.slots[&a].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(a)].output_values().unwrap()[0].as_i64(),
         Some(7),
         "A (Ram) is kept hot for the next run even though B has fully drained it"
     );
@@ -811,7 +811,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
 
     let plan = structural_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile(&ExecutionProgram::default(), &p.program);
     let first = run_with(&p.program, &plan, &mut cache).await;
     assert_eq!(first.executed_nodes.len(), 3);
 
@@ -829,7 +829,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
         "the producer and impure consumer still run"
     );
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "the producer is reclaimed immediately after its only live reader"
     );
 }
@@ -855,12 +855,12 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[&a].value, ValueState::Empty),
+        matches!(cache.slots[nx(a)].value, ValueState::Empty),
         "A (None, no consumers) is freed right after it runs: {:?}",
-        cache.slots[&a].value
+        cache.slots[nx(a)].value
     );
     assert_eq!(
-        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(b)].output_values().unwrap()[0].as_i64(),
         Some(7),
         "B (Ram, no consumers) is kept hot"
     );
@@ -889,8 +889,8 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     plan.roots.reset(p.program.e_nodes.len());
     plan.roots.insert(nx(downstream));
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
-    cache.slots.get_mut(&missing).unwrap().value = ValueState::Resident {
+    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.slots[nx(missing)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         produced_under: None,
     };
@@ -901,7 +901,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
         "the source is cut, the missing implementation errors, and its consumer skips"
     );
     assert!(
-        cache.slots[&missing].output_values().is_none(),
+        cache.slots[nx(missing)].output_values().is_none(),
         "the missing node's stale value is dropped, not served"
     );
     let error_of = |e_node_id: ExecutionNodeId| {
@@ -967,13 +967,13 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile(&ExecutionProgram::default(), &p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &plan.plan, &mut cache).await;
     assert_eq!(stats1.executed_nodes.len(), 3);
     assert_eq!(
-        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(b)].output_values().unwrap()[0].as_i64(),
         Some(6)
     );
 
@@ -987,7 +987,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         "B is a reuse hit despite A's failure"
     );
     assert_eq!(
-        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        cache.slots[nx(b)].output_values().unwrap()[0].as_i64(),
         Some(6),
         "B's valid cached value survives the sibling failure"
     );

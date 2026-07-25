@@ -56,7 +56,6 @@ fn execution_node_id(
         .compiled
         .program
         .e_node_ids
-        .values
         .iter()
         .copied()
         .find(|&e_node_id| execution_node_name(execution_graph, graph, library, e_node_id) == name)
@@ -72,7 +71,6 @@ fn execution_node_ids(
         .compiled
         .program
         .e_node_ids
-        .values
         .iter()
         .copied()
         .filter(|&e_node_id| {
@@ -281,10 +279,10 @@ mod cache_persistence {
             "the covering blob prevents a redundant maintenance publication"
         );
 
-        assert_eq!(engine.cache.slots[&e_node_id].state.get::<i64>(), Some(&1));
+        assert_eq!(engine.slot(e_node_id).state.get::<i64>(), Some(&1));
         engine.update(&graph, &library_v0).unwrap();
         assert_eq!(
-            engine.cache.slots[&e_node_id].state.get::<i64>(),
+            engine.slot(e_node_id).state.get::<i64>(),
             Some(&1),
             "a same-version reinstall keeps node state"
         );
@@ -292,7 +290,7 @@ mod cache_persistence {
         let library_v1 = make_lib(2, 1);
         engine.update(&graph, &library_v1).unwrap();
         assert!(
-            engine.cache.slots[&e_node_id].state.is_none(),
+            engine.slot(e_node_id).state.is_none(),
             "a version bump drops the predecessor's state"
         );
         let changed = engine.execute_sinks().await.unwrap();
@@ -306,7 +304,7 @@ mod cache_persistence {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(*printed.lock().unwrap(), vec![1, 2]);
         assert_eq!(
-            engine.cache.slots[&e_node_id].state.get::<i64>(),
+            engine.slot(e_node_id).state.get::<i64>(),
             Some(&2),
             "the new implementation owns freshly written state"
         );
@@ -407,16 +405,13 @@ mod cache_persistence {
         );
         for e_node_id in &expected {
             assert!(
-                matches!(engine.cache.slots[e_node_id].value, ValueState::Empty),
+                matches!(engine.slot(*e_node_id).value, ValueState::Empty),
                 "{e_node_id:?} must release its resident output"
             );
         }
         let get_b_eid = root_execution_node(get_b_id);
         assert!(
-            matches!(
-                engine.cache.slots[&get_b_eid].value,
-                ValueState::Resident { .. }
-            ),
+            matches!(engine.slot(get_b_eid).value, ValueState::Resident { .. }),
             "an upstream sibling outside the consumer cone stays resident"
         );
         assert_eq!(blob_count(&dir), 1, "only get_b's disk blob remains");
@@ -463,14 +458,14 @@ mod cache_persistence {
         expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
         assert!(
             matches!(
-                reopened.cache.slots[&blocked_eid].value,
+                reopened.slot(blocked_eid).value,
                 ValueState::Resident { .. }
             ),
             "a failed disk deletion must leave the matching RAM value resident"
         );
         for e_node_id in &expected_successes {
             assert!(
-                matches!(reopened.cache.slots[e_node_id].value, ValueState::Empty),
+                matches!(reopened.slot(*e_node_id).value, ValueState::Empty),
                 "{e_node_id:?} must still evict when another target fails"
             );
         }
@@ -776,17 +771,19 @@ mod cache_persistence {
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
-        let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
+        let mult_resident = engine
+            .slot(root_execution_node(mult_id))
             .output_values()
             .is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
         // ...but the deeper `sum` is not even flagged: the blob stays in the store,
         // outside the runtime slot, until a later run actually needs it.
-        let sum_resident = engine.cache.slots[&root_execution_node(sum_id)]
+        let sum_resident = engine
+            .slot(root_execution_node(sum_id))
             .output_values()
             .is_some();
         let sum_empty = matches!(
-            engine.cache.slots[&root_execution_node(sum_id)].value,
+            engine.slot(root_execution_node(sum_id)).value,
             ValueState::Empty
         );
         assert!(
@@ -801,7 +798,8 @@ mod cache_persistence {
         let empty_dir = TempDir::new("chain-empty");
         engine.cache.disk_store = DiskStore::new(&Library::default(), Some(empty_dir.0.clone()));
         assert!(
-            engine.cache.slots[&root_execution_node(mult_id)]
+            engine
+                .slot(root_execution_node(mult_id))
                 .output_values()
                 .is_some(),
             "switching stores preserves resident values"
@@ -857,7 +855,8 @@ mod cache_persistence {
 
         engine.execute_sinks().await.unwrap();
         assert!(
-            engine.cache.slots[&root_execution_node(sum_id)]
+            engine
+                .slot(root_execution_node(sum_id))
                 .output_values()
                 .is_some(),
             "sum is resident after the run that computed it"
@@ -870,11 +869,13 @@ mod cache_persistence {
             "only print runs the second time"
         );
 
-        let sum_slot = &engine.cache.slots[&root_execution_node(sum_id)];
-        let mult_resident = engine.cache.slots[&root_execution_node(mult_id)]
+        let sum_slot = &engine.slot(root_execution_node(sum_id));
+        let mult_resident = engine
+            .slot(root_execution_node(mult_id))
             .output_values()
             .is_some();
-        let get_a_resident = engine.cache.slots[&root_execution_node(get_a_id)]
+        let get_a_resident = engine
+            .slot(root_execution_node(get_a_id))
             .output_values()
             .is_some();
         assert!(
@@ -906,7 +907,8 @@ mod cache_persistence {
             "the changed downstream node recomputes"
         );
         assert!(
-            engine.cache.slots[&root_execution_node(sum_id)]
+            engine
+                .slot(root_execution_node(sum_id))
                 .output_values()
                 .is_some(),
             "the reused Both value remains resident"
@@ -978,7 +980,7 @@ mod cache_persistence {
         }
 
         // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
-        let slot = &engine.cache.slots[&root_execution_node(mult_id)];
+        let slot = &engine.slot(root_execution_node(mult_id));
         assert_eq!(
             slot.output_values().is_some(),
             mode.caches_in_ram(),
@@ -1160,7 +1162,8 @@ mod cache_persistence {
         // the matching A blob — it must serve 6 from disk, not the stale 35.
         engine.update(&build(2, 3, CacheMode::Both), &lib)?;
         assert_eq!(
-            engine.cache.slots[&root_execution_node(mult_id)]
+            engine
+                .slot(root_execution_node(mult_id))
                 .output_values()
                 .and_then(|values| values[0].as_i64()),
             Some(35),
@@ -1257,13 +1260,13 @@ mod cache_persistence {
             engine.update(&build(CacheMode::Ram), &lib).unwrap();
             engine.execute_sinks().await.unwrap();
             assert!(
-                engine.cache.slots[&mult_id].output_values().is_some(),
+                engine.slot(mult_id).output_values().is_some(),
                 "Ram retains the current pure value"
             );
 
             engine.update(&build(mode), &lib).unwrap();
             assert!(
-                matches!(engine.cache.slots[&mult_id].value, ValueState::Empty),
+                matches!(engine.slot(mult_id).value, ValueState::Empty),
                 "{mode:?} releases the old RAM value during install"
             );
         }
@@ -3226,7 +3229,7 @@ mod behavior {
 
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         assert!(
-            matches!(execution_graph.cache.slots[&get_b].value, ValueState::Empty),
+            matches!(execution_graph.slot(get_b).value, ValueState::Empty),
             "an impure value cannot hit on a future run, so the end sweep releases it"
         );
 
@@ -3747,7 +3750,8 @@ mod execution {
         let stats = eg.execute_sinks().await?;
         assert!(stats.node_errors.is_empty());
         let e_node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
-        let outputs = eg.cache.slots[&e_node_id]
+        let outputs = eg
+            .slot(e_node_id)
             .output_values()
             .cloned()
             .expect("the node ran, so it holds outputs");
@@ -3765,7 +3769,8 @@ mod execution {
         eg.update(&graph, &library).unwrap();
         let stats = eg.execute_sinks().await?;
         assert!(stats.node_errors.is_empty());
-        let outputs = eg.cache.slots[&e_node_id]
+        let outputs = eg
+            .slot(e_node_id)
             .output_values()
             .cloned()
             .expect("the invalidated pure node re-ran");
@@ -4150,8 +4155,8 @@ mod error_propagation {
             stats.node_errors.iter().find(move |e| e.e_node_id == id)
         };
         let output_values = |name: &str| {
-            execution_graph.cache.slots
-                [&execution_node_id(&execution_graph, &graph, &library, name).unwrap()]
+            execution_graph
+                .slot(execution_node_id(&execution_graph, &graph, &library, name).unwrap())
                 .output_values()
                 .cloned()
         };

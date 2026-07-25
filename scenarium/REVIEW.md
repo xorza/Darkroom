@@ -110,6 +110,12 @@ flattened execution identity when a new program is installed.
   `src/execution/codec.rs`) extracted from the library at construction;
   format calls take `&Codecs`, and cache I/O no longer holds funcs, shared
   graphs, or editor metadata.
+- *`RuntimeCache::slots` was the last id-hashed per-node structure in the run
+  loop* — slots are now a `NodeColumn<RuntimeSlot>` aligned to the installed
+  program; `reconcile` re-pairs the previous install's slots with the new
+  index order by stable id (the only id hashing slot access ever pays), and
+  every executor/resolver/digest slot access is an index read. Disk blobs
+  stay id-named so they survive installs that shift indices.
 - *Targeted runs rebuilt full-program state across four node hash maps* —
   the installed program is now a dense, id-sorted vector with `NodeIdx`
   positions; compiled `Bind` edges intern to `OutputAddr` at compile
@@ -136,13 +142,6 @@ flattened execution identity when a new program is installed.
   stop were meant to protect.
 
 ## Medium: Per-run orchestration complexity
-
-- [ ] **`RuntimeCache::slots` remains the one id-hashed per-node structure in
-  the run loop.** With the program now dense-indexed, the executor still
-  reaches slots through `HashMap<ExecutionNodeId, RuntimeSlot>` — several
-  hashes per node and one per wire read. The follow-up (phase 2 of the
-  dense-index move) stores slots in program index order and remaps by id
-  only at install-time `reconcile`.
 
 - [ ] **Resolution serially hydrates every reusable disk frontier before
   execution starts.** The reverse sweep awaits `check_reuse` per live node

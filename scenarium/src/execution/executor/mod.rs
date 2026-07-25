@@ -143,14 +143,13 @@ impl Executor {
                         // a cache, so its output is never read. Report only a current resident value;
                         // unneeded disk blobs remain unprobed.
                         self.outcomes[node_idx] = NodeOutcome::Cut {
-                            cached: frame.cache.is_resident_current(e_node_id),
+                            cached: frame.cache.is_resident_current(node_idx),
                         };
                         continue;
                     }
                     Disposition::MissingLambda => {
                         mark_skipped(
                             frame.cache,
-                            program,
                             &mut self.outcomes,
                             node_idx,
                             RunError::MissingLambda {
@@ -175,7 +174,7 @@ impl Executor {
                 // skipped.
                 let reused = match resolved.disposition[node_idx] {
                     Disposition::Reuse => true,
-                    Disposition::Run if frame.cache.slots[&e_node_id].current_digest.is_none() => {
+                    Disposition::Run if frame.cache.slots[node_idx].current_digest.is_none() => {
                         frame
                             .resource_stamps
                             .prepare_node(
@@ -217,7 +216,6 @@ impl Executor {
                     frame.abandon_input_reads(node_idx);
                     mark_skipped(
                         frame.cache,
-                        program,
                         &mut self.outcomes,
                         node_idx,
                         RunError::SkippedUpstream { func_id },
@@ -230,7 +228,7 @@ impl Executor {
                 frame.collect_inputs(node_idx);
 
                 let output_count = e_node.outputs.len as usize;
-                let event_state = frame.cache.slots[&e_node_id].event_state.clone();
+                let event_state = frame.cache.slots[node_idx].event_state.clone();
                 debug_assert!(matches!(self.outcomes[node_idx], NodeOutcome::Pending));
 
                 // Attribute any logs this node emits to it (read by
@@ -247,12 +245,7 @@ impl Executor {
                 }
                 let demand = resolved.outputs.demand.slice(e_node.outputs);
                 let result = {
-                    let slot = frame
-                        .cache
-                        .slots
-                        .get_mut(&e_node_id)
-                        .unwrap()
-                        .invoke_slot(output_count);
+                    let slot = frame.cache.slots[node_idx].invoke_slot(output_count);
                     e_node
                         .lambda
                         .invoke(
@@ -287,8 +280,7 @@ impl Executor {
                         Err(RunError::Cancelled { func_id })
                     }
                     Ok(()) => {
-                        let outputs =
-                            frame.cache.slots[&e_node_id].unbound_demanded_outputs(demand);
+                        let outputs = frame.cache.slots[node_idx].unbound_demanded_outputs(demand);
                         if outputs.is_empty() {
                             Ok(())
                         } else {
@@ -298,7 +290,7 @@ impl Executor {
                     other => other,
                 };
                 let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
-                let slot = frame.cache.slots.get_mut(&e_node_id).unwrap();
+                let slot = &mut frame.cache.slots[node_idx];
                 let succeeded = match result {
                     // The fresh output now corresponds to this node's current digest; record
                     // it so the next run's reuse check is a RAM hit.
@@ -388,8 +380,8 @@ pub(crate) mod test_support {
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
         pub(crate) fn ran(&self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> bool {
-            let node = program.e_node_index[&e_node_id];
-            self.outcomes.values.get(node.idx()).is_none_or(|outcome| {
+            let node_idx = program.e_node_index[&e_node_id];
+            self.outcomes.get(node_idx).is_none_or(|outcome| {
                 matches!(
                     outcome,
                     NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }

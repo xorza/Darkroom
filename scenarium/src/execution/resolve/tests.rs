@@ -88,12 +88,12 @@ impl Fix {
             event_sources,
         };
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&self.program);
+        cache.reconcile(&ExecutionProgram::default(), &self.program);
         let resource_stamps = RunResourceStamps::default();
         stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
         for cached in cached {
-            let digest = cache.slots[&cached.e_node_id].current_digest.unwrap();
-            cache.slots.get_mut(&cached.e_node_id).unwrap().value = ValueState::Resident {
+            let digest = cache.slots[nx(cached.e_node_id)].current_digest.unwrap();
+            cache.slots[nx(cached.e_node_id)].value = ValueState::Resident {
                 snapshot: OutputSnapshot::new(cached.values),
                 produced_under: Some(digest),
             };
@@ -311,13 +311,7 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
             .slice(fix.program.by_id(node_pinned).outputs),
         &[OutputDemand::Produce, OutputDemand::Produce]
     );
-    assert!(
-        run.outputs
-            .readers
-            .values
-            .iter()
-            .all(|readers| *readers == 0)
-    );
+    assert!(run.outputs.readers.iter().all(|readers| *readers == 0));
 }
 
 #[tokio::test]
