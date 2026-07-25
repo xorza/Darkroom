@@ -14,14 +14,13 @@ use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
 
 /// A tab mid-drag: armed when a movable chip's drag latches, cleared on
-/// release or Esc.
+/// release or Esc. Holds the tab itself and nothing positional — the
+/// release edge is polled through `tab_chip_wid(tab)`, so an undo that
+/// rearranges the strip mid-drag can't strand the gesture on a slot the
+/// tab has left.
 #[derive(Debug)]
 pub(super) struct TabDrag {
     pub(super) tab: TabRef,
-    /// Where the chip lived when the drag latched — polled for the
-    /// release edge (the layout can't change mid-drag, so the address
-    /// stays valid).
-    pub(super) source: (TabGroupId, usize),
     /// Label for the ghost chip, snapshotted at arm time.
     pub(super) text: String,
 }

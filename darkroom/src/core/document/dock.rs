@@ -179,15 +179,21 @@ pub(crate) enum DockDrop {
 /// single op vocabulary the whole pipeline speaks: the dock UI
 /// constructs one, `UiAction::Dock` transports it, `Intent::Dock`
 /// records it as a before/after snapshot, and `apply` runs it. Ops fed
-/// stale addresses (a group or split that no longer exists) no-op, and
-/// the snapshot diff drops them.
+/// something that no longer exists no-op, and the snapshot diff drops
+/// them.
+///
+/// Every tab op names its tab by identity, never by strip position. An
+/// op is built from one frame's response and applied in a later phase of
+/// the next, and undo can rearrange the layout in between — an index
+/// would by then address whatever tab slid into that slot.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum DockOp {
-    /// Make `group`'s tab at `index` visible and focus the group.
-    ActivateTab { group: TabGroupId, index: usize },
-    /// Close `group`'s tab at `index`. The `Main` tab never closes —
-    /// the op refuses it.
-    CloseTab { group: TabGroupId, index: usize },
+    /// Make `tab` visible in whichever group holds it, and focus that
+    /// group.
+    ActivateTab { tab: TabRef },
+    /// Close `tab` wherever it sits. The `Main` tab never closes — the
+    /// op refuses it.
+    CloseTab { tab: TabRef },
     /// Move `tab` to `to` — into another strip or splitting a pane.
     MoveTab { tab: TabRef, to: DockDrop },
     /// Set the ratio of the split at `split` (its packed root path).
@@ -329,57 +335,59 @@ impl DockLayout {
     /// layout mutation.
     pub(crate) fn apply(&mut self, op: DockOp) {
         match op {
-            DockOp::ActivateTab { group, index } => self.activate(group, index),
-            DockOp::CloseTab { group, index } => self.close_tab(group, index),
+            DockOp::ActivateTab { tab } => self.activate(tab),
+            DockOp::CloseTab { tab } => self.close_tab(tab),
             DockOp::MoveTab { tab, to } => self.move_tab(tab, to),
             DockOp::SetRatio { split, ratio } => self.set_ratio(split, ratio),
         }
     }
 
-    /// Focus `group` and make its `index` tab visible. Out-of-range
-    /// input is ignored.
-    fn activate(&mut self, group: TabGroupId, index: usize) {
-        if let Some(g) = self.group_mut(group)
-            && index < g.tabs.len()
-        {
-            g.active = index;
-            self.focused = group;
-        }
+    /// Make `tab` the visible one in whichever group holds it, and focus
+    /// that group. A tab that has since closed no-ops.
+    fn activate(&mut self, tab: TabRef) {
+        let Some(TabAddress { group, index }) = self.find_tab(tab) else {
+            return;
+        };
+        self.group_mut(group)
+            .expect("find_tab resolved a live group")
+            .active = index;
+        self.focused = group;
     }
 
-    /// `tab`'s address, appending it to `group`'s strip when it isn't
-    /// open anywhere — the shared non-undoable half of opening any tab
+    /// Append `tab` to `group`'s strip unless it's already open
+    /// somewhere — the shared non-undoable half of opening any tab
     /// (callers focus it through a recorded activation). Unlike the
     /// intent-fed ops this is a direct call whose callers read a live
     /// group id in the same call chain, so a dead id is a logic error,
     /// not tolerable staleness.
-    pub(crate) fn find_or_insert(&mut self, tab: TabRef, group: TabGroupId) -> TabAddress {
-        match self.find_tab(tab) {
-            Some(addr) => addr,
-            None => self.insert_tab(group, tab),
+    pub(crate) fn find_or_insert(&mut self, tab: TabRef, group: TabGroupId) {
+        if self.find_tab(tab).is_none() {
+            self.insert_tab(group, tab);
         }
     }
 
     /// Raw append of `tab` to `group`'s strip; [`Self::find_or_insert`]
     /// owns the dedup.
-    fn insert_tab(&mut self, group: TabGroupId, tab: TabRef) -> TabAddress {
-        let g = self.group_mut(group).expect("insert target group exists");
-        g.tabs.push(tab);
-        let index = g.tabs.len() - 1;
-        TabAddress { group, index }
+    fn insert_tab(&mut self, group: TabGroupId, tab: TabRef) {
+        self.group_mut(group)
+            .expect("insert target group exists")
+            .tabs
+            .push(tab);
     }
 
-    /// Close `group`'s tab at `index`. The `Main` tab never closes (also
-    /// guarded at intent build). A group emptied by the close collapses
-    /// out of the tree; a vanished focus falls back to the primary group.
-    fn close_tab(&mut self, group: TabGroupId, index: usize) {
-        let Some(g) = self.group_mut(group) else {
+    /// Close `tab` wherever it sits. The `Main` tab never closes. A group
+    /// emptied by the close collapses out of the tree; a vanished focus
+    /// falls back to the primary group.
+    fn close_tab(&mut self, tab: TabRef) {
+        if tab == TabRef::Graph(GraphRef::Main) {
+            return;
+        }
+        let Some(TabAddress { group, index }) = self.find_tab(tab) else {
             return;
         };
-        match g.tabs.get(index) {
-            None | Some(&TabRef::Graph(GraphRef::Main)) => return,
-            Some(_) => g.remove_tab(index),
-        }
+        self.group_mut(group)
+            .expect("find_tab resolved a live group")
+            .remove_tab(index);
         self.normalize();
     }
 
@@ -856,9 +864,7 @@ mod tests {
                 side: SplitSide::Bottom,
             },
         );
-        let lone = l.focused;
-
-        l.close_tab(lone, 0);
+        l.close_tab(viewer(1));
         l.validate().unwrap();
         assert!(
             matches!(l.node(DockLayout::ROOT), DockNode::Group(_)),
@@ -866,22 +872,21 @@ mod tests {
         );
         assert_eq!(l.focused, primary, "dangling focus falls back to primary");
 
-        // Main never closes, directly or by index games.
-        l.close_tab(primary, 0);
+        // Main never closes, and a tab that isn't open anywhere no-ops.
+        l.close_tab(main_tab());
         assert_eq!(l.primary().tabs[0], main_tab());
-        l.close_tab(primary, 99);
+        l.close_tab(viewer(9));
         l.validate().unwrap();
     }
 
     #[test]
     fn close_keeps_active_on_the_surviving_tab() {
         let mut l = seeded();
-        let primary = l.primary().id;
-        l.activate(primary, 2);
+        l.activate(viewer(1));
         assert_eq!(l.group(l.focused).unwrap().active_tab(), viewer(1));
 
         // Closing the active last tab clamps active onto the previous one.
-        l.close_tab(primary, 2);
+        l.close_tab(viewer(1));
         l.validate().unwrap();
         assert_eq!(l.primary().tabs, [main_tab(), TabRef::Preferences]);
         assert_eq!(l.primary().active, 1);
@@ -891,8 +896,8 @@ mod tests {
         // clamping keeps it in range (pointing at the same slot is
         // accepted drift, the snapshot undo restores exact state).
         let mut l = seeded();
-        l.activate(primary, 2);
-        l.close_tab(primary, 1);
+        l.activate(viewer(1));
+        l.close_tab(TabRef::Preferences);
         l.validate().unwrap();
         assert_eq!(l.primary().active, 1, "clamped into range");
     }
