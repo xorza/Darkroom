@@ -282,7 +282,7 @@ pub(crate) struct Document {
 /// Whether a tab still resolves against the graph: `Main` and
 /// `Preferences` always do, a local graph tab lives with its map entry,
 /// and a viewer tab dies with its node. The single predicate behind
-/// [`Document::ensure_valid_layout`]'s fast-path *and* its prune, so
+/// [`Document::reconcile_with_graph`]'s fast-path *and* its prune, so
 /// the two can't drift.
 fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
@@ -399,18 +399,22 @@ impl Document {
         true
     }
 
-    /// Keep the layout renderable: drop tabs whose graph vanished
-    /// (collapsing panes that empty) and seed any `Local` tab that's
-    /// missing its view metadata — so the scene rebuild always resolves
-    /// a live graph *and* view. `Main` always survives (`graph_for(Main)`
-    /// is infallible and `main_view` always exists).
+    /// Bring the editor's derived state back in line with the graph: drop
+    /// tabs whose target vanished (collapsing panes that empty), drop
+    /// `local_views` whose graph vanished, and seed a view for any `Local`
+    /// tab missing one — so the scene rebuild always resolves a live graph
+    /// *and* view. `Main` always survives (`graph_for(Main)` is infallible
+    /// and `main_view` always exists).
     ///
-    /// The view-seeding covers a desync hazard: the layout and
-    /// `local_views` are independent serialized fields, so a deserialized
-    /// (or hand-edited) document can carry a `Local` tab with no matching
-    /// `local_views` entry. Seeding it here recovers gracefully instead of
-    /// panicking on a later `view(target).expect(..)`.
-    pub(crate) fn ensure_valid_layout(&mut self) {
+    /// Both view repairs cover one seam: a `local_views` entry is seeded
+    /// lazily on first open, *outside* the undo record, so undo can remove
+    /// the graph it belongs to without taking it along (`revert_graph`
+    /// edits one target's `EditScope` and can't reach the map), and a
+    /// deserialized or hand-edited document can carry a `Local` tab with
+    /// no entry at all. Either state fails [`Self::validate`], which is why
+    /// this runs every frame in the navigation phase, right after undo/redo
+    /// and the intent drain — well before anything can save.
+    pub(crate) fn reconcile_with_graph(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only when something died does the
         // retain (and its re-pack) run, against the same predicate.
@@ -419,6 +423,13 @@ impl Document {
             let Document { graph, layout, .. } = self;
             layout.retain_tabs(|t| tab_alive(graph, t));
         }
+        // An orphaned view is dead state, not recoverable state: if the
+        // graph comes back (redo), the next open re-seeds the view from
+        // scratch. Unguarded because the retain allocates nothing.
+        let Document {
+            graph, local_views, ..
+        } = self;
+        local_views.retain(|id, _| graph.find_graph(*id).is_some());
         // Seed views for any `Local` tab missing one. Guarded by `any`
         // so the common (all-seeded) case allocates nothing.
         if self.layout.all_tabs().any(
@@ -894,7 +905,7 @@ mod tests {
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::Graph(GraphRef::Local(inner)), primary);
-        doc.ensure_valid_layout();
+        doc.reconcile_with_graph();
         assert!(
             doc.layout
                 .all_tabs()
@@ -1064,7 +1075,7 @@ mod tests {
 
         // Preferences always resolves; a viewer tab resolves while its
         // node exists — neither is pruned and the activation holds.
-        doc.ensure_valid_layout();
+        doc.reconcile_with_graph();
         assert_eq!(
             all_tabs(&doc),
             vec![
@@ -1074,11 +1085,11 @@ mod tests {
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
-        doc.validate_debug();
+        doc.validate().unwrap();
     }
 
     #[test]
-    fn ensure_valid_layout_keeps_non_graph_tabs_when_a_graph_tab_vanishes() {
+    fn reconcile_with_graph_keeps_non_graph_tabs_when_a_graph_tab_vanishes() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let id = doc.create_graph(GraphRef::Main).unwrap();
@@ -1094,7 +1105,7 @@ mod tests {
         // Drop the graph out from under its open tab.
         doc.graph.graphs.remove(&id);
 
-        doc.ensure_valid_layout();
+        doc.reconcile_with_graph();
         // The dead graph tab is pruned; Main + the non-graph tabs
         // remain, and the clamped active still points at the image tab
         // (it slid left one slot with the removal).
@@ -1110,13 +1121,13 @@ mod tests {
     }
 
     #[test]
-    fn ensure_valid_layout_prunes_a_viewer_tab_whose_node_is_gone() {
+    fn reconcile_with_graph_prunes_a_viewer_tab_whose_node_is_gone() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
-        doc.ensure_valid_layout();
+        doc.reconcile_with_graph();
         assert_eq!(
             all_tabs(&doc).len(),
             2,
@@ -1131,7 +1142,7 @@ mod tests {
             format!("{err:#}").contains("open tab references a missing target"),
             "unexpected validation error: {err:#}"
         );
-        doc.ensure_valid_layout();
+        doc.reconcile_with_graph();
         assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
         assert_eq!(doc.layout.primary().active, 0);
     }
@@ -1165,9 +1176,67 @@ mod tests {
     }
 
     #[test]
-    fn document_passes_validate_debug() {
+    fn undo_prunes_the_view_of_a_graph_it_removed() {
+        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::Intent;
+
+        // A `local_views` entry is seeded lazily on first open, *outside*
+        // the undo record, so undoing the edit that created its graph
+        // leaves the view behind — `revert_graph` only reaches one
+        // target's `EditScope` and can't touch the map. An orphaned view
+        // fails `validate`, which save now refuses to write past.
+        let mut local = leaf_graph("Lib").clone_mapped();
+        local.interface.origin = Some(GraphId::unique());
+        let local_id = GraphId::unique();
+        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
+
+        let mut doc = Document::default();
+        let step = build_step(
+            Intent::AddNode {
+                pos: Vec2::ZERO,
+                node_id: NodeId::unique(),
+                node,
+                graph: Some((local_id, Box::new(local))),
+                bindings: vec![],
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("add builds");
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.ensure_sub_view(local_id), "the user opens the graph");
+        doc.validate()
+            .expect("an open graph plus its view is valid");
+
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(
+            doc.validate().is_err(),
+            "undo takes the graph but strands its view"
+        );
+
+        doc.reconcile_with_graph();
+        doc.validate().expect("reconcile drops the orphaned view");
+        assert!(
+            doc.view(GraphRef::Local(local_id)).is_none(),
+            "the view is gone, not merely ignored"
+        );
+
+        // The same pass leaves a live graph's view alone.
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.ensure_sub_view(local_id), "redo, reopen");
+        doc.reconcile_with_graph();
+        assert!(
+            doc.view(GraphRef::Local(local_id)).is_some(),
+            "a view whose graph is alive survives the prune"
+        );
+        doc.validate().unwrap();
+    }
+
+    #[test]
+    fn document_passes_validation() {
         let doc = build_test_doc();
-        doc.validate_debug();
+        doc.validate().unwrap();
     }
 
     #[test]
@@ -1224,7 +1293,7 @@ mod tests {
 
     fn assert_roundtrip() {
         let doc = build_test_doc();
-        doc.validate_debug();
+        doc.validate().unwrap();
         let serialized = serde_json::to_vec_pretty(&doc).expect("serialize document");
         assert!(
             !serialized.is_empty(),
@@ -1235,7 +1304,7 @@ mod tests {
         deserialized
             .validate()
             .expect("deserialized document is valid");
-        deserialized.validate_debug();
+        deserialized.validate().unwrap();
         assert_eq!(
             doc, deserialized,
             "the complete document should round-trip through JSON"
@@ -1256,7 +1325,7 @@ mod tests {
         let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
         *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
-        doc.validate_debug();
+        doc.validate().unwrap();
 
         let bytes = serde_json::to_vec_pretty(&doc).expect("serialize");
         let reloaded: Document = serde_json::from_slice(&bytes).expect("load");

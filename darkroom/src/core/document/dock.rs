@@ -486,7 +486,7 @@ impl DockLayout {
     }
 
     /// Drop every tab failing `keep`, collapsing groups that empty —
-    /// the layout half of `Document::ensure_valid_layout` pruning.
+    /// the layout half of `Document::reconcile_with_graph` pruning.
     pub(crate) fn retain_tabs(&mut self, mut keep: impl FnMut(TabRef) -> bool) {
         for node in &mut self.nodes {
             if let DockNode::Group(g) = node {

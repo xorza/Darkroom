@@ -359,7 +359,7 @@ impl Editor {
             open.document.active_target().unwrap_or(GraphRef::Main),
         );
         // A closed/deleted target can't be active; fall back to Main.
-        open.document.ensure_valid_layout();
+        open.document.reconcile_with_graph();
     }
 
     /// Note a possible active-graph change: when `target` differs from
@@ -687,7 +687,7 @@ mod tests {
             .document
             .layout
             .retain_tabs(|t| t != TabRef::ImageViewer(port(1)));
-        test.open.document.ensure_valid_layout();
+        test.open.document.reconcile_with_graph();
         test.editor.sync_image_viewers(&test.open);
         assert!(test.editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(
