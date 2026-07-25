@@ -13,7 +13,7 @@ use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
 use crate::core::runtime_library::PublishedLibrary;
 
-use super::{InboundSender, ScriptMessage, StdoutBuffer};
+use super::{InboundSender, ScriptMessage, SharedOutput};
 
 /// Upper bound on the number of Rhai operations a single chunk can
 /// perform. Rhai counts operations at every AST node, so this is
@@ -48,16 +48,16 @@ const MAX_EXPR_DEPTH: usize = 64;
 const MAX_FN_EXPR_DEPTH: usize = 32;
 
 pub(super) fn build_engine(
-    stdout: StdoutBuffer,
+    output: SharedOutput,
     inbound: InboundSender,
     library: PublishedLibrary,
 ) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
-    wire_print_hook(&mut engine, stdout, inbound.clone());
-    register_run(&mut engine, inbound.clone());
-    register_shutdown(&mut engine, inbound.clone());
-    register_mutations(&mut engine, inbound);
+    wire_print_hook(&mut engine, output.clone(), inbound.clone());
+    register_run(&mut engine, output.clone(), inbound.clone());
+    register_shutdown(&mut engine, output.clone(), inbound.clone());
+    register_mutations(&mut engine, output, inbound);
     register_introspection(&mut engine, library.clone());
     register_host_helpers(&mut engine, library);
     wire_debug_hook(&mut engine);
@@ -68,6 +68,12 @@ pub(super) fn build_engine(
 /// Resource caps. None of these are individually load-bearing for
 /// correctness — they bound a runaway script's blast radius (CPU,
 /// memory, recursion) to something the host can absorb.
+///
+/// These bound what a script can *compute*. What it can hand the *host* —
+/// reply output and queued effects — is bounded separately by
+/// [`ScriptOutput`](super::ScriptOutput), because none of these caps stop
+/// a script from spending its whole operation budget on `print` or
+/// `apply`.
 fn configure_caps(engine: &mut Engine) {
     engine.set_max_operations(MAX_OPERATIONS);
     engine.set_max_string_size(MAX_STRING_SIZE);
@@ -83,17 +89,35 @@ fn configure_caps(engine: &mut Engine) {
 /// host (which echoes it). Hook fires synchronously during the script
 /// run, so the buffer is guaranteed to still describe the active request
 /// when `run_script` drains it.
-fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSender) {
+///
+/// Both sinks stop together once the request's output budget is spent —
+/// `on_print` takes an infallible `Fn(&str)`, so there's no way to fail
+/// the script from here, and output past the cap is diagnostic anyway.
+/// The drained reply carries a truncation note so the client can tell.
+fn wire_print_hook(engine: &mut Engine, output: SharedOutput, inbound: InboundSender) {
     engine.on_print(move |msg| {
-        {
-            let mut buf = stdout.lock().unwrap();
-            buf.push_str(msg);
-            buf.push('\n');
+        if !output.lock().unwrap().record_print(msg) {
+            return;
         }
         inbound.send(ScriptMessage::Print {
             msg: msg.to_string(),
         });
     });
+}
+
+/// Claim `count` queued effects for the in-flight request, or fail the
+/// script. Unlike `print`, an effect that silently vanished would lose
+/// graph edits the caller believes it made, so exhausting the budget ends
+/// the run with a reason the client reads back in `ScriptResult.error`.
+fn claim_effects(output: &SharedOutput, count: usize) -> Result<(), Box<rhai::EvalAltResult>> {
+    if output.lock().unwrap().claim_effects(count) {
+        return Ok(());
+    }
+    Err(format!(
+        "script effect budget exhausted (limit {} per request)",
+        super::MAX_EFFECTS
+    )
+    .into())
 }
 
 /// Decode a `Intent` from a Rhai `Dynamic` with numeric
@@ -112,19 +136,26 @@ fn decode_action(d: &Dynamic) -> Result<Intent, String> {
 /// `run()` — trigger one graph evaluation. Bypasses the undo stack;
 /// `App` routes it to `App::run_graph` after applying any pending intents
 /// (so the worker sees the latest graph before evaluating).
-fn register_run(engine: &mut Engine, inbound: InboundSender) {
-    engine.register_fn("run", move || {
+fn register_run(engine: &mut Engine, output: SharedOutput, inbound: InboundSender) {
+    engine.register_fn("run", move || -> Result<(), Box<rhai::EvalAltResult>> {
+        claim_effects(&output, 1)?;
         inbound.send(ScriptMessage::RunOnce);
+        Ok(())
     });
 }
 
 /// `shutdown()` — ask the host to quit. Pushed through the inbound
 /// channel like every other side effect; `App` translates it into
 /// [`aperture::HostHandle::quit`].
-fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
-    engine.register_fn("shutdown", move || {
-        inbound.send(ScriptMessage::Shutdown);
-    });
+fn register_shutdown(engine: &mut Engine, output: SharedOutput, inbound: InboundSender) {
+    engine.register_fn(
+        "shutdown",
+        move || -> Result<(), Box<rhai::EvalAltResult>> {
+            claim_effects(&output, 1)?;
+            inbound.send(ScriptMessage::Shutdown);
+            Ok(())
+        },
+    );
 }
 
 /// `apply(action)` / `apply_all(actions)` — the generic mutation
@@ -132,13 +163,14 @@ fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
 /// via `serde::Deserialize`; new variants light up automatically with
 /// no per-variant glue. `apply_all` ships everything in a single
 /// `ScriptMessage::Apply` so the batch is one undo step.
-fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
+fn register_mutations(engine: &mut Engine, output: SharedOutput, inbound: InboundSender) {
     {
-        let inbound = inbound.clone();
+        let (output, inbound) = (output.clone(), inbound.clone());
         engine.register_fn(
             "apply",
             move |action: Dynamic| -> Result<(), Box<rhai::EvalAltResult>> {
                 let action = decode_action(&action).map_err(|e| format!("apply: {e}"))?;
+                claim_effects(&output, 1)?;
                 inbound.send(ScriptMessage::Apply(vec![action]));
                 Ok(())
             },
@@ -152,6 +184,9 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
                 .enumerate()
                 .map(|(i, d)| decode_action(&d).map_err(|e| format!("apply_all[{i}]: {e}")))
                 .collect::<Result<_, _>>()?;
+            // A batch costs its whole length: one message, but the host
+            // queues and applies every intent in it.
+            claim_effects(&output, actions.len())?;
             inbound.send(ScriptMessage::Apply(actions));
             Ok(())
         },

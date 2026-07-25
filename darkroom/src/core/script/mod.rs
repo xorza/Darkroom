@@ -173,12 +173,80 @@ impl InboundSender {
     }
 }
 
-/// Buffer accumulating the in-flight script's `print(...)` output. The
-/// executor runs one script at a time on a single tokio task, so there's
-/// no real contention — the `Mutex` exists because Rhai's `on_print` hook
-/// requires a `'static + Sync` callback (sync-mode Rhai). Drained by
-/// `run_script` after each request and shipped as `ScriptResult.print`.
-type StdoutBuffer = Arc<Mutex<String>>;
+/// Cap on the `print(...)` output one request accumulates. This *is* the
+/// reply's `print` field, so it bounds the outbound frame as well as host
+/// memory; past it, output is dropped and the reply says so. Generous for
+/// diagnostics, comfortably inside [`tcp::MAX_FRAME_BYTES`].
+const MAX_PRINT_BYTES: usize = 64 * 1024;
+
+/// Cap on what one request may queue on the host's inbound channel —
+/// counted in intents, so an `apply_all` of N costs N. The channel is
+/// unbounded and drained once per host frame, so without this a script
+/// burning its Rhai operation budget on `apply` calls queues millions of
+/// allocations the host never gets a chance to consume.
+const MAX_EFFECTS: usize = 10_000;
+
+/// The in-flight request's host-side accumulation, and its budget.
+///
+/// Rhai's own caps (see `engine::configure_caps`) bound what a script can
+/// *compute*; these bound what it can hand the host. The executor runs one
+/// script at a time on a single tokio task, so there's no real contention —
+/// the `Mutex` exists because Rhai's `on_print` hook requires a
+/// `'static + Sync` callback (sync-mode Rhai). Reset by `run_script` after
+/// each request.
+#[derive(Debug, Default)]
+struct ScriptOutput {
+    /// Everything `print(...)` produced, shipped as `ScriptResult.print`.
+    print: String,
+    /// Set once output hit [`MAX_PRINT_BYTES`]; the drained reply carries a
+    /// trailing note so a client can't mistake truncation for the end.
+    truncated: bool,
+    /// Intents and signals queued on the inbound channel so far.
+    effects: usize,
+}
+
+type SharedOutput = Arc<Mutex<ScriptOutput>>;
+
+impl ScriptOutput {
+    /// Record one `print` call. Returns whether it should also be echoed to
+    /// the host — once the buffer is full there's nothing to echo either,
+    /// so one check covers the reply *and* the channel.
+    fn record_print(&mut self, msg: &str) -> bool {
+        // `+ 1` for the newline, so the cap holds for what's really stored.
+        if self.print.len() + msg.len() + 1 > MAX_PRINT_BYTES {
+            self.truncated = true;
+            return false;
+        }
+        self.print.push_str(msg);
+        self.print.push('\n');
+        true
+    }
+
+    /// Claim `count` effects against the budget, or refuse. Refusing aborts
+    /// the script: silently dropping an `Apply` would lose graph edits the
+    /// caller believes it made.
+    fn claim_effects(&mut self, count: usize) -> bool {
+        let Some(spent) = self
+            .effects
+            .checked_add(count)
+            .filter(|n| *n <= MAX_EFFECTS)
+        else {
+            return false;
+        };
+        self.effects = spent;
+        true
+    }
+
+    /// Take the request's output, leaving the budget clear for the next one.
+    fn drain(&mut self) -> String {
+        let mut print = std::mem::take(&mut self.print);
+        if std::mem::take(&mut self.truncated) {
+            print.push_str("… output truncated\n");
+        }
+        self.effects = 0;
+        print
+    }
+}
 
 /// A background tokio task paired with its cooperative cancel token.
 /// Dropping it cancels the token (soft stop) then aborts the task (hard
@@ -254,7 +322,7 @@ async fn run_executor(
     inbound: InboundSender,
     library: PublishedLibrary,
 ) {
-    let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
+    let state: SharedOutput = SharedOutput::default();
     let engine = engine::build_engine(state.clone(), inbound, library);
     let mut sessions = SessionStore::default();
 
@@ -283,11 +351,11 @@ async fn run_executor(
 }
 
 /// Run a single request end-to-end: resolve its session, evaluate the
-/// script, drain the accumulated stdout, and return the reply.
+/// script, drain the accumulated output, and return the reply.
 fn run_script(
     engine: &Engine,
     sessions: &mut SessionStore,
-    state: &StdoutBuffer,
+    state: &SharedOutput,
     req: &ScriptRequest,
 ) -> ScriptResult {
     // Opportunistic sweep: every incoming request is a chance to drop
@@ -306,7 +374,7 @@ fn run_script(
             };
             return ScriptResult {
                 session: echoed,
-                print: String::new(),
+                print: state.lock().unwrap().drain(),
                 result: serde_json::Value::Null,
                 error: Some(e.to_string()),
             };
@@ -328,9 +396,9 @@ fn run_script(
         Err(e) => (serde_json::Value::Null, Some(e.to_string())),
     };
 
-    // Drain the hook's accumulator. `mem::take` leaves the buffer empty
-    // for the next request, so no explicit clear is needed.
-    let print = std::mem::take(&mut *state.lock().unwrap());
+    // Drain the hook's accumulator, which also clears the budget for the
+    // next request.
+    let print = state.lock().unwrap().drain();
 
     ScriptResult {
         session: Some(session_id),

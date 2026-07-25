@@ -24,6 +24,19 @@ fn published_library(library: Library) -> PublishedLibrary {
     internals::published_library(library)
 }
 
+/// A fixed func id the budget tests can name from Rhai source.
+fn stub_func_id() -> scenarium::FuncId {
+    "d0cc37c4-2a95-44b0-bedd-04ad7880cdc1".into()
+}
+
+/// One-func library so `host::make_add_node` resolves.
+fn stub_library() -> Library {
+    use scenarium::Func;
+    let mut lib = Library::default();
+    lib.add(testing::with_stub_lambda(Func::new(stub_func_id(), "stub")));
+    lib
+}
+
 /// Drain the next inbound, asserting it's a single-batch `Apply`, and
 /// return the decoded intents.
 fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> {
@@ -47,7 +60,7 @@ fn list_funcs_returns_full_func_objects_sorted_by_name() {
             .event("changed", EventLambda::default()),
     ));
 
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, _rx) = test_inbound();
     let library = published_library(lib);
     let engine = engine::build_engine(state, tx, library.clone());
@@ -99,7 +112,7 @@ fn list_funcs_returns_full_func_objects_sorted_by_name() {
 
 #[test]
 fn list_funcs_is_empty_when_func_lib_is_empty() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, _rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -112,7 +125,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
     // `create_node` lives in prelude.rhai; it calls `make_add_node`,
     // which surfaces this error. Confirms the prelude → native helper
     // call chain propagates errors cleanly.
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -125,7 +138,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
 
 #[test]
 fn create_node_unknown_id_returns_rhai_error_and_no_action() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     // Empty Library → any well-formed UUID is "unknown".
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
@@ -145,7 +158,7 @@ fn create_node_known_id_enqueues_add_node() {
     let mut lib = Library::default();
     lib.add(testing::with_stub_lambda(Func::new(alpha_id, "alpha")));
 
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let library = published_library(lib);
     let engine = engine::build_engine(state, tx, library.clone());
@@ -197,7 +210,7 @@ fn apply_decodes_arbitrary_intent_via_serde() {
     // generic `serde::Deserialize` path that lights up every other variant
     // for free. If this works, a script can drive any current or future
     // `Intent` through `apply` without touching the executor.
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -215,7 +228,7 @@ fn apply_decodes_arbitrary_intent_via_serde() {
 
 #[test]
 fn apply_returns_rhai_error_on_unknown_variant() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -228,7 +241,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
 
 #[test]
 fn apply_all_batches_actions_into_one_inbound() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -254,7 +267,7 @@ fn apply_all_batches_actions_into_one_inbound() {
 fn prelude_connect_decodes_to_setinput_bind() {
     // Pins the rewritten `connect` map shape against the new `Intent`:
     // `SetInput { to: Some(Binding::Bind(OutputPort { node_id, port_idx })) }`.
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -283,7 +296,7 @@ fn prelude_connect_decodes_to_setinput_bind() {
 
 #[test]
 fn prelude_disconnect_decodes_to_setinput_none() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -304,7 +317,7 @@ fn prelude_move_node_decodes_to_moveselection() {
     // `host::make_move_node` builds the intent in Rust and round-trips it
     // through Rhai → serde_json → `Intent`, so this also pins that
     // `glam::Vec2` survives the round-trip intact.
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -327,7 +340,7 @@ fn prelude_move_node_decodes_to_moveselection() {
 
 #[test]
 fn prelude_select_node_decodes_to_setselection() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -348,7 +361,7 @@ fn prelude_select_node_decodes_to_setselection() {
 
 #[test]
 fn run_emits_run_once() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
@@ -358,10 +371,108 @@ fn run_emits_run_once() {
 
 #[test]
 fn shutdown_emits_shutdown() {
-    let state = Arc::new(Mutex::new(String::new()));
+    let state = SharedOutput::default();
     let (tx, mut rx) = test_inbound();
     let engine = engine::build_engine(state, tx, published_library(Library::default()));
 
     engine.eval::<()>("shutdown()").unwrap();
     assert!(matches!(rx.try_recv(), Ok(ScriptMessage::Shutdown)));
+}
+
+#[test]
+fn print_output_is_capped_and_stops_echoing_to_the_host() {
+    // Rhai's caps bound one string at MAX_STRING_SIZE, not the number of
+    // prints, so 10M operations of `print` used to grow the reply buffer
+    // and the unbounded host channel together with nothing stopping it.
+    let state = SharedOutput::default();
+    let (tx, mut rx) = test_inbound();
+    let engine = engine::build_engine(state.clone(), tx, published_library(Library::default()));
+
+    // ~1 KiB per line, 200 lines — well past the 64 KiB cap.
+    engine
+        .eval::<()>(
+            r#"
+            let line = "";
+            for i in 0..1000 { line += "x" }
+            for i in 0..200 { print(line) }
+            "#,
+        )
+        .unwrap();
+
+    let output = state.lock().unwrap().print.len();
+    assert!(
+        output <= MAX_PRINT_BYTES,
+        "buffer held {output} bytes, past the {MAX_PRINT_BYTES} cap"
+    );
+    let queued = std::iter::from_fn(|| rx.try_recv().ok()).count();
+    assert!(
+        queued < 200,
+        "the host channel kept taking prints past the cap ({queued} queued)"
+    );
+
+    // Draining reports the truncation rather than passing a silently
+    // shortened transcript off as complete.
+    let drained = state.lock().unwrap().drain();
+    assert!(drained.ends_with("… output truncated\n"), "{drained:.80}");
+    assert_eq!(
+        state.lock().unwrap().print.len(),
+        0,
+        "the next request starts clean"
+    );
+}
+
+#[test]
+fn the_effect_budget_ends_the_script_instead_of_dropping_edits() {
+    // An `Apply` that vanished would lose graph edits the caller believes
+    // it made, so exhausting the budget fails the run with a reason.
+    let state = SharedOutput::default();
+    let (tx, mut rx) = test_inbound();
+    let engine = engine::build_engine(state.clone(), tx, published_library(stub_library()));
+
+    let error = engine
+        .eval::<()>(&format!(
+            r#"
+            let node = host::make_add_node("{}", 0.0, 0.0);
+            loop {{ apply(node) }}
+            "#,
+            stub_func_id()
+        ))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("effect budget exhausted"),
+        "the script must stop with a reason: {error}"
+    );
+
+    let queued = std::iter::from_fn(|| rx.try_recv().ok()).count();
+    assert_eq!(
+        queued, MAX_EFFECTS,
+        "exactly the budget reached the host, and not one more"
+    );
+}
+
+#[test]
+fn a_batch_costs_its_whole_length_against_the_budget() {
+    // One `apply_all` message can carry up to Rhai's array cap in intents,
+    // so counting messages instead of intents would leave the host queue
+    // unbounded in practice.
+    let state = SharedOutput::default();
+    let (tx, _rx) = test_inbound();
+    let engine = engine::build_engine(state.clone(), tx, published_library(stub_library()));
+
+    let script = format!(
+        r#"
+        let node = host::make_add_node("{}", 0.0, 0.0);
+        let batch = [];
+        for i in 0..10 {{ batch.push(node) }}
+        apply_all(batch);
+        "#,
+        stub_func_id()
+    );
+    engine.eval::<()>(&script).unwrap();
+    assert_eq!(
+        state.lock().unwrap().effects,
+        10,
+        "a ten-intent batch spends ten, not one"
+    );
 }
