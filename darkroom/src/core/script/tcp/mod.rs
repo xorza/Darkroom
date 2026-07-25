@@ -47,7 +47,7 @@ use uuid::Uuid;
 
 use common::file_utils;
 
-use crate::core::script::{CancellableTask, ScriptRequest, session};
+use crate::core::script::{CancellableTask, ScriptRequest, ScriptResult, session};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts. Applied to both the
@@ -381,9 +381,7 @@ async fn handle_conn(
             },
         };
 
-        // `ScriptResult` derives Serialize so its field names define the
-        // wire shape. See its doc comment for the JSON layout.
-        let body = serde_json::to_string(&reply).expect("script reply is serializable");
+        let body = encode_reply(&reply);
         with_timeout(
             timeouts.write,
             "reply write timed out",
@@ -430,13 +428,55 @@ async fn read_compressed_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8
         .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
 }
 
+/// Write `[u32 compressed_len][lz4-with-prepended-size payload]`, bounded
+/// by the same `MAX_FRAME_BYTES` the reader enforces. Without the cap the
+/// server can emit a frame no conforming client — including
+/// [`read_compressed_frame`] — will accept, which reads to the client as a
+/// dropped connection rather than a reply.
 async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.len() as u64 > u64::from(MAX_FRAME_BYTES) {
+        return Err(Error::other(format!(
+            "reply body too large: {} > {MAX_FRAME_BYTES}",
+            bytes.len()
+        )));
+    }
     let compressed = lz4_flex::block::compress_prepend_size(bytes);
-    let len =
-        u32::try_from(compressed.len()).map_err(|_| Error::other("reply frame exceeds u32"))?;
+    let len = u32::try_from(compressed.len())
+        .ok()
+        .filter(|len| *len <= MAX_FRAME_BYTES)
+        .ok_or_else(|| {
+            Error::other(format!(
+                "compressed reply too large: {} > {MAX_FRAME_BYTES}",
+                compressed.len()
+            ))
+        })?;
     stream.write_u32(len).await?;
     stream.write_all(&compressed).await?;
     Ok(())
+}
+
+/// Serialize `reply`, substituting an error reply when the body wouldn't
+/// fit in a frame. A script's final expression becomes `ScriptResult.result`
+/// verbatim, so a reply can outgrow the cap however tightly `print` is
+/// bounded — and a client that asked a question deserves a readable answer
+/// saying so, not a closed socket.
+fn encode_reply(reply: &ScriptResult) -> String {
+    // `ScriptResult` derives Serialize so its field names define the wire
+    // shape. See its doc comment for the JSON layout.
+    let body = serde_json::to_string(reply).expect("script reply is serializable");
+    if body.len() as u64 <= u64::from(MAX_FRAME_BYTES) {
+        return body;
+    }
+    let replacement = ScriptResult {
+        session: reply.session,
+        print: String::new(),
+        result: serde_json::Value::Null,
+        error: Some(format!(
+            "reply too large to send: {} bytes exceeds the {MAX_FRAME_BYTES}-byte frame limit",
+            body.len()
+        )),
+    };
+    serde_json::to_string(&replacement).expect("script reply is serializable")
 }
 
 #[cfg(test)]

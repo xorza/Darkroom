@@ -417,3 +417,64 @@ async fn excess_connections_are_refused() {
     let reply = parse_reply(&read_reply(&mut admitted).await);
     assert_eq!(reply.error, None);
 }
+
+#[test]
+fn an_oversized_reply_becomes_an_error_the_client_can_read() {
+    // The reader rejects anything past MAX_FRAME_BYTES, so a reply past it
+    // is a frame no conforming client — including ours — will accept. It
+    // must not go on the wire at all; the client gets a readable refusal
+    // instead of a dropped connection.
+    let session = Some(uuid::Uuid::nil());
+    let huge = ScriptResult {
+        session,
+        print: String::new(),
+        result: serde_json::Value::String("x".repeat(MAX_FRAME_BYTES as usize)),
+        error: None,
+    };
+    let encoded = encode_reply(&huge);
+    assert!(
+        encoded.len() as u64 <= u64::from(MAX_FRAME_BYTES),
+        "the substitute must itself fit: {} bytes",
+        encoded.len()
+    );
+    let parsed: ScriptResult = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(parsed.session, session, "the session still round-trips");
+    assert_eq!(parsed.result, serde_json::Value::Null);
+    assert!(
+        parsed.error.unwrap().contains("reply too large"),
+        "the client is told why"
+    );
+
+    // A reply that fits is passed through untouched.
+    let small = ScriptResult {
+        session,
+        print: "ok\n".to_string(),
+        result: serde_json::Value::from(7),
+        error: None,
+    };
+    let parsed: ScriptResult = serde_json::from_str(&encode_reply(&small)).unwrap();
+    assert_eq!(parsed.print, "ok\n");
+    assert_eq!(parsed.result, serde_json::Value::from(7));
+    assert_eq!(parsed.error, None);
+}
+
+#[tokio::test]
+async fn write_frame_refuses_a_body_past_the_readers_limit() {
+    let listener = TcpListener::bind(loopback_ephemeral()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accept = tokio::spawn(async move { listener.accept().await.unwrap().0 });
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let mut server = accept.await.unwrap();
+
+    let oversized = vec![b'x'; MAX_FRAME_BYTES as usize + 1];
+    let error = write_frame(&mut server, &oversized).await.unwrap_err();
+    assert!(
+        error.to_string().contains("too large"),
+        "refused with a reason: {error}"
+    );
+    // Nothing was written, so the reader is still waiting on a fresh frame
+    // rather than resyncing mid-stream.
+    let within = vec![b'y'; 32];
+    write_frame(&mut server, &within).await.unwrap();
+    assert_eq!(read_compressed_frame(&mut client).await.unwrap(), within);
+}
