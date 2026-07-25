@@ -13,8 +13,9 @@ use scenarium::{Graph, GraphDef, NodeId};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
+use crate::core::io::graph_library::GraphLibrarySaveError;
 use crate::core::io::preferences::Preferences;
-use crate::core::runtime_library::{RuntimeLibrary, RuntimeLibraryChange};
+use crate::core::runtime_library::{LibraryEdit, RuntimeLibrary};
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
@@ -84,8 +85,8 @@ impl RuntimeHost {
     }
 
     pub(crate) fn import_template(&mut self, graph: GraphDef) -> bool {
-        let change = self.library.import_template(graph);
-        self.apply_library_change(change)
+        let edit = self.library.import_template(graph);
+        self.report_library_edit(edit)
     }
 
     pub(crate) fn publish_graph_to_library(
@@ -94,22 +95,28 @@ impl RuntimeHost {
         target: GraphRef,
         node_id: NodeId,
     ) -> bool {
-        let change = self.library.publish_graph(document, target, node_id);
-        self.apply_library_change(change)
+        let edit = self.library.publish_graph(document, target, node_id);
+        self.report_library_edit(edit)
     }
 
-    fn apply_library_change(&mut self, change: RuntimeLibraryChange) -> bool {
-        let changed = change.changed;
-        if changed {
-            match change.persist_error {
-                None => self.status.error = None,
-                Some(error) => self
-                    .status
-                    .error(format!("graph library save failed: {error:#}")),
+    /// Report a graph-library edit and say whether it landed. A persist
+    /// failure reports and answers `false`: the library is written before
+    /// anything adopts it, so a failed edit changed nothing anywhere and
+    /// the caller must not treat it as work done.
+    fn report_library_edit(&mut self, edit: Result<LibraryEdit, GraphLibrarySaveError>) -> bool {
+        match edit {
+            Ok(LibraryEdit::Committed) => {
+                self.status.error = None;
+                self.sync_worker_disk_store();
+                true
             }
-            self.sync_worker_disk_store();
+            Ok(LibraryEdit::Skipped) => false,
+            Err(error) => {
+                self.status
+                    .error(format!("graph library save failed: {error:#}"));
+                false
+            }
         }
-        changed
     }
 
     /// Push a fresh [`DiskStore`] (current library snapshot + current root)

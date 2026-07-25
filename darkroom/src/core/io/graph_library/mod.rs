@@ -4,6 +4,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use common::{DeserializeError, SerdeFormat, SerializeError, deserialize, file_utils, serialize};
+use scenarium::{GraphDef, GraphId};
 
 use crate::core::graph_library::GraphLibrary;
 use crate::core::io::cwd_file;
@@ -137,14 +138,60 @@ fn load_from(path: &Path) -> Result<GraphLibrary, GraphLibraryLoadError> {
     })
 }
 
-pub(crate) fn save(library: &GraphLibrary) -> Result<(), GraphLibrarySaveError> {
-    save_to(&path(), library)
+/// One graph-library mutation. Both editing paths — importing a template
+/// and publishing a local graph — reduce to this: store `graph`, reusing
+/// `origin` when the library still holds that entry and minting a fresh id
+/// otherwise.
+#[derive(Debug)]
+pub(crate) struct LibraryEntry {
+    /// The library id this definition was last published to, if any.
+    /// Resolved against the file rather than the caller's snapshot, so an
+    /// entry another instance deleted becomes a fresh one instead of
+    /// resurrecting a dead id.
+    pub(crate) origin: Option<GraphId>,
+    pub(crate) graph: GraphDef,
 }
 
-fn save_to(path: &Path, library: &GraphLibrary) -> Result<(), GraphLibrarySaveError> {
-    read(path).map_err(|source| GraphLibrarySaveError::Unreadable {
+/// The library as it now stands on disk, plus the id the entry landed at.
+/// The caller adopts this in place of its own copy — the file is the
+/// source of truth, and the in-memory library is a cache of it.
+#[derive(Debug)]
+pub(crate) struct CommittedEntry {
+    pub(crate) library: GraphLibrary,
+    pub(crate) id: GraphId,
+}
+
+pub(crate) fn commit_entry(entry: LibraryEntry) -> Result<CommittedEntry, GraphLibrarySaveError> {
+    commit_entry_to(&path(), entry)
+}
+
+/// Read the file, add `entry`, write the union back, and hand the caller
+/// the merged library to adopt.
+///
+/// Re-reading is what keeps a second instance's entries: writing the
+/// caller's whole snapshot would drop everything added since that snapshot
+/// was taken. It does *not* make the read-modify-write atomic — two
+/// instances can still interleave and lose one entry — which is left
+/// deliberately unlocked. Closing it needs cross-process mutual exclusion,
+/// and for a single-user desktop app the window (two publishes racing
+/// within a few milliseconds) does not justify the cost.
+fn commit_entry_to(
+    path: &Path,
+    entry: LibraryEntry,
+) -> Result<CommittedEntry, GraphLibrarySaveError> {
+    let mut library = read(path).map_err(|source| GraphLibrarySaveError::Unreadable {
         source: Box::new(source),
     })?;
+    let id = entry
+        .origin
+        .filter(|origin| library.graphs.contains_key(origin))
+        .unwrap_or_else(GraphId::unique);
+    library.graphs.insert(id, entry.graph);
+    write_library(path, &library)?;
+    Ok(CommittedEntry { library, id })
+}
+
+fn write_library(path: &Path, library: &GraphLibrary) -> Result<(), GraphLibrarySaveError> {
     let bytes = serialize(library, SerdeFormat::Json)
         .map_err(|source| GraphLibrarySaveError::Serialize { source })?;
     file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable).map_err(
