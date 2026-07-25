@@ -157,7 +157,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     std::fs::write(&file, b"x").unwrap();
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &fixture.program);
+    cache.reconcile(&fixture.program);
     let mut resource_stamps = RunResourceStamps::default();
 
     resource_stamps

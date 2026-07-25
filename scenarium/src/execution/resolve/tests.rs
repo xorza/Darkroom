@@ -87,7 +87,7 @@ impl Fix {
             event_sources,
         };
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&ExecutionProgram::default(), &self.program);
+        cache.reconcile(&self.program);
         let resource_stamps = RunResourceStamps::default();
         stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
         for cached in cached {

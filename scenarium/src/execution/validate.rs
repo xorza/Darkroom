@@ -55,6 +55,12 @@ pub(crate) enum CompiledGraphValidationError {
 pub(crate) enum InstalledGraphValidationError {
     #[error("runtime cache node set does not match the compiled program")]
     NodeSet,
+    #[error("runtime cache slot {node_idx:?} holds node {cached:?}, not {e_node_id:?}")]
+    NodeMismatch {
+        node_idx: NodeIdx,
+        cached: ExecutionNodeId,
+        e_node_id: ExecutionNodeId,
+    },
     #[error("runtime cache output arity does not match node {e_node_id:?}")]
     OutputArity { e_node_id: ExecutionNodeId },
     #[error("runtime cache state owner does not match node {e_node_id:?}")]
@@ -179,13 +185,21 @@ impl CompiledGraph {
             return Err(InstalledGraphValidationError::NodeSet);
         }
 
-        for ((e_node_id, e_node), slot) in self
+        for (i, ((e_node_id, e_node), (cached, slot))) in self
             .program
             .e_node_ids
             .iter()
             .zip(&self.program.e_nodes)
-            .zip(cache.slots.iter())
+            .zip(cache.e_node_ids.iter().zip(cache.slots.iter()))
+            .enumerate()
         {
+            if cached != e_node_id {
+                return Err(InstalledGraphValidationError::NodeMismatch {
+                    node_idx: NodeIdx(i as u32),
+                    cached: *cached,
+                    e_node_id: *e_node_id,
+                });
+            }
             if let Some(output_values) = slot.output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {

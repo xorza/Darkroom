@@ -30,14 +30,19 @@ use crate::{DynamicValue, RamUsage};
 /// The per-node cross-run cache plus its disk backing. `slots` is a
 /// [`NodeColumn`] aligned to the installed program, so every run-loop access is
 /// an array read; cross-install survival happens at [`reconcile`](Self::reconcile),
-/// which re-pairs the previous install's slots with the new index order by
-/// stable id. The resolver stamps each node's digest and decides cache reuse,
+/// which re-pairs the slots with the new index order by stable id. The resolver stamps
+/// each node's digest and decides cache reuse,
 /// while the executor mutates outputs/state and consumes that decision. `disk_store`
 /// persists outputs and serves them back; it is kept across graph updates while only `slots`
 /// is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
     pub(crate) slots: NodeColumn<RuntimeSlot>,
+    /// The ids `slots` is currently paired with, so the cache can interpret its
+    /// own state: reconciling to a new program needs no memory of the previous
+    /// one, and [`validate_installed`](crate::execution::compile::CompiledGraph::validate_installed)
+    /// can compare alignment element-wise instead of by length.
+    pub(crate) e_node_ids: NodeColumn<ExecutionNodeId>,
     pub(crate) disk_store: DiskStore,
     ram_seen: HashSet<usize>,
 }
@@ -51,6 +56,14 @@ pub(crate) struct CacheEvictionFailure {
 impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+        self.e_node_ids.clear();
+    }
+
+    /// Append the slot for the next dense index, paired with the id it belongs
+    /// to. The only way slots enter the column, so the two stay aligned.
+    fn push_slot(&mut self, e_node_id: ExecutionNodeId, slot: RuntimeSlot) {
+        self.e_node_ids.push(e_node_id);
+        self.slots.push(slot);
     }
 
     pub(crate) async fn evict(
@@ -78,15 +91,11 @@ impl RuntimeCache {
     /// The total and per-node RAM held by resident values. The global total deduplicates
     /// shared custom values by pointer identity, while each node reports the full size of
     /// every value it holds. `Empty` slots and zero-byte nodes are omitted.
-    pub(crate) fn resident_ram_stats(
-        &mut self,
-        program: &ExecutionProgram,
-        by_node: &mut Vec<NodeRamUsage>,
-    ) -> RamUsage {
+    pub(crate) fn resident_ram_stats(&mut self, by_node: &mut Vec<NodeRamUsage>) -> RamUsage {
         self.ram_seen.clear();
         by_node.clear();
         let mut total = RamUsage::default();
-        for (e_node_id, slot) in program.e_node_ids.iter().zip(self.slots.iter()) {
+        for (e_node_id, slot) in self.e_node_ids.iter().zip(self.slots.iter()) {
             let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
@@ -114,24 +123,15 @@ impl RuntimeCache {
         total
     }
 
-    /// Realign the slots to a newly installed program: pair the previous
-    /// install's slots with the new index order by stable id — dropping
-    /// persistent state whose owning implementation (func id + version)
-    /// changed — default new nodes, trim removed ones, and apply the installed
-    /// program's RAM-retention policy immediately. The one place ids are
-    /// hashed for slot access; every per-run access is an index read.
-    pub(crate) fn reconcile(&mut self, previous: &ExecutionProgram, program: &ExecutionProgram) {
-        assert_eq!(
-            self.slots.len(),
-            previous.e_nodes.len(),
-            "the runtime cache must be aligned to the previously installed program"
-        );
-        let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> = previous
-            .e_node_ids
-            .iter()
-            .copied()
-            .zip(self.slots.drain())
-            .collect();
+    /// Realign the slots to a newly installed program: re-pair the slots the
+    /// cache is currently holding with the new index order by stable id —
+    /// dropping persistent state whose owning implementation (func id +
+    /// version) changed — default new nodes, trim removed ones, and apply the
+    /// installed program's RAM-retention policy immediately. The one place ids
+    /// are hashed for slot access; every per-run access is an index read.
+    pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
+        let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> =
+            self.e_node_ids.drain().zip(self.slots.drain()).collect();
         for (e_node_id, e_node) in program.e_node_ids.iter().zip(&program.e_nodes) {
             let owner = StateOwner {
                 func_id: e_node.func_id,
@@ -147,7 +147,7 @@ impl RuntimeCache {
                     ..Default::default()
                 },
             };
-            self.slots.push(slot);
+            self.push_slot(*e_node_id, slot);
         }
         self.release_dead_outputs(program);
     }

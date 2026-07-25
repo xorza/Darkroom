@@ -22,9 +22,16 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
     OutputSnapshot::new(values)
 }
 
+/// Append a slot under the id its dense position implies — `from_u128(idx + 1)`,
+/// the same numbering the programs in this file push, so the cache lands aligned
+/// to them without a reconcile.
 fn insert_slot(cache: &mut RuntimeCache, slot: RuntimeSlot) -> NodeIdx {
+    let node_idx = NodeIdx(cache.slots.len() as u32);
+    cache
+        .e_node_ids
+        .push(ExecutionNodeId::from_u128(node_idx.0 as u128 + 1));
     cache.slots.push(slot);
-    NodeIdx(cache.slots.len() as u32 - 1)
+    node_idx
 }
 
 #[tokio::test]
@@ -267,7 +274,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
             .cache = *mode;
     }
 
-    cache.reconcile(&program, &program);
+    cache.reconcile(&program);
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -293,7 +300,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     program.push(e_node_id, node(func_id, 0));
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &program);
+    cache.reconcile(&program);
     let digest = Digest([5u8; 32]);
     let node_idx = NodeIdx(0);
     let slot = &mut cache.slots[node_idx];
@@ -306,7 +313,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     };
 
     // Same (func, version): everything survives.
-    cache.reconcile(&program, &program);
+    cache.reconcile(&program);
     assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
         cache.slots[node_idx].event_state.lock().await.get::<u32>(),
@@ -317,7 +324,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     // Bumped version: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the version.
     *program.by_id_mut(e_node_id) = node(func_id, 1);
-    cache.reconcile(&program, &program);
+    cache.reconcile(&program);
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a version bump must drop the predecessor's state"
@@ -331,11 +338,75 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     // Changed func id at the same version: state drops too.
     cache.slots[node_idx].state.set(31_u32);
     *program.by_id_mut(e_node_id) = node(FuncId::from_u128(78), 1);
-    cache.reconcile(&program, &program);
+    cache.reconcile(&program);
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a func change must drop the predecessor's state"
     );
+}
+
+/// Slots follow their stable id when a recompile shifts the dense index space,
+/// which is what makes the cache self-describing: it re-pairs against nothing
+/// but the ids it already carries.
+#[test]
+fn reconcile_follows_ids_when_the_index_space_shifts() {
+    let build = |ids: &[u128]| {
+        let mut program = ExecutionProgram::default();
+        for id in ids {
+            program.push(
+                ExecutionNodeId::from_u128(*id),
+                ExecutionNode {
+                    cache: CacheMode::Ram,
+                    behavior: FuncBehavior::Pure,
+                    ..Default::default()
+                },
+            );
+        }
+        program
+    };
+    let digest = |id: u128| Digest([id as u8; 32]);
+
+    // Ids 1, 2, 3 at indices 0, 1, 2 — each slot stamped with its own digest.
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&build(&[1, 2, 3]));
+    for i in 0..3u32 {
+        let slot = &mut cache.slots[NodeIdx(i)];
+        slot.current_digest = Some(digest(i as u128 + 1));
+        slot.value = ValueState::Resident {
+            snapshot: complete_snapshot(out()),
+            produced_under: Some(digest(i as u128 + 1)),
+        };
+        slot.state.set(i);
+    }
+
+    // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
+    // surviving node slides down one index.
+    cache.reconcile(&build(&[2, 3, 4]));
+
+    assert_eq!(
+        cache.e_node_ids.iter().copied().collect::<Vec<_>>(),
+        (2..=4).map(ExecutionNodeId::from_u128).collect::<Vec<_>>(),
+        "the cache tracks the new index order"
+    );
+    assert_eq!(
+        cache.slots[NodeIdx(0)].current_digest,
+        Some(digest(2)),
+        "node 2's slot moved from index 1 to index 0"
+    );
+    assert_eq!(cache.slots[NodeIdx(0)].state.get::<u32>(), Some(&1));
+    assert_eq!(
+        cache.slots[NodeIdx(1)].current_digest,
+        Some(digest(3)),
+        "node 3's slot moved from index 2 to index 1"
+    );
+    assert_eq!(cache.slots[NodeIdx(1)].state.get::<u32>(), Some(&2));
+    assert_eq!(
+        cache.slots[NodeIdx(2)].current_digest,
+        None,
+        "the appended node 4 gets a fresh slot"
+    );
+    assert!(cache.slots[NodeIdx(2)].output_values().is_none());
+    assert_eq!(cache.slots.len(), 3, "the deleted node 1's slot is dropped");
 }
 
 #[test]
@@ -556,14 +627,10 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     );
     // Slot C: empty — contributes zero.
     insert_slot(&mut cache, RuntimeSlot::default());
-    let mut program = ExecutionProgram::default();
-    for id in 1..=3u128 {
-        program.push(ExecutionNodeId::from_u128(id), ExecutionNode::default());
-    }
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
     let mut by_node = Vec::new();
-    let total = cache.resident_ram_stats(&program, &mut by_node);
+    let total = cache.resident_ram_stats(&mut by_node);
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);
 
@@ -586,7 +653,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     let capacity = by_node.capacity();
     let seen_capacity = cache.ram_seen.capacity();
     assert_eq!(
-        cache.resident_ram_stats(&program, &mut by_node),
+        cache.resident_ram_stats(&mut by_node),
         RamUsage { cpu: 105, gpu: 10 }
     );
     assert_eq!(by_node.as_ptr(), allocation);
