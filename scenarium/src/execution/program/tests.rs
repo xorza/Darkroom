@@ -36,23 +36,16 @@ fn emitted_nodes(program: &mut ExecutionProgram) -> Vec<(ExecutionNodeId, Execut
     e_nodes
 }
 
-/// The handover [`Flattener::build`](crate::execution::flatten::Flattener::build)
-/// performs: id-sort the emit-order buffer, then drain it into the program.
-fn adopt(program: &mut ExecutionProgram, e_nodes: &mut Vec<(ExecutionNodeId, ExecutionNode)>) {
-    e_nodes.sort_unstable_by_key(|(id, _)| *id);
-    program.adopt_nodes(e_nodes.drain(..));
-}
-
-/// Dense indices follow id order rather than flatten's walk order, and the
-/// caller's buffer is left empty for the next compile.
+/// Dense indices follow id order rather than flatten's walk order, and draining
+/// leaves the caller's buffer empty with its allocation intact.
 #[test]
-fn node_handover_orders_by_id_and_drains_the_flattener_buffer() {
+fn adopt_nodes_orders_by_id_and_drains_the_flattener_buffer() {
     let mut program = ExecutionProgram::default();
     let mut e_nodes = emitted_nodes(&mut program);
     let capacity = e_nodes.capacity();
-    adopt(&mut program, &mut e_nodes);
+    program.adopt_nodes(e_nodes.drain(..));
 
-    assert!(e_nodes.is_empty(), "the handover drains the buffer");
+    assert!(e_nodes.is_empty(), "adoption drains the buffer");
     assert_eq!(
         e_nodes.capacity(),
         capacity,
@@ -70,22 +63,6 @@ fn node_handover_orders_by_id_and_drains_the_flattener_buffer() {
             "the reverse map agrees with the id-ordered vector"
         );
     }
-
-    // Adoption assigns indices in the order it receives, so the id-sort is a
-    // contract on the caller — asserted rather than silently trusted.
-    #[cfg(debug_assertions)]
-    {
-        let mut program = ExecutionProgram::default();
-        let mut unsorted = emitted_nodes(&mut program);
-        unsorted.reverse();
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            program.adopt_nodes(unsorted);
-        }));
-        assert!(
-            panic.is_err(),
-            "adopting a walk-ordered sequence must trip the id-order assert"
-        );
-    }
 }
 
 /// Interning rewrites flatten's id-based fixups into the dense index space. The
@@ -94,7 +71,7 @@ fn node_handover_orders_by_id_and_drains_the_flattener_buffer() {
 fn intern_bindings_resolves_ids_to_dense_addresses_over_emit_ordered_pools() {
     let mut program = ExecutionProgram::default();
     let mut e_nodes = emitted_nodes(&mut program);
-    program.adopt_nodes(&mut e_nodes);
+    program.adopt_nodes(e_nodes.drain(..));
 
     // The consumer owns input-pool slots 0 and 1; bind them to id 1 port 1 and
     // id 3 port 0, which adoption placed at indices 0 and 2.
