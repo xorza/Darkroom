@@ -235,14 +235,71 @@ mod tests {
     use super::*;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
+    use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::test_support::FlattenMapBuilder;
     use crate::execution::program::ExecutionNode;
     use crate::execution::program::index::OutputAddr;
     use crate::execution::validate::CompiledGraphValidationError;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::graph::{GraphDef, NodeSearch};
-    use crate::node::definition::FuncId;
-    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+    use crate::node::definition::{Func, FuncId};
+    use crate::node::event::EventLambda;
+    use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
+
+    /// Event edges get the same treatment as bind fixups: an endpoint flatten
+    /// never emitted is a flatten bug, so wiring panics instead of dropping the
+    /// edge, and the compiled artifact still carries a range backstop.
+    #[test]
+    fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
+        let mut library = test_func_lib(TestFuncHooks::default());
+        library.add(testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "ticker")
+                .category("Test")
+                .sink()
+                .event("tick", EventLambda::default()),
+        ));
+        let mut graph = Graph::default();
+        let emitter = graph.add(library.by_name("ticker").unwrap().into());
+        let subscriber = graph.add(library.by_name("Print").unwrap().into());
+        graph.subscribe(emitter, 0, subscriber);
+
+        let mut compiled = Compiler::default().compile(&graph, &library).unwrap();
+        let emitter_idx =
+            compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[emitter])];
+        let events = compiled.program[emitter_idx].events;
+        assert_eq!(
+            compiled.program.events[events][0].subscribers.len(),
+            1,
+            "the authored subscription wired one flat subscriber"
+        );
+
+        // An unemitted subscriber is a flatten bug, not drift to absorb.
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compiled.program.apply_subscriptions([(
+                ExecutionEventPort {
+                    e_node_id: ExecutionNodeId::from_authoring(&[emitter]),
+                    event_idx: 0,
+                },
+                ExecutionNodeId::unique(),
+            )]);
+        }));
+        assert!(
+            panic.is_err(),
+            "wiring a subscriber the program never adopted must panic"
+        );
+
+        // And the artifact check catches a subscriber index that names no node.
+        let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+        compiled.program.events[events][0].subscribers[0] = past_the_end;
+        assert!(
+            matches!(
+                compiled.validate(&library),
+                Err(CompiledGraphValidationError::MissingEventSubscriber { subscriber, .. })
+                    if subscriber == past_the_end
+            ),
+            "a subscriber past the node vector is caught by validation"
+        );
+    }
 
     /// The binding-integrity backstops. `intern_bindings` mints an address only
     /// from a successful id lookup and a real compile can't reach either arm, so

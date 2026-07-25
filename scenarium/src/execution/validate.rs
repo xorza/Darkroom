@@ -39,6 +39,13 @@ pub(crate) enum CompiledGraphValidationError {
     OutputRange { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} event range is out of bounds")]
     EventRange { e_node_id: ExecutionNodeId },
+    #[error(
+        "execution node {e_node_id:?} has an event subscriber outside the program: {subscriber:?}"
+    )]
+    MissingEventSubscriber {
+        e_node_id: ExecutionNodeId,
+        subscriber: NodeIdx,
+    },
     #[error("execution node {e_node_id:?} binds to missing output {target:?}")]
     MissingBindingTarget {
         e_node_id: ExecutionNodeId,
@@ -71,6 +78,12 @@ pub(crate) enum InstalledGraphValidationError {
 pub(crate) enum ExecutionPlanValidationError {
     #[error("execution order contains more entries than the program")]
     OrderTooLong,
+    #[error("plan {set} spans {len} nodes, not the program's {expected}")]
+    SetLength {
+        set: &'static str,
+        len: usize,
+        expected: usize,
+    },
     #[error("execution order contains an out-of-range node index: {node_idx:?}")]
     NodeOutOfRange { node_idx: NodeIdx },
     #[error("execution node {e_node_id:?} input range is out of bounds")]
@@ -139,10 +152,25 @@ impl CompiledGraph {
                     e_node_id: *e_node_id,
                 });
             }
-            if program.events.get(e_node.events.range()).is_none() {
-                return Err(CompiledGraphValidationError::EventRange {
+            let events = program.events.get(e_node.events.range()).ok_or(
+                CompiledGraphValidationError::EventRange {
                     e_node_id: *e_node_id,
-                });
+                },
+            )?;
+
+            // Unreachable while `apply_subscriptions` mints every subscriber from a
+            // successful id lookup — kept as the backstop if that stops holding.
+            for e_event in events {
+                if let Some(&subscriber) = e_event
+                    .subscribers
+                    .iter()
+                    .find(|s| s.idx() >= program.e_nodes.len())
+                {
+                    return Err(CompiledGraphValidationError::MissingEventSubscriber {
+                        e_node_id: *e_node_id,
+                        subscriber,
+                    });
+                }
             }
 
             for e_input in inputs {
@@ -243,6 +271,24 @@ impl ExecutionPlan {
             return Err(ExecutionPlanValidationError::OrderTooLong);
         }
 
+        // Establish that every column and set spans the program before the
+        // index reads below rely on it — a validator must report the corruption
+        // it finds, never fault on it.
+        for (set, len) in [
+            ("verdicts", self.verdicts.len()),
+            ("roots", self.roots.len()),
+            ("pinned", self.pinned.len()),
+            ("event sources", self.event_sources.len()),
+        ] {
+            if len != program.e_nodes.len() {
+                return Err(ExecutionPlanValidationError::SetLength {
+                    set,
+                    len,
+                    expected: program.e_nodes.len(),
+                });
+            }
+        }
+
         let mut seen_in_order = NodeSet::default();
         seen_in_order.reset(program.e_nodes.len());
         for &node_idx in &self.process_order {
@@ -257,14 +303,16 @@ impl ExecutionPlan {
                 .ok_or(ExecutionPlanValidationError::InputRange { e_node_id })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
-                    let disabled_dependency = program
-                        .e_nodes
-                        .get(addr.node_idx.idx())
-                        .is_some_and(|e_node| e_node.disabled)
-                        && self
-                            .verdicts
-                            .get(addr.node_idx)
-                            .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
+                    // Resolve the dependency before probing the sets: an
+                    // out-of-range target is the corruption to report, not a
+                    // reason to index past `seen_in_order` and `e_node_ids`.
+                    let dependency = program.e_nodes.get(addr.node_idx.idx()).ok_or(
+                        ExecutionPlanValidationError::NodeOutOfRange {
+                            node_idx: addr.node_idx,
+                        },
+                    )?;
+                    let disabled_dependency = dependency.disabled
+                        && self.verdicts[addr.node_idx] == NodeVerdict::Disabled;
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(ExecutionPlanValidationError::BeforeDependency {
                             e_node_id,
@@ -279,7 +327,12 @@ impl ExecutionPlan {
             seen_in_order.insert(node_idx);
         }
 
+        // A set bit in the last word's padding survives a release-build
+        // out-of-range `insert`, so an iterated index is checked like any other.
         for node_idx in self.pinned.iter() {
+            if node_idx.idx() >= program.e_nodes.len() {
+                return Err(ExecutionPlanValidationError::NodeOutOfRange { node_idx });
+            }
             if !self.roots.contains(node_idx) {
                 return Err(ExecutionPlanValidationError::PinnedNodeNotRoot {
                     e_node_id: program.e_node_ids[node_idx],
@@ -287,6 +340,9 @@ impl ExecutionPlan {
             }
         }
         for node_idx in self.event_sources.iter() {
+            if node_idx.idx() >= program.e_nodes.len() {
+                return Err(ExecutionPlanValidationError::NodeOutOfRange { node_idx });
+            }
             if !self.roots.contains(node_idx) {
                 return Err(ExecutionPlanValidationError::EventSourceNotRoot {
                     e_node_id: program.e_node_ids[node_idx],
