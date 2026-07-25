@@ -28,7 +28,7 @@ impl EventLambda {
     pub async fn invoke(&self, state: SharedAnyState) {
         match self {
             EventLambda::None => {
-                panic!("Func missing lambda");
+                panic!("event missing lambda");
             }
             EventLambda::Lambda(inner) => (inner)(state).await,
         }
