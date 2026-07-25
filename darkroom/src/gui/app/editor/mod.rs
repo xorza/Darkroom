@@ -8,11 +8,11 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
-use scenarium::Library;
+use scenarium::{Library, OutputPort};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::document::{GraphRef, PortKind, PortRef, TabRef};
+use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::duplicate::{
@@ -461,8 +461,7 @@ impl Editor {
     /// Open `port`'s image-viewer tab and focus it — one tab per port,
     /// deduped. Mirrors [`Self::open_preferences`]: adding the tab is the
     /// non-undoable part, focus routes through a recorded activation.
-    fn open_image_viewer(&mut self, open: &mut OpenDocument, port: PortRef) {
-        assert_eq!(port.kind, PortKind::Output);
+    fn open_image_viewer(&mut self, open: &mut OpenDocument, port: OutputPort) {
         let group = open.document.layout.focused;
         let tab = TabRef::ImageViewer(port);
         open.document.layout.find_or_insert(tab, group);
@@ -533,10 +532,10 @@ mod tests {
     use scenarium::DataType;
     use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
-    use scenarium::{Graph, InputPort, Node, NodeKind};
+    use scenarium::{Graph, InputPort, Node, NodeKind, OutputPort};
 
     use crate::core::document::open_document::OpenDocument;
-    use crate::core::document::{Document, GraphRef, ItemRef, PortKind, PortRef, TabRef};
+    use crate::core::document::{Document, GraphRef, ItemRef, TabRef};
     use crate::core::edit::intent::types::Intent;
     use crate::gui::UiAction;
     use crate::gui::app::editor::Editor;
@@ -635,11 +634,7 @@ mod tests {
             .main_view
             .item_placements
             .insert(ItemRef::Node(id), Vec2::ZERO);
-        let port = |port_idx| PortRef {
-            node_id: id,
-            kind: PortKind::Output,
-            port_idx,
-        };
+        let port = |port_idx| OutputPort::new(id, port_idx);
         let open = |test: &mut TestEditor, p| {
             test.editor.actions.push(UiAction::OpenImageViewer(p));
             test.editor.apply_view_actions(&mut test.open);

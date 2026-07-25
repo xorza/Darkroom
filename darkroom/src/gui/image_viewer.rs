@@ -19,9 +19,9 @@ use aperture::{
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
-use scenarium::NodeSearch;
+use scenarium::{NodeSearch, OutputPort};
 
-use crate::core::document::{Document, PortKind, PortRef, Viewport};
+use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
 use crate::gui::pinned_output::{FullImage, StoredContent};
@@ -43,13 +43,13 @@ const CHECKER_SQUARE_PX: f32 = 8.0;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-port viewer map, keyed by (and
-/// carrying) the [`PortRef`] its tab binds to; content is runtime-only
+/// carrying) the [`OutputPort`] its tab binds to; content is runtime-only
 /// (never persisted).
 #[derive(Debug)]
 pub(crate) struct ImageViewer {
     /// The port this viewer shows — keys the pane's widget id so two
     /// viewer tabs never share gesture responses.
-    port: PortRef,
+    port: OutputPort,
     /// Texture dimensions used to decide whether a new revision needs a refit.
     source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
@@ -78,7 +78,7 @@ struct ShownImage<'a> {
 
 impl ImageViewer {
     /// An empty viewer for `port` (shows the hint until content arrives).
-    pub(crate) fn new(port: PortRef) -> Self {
+    pub(crate) fn new(port: OutputPort) -> Self {
         Self {
             port,
             source_size: None,
@@ -376,34 +376,33 @@ impl ImageViewer {
 /// back to "image" for an unnamed node) plus a compact port tag, so
 /// several ports of one node stay tellable apart — e.g. "stack · out 1".
 /// The one formatter for both the tab strip and the viewer title.
-pub(crate) fn port_label(doc: &Document, port: PortRef) -> String {
+///
+/// A recursive whole-document node search plus a fresh `String`, so
+/// resolve it once per tab per frame rather than once per reader.
+pub(crate) fn port_label(doc: &Document, port: OutputPort) -> String {
     let name = doc
         .graph
         .find(port.node_id, NodeSearch::Recursive)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or("image");
-    let side = match port.kind {
-        PortKind::Input => "in",
-        PortKind::Output => "out",
-    };
-    format!("{name} \u{b7} {side} {}", port.port_idx)
+    format!("{name} \u{b7} out {}", port.port_idx)
 }
 
 /// Last frame's measured pane size, `None` before the first layout.
-fn pane_size(ui: &Ui, port: PortRef) -> Option<Vec2> {
+fn pane_size(ui: &Ui, port: OutputPort) -> Option<Vec2> {
     let size = ui.response_for(pane_wid(port)).layout_rect?.size;
     (size.w > 0.0 && size.h > 0.0).then(|| Vec2::new(size.w, size.h))
 }
 
 /// Stable id for a viewer's pane — keyed by port so switching between two
 /// viewer tabs can't cross-feed their gesture responses.
-fn pane_wid(port: PortRef) -> WidgetId {
+fn pane_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("image_viewer.pane", port))
 }
 
 /// Stable id for one control-panel widget, keyed by port + role.
-fn control_wid(port: PortRef, key: &'static str) -> WidgetId {
+fn control_wid(port: OutputPort, key: &'static str) -> WidgetId {
     WidgetId::from_hash(("image_viewer.controls", port, key))
 }
 
@@ -438,7 +437,7 @@ fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Te
 
 /// The nearest/bilinear magnification toggle: accent-filled while nearest
 /// is active. Flips `filter` on click; returns whether it changed.
-fn filter_toggle(ui: &mut Ui, theme: &Theme, port: PortRef, filter: &mut ImageFilter) -> bool {
+fn filter_toggle(ui: &mut Ui, theme: &Theme, port: OutputPort, filter: &mut ImageFilter) -> bool {
     let nearest = *filter == ImageFilter::Nearest;
     let tip = if nearest {
         "Zoom-in sampling: nearest — click for bilinear"
@@ -602,12 +601,8 @@ mod tests {
     use super::*;
     use scenarium::NodeId;
 
-    fn port() -> PortRef {
-        PortRef {
-            node_id: NodeId::from_u128(1),
-            kind: PortKind::Output,
-            port_idx: 0,
-        }
+    fn port() -> OutputPort {
+        OutputPort::new(NodeId::from_u128(1), 0)
     }
 
     #[test]

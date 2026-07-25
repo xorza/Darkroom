@@ -9,6 +9,7 @@ pub(crate) mod node;
 pub(crate) mod pinned_output;
 pub(crate) mod preferences_view;
 pub(crate) mod widgets;
+use scenarium::OutputPort;
 
 pub(crate) mod app;
 pub(crate) mod format;
@@ -17,8 +18,8 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
+use crate::core::document::GraphRef;
 use crate::core::document::dock::DockOp;
-use crate::core::document::{GraphRef, PortRef};
 use crate::gui::app::App;
 use aperture::WindowToken;
 
@@ -51,7 +52,7 @@ pub(crate) enum UiAction {
     /// chip at the end of the strip).
     NewGraph,
     /// Show this pinned output's full runtime image in its viewer tab.
-    OpenImageViewer(PortRef),
+    OpenImageViewer(OutputPort),
 }
 
 /// One event (emitter) port's identity. Events are indexed independently
