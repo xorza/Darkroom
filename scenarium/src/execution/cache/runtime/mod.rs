@@ -114,7 +114,7 @@ impl RuntimeCache {
     /// ones, and apply the installed program's RAM-retention policy immediately.
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
-            .retain(|e_node_id, _| program.index.contains_key(e_node_id));
+            .retain(|e_node_id, _| program.e_node_index.contains_key(e_node_id));
         for (e_node_id, e_node) in program.e_node_ids.values.iter().zip(&program.e_nodes) {
             let owner = StateOwner {
                 func_id: e_node.func_id,

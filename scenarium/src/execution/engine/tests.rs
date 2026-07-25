@@ -586,7 +586,7 @@ mod cache_persistence {
         engine
             .execute(
                 RunSeeds {
-                    nodes: vec![root_execution_node(mult_id)],
+                    e_node_ids: vec![root_execution_node(mult_id)],
                     ..Default::default()
                 },
                 Some(&tx),
@@ -2396,18 +2396,20 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&get_b]]
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                execution_graph.plan.verdicts
+                    [execution_graph.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                !execution_graph.plan.verdicts
+                    [execution_graph.compiled.program.e_node_index[&gated]]
                     .wants_execute()
             );
         }
@@ -2443,11 +2445,13 @@ mod missing_inputs {
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                execution_graph.plan.verdicts
+                    [execution_graph.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                !execution_graph.plan.verdicts
+                    [execution_graph.compiled.program.e_node_index[&gated]]
                     .wants_execute()
             );
         }
@@ -2477,11 +2481,11 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&print]]
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2527,7 +2531,7 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2570,8 +2574,9 @@ mod disabled_nodes {
             !execution_graph
                 .plan
                 .process_order
-                .contains(&execution_graph.compiled.program.index[&sum])
-                && execution_graph.plan.verdicts[execution_graph.compiled.program.index[&sum]]
+                .contains(&execution_graph.compiled.program.e_node_index[&sum])
+                && execution_graph.plan.verdicts
+                    [execution_graph.compiled.program.e_node_index[&sum]]
                     == NodeVerdict::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
@@ -2582,15 +2587,15 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&get_b]]
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&print]]
+            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
 
@@ -3367,7 +3372,7 @@ mod composite_behavior {
             .id;
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
         let e_node_id = ExecutionNodeId::from_authoring(&[outer_inst, inner_inst, deep_id]);
-        assert!(compiled.program.index.contains_key(&e_node_id));
+        assert!(compiled.program.e_node_index.contains_key(&e_node_id));
         assert_eq!(
             compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
             vec![deep_id, inner_inst, outer_inst]
@@ -3429,7 +3434,7 @@ mod composite_behavior {
         let mut stats = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
-                nodes: vec![first_e_node_id],
+                e_node_ids: vec![first_e_node_id],
                 ..Default::default()
             },
             Some(&tx),
@@ -3613,7 +3618,7 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&sum]]
+            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&sum]]
                 .missing_required_inputs()
         );
 
@@ -3903,7 +3908,7 @@ mod node_seeds {
         eg.execute(
             RunSeeds {
                 sinks: true,
-                nodes: vec![root_execution_node(sum_id)],
+                e_node_ids: vec![root_execution_node(sum_id)],
                 ..Default::default()
             },
             None,
@@ -4645,7 +4650,7 @@ mod events {
         assert!(
             eg.plan
                 .process_order
-                .contains(&eg.compiled.program.index[&root_execution_node(trigger_id)]),
+                .contains(&eg.compiled.program.e_node_index[&root_execution_node(trigger_id)]),
             "the RunSinks sink runs as a sink"
         );
 
@@ -5368,7 +5373,7 @@ mod graph {
             assert!(
                 eg.compiled
                     .program
-                    .index
+                    .e_node_index
                     .contains_key(&root_execution_node(node.id)),
                 "id preserved"
             );
@@ -6268,7 +6273,7 @@ mod compile_regressions {
         assert!(
             !eg.compiled
                 .program
-                .index
+                .e_node_index
                 .contains_key(&root_execution_node(sum_interior_id)),
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );

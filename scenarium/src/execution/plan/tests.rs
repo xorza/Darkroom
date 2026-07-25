@@ -177,7 +177,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &f.compiled,
             &RunSeeds {
                 sinks: true,
-                nodes: vec![producer],
+                e_node_ids: vec![producer],
                 ..Default::default()
             },
             &mut plan,
@@ -201,7 +201,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![a],
+        e_node_ids: vec![a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -210,7 +210,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
 
     let seeds = RunSeeds {
-        nodes: vec![a, a],
+        e_node_ids: vec![a, a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -249,7 +249,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![b],
+        e_node_ids: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -265,7 +265,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         sinks: true,
-        nodes: vec![b],
+        e_node_ids: vec![b],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -276,7 +276,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // not a silent skip.
     let bogus = ExecutionNodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds {
-        nodes: vec![bogus],
+        e_node_ids: vec![bogus],
         ..Default::default()
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();

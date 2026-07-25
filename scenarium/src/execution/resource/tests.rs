@@ -171,14 +171,14 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache.stamp_digest(
         &fixture.program,
         &resource_stamps,
-        fixture.program.index[&fixture.first],
+        fixture.program.e_node_index[&fixture.first],
     );
 
     std::fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(
         &fixture.program,
         &resource_stamps,
-        fixture.program.index[&fixture.second],
+        fixture.program.e_node_index[&fixture.second],
     );
     assert_eq!(
         cache.slots[&fixture.first].current_digest, cache.slots[&fixture.second].current_digest,
@@ -197,7 +197,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache.stamp_digest(
         &fixture.program,
         &resource_stamps,
-        fixture.program.index[&fixture.first],
+        fixture.program.e_node_index[&fixture.first],
     );
     assert_ne!(
         cache.slots[&fixture.first].current_digest, first_run,

@@ -245,8 +245,8 @@ fn collect_roots(
     // Node seeds (on-demand preview): each exact execution node is a root and pinned so
     // every output is computed and delivered. `pinned` also records the one-run disabled
     // override. An id absent from the installed program is inconsistent caller state.
-    for &e_node_id in &seeds.nodes {
-        let Some(&node_idx) = program.index.get(&e_node_id) else {
+    for &e_node_id in &seeds.e_node_ids {
+        let Some(&node_idx) = program.e_node_index.get(&e_node_id) else {
             return Err(Error::NodeSeedNotFound { e_node_id });
         };
         plan.roots.insert(node_idx);
@@ -257,7 +257,7 @@ fn collect_roots(
     // promotes this run to run all sinks (below), so it's skipped as a root here.
     let mut run_sinks = seeds.sinks;
     for &event in &seeds.events {
-        let Some(&owner_idx) = program.index.get(&event.e_node_id) else {
+        let Some(&owner_idx) = program.e_node_index.get(&event.e_node_id) else {
             return Err(Error::EventSeedNotFound { event });
         };
         let Some(e_event) = program.events[program[owner_idx].events].get(event.event_idx) else {

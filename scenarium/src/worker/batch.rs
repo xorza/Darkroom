@@ -56,12 +56,12 @@ impl BatchIntent {
                         sinks,
                         event_sources,
                         events,
-                        nodes,
+                        e_node_ids,
                     } = seeds;
                     self.execute_sinks |= sinks;
                     self.execute_event_sources |= event_sources;
                     self.events.extend(events);
-                    self.execute_nodes.extend(nodes);
+                    self.execute_nodes.extend(e_node_ids);
                 }
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
                 WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
