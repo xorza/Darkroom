@@ -280,11 +280,12 @@ mod tests {
 
     use tokio::io::{AsyncRead, AsyncWrite};
 
+    use crate::Invocation;
     use crate::graph::GraphDef;
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
     use crate::node::definition::{Func, FuncId, FuncInput};
-    use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
+    use crate::node::lambda::{InvokeError, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::{ContextManager, ContextStore};
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -444,12 +445,8 @@ mod tests {
         let mut ctx_manager = ContextManager::default();
         let mut node_state = AnyState::default();
         let mut inputs = vec![
-            InvokeInput {
-                value: DynamicValue::Static(StaticValue::Int(2)),
-            },
-            InvokeInput {
-                value: DynamicValue::Static(StaticValue::Int(4)),
-            },
+            DynamicValue::Static(StaticValue::Int(2)),
+            DynamicValue::Static(StaticValue::Int(4)),
         ];
         let mut outputs = vec![DynamicValue::Unbound];
         let output_demand = vec![OutputDemand::Produce; outputs.len()];
@@ -458,14 +455,14 @@ mod tests {
             .by_id(sum_id)
             .unwrap()
             .lambda
-            .invoke(
-                &mut ctx_manager,
-                &mut node_state,
-                &event_state,
-                &mut inputs,
-                &output_demand,
-                &mut outputs,
-            )
+            .invoke(Invocation {
+                ctx: &mut ctx_manager,
+                state: &mut node_state,
+                event_state: &event_state,
+                inputs: &mut inputs,
+                demand: &output_demand,
+                outputs: &mut outputs,
+            })
             .await?;
         assert_eq!(outputs[0].as_i64().unwrap(), 6);
         let cached = *node_state
@@ -473,21 +470,21 @@ mod tests {
             .expect("InvokeCache should contain the sum value");
         assert_eq!(cached, 6);
 
-        inputs[0].value = DynamicValue::Static(StaticValue::Int(3));
-        inputs[1].value = DynamicValue::Static(StaticValue::Int(5));
+        inputs[0] = DynamicValue::Static(StaticValue::Int(3));
+        inputs[1] = DynamicValue::Static(StaticValue::Int(5));
         outputs[0] = DynamicValue::Unbound;
         library
             .by_id(sum_id)
             .unwrap()
             .lambda
-            .invoke(
-                &mut ctx_manager,
-                &mut node_state,
-                &event_state,
-                &mut inputs,
-                &output_demand,
-                &mut outputs,
-            )
+            .invoke(Invocation {
+                ctx: &mut ctx_manager,
+                state: &mut node_state,
+                event_state: &event_state,
+                inputs: &mut inputs,
+                demand: &output_demand,
+                outputs: &mut outputs,
+            })
             .await?;
         assert_eq!(outputs[0].as_i64().unwrap(), 8);
 

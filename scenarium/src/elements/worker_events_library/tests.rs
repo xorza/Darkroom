@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use crate::DynamicValue;
+use crate::Invocation;
 use crate::elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 use crate::node::definition::Func;
-use crate::node::lambda::{InvokeError, InvokeInput, InvokeResult, OutputDemand};
+use crate::node::lambda::{InvokeError, InvokeResult, OutputDemand};
 use crate::runtime::any_state::AnyState;
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -21,21 +22,19 @@ async fn invoke_frame(
 ) -> InvokeResult<FrameOutputs> {
     let mut context = ContextManager::default();
     let mut state = AnyState::default();
-    let mut inputs = [InvokeInput {
-        value: frequency.into(),
-    }];
+    let mut inputs = [frequency.into()];
     let demand = [OutputDemand::Produce; 2];
     let mut outputs = [DynamicValue::Unbound, DynamicValue::Unbound];
 
     func.lambda
-        .invoke(
-            &mut context,
-            &mut state,
+        .invoke(Invocation {
+            ctx: &mut context,
+            state: &mut state,
             event_state,
-            &mut inputs,
-            &demand,
-            &mut outputs,
-        )
+            inputs: &mut inputs,
+            demand: &demand,
+            outputs: &mut outputs,
+        })
         .await?;
 
     Ok(FrameOutputs {

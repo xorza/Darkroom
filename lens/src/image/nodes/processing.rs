@@ -1,6 +1,7 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
+use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, InvokeError, InvokeResult, StaticValue};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
@@ -41,18 +42,21 @@ fn register_brightness(library: &mut Library) {
         )
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."))
         .lambda(FuncLambda::new(
-            move |contexts, _, _, inputs, _, outputs| {
+            move |Invocation {
+                      ctx: contexts,
+                      inputs,
+                      outputs,
+                      ..
+                  }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
                     debug_assert_eq!(outputs.len(), 1);
-                    let value = std::mem::take(&mut inputs[0].value);
+                    let value = std::mem::take(&mut inputs[0]);
                     let brightness = inputs[1]
-                        .value
                         .as_f64()
                         .expect("brightness input type is validated at the compile boundary")
                         as f32;
                     let contrast = inputs[2]
-                        .value
                         .as_f64()
                         .expect("contrast input type is validated at the compile boundary")
                         as f32;
@@ -89,13 +93,17 @@ fn register_convert(library: &mut Library) {
                 FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Converted image."),
             )
             .lambda(FuncLambda::new(
-                move |contexts, _, _, inputs, _, outputs| {
+                move |Invocation {
+                          ctx: contexts,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
-                        let value = std::mem::take(&mut inputs[0].value);
+                        let value = std::mem::take(&mut inputs[0]);
                         let format = inputs[1]
-                            .value
                             .as_enum()
                             .expect("format input type is validated at the compile boundary");
                         let converted = {
@@ -151,26 +159,27 @@ fn register_blend(library: &mut Library) {
             )
             .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Blended image."))
             .lambda(FuncLambda::new(
-                move |contexts, _, _, inputs, _, outputs| {
+                move |Invocation {
+                          ctx: contexts,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 4);
                         debug_assert_eq!(outputs.len(), 1);
                         let source = inputs[0]
-                            .value
                             .as_custom::<Image>()
                             .expect("source input type is validated at the compile boundary");
                         let destination = inputs[1]
-                            .value
                             .as_custom::<Image>()
                             .expect("destination input type is validated at the compile boundary");
                         let mode = inputs[2]
-                            .value
                             .as_enum()
                             .expect("mode input type is validated at the compile boundary")
                             .parse::<BlendMode>()
                             .expect("enum input is validated at the compile boundary");
                         let alpha = inputs[3]
-                            .value
                             .as_f64()
                             .expect("alpha input type is validated at the compile boundary")
                             as f32;
@@ -231,20 +240,24 @@ fn register_transform(library: &mut Library) {
                 FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
             )
             .lambda(FuncLambda::new(
-                move |contexts, _, _, inputs, _, outputs| {
+                move |Invocation {
+                          ctx: contexts,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 6);
                         debug_assert_eq!(outputs.len(), 1);
                         let image = inputs[0]
-                            .value
                             .as_custom::<Image>()
                             .expect("image input type is validated at the compile boundary");
-                        let scalar =
-                            |index: usize| {
-                                inputs[index].value.as_f64().expect(
-                                    "transform input type is validated at the compile boundary",
-                                ) as f32
-                            };
+                        let scalar = |index: usize| {
+                            inputs[index]
+                                .as_f64()
+                                .expect("transform input type is validated at the compile boundary")
+                                as f32
+                        };
                         let vision = contexts.get(VISION_CTX_TYPE);
                         let mut output = imaginarium::ImageBuffer::new_empty(image.buffer.desc);
                         let center = Vec2::new(

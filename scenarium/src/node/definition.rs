@@ -527,7 +527,7 @@ mod tests {
                 .default(StaticValue::FsPaths(vec!["a.fits".into()])),
             )
             .wildcard_output("value", 0)
-            .lambda(crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }))
+            .lambda(crate::async_lambda!(|_| { Ok(()) }))
             .validate()
             .unwrap();
     }

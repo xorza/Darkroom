@@ -11,6 +11,7 @@ use crate::astro::config::processing::{
 use crate::astro::nodes::runtime;
 use crate::config_node::{ConfigValue, NodeConfig, config_data_type};
 use crate::image::IMAGE_DATA_TYPE;
+use scenarium::Invocation;
 
 pub(crate) fn register(library: &mut Library) {
     register_stretch(library);
@@ -34,18 +35,21 @@ fn register_stretch(library: &mut Library) {
                 FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
                     .description("Stretched, display-ready image."),
             )
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 2);
-                    debug_assert_eq!(outputs.len(), 1);
-                    let config =
-                        preset::resolve::<StretchConfigDef, StretchPreset>(&inputs[1].value);
-                    let value = std::mem::take(&mut inputs[0].value);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                    Ok(())
-                })
-            })),
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          inputs, outputs, ..
+                      }| {
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 2);
+                        debug_assert_eq!(outputs.len(), 1);
+                        let config = preset::resolve::<StretchConfigDef, StretchPreset>(&inputs[1]);
+                        let value = std::mem::take(&mut inputs[0]);
+                        outputs[0] =
+                            runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                        Ok(())
+                    })
+                },
+            )),
     );
 }
 
@@ -58,15 +62,20 @@ fn register_background(library: &mut Library) {
             frame_input("Image"),
             preset::input::<BackgroundConfigDef, BackgroundModeKind>("Config"),
         ],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let config =
-                    preset::resolve::<BackgroundConfigDef, BackgroundModeKind>(&inputs[1].value);
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] = runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let config =
+                        preset::resolve::<BackgroundConfigDef, BackgroundModeKind>(&inputs[1]);
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 
@@ -80,25 +89,28 @@ fn register_denoise(library: &mut Library) {
             float_input("Strength", 0.85, "Denoise strength in [0, 1]."),
             config_override_input::<DenoiseConfigDef>(),
         ],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let config = inputs[2]
-                    .value
-                    .as_custom::<ConfigValue<DenoiseConfigDef>>()
-                    .map(|config| config.0.clone().into())
-                    .unwrap_or_else(|| Denoise {
-                        strength: inputs[1]
-                            .value
-                            .as_f64()
-                            .map(|value| value as f32)
-                            .expect("strength input type is validated at the compile boundary"),
-                        ..Default::default()
-                    });
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] = runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let config = inputs[2]
+                        .as_custom::<ConfigValue<DenoiseConfigDef>>()
+                        .map(|config| config.0.clone().into())
+                        .unwrap_or_else(|| Denoise {
+                            strength: inputs[1]
+                                .as_f64()
+                                .map(|value| value as f32)
+                                .expect("strength input type is validated at the compile boundary"),
+                            ..Default::default()
+                        });
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 
@@ -111,14 +123,19 @@ fn register_scnr(library: &mut Library) {
             frame_input("Image"),
             preset::input::<ScnrConfigDef, ScnrKind>("Method"),
         ],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let method = preset::resolve::<ScnrConfigDef, ScnrKind>(&inputs[1].value);
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] = runtime::run_frame_op(value, move |image| method.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let method = preset::resolve::<ScnrConfigDef, ScnrKind>(&inputs[1]);
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, move |image| method.apply(image)).await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 
@@ -128,14 +145,19 @@ fn register_neutralize(library: &mut Library) {
         "Neutralize Background",
         "Shifts each channel so the background reads neutral gray.",
         vec![frame_input("Image")],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] =
-                    runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image))
+                            .await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 
@@ -149,25 +171,28 @@ fn register_hdr(library: &mut Library) {
             float_input("Amount", 0.5, "Compression amount in [0, 1]."),
             config_override_input::<HdrConfigDef>(),
         ],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let config = inputs[2]
-                    .value
-                    .as_custom::<ConfigValue<HdrConfigDef>>()
-                    .map(|config| config.0.clone().into())
-                    .unwrap_or_else(|| Hdr {
-                        amount: inputs[1]
-                            .value
-                            .as_f64()
-                            .map(|value| value as f32)
-                            .expect("amount input type is validated at the compile boundary"),
-                        ..Default::default()
-                    });
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] = runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let config = inputs[2]
+                        .as_custom::<ConfigValue<HdrConfigDef>>()
+                        .map(|config| config.0.clone().into())
+                        .unwrap_or_else(|| Hdr {
+                            amount: inputs[1]
+                                .as_f64()
+                                .map(|value| value as f32)
+                                .expect("amount input type is validated at the compile boundary"),
+                            ..Default::default()
+                        });
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 
@@ -181,25 +206,28 @@ fn register_local_contrast(library: &mut Library) {
             float_input("Strength", 0.8, "Local-contrast strength in [0, 1]."),
             config_override_input::<LocalContrastConfigDef>(),
         ],
-        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            Box::pin(async move {
-                let config = inputs[2]
-                    .value
-                    .as_custom::<ConfigValue<LocalContrastConfigDef>>()
-                    .map(|config| config.0.clone().into())
-                    .unwrap_or_else(|| LocalContrast {
-                        strength: inputs[1]
-                            .value
-                            .as_f64()
-                            .map(|value| value as f32)
-                            .expect("strength input type is validated at the compile boundary"),
-                        ..Default::default()
-                    });
-                let value = std::mem::take(&mut inputs[0].value);
-                outputs[0] = runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                Ok(())
-            })
-        }),
+        FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                Box::pin(async move {
+                    let config = inputs[2]
+                        .as_custom::<ConfigValue<LocalContrastConfigDef>>()
+                        .map(|config| config.0.clone().into())
+                        .unwrap_or_else(|| LocalContrast {
+                            strength: inputs[1]
+                                .as_f64()
+                                .map(|value| value as f32)
+                                .expect("strength input type is validated at the compile boundary"),
+                            ..Default::default()
+                        });
+                    let value = std::mem::take(&mut inputs[0]);
+                    outputs[0] =
+                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                    Ok(())
+                })
+            },
+        ),
     ));
 }
 

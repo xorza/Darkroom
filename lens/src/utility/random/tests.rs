@@ -1,6 +1,5 @@
-use scenarium::{
-    AnyState, ContextManager, DynamicValue, InvokeInput, OutputDemand, SharedAnyState,
-};
+use scenarium::Invocation;
+use scenarium::{AnyState, ContextManager, DynamicValue, OutputDemand, SharedAnyState};
 
 use crate::utility::random::{random_library, scale_random};
 
@@ -28,25 +27,18 @@ fn registers_random_func_and_scales_unit_values() {
 async fn equal_bounds_produce_that_exact_value() {
     let library = random_library();
     let function = library.by_name("Random").unwrap();
-    let mut inputs = [
-        InvokeInput {
-            value: DynamicValue::from(4.25),
-        },
-        InvokeInput {
-            value: DynamicValue::from(4.25),
-        },
-    ];
+    let mut inputs = [DynamicValue::from(4.25), DynamicValue::from(4.25)];
     let mut outputs = [DynamicValue::Unbound];
     function
         .lambda
-        .invoke(
-            &mut ContextManager::default(),
-            &mut AnyState::default(),
-            &SharedAnyState::default(),
-            &mut inputs,
-            &[OutputDemand::Produce],
-            &mut outputs,
-        )
+        .invoke(Invocation {
+            ctx: &mut ContextManager::default(),
+            state: &mut AnyState::default(),
+            event_state: &SharedAnyState::default(),
+            inputs: &mut inputs,
+            demand: &[OutputDemand::Produce],
+            outputs: &mut outputs,
+        })
         .await
         .unwrap();
     assert_eq!(outputs[0].as_f64(), Some(4.25));

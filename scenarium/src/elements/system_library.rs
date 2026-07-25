@@ -2,6 +2,7 @@ use crate::DataType;
 use crate::async_lambda;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::lambda::Invocation;
 
 /// The built-in system / utility nodes: logging and value-to-text conversion.
 pub fn system_library() -> Library {
@@ -18,9 +19,9 @@ pub fn system_library() -> Library {
                 FuncInput::required("Value", DataType::Any)
                     .description("Value of any type to write to the node's log (info level)."),
             )
-            .lambda(async_lambda!(move |ctx, _, _, inputs, _, _| {
+            .lambda(async_lambda!(move |Invocation { ctx, inputs, .. }| {
                 assert_eq!(inputs.len(), 1);
-                ctx.info(inputs[0].value.to_value_string());
+                ctx.info(inputs[0].to_value_string());
                 Ok(())
             })),
     );
@@ -37,11 +38,13 @@ pub fn system_library() -> Library {
             .output(
                 FuncOutput::new("Text", DataType::String).description("The value's string form."),
             )
-            .lambda(async_lambda!(|_, _, _, inputs, _, outputs| {
+            .lambda(async_lambda!(|Invocation {
+                                       inputs, outputs, ..
+                                   }| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                outputs[0] = inputs[0].value.to_value_string().into();
+                outputs[0] = inputs[0].to_value_string().into();
                 Ok(())
             })),
     );
@@ -64,12 +67,14 @@ pub fn system_library() -> Library {
             .output(
                 FuncOutput::new("Text", DataType::String).description("A's text followed by B's."),
             )
-            .lambda(async_lambda!(|_, _, _, inputs, _, outputs| {
+            .lambda(async_lambda!(|Invocation {
+                                       inputs, outputs, ..
+                                   }| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let mut result = inputs[0].value.to_value_string();
-                result.push_str(&inputs[1].value.to_value_string());
+                let mut result = inputs[0].to_value_string();
+                result.push_str(&inputs[1].to_value_string());
 
                 outputs[0] = result.into();
                 Ok(())
@@ -83,7 +88,7 @@ pub fn system_library() -> Library {
 mod tests {
     use super::*;
     use crate::DynamicValue;
-    use crate::node::lambda::{InvokeInput, OutputDemand};
+    use crate::node::lambda::OutputDemand;
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -96,18 +101,18 @@ mod tests {
         let mut ctx = ContextManager::default();
         let mut state = AnyState::default();
         let event_state = SharedAnyState::default();
-        let mut inputs = [InvokeInput { value: a }, InvokeInput { value: b }];
+        let mut inputs = [a, b];
         let mut outputs = [DynamicValue::Unbound];
         concat
             .lambda
-            .invoke(
-                &mut ctx,
-                &mut state,
-                &event_state,
-                &mut inputs,
-                &[OutputDemand::Produce],
-                &mut outputs,
-            )
+            .invoke(Invocation {
+                ctx: &mut ctx,
+                state: &mut state,
+                event_state: &event_state,
+                inputs: &mut inputs,
+                demand: &[OutputDemand::Produce],
+                outputs: &mut outputs,
+            })
             .await
             .unwrap();
         outputs[0].as_string().unwrap().to_owned()

@@ -1,10 +1,10 @@
+use scenarium::Invocation;
 use std::fs;
 use std::path::PathBuf;
 
 use imaginarium::{ColorFormat, ContrastBrightness};
 use scenarium::{
-    AnyState, ContextManager, DynamicValue, Func, InvokeInput, OutputDemand, SharedAnyState,
-    StaticValue,
+    AnyState, ContextManager, DynamicValue, Func, OutputDemand, SharedAnyState, StaticValue,
 };
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
@@ -106,43 +106,35 @@ async fn load_and_save_round_trip_exact_pixels() {
     let library = image_library();
 
     let mut save_inputs = [
-        InvokeInput {
-            value: DynamicValue::from_custom(Image::from(image)),
-        },
-        InvokeInput {
-            value: StaticValue::FsPath(path.display().to_string()).into(),
-        },
-        InvokeInput {
-            value: StaticValue::Enum(ConversionFormat::AsIs.label()).into(),
-        },
+        DynamicValue::from_custom(Image::from(image)),
+        StaticValue::FsPath(path.display().to_string()).into(),
+        StaticValue::Enum(ConversionFormat::AsIs.label()).into(),
     ];
     func(&library, "Save Image")
         .lambda
-        .invoke(
-            &mut ContextManager::default(),
-            &mut AnyState::default(),
-            &SharedAnyState::default(),
-            &mut save_inputs,
-            &[],
-            &mut [],
-        )
+        .invoke(Invocation {
+            ctx: &mut ContextManager::default(),
+            state: &mut AnyState::default(),
+            event_state: &SharedAnyState::default(),
+            inputs: &mut save_inputs,
+            demand: &[],
+            outputs: &mut [],
+        })
         .await
         .unwrap();
 
-    let mut load_inputs = [InvokeInput {
-        value: StaticValue::FsPath(path.display().to_string()).into(),
-    }];
+    let mut load_inputs = [StaticValue::FsPath(path.display().to_string()).into()];
     let mut outputs = [DynamicValue::Unbound];
     func(&library, "Load Image")
         .lambda
-        .invoke(
-            &mut ContextManager::default(),
-            &mut AnyState::default(),
-            &SharedAnyState::default(),
-            &mut load_inputs,
-            &[OutputDemand::Produce],
-            &mut outputs,
-        )
+        .invoke(Invocation {
+            ctx: &mut ContextManager::default(),
+            state: &mut AnyState::default(),
+            event_state: &SharedAnyState::default(),
+            inputs: &mut load_inputs,
+            demand: &[OutputDemand::Produce],
+            outputs: &mut outputs,
+        })
         .await
         .unwrap();
     let loaded = outputs[0].as_custom::<Image>().unwrap();

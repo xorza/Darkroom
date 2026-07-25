@@ -5,7 +5,7 @@ use crate::library::Library;
 use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
 use crate::node::event::EventLambda;
-use crate::node::lambda::{FuncLambda, InvokeError, InvokeResult};
+use crate::node::lambda::{FuncLambda, Invocation, InvokeError, InvokeResult};
 use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time::Instant;
 
@@ -102,10 +102,14 @@ pub fn worker_events_library() -> Library {
                 EventLambda::new(|state| Box::pin(wait_for_fps_event(state))),
             )
             .lambda(FuncLambda::new(
-                move |_context_manager, _state, event_state, inputs, _output_demand, outputs| {
+                move |Invocation {
+                          event_state,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
                     Box::pin(async move {
                         let frequency = inputs[0]
-                            .value
                             .as_f64()
                             .expect("frequency input type is validated before invocation");
                         let period = fps_period(frequency)?;

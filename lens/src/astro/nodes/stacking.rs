@@ -17,6 +17,7 @@ use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use scenarium::Invocation;
 
 #[derive(Debug, thiserror::Error)]
 enum LightFramesError {
@@ -69,62 +70,69 @@ pub(crate) fn register(library: &mut Library) {
                 FuncOutput::new("Weight", IMAGE_DATA_TYPE.clone())
                     .description("Per-pixel accumulated weight map."),
             )
-            .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
-                let cancel = ctx.cancel_flag();
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 6);
-                    debug_assert_eq!(outputs.len(), 3);
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          ctx,
+                          inputs,
+                          outputs,
+                          ..
+                      }| {
+                    let cancel = ctx.cancel_flag();
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 6);
+                        debug_assert_eq!(outputs.len(), 3);
 
-                    let light_paths = inputs[0]
-                        .value
-                        .as_fs_paths()
-                        .expect("lights input type is validated at the compile boundary");
-                    let lights = light_frames(light_paths).map_err(InvokeError::external)?;
+                        let light_paths = inputs[0]
+                            .as_fs_paths()
+                            .expect("lights input type is validated at the compile boundary");
+                        let lights = light_frames(light_paths).map_err(InvokeError::external)?;
 
-                    let masters_value = inputs[1].value.clone();
-                    let detection =
-                        preset::resolve::<DetectionConfigDef, DetectionPreset>(&inputs[2].value);
-                    let registration = preset::resolve::<RegistrationConfigDef, RegistrationPreset>(
-                        &inputs[3].value,
-                    );
-                    let stack =
-                        preset::resolve::<CombineConfigDef, CombinePreset>(&inputs[4].value);
-                    let reference = match inputs[5]
-                        .value
-                        .as_i64()
-                        .expect("reference input type is validated at the compile boundary")
-                    {
-                        index if index >= 0 => Reference::Index(index as usize),
-                        _ => Reference::Auto,
-                    };
-                    let config = AlignStackConfig {
-                        detection,
-                        registration,
-                        stack,
-                        reference,
-                        cosmic_ray: None,
-                    };
+                        let masters_value = inputs[1].clone();
+                        let detection =
+                            preset::resolve::<DetectionConfigDef, DetectionPreset>(&inputs[2]);
+                        let registration = preset::resolve::<
+                            RegistrationConfigDef,
+                            RegistrationPreset,
+                        >(&inputs[3]);
+                        let stack = preset::resolve::<CombineConfigDef, CombinePreset>(&inputs[4]);
+                        let reference = match inputs[5]
+                            .as_i64()
+                            .expect("reference input type is validated at the compile boundary")
+                        {
+                            index if index >= 0 => Reference::Index(index as usize),
+                            _ => Reference::Auto,
+                        };
+                        let config = AlignStackConfig {
+                            detection,
+                            registration,
+                            stack,
+                            reference,
+                            cosmic_ray: None,
+                        };
 
-                    let result = runtime::run_cancellable(cancel, move |cancel| {
-                        let empty = CalibrationMasters::default();
-                        let masters = masters_value
-                            .as_custom::<Masters>()
-                            .map(|masters| &masters.masters)
-                            .unwrap_or(&empty);
-                        calibrate_align_stack(&lights, masters, &config, cancel)
+                        let result = runtime::run_cancellable(cancel, move |cancel| {
+                            let empty = CalibrationMasters::default();
+                            let masters = masters_value
+                                .as_custom::<Masters>()
+                                .map(|masters| &masters.masters)
+                                .unwrap_or(&empty);
+                            calibrate_align_stack(&lights, masters, &config, cancel)
+                        })
+                        .await?;
+
+                        let coverage = LinearImage::from(result.product.coverage);
+                        let weight = LinearImage::from(result.product.weight);
+                        outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
+                            &result.product.image,
+                        )));
+                        outputs[1] =
+                            DynamicValue::from_custom(Image::from(RawImage::from(&coverage)));
+                        outputs[2] =
+                            DynamicValue::from_custom(Image::from(RawImage::from(&weight)));
+                        Ok(())
                     })
-                    .await?;
-
-                    let coverage = LinearImage::from(result.product.coverage);
-                    let weight = LinearImage::from(result.product.weight);
-                    outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
-                        &result.product.image,
-                    )));
-                    outputs[1] = DynamicValue::from_custom(Image::from(RawImage::from(&coverage)));
-                    outputs[2] = DynamicValue::from_custom(Image::from(RawImage::from(&weight)));
-                    Ok(())
-                })
-            })),
+                },
+            )),
     );
 }
 

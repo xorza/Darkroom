@@ -138,9 +138,6 @@ impl ExecutionEngine {
                     resolved: &self.resolver.run,
                     cache: &mut self.cache,
                     resource_stamps: &mut self.resource_stamps,
-                    // Reborrowed, not moved: a `&mut dyn` is invariant, so passing the
-                    // caller's borrow on would hold the engine's own fields for the caller's
-                    // whole lifetime rather than just this call.
                     reporter,
                     cancel,
                 },

@@ -9,6 +9,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
+use scenarium::Invocation;
 use scenarium::{DataType, FsPathConfig, FsPathMode, StaticValue};
 use scenarium::{
     EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
@@ -199,22 +200,19 @@ pub fn fs_watch_library() -> Library {
                 }),
             )
             .lambda(FuncLambda::new(
-                move |_ctx, _state, event_state, inputs, _demand, outputs| {
+                move |Invocation { event_state, inputs, outputs, .. }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
-                            .value
                             .as_fs_path()
                             .expect("directory input type is validated at the compile boundary")
                             .to_string();
                         let recursive = inputs[1]
-                            .value
                             .as_bool()
                             .expect("recursive input type is validated at the compile boundary");
                         let debounce = Duration::from_millis(
                             inputs[2]
-                                .value
                                 .as_i64()
                                 .expect(
                                     "debounce input type is validated at the compile boundary",

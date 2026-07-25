@@ -11,6 +11,7 @@ use crate::config_node::enum_input;
 use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use scenarium::Invocation;
 
 pub(super) fn register(library: &mut Library) {
     register_load(library);
@@ -28,25 +29,28 @@ fn register_load(library: &mut Library) {
                     .description("Image file to load."),
             )
             .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Loaded image."))
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 1);
-                    debug_assert_eq!(outputs.len(), 1);
-                    let path = PathBuf::from(
-                        inputs[0]
-                            .value
-                            .as_fs_path()
-                            .expect("path input type is validated at the compile boundary"),
-                    );
-                    let image = tokio::task::spawn_blocking(move || {
-                        imaginarium::Image::read_file(path).map_err(InvokeError::external)
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          inputs, outputs, ..
+                      }| {
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 1);
+                        debug_assert_eq!(outputs.len(), 1);
+                        let path = PathBuf::from(
+                            inputs[0]
+                                .as_fs_path()
+                                .expect("path input type is validated at the compile boundary"),
+                        );
+                        let image = tokio::task::spawn_blocking(move || {
+                            imaginarium::Image::read_file(path).map_err(InvokeError::external)
+                        })
+                        .await
+                        .map_err(InvokeError::external)??;
+                        outputs[0] = DynamicValue::from_custom(Image::from(image));
+                        Ok(())
                     })
-                    .await
-                    .map_err(InvokeError::external)??;
-                    outputs[0] = DynamicValue::from_custom(Image::from(image));
-                    Ok(())
-                })
-            })),
+                },
+            )),
     );
 }
 
@@ -70,18 +74,16 @@ fn register_save(library: &mut Library) {
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),
             )
-            .lambda(FuncLambda::new(move |contexts, _, _, inputs, _, _| {
+            .lambda(FuncLambda::new(move |Invocation { ctx: contexts, inputs, .. }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
-                    let value = std::mem::take(&mut inputs[0].value);
+                    let value = std::mem::take(&mut inputs[0]);
                     let path = PathBuf::from(
                         inputs[1]
-                            .value
                             .as_fs_path()
                             .expect("path input type is validated at the compile boundary"),
                     );
                     let format = inputs[2]
-                        .value
                         .as_enum()
                         .expect("format input type is validated at the compile boundary")
                         .to_owned();

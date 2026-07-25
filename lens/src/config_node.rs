@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::FuncLambda;
+use scenarium::Invocation;
 use scenarium::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
 use scenarium::{Func, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
@@ -111,19 +112,23 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
         .into();
     let func = func
         .output(FuncOutput::new("Config", config_data_type::<T>()))
-        .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-            let kinds = kinds.clone();
-            Box::pin(async move {
-                let values: Vec<FieldValue> = kinds
-                    .iter()
-                    .zip(inputs)
-                    .map(|(kind, input)| field_value(kind, &input.value))
-                    .collect();
-                let config = T::from_fields(&values).map_err(InvokeError::external)?;
-                outputs[0] = DynamicValue::from_custom(ConfigValue(config));
-                Ok(())
-            })
-        }));
+        .lambda(FuncLambda::new(
+            move |Invocation {
+                      inputs, outputs, ..
+                  }| {
+                let kinds = kinds.clone();
+                Box::pin(async move {
+                    let values: Vec<FieldValue> = kinds
+                        .iter()
+                        .zip(inputs)
+                        .map(|(kind, input)| field_value(kind, input))
+                        .collect();
+                    let config = T::from_fields(&values).map_err(InvokeError::external)?;
+                    outputs[0] = DynamicValue::from_custom(ConfigValue(config));
+                    Ok(())
+                })
+            },
+        ));
     library.add(func);
 }
 

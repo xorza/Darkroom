@@ -9,7 +9,6 @@ use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, Output
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::report::{PinnedOutput, PinnedOutputs};
 use crate::execution::resolve::ResolvedRun;
-use crate::node::lambda::InvokeInput;
 
 #[derive(Default, Debug)]
 pub(super) struct RemainingOutputReads {
@@ -90,7 +89,7 @@ impl ExecutionFrame<'_, '_> {
                     value
                 }
             };
-            self.inputs.push(InvokeInput { value });
+            self.inputs.push(value);
         }
     }
 
