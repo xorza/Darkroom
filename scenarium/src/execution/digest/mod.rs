@@ -38,7 +38,8 @@
 use blake3::Hasher;
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;
@@ -245,11 +246,11 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 ///   `None`, and the run loop re-stamps such a node at reach time, once its producers settled.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
-    e_node_id: ExecutionNodeId,
+    node_idx: NodeIdx,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
 ) -> Option<Digest> {
-    let e_node = &program.e_nodes[&e_node_id];
+    let e_node = &program[node_idx];
 
     // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
     // digest and always recomputes.
@@ -282,17 +283,17 @@ pub(crate) fn node_digest(
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
                 // is set; a `None` taints this node.
-                let node = cache.slots[&addr.e_node_id].current_digest?;
+                let producer = cache.slots[&program.e_node_ids[addr.node_idx]].current_digest?;
                 hasher
                     .write_bytes(&[2])
-                    .write_digest(&port_digest_of(node, addr.port_idx));
+                    .write_digest(&port_digest_of(producer, addr.port_idx as usize));
                 // A resource-typed input dereferences the delivered reference, so the
                 // external state behind the *runtime value* is part of this node's key —
                 // the Bind-side counterpart of the `Const` arm's `hash_fs_content`. Needs
                 // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
                 if input.stamps_fs_path {
-                    hash_bound_fs_path(&mut hasher, cache, resource_stamps, addr)?;
+                    hash_bound_fs_path(&mut hasher, program, cache, resource_stamps, addr)?;
                 }
             }
         }
@@ -310,13 +311,14 @@ pub(crate) fn node_digest(
 /// value folds a distinct marker instead.
 fn hash_bound_fs_path(
     hasher: &mut DigestHasher,
+    program: &ExecutionProgram,
     cache: &RuntimeCache,
     resource_stamps: &RunResourceStamps,
-    addr: &ExecutionOutputPort,
+    addr: &OutputAddr,
 ) -> Option<()> {
-    let value = cache.slots[&addr.e_node_id]
+    let value = cache.slots[&program.e_node_ids[addr.node_idx]]
         .current_output_values()?
-        .get(addr.port_idx)?;
+        .get(addr.port_idx as usize)?;
     match value.as_static() {
         Some(StaticValue::FsPath(path)) => {
             hasher.write_bytes(&[3]);

@@ -6,7 +6,7 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::{Digest, DigestHasher};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
-use crate::execution::program::index::{NodeMap, NodeSet};
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
@@ -115,7 +115,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         .zip(input_ranges)
         .zip(output_ranges)
     {
-        program.e_nodes.insert(
+        program.push(
             e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
@@ -126,18 +126,24 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
             },
         );
     }
-    let verdicts: NodeMap<NodeVerdict> = [first, second]
-        .into_iter()
-        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
-        .collect();
+    let mut verdicts = NodeColumn::default();
+    verdicts.reset(program.e_nodes.len(), NodeVerdict::Execute);
+    let mut roots = NodeSet::default();
+    roots.reset(program.e_nodes.len());
+    roots.insert(NodeIdx(0));
+    roots.insert(NodeIdx(1));
+    let mut pinned = NodeSet::default();
+    pinned.reset(program.e_nodes.len());
+    let mut event_sources = NodeSet::default();
+    event_sources.reset(program.e_nodes.len());
     ConstPathFixture {
         program,
         plan: ExecutionPlan {
-            process_order: vec![first, second],
+            process_order: vec![NodeIdx(0), NodeIdx(1)],
             verdicts,
-            roots: [first, second].into_iter().collect(),
-            pinned: NodeSet::new(),
-            event_sources: NodeSet::new(),
+            roots,
+            pinned,
+            event_sources,
         },
         first,
         second,
@@ -162,10 +168,18 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(&fixture.program, &resource_stamps, fixture.first);
+    cache.stamp_digest(
+        &fixture.program,
+        &resource_stamps,
+        fixture.program.index[&fixture.first],
+    );
 
     std::fs::write(&file, b"longer").unwrap();
-    cache.stamp_digest(&fixture.program, &resource_stamps, fixture.second);
+    cache.stamp_digest(
+        &fixture.program,
+        &resource_stamps,
+        fixture.program.index[&fixture.second],
+    );
     assert_eq!(
         cache.slots[&fixture.first].current_digest, cache.slots[&fixture.second].current_digest,
         "both consumers fold the run's one coherent resource identity"
@@ -180,7 +194,11 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(&fixture.program, &resource_stamps, fixture.first);
+    cache.stamp_digest(
+        &fixture.program,
+        &resource_stamps,
+        fixture.program.index[&fixture.first],
+    );
     assert_ne!(
         cache.slots[&fixture.first].current_digest, first_run,
         "the next run refreshes resource identity"

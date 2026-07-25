@@ -3,9 +3,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::DynamicValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::executor::EVENTS_OUTLIVE_RUN;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::index::{OutputColumn, OutputIdx};
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeIdx, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent};
 use crate::execution::resolve::ResolvedRun;
@@ -36,9 +36,9 @@ impl RemainingOutputReads {
         *remaining == 0
     }
 
-    fn node_drained(&self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> bool {
+    fn node_drained(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> bool {
         self.counts
-            .slice(program.e_nodes[&e_node_id].outputs)
+            .slice(program[node_idx].outputs)
             .iter()
             .all(|remaining| *remaining == 0)
     }
@@ -57,20 +57,20 @@ pub(crate) struct ExecutionFrame<'a> {
 impl ExecutionFrame<'_> {
     pub(crate) fn emit_pinned_values(
         &mut self,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
         events: Option<&UnboundedSender<RunEvent>>,
     ) {
         let Some(events) = events else { return };
-        let outputs = self.program.e_nodes[&e_node_id].outputs;
-        let pinned_root = self.plan.pinned.contains(&e_node_id);
+        let outputs = self.program[node_idx].outputs;
+        let pinned_root = self.plan.pinned.contains(node_idx);
         let values: Vec<_> = self.program.outputs[outputs]
             .iter()
             .enumerate()
             .filter(|(_, output)| pinned_root || output.pinned)
             .map(|(port_idx, _)| {
-                let address = ExecutionOutputPort {
-                    e_node_id,
-                    port_idx,
+                let address = OutputAddr {
+                    node_idx,
+                    port_idx: port_idx as u32,
                 };
                 let value = self
                     .cache
@@ -83,13 +83,16 @@ impl ExecutionFrame<'_> {
             return;
         }
         events
-            .send(RunEvent::PinnedOutputs(PinnedOutputs { e_node_id, values }))
+            .send(RunEvent::PinnedOutputs(PinnedOutputs {
+                e_node_id: self.program.e_node_ids[node_idx],
+                values,
+            }))
             .expect(EVENTS_OUTLIVE_RUN);
     }
 
-    pub(crate) fn collect_inputs(&mut self, e_node_id: ExecutionNodeId) {
+    pub(crate) fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
-        for input in &self.program.inputs[self.program.e_nodes[&e_node_id].inputs] {
+        for input in &self.program.inputs[self.program[node_idx].inputs] {
             let binding = &input.binding;
             let value = match binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
@@ -98,9 +101,7 @@ impl ExecutionFrame<'_> {
                     let address = *addr;
                     let output_idx = self.program.output_idx(address);
                     let take = self.remaining_reads.is_last(output_idx)
-                        && !self.program.e_nodes[&address.e_node_id]
-                            .cache
-                            .caches_in_ram();
+                        && !self.program[address.node_idx].cache.caches_in_ram();
                     let value = self
                         .cache
                         .read_output_port(self.program, address, take)
@@ -115,8 +116,8 @@ impl ExecutionFrame<'_> {
 
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
-    pub(crate) fn abandon_input_reads(&mut self, consumer_id: ExecutionNodeId) {
-        for input in &self.program.inputs[self.program.e_nodes[&consumer_id].inputs] {
+    pub(crate) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
+        for input in &self.program.inputs[self.program[consumer_idx].inputs] {
             let address = match &input.binding {
                 ExecutionBinding::Bind(address) => Some(*address),
                 ExecutionBinding::None | ExecutionBinding::Const(_) => None,
@@ -127,20 +128,24 @@ impl ExecutionFrame<'_> {
         }
     }
 
-    pub(crate) fn release_drained_outputs(&mut self, e_node_id: ExecutionNodeId) {
-        if !self.program.e_nodes[&e_node_id].cache.caches_in_ram()
-            && self.remaining_reads.node_drained(self.program, e_node_id)
+    pub(crate) fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
+        if !self.program[node_idx].cache.caches_in_ram()
+            && self.remaining_reads.node_drained(self.program, node_idx)
         {
-            self.cache.slots.get_mut(&e_node_id).unwrap().clear_output();
+            self.cache
+                .slots
+                .get_mut(&self.program.e_node_ids[node_idx])
+                .unwrap()
+                .clear_output();
         }
     }
 
     /// Completes one resolver-counted read and releases its producer port or slot when no
     /// planned reader can still use it.
-    fn complete_planned_read(&mut self, address: ExecutionOutputPort) {
+    fn complete_planned_read(&mut self, address: OutputAddr) {
         let output_idx = self.program.output_idx(address);
         if !self.remaining_reads.consume(output_idx)
-            || self.cache.slots[&address.e_node_id]
+            || self.cache.slots[&self.program.e_node_ids[address.node_idx]]
                 .output_values()
                 .is_none()
         {
@@ -148,14 +153,11 @@ impl ExecutionFrame<'_> {
         }
         if self
             .remaining_reads
-            .node_drained(self.program, address.e_node_id)
+            .node_drained(self.program, address.node_idx)
         {
-            self.release_drained_outputs(address.e_node_id);
-        } else if !self.program.e_nodes[&address.e_node_id]
-            .cache
-            .caches_in_ram()
-        {
-            self.cache.clear_output_port(address);
+            self.release_drained_outputs(address.node_idx);
+        } else if !self.program[address.node_idx].cache.caches_in_ram() {
+            self.cache.clear_output_port(self.program, address);
         }
     }
 }

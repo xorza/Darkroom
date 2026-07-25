@@ -14,27 +14,23 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 
-#[cfg(test)]
-use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
-#[cfg(test)]
-use crate::execution::digest::Digest;
 use crate::execution::digest::node_digest;
 use crate::execution::disk_store::{DiskStore, StorePolicy};
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::ExecutionProgram;
+use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::OutputAddr;
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
-#[cfg(test)]
-mod tests;
-
-/// The per-node cross-run cache plus its disk backing. `slots` is keyed like
-/// `program.e_nodes`; the resolver stamps each node's digest and decides cache reuse,
+/// The per-node cross-run cache plus its disk backing. `slots` is keyed by
+/// `ExecutionNodeId` so state survives installs; the resolver stamps each
+/// node's digest and decides cache reuse,
 /// while the executor mutates outputs/state and consumes that decision. `disk_store`
 /// persists outputs and serves them back; it is kept across graph updates while only `slots`
 /// is reconciled or cleared.
@@ -118,8 +114,8 @@ impl RuntimeCache {
     /// ones, and apply the installed program's RAM-retention policy immediately.
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
-            .retain(|e_node_id, _| program.e_nodes.contains_key(e_node_id));
-        for (e_node_id, e_node) in &program.e_nodes {
+            .retain(|e_node_id, _| program.index.contains_key(e_node_id));
+        for (e_node_id, e_node) in program.e_node_ids.values.iter().zip(&program.e_nodes) {
             let owner = StateOwner {
                 func_id: e_node.func_id,
                 version: e_node.version,
@@ -180,37 +176,43 @@ impl RuntimeCache {
     pub(crate) fn read_output_port(
         &mut self,
         program: &ExecutionProgram,
-        address: ExecutionOutputPort,
+        address: OutputAddr,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = program.e_nodes[&address.e_node_id].outputs.len as usize;
-        let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&address.e_node_id).unwrap().value
+        let arity = program[address.node_idx].outputs.len as usize;
+        let ValueState::Resident { snapshot, .. } = &mut self
+            .slots
+            .get_mut(&program.e_node_ids[address.node_idx])
+            .unwrap()
+            .value
         else {
             return None;
         };
         debug_assert_eq!(snapshot.values.len(), arity);
         Some(if take {
-            std::mem::take(&mut snapshot.values[address.port_idx])
+            std::mem::take(&mut snapshot.values[address.port_idx as usize])
         } else {
-            snapshot.values[address.port_idx].clone()
+            snapshot.values[address.port_idx as usize].clone()
         })
     }
 
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
     /// others are still owed to other consumers.
-    pub(crate) fn clear_output_port(&mut self, address: ExecutionOutputPort) {
-        let ValueState::Resident { snapshot, .. } =
-            &mut self.slots.get_mut(&address.e_node_id).unwrap().value
+    pub(crate) fn clear_output_port(&mut self, program: &ExecutionProgram, address: OutputAddr) {
+        let ValueState::Resident { snapshot, .. } = &mut self
+            .slots
+            .get_mut(&program.e_node_ids[address.node_idx])
+            .unwrap()
+            .value
         else {
             panic!("an output can only be released from a resident slot");
         };
         debug_assert!(
-            address.port_idx < snapshot.values.len(),
+            (address.port_idx as usize) < snapshot.values.len(),
             "output port must be in range"
         );
-        snapshot.values[address.port_idx] = DynamicValue::Unbound;
+        snapshot.values[address.port_idx as usize] = DynamicValue::Unbound;
     }
 
     /// Stamp `e_node_id`'s structural content digest into its slot. The producer-first resolver
@@ -220,10 +222,13 @@ impl RuntimeCache {
         &mut self,
         program: &ExecutionProgram,
         resource_stamps: &RunResourceStamps,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
     ) {
-        let digest = node_digest(program, e_node_id, self, resource_stamps);
-        self.slots.get_mut(&e_node_id).unwrap().current_digest = digest;
+        let digest = node_digest(program, node_idx, self, resource_stamps);
+        self.slots
+            .get_mut(&program.e_node_ids[node_idx])
+            .unwrap()
+            .current_digest = digest;
     }
 
     /// Whether an unchanged output can satisfy this run's exact demand — already resident in
@@ -238,10 +243,11 @@ impl RuntimeCache {
     pub(crate) async fn check_reuse(
         &mut self,
         program: &ExecutionProgram,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
     ) -> bool {
+        let e_node_id = program.e_node_ids[node_idx];
         if self.slots[&e_node_id].current_digest.is_none() {
             return false;
         }
@@ -250,7 +256,7 @@ impl RuntimeCache {
         }
         let Some(target) = self.disk_store.blob_target(
             e_node_id,
-            &program.e_nodes[&e_node_id],
+            &program[node_idx],
             self.slots[&e_node_id].current_digest,
         ) else {
             return false;
@@ -281,13 +287,14 @@ impl RuntimeCache {
     pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
+        let e_node_id = program.e_node_ids[node_idx];
         let target = self.disk_store.blob_target(
             e_node_id,
-            &program.e_nodes[&e_node_id],
+            &program[node_idx],
             self.slots[&e_node_id].current_digest,
         );
         let resident = self.is_resident_current(e_node_id).then(|| {
@@ -309,8 +316,7 @@ impl RuntimeCache {
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
     pub(crate) fn release_dead_outputs(&mut self, program: &ExecutionProgram) {
-        for e_node_id in program.e_nodes.keys() {
-            let e_node = &program.e_nodes[e_node_id];
+        for (e_node_id, e_node) in program.e_node_ids.values.iter().zip(&program.e_nodes) {
             let retained = e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure
                 && self.is_resident_current(*e_node_id);
@@ -324,7 +330,10 @@ impl RuntimeCache {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::execution::cache::runtime::RuntimeCache;
+    use crate::execution::cache::slot::{OutputSnapshot, ValueState};
+    use crate::execution::digest::Digest;
+    use crate::execution::identity::ExecutionNodeId;
 
     pub(crate) fn hydrate(
         cache: &mut RuntimeCache,
@@ -338,3 +347,6 @@ pub(crate) mod test_support {
         };
     }
 }
+
+#[cfg(test)]
+mod tests;

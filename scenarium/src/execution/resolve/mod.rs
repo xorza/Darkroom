@@ -19,9 +19,9 @@
 //! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::index::{NodeMap, OutputColumn, OutputIdx};
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::OutputDemand;
@@ -68,18 +68,15 @@ impl ResolvedOutputs {
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
     ) {
-        let outputs = program.e_nodes[&e_node_id].outputs;
-        if plan.pinned.contains(&e_node_id) {
+        let outputs = program[node_idx].outputs;
+        if plan.pinned.contains(node_idx) {
             self.demand.slice_mut(outputs).fill(OutputDemand::Produce);
             return;
         }
-        for port_idx in 0..outputs.len as usize {
-            let output_idx = program.output_idx(ExecutionOutputPort {
-                e_node_id,
-                port_idx,
-            });
+        for port_idx in 0..outputs.len {
+            let output_idx = program.output_idx(OutputAddr { node_idx, port_idx });
             if program.outputs[output_idx.idx()].pinned {
                 self.demand[output_idx] = OutputDemand::Produce;
             }
@@ -99,20 +96,14 @@ impl ResolvedOutputs {
 /// nor a reader to its producers.
 #[derive(Debug, Default)]
 pub(crate) struct ResolvedRun {
-    pub(crate) disposition: NodeMap<Disposition>,
+    pub(crate) disposition: NodeColumn<Disposition>,
     pub(crate) outputs: ResolvedOutputs,
 }
 
 impl ResolvedRun {
     fn reset_for_program(&mut self, program: &ExecutionProgram) {
-        self.disposition.clear();
-        self.disposition.extend(
-            program
-                .e_nodes
-                .keys()
-                .copied()
-                .map(|e_node_id| (e_node_id, Disposition::Cut)),
-        );
+        self.disposition
+            .reset(program.e_nodes.len(), Disposition::Cut);
         self.outputs.reset(program.outputs.len());
     }
 }
@@ -152,11 +143,11 @@ fn stamp_digests(
     resource_stamps: &RunResourceStamps,
     plan: &ExecutionPlan,
 ) {
-    for &e_node_id in &plan.process_order {
-        if !plan.verdicts[&e_node_id].wants_execute() {
+    for &node_idx in &plan.process_order {
+        if !plan.verdicts[node_idx].wants_execute() {
             continue;
         }
-        cache.stamp_digest(program, resource_stamps, e_node_id);
+        cache.stamp_digest(program, resource_stamps, node_idx);
     }
 }
 
@@ -172,35 +163,35 @@ async fn resolve_run(
     run: &mut ResolvedRun,
 ) {
     run.reset_for_program(program);
-    for e_node_id in &plan.roots {
-        *run.disposition.get_mut(e_node_id).unwrap() = Disposition::Run;
+    for node_idx in plan.roots.iter() {
+        run.disposition[node_idx] = Disposition::Run;
     }
 
-    for &e_node_id in plan.process_order.iter().rev() {
-        if run.disposition[&e_node_id] != Disposition::Run {
+    for &node_idx in plan.process_order.iter().rev() {
+        if run.disposition[node_idx] != Disposition::Run {
             continue;
         }
-        if !plan.verdicts[&e_node_id].wants_execute() {
-            *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Cut;
+        if !plan.verdicts[node_idx].wants_execute() {
+            run.disposition[node_idx] = Disposition::Cut;
             continue;
         }
-        if program.e_nodes[&e_node_id].lambda.is_none() {
-            *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::MissingLambda;
+        if program[node_idx].lambda.is_none() {
+            run.disposition[node_idx] = Disposition::MissingLambda;
             continue;
         }
-        run.outputs.seed_external_demand(program, plan, e_node_id);
-        let outputs = program.e_nodes[&e_node_id].outputs;
+        run.outputs.seed_external_demand(program, plan, node_idx);
+        let outputs = program[node_idx].outputs;
         let demand = run.outputs.demand.slice(outputs);
-        if !plan.event_sources.contains(&e_node_id)
-            && cache.check_reuse(program, e_node_id, demand, ctx).await
+        if !plan.event_sources.contains(node_idx)
+            && cache.check_reuse(program, node_idx, demand, ctx).await
         {
-            *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Reuse;
+            run.disposition[node_idx] = Disposition::Reuse;
             continue;
         }
-        *run.disposition.get_mut(&e_node_id).unwrap() = Disposition::Run;
-        for input in &program.inputs[program.e_nodes[&e_node_id].inputs] {
+        run.disposition[node_idx] = Disposition::Run;
+        for input in &program.inputs[program[node_idx].inputs] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                *run.disposition.get_mut(&addr.e_node_id).unwrap() = Disposition::Run;
+                run.disposition[addr.node_idx] = Disposition::Run;
                 run.outputs.add_reader(program.output_idx(*addr));
             }
         }

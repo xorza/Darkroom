@@ -11,25 +11,15 @@ use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::StorePolicy;
 use crate::execution::error::Result;
-#[cfg(test)]
-use crate::execution::error::{Error, RunError};
 use crate::execution::executor::Executor;
-#[cfg(test)]
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::plan::{ExecutionPlan, Planner};
-#[cfg(test)]
-use crate::execution::program::ExecutionNode;
+use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunEvent;
 use crate::execution::resolve::Resolver;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
-#[cfg(test)]
-use crate::node::definition::FuncId;
-
-#[cfg(test)]
-mod tests;
 
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `plan` buffer, the `planner`
@@ -176,17 +166,15 @@ impl ExecutionEngine {
     /// snapshot preserves an existing blob that already covers it. Also a no-op for a node with
     /// no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for e_node_id in self.compiled.program.e_nodes.keys().copied() {
-            if !self.compiled.program.e_nodes[&e_node_id]
-                .cache
-                .persists_to_disk()
-            {
+        for i in 0..self.compiled.program.e_nodes.len() {
+            let node_idx = NodeIdx(i as u32);
+            if !self.compiled.program[node_idx].cache.persists_to_disk() {
                 continue;
             }
             self.cache
                 .store_node(
                     &self.compiled.program,
-                    e_node_id,
+                    node_idx,
                     StorePolicy::PreserveCovering,
                     &mut self.executor.ctx_manager.contexts,
                 )
@@ -314,11 +302,11 @@ pub(crate) mod test_support {
 
         pub(crate) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
             let program = &self.compiled.program;
-            &program.inputs[program.e_nodes[&e_node_id].inputs]
+            &program.inputs[program.by_id(e_node_id).inputs]
         }
 
         pub(crate) fn node_events(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
-            let events = self.compiled.program.e_nodes[&e_node_id].events;
+            let events = self.compiled.program.by_id(e_node_id).events;
             &self.compiled.program.events[events]
         }
 
@@ -327,7 +315,7 @@ pub(crate) mod test_support {
                 .run
                 .outputs
                 .demand
-                .slice(self.compiled.program.e_nodes[&e_node_id].outputs)
+                .slice(self.compiled.program.by_id(e_node_id).outputs)
         }
 
         pub(crate) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
@@ -335,12 +323,12 @@ pub(crate) mod test_support {
                 .run
                 .outputs
                 .readers
-                .slice(self.compiled.program.e_nodes[&e_node_id].outputs)
+                .slice(self.compiled.program.by_id(e_node_id).outputs)
         }
 
         /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.
         pub(crate) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
-            self.executor.ran(e_node_id)
+            self.executor.ran(&self.compiled.program, e_node_id)
         }
 
         /// Resident-only argument values, test inspection only: reads whatever is
@@ -353,21 +341,22 @@ pub(crate) mod test_support {
             &self,
             e_node_id: ExecutionNodeId,
         ) -> Option<ArgumentValues> {
-            self.compiled.program.e_nodes.get(&e_node_id)?;
+            self.compiled.program.index.get(&e_node_id)?;
             Some(self.argument_values_at(e_node_id))
         }
 
         fn argument_values_at(&self, e_node_id: ExecutionNodeId) -> ArgumentValues {
-            let e_node = &self.compiled.program.e_nodes[&e_node_id];
+            let e_node = &self.compiled.program.by_id(e_node_id);
 
             let inputs = self.compiled.program.inputs[e_node.inputs]
                 .iter()
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(value) => Some(DynamicValue::from(value)),
-                    ExecutionBinding::Bind(address) => self.cache.slots[&address.e_node_id]
+                    ExecutionBinding::Bind(address) => self.cache.slots
+                        [&self.compiled.program.e_node_ids[address.node_idx]]
                         .output_values()
-                        .and_then(|outputs| outputs.get(address.port_idx))
+                        .and_then(|outputs| outputs.get(address.port_idx as usize))
                         .cloned(),
                 })
                 .collect();
@@ -395,3 +384,6 @@ pub(crate) mod test_support {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

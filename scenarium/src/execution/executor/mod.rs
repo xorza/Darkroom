@@ -30,9 +30,8 @@ use common::CancelToken;
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-#[cfg(test)]
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::program::index::NodeColumn;
 use crate::execution::report::{RunEvent, RunPhase, RunProgress};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
@@ -46,7 +45,6 @@ use crate::execution::executor::outcomes::{
 use crate::execution::executor::value_flow::{ExecutionFrame, RemainingOutputReads};
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
-use crate::execution::program::index::NodeMap;
 use crate::execution::resolve::{Disposition, ResolvedRun};
 use crate::execution::resource::RunResourceStamps;
 
@@ -69,25 +67,12 @@ pub(crate) struct Executor {
     /// The run's mutable copy of the resolver's live binding counts. Input consumption or
     /// retirement decrements it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
-    /// Per-run outcome per node (see [`NodeOutcome`]), keyed by node id. Reused
-    /// across runs and rebuilt each run.
-    outcomes: NodeMap<NodeOutcome>,
+    /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
+    /// dense node vector. Reused across runs and rebuilt each run.
+    outcomes: NodeColumn<NodeOutcome>,
 }
 
 impl Executor {
-    /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e. wasn't
-    /// reused from RAM/disk. Before any run (empty map) every node reads as "ran", so
-    /// plan-only introspection still sees the full schedule. Test introspection only.
-    #[cfg(test)]
-    pub(crate) fn ran(&self, e_node_id: ExecutionNodeId) -> bool {
-        self.outcomes.get(&e_node_id).is_none_or(|outcome| {
-            matches!(
-                outcome,
-                NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }
-            )
-        })
-    }
-
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
     /// [`NodeOutcome::Cut`] if the resolver pruned its cone, report a missing implementation,
     /// serve it from RAM/disk on [`Disposition::Reuse`], or invoke its lambda and persist the
@@ -112,14 +97,8 @@ impl Executor {
         // one source.
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
-        self.outcomes.clear();
-        self.outcomes.extend(
-            program
-                .e_nodes
-                .keys()
-                .copied()
-                .map(|e_node_id| (e_node_id, NodeOutcome::Pending)),
-        );
+        self.outcomes
+            .reset(program.e_nodes.len(), NodeOutcome::Pending);
 
         self.remaining_reads.seed(resolved);
 
@@ -135,7 +114,7 @@ impl Executor {
 
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
-            for (process_idx, &e_node_id) in plan.process_order.iter().enumerate() {
+            for (process_idx, &node_idx) in plan.process_order.iter().enumerate() {
                 // Drain point for the live-report relay: sync-completing lambdas
                 // give the worker's select no suspension point of their own, and
                 // without one per node the whole "live" stream would flush only
@@ -146,23 +125,24 @@ impl Executor {
                 // node already mid-invoke isn't interrupted, while unreached outcomes stay
                 // `Pending` and are omitted from the outcome.
                 if self.ctx_manager.cancel.is_cancelled() {
-                    for &pending_id in &plan.process_order[process_idx..] {
-                        if resolved.disposition[&pending_id] == Disposition::Run {
-                            frame.abandon_input_reads(pending_id);
+                    for &pending_idx in &plan.process_order[process_idx..] {
+                        if resolved.disposition[pending_idx] == Disposition::Run {
+                            frame.abandon_input_reads(pending_idx);
                         }
                     }
                     break;
                 }
-                let e_node = &program.e_nodes[&e_node_id];
-                if !plan.verdicts[&e_node_id].wants_execute() {
+                let e_node = &program[node_idx];
+                let e_node_id = program.e_node_ids[node_idx];
+                if !plan.verdicts[node_idx].wants_execute() {
                     continue;
                 }
-                match resolved.disposition[&e_node_id] {
+                match resolved.disposition[node_idx] {
                     Disposition::Cut => {
                         // Pruned by the pre-run cut: every consumer that would read this node reused
                         // a cache, so its output is never read. Report only a current resident value;
                         // unneeded disk blobs remain unprobed.
-                        *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Cut {
+                        self.outcomes[node_idx] = NodeOutcome::Cut {
                             cached: frame.cache.is_resident_current(e_node_id),
                         };
                         continue;
@@ -170,8 +150,9 @@ impl Executor {
                     Disposition::MissingLambda => {
                         mark_skipped(
                             frame.cache,
+                            program,
                             &mut self.outcomes,
-                            e_node_id,
+                            node_idx,
                             RunError::MissingLambda {
                                 func_id: e_node.func_id,
                             },
@@ -192,7 +173,7 @@ impl Executor {
                 // errored-dependency check: a digest-valid cached value stays valid even when an
                 // upstream re-ran for another consumer and failed, so it must not be cleared as
                 // skipped.
-                let reused = match resolved.disposition[&e_node_id] {
+                let reused = match resolved.disposition[node_idx] {
                     Disposition::Reuse => true,
                     Disposition::Run if frame.cache.slots[&e_node_id].current_digest.is_none() => {
                         frame
@@ -200,20 +181,20 @@ impl Executor {
                             .prepare_node(
                                 program,
                                 frame.cache,
-                                e_node_id,
+                                node_idx,
                                 self.ctx_manager.cancel.clone(),
                             )
                             .await;
                         frame
                             .cache
-                            .stamp_digest(program, frame.resource_stamps, e_node_id);
+                            .stamp_digest(program, frame.resource_stamps, node_idx);
                         let demand = resolved.outputs.demand.slice(e_node.outputs);
                         let reused = frame
                             .cache
-                            .check_reuse(program, e_node_id, demand, &mut self.ctx_manager.contexts)
+                            .check_reuse(program, node_idx, demand, &mut self.ctx_manager.contexts)
                             .await;
                         if reused {
-                            frame.abandon_input_reads(e_node_id);
+                            frame.abandon_input_reads(node_idx);
                         }
                         reused
                     }
@@ -223,21 +204,22 @@ impl Executor {
                     }
                 };
                 if reused {
-                    *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Reused;
-                    frame.emit_pinned_values(e_node_id, events);
-                    frame.release_drained_outputs(e_node_id);
+                    self.outcomes[node_idx] = NodeOutcome::Reused;
+                    frame.emit_pinned_values(node_idx, events);
+                    frame.release_drained_outputs(node_idx);
                     continue;
                 }
 
                 debug_assert!(!e_node.lambda.is_none());
                 let func_id = e_node.func_id;
 
-                if has_errored_dependency(program, &self.outcomes, e_node_id) {
-                    frame.abandon_input_reads(e_node_id);
+                if has_errored_dependency(program, &self.outcomes, node_idx) {
+                    frame.abandon_input_reads(node_idx);
                     mark_skipped(
                         frame.cache,
+                        program,
                         &mut self.outcomes,
-                        e_node_id,
+                        node_idx,
                         RunError::SkippedUpstream { func_id },
                     );
                     continue;
@@ -245,11 +227,11 @@ impl Executor {
 
                 // Read already-resolved inputs and release each producer whose last read this
                 // satisfies. Disk reuse is hydrated before the resolver cuts producer cones.
-                frame.collect_inputs(e_node_id);
+                frame.collect_inputs(node_idx);
 
                 let output_count = e_node.outputs.len as usize;
                 let event_state = frame.cache.slots[&e_node_id].event_state.clone();
-                debug_assert!(matches!(self.outcomes[&e_node_id], NodeOutcome::Pending));
+                debug_assert!(matches!(self.outcomes[node_idx], NodeOutcome::Pending));
 
                 // Attribute any logs this node emits to it (read by
                 // `ContextManager::log`).
@@ -322,13 +304,12 @@ impl Executor {
                     // it so the next run's reuse check is a RAM hit.
                     Ok(()) => {
                         slot.stamp_produced();
-                        *self.outcomes.get_mut(&e_node_id).unwrap() =
-                            NodeOutcome::Ran { secs: run_time };
+                        self.outcomes[node_idx] = NodeOutcome::Ran { secs: run_time };
                         true
                     }
                     Err(error) => {
                         slot.clear_output();
-                        *self.outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Failed {
+                        self.outcomes[node_idx] = NodeOutcome::Failed {
                             secs: run_time,
                             error,
                         };
@@ -352,7 +333,7 @@ impl Executor {
                 // synchronously inside `store_node`; only the write awaits, so the cache
                 // borrow doesn't cross it.
                 if succeeded {
-                    if plan.event_sources.contains(&e_node_id) {
+                    if plan.event_sources.contains(node_idx) {
                         outcome.event_triggers.extend(
                             program.events[e_node.events]
                                 .iter()
@@ -371,18 +352,18 @@ impl Executor {
                         );
                     }
                     // Deliver before later consumers can release values; host delivery is not a reader.
-                    frame.emit_pinned_values(e_node_id, events);
+                    frame.emit_pinned_values(node_idx, events);
                     // The preceding reuse miss proves that no blob can cover this result.
                     frame
                         .cache
                         .store_node(
                             program,
-                            e_node_id,
+                            node_idx,
                             StorePolicy::KnownMiss,
                             &mut self.ctx_manager.contexts,
                         )
                         .await;
-                    frame.release_drained_outputs(e_node_id);
+                    frame.release_drained_outputs(node_idx);
                 }
             }
         }
@@ -391,6 +372,30 @@ impl Executor {
         collect_execution_outcome(program, plan, &self.outcomes, start, outcome);
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::execution::executor::Executor;
+    use crate::execution::executor::outcomes::NodeOutcome;
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program::ExecutionProgram;
+
+    impl Executor {
+        /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e.
+        /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
+        /// reads as "ran", so plan-only introspection still sees the full schedule;
+        /// an id absent from the installed program is a caller bug and panics.
+        pub(crate) fn ran(&self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> bool {
+            let node = program.index[&e_node_id];
+            self.outcomes.values.get(node.idx()).is_none_or(|outcome| {
+                matches!(
+                    outcome,
+                    NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }
+                )
+            })
+        }
     }
 }
 

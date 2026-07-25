@@ -2,12 +2,16 @@ use std::sync::Arc;
 
 use super::*;
 use crate::execution::compile::{CompileError, Compiler};
+use crate::execution::error::{Error, RunError};
+use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
+use crate::execution::program::ExecutionNode;
 use crate::graph::{
     Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
 use crate::library::Library;
+use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncBehavior};
 use crate::node::lambda::test_support;
 use crate::node::lambda::{InvokeError, OutputDemand};
@@ -51,8 +55,9 @@ fn execution_node_id(
     execution_graph
         .compiled
         .program
-        .e_nodes
-        .keys()
+        .e_node_ids
+        .values
+        .iter()
         .copied()
         .find(|&e_node_id| execution_node_name(execution_graph, graph, library, e_node_id) == name)
 }
@@ -66,8 +71,9 @@ fn execution_node_ids(
     execution_graph
         .compiled
         .program
-        .e_nodes
-        .keys()
+        .e_node_ids
+        .values
+        .iter()
         .copied()
         .filter(|&e_node_id| {
             execution_node_name(execution_graph, graph, library, e_node_id) == name
@@ -89,11 +95,13 @@ fn execution_node_names_in_order(
         .plan
         .process_order
         .iter()
-        .filter(|&&e_node_id| {
-            execution_graph.plan.verdicts[&e_node_id].wants_execute()
+        .filter(|&&node_idx| {
+            let e_node_id = execution_graph.compiled.program.e_node_ids[node_idx];
+            execution_graph.plan.verdicts[node_idx].wants_execute()
                 && execution_graph.node_ran(e_node_id)
         })
-        .map(|&e_node_id| {
+        .map(|&node_idx| {
+            let e_node_id = execution_graph.compiled.program.e_node_ids[node_idx];
             execution_node_name(execution_graph, graph, library, e_node_id).to_owned()
         })
         .collect()
@@ -2239,24 +2247,14 @@ mod graph_structure {
         assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
         assert_eq!(execution_graph.plan.process_order.len(), 5);
         assert!(
-            execution_graph
-                .compiled
-                .program
-                .e_nodes
-                .keys()
-                .copied()
-                .all(|e_node_id| {
-                    !execution_graph.plan.verdicts[&e_node_id].missing_required_inputs()
-                })
+            (0..execution_graph.compiled.program.e_nodes.len())
+                .all(
+                    |i| !execution_graph.plan.verdicts[NodeIdx(i as u32)].missing_required_inputs()
+                )
         );
         assert!(
-            execution_graph
-                .compiled
-                .program
-                .e_nodes
-                .keys()
-                .copied()
-                .all(|e_node_id| execution_graph.plan.verdicts[&e_node_id].wants_execute())
+            (0..execution_graph.compiled.program.e_nodes.len())
+                .all(|i| execution_graph.plan.verdicts[NodeIdx(i as u32)].wants_execute())
         );
 
         let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
@@ -2287,7 +2285,7 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_readers(sum), &[1]);
         assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
-        assert!(execution_graph.compiled.program.e_nodes[&print].sink);
+        assert!(execution_graph.compiled.program.by_id(print).sink);
 
         Ok(())
     }
@@ -2397,12 +2395,21 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         // get_b has no missing inputs (no inputs at all)
-        assert!(!execution_graph.plan.verdicts[&get_b].missing_required_inputs());
+        assert!(
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&get_b]]
+                .missing_required_inputs()
+        );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
-            assert!(execution_graph.plan.verdicts[&gated].missing_required_inputs());
-            assert!(!execution_graph.plan.verdicts[&gated].wants_execute());
+            assert!(
+                execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                    .missing_required_inputs()
+            );
+            assert!(
+                !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                    .wants_execute()
+            );
         }
 
         Ok(())
@@ -2435,8 +2442,14 @@ mod missing_inputs {
         // The missing flag flows through the optional bind to mult and on to print, so
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
-            assert!(execution_graph.plan.verdicts[&gated].missing_required_inputs());
-            assert!(!execution_graph.plan.verdicts[&gated].wants_execute());
+            assert!(
+                execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                    .missing_required_inputs()
+            );
+            assert!(
+                !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&gated]]
+                    .wants_execute()
+            );
         }
 
         Ok(())
@@ -2463,8 +2476,14 @@ mod missing_inputs {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
-        assert!(!execution_graph.plan.verdicts[&mult].missing_required_inputs());
-        assert!(!execution_graph.plan.verdicts[&print].missing_required_inputs());
+        assert!(
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+                .missing_required_inputs()
+        );
+        assert!(
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&print]]
+                .missing_required_inputs()
+        );
         assert!(
             execution_node_names_in_order(&execution_graph, &graph, &library)
                 .contains(&"mult".to_string())
@@ -2507,7 +2526,10 @@ mod missing_inputs {
         // The run completes (no panic reading sum's absent output); the gated `mult`
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        assert!(execution_graph.plan.verdicts[&mult].missing_required_inputs());
+        assert!(
+            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+                .missing_required_inputs()
+        );
         assert!(
             !execution_node_names_in_order(&execution_graph, &graph, &library)
                 .contains(&"mult".to_string())
@@ -2541,12 +2563,16 @@ mod disabled_nodes {
 
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.compiled.program.e_nodes[&sum].disabled,
+            execution_graph.compiled.program.by_id(sum).disabled,
             "the compiled node retains its authored disabled state"
         );
         assert!(
-            !execution_graph.plan.process_order.contains(&sum)
-                && execution_graph.plan.verdicts[&sum] == NodeVerdict::Disabled,
+            !execution_graph
+                .plan
+                .process_order
+                .contains(&execution_graph.compiled.program.index[&sum])
+                && execution_graph.plan.verdicts[execution_graph.compiled.program.index[&sum]]
+                    == NodeVerdict::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
 
@@ -2555,9 +2581,18 @@ mod disabled_nodes {
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-        assert!(!execution_graph.plan.verdicts[&get_b].missing_required_inputs());
-        assert!(execution_graph.plan.verdicts[&mult].missing_required_inputs());
-        assert!(execution_graph.plan.verdicts[&print].missing_required_inputs());
+        assert!(
+            !execution_graph.plan.verdicts[execution_graph.compiled.program.index[&get_b]]
+                .missing_required_inputs()
+        );
+        assert!(
+            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&mult]]
+                .missing_required_inputs()
+        );
+        assert!(
+            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&print]]
+                .missing_required_inputs()
+        );
 
         Ok(())
     }
@@ -3332,7 +3367,7 @@ mod composite_behavior {
             .id;
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
         let e_node_id = ExecutionNodeId::from_authoring(&[outer_inst, inner_inst, deep_id]);
-        assert!(compiled.program.e_nodes.contains_key(&e_node_id));
+        assert!(compiled.program.index.contains_key(&e_node_id));
         assert_eq!(
             compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
             vec![deep_id, inner_inst, outer_inst]
@@ -3577,7 +3612,10 @@ mod execution {
 
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
-        assert!(execution_graph.plan.verdicts[&sum].missing_required_inputs());
+        assert!(
+            execution_graph.plan.verdicts[execution_graph.compiled.program.index[&sum]]
+                .missing_required_inputs()
+        );
 
         Ok(())
     }
@@ -4607,7 +4645,7 @@ mod events {
         assert!(
             eg.plan
                 .process_order
-                .contains(&root_execution_node(trigger_id)),
+                .contains(&eg.compiled.program.index[&root_execution_node(trigger_id)]),
             "the RunSinks sink runs as a sink"
         );
 
@@ -5272,7 +5310,7 @@ mod graph {
         input_idx: usize,
     ) -> ExecutionNodeId {
         match &eg.node_inputs(e_node_id)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => addr.e_node_id,
+            ExecutionBinding::Bind(addr) => eg.compiled.program.e_node_ids[addr.node_idx],
             other => panic!("expected Bind, got {other:?}"),
         }
     }
@@ -5330,7 +5368,7 @@ mod graph {
             assert!(
                 eg.compiled
                     .program
-                    .e_nodes
+                    .index
                     .contains_key(&root_execution_node(node.id)),
                 "id preserved"
             );
@@ -5438,7 +5476,11 @@ mod graph {
         e_node_id: ExecutionNodeId,
         event_idx: usize,
     ) -> Vec<ExecutionNodeId> {
-        eg.node_events(e_node_id)[event_idx].subscribers.clone()
+        eg.node_events(e_node_id)[event_idx]
+            .subscribers
+            .iter()
+            .map(|&node_idx| eg.compiled.program.e_node_ids[node_idx])
+            .collect()
     }
 
     /// A parent subscriber of a composite's exposed event is rewired onto the
@@ -5910,7 +5952,8 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::identity::ExecutionOutputPort;
+    use crate::execution::program::index::NodeIdx;
+    use crate::execution::program::index::OutputAddr;
     use crate::execution::program::{ExecutionInput, ExecutionOutput, ExecutionProgram};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
@@ -5971,23 +6014,23 @@ mod compile_regressions {
         let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
         let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_int].outputs][0]
+            engine.compiled.program.outputs[engine.compiled.program.by_id(make_int).outputs][0]
                 .data_type,
             DataType::Int,
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_str].outputs][0]
+            engine.compiled.program.outputs[engine.compiled.program.by_id(make_str).outputs][0]
                 .data_type,
             DataType::String,
             "make_str reads its own type, not its neighbor's"
         );
         assert!(
-            !engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_int].outputs][0]
+            !engine.compiled.program.outputs[engine.compiled.program.by_id(make_int).outputs][0]
                 .pinned
         );
         assert!(
-            engine.compiled.program.outputs[engine.compiled.program.e_nodes[&make_str].outputs][0]
+            engine.compiled.program.outputs[engine.compiled.program.by_id(make_str).outputs][0]
                 .pinned
         );
     }
@@ -6057,8 +6100,7 @@ mod compile_regressions {
                 "authoring resolution for {node_id}"
             );
             assert_eq!(
-                program.outputs[program.e_nodes[&root_execution_node(node_id)].outputs][0]
-                    .data_type,
+                program.outputs[program.by_id(root_execution_node(node_id)).outputs][0].data_type,
                 expected,
                 "compiled resolution for {node_id}"
             );
@@ -6087,13 +6129,13 @@ mod compile_regressions {
         let inputs = program.inputs.append([ExecutionInput {
             required: true,
             stamps_fs_path: false,
-            binding: ExecutionBinding::Bind(ExecutionOutputPort {
-                e_node_id,
+            binding: ExecutionBinding::Bind(OutputAddr {
+                node_idx: NodeIdx(0),
                 port_idx: 0,
             }),
         }]);
         let outputs = program.outputs.append([ExecutionOutput::default()]);
-        program.e_nodes.insert(
+        program.push(
             e_node_id,
             ExecutionNode {
                 func_id: passthrough.id,
@@ -6104,7 +6146,7 @@ mod compile_regressions {
         );
         program.resolve_output_types(&library);
         assert_eq!(
-            program.outputs[program.e_nodes[&e_node_id].outputs][0].data_type,
+            program.outputs[program.by_id(e_node_id).outputs][0].data_type,
             DataType::Any
         );
     }
@@ -6226,7 +6268,7 @@ mod compile_regressions {
         assert!(
             !eg.compiled
                 .program
-                .e_nodes
+                .index
                 .contains_key(&root_execution_node(sum_interior_id)),
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );

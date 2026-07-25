@@ -394,7 +394,8 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     let flat_input = |g: &Graph, node: NodeId| {
         assert!(g.validate_for_execution(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node = &compiled.program.e_nodes[&ExecutionNodeId::from_authoring(&[node])];
+        let e_node =
+            &compiled.program[compiled.program.index[&ExecutionNodeId::from_authoring(&[node])]];
         compiled.program.inputs[e_node.inputs.start as usize]
             .binding
             .clone()
@@ -688,21 +689,33 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     g.set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
 
     // The sink's flat input in the compiled program: the type gate rules on
-    // the authored wire, never on the document (nothing is severed).
+    // the authored wire, never on the document (nothing is severed). A `Bind`
+    // is mapped back to its producer's id so assertions stay id-based.
+    #[derive(Debug, PartialEq)]
+    enum FlatSink {
+        Unbound,
+        Const,
+        Bound(ExecutionNodeId),
+    }
     let sink_binding = |g: &Graph| {
         let mut compiler = Compiler::default();
         let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node = &compiled.program.e_nodes[&ExecutionNodeId::from_authoring(&[sink])];
-        compiled.program.inputs[e_node.inputs.start as usize]
-            .binding
-            .clone()
+        let e_node =
+            &compiled.program[compiled.program.index[&ExecutionNodeId::from_authoring(&[sink])]];
+        match &compiled.program.inputs[e_node.inputs.start as usize].binding {
+            ExecutionBinding::Bind(addr) => {
+                FlatSink::Bound(compiled.program.e_node_ids[addr.node_idx])
+            }
+            ExecutionBinding::Const(_) => FlatSink::Const,
+            ExecutionBinding::None => FlatSink::Unbound,
+        }
     };
 
     // The valid Float chain binds the sink to its passthrough producer
     // (passthroughs are real func nodes — only boundaries short-circuit).
-    assert!(
-        matches!(sink_binding(&g), ExecutionBinding::Bind(addr)
-            if addr.e_node_id == ExecutionNodeId::from_authoring(&[p2])),
+    assert_eq!(
+        sink_binding(&g),
+        FlatSink::Bound(ExecutionNodeId::from_authoring(&[p2])),
         "a well-typed chain flattens as bound"
     );
 
@@ -711,7 +724,7 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     // the one now incompatible — it flattens as unbound while the authored
     // wire survives in the document.
     g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
-    assert!(matches!(sink_binding(&g), ExecutionBinding::None));
+    assert_eq!(sink_binding(&g), FlatSink::Unbound);
     assert_eq!(
         g.bindings.get(&InputPort::new(sink, 0)),
         Some(&Binding::bind(p2, 0)),
@@ -723,12 +736,12 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
         InputPort::new(sink, 0),
         Binding::Const(StaticValue::String("nope".into())),
     );
-    assert!(matches!(sink_binding(&g), ExecutionBinding::None));
+    assert_eq!(sink_binding(&g), FlatSink::Unbound);
     g.set_input_binding(
         InputPort::new(sink, 0),
         Binding::Const(StaticValue::Float(1.0)),
     );
-    assert!(matches!(sink_binding(&g), ExecutionBinding::Const(_)));
+    assert_eq!(sink_binding(&g), FlatSink::Const);
 }
 
 #[test]

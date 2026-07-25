@@ -4,8 +4,6 @@ mod format;
 
 use std::io;
 use std::path::PathBuf;
-#[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
@@ -26,14 +24,7 @@ pub struct DiskStore {
     codecs: Codecs,
     disk_root: Option<PathBuf>,
     #[cfg(test)]
-    pub(crate) store_io: StoreIoCounts,
-}
-
-#[cfg(test)]
-#[derive(Debug, Default)]
-pub(crate) struct StoreIoCounts {
-    pub(crate) coverage_probes: AtomicU64,
-    pub(crate) publication_attempts: AtomicU64,
+    pub(crate) store_io: test_support::StoreIoCounts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +53,7 @@ impl DiskStore {
             codecs: library.codecs(),
             disk_root,
             #[cfg(test)]
-            store_io: StoreIoCounts::default(),
+            store_io: test_support::StoreIoCounts::default(),
         }
     }
 
@@ -167,7 +158,7 @@ impl DiskStore {
             #[cfg(test)]
             self.store_io
                 .coverage_probes
-                .fetch_add(1, Ordering::Relaxed);
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         if policy == StorePolicy::PreserveCovering && self.covers(target, &snapshot.values).await {
             return;
@@ -175,7 +166,7 @@ impl DiskStore {
         #[cfg(test)]
         self.store_io
             .publication_attempts
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(parent) = target
             .path
             .parent()
@@ -216,6 +207,17 @@ impl DiskStore {
         if let Err(error) = writer.into_inner().commit().await {
             tracing::warn!(path = %target.path.display(), %error, "failed to publish output cache");
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::atomic::AtomicU64;
+
+    #[derive(Debug, Default)]
+    pub(crate) struct StoreIoCounts {
+        pub(crate) coverage_probes: AtomicU64,
+        pub(crate) publication_attempts: AtomicU64,
     }
 }
 

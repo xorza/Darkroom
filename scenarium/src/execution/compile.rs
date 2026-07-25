@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
+use crate::execution::program::index::{NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
@@ -63,41 +64,47 @@ impl CompiledGraph {
         &self,
         authored_node_ids: &[NodeId],
     ) -> Vec<ExecutionNodeId> {
+        let program = &self.program;
         let selected: HashSet<NodeId> = authored_node_ids.iter().copied().collect();
-        let mut closure: HashSet<ExecutionNodeId> = self
-            .program
-            .e_nodes
-            .keys()
-            .copied()
-            .filter(|e_node_id| {
-                self.flatten_map
-                    .attribution(*e_node_id)
-                    .expect("every execution node has authored attribution")
-                    .any(|node_id| selected.contains(&node_id))
-            })
-            .collect();
+        let mut in_closure = NodeSet::default();
+        in_closure.reset(program.e_nodes.len());
+        let mut pending: Vec<NodeIdx> = Vec::new();
+        for (i, e_node_id) in program.e_node_ids.values.iter().enumerate() {
+            if self
+                .flatten_map
+                .attribution(*e_node_id)
+                .expect("every execution node has authored attribution")
+                .any(|node_id| selected.contains(&node_id))
+            {
+                in_closure.insert(NodeIdx(i as u32));
+                pending.push(NodeIdx(i as u32));
+            }
+        }
 
-        let mut consumers: HashMap<ExecutionNodeId, Vec<ExecutionNodeId>> = HashMap::new();
-        for (consumer_id, e_node) in &self.program.e_nodes {
-            for input in &self.program.inputs[e_node.inputs] {
+        let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
+        for (i, e_node) in program.e_nodes.iter().enumerate() {
+            for input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
                     consumers
-                        .entry(address.e_node_id)
+                        .entry(address.node_idx)
                         .or_default()
-                        .push(*consumer_id);
+                        .push(NodeIdx(i as u32));
                 }
             }
         }
-        let mut pending: Vec<_> = closure.iter().copied().collect();
-        while let Some(e_node_id) = pending.pop() {
-            for consumer_id in consumers.get(&e_node_id).into_iter().flatten() {
-                if closure.insert(*consumer_id) {
-                    pending.push(*consumer_id);
+        while let Some(node_idx) = pending.pop() {
+            for &consumer_idx in consumers.get(&node_idx).into_iter().flatten() {
+                if !in_closure.contains(consumer_idx) {
+                    in_closure.insert(consumer_idx);
+                    pending.push(consumer_idx);
                 }
             }
         }
 
-        let mut closure: Vec<_> = closure.into_iter().collect();
+        let mut closure: Vec<ExecutionNodeId> = in_closure
+            .iter()
+            .map(|node_idx| program.e_node_ids[node_idx])
+            .collect();
         closure.sort_unstable();
         closure
     }
@@ -137,8 +144,9 @@ impl Compiler {
         // `Graph`. Everything downstream is boundary-agnostic (func nodes only).
         let mut program = ExecutionProgram::default();
         let mut flatten_map = FlattenMap::default();
+        let mut e_nodes = HashMap::new();
         self.flattener.build(
-            &mut program.e_nodes,
+            &mut e_nodes,
             Pools {
                 inputs: &mut program.inputs,
                 outputs: &mut program.outputs,
@@ -147,6 +155,17 @@ impl Compiler {
             graph,
             library,
             &mut flatten_map,
+        );
+
+        // Assign dense node indices, then intern the id-based edge fixups —
+        // the only id hashing the compiled program ever pays.
+        program.adopt_nodes(e_nodes);
+        program.intern_bindings(&self.flattener.pending_binds);
+        program.apply_subscriptions(
+            self.flattener
+                .subs
+                .iter()
+                .map(|sub| (sub.event, sub.subscriber)),
         );
 
         // Resolve types here so runtime digesting does not retain the function library.
@@ -239,7 +258,7 @@ mod tests {
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
         let e_node_id = ExecutionNodeId::from_authoring(&[instance_id, interior_id]);
         assert!(
-            compiled.program.e_nodes[&e_node_id].disabled,
+            compiled.program.by_id(e_node_id).disabled,
             "the disabled instance marks its compiled interior effectively disabled"
         );
     }
@@ -281,7 +300,7 @@ mod tests {
         let mut builder = FlattenMapBuilder::new();
         builder.insert_leaf(e_node_id, [], interior);
         let mut program = ExecutionProgram::default();
-        program.e_nodes.insert(
+        program.push(
             e_node_id,
             ExecutionNode {
                 func_id: missing_func,

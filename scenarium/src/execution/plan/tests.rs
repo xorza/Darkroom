@@ -1,8 +1,9 @@
 use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Error;
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
-use crate::execution::program::index::NodeSet;
+use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
 };
@@ -40,7 +41,7 @@ impl Fix {
             .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = program.e_nodes.len();
         let id = ExecutionNodeId::from_u128(idx as u128 + 1);
-        program.e_nodes.insert(
+        program.push(
             id,
             ExecutionNode {
                 sink,
@@ -57,10 +58,16 @@ impl Fix {
     }
 }
 
+/// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
+/// in push order, so a node's dense index is recoverable from its id.
+fn nx(e_node_id: ExecutionNodeId) -> NodeIdx {
+    NodeIdx(e_node_id.as_uuid().as_u128() as u32 - 1)
+}
+
 fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionOutputPort {
-        e_node_id,
-        port_idx: port,
+    ExecutionBinding::Bind(OutputAddr {
+        node_idx: nx(e_node_id),
+        port_idx: port as u32,
     })
 }
 
@@ -90,10 +97,10 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
 
     let mut p = plan(&f);
     p.validate(&f.compiled.program).unwrap();
-    assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
+    assert_eq!(p.process_order, [a, b, c].map(nx), "post-order: deps first");
     for idx in [a, b, c] {
-        assert!(p.verdicts[&idx].wants_execute());
-        assert!(!p.verdicts[&idx].missing_required_inputs());
+        assert!(p.verdicts[nx(idx)].wants_execute());
+        assert!(!p.verdicts[nx(idx)].missing_required_inputs());
     }
 
     p.process_order.swap(0, 1);
@@ -101,7 +108,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         p.validate(&f.compiled.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}")
     );
-    *p.verdicts.get_mut(&a).unwrap() = NodeVerdict::Disabled;
+    p.verdicts[nx(a)] = NodeVerdict::Disabled;
     assert_eq!(
         p.validate(&f.compiled.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}"),
@@ -119,11 +126,11 @@ fn missing_required_input_blocks_node_and_dependents() {
     let p = plan(&f);
     for idx in [a, b] {
         assert!(
-            p.verdicts[&idx].missing_required_inputs(),
+            p.verdicts[nx(idx)].missing_required_inputs(),
             "node {idx:?} missing"
         );
         assert!(
-            !p.verdicts[&idx].wants_execute(),
+            !p.verdicts[nx(idx)].wants_execute(),
             "node {idx:?} not runnable"
         );
     }
@@ -136,21 +143,16 @@ fn optional_unbound_input_does_not_block() {
     let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
     let p = plan(&f);
-    assert!(!p.verdicts[&a].missing_required_inputs());
-    assert!(p.verdicts[&a].wants_execute());
-    assert_eq!(p.process_order, vec![a]);
+    assert!(!p.verdicts[nx(a)].missing_required_inputs());
+    assert!(p.verdicts[nx(a)].wants_execute());
+    assert_eq!(p.process_order, [a].map(nx));
 }
 
 #[test]
 fn explicit_seed_overrides_disabled_dependency_for_this_run() {
     let mut f = Fix::default();
     let producer = f.node(false, &[], 1);
-    f.compiled
-        .program
-        .e_nodes
-        .get_mut(&producer)
-        .unwrap()
-        .disabled = true;
+    f.compiled.program.by_id_mut(producer).disabled = true;
     let required = f.node(true, &[(true, bind(producer, 0))], 1);
     let optional = f.node(true, &[(false, bind(producer, 0))], 1);
 
@@ -166,9 +168,9 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &mut plan,
         )
         .unwrap();
-    assert_eq!(plan.verdicts[&producer], NodeVerdict::Disabled);
-    assert_eq!(plan.verdicts[&required], NodeVerdict::MissingInputs);
-    assert_eq!(plan.verdicts[&optional], NodeVerdict::Execute);
+    assert_eq!(plan.verdicts[nx(producer)], NodeVerdict::Disabled);
+    assert_eq!(plan.verdicts[nx(required)], NodeVerdict::MissingInputs);
+    assert_eq!(plan.verdicts[nx(optional)], NodeVerdict::Execute);
 
     planner
         .plan(
@@ -183,7 +185,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
         .unwrap();
     for e_node_id in [producer, required, optional] {
         assert_eq!(
-            plan.verdicts[&e_node_id],
+            plan.verdicts[nx(e_node_id)],
             NodeVerdict::Execute,
             "the explicit producer seed makes every consumer runnable"
         );
@@ -204,16 +206,16 @@ fn node_seed_is_both_a_root_and_pinned() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
-    assert_eq!(p.pinned, NodeSet::from([a]));
-    assert_eq!(p.roots, NodeSet::from([a]));
+    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(a)]);
+    assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
 
     let seeds = RunSeeds {
         nodes: vec![a, a],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
-    assert_eq!(p.pinned, NodeSet::from([a]));
-    assert_eq!(p.roots, NodeSet::from([a]));
+    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(a)]);
+    assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
 }
 
 #[test]
@@ -252,12 +254,12 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
-    assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
-    assert_eq!(p.roots, NodeSet::from([b]));
-    assert_eq!(p.pinned, NodeSet::from([b]));
-    assert!(p.verdicts[&a].wants_execute());
-    assert!(p.verdicts[&b].wants_execute());
-    assert!(!p.verdicts[&c].wants_execute(), "C never verdicted");
+    assert_eq!(p.process_order, [a, b].map(nx), "only B's cone, deps first");
+    assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(b)]);
+    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(b)]);
+    assert!(p.verdicts[nx(a)].wants_execute());
+    assert!(p.verdicts[nx(b)].wants_execute());
+    assert!(!p.verdicts[nx(c)].wants_execute(), "C never verdicted");
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays pinned.
@@ -267,8 +269,8 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
-    assert_eq!(p.process_order, vec![a, b, c]);
-    assert_eq!(p.pinned, NodeSet::from([b]));
+    assert_eq!(p.process_order, [a, b, c].map(nx));
+    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(b)]);
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.
@@ -287,10 +289,10 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
     let emitter = f.node(false, &[], 0);
     let subscriber = f.node(false, &[], 0);
     let events = f.compiled.program.events.append([ExecutionEvent {
-        subscribers: vec![subscriber],
+        subscribers: vec![nx(subscriber)],
         ..Default::default()
     }]);
-    f.compiled.program.e_nodes.get_mut(&emitter).unwrap().events = events;
+    f.compiled.program.by_id_mut(emitter).events = events;
 
     let event = ExecutionEventPort {
         e_node_id: emitter,
@@ -308,9 +310,9 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
             &mut plan,
         )
         .unwrap();
-    assert_eq!(plan.roots, NodeSet::from([subscriber]));
-    assert_eq!(plan.process_order, vec![subscriber]);
-    assert!(plan.event_sources.is_empty());
+    assert_eq!(plan.roots.iter().collect::<Vec<_>>(), vec![nx(subscriber)]);
+    assert_eq!(plan.process_order, [subscriber].map(nx));
+    assert!(plan.event_sources.iter().next().is_none());
 
     planner
         .plan(
@@ -322,9 +324,12 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
             &mut plan,
         )
         .unwrap();
-    assert_eq!(plan.roots, NodeSet::from([emitter]));
-    assert_eq!(plan.event_sources, NodeSet::from([emitter]));
-    assert_eq!(plan.process_order, vec![emitter]);
+    assert_eq!(plan.roots.iter().collect::<Vec<_>>(), vec![nx(emitter)]);
+    assert_eq!(
+        plan.event_sources.iter().collect::<Vec<_>>(),
+        vec![nx(emitter)]
+    );
+    assert_eq!(plan.process_order, [emitter].map(nx));
 
     let invalid = [
         ExecutionEventPort {

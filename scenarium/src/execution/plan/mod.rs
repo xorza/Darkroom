@@ -10,8 +10,7 @@
 
 use crate::execution::compile::CompiledGraph;
 use crate::execution::error::{Error, Result};
-use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeMap, NodeSet};
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
 use crate::execution::seeds::RunSeeds;
 use crate::node::special::SpecialNode;
@@ -50,11 +49,11 @@ impl NodeVerdict {
 /// `verdicts` must already hold the producer's verdict, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
 /// outcome so the two can't drift.
-pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdict>) -> bool {
+pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVerdict>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => match verdicts[&addr.e_node_id] {
+        ExecutionBinding::Bind(addr) => match verdicts[addr.node_idx] {
             NodeVerdict::Execute => false,
             NodeVerdict::Disabled => input.required,
             NodeVerdict::MissingInputs => true,
@@ -68,9 +67,10 @@ pub(crate) struct ExecutionPlan {
     /// seeded from the roots. Disabled dependencies stay outside the order unless they
     /// are explicit node seeds. The resolver refines it into the surviving run before
     /// execution.
-    pub(crate) process_order: Vec<ExecutionNodeId>,
-    /// Per-node verdict (execute / disabled / missing-inputs), keyed by node id.
-    pub(crate) verdicts: NodeMap<NodeVerdict>,
+    pub(crate) process_order: Vec<NodeIdx>,
+    /// Per-node verdict (execute / disabled / missing-inputs), aligned to the
+    /// program's dense node vector.
+    pub(crate) verdicts: NodeColumn<NodeVerdict>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
     /// the resolver seeds liveness from these and prunes any cone reachable only through
@@ -91,24 +91,19 @@ pub(crate) struct ExecutionPlan {
 impl ExecutionPlan {
     pub(crate) fn reset_for_program(&mut self, program: &ExecutionProgram) {
         self.process_order.clear();
-        self.verdicts.clear();
-        self.verdicts.extend(
-            program
-                .e_nodes
-                .keys()
-                .copied()
-                .map(|e_node_id| (e_node_id, NodeVerdict::default())),
-        );
-        self.roots.clear();
-        self.pinned.clear();
-        self.event_sources.clear();
+        self.verdicts
+            .reset(program.e_nodes.len(), NodeVerdict::default());
+        self.roots.reset(program.e_nodes.len());
+        self.pinned.reset(program.e_nodes.len());
+        self.event_sources.reset(program.e_nodes.len());
     }
 }
 
 /// DFS coloring for the backward pass. White = unvisited, Gray = on
 /// stack (Done pushed, children pending), Black = children done.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Color {
+    #[default]
     White,
     Gray,
     Black,
@@ -116,8 +111,8 @@ enum Color {
 
 #[derive(Debug)]
 enum Visit {
-    Discover(ExecutionNodeId),
-    Done(ExecutionNodeId),
+    Discover(NodeIdx),
+    Done(NodeIdx),
 }
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
@@ -125,7 +120,7 @@ enum Visit {
 #[derive(Debug, Default)]
 pub(crate) struct Planner {
     /// DFS coloring for the backward pass.
-    color: NodeMap<Color>,
+    color: NodeColumn<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
 }
@@ -133,14 +128,7 @@ pub(crate) struct Planner {
 impl Planner {
     fn reset_for_program(&mut self, program: &ExecutionProgram) {
         self.stack.clear();
-        self.color.clear();
-        self.color.extend(
-            program
-                .e_nodes
-                .keys()
-                .copied()
-                .map(|e_node_id| (e_node_id, Color::White)),
-        );
+        self.color.reset(program.e_nodes.len(), Color::White);
     }
 
     /// Build the per-run schedule into `plan` from the compiled artifact and the run's
@@ -178,25 +166,25 @@ impl Planner {
         program: &ExecutionProgram,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        for e_node_id in plan.roots.iter().copied() {
-            self.stack.push(Visit::Discover(e_node_id));
+        for node_idx in plan.roots.iter() {
+            self.stack.push(Visit::Discover(node_idx));
         }
 
         while let Some(visit) = self.stack.pop() {
-            let e_node_id = match visit {
-                Visit::Discover(e_node_id) => e_node_id,
-                Visit::Done(e_node_id) => {
-                    debug_assert_eq!(self.color[&e_node_id], Color::Gray);
-                    *self.color.get_mut(&e_node_id).unwrap() = Color::Black;
-                    plan.process_order.push(e_node_id);
+            let node_idx = match visit {
+                Visit::Discover(node_idx) => node_idx,
+                Visit::Done(node_idx) => {
+                    debug_assert_eq!(self.color[node_idx], Color::Gray);
+                    self.color[node_idx] = Color::Black;
+                    plan.process_order.push(node_idx);
                     // Runnable unless a required input is unbound or fed by a
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
-                    let missing = program.inputs[program.e_nodes[&e_node_id].inputs]
+                    let missing = program.inputs[program[node_idx].inputs]
                         .iter()
                         .any(|e_input| input_missing(e_input, &plan.verdicts));
-                    *plan.verdicts.get_mut(&e_node_id).unwrap() = if missing {
+                    plan.verdicts[node_idx] = if missing {
                         NodeVerdict::MissingInputs
                     } else {
                         NodeVerdict::Execute
@@ -205,29 +193,31 @@ impl Planner {
                 }
             };
 
-            match self.color[&e_node_id] {
+            match self.color[node_idx] {
                 Color::Gray => {
-                    return Err(Error::CycleDetected { e_node_id });
+                    return Err(Error::CycleDetected {
+                        e_node_id: program.e_node_ids[node_idx],
+                    });
                 }
                 Color::Black => continue,
                 Color::White => {}
             }
 
-            let e_node = &program.e_nodes[&e_node_id];
+            let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
             // seed is pinned before this walk and overrides disable for this run.
-            if e_node.disabled && !plan.pinned.contains(&e_node_id) {
-                *self.color.get_mut(&e_node_id).unwrap() = Color::Black;
-                *plan.verdicts.get_mut(&e_node_id).unwrap() = NodeVerdict::Disabled;
+            if e_node.disabled && !plan.pinned.contains(node_idx) {
+                self.color[node_idx] = Color::Black;
+                plan.verdicts[node_idx] = NodeVerdict::Disabled;
                 continue;
             }
 
-            *self.color.get_mut(&e_node_id).unwrap() = Color::Gray;
-            self.stack.push(Visit::Done(e_node_id));
+            self.color[node_idx] = Color::Gray;
+            self.stack.push(Visit::Done(node_idx));
 
             for e_input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    self.stack.push(Visit::Discover(addr.e_node_id));
+                    self.stack.push(Visit::Discover(addr.node_idx));
                 }
             }
         }
@@ -256,29 +246,29 @@ fn collect_roots(
     // every output is computed and delivered. `pinned` also records the one-run disabled
     // override. An id absent from the installed program is inconsistent caller state.
     for &e_node_id in &seeds.nodes {
-        if !program.e_nodes.contains_key(&e_node_id) {
+        let Some(&node_idx) = program.index.get(&e_node_id) else {
             return Err(Error::NodeSeedNotFound { e_node_id });
-        }
-        plan.roots.insert(e_node_id);
-        plan.pinned.insert(e_node_id);
+        };
+        plan.roots.insert(node_idx);
+        plan.pinned.insert(node_idx);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
     // promotes this run to run all sinks (below), so it's skipped as a root here.
     let mut run_sinks = seeds.sinks;
     for &event in &seeds.events {
-        let Some(e_node) = program.e_nodes.get(&event.e_node_id) else {
+        let Some(&owner_idx) = program.index.get(&event.e_node_id) else {
             return Err(Error::EventSeedNotFound { event });
         };
-        let Some(e_event) = program.events[e_node.events].get(event.event_idx) else {
+        let Some(e_event) = program.events[program[owner_idx].events].get(event.event_idx) else {
             return Err(Error::EventSeedNotFound { event });
         };
         let subs = &e_event.subscribers;
-        for &sub in subs {
-            if program.e_nodes[&sub].special == Some(SpecialNode::RunSinks) {
+        for &sub_idx in subs {
+            if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                 run_sinks = true;
             } else {
-                plan.roots.insert(sub);
+                plan.roots.insert(sub_idx);
             }
         }
     }
@@ -289,21 +279,21 @@ fn collect_roots(
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
     // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
-    for e_node_id in program.e_nodes.keys().copied() {
-        let e_node = &program.e_nodes[&e_node_id];
+    for (i, e_node) in program.e_nodes.iter().enumerate() {
+        let node_idx = NodeIdx(i as u32);
         if e_node.disabled {
             continue;
         }
         if run_sinks && e_node.sink {
-            plan.roots.insert(e_node_id);
+            plan.roots.insert(node_idx);
         }
         if seeds.event_sources
             && program.events[e_node.events]
                 .iter()
                 .any(|event| !event.subscribers.is_empty())
         {
-            plan.roots.insert(e_node_id);
-            plan.event_sources.insert(e_node_id);
+            plan.roots.insert(node_idx);
+            plan.event_sources.insert(node_idx);
         }
     }
     Ok(())

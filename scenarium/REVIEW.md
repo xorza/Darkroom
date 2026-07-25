@@ -110,6 +110,15 @@ flattened execution identity when a new program is installed.
   `src/execution/codec.rs`) extracted from the library at construction;
   format calls take `&Codecs`, and cache I/O no longer holds funcs, shared
   graphs, or editor metadata.
+- *Targeted runs rebuilt full-program state across four node hash maps* —
+  the installed program is now a dense, id-sorted vector with `NodeIdx`
+  positions; compiled `Bind` edges intern to `OutputAddr` at compile
+  (`ExecutionProgram::intern_bindings`), and plan verdicts, DFS colors,
+  dispositions, and outcomes are `NodeIdx`-aligned columns and bitsets whose
+  resets are memsets. Per-run and per-edge id hashing is gone from planning,
+  resolution, and execution; ids are hashed only at the host boundary (seed
+  resolution, slot access, report emission). `NodeIdx` is install-local and
+  never enters digests, persisted bytes, or reports.
 
 ## High: Worker lifecycle
 
@@ -128,16 +137,12 @@ flattened execution identity when a new program is installed.
 
 ## Medium: Per-run orchestration complexity
 
-- [ ] **Targeted runs still rebuild full-program state across four node hash
-  maps and two output columns.** Planning, DFS coloring, resolution, and
-  execution outcomes each clear and repopulate state from every installed
-  node before walking the reachable schedule
-  (`src/execution/plan/mod.rs:92-105`, `:134-144`,
-  `src/execution/resolve/mod.rs:106-117`,
-  `src/execution/executor/mod.rs:114-121`), and resolution initializes every
-  output entry (`src/execution/resolve/mod.rs:61-64`). A one-node preview
-  therefore pays whole-graph hashing and initialization costs while the same
-  identities and lifecycle states are duplicated across pipeline phases.
+- [ ] **`RuntimeCache::slots` remains the one id-hashed per-node structure in
+  the run loop.** With the program now dense-indexed, the executor still
+  reaches slots through `HashMap<ExecutionNodeId, RuntimeSlot>` — several
+  hashes per node and one per wire read. The follow-up (phase 2 of the
+  dense-index move) stores slots in program index order and remaps by id
+  only at install-time `reconcile`.
 
 - [ ] **Resolution serially hydrates every reusable disk frontier before
   execution starts.** The reverse sweep awaits `check_reuse` per live node
