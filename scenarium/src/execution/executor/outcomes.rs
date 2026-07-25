@@ -27,7 +27,8 @@ pub(super) enum NodeOutcome {
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
     Failed { secs: f64, error: RunError },
-    /// Never ran — an upstream dependency errored or its func has no implementation attached.
+    /// Never ran — an upstream dependency errored, its func has no implementation attached,
+    /// or the cached output it was resolved to reuse failed to load.
     Skipped { error: RunError },
 }
 
@@ -43,8 +44,9 @@ impl NodeOutcome {
 
 /// Drop `e_node_id` from this run: clear any stale cached output so it isn't served as
 /// this run's result, and record the outcome under the caller's reason —
-/// [`RunError::SkippedUpstream`] for an errored dependency or
-/// [`RunError::MissingLambda`] for a func with no implementation.
+/// [`RunError::SkippedUpstream`] for an errored dependency,
+/// [`RunError::MissingLambda`] for a func with no implementation, or
+/// [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
 pub(super) fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeColumn<NodeOutcome>,
