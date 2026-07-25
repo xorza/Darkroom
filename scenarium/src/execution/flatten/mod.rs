@@ -99,14 +99,11 @@ impl Flattener {
             run.emit(false);
         }
 
-        // Hand over the nodes in id order rather than walk order, so the
-        // compiled artifact is deterministic; draining leaves the buffer's
-        // allocation here for the next build. Then resolve the edge fixups the
-        // walk deferred — the only id hashing a compiled program ever pays.
-        self.e_nodes.sort_unstable_by_key(|(id, _)| *id);
-        program.adopt_nodes(self.e_nodes.drain(..));
-        program.intern_bindings(&self.pending_binds);
-        program.apply_subscriptions(&self.subs);
+        // Hand the walk's output to the program, which indexes the nodes and
+        // resolves the edge fixups against that index — the only id hashing a
+        // compiled program ever pays. Draining leaves every buffer's allocation
+        // here for the next build.
+        program.adopt_flattened(self.e_nodes.drain(..), &self.pending_binds, &self.subs);
     }
 }
 
