@@ -395,6 +395,21 @@ impl BreakerUI {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use super::*;
+
+    impl BreakerState {
+        /// The pins recorded as cut this frame, so a sibling module can
+        /// assert its own `mark_broken_pin` discipline — notably that
+        /// resolving a pin once per frame records it once, however many
+        /// render passes then read that resolution.
+        pub(crate) fn broken_pins(&self) -> &[OutputPort] {
+            &self.broken_pins
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -15,7 +15,7 @@ use crate::gui::canvas::drag_anchor::GroupDragAnchor;
 use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
-use crate::gui::canvas::pin_ui;
+use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
@@ -105,6 +105,7 @@ impl NodeUI {
         rcx: RecordCtx<'_>,
         cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
+        pin_ui: &PinUi,
         out: &mut Vec<Intent>,
     ) {
         // Paint in `scene.z_order` (mirrored from `item_placements`) — later
@@ -132,8 +133,10 @@ impl NodeUI {
             let id = match *key {
                 ItemRef::Node(id) => id,
                 ItemRef::Pin(port) => {
-                    // Pin previews hold no keyboard focus, so they need no cull exemption.
-                    pin_ui::draw_pin(ui, rcx, port, cull, probe, out);
+                    // Pin previews hold no keyboard focus, so they need no
+                    // cull exemption — and their cull decision was already
+                    // made when `pin_ui` resolved this frame's geometry.
+                    pin_ui.draw_pin(ui, rcx, port, out);
                     continue;
                 }
             };

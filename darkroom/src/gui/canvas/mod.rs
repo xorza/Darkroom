@@ -88,7 +88,9 @@ pub(crate) struct GraphUI {
 }
 
 /// The resettable, one-gesture-lifetime controllers. Everything here is
-/// dropped on a tab switch; nothing here is a cross-frame cache.
+/// dropped on a tab switch, and nothing here carries meaning across frames —
+/// `PinUi`'s resolved-geometry map is refilled from scratch every frame and
+/// kept only to reuse its allocation, so a tab switch costs at most that.
 #[derive(Default, Debug)]
 struct Gestures {
     node_ui: NodeUI,
@@ -279,10 +281,7 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
-                    // The pin card and wire renderers are free functions —
-                    // only the drag gesture needs the controller, and that
-                    // ran back in `prepass`.
-                    pin_ui: _,
+                    pin_ui,
                     subscription_ui,
                     new_node_ui: _,
                     graph_menu: _,
@@ -363,6 +362,14 @@ impl GraphUI {
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
+                            // A pin paints in two passes — its wire below,
+                            // its card up in the z-order walk — so its
+                            // geometry is resolved here, once, ahead of
+                            // both. That's also the breaker's single look
+                            // at every pin, keeping its one-hit-per-frame
+                            // rule intact. Must precede `wires`, which
+                            // takes the probe.
+                            pin_ui.resolve(ui, scene, geometry, &mut probe, cull);
                             // All three wire renderers share these inputs, so
                             // they're bundled once and reborrowed into each.
                             // Subscription and pin wires sit under the node
@@ -381,7 +388,7 @@ impl GraphUI {
                             };
                             connection_ui::draw(ui, &mut wires);
                             subscription_ui::draw(ui, &mut wires);
-                            pin_ui::draw_wires(ui, &mut wires);
+                            pin_ui.draw_wires(ui, &wires);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -396,7 +403,7 @@ impl GraphUI {
                             // paint stack, so either kind can sit above the
                             // other and clicking raises it. Only the pin
                             // wire (above) shares the other wires' z-order.
-                            node_ui.draw_all(ui, rcx, cull, &mut probe, out);
+                            node_ui.draw_all(ui, rcx, cull, &mut probe, pin_ui, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

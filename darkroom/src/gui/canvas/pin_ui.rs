@@ -26,9 +26,9 @@
 //! position lands in `Document` (and `Scene` rebuilds) before the record
 //! pass, there's no separate in-flight preview to paint — the widget's
 //! real position already reflects the live drag by the time
-//! [`draw_wires`]/[`draw_pin`] run.
+//! [`PinUi::draw_wires`]/[`PinUi::draw_pin`] run.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use aperture::{CurveBrush, Rect, Ui};
 use glam::Vec2;
@@ -70,9 +70,8 @@ pub(crate) fn default_pin_offset(theme: &Theme) -> Vec2 {
 
 /// World-space rect of a pinned output's preview widget at `top_left`
 /// (its [`crate::gui::scene::SceneOutput::pin_position`]) — the same fixed footprint at the
-/// same absolute position [`draw_pin`] paints at. Shared
-/// by the rubber-band sweep's hit-test and [`resolve_pin_geometry`]'s
-/// breaker/hover geometry.
+/// same absolute position [`PinUi::draw_pin`] paints at. Shared by the rubber-band
+/// sweep's hit-test and [`PinUi::resolve`]'s breaker/hover geometry.
 pub(super) fn pin_preview_rect(top_left: Vec2) -> Rect {
     Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 }
@@ -140,11 +139,27 @@ pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiA
 /// pin, the preview widget for a reposition.
 type PinDragAnchor = GroupDragAnchor<OutputPort>;
 
-/// Pinned outputs' preview-widget drag state. Only one pin drag is ever in
-/// flight, so `drag` is a single slot.
+/// Pinned outputs' drag gesture plus this frame's resolved pin geometry.
 #[derive(Default, Debug)]
 pub(crate) struct PinUi {
+    /// Only one pin drag is ever in flight, so a single slot.
     drag: Option<PinDragAnchor>,
+    /// Every on-screen pin's geometry, refilled by [`Self::resolve`] once per
+    /// frame and read by both halves of the pin draw.
+    ///
+    /// A pin paints in two places — its wire beneath the node bodies
+    /// ([`Self::draw_wires`]) and its card at its own slot in the shared
+    /// paint stack ([`Self::draw_pin`]). Resolving per-draw would run the
+    /// cull test, the breaker hit test, and the hover lookup twice for every
+    /// pin, and would record every breaker-crossed pin *twice* against the
+    /// probe. Resolving once, ahead of both passes, is what keeps
+    /// [`crate::gui::canvas::breaker::BreakerState`]'s "every render pass
+    /// visits its own targets at most once per frame" true of pins.
+    ///
+    /// Carries nothing across frames — [`Self::resolve`] clears it first —
+    /// but is kept rather than rebuilt so the map's allocation is reused,
+    /// like `PortLayer::live`.
+    pins: HashMap<OutputPort, PinGeometry>,
 }
 
 impl PinUi {
@@ -227,196 +242,208 @@ impl PinUi {
             });
         }
     }
-}
 
-/// Paint every pinned output's connecting bezier — called alongside
-/// [`crate::gui::canvas::connection_ui::draw`] /
-/// [`crate::gui::canvas::subscription_ui::draw`], *before* the node bodies,
-/// so a pin wire passing behind an unrelated node goes under it like any
-/// other wire, instead of drawing on top. Marks a breaker-crossed pin via
-/// `probe.mark_broken_pin` for the breaker's release-frame drain — the same
-/// combined bezier-or-widget-rect test [`draw_pin`] runs, so both halves
-/// agree on `broken` within the same frame even though they paint at
-/// different points in the pass. Only the wire draws here; the port-circle
-/// glyph and the card paint at their own slot in the shared paint stack (see
-/// [`draw_pin`]).
-///
-/// Reads nothing but committed scene state, so it belongs to the module
-/// rather than [`PinUi`] — the drag that struct owns has already landed in
-/// `Document` (and been mirrored into `Scene`) by the time this runs.
-pub(super) fn draw_wires(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, scene, geometry) = (pass.theme, pass.scene, pass.geometry);
-    for pin in scene.pinned_outputs() {
-        let Some(g) = resolve_pin_geometry(ui, geometry, pass.probe, pass.cull, pin.port, pin.pos)
-        else {
-            continue;
+    /// Refill [`Self::pins`] with every pinned output the cull region keeps,
+    /// recording each breaker-crossed one against `probe` exactly once. Runs
+    /// before the wire pass takes the probe, so both draws read a settled
+    /// result — and it is the only place either of them, or the breaker,
+    /// looks at a pin's geometry.
+    pub(super) fn resolve(
+        &mut self,
+        ui: &Ui,
+        scene: &Scene,
+        geometry: &CanvasGeometry,
+        probe: &mut BreakerProbe<'_>,
+        cull: CullRegion,
+    ) {
+        self.pins.clear();
+        for pin in scene.pinned_outputs() {
+            let Some(port_center) = geometry.ports.center(output_port_ref(pin.port)) else {
+                continue;
+            };
+            // `pin.pos` is the wire's far end and the card's own top-left
+            // corner, one and the same point, so the wire lands exactly on
+            // the port-circle glyph peeking from under that corner.
+            let wire = Wire::data(port_center, pin.pos);
+            let card = pin_preview_rect(pin.pos);
+            if !cull.keeps_pin(card, &wire) {
+                continue;
+            }
+            let broken = pin_targeted(probe, &wire, card);
+            if broken {
+                probe.mark_broken_pin(pin.port);
+            }
+            self.pins.insert(
+                pin.port,
+                PinGeometry {
+                    wire,
+                    box_hover: preview_hovered(ui, pin.port),
+                    broken,
+                },
+            );
+        }
+    }
+
+    /// This frame's geometry for `port`, or `None` when the output isn't
+    /// pinned, its port hasn't measured yet, or the cull region dropped it —
+    /// in all three cases neither half of the pin paints.
+    fn get(&self, port: OutputPort) -> Option<PinGeometry> {
+        self.pins.get(&port).copied()
+    }
+
+    /// Paint every pinned output's connecting bezier — called alongside
+    /// [`crate::gui::canvas::connection_ui::draw`] /
+    /// [`crate::gui::canvas::subscription_ui::draw`], *before* the node
+    /// bodies, so a pin wire passing behind an unrelated node goes under it
+    /// like any other wire, instead of drawing on top. Only the wire draws
+    /// here; the port-circle glyph and the card paint at their own slot in
+    /// the shared paint stack (see [`Self::draw_pin`]).
+    ///
+    /// Takes `pass` by shared ref, so it can't reach the breaker probe:
+    /// [`Self::resolve`] already recorded whatever this pass crossed, and
+    /// this half only paints the result.
+    pub(super) fn draw_wires(&self, ui: &mut Ui, pass: &WirePass<'_, '_>) {
+        let (theme, scene, geometry) = (pass.theme, pass.scene, pass.geometry);
+        // Iterating the scene rather than `self.pins` keeps the paint order
+        // deterministic; the map is a lookup, not a sequence.
+        for pin in scene.pinned_outputs() {
+            let Some(g) = self.get(pin.port) else {
+                continue;
+            };
+            // A pin resolves its own `broken` (its card counts as part of
+            // the glyph), so only the emphasis tier comes off the pass.
+            let endpoint_hover =
+                geometry.ports.is_hovered(output_port_ref(pin.port)) || g.box_hover;
+            let stroke = pass
+                .emphasis
+                .stroke(theme.connection_width, g.broken, endpoint_hover);
+            let base = port_color(theme, &pin.output.ty, PortKind::Output, false);
+            let color = if stroke.broken {
+                theme.colors.connection_broken
+            } else {
+                pass.emphasis.tint(base, stroke.hovered)
+            };
+            g.wire.add(ui, stroke.width, CurveBrush::Solid(color));
+        }
+    }
+
+    /// Paint one pinned output's port-circle glyph + preview widget, at its
+    /// own slot in the shared paint stack — called by
+    /// [`crate::gui::node::NodeUI::draw_all`]'s z-order walk, interleaved
+    /// with the node bodies, so the card sits above or below any node by
+    /// stack position. Only the wire draws elsewhere (in the wires' own
+    /// under-everything tier — see [`Self::draw_wires`]).
+    ///
+    /// `&self` for the resolved geometry alone; the drag gesture landed in
+    /// `Document` (and was mirrored into `Scene`) back in the prepass, so
+    /// the card's position is already the live one.
+    pub(crate) fn draw_pin(
+        &self,
+        ui: &mut Ui,
+        rcx: RecordCtx<'_>,
+        port: OutputPort,
+        out: &mut Vec<Intent>,
+    ) {
+        let theme = rcx.theme;
+        let scene = rcx.scene;
+        // Absent when the cull region dropped this pin or its port hasn't
+        // measured — the same decision `draw_wires` read, so the card and
+        // its wire appear and disappear together.
+        let Some(g) = self.get(port) else {
+            return;
         };
-        let port_ref = PortRef {
-            node_id: pin.port.node_id,
-            kind: PortKind::Output,
-            port_idx: pin.port.port_idx,
+        // A pin item only exists for a pinned output on a live node, but
+        // the projection can still come up short (a missing-func stub
+        // renders portless), so a failed lookup just skips the card.
+        let Some(n) = scene.nodes.get(&port.node_id) else {
+            return;
         };
-        // A pin resolves its own `broken` (its card counts as part of
-        // the glyph), so only the emphasis tier comes off the pass.
-        let endpoint_hover = geometry.ports.is_hovered(port_ref) || g.box_hover;
-        let stroke = pass
-            .emphasis
-            .stroke(theme.connection_width, g.broken, endpoint_hover);
-        let base = port_color(theme, &pin.output.ty, PortKind::Output, false);
-        let color = if stroke.broken {
+        let Some(output) = scene.outputs(n.outputs).get(port.port_idx) else {
+            return;
+        };
+        // The data-type accent lives *only* on the port-circle
+        // glyph (brightening on the widget's own hover, like a
+        // real port circle) — the widget's own border stays
+        // neutral (see `pin_preview::draw_widget`), so the accent
+        // doesn't double up right next to itself.
+        let accent = if g.broken {
             theme.colors.connection_broken
         } else {
-            pass.emphasis.tint(base, stroke.hovered)
+            port_color(theme, &output.ty, PortKind::Output, g.box_hover)
         };
-        g.wire.add(ui, stroke.width, CurveBrush::Solid(color));
-    }
-}
+        // The wire's far end *is* the card's top-left corner, so the glyph
+        // lands exactly where the bezier arrives.
+        let top_left = g.wire.p3;
+        dot(ui, top_left.x, top_left.y, theme.port_size * 0.5, accent);
 
-/// Paint one pinned output's port-circle glyph + preview widget, at its own
-/// slot in the shared paint stack — called by
-/// [`crate::gui::node::NodeUI::draw_all`]'s z-order walk, interleaved with
-/// the node bodies, so the card sits above or below any node by stack
-/// position. Only the wire draws elsewhere (in the wires' own
-/// under-everything tier — see [`draw_wires`]).
-///
-/// Free-standing for the same reason [`draw_wires`] is, and specifically so
-/// the z-order walk needn't borrow [`PinUi`] just to reach a card renderer
-/// that never touches the drag state.
-pub(crate) fn draw_pin(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    port: OutputPort,
-    cull: CullRegion,
-    probe: &mut BreakerProbe<'_>,
-    out: &mut Vec<Intent>,
-) {
-    let theme = rcx.theme;
-    let scene = rcx.scene;
-    // A pin item only exists for a pinned output on a live node, but
-    // the projection can still come up short (a missing-func stub
-    // renders portless), so a failed lookup just skips the card.
-    let Some(n) = scene.nodes.get(&port.node_id) else {
-        return;
-    };
-    let Some(output) = scene.outputs(n.outputs).get(port.port_idx) else {
-        return;
-    };
-    let Some(pin_position) = output.pin_position else {
-        return;
-    };
-    let Some(g) = resolve_pin_geometry(ui, rcx.geometry, probe, cull, port, pin_position) else {
-        return;
-    };
-    // The data-type accent lives *only* on the port-circle
-    // glyph (brightening on the widget's own hover, like a
-    // real port circle) — the widget's own border stays
-    // neutral (see `pin_preview::draw_widget`), so the accent
-    // doesn't double up right next to itself.
-    let accent = if g.broken {
-        theme.colors.connection_broken
-    } else {
-        port_color(theme, &output.ty, PortKind::Output, g.box_hover)
-    };
-    // The wire's far end *is* the card's top-left corner, so the glyph
-    // lands exactly where the bezier arrives.
-    let top_left = g.wire.p3;
-    dot(ui, top_left.x, top_left.y, theme.port_size * 0.5, accent);
-
-    // Same broken/selected/resting decision a node body draws
-    // (`Theme::card_border`), so "in the selection" reads as one
-    // visual language across nodes and pin previews.
-    let is_selected = rcx.selected.contains(&ItemRef::Pin(g.out_port));
-    let border = theme.card_border(g.broken, is_selected);
-    let value = rcx.run_state.pinned_outputs.entries.get(&g.out_port);
-    let image = value.and_then(|value| match value {
-        StoredContent::Image(image) => Some(image),
-        StoredContent::Text(_) | StoredContent::Error(_) => None,
-    });
-    let text = image.is_none().then_some(match value {
-        Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
-        Some(StoredContent::Image(_)) => "image preview unavailable",
-        None => "not yet run",
-    });
-    let title = {
-        let node_name = n.name.borrow_str();
-        let output_name = output.name.borrow_str();
-        preview_title(&node_name, &output_name)
-    };
-    let response = pin_preview::draw_widget(
-        ui,
-        theme,
-        g.out_port,
-        top_left,
-        &title,
-        border.color,
-        border.width,
-        image,
-        text,
-        n.runnable(),
-    );
-    // Click without drag → select + raise, exactly like a node body
-    // click (plain replaces the selection, Shift toggles this
-    // pin's membership); a drag repositions instead (handled by
-    // `PinUi::apply`).
-    if response.left.clicked() {
-        let shift = ui.modifiers().shift;
-        click_intents(shift, scene, ItemRef::Pin(g.out_port), out);
+        // Same broken/selected/resting decision a node body draws
+        // (`Theme::card_border`), so "in the selection" reads as one
+        // visual language across nodes and pin previews.
+        let is_selected = rcx.selected.contains(&ItemRef::Pin(port));
+        let border = theme.card_border(g.broken, is_selected);
+        let value = rcx.run_state.pinned_outputs.entries.get(&port);
+        let image = value.and_then(|value| match value {
+            StoredContent::Image(image) => Some(image),
+            StoredContent::Text(_) | StoredContent::Error(_) => None,
+        });
+        let text = image.is_none().then_some(match value {
+            Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
+            Some(StoredContent::Image(_)) => "image preview unavailable",
+            None => "not yet run",
+        });
+        let title = {
+            let node_name = n.name.borrow_str();
+            let output_name = output.name.borrow_str();
+            preview_title(&node_name, &output_name)
+        };
+        let response = pin_preview::draw_widget(
+            ui,
+            theme,
+            port,
+            top_left,
+            &title,
+            border.color,
+            border.width,
+            image,
+            text,
+            n.runnable(),
+        );
+        // Click without drag → select + raise, exactly like a node body
+        // click (plain replaces the selection, Shift toggles this
+        // pin's membership); a drag repositions instead (handled by
+        // `PinUi::apply`).
+        if response.left.clicked() {
+            let shift = ui.modifiers().shift;
+            click_intents(shift, scene, ItemRef::Pin(port), out);
+        }
     }
 }
 
 /// One pinned output's resolved geometry + breaker/hover state for this
-/// frame — computed once, fed to both [`draw_wires`] (the bezier,
-/// pre-node-body) and [`draw_pin`] (the port circle + card,
-/// post-node-body) so a pin drawn in two passes still agrees on `broken`
-/// and hover within the same frame.
-#[derive(Debug)]
+/// frame — read by both [`PinUi::draw_wires`] (the bezier, pre-node-body) and
+/// [`PinUi::draw_pin`] (the port circle + card, post-node-body), so a pin drawn in
+/// two passes can't disagree with itself about `broken` or hover.
+#[derive(Clone, Copy, Debug)]
 struct PinGeometry {
-    out_port: OutputPort,
     /// The connecting bezier: from the port center (`p0`) to the preview
     /// card's own top-left corner (`p3`), where the port-circle glyph peeks
     /// out from under it.
     wire: Wire,
     box_hover: bool,
     /// Whether the active breaker gesture crosses this pin's bezier or its
-    /// widget rect — already folded into `probe.mark_broken_pin` here, so
-    /// neither caller needs to repeat that.
+    /// widget rect. Already recorded via `probe.mark_broken_pin` by
+    /// [`PinUi::resolve`] — readers only paint the alarm.
     broken: bool,
 }
 
-/// `top_left` is the pinned output's [`crate::gui::scene::SceneOutput::pin_position`] — the
-/// wire's far end and the preview widget's own top-left corner, one and
-/// the same point, so the wire lands exactly on the port-circle glyph
-/// peeking from under that corner.
-fn resolve_pin_geometry(
-    ui: &Ui,
-    geometry: &CanvasGeometry,
-    probe: &mut BreakerProbe<'_>,
-    cull: CullRegion,
-    out_port: OutputPort,
-    top_left: Vec2,
-) -> Option<PinGeometry> {
-    let port_ref = PortRef {
-        node_id: out_port.node_id,
+/// A pinned output's port as a [`PortRef`], for the [`CanvasGeometry`]
+/// lookups keyed that way.
+fn output_port_ref(port: OutputPort) -> PortRef {
+    PortRef {
+        node_id: port.node_id,
         kind: PortKind::Output,
-        port_idx: out_port.port_idx,
-    };
-    let port_center = geometry.ports.center(port_ref)?;
-    let wire = Wire::data(port_center, top_left);
-    let card = pin_preview_rect(top_left);
-    if !cull.keeps_pin(card, &wire) {
-        return None;
+        port_idx: port.port_idx,
     }
-    let broken = pin_targeted(probe, &wire, card);
-    if broken {
-        probe.mark_broken_pin(out_port);
-    }
-    let box_hover = preview_hovered(ui, out_port);
-    Some(PinGeometry {
-        out_port,
-        wire,
-        box_hover,
-        broken,
-    })
 }
 
 /// True if the active breaker gesture crosses the pin's glyph — either the
@@ -462,8 +489,13 @@ fn preview_hovered(ui: &Ui, port: OutputPort) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::Viewport;
     use crate::gui::canvas::breaker::{BreakerState, cubic_point};
+    use crate::gui::scene::SceneOutput;
+    use crate::gui::scene::internals::scene_node_stub;
     use aperture::PointerButton;
+    use common::Span;
+    use scenarium::DataType;
 
     /// A `BreakerProbe` wrapping `state`, at the origin — every test here
     /// works in a local frame with no canvas offset to convert.
@@ -476,6 +508,142 @@ mod tests {
 
     fn box_rect_at(top_left: Vec2) -> Rect {
         Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT)
+    }
+
+    /// A one-node scene whose sole output is pinned at `top_left`, plus a
+    /// `CanvasGeometry` with that output's port circle seeded at the origin.
+    fn pinned_fixture(ui: &mut Ui, top_left: Vec2) -> (Scene, CanvasGeometry, OutputPort) {
+        let node_id = NodeId::unique();
+        let mut node = scene_node_stub(ui, node_id, Vec2::ZERO);
+        node.outputs = Span::new(0, 1);
+        let mut scene = Scene::default();
+        scene.nodes.insert(node_id, node);
+        scene.outputs.push(SceneOutput {
+            name: ui.intern("out"),
+            description: ui.intern(""),
+            ty: DataType::Int,
+            pin_position: Some(top_left),
+        });
+        let port = OutputPort::new(node_id, 0);
+        let mut geometry = CanvasGeometry::default();
+        geometry
+            .ports
+            .seed_center(output_port_ref(port), Vec2::ZERO);
+        (scene, geometry, port)
+    }
+
+    /// A cull region that keeps everything (the canvas hasn't measured).
+    fn no_cull() -> CullRegion {
+        CullRegion::from_canvas(None, Vec2::ZERO, &Viewport::default())
+    }
+
+    #[test]
+    fn resolve_records_a_breaker_crossed_pin_exactly_once() {
+        // A pin paints in two passes — its wire under the node bodies, its
+        // card at its own z-order slot — and both now read this one
+        // resolution. Each pass used to run its own hit test and call
+        // `mark_broken_pin`, so one scribble across one pin queued *two*
+        // unpin intents on release, falsifying `BreakerState`'s "every
+        // render pass visits its own targets at most once per frame".
+        //
+        // Neither reader can mark any more (no `&mut` probe reaches either,
+        // so the type system settles that half). What's left to pin down is
+        // the resolver's own discipline: one recorded cut per crossed pin,
+        // including when the scribble crosses *both* halves of the glyph and
+        // the two hit tests both fire.
+        let mut ui = Ui::default();
+        let top_left = Vec2::new(300.0, 0.0);
+        let (scene, geometry, port) = pinned_fixture(&mut ui, top_left);
+        let card = box_rect_at(top_left);
+        // The bezier is flat along y = 0 from x = 0 to x = 300 (every
+        // control point sits on that line); the card spans x 300..580.
+        let wire = Wire::data(Vec2::ZERO, top_left);
+        let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
+
+        let cases = [
+            // Vertical stroke through the bezier alone, left of the card.
+            (
+                "wire only",
+                mid + Vec2::new(0.0, -80.0),
+                mid + Vec2::new(0.0, 80.0),
+                false,
+            ),
+            // Diagonal crossing the bezier at (175, 0) — where the stroke's
+            // y reaches 0 — and ending at (400, 150), inside the card.
+            (
+                "wire and card",
+                Vec2::new(100.0, -50.0),
+                Vec2::new(400.0, 150.0),
+                true,
+            ),
+        ];
+        for (label, from, to, hits_card) in cases {
+            let mut breaker = BreakerState::start(from, PointerButton::Right);
+            breaker.add_point(to);
+            {
+                // Precondition: the second case really does hit both halves,
+                // so "exactly one" below isn't just the wire path again.
+                let probe = probe_for(&mut breaker);
+                assert!(probe.crosses_wire(&wire), "{label}: must cross the bezier");
+                assert_eq!(probe.crosses_rect(card), hits_card, "{label}: card overlap");
+            }
+            let mut pin_ui = PinUi::default();
+            {
+                let mut probe = probe_for(&mut breaker);
+                pin_ui.resolve(&ui, &scene, &geometry, &mut probe, no_cull());
+            }
+
+            let g = pin_ui.get(port).expect("an unculled pin resolves");
+            assert!(g.broken, "{label}: the scribble crosses this pin");
+            assert_eq!(
+                g.wire.p3, top_left,
+                "{label}: the wire lands on the card's corner"
+            );
+            assert_eq!(
+                breaker.broken_pins(),
+                [port],
+                "{label}: one resolution per frame is one recorded cut",
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_drops_a_culled_pin_and_leaves_it_uncut() {
+        // A cull region far from the pin drops it from the map entirely, so
+        // neither half paints — and the breaker can't have crossed it, since
+        // the scribble is always on-screen. Same fixture and same scribble
+        // as the test above, so the cull region is the only thing that
+        // differs between "cut" and "not cut".
+        let mut ui = Ui::default();
+        let top_left = Vec2::new(300.0, 0.0);
+        let (scene, geometry, port) = pinned_fixture(&mut ui, top_left);
+        let wire = Wire::data(Vec2::ZERO, top_left);
+        let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
+        let mut breaker = BreakerState::start(mid + Vec2::new(0.0, -80.0), PointerButton::Right);
+        breaker.add_point(mid + Vec2::new(0.0, 80.0));
+
+        // Origin (-5000, -5000) puts the 10×10 visible rect at world
+        // (5000, 5000)..(5010, 5010) (+16 margin) — nowhere near the pin's
+        // wire hull (x 0..300) or its card (x 300..580).
+        let far = CullRegion::from_canvas(
+            Some(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Vec2::new(-5000.0, -5000.0),
+            &Viewport::default(),
+        );
+        let mut pin_ui = PinUi::default();
+        {
+            let mut probe = probe_for(&mut breaker);
+            pin_ui.resolve(&ui, &scene, &geometry, &mut probe, far);
+        }
+
+        assert!(
+            pin_ui.get(port).is_none(),
+            "an off-screen pin resolves to nothing"
+        );
+        assert!(
+            breaker.broken_pins().is_empty(),
+            "and an off-screen pin can't be cut",
+        );
     }
 
     #[test]
