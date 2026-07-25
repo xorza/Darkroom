@@ -80,47 +80,28 @@ impl DockUi {
     /// before this frame's record, so a switch — or a committed drop —
     /// draws the same frame it lands.
     pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, actions: &mut Vec<UiAction>) {
-        for group in doc.layout.groups() {
-            for (index, &tab) in group.tabs.iter().enumerate() {
-                if strip::closable(tab)
-                    && ui
-                        .response_for(strip::tab_close_wid(group.id, index))
-                        .left
-                        .clicked()
-                {
-                    actions.push(UiAction::Dock(DockOp::CloseTab {
-                        group: group.id,
-                        index,
-                    }));
-                    continue;
-                }
-                let label_clicked = strip::renamable_graph(tab)
-                    .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).left.clicked());
-                if label_clicked
-                    || ui
-                        .response_for(strip::tab_chip_wid(group.id, index))
-                        .left
-                        .clicked()
-                {
-                    actions.push(UiAction::Dock(DockOp::ActivateTab {
-                        group: group.id,
-                        index,
-                    }));
-                }
-                if self.tab_drag.is_none()
-                    && strip::movable(tab)
-                    && ui
-                        .response_for(strip::tab_chip_wid(group.id, index))
-                        .left
-                        .drag
-                        .started()
-                {
-                    self.tab_drag = Some(TabDrag {
-                        tab,
-                        source: (group.id, index),
-                        text: tab_text(doc, tab).into_owned(),
-                    });
-                }
+        for tab in doc.layout.all_tabs() {
+            if strip::closable(tab) && ui.response_for(strip::tab_close_wid(tab)).left.clicked() {
+                actions.push(UiAction::Dock(DockOp::CloseTab { tab }));
+                continue;
+            }
+            let label_clicked = strip::renamable_graph(tab)
+                .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).left.clicked());
+            if label_clicked || ui.response_for(strip::tab_chip_wid(tab)).left.clicked() {
+                actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
+            }
+            if self.tab_drag.is_none()
+                && strip::movable(tab)
+                && ui
+                    .response_for(strip::tab_chip_wid(tab))
+                    .left
+                    .drag
+                    .started()
+            {
+                self.tab_drag = Some(TabDrag {
+                    tab,
+                    text: tab_text(doc, tab).into_owned(),
+                });
             }
         }
         if ui.response_for(strip::tab_new_wid()).left.clicked() {
@@ -130,13 +111,13 @@ impl DockUi {
         let Some(dragged) = &self.tab_drag else {
             return;
         };
-        let (tab, (src_group, src_index)) = (dragged.tab, dragged.source);
+        let tab = dragged.tab;
         if ui.escape_pressed() || doc.layout.find_tab(tab).is_none() {
             self.tab_drag = None;
             return;
         }
         if ui
-            .response_for(strip::tab_chip_wid(src_group, src_index))
+            .response_for(strip::tab_chip_wid(tab))
             .left
             .drag
             .stopped()
@@ -269,8 +250,10 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
         let Some(strip_rect) = ui.response_for(strip::strip_wid(group.id)).rect else {
             continue;
         };
-        let chips: Vec<Rect> = (0..group.tabs.len())
-            .filter_map(|i| ui.response_for(strip::tab_chip_wid(group.id, i)).rect)
+        let chips: Vec<Rect> = group
+            .tabs
+            .iter()
+            .filter_map(|&tab| ui.response_for(strip::tab_chip_wid(tab)).rect)
             .collect();
         return Some(classify_drop(
             group.id,

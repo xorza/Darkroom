@@ -46,14 +46,17 @@ fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockOp) -> bool {
     true
 }
 
+/// Ops name their tab, so these resolve the primary strip's slot at call
+/// time — the index is the test's way of pointing at a tab, never part of
+/// the op.
 fn switch_to(stack: &mut ActionStack, doc: &mut Document, to: usize) {
-    let group = doc.layout.primary().id;
-    dock(stack, doc, DockOp::ActivateTab { group, index: to });
+    let tab = primary_tabs(doc)[to];
+    dock(stack, doc, DockOp::ActivateTab { tab });
 }
 
 fn close_at(stack: &mut ActionStack, doc: &mut Document, index: usize) -> bool {
-    let group = doc.layout.primary().id;
-    dock(stack, doc, DockOp::CloseTab { group, index })
+    let tab = primary_tabs(doc)[index];
+    dock(stack, doc, DockOp::CloseTab { tab })
 }
 
 #[test]
@@ -132,13 +135,51 @@ fn switch_does_not_merge_across_an_intervening_edit() {
 }
 
 #[test]
-fn close_is_dropped_for_main_or_out_of_range() {
+fn close_is_dropped_for_main_or_a_tab_that_is_not_open() {
     let mut doc = doc_with_distinct_tabs();
     let mut stack = ActionStack::new(1 << 20);
-    // Main (index 0) is never closable; index 3 is past the end.
+    // Main is never closable; a tab that isn't open anywhere no-ops.
     assert!(!close_at(&mut stack, &mut doc, 0), "Main must not close");
-    assert!(!close_at(&mut stack, &mut doc, 3), "OOB index must drop");
+    assert!(
+        !dock(
+            &mut stack,
+            &mut doc,
+            DockOp::CloseTab {
+                tab: TabRef::Preferences
+            }
+        ),
+        "closing a tab that isn't open must drop"
+    );
     assert_eq!(primary_tabs(&doc).len(), 3, "no tab removed");
+}
+
+#[test]
+fn tab_ops_follow_their_tab_across_a_layout_change() {
+    // The invariant the dock's whole click path rests on. A dock op is
+    // built from one frame's chip response and applied a phase later, with
+    // undo able to rearrange the strip in between. Because ops name their
+    // tab rather than its slot, the rearrangement can't redirect one onto
+    // whatever slid into that slot.
+    let mut doc = doc_with_distinct_tabs();
+    let mut stack = ActionStack::new(1 << 20);
+    let [main, _a, b] = primary_tabs(&doc)[..] else {
+        panic!("seeded with three tabs");
+    };
+
+    // Built while `b` sits at slot 2, applied after `a` left and `b` slid
+    // down to slot 1.
+    let close_b = Intent::Dock(DockOp::CloseTab { tab: b });
+    assert!(close_at(&mut stack, &mut doc, 1), "close a");
+    assert_eq!(primary_tabs(&doc), [main, b], "b moved to slot 1");
+
+    let step = build_step(close_b, &doc, GraphRef::Main).unwrap();
+    apply_step(&step, &mut doc, GraphRef::Main);
+    assert_eq!(
+        primary_tabs(&doc),
+        [main],
+        "the op closed b, not whatever now occupies slot 2"
+    );
+    doc.validate_debug();
 }
 
 #[test]

@@ -1057,11 +1057,8 @@ mod tests {
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
-        for active in [1, 2] {
-            doc.layout.apply(DockOp::ActivateTab {
-                group: primary,
-                index: active,
-            });
+        for tab in [TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))] {
+            doc.layout.apply(DockOp::ActivateTab { tab });
             assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
         }
 
@@ -1092,8 +1089,7 @@ mod tests {
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         doc.layout.apply(DockOp::ActivateTab {
-            group: primary,
-            index: 3,
+            tab: TabRef::ImageViewer(out_port(node_id)),
         }); // viewing the image tab
         // Drop the graph out from under its open tab.
         doc.graph.graphs.remove(&id);

@@ -52,11 +52,13 @@ pub(super) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
     }
 }
 
-/// Stable id for `group`'s tab chip at `index` — deterministic so the
-/// prepass (activation clicks, the drag scan) can read it without the
-/// live response.
-pub(super) fn tab_chip_wid(group: TabGroupId, index: usize) -> WidgetId {
-    WidgetId::from_hash(("dock.tab", group, index))
+/// Stable id for `tab`'s chip — deterministic so the prepass
+/// (activation clicks, the drag scan) can read it without the live
+/// response. Keyed on the tab, not its strip slot: the prepass reads
+/// *last* frame's response, and undo can have rearranged the strip since,
+/// so a slot-keyed id would hand one chip's click to another tab.
+pub(super) fn tab_chip_wid(tab: TabRef) -> WidgetId {
+    WidgetId::from_hash(("dock.tab", tab))
 }
 
 /// Stable id for `group`'s whole strip row — the drag scan's
@@ -65,20 +67,19 @@ pub(super) fn strip_wid(group: TabGroupId) -> WidgetId {
     WidgetId::from_hash(("dock.strip", group))
 }
 
-/// Stable id for the close button of `group`'s tab at `index`.
-pub(super) fn tab_close_wid(group: TabGroupId, index: usize) -> WidgetId {
-    WidgetId::from_hash(("dock.tab_close", group, index))
+/// Stable id for `tab`'s close button.
+pub(super) fn tab_close_wid(tab: TabRef) -> WidgetId {
+    WidgetId::from_hash(("dock.tab_close", tab))
 }
 
-/// Stable id for the split context menu of `group`'s tab at `index`.
-fn tab_menu_wid(group: TabGroupId, index: usize) -> WidgetId {
-    WidgetId::from_hash(("dock.tab_menu", group, index))
+/// Stable id for `tab`'s split context menu.
+fn tab_menu_wid(tab: TabRef) -> WidgetId {
+    WidgetId::from_hash(("dock.tab_menu", tab))
 }
 
-/// Stable id for the rename editor on a graph tab. Keyed on the
-/// graph id (not group/index) so the editing state survives the tab
-/// moving or reordering. A click landing on the label is captured
-/// there, so the scan polls this id alongside the outer chip's.
+/// Stable id for the rename editor on a graph tab, keyed on the graph
+/// id like every other chip widget. A click landing on the label is
+/// captured there, so the scan polls this id alongside the outer chip's.
 pub(super) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
@@ -174,7 +175,7 @@ pub(super) fn show(
         .background(Background::fill(theme.colors.chrome_fill))
         .show(ui, |ui| {
             for (i, label) in labels.iter().enumerate() {
-                tab_chip(ui, &mut strip, label, i, i == group.active);
+                tab_chip(ui, &mut strip, label, i == group.active);
             }
             if group.tabs.contains(&TabRef::Graph(GraphRef::Main)) {
                 new_tab_chip(ui, theme);
@@ -182,7 +183,7 @@ pub(super) fn show(
         });
 }
 
-fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, active: bool) {
+fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
     let theme = s.theme;
     let r = theme.tab_corner_radius;
     // Active-tab selection cue: a 2px accent cap along the top, built from two
@@ -241,7 +242,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
         Sense::CLICK
     };
     Panel::hstack()
-        .id(tab_chip_wid(s.group, index))
+        .id(tab_chip_wid(label.tab))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(sense)
         .padding(Spacing::new(0.0, outer_top, 0.0, 0.0))
@@ -286,13 +287,13 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                         Text::new(label.text.clone()).style(&label_style).show(ui);
                     }
                     if closable(label.tab) {
-                        close_button(ui, theme, tab_close_wid(s.group, index));
+                        close_button(ui, theme, tab_close_wid(label.tab));
                     }
                 });
         });
 
     if movable(label.tab) {
-        split_menu(ui, s, label.tab, index);
+        split_menu(ui, s, label.tab);
     }
 }
 
@@ -328,12 +329,9 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
 /// Right-click split menu — the phase-1 stand-in for drag-docking (and a
 /// keeper: cheap and discoverable). Opens on the chip's secondary click;
 /// a pick moves `tab` into a fresh pane on the chosen side.
-fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef, index: usize) {
-    let menu_wid = tab_menu_wid(s.group, index);
-    if ui
-        .response_for(tab_chip_wid(s.group, index))
-        .right
-        .clicked()
+fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
+    let menu_wid = tab_menu_wid(tab);
+    if ui.response_for(tab_chip_wid(tab)).right.clicked()
         && let Some(p) = ui.pointer_pos()
     {
         ContextMenu::open(ui, menu_wid, p);

@@ -10,7 +10,7 @@
 use aperture::Ui;
 use scenarium::Library;
 
-use crate::core::document::dock::{DockOp, TabAddress};
+use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
@@ -464,11 +464,9 @@ impl Editor {
     fn open_image_viewer(&mut self, open: &mut OpenDocument, port: PortRef) {
         assert_eq!(port.kind, PortKind::Output);
         let group = open.document.layout.focused;
-        let addr = open
-            .document
-            .layout
-            .find_or_insert(TabRef::ImageViewer(port), group);
-        self.push_activate(addr);
+        let tab = TabRef::ImageViewer(port);
+        open.document.layout.find_or_insert(tab, group);
+        self.push_activate(tab);
     }
 
     /// Keep the viewer tabs in step with the document by dropping navigation
@@ -481,8 +479,8 @@ impl Editor {
     }
 
     /// Queue the recorded focus/activation half of an open.
-    fn push_activate(&mut self, addr: TabAddress) {
-        self.intents.push(activate_intent(addr));
+    fn push_activate(&mut self, tab: TabRef) {
+        self.intents.push(activate_intent(tab));
     }
 
     /// Open `target`'s tab in the primary group (graph tabs are pinned
@@ -502,11 +500,9 @@ impl Editor {
             return; // graph vanished — nothing to open
         }
         let group = open.document.layout.primary().id;
-        let addr = open
-            .document
-            .layout
-            .find_or_insert(TabRef::Graph(target), group);
-        self.push_activate(addr);
+        let tab = TabRef::Graph(target);
+        open.document.layout.find_or_insert(tab, group);
+        self.push_activate(tab);
     }
 
     /// Open the [`TabRef::Preferences`] settings tab in the focused group
@@ -517,20 +513,16 @@ impl Editor {
     /// immediately like every external edit.
     pub(super) fn open_preferences(&mut self, open: &mut OpenDocument) {
         let group = open.document.layout.focused;
-        let addr = open
-            .document
+        open.document
             .layout
             .find_or_insert(TabRef::Preferences, group);
-        self.apply_edit(open, activate_intent(addr));
+        self.apply_edit(open, activate_intent(TabRef::Preferences));
     }
 }
 
-/// The recorded focus/activation half of opening a tab at `addr`.
-fn activate_intent(addr: TabAddress) -> Intent {
-    Intent::Dock(DockOp::ActivateTab {
-        group: addr.group,
-        index: addr.index,
-    })
+/// The recorded focus/activation half of opening `tab`.
+fn activate_intent(tab: TabRef) -> Intent {
+    Intent::Dock(DockOp::ActivateTab { tab })
 }
 
 #[cfg(test)]

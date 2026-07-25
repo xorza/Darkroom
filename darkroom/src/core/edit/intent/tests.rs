@@ -78,8 +78,7 @@ fn dirties_document_splits_edits_from_navigation() {
         }),
         // Activating a tab is focus, not arrangement work.
         dock_step(DockOp::ActivateTab {
-            group: primary,
-            index: 1,
+            tab: TabRef::Preferences,
         })
         .unwrap(),
     ];

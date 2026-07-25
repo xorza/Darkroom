@@ -108,6 +108,19 @@ impl ConnectionUI {
             self.state = None;
             return;
         }
+        // Both modes span frames, and undo runs before this prepass, so the
+        // node the wire grew out of can disappear under it. Drop the
+        // gesture rather than let it keep snapping — a commit against a
+        // dead producer is refused at the edit boundary anyway, silently,
+        // and `port_data_type` would meanwhile report the start as untyped
+        // (which `scan_snap_target` reads as "compatible with anything").
+        if self
+            .state
+            .is_some_and(|state| !scene.nodes.contains_key(&state.start.node_id))
+        {
+            self.state = None;
+            return;
+        }
         let Some(mut state) = self.state else {
             return;
         };
@@ -608,7 +621,8 @@ mod tests {
 
     use crate::core::document::{BoundarySide, GraphView, PortKind, PortRef};
     use crate::core::edit::intent::types::Intent;
-    use crate::gui::canvas::connection_ui::commit_connection;
+    use crate::gui::canvas::connection_ui::{ConnectionUI, DragMode, InFlight, commit_connection};
+    use crate::gui::canvas::geometry::CanvasGeometry;
     use crate::gui::run_state::RunState;
     use crate::gui::scene::{Scene, SceneSource};
 
@@ -731,5 +745,57 @@ mod tests {
         );
         assert_eq!(out.len(), 1, "no interface change for an existing port");
         assert!(matches!(&out[0], Intent::SetInput { .. }));
+    }
+
+    /// Drive one prepass with a wire already in flight from `start`,
+    /// returning the gesture state that survived it. `Floating` because it
+    /// is the mode that survives a quiet frame (a `Held` wire reads the
+    /// release edge off the port geometry, which a bare fixture has none
+    /// of) — and the more exposed one: no button is held, so it can sit
+    /// across an arbitrary number of undos.
+    fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
+        let mut ui = Ui::default();
+        let mut connections = ConnectionUI {
+            state: Some(InFlight {
+                start,
+                snap_end: None,
+                mode: DragMode::Floating,
+            }),
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        connections.apply(&mut ui, scene, &CanvasGeometry::default(), None, &mut out);
+        assert!(out.is_empty(), "an untouched prepass emits nothing");
+        connections.state
+    }
+
+    #[test]
+    fn a_wire_drops_when_its_start_node_leaves_the_scene() {
+        // Undo runs before the canvas prepass, so the node a wire grew out
+        // of can vanish mid-drag. The gesture has to let go: a commit
+        // against a dead producer is refused at the edit boundary anyway
+        // (silently), and until then `port_data_type` reports the start as
+        // untyped, which `scan_snap_target` reads as "compatible with
+        // anything" — so a stranded wire would snap onto ports it should
+        // never accept.
+        let f = fixture();
+        let live = PortRef {
+            node_id: f.mult,
+            kind: PortKind::Output,
+            port_idx: 0,
+        };
+        assert!(
+            prepass_with_wire_from(&f.scene, live).is_some(),
+            "a wire from a node still in the scene stays in flight"
+        );
+
+        let gone = PortRef {
+            node_id: NodeId::unique(),
+            ..live
+        };
+        assert!(
+            prepass_with_wire_from(&f.scene, gone).is_none(),
+            "a wire from a vanished node drops"
+        );
     }
 }
