@@ -4,7 +4,7 @@ use bytemuck::Pod;
 
 use crate::common::color_format::*;
 
-pub(in crate::image) trait ChannelConvert<To>: Copy {
+pub(crate) trait ChannelConvert<To>: Copy {
     fn convert(self) -> To;
 }
 
