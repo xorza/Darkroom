@@ -117,14 +117,6 @@ impl<T> NodeColumn<T> {
         self.values.clear();
     }
 
-    /// The entry at `node_idx`, or `None` past the column's length — for
-    /// callers probing a column that may not span the program (an empty
-    /// pre-run column, a validation bounds check). In-range access uses
-    /// indexing.
-    pub(crate) fn get(&self, node_idx: NodeIdx) -> Option<&T> {
-        self.values.get(node_idx.idx())
-    }
-
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
         self.values.iter()
     }
@@ -158,6 +150,12 @@ pub(crate) struct NodeSet {
 }
 
 impl NodeSet {
+    /// The index space the set spans — the bound every [`contains`](Self::contains)
+    /// and [`insert`](Self::insert) is checked against.
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
     pub(crate) fn reset(&mut self, len: usize) {
         self.words.clear();
         self.words.resize(len.div_ceil(u64::BITS as usize), 0);
@@ -203,11 +201,20 @@ impl<T> OutputColumn<T> {
 
 #[cfg(test)]
 mod test_support {
-    use crate::execution::program::index::OutputColumn;
+    use crate::execution::program::index::{NodeColumn, NodeIdx, OutputColumn};
 
     impl<T> OutputColumn<T> {
         pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
             self.values.iter()
+        }
+    }
+
+    impl<T> NodeColumn<T> {
+        /// The entry at `node_idx`, or `None` past the column's length — for
+        /// introspection that may run before the column is sized (an empty
+        /// pre-run column). Production access is by indexing.
+        pub(crate) fn get(&self, node_idx: NodeIdx) -> Option<&T> {
+            self.values.get(node_idx.idx())
         }
     }
 }

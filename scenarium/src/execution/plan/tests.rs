@@ -113,6 +113,29 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         format!("execution node {b:?} appears before dependency {a:?}"),
         "a disabled verdict cannot hide an enabled dependency"
     );
+    p.process_order.swap(0, 1);
+    p.verdicts[nx(a)] = NodeVerdict::default();
+
+    // The validator reports corruption rather than faulting on it: a binding
+    // target past the last node used to index `seen_in_order` out of range.
+    let past_the_end = NodeIdx(f.compiled.program.e_nodes.len() as u32);
+    let b_input = f.compiled.program[nx(b)].inputs.start as usize;
+    f.compiled.program.inputs[b_input].binding = ExecutionBinding::Bind(OutputAddr {
+        node_idx: past_the_end,
+        port_idx: 0,
+    });
+    assert_eq!(
+        p.validate(&f.compiled.program).unwrap_err().to_string(),
+        format!("execution order contains an out-of-range node index: {past_the_end:?}")
+    );
+
+    // Likewise for a set that no longer spans the program.
+    f.compiled.program.inputs[b_input].binding = bind(a, 0);
+    p.pinned.reset(0);
+    assert_eq!(
+        p.validate(&f.compiled.program).unwrap_err().to_string(),
+        "plan pinned spans 0 nodes, not the program's 3"
+    );
 }
 
 #[test]

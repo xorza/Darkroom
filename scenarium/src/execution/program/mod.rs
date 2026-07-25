@@ -171,20 +171,29 @@ impl ExecutionProgram {
         }
     }
 
-    /// Apply flatten's resolved event edges. Tolerant like the old post-pass:
-    /// a subscriber or emitter that didn't flatten (drift) wires nothing.
+    /// Apply flatten's resolved event edges. Every endpoint exists for the same
+    /// reason bind targets do: flatten resolves emitters and subscribers to
+    /// nodes it emitted, and drops the edge itself when either side is missing
+    /// or the emitter no longer declares the event. So a miss here is a flatten
+    /// bug, and panics rather than silently unwiring an event the graph asked for.
     pub(crate) fn apply_subscriptions(
         &mut self,
         subs: impl IntoIterator<Item = (ExecutionEventPort, ExecutionNodeId)>,
     ) {
         for (event, subscriber) in subs {
-            let Some(&subscriber_idx) = self.e_node_index.get(&subscriber) else {
-                continue;
-            };
-            let Some(&emitter_idx) = self.e_node_index.get(&event.e_node_id) else {
-                continue;
-            };
+            let subscriber_idx = *self
+                .e_node_index
+                .get(&subscriber)
+                .expect("flatten only subscribes nodes it emitted");
+            let emitter_idx = *self
+                .e_node_index
+                .get(&event.e_node_id)
+                .expect("flatten only subscribes to emitters it emitted");
             let events = self[emitter_idx].events;
+            assert!(
+                event.event_idx < events.len as usize,
+                "flatten only subscribes to events the emitter declares"
+            );
             self.events[events][event.event_idx]
                 .subscribers
                 .push(subscriber_idx);
