@@ -2,10 +2,10 @@ use std::time::Instant;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::RunError;
-use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
+use crate::execution::identity::ExecutionInputPort;
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::plan::{ExecutionPlan, input_missing};
-use crate::execution::program::index::NodeMap;
+use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 
 /// What became of a node this run — the single per-node result map, so the run-time
@@ -47,39 +47,45 @@ impl NodeOutcome {
 /// [`RunError::MissingLambda`] for a func with no implementation.
 pub(crate) fn mark_skipped(
     cache: &mut RuntimeCache,
-    outcomes: &mut NodeMap<NodeOutcome>,
-    e_node_id: ExecutionNodeId,
+    program: &ExecutionProgram,
+    outcomes: &mut NodeColumn<NodeOutcome>,
+    node_idx: NodeIdx,
     error: RunError,
 ) {
-    cache.slots.get_mut(&e_node_id).unwrap().clear_output();
-    *outcomes.get_mut(&e_node_id).unwrap() = NodeOutcome::Skipped { error };
+    cache
+        .slots
+        .get_mut(&program.e_node_ids[node_idx])
+        .unwrap()
+        .clear_output();
+    outcomes[node_idx] = NodeOutcome::Skipped { error };
 }
 
 pub(crate) fn has_errored_dependency(
     program: &ExecutionProgram,
-    outcomes: &NodeMap<NodeOutcome>,
-    e_node_id: ExecutionNodeId,
+    outcomes: &NodeColumn<NodeOutcome>,
+    node_idx: NodeIdx,
 ) -> bool {
-    program.inputs[program.e_nodes[&e_node_id].inputs]
+    program.inputs[program[node_idx].inputs]
         .iter()
         .any(|input| {
-            matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[&addr.e_node_id].error().is_some())
+            matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.node_idx].error().is_some())
         })
 }
 
 pub(crate) fn collect_execution_outcome(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    outcomes: &NodeMap<NodeOutcome>,
+    outcomes: &NodeColumn<NodeOutcome>,
     start: Instant,
     outcome: &mut ExecutionOutcome,
 ) {
     // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
     // the sole source of truth; a node the run never reached (a cancelled run's tail, or
     // skipped for missing inputs) is `Pending` and contributes to no list here.
-    for &e_node_id in &plan.process_order {
-        let e = &program.e_nodes[&e_node_id];
-        match &outcomes[&e_node_id] {
+    for &node_idx in &plan.process_order {
+        let e_node = &program[node_idx];
+        let e_node_id = program.e_node_ids[node_idx];
+        match &outcomes[node_idx] {
             // A reuse hit, or a node the cut pruned that still holds a resident value, are
             // both "available, not recomputed" — reported cached. A pruned node
             // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
@@ -101,10 +107,10 @@ pub(crate) fn collect_execution_outcome(
             }
             _ => {}
         }
-        if plan.verdicts[&e_node_id].missing_required_inputs() {
+        if plan.verdicts[node_idx].missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with the
             // planner) — only for the rare missing node, so it isn't worth a stored column.
-            for (i, input) in program.inputs[e.inputs].iter().enumerate() {
+            for (i, input) in program.inputs[e_node.inputs].iter().enumerate() {
                 if input_missing(input, &plan.verdicts) {
                     outcome.missing_inputs.push(ExecutionInputPort {
                         e_node_id,
@@ -113,7 +119,7 @@ pub(crate) fn collect_execution_outcome(
                 }
             }
         }
-        if let Some(err) = outcomes[&e_node_id].error() {
+        if let Some(err) = outcomes[node_idx].error() {
             outcome.node_errors.push(NodeError {
                 e_node_id,
                 error: err.clone(),

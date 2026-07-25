@@ -14,7 +14,6 @@
 
 use hashbrown::{HashMap, HashSet};
 
-use crate::DataType;
 use crate::execution::identity::{
     ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
 };
@@ -28,6 +27,7 @@ use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, Outp
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput};
 use crate::node::special::SpecialNode;
+use crate::{DataType, StaticValue};
 
 /// Reusable flattening scratch owned by the
 /// [`Compiler`](crate::execution::compile::Compiler). The per-build resolved-graph
@@ -42,9 +42,15 @@ pub(crate) struct Flattener {
     /// Shared graphs currently on the emit-descent path. Reused across builds.
     seen_shared: HashSet<GraphId>,
     /// Resolved flat event edges (with flattened ids), collected during the
-    /// walk and applied after the node pass (when `e_nodes` is final and
-    /// addressable by key). Reused across builds.
-    subs: Vec<ExecutionSubscription>,
+    /// walk; the compiler applies them once the program has adopted the node
+    /// set ([`ExecutionProgram::apply_subscriptions`]). Reused across builds.
+    pub(crate) subs: Vec<ExecutionSubscription>,
+    /// Resolved `Bind` fixups: input-pool slot → id-based producer address.
+    /// Bindings can reference nodes emitted later in the walk, so the dense
+    /// [`OutputAddr`](crate::execution::program::OutputAddr) form is interned
+    /// by the compiler after adoption
+    /// ([`ExecutionProgram::intern_bindings`]). Reused across builds.
+    pub(crate) pending_binds: Vec<(u32, ExecutionOutputPort)>,
 }
 
 /// The graph's packed port pools, rebuilt each `build`.
@@ -69,6 +75,7 @@ impl Flattener {
         self.path.clear();
         self.seen_shared.clear();
         self.subs.clear();
+        self.pending_binds.clear();
         e_nodes.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
@@ -88,6 +95,7 @@ impl Flattener {
                 flatten,
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
+                pending_binds: &mut self.pending_binds,
                 e_nodes,
                 inputs: pools.inputs,
                 outputs: pools.outputs,
@@ -95,26 +103,23 @@ impl Flattener {
             };
             run.emit(false);
         }
-
-        // Apply resolved event edges now that every flat emitter/subscriber exists and
-        // is addressable by key. Subscribers were cleared while rebuilding events.
-        for subscription in &self.subs {
-            if !e_nodes.contains_key(&subscription.subscriber) {
-                continue;
-            }
-            if let Some(e_node) = e_nodes.get_mut(&subscription.event.e_node_id) {
-                pools.events[e_node.events][subscription.event.event_idx]
-                    .subscribers
-                    .push(subscription.subscriber);
-            }
-        }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ExecutionSubscription {
-    event: ExecutionEventPort,
-    subscriber: ExecutionNodeId,
+pub(crate) struct ExecutionSubscription {
+    pub(crate) event: ExecutionEventPort,
+    pub(crate) subscriber: ExecutionNodeId,
+}
+
+/// An id-based resolved binding — flatten's intermediate form. `Bind` targets
+/// can be emitted later in the walk, so they are recorded as fixups and
+/// interned to dense addresses after the program adopts the node set.
+#[derive(Debug)]
+enum FlatBinding {
+    None,
+    Const(StaticValue),
+    Bind(ExecutionOutputPort),
 }
 
 /// One flattening pass. Borrows the reusable `path` buffer from `Flattener`;
@@ -136,6 +141,7 @@ struct Run<'a> {
     flatten: &'a mut FlattenMap,
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<ExecutionSubscription>,
+    pending_binds: &'a mut Vec<(u32, ExecutionOutputPort)>,
     e_nodes: &'a mut HashMap<ExecutionNodeId, ExecutionNode>,
     /// The inputs pool being built this update.
     inputs: &'a mut Pool<ExecutionInput>,
@@ -280,8 +286,17 @@ impl<'a> Run<'a> {
 
             for (port_idx, func_input) in func.inputs.iter().enumerate() {
                 let port = InputPort::new(node.id, port_idx);
-                let binding = self.typed_binding(graph, func_input, graph.bindings.get(&port));
-                self.inputs[inputs_start + port_idx].binding = binding;
+                match self.typed_binding(graph, func_input, graph.bindings.get(&port)) {
+                    FlatBinding::None => {}
+                    FlatBinding::Const(value) => {
+                        self.inputs[inputs_start + port_idx].binding =
+                            ExecutionBinding::Const(value);
+                    }
+                    FlatBinding::Bind(target) => {
+                        self.pending_binds
+                            .push(((inputs_start + port_idx) as u32, target));
+                    }
+                }
             }
         }
 
@@ -387,7 +402,7 @@ impl<'a> Run<'a> {
     /// Resolve an output reference in the current frame to a concrete flat
     /// producer, following through boundary and composite nodes. Leaves the
     /// descent stack as it found it.
-    fn resolve(&mut self, port: OutputPort) -> ExecutionBinding {
+    fn resolve(&mut self, port: OutputPort) -> FlatBinding {
         let OutputPort { node_id, port_idx } = port;
         let graph = self.current();
         let node = graph
@@ -403,9 +418,9 @@ impl<'a> Run<'a> {
                     .node_ports(node, self.library)
                     .is_some_and(|ports| port_idx >= ports.outputs.len())
                 {
-                    return ExecutionBinding::None;
+                    return FlatBinding::None;
                 }
-                ExecutionBinding::Bind(ExecutionOutputPort {
+                FlatBinding::Bind(ExecutionOutputPort {
                     e_node_id: self.execution_node_id(node_id),
                     port_idx,
                 })
@@ -417,7 +432,7 @@ impl<'a> Run<'a> {
                     .resolve_graph(*r, self.library)
                     .expect("graph node references a missing graph");
                 let Some(output) = nested.body.boundary_node(NodeKind::GraphOutput) else {
-                    return ExecutionBinding::None;
+                    return FlatBinding::None;
                 };
                 let binding = nested.body.bindings.get(&InputPort::new(output, port_idx));
                 self.push_level(node_id, &nested.body);
@@ -436,7 +451,7 @@ impl<'a> Run<'a> {
                 self.push_level(instance_id, graph);
                 source
             }
-            NodeKind::GraphOutput => ExecutionBinding::None,
+            NodeKind::GraphOutput => FlatBinding::None,
         }
     }
 
@@ -451,7 +466,7 @@ impl<'a> Run<'a> {
         graph: &'a Graph,
         input: &FuncInput,
         binding: Option<&Binding>,
-    ) -> ExecutionBinding {
+    ) -> FlatBinding {
         let mismatched = match binding {
             Some(Binding::Bind(src)) => !input
                 .data_type
@@ -460,15 +475,15 @@ impl<'a> Run<'a> {
             None => false,
         };
         if mismatched {
-            return ExecutionBinding::None;
+            return FlatBinding::None;
         }
         self.resolve_binding(binding)
     }
 
-    fn resolve_binding(&mut self, binding: Option<&Binding>) -> ExecutionBinding {
+    fn resolve_binding(&mut self, binding: Option<&Binding>) -> FlatBinding {
         match binding {
-            None => ExecutionBinding::None,
-            Some(Binding::Const(value)) => ExecutionBinding::Const(value.clone()),
+            None => FlatBinding::None,
+            Some(Binding::Const(value)) => FlatBinding::Const(value.clone()),
             Some(Binding::Bind(output)) => self.resolve(*output),
         }
     }

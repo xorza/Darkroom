@@ -1,10 +1,10 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::index::NodeSet;
-use crate::execution::program::index::OutputIdx;
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::FuncLambda;
@@ -40,7 +40,7 @@ impl Fix {
         let idx = self.program.e_nodes.len();
         let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
         self.order.push(e_node_id);
-        self.program.e_nodes.insert(
+        self.program.push(
             e_node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
@@ -63,22 +63,29 @@ impl Fix {
         missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
     ) -> ResolvedRun {
-        let mut verdicts: NodeMap<NodeVerdict> = self
-            .program
-            .e_nodes
-            .keys()
-            .copied()
-            .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
-            .collect();
+        let mut verdicts = NodeColumn::default();
+        verdicts.reset(self.program.e_nodes.len(), NodeVerdict::Execute);
         for e_node_id in missing {
-            *verdicts.get_mut(e_node_id).unwrap() = NodeVerdict::MissingInputs;
+            verdicts[nx(*e_node_id)] = NodeVerdict::MissingInputs;
         }
+        let mut root_set = NodeSet::default();
+        root_set.reset(self.program.e_nodes.len());
+        for root in roots {
+            root_set.insert(nx(*root));
+        }
+        let mut pinned_set = NodeSet::default();
+        pinned_set.reset(self.program.e_nodes.len());
+        for pin in pinned {
+            pinned_set.insert(nx(*pin));
+        }
+        let mut event_sources = NodeSet::default();
+        event_sources.reset(self.program.e_nodes.len());
         let plan = ExecutionPlan {
-            process_order: self.order.clone(),
+            process_order: self.order.iter().map(|id| nx(*id)).collect(),
             verdicts,
-            roots: roots.iter().copied().collect(),
-            pinned: pinned.iter().copied().collect(),
-            event_sources: NodeSet::new(),
+            roots: root_set,
+            pinned: pinned_set,
+            event_sources,
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);
@@ -105,10 +112,16 @@ impl Fix {
     }
 }
 
+/// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
+/// in push order, so a node's dense index is recoverable from its id.
+fn nx(e_node_id: ExecutionNodeId) -> NodeIdx {
+    NodeIdx(e_node_id.as_uuid().as_u128() as u32 - 1)
+}
+
 fn bind(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionOutputPort {
-        e_node_id,
-        port_idx,
+    ExecutionBinding::Bind(OutputAddr {
+        node_idx: nx(e_node_id),
+        port_idx: port_idx as u32,
     })
 }
 
@@ -150,13 +163,11 @@ async fn reuse_hit_prunes_its_whole_upstream_cone() {
         )
         .await;
 
-    assert_eq!(run.disposition[&source], Disposition::Cut);
-    assert_eq!(run.disposition[&cached], Disposition::Reuse);
-    assert_eq!(run.disposition[&sink], Disposition::Run);
+    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
+    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
+    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
     assert_eq!(
-        run.outputs
-            .readers
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[0]
     );
 }
@@ -187,20 +198,16 @@ async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() 
         )
         .await;
 
-    assert_eq!(run.disposition[&source], Disposition::Reuse);
-    assert_eq!(run.disposition[&cached], Disposition::Reuse);
-    assert_eq!(run.disposition[&live], Disposition::Run);
-    assert_eq!(run.disposition[&sink], Disposition::Run);
+    assert_eq!(run.disposition[nx(source)], Disposition::Reuse);
+    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
+    assert_eq!(run.disposition[nx(live)], Disposition::Run);
+    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
     assert_eq!(
-        run.outputs
-            .demand
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Produce, OutputDemand::Skip]
     );
     assert_eq!(
-        run.outputs
-            .readers
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[1, 0]
     );
 }
@@ -216,18 +223,14 @@ async fn missing_input_stops_liveness_before_its_producer() {
 
     let run = fix.resolve(&[blocked], &[], &[blocked], Vec::new()).await;
 
-    assert_eq!(run.disposition[&source], Disposition::Cut);
-    assert_eq!(run.disposition[&blocked], Disposition::Cut);
+    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
+    assert_eq!(run.disposition[nx(blocked)], Disposition::Cut);
     assert_eq!(
-        run.outputs
-            .demand
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Skip]
     );
     assert_eq!(
-        run.outputs
-            .readers
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[0]
     );
 }
@@ -237,7 +240,7 @@ async fn missing_lambda_stops_liveness_before_its_producer() {
     let mut fix = Fix::default();
     let source = fix.node(&[], 1);
     let missing = fix.node(&[(false, bind(source, 0))], 1);
-    fix.program.e_nodes.get_mut(&missing).unwrap().lambda = FuncLambda::None;
+    fix.program.by_id_mut(missing).lambda = FuncLambda::None;
     let sink = fix.node(&[(false, bind(missing, 0))], 0);
 
     let run = fix
@@ -252,29 +255,25 @@ async fn missing_lambda_stops_liveness_before_its_producer() {
         )
         .await;
 
-    assert_eq!(run.disposition[&source], Disposition::Cut);
+    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
     assert_eq!(
-        run.disposition[&missing],
+        run.disposition[nx(missing)],
         Disposition::MissingLambda,
         "a matching cache cannot hide a reached missing implementation"
     );
-    assert_eq!(run.disposition[&sink], Disposition::Run);
+    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
     assert_eq!(
-        run.outputs
-            .demand
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Skip]
     );
     assert_eq!(
-        run.outputs
-            .readers
-            .slice(fix.program.e_nodes[&source].outputs),
+        run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[0]
     );
     assert_eq!(
         run.outputs
             .readers
-            .slice(fix.program.e_nodes[&missing].outputs),
+            .slice(fix.program.by_id(missing).outputs),
         &[1],
         "the downstream skip still owns one read to retire"
     );
@@ -285,8 +284,8 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
     let mut fix = Fix::default();
     let graph_pinned = fix.node(&[], 2);
     let node_pinned = fix.node(&[], 2);
-    let output_idx = fix.program.output_idx(ExecutionOutputPort {
-        e_node_id: graph_pinned,
+    let output_idx = fix.program.output_idx(OutputAddr {
+        node_idx: nx(graph_pinned),
         port_idx: 1,
     });
     fix.program.outputs[output_idx.idx()].pinned = true;
@@ -303,13 +302,13 @@ async fn graph_and_node_pins_seed_demand_without_readers() {
     assert_eq!(
         run.outputs
             .demand
-            .slice(fix.program.e_nodes[&graph_pinned].outputs),
+            .slice(fix.program.by_id(graph_pinned).outputs),
         &[OutputDemand::Skip, OutputDemand::Produce]
     );
     assert_eq!(
         run.outputs
             .demand
-            .slice(fix.program.e_nodes[&node_pinned].outputs),
+            .slice(fix.program.by_id(node_pinned).outputs),
         &[OutputDemand::Produce, OutputDemand::Produce]
     );
     assert!(
@@ -341,8 +340,8 @@ async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         )
         .await;
 
-    assert_eq!(run.disposition[&deep], Disposition::Cut);
-    assert_eq!(run.disposition[&source], Disposition::Cut);
-    assert_eq!(run.disposition[&cached], Disposition::Reuse);
-    assert_eq!(run.disposition[&sink], Disposition::Run);
+    assert_eq!(run.disposition[nx(deep)], Disposition::Cut);
+    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
+    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
+    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
 }

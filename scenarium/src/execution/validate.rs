@@ -4,14 +4,15 @@
 //! validation errors.
 
 use common::is_debug;
-use hashbrown::HashSet;
 use thiserror::Error;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::StateOwner;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort, FlattenMapValidationError};
+use crate::execution::identity::{ExecutionNodeId, FlattenMapValidationError};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::library::Library;
 use crate::node::definition::FuncId;
@@ -42,12 +43,12 @@ pub(crate) enum CompiledGraphValidationError {
     #[error("execution node {e_node_id:?} binds to missing output {target:?}")]
     MissingBindingTarget {
         e_node_id: ExecutionNodeId,
-        target: ExecutionOutputPort,
+        target: OutputAddr,
     },
     #[error("execution node {e_node_id:?} binds to out-of-range output {target:?}")]
     BindingOutputOutOfRange {
         e_node_id: ExecutionNodeId,
-        target: ExecutionOutputPort,
+        target: OutputAddr,
     },
 }
 
@@ -67,8 +68,8 @@ pub(crate) enum InstalledGraphValidationError {
 pub(crate) enum ExecutionPlanValidationError {
     #[error("execution order contains more entries than the program")]
     OrderTooLong,
-    #[error("execution order contains missing node {e_node_id:?}")]
-    MissingNode { e_node_id: ExecutionNodeId },
+    #[error("execution order contains an out-of-range node index: {node_idx:?}")]
+    NodeOutOfRange { node_idx: NodeIdx },
     #[error("execution node {e_node_id:?} input range is out of bounds")]
     InputRange { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} appears before dependency {dependency:?}")]
@@ -92,8 +93,9 @@ impl CompiledGraph {
     /// library-free install-side checks live in [`Self::validate_installed`].
     pub(crate) fn validate(&self, library: &Library) -> Result<(), CompiledGraphValidationError> {
         let program = &self.program;
-        self.flatten_map.validate(program.e_nodes.keys().copied())?;
-        for (e_node_id, e_node) in &program.e_nodes {
+        self.flatten_map
+            .validate(program.e_node_ids.values.iter().copied())?;
+        for (e_node_id, e_node) in program.e_node_ids.values.iter().zip(&program.e_nodes) {
             if e_node.func_id.is_nil() {
                 return Err(CompiledGraphValidationError::NilFuncId {
                     e_node_id: *e_node_id,
@@ -142,13 +144,13 @@ impl CompiledGraph {
 
             for e_input in inputs {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    let target = program.e_nodes.get(&e_addr.e_node_id).ok_or(
+                    let target_e_node = program.e_nodes.get(e_addr.node_idx.idx()).ok_or(
                         CompiledGraphValidationError::MissingBindingTarget {
                             e_node_id: *e_node_id,
                             target: *e_addr,
                         },
                     )?;
-                    if e_addr.port_idx >= target.outputs.len as usize {
+                    if e_addr.port_idx >= target_e_node.outputs.len {
                         return Err(CompiledGraphValidationError::BindingOutputOutOfRange {
                             e_node_id: *e_node_id,
                             target: *e_addr,
@@ -180,7 +182,13 @@ impl CompiledGraph {
             return Err(InstalledGraphValidationError::NodeSet);
         }
 
-        for (e_node_id, e_node) in &self.program.e_nodes {
+        for (e_node_id, e_node) in self
+            .program
+            .e_node_ids
+            .values
+            .iter()
+            .zip(&self.program.e_nodes)
+        {
             let slot =
                 cache
                     .slots
@@ -229,12 +237,14 @@ impl ExecutionPlan {
             return Err(ExecutionPlanValidationError::OrderTooLong);
         }
 
-        let mut seen_in_order = HashSet::with_capacity(self.process_order.len());
-        for &e_node_id in &self.process_order {
+        let mut seen_in_order = NodeSet::default();
+        seen_in_order.reset(program.e_nodes.len());
+        for &node_idx in &self.process_order {
             let e_node = program
                 .e_nodes
-                .get(&e_node_id)
-                .ok_or(ExecutionPlanValidationError::MissingNode { e_node_id })?;
+                .get(node_idx.idx())
+                .ok_or(ExecutionPlanValidationError::NodeOutOfRange { node_idx })?;
+            let e_node_id = program.e_node_ids[node_idx];
             let inputs = program
                 .inputs
                 .get(e_node.inputs.range())
@@ -243,36 +253,38 @@ impl ExecutionPlan {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     let disabled_dependency = program
                         .e_nodes
-                        .get(&addr.e_node_id)
-                        .is_some_and(|node| node.disabled)
+                        .get(addr.node_idx.idx())
+                        .is_some_and(|e_node| e_node.disabled)
                         && self
                             .verdicts
-                            .get(&addr.e_node_id)
+                            .values
+                            .get(addr.node_idx.idx())
                             .is_some_and(|verdict| *verdict == NodeVerdict::Disabled);
-                    if !seen_in_order.contains(&addr.e_node_id) && !disabled_dependency {
+                    if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(ExecutionPlanValidationError::BeforeDependency {
                             e_node_id,
-                            dependency: addr.e_node_id,
+                            dependency: program.e_node_ids[addr.node_idx],
                         });
                     }
                 }
             }
-            if !seen_in_order.insert(e_node_id) {
+            if seen_in_order.contains(node_idx) {
                 return Err(ExecutionPlanValidationError::DuplicateNode { e_node_id });
             }
+            seen_in_order.insert(node_idx);
         }
 
-        for e_node_id in &self.pinned {
-            if !self.roots.contains(e_node_id) {
+        for node_idx in self.pinned.iter() {
+            if !self.roots.contains(node_idx) {
                 return Err(ExecutionPlanValidationError::PinnedNodeNotRoot {
-                    e_node_id: *e_node_id,
+                    e_node_id: program.e_node_ids[node_idx],
                 });
             }
         }
-        for e_node_id in &self.event_sources {
-            if !self.roots.contains(e_node_id) {
+        for node_idx in self.event_sources.iter() {
+            if !self.roots.contains(node_idx) {
                 return Err(ExecutionPlanValidationError::EventSourceNotRoot {
-                    e_node_id: *e_node_id,
+                    e_node_id: program.e_node_ids[node_idx],
                 });
             }
         }

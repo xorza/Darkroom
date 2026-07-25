@@ -31,16 +31,21 @@ use `DetachedNode`, which keeps the id, node, all touching wiring, subscriptions
 and pins together.
 
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
-are dissolved into flat function nodes and packed input, output-metadata, and
-event pools. Each node stores typed ranges into those shared vectors, avoiding
-per-node port allocations. Top-level nodes retain
+are dissolved into flat function nodes stored in a dense, id-sorted vector
+(`NodeIdx` positions) plus packed input, output-metadata, and event pools.
+Each node stores typed ranges into those shared vectors, avoiding per-node
+port allocations, and every compiled `Bind` edge is interned to a dense
+`OutputAddr` — per-run scheduling, resolution, and execution state are
+`NodeIdx`-aligned columns and bitsets, so runs walk arrays without hashing
+ids. Top-level nodes retain
 the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
 BLAKE3 from the enclosing instance ids and interior node id. `FlattenMap`
 retains only the compact scope ancestry needed to attribute each execution id
 to its authored node and enclosing instances. Targeted runs and runtime reports
-use exact `ExecutionNodeId`s; the host projects them through the installed
-`CompiledGraph` when it needs authoring identities.
+use exact `ExecutionNodeId`s at the host boundary (`NodeIdx` is install-local
+and never enters a digest, persisted byte, or report); the host projects them
+through the installed `CompiledGraph` when it needs authoring identities.
 
 ## Source layout
 

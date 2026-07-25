@@ -23,8 +23,6 @@ pub(crate) mod clone;
 pub(crate) mod interface;
 pub(crate) mod query;
 mod serde;
-#[cfg(test)]
-mod tests;
 pub(crate) mod validate;
 pub(crate) mod wiring;
 
@@ -550,3 +548,6 @@ impl From<i64> for Binding {
         Binding::Const(value.into())
     }
 }
+
+#[cfg(test)]
+mod tests;

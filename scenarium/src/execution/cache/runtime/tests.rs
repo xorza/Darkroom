@@ -3,8 +3,10 @@ use std::sync::Arc;
 use crate::execution::cache::runtime::{RuntimeCache, test_support};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::digest::Digest;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
+use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -196,7 +198,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
     for (index, (_, mode, behavior, current_digest, produced_under, _)) in cases.iter().enumerate()
     {
         let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
-        program.e_nodes.insert(
+        program.push(
             e_node_id,
             ExecutionNode {
                 cache: *mode,
@@ -244,7 +246,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 
     for (index, _) in cases.iter().enumerate() {
         let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
-        program.e_nodes.insert(
+        program.push(
             e_node_id,
             ExecutionNode {
                 cache: CacheMode::Ram,
@@ -267,9 +269,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     }
     for (index, (mode, _)) in cases.iter().enumerate() {
         program
-            .e_nodes
-            .get_mut(&ExecutionNodeId::from_u128(index as u128 + 1))
-            .unwrap()
+            .by_id_mut(ExecutionNodeId::from_u128(index as u128 + 1))
             .cache = *mode;
     }
 
@@ -297,7 +297,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     };
     let e_node_id = ExecutionNodeId::from_u128(1);
     let mut program = ExecutionProgram::default();
-    program.e_nodes.insert(e_node_id, node(func_id, 0));
+    program.push(e_node_id, node(func_id, 0));
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&program);
@@ -326,7 +326,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Bumped version: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the version.
-    program.e_nodes.insert(e_node_id, node(func_id, 1));
+    *program.by_id_mut(e_node_id) = node(func_id, 1);
     cache.reconcile(&program);
     assert!(
         cache.slots[&e_node_id].state.is_none(),
@@ -340,9 +340,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Changed func id at the same version: state drops too.
     cache.slots.get_mut(&e_node_id).unwrap().state.set(31_u32);
-    program
-        .e_nodes
-        .insert(e_node_id, node(FuncId::from_u128(78), 1));
+    *program.by_id_mut(e_node_id) = node(FuncId::from_u128(78), 1);
     cache.reconcile(&program);
     assert!(
         cache.slots[&e_node_id].state.is_none(),
@@ -392,6 +390,17 @@ fn resident_hit_derives_coverage_from_values() {
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
     let e_node_id = insert_slot(&mut cache, 1, slot);
+    let mut program = ExecutionProgram::default();
+    let outputs = program
+        .outputs
+        .append([ExecutionOutput::default(), ExecutionOutput::default()]);
+    program.push(
+        e_node_id,
+        ExecutionNode {
+            outputs,
+            ..Default::default()
+        },
+    );
 
     let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
         panic!("the invocation result was stamped resident");
@@ -402,10 +411,13 @@ fn resident_hit_derives_coverage_from_values() {
     assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache.clear_output_port(ExecutionOutputPort {
-        e_node_id,
-        port_idx: 0,
-    });
+    cache.clear_output_port(
+        &program,
+        OutputAddr {
+            node_idx: NodeIdx(0),
+            port_idx: 0,
+        },
+    );
     let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
@@ -442,7 +454,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     let outputs = program
         .outputs
         .append([ExecutionOutput::default(), ExecutionOutput::default()]);
-    program.e_nodes.insert(
+    program.push(
         e_node_id,
         ExecutionNode {
             outputs,
@@ -465,8 +477,8 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
         catch_unwind(AssertUnwindSafe(|| {
             cache.read_output_port(
                 &program,
-                ExecutionOutputPort {
-                    e_node_id,
+                OutputAddr {
+                    node_idx: NodeIdx(0),
                     port_idx: 0,
                 },
                 false,
@@ -477,10 +489,13 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            cache.clear_output_port(ExecutionOutputPort {
-                e_node_id,
-                port_idx: 1,
-            });
+            cache.clear_output_port(
+                &program,
+                OutputAddr {
+                    node_idx: NodeIdx(0),
+                    port_idx: 1,
+                },
+            );
         }))
         .is_err(),
         "a released output port must be in range"

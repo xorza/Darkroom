@@ -2,7 +2,9 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::test_support::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
+use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::resource::test_support::prepare_node;
@@ -50,7 +52,7 @@ impl Prog {
 
     /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
     fn stamp_fs_path_input(&mut self, idx: usize, input_idx: usize) {
-        let pool = self.program.e_nodes[&e_node_id(idx)].inputs.start as usize + input_idx;
+        let pool = self.program.by_id(e_node_id(idx)).inputs.start as usize + input_idx;
         self.program.inputs[pool].stamps_fs_path = true;
     }
 
@@ -78,7 +80,7 @@ impl Prog {
                 pinned: false,
             }));
         let e_node_id = e_node_id(idx);
-        self.program.e_nodes.insert(
+        self.program.push(
             e_node_id,
             ExecutionNode {
                 behavior,
@@ -93,14 +95,20 @@ impl Prog {
 }
 
 fn bind(idx: usize, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(ExecutionOutputPort {
-        e_node_id: e_node_id(idx),
-        port_idx: port,
+    ExecutionBinding::Bind(OutputAddr {
+        node_idx: node_idx(idx),
+        port_idx: port as u32,
     })
 }
 
 fn e_node_id(idx: usize) -> ExecutionNodeId {
     ExecutionNodeId::from_u128(idx as u128 + 1)
+}
+
+/// The fixture pushes nodes in index order, so the dense index equals the
+/// fixture index.
+fn node_idx(idx: usize) -> NodeIdx {
+    NodeIdx(idx as u32)
 }
 
 fn konst(value: StaticValue) -> ExecutionBinding {
@@ -123,8 +131,8 @@ fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut resource_stamps = RunResourceStamps::default();
     for idx in 0..=through {
         let e_node_id = e_node_id(idx);
-        prepare_node(&mut resource_stamps, program, &cache, e_node_id);
-        let digest = node_digest(program, e_node_id, &cache, &resource_stamps);
+        prepare_node(&mut resource_stamps, program, &cache, node_idx(idx));
+        let digest = node_digest(program, node_idx(idx), &cache, &resource_stamps);
         cache.slots.get_mut(&e_node_id).unwrap().current_digest = digest;
     }
     cache
@@ -161,7 +169,7 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first[1], first[2]);
     assert_ne!(first[0], first[2]);
 
-    p.program.e_nodes.get_mut(&e_node_id(0)).unwrap().version = 1;
+    p.program.by_id_mut(e_node_id(0)).version = 1;
     let versioned = digests(&p);
     assert_ne!(
         first[0], versioned[0],
@@ -342,7 +350,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
         let mut resource_stamps = RunResourceStamps::default();
-        let producer = node_digest(&p.program, e_node_id(0), &cache, &resource_stamps).unwrap();
+        let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
         cache.slots.get_mut(&e_node_id(0)).unwrap().current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
@@ -352,11 +360,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 producer,
             );
         }
-        prepare_node(&mut resource_stamps, &p.program, &cache, e_node_id(1));
-        prepare_node(&mut resource_stamps, &p.program, &cache, e_node_id(2));
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(1));
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(2));
         DigestPair {
-            typed: node_digest(&p.program, e_node_id(1), &cache, &resource_stamps),
-            plain: node_digest(&p.program, e_node_id(2), &cache, &resource_stamps),
+            typed: node_digest(&p.program, node_idx(1), &cache, &resource_stamps),
+            plain: node_digest(&p.program, node_idx(2), &cache, &resource_stamps),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -436,7 +444,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
     let mut resource_stamps = RunResourceStamps::default();
-    let producer = node_digest(&p.program, e_node_id(0), &cache, &resource_stamps).unwrap();
+    let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
     cache.slots.get_mut(&e_node_id(0)).unwrap().current_digest = Some(producer);
     hydrate(
         &mut cache,
@@ -445,9 +453,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         producer,
     );
     cache.slots.get_mut(&e_node_id(0)).unwrap().current_digest = Some(Digest([9; 32]));
-    prepare_node(&mut resource_stamps, &p.program, &cache, e_node_id(1));
+    prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(1));
     assert_eq!(
-        node_digest(&p.program, e_node_id(1), &cache, &resource_stamps),
+        node_digest(&p.program, node_idx(1), &cache, &resource_stamps),
         None,
         "a path value produced under an old producer digest is unreadable"
     );

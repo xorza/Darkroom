@@ -12,8 +12,8 @@ use hashbrown::{HashMap, HashSet};
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::DigestHasher;
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::ExecutionPlan;
+use crate::execution::program::index::NodeIdx;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::node::definition::FuncBehavior;
 
@@ -154,13 +154,13 @@ impl RunResourceStamps {
         requests: &mut HashSet<String>,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
     ) {
-        let node = &program.e_nodes[&e_node_id];
-        if node.behavior != FuncBehavior::Pure {
+        let e_node = &program[node_idx];
+        if e_node.behavior != FuncBehavior::Pure {
             return;
         }
-        for input in &program.inputs[node.inputs] {
+        for input in &program.inputs[e_node.inputs] {
             match &input.binding {
                 ExecutionBinding::Const(StaticValue::FsPath(path)) => {
                     self.collect_fs_paths(requests, std::slice::from_ref(path));
@@ -169,9 +169,9 @@ impl RunResourceStamps {
                     self.collect_fs_paths(requests, paths);
                 }
                 ExecutionBinding::Bind(address) if input.stamps_fs_path => {
-                    let Some(value) = cache.slots[&address.e_node_id]
+                    let Some(value) = cache.slots[&program.e_node_ids[address.node_idx]]
                         .output_values()
-                        .and_then(|values| values.get(address.port_idx))
+                        .and_then(|values| values.get(address.port_idx as usize))
                     else {
                         continue;
                     };
@@ -200,9 +200,9 @@ impl RunResourceStamps {
     ) -> impl Future<Output = ()> + 'a {
         self.fs_paths.clear();
         let mut requests = HashSet::new();
-        for &e_node_id in &plan.process_order {
-            if plan.verdicts[&e_node_id].wants_execute() {
-                self.collect_node_paths(&mut requests, program, cache, e_node_id);
+        for &node_idx in &plan.process_order {
+            if plan.verdicts[node_idx].wants_execute() {
+                self.collect_node_paths(&mut requests, program, cache, node_idx);
             }
         }
         self.prepare(requests, cancel)
@@ -212,11 +212,11 @@ impl RunResourceStamps {
         &'a mut self,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
         cancel: CancelToken,
     ) -> impl Future<Output = ()> + 'a {
         let mut requests = HashSet::new();
-        self.collect_node_paths(&mut requests, program, cache, e_node_id);
+        self.collect_node_paths(&mut requests, program, cache, node_idx);
         self.prepare(requests, cancel)
     }
 
@@ -249,8 +249,8 @@ pub(crate) mod test_support {
     use hashbrown::HashSet;
 
     use crate::execution::cache::runtime::RuntimeCache;
-    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
+    use crate::execution::program::index::NodeIdx;
 
     use crate::execution::resource::{RunResourceStamps, resolve_paths};
 
@@ -258,10 +258,10 @@ pub(crate) mod test_support {
         stamps: &mut RunResourceStamps,
         program: &ExecutionProgram,
         cache: &RuntimeCache,
-        e_node_id: ExecutionNodeId,
+        node_idx: NodeIdx,
     ) {
         let mut requests = HashSet::new();
-        stamps.collect_node_paths(&mut requests, program, cache, e_node_id);
+        stamps.collect_node_paths(&mut requests, program, cache, node_idx);
         let prepared = resolve_paths(requests, &CancelToken::never());
         stamps.fs_paths.extend(prepared);
     }

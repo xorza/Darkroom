@@ -1,5 +1,12 @@
 //! Strongly typed identities for one flattened compiled graph, plus the compact
 //! scope map used to attribute an execution node to authored nodes.
+//!
+//! Naming convention: `Execution`-prefixed types are the **stable identity
+//! space** — they survive installs, cross the host boundary, and may enter
+//! digests. `…Id` is a uuid identity; `…Port` pairs one with a port/event
+//! index. The install-local **dense index space** (`NodeIdx`, `OutputIdx`,
+//! `OutputAddr`) lives in `program/index.rs` under bare names — those types
+//! never leave the execution internals, so they need no prefix.
 
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};

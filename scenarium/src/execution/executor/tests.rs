@@ -6,9 +6,10 @@ use super::*;
 use crate::async_lambda;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::index::{NodeSet, OutputColumn, OutputIdx};
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::PinnedOutputs;
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
@@ -49,7 +50,7 @@ impl Prog {
             .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = self.program.e_nodes.len();
         let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
-        self.program.e_nodes.insert(
+        self.program.push(
             e_node_id,
             ExecutionNode {
                 func_id: FuncId::from_u128(idx as u128 + 1),
@@ -68,12 +69,12 @@ impl Prog {
     /// Override a node's [`CacheMode`] (nodes default to `Ram`). Drives the mid-run
     /// output-release tests, which turn on the non-RAM modes.
     fn set_cache(&mut self, e_node_id: ExecutionNodeId, cache: CacheMode) {
-        self.program.e_nodes.get_mut(&e_node_id).unwrap().cache = cache;
+        self.program.by_id_mut(e_node_id).cache = cache;
     }
 
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
     fn set_output_pinned(&mut self, e_node_id: ExecutionNodeId, port: usize, pinned: bool) {
-        let start = self.program.e_nodes[&e_node_id].outputs.start as usize;
+        let start = self.program.by_id(e_node_id).outputs.start as usize;
         self.program.outputs[start + port].pinned = pinned;
     }
 }
@@ -100,15 +101,12 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
             }
         })
         .collect();
+    let mut disposition = NodeColumn::default();
+    disposition.reset(program.e_nodes.len(), Disposition::Run);
     TestRun {
         plan: structural_plan(program),
         resolved: ResolvedRun {
-            disposition: program
-                .e_nodes
-                .keys()
-                .copied()
-                .map(|e_node_id| (e_node_id, Disposition::Run))
-                .collect(),
+            disposition,
             outputs: ResolvedOutputs {
                 demand: OutputColumn::from(demand),
                 readers: OutputColumn::from(readers),
@@ -117,15 +115,21 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
     }
 }
 
-fn demand_output(program: &ExecutionProgram, run: &mut TestRun, address: ExecutionOutputPort) {
+fn demand_output(program: &ExecutionProgram, run: &mut TestRun, address: OutputAddr) {
     let output_idx = program.output_idx(address);
     run.resolved.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
-fn output(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionOutputPort {
-    ExecutionOutputPort {
-        e_node_id,
-        port_idx,
+/// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
+/// in push order, so a node's dense index is recoverable from its id.
+fn nx(e_node_id: ExecutionNodeId) -> NodeIdx {
+    NodeIdx(e_node_id.as_uuid().as_u128() as u32 - 1)
+}
+
+fn output(e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
+    OutputAddr {
+        node_idx: nx(e_node_id),
+        port_idx: port_idx as u32,
     }
 }
 
@@ -142,19 +146,25 @@ fn straight_run(program: &ExecutionProgram) -> TestRun {
 
 fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
     let process_order: Vec<_> = (0..program.e_nodes.len())
-        .map(|idx| ExecutionNodeId::from_u128(idx as u128 + 1))
+        .map(|idx| NodeIdx(idx as u32))
         .collect();
-    let verdicts = process_order
-        .iter()
-        .copied()
-        .map(|e_node_id| (e_node_id, NodeVerdict::Execute))
-        .collect();
+    let mut verdicts = NodeColumn::default();
+    verdicts.reset(program.e_nodes.len(), NodeVerdict::Execute);
+    let mut roots = NodeSet::default();
+    roots.reset(program.e_nodes.len());
+    for &node_idx in &process_order {
+        roots.insert(node_idx);
+    }
+    let mut pinned = NodeSet::default();
+    pinned.reset(program.e_nodes.len());
+    let mut event_sources = NodeSet::default();
+    event_sources.reset(program.e_nodes.len());
     ExecutionPlan {
-        process_order: process_order.clone(),
+        process_order,
         verdicts,
-        roots: process_order.into_iter().collect(),
-        pinned: NodeSet::new(),
-        event_sources: NodeSet::new(),
+        roots,
+        pinned,
+        event_sources,
     }
 }
 
@@ -568,7 +578,7 @@ async fn pinned_root_demands_output_without_retaining_it() {
 
     let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, output(a, 0));
-    plan.plan.pinned.insert(a);
+    plan.plan.pinned.insert(nx(a));
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
@@ -637,7 +647,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
 
     let mut run = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut run, output(a, 0));
-    *run.resolved.disposition.get_mut(&a).unwrap() = Disposition::Reuse;
+    run.resolved.disposition[nx(a)] = Disposition::Reuse;
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
@@ -695,7 +705,7 @@ async fn pinned_root_pushes_every_output() {
     let mut plan = run_with_readers(&p.program, vec![0, 0]);
     demand_output(&p.program, &mut plan, output(a, 0));
     demand_output(&p.program, &mut plan, output(a, 1));
-    plan.plan.pinned.insert(a);
+    plan.plan.pinned.insert(nx(a));
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
@@ -794,8 +804,8 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let a = p.node(&[], 1, producer);
     let live = p.node(&[bind(a, 0)], 1, consumer.clone());
     let cached = p.node(&[bind(a, 0)], 1, consumer);
-    p.program.e_nodes.get_mut(&a).unwrap().behavior = FuncBehavior::Pure;
-    p.program.e_nodes.get_mut(&cached).unwrap().behavior = FuncBehavior::Pure;
+    p.program.by_id_mut(a).behavior = FuncBehavior::Pure;
+    p.program.by_id_mut(cached).behavior = FuncBehavior::Pure;
     p.set_cache(a, CacheMode::None);
     p.set_cache(live, CacheMode::None);
 
@@ -876,8 +886,8 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     let downstream = p.node(&[bind(missing, 0)], 1, consumer);
 
     let mut plan = structural_plan(&p.program);
-    plan.roots.clear();
-    plan.roots.insert(downstream);
+    plan.roots.reset(p.program.e_nodes.len());
+    plan.roots.insert(nx(downstream));
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
     cache.slots.get_mut(&missing).unwrap().value = ValueState::Resident {
@@ -944,7 +954,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     let c = p.node(&[bind(a, 0)], 1, consumer());
     // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
     for e_node_id in [a, b, c] {
-        p.program.e_nodes.get_mut(&e_node_id).unwrap().behavior = FuncBehavior::Pure;
+        p.program.by_id_mut(e_node_id).behavior = FuncBehavior::Pure;
     }
     // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
     p.set_cache(a, CacheMode::None);

@@ -8,8 +8,9 @@ pub(crate) mod pool;
 
 use hashbrown::HashMap;
 
-use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
-use crate::execution::program::index::OutputIdx;
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputIdx};
 use crate::execution::program::pool::{Pool, PoolRange};
 use crate::graph::CacheMode;
 use crate::library::Library;
@@ -25,7 +26,7 @@ pub(crate) enum ExecutionBinding {
     #[default]
     None,
     Const(StaticValue),
-    Bind(ExecutionOutputPort),
+    Bind(OutputAddr),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,7 +39,7 @@ pub(crate) struct ExecutionInput {
 
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionEvent {
-    pub subscribers: Vec<ExecutionNodeId>,
+    pub subscribers: Vec<NodeIdx>,
     pub lambda: EventLambda,
 }
 
@@ -52,8 +53,9 @@ pub(crate) type InputRange = PoolRange<ExecutionInput>;
 pub(crate) type OutputRange = PoolRange<ExecutionOutput>;
 pub(crate) type EventRange = PoolRange<ExecutionEvent>;
 
-/// Topology + code for one flat node. Immutable across runs; all mutable
-/// per-run/cross-run state is keyed by the node id in the executor.
+/// Topology + code for one flat node. Immutable across runs; mutable per-run
+/// state lives in `NodeIdx`-aligned columns, and cross-run cache slots are
+/// keyed by the node's stable id.
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionNode {
     pub sink: bool,
@@ -94,7 +96,16 @@ pub(crate) struct ExecutionNode {
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
-    pub(crate) e_nodes: HashMap<ExecutionNodeId, ExecutionNode>,
+    /// The dense node vector — every per-run column and set aligns to it.
+    /// Ordered by `ExecutionNodeId` (see [`Self::adopt_nodes`]) so compiled
+    /// artifacts and program walks are deterministic.
+    pub(crate) e_nodes: Vec<ExecutionNode>,
+    /// `NodeIdx` → authoring-derived id, for the host boundary (reports,
+    /// seeds, eviction, cache slots).
+    pub(crate) e_node_ids: NodeColumn<ExecutionNodeId>,
+    /// Id → `NodeIdx`, for resolving host-supplied identities once per use;
+    /// nothing per-run iterates or rebuilds it.
+    pub(crate) index: HashMap<ExecutionNodeId, NodeIdx>,
     pub(crate) inputs: Pool<ExecutionInput>,
     pub(crate) events: Pool<ExecutionEvent>,
     /// Each node's resolved declared output types (wildcards followed) and pin bits,
@@ -107,30 +118,99 @@ pub(crate) struct ExecutionProgram {
     pub(crate) outputs: Pool<ExecutionOutput>,
 }
 
+impl std::ops::Index<NodeIdx> for ExecutionProgram {
+    type Output = ExecutionNode;
+
+    fn index(&self, index: NodeIdx) -> &ExecutionNode {
+        &self.e_nodes[index.idx()]
+    }
+}
+
 impl ExecutionProgram {
-    pub(crate) fn output_idx(&self, address: ExecutionOutputPort) -> OutputIdx {
-        let outputs = self.e_nodes[&address.e_node_id].outputs;
+    /// Append one node, assigning the next dense index. Panics on a duplicate
+    /// id — flattened ids are unique by construction.
+    pub(crate) fn push(&mut self, id: ExecutionNodeId, e_node: ExecutionNode) -> NodeIdx {
         debug_assert!(
-            address.port_idx < outputs.len as usize,
+            u32::try_from(self.e_nodes.len()).is_ok(),
+            "program node count must fit in u32"
+        );
+        let node_idx = NodeIdx(self.e_nodes.len() as u32);
+        let previous = self.index.insert(id, node_idx);
+        assert!(previous.is_none(), "flattened node ids must be unique");
+        self.e_node_ids.values.push(id);
+        self.e_nodes.push(e_node);
+        node_idx
+    }
+
+    /// Adopt the flattened node set, assigning dense indices in id order so
+    /// the compiled artifact is deterministic regardless of flatten's walk.
+    pub(crate) fn adopt_nodes(&mut self, e_nodes: HashMap<ExecutionNodeId, ExecutionNode>) {
+        self.e_nodes.clear();
+        self.e_node_ids.values.clear();
+        self.index.clear();
+        let mut entries: Vec<_> = e_nodes.into_iter().collect();
+        entries.sort_unstable_by_key(|(id, _)| *id);
+        for (id, e_node) in entries {
+            self.push(id, e_node);
+        }
+    }
+
+    /// Intern flatten's id-based binding fixups into dense [`OutputAddr`]s —
+    /// the one place producer ids are hashed, once per compile instead of per
+    /// run. Every target exists: flatten only records producers it emitted.
+    pub(crate) fn intern_bindings(&mut self, binds: &[(u32, ExecutionOutputPort)]) {
+        for &(input_idx, port) in binds {
+            let node_idx = self.index[&port.e_node_id];
+            self.inputs[input_idx as usize].binding = ExecutionBinding::Bind(OutputAddr {
+                node_idx,
+                port_idx: port.port_idx as u32,
+            });
+        }
+    }
+
+    /// Apply flatten's resolved event edges. Tolerant like the old post-pass:
+    /// a subscriber or emitter that didn't flatten (drift) wires nothing.
+    pub(crate) fn apply_subscriptions(
+        &mut self,
+        subs: impl IntoIterator<Item = (ExecutionEventPort, ExecutionNodeId)>,
+    ) {
+        for (event, subscriber) in subs {
+            let Some(&subscriber_idx) = self.index.get(&subscriber) else {
+                continue;
+            };
+            let Some(&emitter_idx) = self.index.get(&event.e_node_id) else {
+                continue;
+            };
+            let events = self.e_nodes[emitter_idx.idx()].events;
+            self.events[events][event.event_idx]
+                .subscribers
+                .push(subscriber_idx);
+        }
+    }
+
+    pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
+        let outputs = self.e_nodes[address.node_idx.idx()].outputs;
+        debug_assert!(
+            address.port_idx < outputs.len,
             "output port is out of range"
         );
         debug_assert!(
-            outputs.start.checked_add(address.port_idx as u32).is_some(),
+            outputs.start.checked_add(address.port_idx).is_some(),
             "output pool index must fit in u32"
         );
-        OutputIdx(outputs.start.wrapping_add(address.port_idx as u32))
+        OutputIdx(outputs.start.wrapping_add(address.port_idx))
     }
 
     /// Fill the output metadata pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
     /// flatten, where every compiled node's func is guaranteed present
     /// (`validate_for_execution` resolved them). Results are memoized by
-    /// [`ExecutionOutputPort`]; unresolved and cyclic wildcard ports store `DataType::Any`.
+    /// [`OutputAddr`]; unresolved and cyclic wildcard ports store `DataType::Any`.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let e_nodes = &self.e_nodes;
         let inputs = &self.inputs;
-        let source = |port: ExecutionOutputPort| {
-            let e_node = &e_nodes[&port.e_node_id];
+        let source = |port: OutputAddr| {
+            let e_node = &e_nodes[port.node_idx.idx()];
             let func = match e_node.special {
                 Some(special) => special.func(),
                 None => library.by_id(e_node.func_id).expect(
@@ -138,7 +218,7 @@ impl ExecutionProgram {
                      (validated at validate_for_execution)",
                 ),
             };
-            match &func.outputs[port.port_idx].ty {
+            match &func.outputs[port.port_idx as usize].ty {
                 OutputType::Fixed(data_type) => OutputTypeSource::Fixed(data_type.clone()),
                 OutputType::Wildcard { mirrors } => {
                     let input = &inputs[e_node.inputs][*mirrors];
@@ -155,17 +235,36 @@ impl ExecutionProgram {
             }
         };
         let mut resolver = OutputTypeResolver::new(self.outputs.len());
-        for (e_node_id, e_node) in e_nodes {
-            for port_idx in 0..e_node.outputs.len as usize {
+        for (i, e_node) in self.e_nodes.iter().enumerate() {
+            for port_idx in 0..e_node.outputs.len {
                 let data_type = resolver.resolve(
-                    ExecutionOutputPort {
-                        e_node_id: *e_node_id,
+                    OutputAddr {
+                        node_idx: NodeIdx(i as u32),
                         port_idx,
                     },
                     &source,
                 );
-                self.outputs[e_node.outputs.start as usize + port_idx].data_type = data_type;
+                self.outputs[(e_node.outputs.start + port_idx) as usize].data_type = data_type;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program::{ExecutionNode, ExecutionProgram};
+
+    /// Test-facing id lookups: tests and engine introspection address nodes by
+    /// their stable id; production paths carry `NodeIdx` instead.
+    impl ExecutionProgram {
+        pub(crate) fn by_id(&self, id: ExecutionNodeId) -> &ExecutionNode {
+            &self.e_nodes[self.index[&id].idx()]
+        }
+
+        pub(crate) fn by_id_mut(&mut self, id: ExecutionNodeId) -> &mut ExecutionNode {
+            let node_idx = self.index[&id];
+            &mut self.e_nodes[node_idx.idx()]
         }
     }
 }
