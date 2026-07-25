@@ -107,6 +107,10 @@ impl<T> NodeColumn<T> {
         self.values.len()
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
     /// Append the entry for the next dense index — build-time only; per-run
     /// columns size themselves with [`reset`](Self::reset).
     pub(crate) fn push(&mut self, value: T) {
@@ -117,8 +121,25 @@ impl<T> NodeColumn<T> {
         self.values.clear();
     }
 
+    /// The entry at `node_idx`, or `None` past the column's length — for
+    /// callers probing a column that may not span the program (an empty
+    /// pre-run column, a validation bounds check). In-range access uses
+    /// indexing.
+    pub(crate) fn get(&self, node_idx: NodeIdx) -> Option<&T> {
+        self.values.get(node_idx.idx())
+    }
+
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
         self.values.iter()
+    }
+
+    /// Entries paired with the index they sit at, so a walk that needs both
+    /// doesn't rebuild the index from an enumeration counter.
+    pub(crate) fn iter_indexed(&self) -> impl Iterator<Item = (NodeIdx, &T)> {
+        self.values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| (NodeIdx(i as u32), value))
     }
 
     pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, T> {
@@ -201,20 +222,11 @@ impl<T> OutputColumn<T> {
 
 #[cfg(test)]
 mod test_support {
-    use crate::execution::program::index::{NodeColumn, NodeIdx, OutputColumn};
+    use crate::execution::program::index::OutputColumn;
 
     impl<T> OutputColumn<T> {
         pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
             self.values.iter()
-        }
-    }
-
-    impl<T> NodeColumn<T> {
-        /// The entry at `node_idx`, or `None` past the column's length — for
-        /// introspection that may run before the column is sized (an empty
-        /// pre-run column). Production access is by indexing.
-        pub(crate) fn get(&self, node_idx: NodeIdx) -> Option<&T> {
-            self.values.get(node_idx.idx())
         }
     }
 }

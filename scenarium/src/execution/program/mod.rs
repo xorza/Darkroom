@@ -95,10 +95,10 @@ pub(crate) struct ExecutionNode {
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
-    /// The dense node vector — every per-run column and set aligns to it.
+    /// The dense node column — every per-run column and set aligns to it.
     /// Ordered by `ExecutionNodeId` (see [`Self::adopt_nodes`]) so compiled
     /// artifacts and program walks are deterministic.
-    pub(crate) e_nodes: Vec<ExecutionNode>,
+    pub(crate) e_nodes: NodeColumn<ExecutionNode>,
     /// `NodeIdx` → authoring-derived id, for the host boundary (reports,
     /// seeds, eviction, cache slots).
     pub(crate) e_node_ids: NodeColumn<ExecutionNodeId>,
@@ -121,7 +121,7 @@ impl std::ops::Index<NodeIdx> for ExecutionProgram {
     type Output = ExecutionNode;
 
     fn index(&self, index: NodeIdx) -> &ExecutionNode {
-        &self.e_nodes[index.idx()]
+        &self.e_nodes[index]
     }
 }
 
@@ -222,7 +222,7 @@ impl ExecutionProgram {
         let e_nodes = &self.e_nodes;
         let inputs = &self.inputs;
         let source = |port: OutputAddr| {
-            let e_node = &e_nodes[port.node_idx.idx()];
+            let e_node = &e_nodes[port.node_idx];
             let func = match e_node.special {
                 Some(special) => special.func(),
                 None => library.by_id(e_node.func_id).expect(
@@ -247,15 +247,9 @@ impl ExecutionProgram {
             }
         };
         let mut resolver = OutputTypeResolver::new(self.outputs.len());
-        for (i, e_node) in self.e_nodes.iter().enumerate() {
+        for (node_idx, e_node) in self.e_nodes.iter_indexed() {
             for port_idx in 0..e_node.outputs.len {
-                let data_type = resolver.resolve(
-                    OutputAddr {
-                        node_idx: NodeIdx(i as u32),
-                        port_idx,
-                    },
-                    &source,
-                );
+                let data_type = resolver.resolve(OutputAddr { node_idx, port_idx }, &source);
                 self.outputs[(e_node.outputs.start + port_idx) as usize].data_type = data_type;
             }
         }
@@ -276,7 +270,7 @@ pub(crate) mod test_support {
 
         pub(crate) fn by_id_mut(&mut self, id: ExecutionNodeId) -> &mut ExecutionNode {
             let node_idx = self.e_node_index[&id];
-            &mut self.e_nodes[node_idx.idx()]
+            &mut self.e_nodes[node_idx]
         }
     }
 }

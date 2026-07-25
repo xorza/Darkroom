@@ -111,7 +111,7 @@ impl CompiledGraph {
         let program = &self.program;
         self.flatten_map
             .validate(program.e_node_ids.iter().copied())?;
-        for (e_node_id, e_node) in program.e_node_ids.iter().zip(&program.e_nodes) {
+        for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
             if e_node.func_id.is_nil() {
                 return Err(CompiledGraphValidationError::NilFuncId {
                     e_node_id: *e_node_id,
@@ -177,7 +177,7 @@ impl CompiledGraph {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
                     // Unreachable while `intern_bindings` mints every address from a
                     // successful id lookup — kept as the backstop if that stops holding.
-                    let target_e_node = program.e_nodes.get(e_addr.node_idx.idx()).ok_or(
+                    let target_e_node = program.e_nodes.get(e_addr.node_idx).ok_or(
                         CompiledGraphValidationError::MissingBindingTarget {
                             e_node_id: *e_node_id,
                             target: *e_addr,
@@ -219,7 +219,7 @@ impl CompiledGraph {
             .program
             .e_node_ids
             .iter()
-            .zip(&self.program.e_nodes)
+            .zip(self.program.e_nodes.iter())
             .zip(cache.e_node_ids.iter().zip(cache.slots.iter()))
             .enumerate()
         {
@@ -294,7 +294,7 @@ impl ExecutionPlan {
         for &node_idx in &self.process_order {
             let e_node = program
                 .e_nodes
-                .get(node_idx.idx())
+                .get(node_idx)
                 .ok_or(ExecutionPlanValidationError::NodeOutOfRange { node_idx })?;
             let e_node_id = program.e_node_ids[node_idx];
             let inputs = program
@@ -306,7 +306,7 @@ impl ExecutionPlan {
                     // Resolve the dependency before probing the sets: an
                     // out-of-range target is the corruption to report, not a
                     // reason to index past `seen_in_order` and `e_node_ids`.
-                    let dependency = program.e_nodes.get(addr.node_idx.idx()).ok_or(
+                    let dependency = program.e_nodes.get(addr.node_idx).ok_or(
                         ExecutionPlanValidationError::NodeOutOfRange {
                             node_idx: addr.node_idx,
                         },

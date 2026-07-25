@@ -132,7 +132,7 @@ impl RuntimeCache {
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> =
             self.e_node_ids.drain().zip(self.slots.drain()).collect();
-        for (e_node_id, e_node) in program.e_node_ids.iter().zip(&program.e_nodes) {
+        for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
             let owner = StateOwner {
                 func_id: e_node.func_id,
                 version: e_node.version,
@@ -319,8 +319,7 @@ impl RuntimeCache {
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
     pub(crate) fn release_dead_outputs(&mut self, program: &ExecutionProgram) {
-        for (i, e_node) in program.e_nodes.iter().enumerate() {
-            let node_idx = NodeIdx(i as u32);
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let retained = e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure
                 && self.is_resident_current(node_idx);
