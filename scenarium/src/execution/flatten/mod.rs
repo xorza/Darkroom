@@ -50,7 +50,8 @@ pub(crate) struct Flattener {
     /// adoption for the same reason. Reused across builds.
     pending_binds: Vec<PendingBind>,
     /// Flat nodes in emit order. Nothing in the walk looks one up, so this is a
-    /// plain vector; adoption sorts and drains it. Reused across builds.
+    /// plain vector; [`build`](Self::build) sorts it by id and drains it into
+    /// the program. Reused across builds.
     e_nodes: Vec<(ExecutionNodeId, ExecutionNode)>,
 }
 
@@ -98,9 +99,12 @@ impl Flattener {
             run.emit(false);
         }
 
-        // Assign dense node indices, then resolve the id-based edge fixups —
-        // the only id hashing a compiled program ever pays.
-        program.adopt_nodes(&mut self.e_nodes);
+        // Hand over the nodes in id order rather than walk order, so the
+        // compiled artifact is deterministic; draining leaves the buffer's
+        // allocation here for the next build. Then resolve the edge fixups the
+        // walk deferred — the only id hashing a compiled program ever pays.
+        self.e_nodes.sort_unstable_by_key(|(id, _)| *id);
+        program.adopt_nodes(self.e_nodes.drain(..));
         program.intern_bindings(&self.pending_binds);
         program.apply_subscriptions(&self.subs);
     }
