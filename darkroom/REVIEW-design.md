@@ -73,13 +73,6 @@ Findings are ordered by severity × payoff.
   forwarders. The project's own style rule discourages thin wrapper methods;
   this is the same call restated at three altitudes.
 
-- [ ] **`image_viewer::port_label` does a recursive whole-document node search
-  per viewer tab, twice per frame.** `gui/image_viewer.rs:379-391` uses
-  `NodeSearch::Recursive` to find the node's name, and it is called from
-  `dock::tab_text` for every tab in every strip
-  (`gui/dock/mod.rs:324-336`) *and* again from the pane content closure
-  (`gui/main_window.rs:123`). Each call also allocates a fresh `String`.
-
 - [ ] **Port tooltip text is rebuilt and then cloned, per port, per frame.**
   `input_label_cell` / `output_cell` build `type_label(...)` (a `String`,
   `gui/node/port_row/mod.rs:514-532`) and wrap it in `port_tip` (another
@@ -100,16 +93,6 @@ Findings are ordered by severity × payoff.
   and the two-rebuild protocol are a lot of machinery whose only observable
   effect is skipping the *second* pass. (cf. REVIEW.md "idle graph frames
   rebuild semantic projection state".)
-
-- [ ] **`TabRef::ImageViewer` stores a `PortRef` when only an output port is
-  representable.** `core/document/mod.rs:88` admits `PortKind::Input` and an
-  arbitrary `port_idx`. Three places exist purely to cope:
-  `Document::viewer_outputs` `filter_map`s the Output kind away
-  (`:367-376`), `Editor::open_image_viewer` asserts the kind
-  (`gui/app/editor/mod.rs:465`), and `image_viewer::port_label` carries an
-  `"in"` arm that nothing can reach (`gui/image_viewer.rs:386-389`).
-  Carrying `OutputPort` instead deletes all three. (cf. REVIEW.md "viewer
-  tabs persist port references that are not validated".)
 
 ---
 
@@ -218,14 +201,6 @@ Findings are ordered by severity × payoff.
   (`:207-220`), differing only in the `Running` arm and assign-vs-merge. The
   `nodes.retain(|_, n| status != None || !logs.is_empty() || ram.total() > 0)`
   predicate appears verbatim at `:237-238` and `:249-251`.
-
-- [ ] **`unimplemented!()` sits in a live command handler.**
-  `App::run_node` panics when the active target is not `Main`
-  (`gui/app/commands/run.rs:50-52`). Reachability is prevented only by
-  `SceneNode::run_available` gating the play chip and the menu item; a
-  command that arrives from any other path (or a stale response) crashes the
-  editor. A refusal or a debug assert would carry the same intent without
-  the crash.
 
 - [ ] **`set_output_pinned` uses `usize::MAX` as a "top of stack" sentinel
   that only works because the move clamps.**
