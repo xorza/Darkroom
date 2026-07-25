@@ -22,13 +22,15 @@ pub(super) struct GraphMenuUi {
 }
 
 impl GraphMenuUi {
+    /// Returns the command a pick resolves to, if any — the canvas decides
+    /// whether it wins the frame. A "Detach copy" pick is an intent, not a
+    /// command, so it lands in `out` and yields `None`.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         out: &mut Vec<Intent>,
-        cmd: &mut Option<AppCommand>,
-    ) {
+    ) -> Option<AppCommand> {
         // Latch on a secondary-click of any local-graph node's badge,
         // read from last frame's response (same timing as the open).
         for n in scene.nodes.values() {
@@ -57,16 +59,14 @@ impl GraphMenuUi {
         });
         // A pick only fires while the menu is open, where `node_id` holds
         // this open's target.
-        if let Some(choice) = pick
-            && let Some(node_id) = self.node_id
-        {
-            match choice {
-                MenuChoice::Publish => {
-                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishGraphToLibrary {
-                        node_id,
-                    }));
-                }
-                MenuChoice::Detach => out.push(Intent::DetachGraph { node_id }),
+        let (choice, node_id) = (pick?, self.node_id?);
+        match choice {
+            MenuChoice::Publish => Some(AppCommand::Graph(GraphCommand::PublishGraphToLibrary {
+                node_id,
+            })),
+            MenuChoice::Detach => {
+                out.push(Intent::DetachGraph { node_id });
+                None
             }
         }
     }

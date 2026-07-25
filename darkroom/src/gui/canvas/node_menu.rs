@@ -48,13 +48,15 @@ enum MenuChoice {
 }
 
 impl NodeMenuUi {
+    /// Returns the command a pick resolves to, if any — the canvas decides
+    /// whether it wins the frame. A structural pick is stashed for the
+    /// `Editor` instead (see [`Self::take_action`]) and yields `None`.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         out: &mut Vec<Intent>,
-        cmd: &mut Option<AppCommand>,
-    ) {
+    ) -> Option<AppCommand> {
         // Latch on a secondary-click of any node body (boundary interface
         // nodes carry no structural identity to duplicate/remove, so they're
         // skipped), read from last frame's response. Right-click selects the
@@ -112,11 +114,12 @@ impl NodeMenuUi {
             chosen
         });
         match pick {
-            Some(MenuChoice::Run(node_id)) => {
-                *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
+            Some(MenuChoice::Run(node_id)) => Some(AppCommand::Run(RunCommand::Node(node_id))),
+            Some(MenuChoice::Action(action)) => {
+                self.action = Some(action);
+                None
             }
-            Some(MenuChoice::Action(action)) => self.action = Some(action),
-            None => {}
+            None => None,
         }
     }
 
