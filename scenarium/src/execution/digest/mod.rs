@@ -38,8 +38,7 @@
 use blake3::Hasher;
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::program::index::NodeIdx;
-use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::definition::FuncBehavior;

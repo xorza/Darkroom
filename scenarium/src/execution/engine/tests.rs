@@ -5962,8 +5962,7 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::program::index::NodeIdx;
-    use crate::execution::program::index::OutputAddr;
+    use crate::execution::program::index::{NodeIdx, OutputAddr};
     use crate::execution::program::{ExecutionInput, ExecutionOutput, ExecutionProgram};
     use crate::graph::Graph;
     use crate::graph::NodeKind;

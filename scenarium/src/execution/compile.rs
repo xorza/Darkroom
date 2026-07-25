@@ -101,11 +101,14 @@ impl CompiledGraph {
             }
         }
 
-        let mut closure: Vec<ExecutionNodeId> = in_closure
+        let closure: Vec<ExecutionNodeId> = in_closure
             .iter()
             .map(|node_idx| program.e_node_ids[node_idx])
             .collect();
-        closure.sort_unstable();
+        debug_assert!(
+            closure.is_sorted(),
+            "dense indices are assigned in id order, so an ascending index walk yields ascending ids"
+        );
         closure
     }
 }
@@ -144,9 +147,7 @@ impl Compiler {
         // `Graph`. Everything downstream is boundary-agnostic (func nodes only).
         let mut program = ExecutionProgram::default();
         let mut flatten_map = FlattenMap::default();
-        let mut e_nodes = HashMap::new();
         self.flattener.build(
-            &mut e_nodes,
             Pools {
                 inputs: &mut program.inputs,
                 outputs: &mut program.outputs,
@@ -159,7 +160,7 @@ impl Compiler {
 
         // Assign dense node indices, then intern the id-based edge fixups —
         // the only id hashing the compiled program ever pays.
-        program.adopt_nodes(e_nodes);
+        program.adopt_nodes(&mut self.flattener.e_nodes);
         program.intern_bindings(&self.flattener.pending_binds);
         program.apply_subscriptions(
             self.flattener

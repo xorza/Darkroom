@@ -12,7 +12,7 @@
 //!
 //! See `README.md` Part A §5.
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashSet;
 
 use crate::execution::identity::{
     ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
@@ -51,6 +51,10 @@ pub(crate) struct Flattener {
     /// by the compiler after adoption
     /// ([`ExecutionProgram::intern_bindings`]). Reused across builds.
     pub(crate) pending_binds: Vec<(u32, ExecutionOutputPort)>,
+    /// Flat nodes in emit order. Nothing in the walk looks one up, so this is a
+    /// plain vector; the compiler sorts and drains it into the program
+    /// ([`ExecutionProgram::adopt_nodes`]). Reused across builds.
+    pub(crate) e_nodes: Vec<(ExecutionNodeId, ExecutionNode)>,
 }
 
 /// The graph's packed port pools, rebuilt each `build`.
@@ -62,11 +66,10 @@ pub(crate) struct Pools<'a> {
 }
 
 impl Flattener {
-    /// Flatten `root` into `e_nodes`, rebuilding the packed pools fresh from the
-    /// library.
+    /// Flatten `root` into [`Self::e_nodes`], rebuilding the packed pools fresh
+    /// from the library.
     pub(crate) fn build(
         &mut self,
-        e_nodes: &mut HashMap<ExecutionNodeId, ExecutionNode>,
         pools: Pools<'_>,
         root: &Graph,
         library: &Library,
@@ -76,7 +79,7 @@ impl Flattener {
         self.seen_shared.clear();
         self.subs.clear();
         self.pending_binds.clear();
-        e_nodes.clear();
+        self.e_nodes.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
         flatten.reset();
@@ -96,7 +99,7 @@ impl Flattener {
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 pending_binds: &mut self.pending_binds,
-                e_nodes,
+                e_nodes: &mut self.e_nodes,
                 inputs: pools.inputs,
                 outputs: pools.outputs,
                 events: pools.events,
@@ -142,7 +145,7 @@ struct Run<'a> {
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<ExecutionSubscription>,
     pending_binds: &'a mut Vec<(u32, ExecutionOutputPort)>,
-    e_nodes: &'a mut HashMap<ExecutionNodeId, ExecutionNode>,
+    e_nodes: &'a mut Vec<(ExecutionNodeId, ExecutionNode)>,
     /// The inputs pool being built this update.
     inputs: &'a mut Pool<ExecutionInput>,
     outputs: &'a mut Pool<ExecutionOutput>,
@@ -261,7 +264,9 @@ impl<'a> Run<'a> {
                 }));
             let inputs_start = inputs.start as usize;
 
-            let previous = self.e_nodes.insert(
+            // Id uniqueness is enforced when the program adopts these
+            // (`ExecutionProgram::push`), so the walk just appends.
+            self.e_nodes.push((
                 e_node_id,
                 ExecutionNode {
                     sink: func.sink,
@@ -276,8 +281,7 @@ impl<'a> Run<'a> {
                     version: func.version,
                     lambda: func.lambda.clone(),
                 },
-            );
-            debug_assert!(previous.is_none(), "flattened node ids must be unique");
+            ));
 
             // Record where this flat node came from (current scope + authoring
             // id) so outcomes map back to editor nodes.
