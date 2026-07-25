@@ -120,15 +120,22 @@ pub(crate) enum ItemRef {
 }
 
 impl ItemRef {
+    /// The node this key lives on — the node itself, or the one a pinned
+    /// output hangs off. Both kinds die with their node, so this is what a
+    /// liveness check (a mid-drag delete, a selection prune) tests.
+    pub(crate) fn owner(self) -> NodeId {
+        match self {
+            ItemRef::Node(id) => id,
+            ItemRef::Pin(port) => port.node_id,
+        }
+    }
+
     /// Whether this key names something that lives on `node_id` — the node
     /// itself, or one of its pinned outputs. Used to prune a node's
     /// selection membership and view items (both forms) when it's removed
     /// from the graph.
     pub(crate) fn belongs_to(self, node_id: NodeId) -> bool {
-        match self {
-            ItemRef::Node(id) => id == node_id,
-            ItemRef::Pin(port) => port.node_id == node_id,
-        }
+        self.owner() == node_id
     }
 }
 
