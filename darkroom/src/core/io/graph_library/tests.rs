@@ -5,11 +5,19 @@ use scenarium::{GraphDef, GraphEvent, GraphId, NodeId};
 
 use crate::core::graph_library::GraphLibrary;
 use crate::core::io::graph_library::{
-    GraphLibraryLoadError, GraphLibraryReadError, broken_path, load_from, save_to,
+    GraphLibraryLoadError, GraphLibraryReadError, LibraryEntry, broken_path, commit_entry_to,
+    load_from, write_library,
 };
 
 fn graph(name: &str) -> GraphDef {
     GraphDef::new(name).category("test")
+}
+
+fn entry(origin: Option<GraphId>, name: &str) -> LibraryEntry {
+    LibraryEntry {
+        origin,
+        graph: graph(name),
+    }
 }
 
 fn library<const N: usize>(names: [&str; N]) -> GraphLibrary {
@@ -26,7 +34,7 @@ fn save_load_roundtrip() {
     let path = test_output_path("darkroom_graph_library/roundtrip.json");
     let _ = std::fs::remove_file(&path);
     let library = library(["blur", "sharpen"]);
-    save_to(&path, &library).unwrap();
+    write_library(&path, &library).unwrap();
 
     assert_eq!(load_from(&path).unwrap().graphs, library.graphs);
 }
@@ -66,7 +74,7 @@ fn corrupt_file_is_quarantined_and_the_slot_reusable() {
     assert_eq!(std::fs::read_to_string(&broken).unwrap(), garbage);
 
     let recovered = library(["recovered"]);
-    save_to(&path, &recovered).unwrap();
+    write_library(&path, &recovered).unwrap();
     assert_eq!(load_from(&path).unwrap().graphs, recovered.graphs);
     assert_eq!(std::fs::read_to_string(&broken).unwrap(), garbage);
 }
@@ -84,7 +92,7 @@ fn structurally_invalid_graph_is_quarantined() {
     let library = GraphLibrary {
         graphs: HashMap::from([(GraphId::unique(), bad)]),
     };
-    save_to(&path, &library).unwrap();
+    write_library(&path, &library).unwrap();
 
     let error = load_from(&path).unwrap_err();
     assert!(
@@ -111,7 +119,10 @@ fn save_refuses_to_overwrite_an_unreadable_file() {
     let garbage = "not a graph library";
     std::fs::write(&path, garbage).unwrap();
 
-    let error = format!("{:#}", save_to(&path, &library(["x"])).unwrap_err());
+    let error = format!(
+        "{:#}",
+        commit_entry_to(&path, entry(None, "x")).unwrap_err()
+    );
     assert!(error.contains(path.to_str().unwrap()), "{error}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), garbage);
 }
@@ -122,6 +133,56 @@ fn unwritable_path_reports_save_failure() {
     if path.parent().unwrap().exists() {
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
-    let error = format!("{:#}", save_to(&path, &library(["x"])).unwrap_err());
+    let error = format!(
+        "{:#}",
+        commit_entry_to(&path, entry(None, "x")).unwrap_err()
+    );
     assert!(error.contains(path.to_str().unwrap()), "{error}");
+}
+
+#[test]
+fn committing_merges_into_the_file_rather_than_overwriting_it() {
+    // The lost-update guard. Each instance holds its own snapshot, so a
+    // commit that wrote the caller's whole library would drop everything
+    // added since that snapshot was taken.
+    let path = test_output_path("darkroom_graph_library/merge.json");
+    let _ = std::fs::remove_file(&path);
+
+    let ours = commit_entry_to(&path, entry(None, "ours")).unwrap();
+    // Stand in for a second instance publishing between our read and write.
+    let theirs = commit_entry_to(&path, entry(None, "theirs")).unwrap();
+    assert_ne!(ours.id, theirs.id, "independent adds get independent ids");
+
+    let on_disk = load_from(&path).unwrap();
+    assert_eq!(on_disk.graphs.len(), 2, "both entries survive");
+    assert_eq!(on_disk.graphs[&ours.id].interface.name, "ours");
+    assert_eq!(on_disk.graphs[&theirs.id].interface.name, "theirs");
+    assert_eq!(
+        theirs.library.graphs.len(),
+        2,
+        "the committer adopts the merged library, not just its own entry"
+    );
+}
+
+#[test]
+fn an_origin_is_reused_only_while_the_file_still_holds_it() {
+    // Republishing updates the entry in place; if that entry is gone from
+    // the file — deleted by another instance — the commit mints a fresh id
+    // instead of resurrecting a dead one.
+    let path = test_output_path("darkroom_graph_library/origin.json");
+    let _ = std::fs::remove_file(&path);
+
+    let first = commit_entry_to(&path, entry(None, "v1")).unwrap();
+    let second = commit_entry_to(&path, entry(Some(first.id), "v2")).unwrap();
+    assert_eq!(second.id, first.id, "a live origin is updated in place");
+    assert_eq!(second.library.graphs.len(), 1, "no duplicate entry");
+    assert_eq!(second.library.graphs[&second.id].interface.name, "v2");
+
+    let stale = GraphId::unique();
+    let third = commit_entry_to(&path, entry(Some(stale), "v3")).unwrap();
+    assert_ne!(
+        third.id, stale,
+        "an origin the file lost becomes a fresh id"
+    );
+    assert_eq!(third.library.graphs.len(), 2);
 }

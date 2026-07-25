@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
-use scenarium::{GraphDef, GraphId, NodeId, math_library, system_library, worker_events_library};
+use scenarium::{GraphDef, NodeId, math_library, system_library, worker_events_library};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::publish;
@@ -40,10 +40,14 @@ pub(crate) struct RuntimeLibrary {
     model_paths: MlModelPaths,
 }
 
-#[derive(Debug)]
-pub(crate) struct RuntimeLibraryChange {
-    pub(crate) changed: bool,
-    pub(crate) persist_error: Option<GraphLibrarySaveError>,
+/// What a graph-library edit did. There is no "changed but unsaved" state:
+/// the file is written before the in-memory library is adopted, so an `Err`
+/// means nothing changed in memory, on disk, or in the document.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LibraryEdit {
+    Committed,
+    /// Nothing to publish — the node isn't a local graph instance.
+    Skipped,
 }
 
 impl RuntimeLibrary {
@@ -67,36 +71,46 @@ impl RuntimeLibrary {
         }
     }
 
-    pub(crate) fn import_template(&mut self, graph: GraphDef) -> RuntimeLibraryChange {
-        let graph_id = GraphId::unique();
-        self.graph_library
-            .graphs
-            .insert(graph_id, graph.clone_mapped());
-        self.finish_graph_library_change(true)
+    /// Add an imported template to the library. Ids are remapped so a
+    /// template written elsewhere can't collide with an existing entry.
+    pub(crate) fn import_template(
+        &mut self,
+        graph: GraphDef,
+    ) -> Result<LibraryEdit, GraphLibrarySaveError> {
+        let committed = graph_library_io::commit_entry(graph_library_io::LibraryEntry {
+            origin: None,
+            graph: graph.clone_mapped(),
+        })?;
+        self.adopt(committed.library);
+        Ok(LibraryEdit::Committed)
     }
 
+    /// Publish `node_id`'s local graph to the library. The file is written
+    /// before anything else moves, so a failed save leaves the library, the
+    /// published snapshot, and the document's lineage exactly as they were.
     pub(crate) fn publish_graph(
         &mut self,
         document: &mut Document,
         target: GraphRef,
         node_id: NodeId,
-    ) -> RuntimeLibraryChange {
-        let changed = publish::publish_graph(document, &mut self.graph_library, target, node_id);
-        self.finish_graph_library_change(changed)
+    ) -> Result<LibraryEdit, GraphLibrarySaveError> {
+        let Some(publication) = publish::resolve_publication(document, target, node_id) else {
+            return Ok(LibraryEdit::Skipped);
+        };
+        let committed = graph_library_io::commit_entry(graph_library_io::LibraryEntry {
+            origin: publication.origin,
+            graph: publication.graph,
+        })?;
+        self.adopt(committed.library);
+        publish::link_origin(document, target, publication.local_id, committed.id);
+        Ok(LibraryEdit::Committed)
     }
 
-    fn finish_graph_library_change(&mut self, changed: bool) -> RuntimeLibraryChange {
-        let persist_error = changed
-            .then(|| graph_library_io::save(&self.graph_library))
-            .and_then(Result::err);
-        let outcome = RuntimeLibraryChange {
-            changed,
-            persist_error,
-        };
-        if outcome.changed {
-            self.recompose();
-        }
-        outcome
+    /// Take the library the file now holds in place of our own copy, and
+    /// republish the merged registry built from it.
+    fn adopt(&mut self, graph_library: GraphLibrary) {
+        self.graph_library = graph_library;
+        self.recompose();
     }
 
     pub(crate) fn update_ml_model_paths(&mut self, paths: &MlModelPaths) -> bool {

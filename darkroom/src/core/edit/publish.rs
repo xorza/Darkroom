@@ -5,51 +5,54 @@ use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::{Document, GraphRef, ItemRef};
-use crate::core::graph_library::GraphLibrary;
 
-pub(crate) fn publish_graph(
-    document: &mut Document,
-    graph_library: &mut GraphLibrary,
+/// A publication read out of the document but not yet committed anywhere.
+/// Resolving and committing are separate so the library file is written
+/// *first*: only once the entry is durably on disk does the caller adopt
+/// the merged library and [`link_origin`] the local graph to it. A publish
+/// that fails to persist then leaves nothing behind — no phantom library
+/// entry that works all session and vanishes on restart, and no document
+/// lineage pointing at one.
+#[derive(Debug)]
+pub(crate) struct Publication {
+    /// The local graph being published — the one whose lineage the commit
+    /// re-points.
+    pub(crate) local_id: GraphId,
+    /// The library entry this local graph came from, if any. Whether it
+    /// still exists is decided against the file at commit time, not here.
+    pub(crate) origin: Option<GraphId>,
+    pub(crate) graph: GraphDef,
+}
+
+/// Read the publication `node_id` names, or `None` when it isn't a local
+/// graph instance. Pure — the document is untouched until [`link_origin`].
+pub(crate) fn resolve_publication(
+    document: &Document,
     target: GraphRef,
     node_id: NodeId,
-) -> bool {
-    let Some(source) = (|| {
-        let scope = document.scope(target)?;
-        let NodeKind::Graph(GraphLink::Local(local_id)) =
-            scope.graph.find(node_id, NodeSearch::TopLevel)?.kind
-        else {
-            return None;
-        };
-        let local = scope.graph.graphs.get(&local_id)?;
-        let existing_lib = local
-            .interface
-            .origin
-            .filter(|id| graph_library.graphs.contains_key(id));
-        Some(PublishSource {
-            local_id,
-            graph: local.clone_mapped(),
-            existing_id: existing_lib,
-        })
-    })() else {
-        return false;
+) -> Option<Publication> {
+    let scope = document.scope(target)?;
+    let NodeKind::Graph(GraphLink::Local(local_id)) =
+        scope.graph.find(node_id, NodeSearch::TopLevel)?.kind
+    else {
+        return None;
     };
-
-    let new_origin = source.existing_id.unwrap_or_else(GraphId::unique);
-    graph_library.graphs.insert(new_origin, source.graph);
-    set_origin(document, target, source.local_id, new_origin);
-    true
+    let local = scope.graph.graphs.get(&local_id)?;
+    Some(Publication {
+        local_id,
+        origin: local.interface.origin,
+        graph: local.clone_mapped(),
+    })
 }
 
-#[derive(Debug)]
-struct PublishSource {
-    local_id: GraphId,
-    graph: GraphDef,
-    existing_id: Option<GraphId>,
-}
-
-/// Point the local graph at the library entry `origin`. Lineage metadata —
-/// not routed through undo.
-fn set_origin(document: &mut Document, parent: GraphRef, graph_id: GraphId, origin: GraphId) {
+/// Point the local graph at the library entry it was committed to. Lineage
+/// metadata — not routed through undo.
+pub(crate) fn link_origin(
+    document: &mut Document,
+    parent: GraphRef,
+    graph_id: GraphId,
+    origin: GraphId,
+) {
     if let Some(graph) = document.graph_mut(parent)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
@@ -106,8 +109,7 @@ mod tests {
     use scenarium::{FuncId, GraphDef, GraphId, GraphLink, Node, NodeId, NodeKind};
 
     use crate::core::document::{Document, GraphRef};
-    use crate::core::edit::publish::publish_graph;
-    use crate::core::graph_library::GraphLibrary;
+    use crate::core::edit::publish::{link_origin, resolve_publication};
 
     #[derive(Debug)]
     struct LocalInstance {
@@ -134,88 +136,59 @@ mod tests {
         graph
     }
 
-    #[test]
-    fn publish_updates_linked_library_def_in_place() {
-        let lib_id = GraphId::unique();
-        let mut graph_library = GraphLibrary::default();
-        graph_library.graphs.insert(lib_id, GraphDef::new("Old"));
-
-        // Local copy linked to that library graph, with diverged content.
-        let mut doc = Document::default();
-        let local = add_local_instance(&mut doc, graph("New", Some(lib_id)));
-
-        assert!(publish_graph(
-            &mut doc,
-            &mut graph_library,
-            GraphRef::Main,
-            local.node_id
-        ));
-        assert_eq!(
-            graph_library.graphs.len(),
-            1,
-            "update in place — no new library entry"
-        );
-        assert_eq!(
-            graph_library.graphs.get(&lib_id).unwrap().interface.name,
-            "New",
-            "library graph took the local graph's content"
-        );
-        assert_eq!(
-            doc.graph
-                .graphs
-                .get(&local.graph_id)
-                .unwrap()
-                .interface
-                .origin,
-            Some(lib_id),
-            "lineage preserved"
-        );
+    fn origin_of(doc: &Document, graph_id: GraphId) -> Option<GraphId> {
+        doc.graph.graphs.get(&graph_id).unwrap().interface.origin
     }
 
     #[test]
-    fn publish_without_origin_creates_entry_and_links_it() {
-        let mut graph_library = GraphLibrary::default();
+    fn resolving_reads_the_local_graph_without_touching_the_document() {
+        // Resolve is the read half: it reports what would be published and
+        // the lineage to reuse, but commits nothing — the library file is
+        // written before `link_origin` moves anything in the document.
+        let lib_id = GraphId::unique();
+        let mut doc = Document::default();
+        let linked = add_local_instance(&mut doc, graph("Linked", Some(lib_id)));
+        let standalone = add_local_instance(&mut doc, graph("Standalone", None));
+
+        let publication = resolve_publication(&doc, GraphRef::Main, linked.node_id)
+            .expect("a local graph instance resolves");
+        assert_eq!(publication.local_id, linked.graph_id);
+        assert_eq!(
+            publication.origin,
+            Some(lib_id),
+            "a linked graph carries its lineage forward for the commit to reuse"
+        );
+        assert_eq!(publication.graph.interface.name, "Linked");
+        assert_eq!(
+            origin_of(&doc, linked.graph_id),
+            Some(lib_id),
+            "resolving wrote nothing"
+        );
+
+        let publication = resolve_publication(&doc, GraphRef::Main, standalone.node_id)
+            .expect("an unlinked local graph resolves too");
+        assert_eq!(
+            publication.origin, None,
+            "no lineage means the commit mints a fresh id"
+        );
+
+        // Only a local graph instance publishes.
+        let plain = doc.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+        assert!(resolve_publication(&doc, GraphRef::Main, plain).is_none());
+        assert!(resolve_publication(&doc, GraphRef::Main, NodeId::unique()).is_none());
+    }
+
+    #[test]
+    fn linking_points_the_local_graph_at_its_committed_entry() {
         let mut doc = Document::default();
         let local = add_local_instance(&mut doc, graph("Standalone", None));
+        let committed = GraphId::unique();
 
-        assert!(publish_graph(
-            &mut doc,
-            &mut graph_library,
-            GraphRef::Main,
-            local.node_id
-        ));
-        assert_eq!(
-            graph_library.graphs.len(),
-            1,
-            "a new graph-library entry was added"
-        );
-        let linked = doc
-            .graph
-            .graphs
-            .get(&local.graph_id)
-            .unwrap()
-            .interface
-            .origin
-            .expect("local graph linked to the new entry");
-        assert!(
-            graph_library.graphs.contains_key(&linked),
-            "origin points at the freshly-created library graph"
-        );
-    }
+        link_origin(&mut doc, GraphRef::Main, local.graph_id, committed);
+        assert_eq!(origin_of(&doc, local.graph_id), Some(committed));
 
-    #[test]
-    fn publish_non_graph_node_is_a_noop() {
-        let mut graph_library = GraphLibrary::default();
-        let mut doc = Document::default();
-        let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let node_id = doc.graph.add(node);
-
-        assert!(!publish_graph(
-            &mut doc,
-            &mut graph_library,
-            GraphRef::Main,
-            node_id
-        ));
-        assert!(graph_library.graphs.is_empty(), "nothing published");
+        // A graph that has since vanished is a no-op, not a panic.
+        doc.graph.graphs.remove(&local.graph_id);
+        link_origin(&mut doc, GraphRef::Main, local.graph_id, committed);
     }
 }
