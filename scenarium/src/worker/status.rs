@@ -75,8 +75,17 @@ pub(crate) struct WorkerStatusPublisher {
 }
 
 impl WorkerStatusPublisher {
+    /// Claim the retained allocation for the next snapshot. When the previously published
+    /// one is still queued at the consumer the allocation can't be reused — and
+    /// `Arc::make_mut` would deep-clone (per-element `String`s and all) vectors this
+    /// function clears three lines later — so publish into a fresh one instead and let the
+    /// queued snapshot die with its reader.
     fn prepare(&mut self, activity: WorkerActivity, kind: WorkerStatusKind) -> &mut WorkerStatus {
-        let update = Arc::make_mut(&mut self.status);
+        if Arc::get_mut(&mut self.status).is_none() {
+            self.status = Arc::default();
+        }
+        let update = Arc::get_mut(&mut self.status)
+            .expect("the status allocation is uniquely held after the swap above");
         update.activity = activity;
         update.kind = kind;
         update.nodes.clear();

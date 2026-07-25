@@ -590,6 +590,12 @@ mod tests {
         assert_eq!(patch.nodes.len(), 2);
         assert_eq!(idle.activity, WorkerActivity::Idle);
         assert!(idle.nodes.is_empty());
+        assert_eq!(
+            idle.nodes.capacity(),
+            0,
+            "publishing over a still-queued snapshot allocates fresh rather than \
+             deep-cloning vectors it immediately clears"
+        );
 
         drop(patch);
         let allocation = Arc::as_ptr(&idle);
