@@ -88,19 +88,19 @@ impl ExecStatus {
 
 /// Everything the editor knows about one node from the last run.
 #[derive(Default, Debug)]
-pub(crate) struct NodeRunState {
-    pub(crate) status: ExecStatus,
-    pub(crate) logs: Vec<NodeLog>,
+struct NodeRunState {
+    status: ExecStatus,
+    logs: Vec<NodeLog>,
     /// Human-readable messages for this run's failures, folded on the same
     /// attribution as `status` (a graph instance collects its subtree's).
     /// Empty unless the node errored; drives the inspector's error detail so
     /// a failed node reads e.g. "no light frames provided", not just "errored".
-    pub(crate) errors: Vec<String>,
+    errors: Vec<String>,
     /// RAM this node's cached output holds after the last run (system vs GPU),
     /// summed across its flattened contributors — a graph instance aggregates
     /// its interior. Zero unless the node retains a value; drives the node body's
     /// memory readout.
-    pub(crate) ram: RamUsage,
+    ram: RamUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

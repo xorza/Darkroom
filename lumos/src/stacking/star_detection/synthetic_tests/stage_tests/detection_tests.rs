@@ -9,7 +9,7 @@ use crate::stacking::star_detection::test_common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::testing::{estimate_background, init_tracing};
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

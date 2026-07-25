@@ -24,18 +24,18 @@ mod simd_neon;
 // Coefficients from Cephes library (Stephen Moshier), public domain.
 // Max relative error < 2e-13.
 
-pub(crate) const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
-pub(crate) const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
-pub(crate) const EXP_P2: f64 = 1.0;
+const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
+const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
+const EXP_P2: f64 = 1.0;
 
-pub(crate) const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
-pub(crate) const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
-pub(crate) const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
-pub(crate) const EXP_Q3: f64 = 2.0;
+const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
+const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
+const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
+const EXP_Q3: f64 = 2.0;
 
 // ln(2) split into high and low parts for exact range reduction
-pub(crate) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
-pub(crate) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
+const LN2_HI: f64 = 6.931_457_519_531_25e-1;
+const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     LMConfig, LMModel, LMResult, accumulate_chi2, build_normal_equations_scalar, optimize,
@@ -48,43 +48,43 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 /// Configuration for Gaussian fitting.
-pub(crate) type GaussianFitConfig = LMConfig;
+pub(super) type GaussianFitConfig = LMConfig;
 
 /// Result of 2D Gaussian fitting.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct GaussianFitResult {
+pub(super) struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
-    pub pos: Vec2,
+    pub(super) pos: Vec2,
     /// Sigma in X and Y directions.
-    pub sigma: Vec2,
+    pub(super) sigma: Vec2,
     /// Whether the fit converged.
-    pub converged: bool,
+    pub(super) converged: bool,
     /// Fit diagnostics (amplitude/background/RMS residual/iteration count) that no
     /// production caller reads — `measure_star` only uses `pos`/`sigma`/`converged` —
     /// but that tests need to verify LM convergence against synthetic ground truth.
     #[allow(dead_code)] // read only by tests
-    pub debug: GaussianFitDebug,
+    debug: GaussianFitDebug,
 }
 
 /// Fit diagnostics kept for tests; see [`GaussianFitResult::debug`].
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // read only by tests
-pub(crate) struct GaussianFitDebug {
+struct GaussianFitDebug {
     /// Amplitude of Gaussian.
-    pub amplitude: f32,
+    amplitude: f32,
     /// Background level.
-    pub background: f32,
+    background: f32,
     /// RMS residual of fit.
-    pub rms_residual: f32,
+    rms_residual: f32,
     /// Number of iterations used.
-    pub iterations: usize,
+    iterations: usize,
 }
 
 /// 2D Gaussian model for L-M optimization (6 parameters).
 /// Parameters: [x0, y0, amplitude, sigma_x, sigma_y, background]
 #[derive(Debug)]
-pub(crate) struct Gaussian2D {
-    pub stamp_radius: f64,
+struct Gaussian2D {
+    stamp_radius: f64,
 }
 
 impl LMModel<6> for Gaussian2D {
@@ -205,7 +205,7 @@ impl LMModel<6> for Gaussian2D {
 /// centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the CCD
 /// noise model so the shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain
 /// unweighted fit.
-pub(crate) fn fit_gaussian_2d(
+pub(super) fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
     stamp_radius: usize,

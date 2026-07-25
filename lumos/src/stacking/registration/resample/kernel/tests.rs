@@ -1,16 +1,16 @@
 use std::f32::consts::PI;
 
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
-use crate::stacking::registration::resample::kernel::{self, test_support};
+use crate::stacking::registration::resample::kernel::{self, internals};
 use glam::Vec2;
 use imaginarium::Buffer2;
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
-    test_support::interpolate(
+    internals::interpolate(
         data,
         Vec2::new(x, y),
-        &config::test_support::warp_params(method),
+        &config::internals::warp_params(method),
     )
 }
 
@@ -455,7 +455,7 @@ fn test_custom_border_value() {
     };
 
     // Fully outside should use the custom border value
-    let val = test_support::interpolate(&data_buf, Vec2::new(-5.0, -5.0), &params);
+    let val = internals::interpolate(&data_buf, Vec2::new(-5.0, -5.0), &params);
     assert!(
         (val - (-99.0)).abs() < TOL,
         "Expected border_value -99.0, got {val}"

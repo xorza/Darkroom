@@ -73,7 +73,7 @@ impl MeshWorkspace {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::background_mesh::TileGrid;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
@@ -103,7 +103,7 @@ mod tests {
     use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::concurrency::test_support::{all_by, job_count};
+    use crate::concurrency::internals::{all_by, job_count};
     use imaginarium::Buffer2;
 
     const SIGMA_CLIP_ITERATIONS: usize = 2;

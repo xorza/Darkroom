@@ -18,7 +18,7 @@ use crate::stacking::registration::triangle::voting::{
 ///
 /// # Returns
 /// Vector of triangles formed from neighboring points
-pub(crate) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
+pub(super) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     let tree = match KdTree::build(positions) {
         Some(t) => t,
         None => return Vec::new(),
@@ -101,7 +101,7 @@ pub(crate) fn match_triangles(
 ///
 /// # Returns
 /// Vector of triangle vertex indices [i, j, k] where i < j < k
-pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
+pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
     let n = tree.len();
     if n < 3 {
         return Vec::new();

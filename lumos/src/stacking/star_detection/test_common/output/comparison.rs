@@ -10,14 +10,14 @@ use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Colors for comparison images.
-pub(crate) mod colors {
+mod colors {
     use imaginarium::Color;
 
-    pub(crate) const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
-    pub(crate) const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
-    pub(crate) const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
-    pub(crate) const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
-    pub(crate) const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
+    pub(super) const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
+    pub(super) const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
+    pub(super) const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
+    pub(super) const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
+    pub(super) const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
 }
 
 /// Create a comparison image showing ground truth and detected stars.
@@ -36,7 +36,7 @@ pub(crate) mod colors {
 /// - Red circles: missed stars
 /// - Yellow circles: false positives
 /// - Cyan crosses: detected centroids
-pub(crate) fn create_comparison_image(
+pub(super) fn create_comparison_image(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -91,17 +91,17 @@ pub(crate) fn create_comparison_image(
 
 /// Result of matching detected stars to ground truth.
 #[derive(Debug, Clone)]
-pub(crate) struct MatchResult {
+pub(super) struct MatchResult {
     /// Indices of matched ground truth stars
-    pub matched_truth: Vec<usize>,
+    pub(super) matched_truth: Vec<usize>,
     /// Indices of matched detected stars
-    pub matched_detected: Vec<usize>,
+    pub(super) matched_detected: Vec<usize>,
     /// Pairs of (truth_idx, detected_idx, distance)
-    pub pairs: Vec<(usize, usize, f32)>,
+    pub(super) pairs: Vec<(usize, usize, f32)>,
 }
 
 /// Match detected stars to ground truth using nearest neighbor.
-pub(crate) fn match_stars(
+pub(super) fn match_stars(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     max_distance: f32,

@@ -2,15 +2,15 @@
 
 use std::f64::consts::PI;
 
-use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
-use crate::stacking::star_detection::centroid::moffat_fit::*;
-use crate::stacking::star_detection::centroid::test_utils::{
+use crate::stacking::star_detection::centroid::internals::{
     add_noise, approx_eq, compute_hessian_gradient,
 };
+use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
+use crate::stacking::star_detection::centroid::moffat_fit::*;
 use glam::Vec2;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn make_moffat_stamp(
+fn make_moffat_stamp(
     width: usize,
     height: usize,
     cx: f32,

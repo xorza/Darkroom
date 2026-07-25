@@ -130,10 +130,7 @@ fn compose(model_paths: &MlModelPaths, graph_library: &GraphLibrary) -> Scenariu
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::sync::Arc;
 
     use scenarium::Library;
@@ -148,3 +145,6 @@ pub(crate) mod test_support {
         library.replace(Arc::new(replacement));
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -49,18 +49,18 @@
 //! ```
 
 pub(crate) mod background;
-pub(crate) mod centroid;
+mod centroid;
 pub(crate) mod config;
 mod convolution;
-pub(crate) mod deblend;
+mod deblend;
 pub(crate) mod detector;
 pub(crate) mod error;
-pub(crate) mod labeling;
+mod labeling;
 mod mask_dilation;
 mod median_filter;
 pub(crate) mod resources;
 pub(crate) mod star;
-pub(crate) mod threshold_mask;
+mod threshold_mask;
 
 #[cfg(test)]
 mod mem_budget_probe;
@@ -71,4 +71,4 @@ mod real_data_tests;
 #[cfg(test)]
 mod synthetic_tests;
 #[cfg(test)]
-pub(crate) mod test_common;
+mod test_common;

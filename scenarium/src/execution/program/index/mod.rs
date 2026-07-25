@@ -20,16 +20,6 @@ impl OutputIdx {
     }
 }
 
-impl From<usize> for OutputIdx {
-    fn from(i: usize) -> Self {
-        debug_assert!(
-            u32::try_from(i).is_ok(),
-            "output pool index must fit in u32"
-        );
-        OutputIdx(i as u32)
-    }
-}
-
 /// A column aligned to the program's flat output pool. Node-local views are sliced by
 /// their compiled output range, while individual entries require an [`OutputIdx`].
 #[derive(Debug, Clone, Default)]
@@ -221,12 +211,22 @@ impl<T> OutputColumn<T> {
 }
 
 #[cfg(test)]
-mod test_support {
-    use crate::execution::program::index::OutputColumn;
+mod internals {
+    use crate::execution::program::index::{OutputColumn, OutputIdx};
 
     impl<T> OutputColumn<T> {
         pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
             self.values.iter()
+        }
+    }
+
+    impl From<usize> for OutputIdx {
+        fn from(i: usize) -> Self {
+            debug_assert!(
+                u32::try_from(i).is_ok(),
+                "output pool index must fit in u32"
+            );
+            OutputIdx(i as u32)
         }
     }
 }

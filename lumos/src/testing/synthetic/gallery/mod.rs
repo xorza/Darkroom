@@ -14,7 +14,7 @@
 use std::f32::consts::FRAC_PI_4;
 use std::path::PathBuf;
 
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use glam::{DVec2, Vec2};
 use image::GrayImage;
 use imaginarium::Buffer2;

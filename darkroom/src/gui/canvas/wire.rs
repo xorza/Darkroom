@@ -14,7 +14,7 @@ use glam::Vec2;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
-pub(crate) const MIN_HANDLE: f32 = 30.0;
+pub(super) const MIN_HANDLE: f32 = 30.0;
 
 /// Upper bound on the *vertical-gap* term of [`cubic_handles`]'s handle
 /// length, so a tall forward span bows into a gentle S rather than a huge loop.
@@ -30,9 +30,9 @@ const BACKREACH_GAIN: f32 = 10.0;
 /// The two interior control points of a connection cubic — the named result
 /// of each renderer's handle-placement function.
 #[derive(Debug)]
-pub(crate) struct CubicHandles {
-    pub(crate) p1: Vec2,
-    pub(crate) p2: Vec2,
+pub(super) struct CubicHandles {
+    pub(super) p1: Vec2,
+    pub(super) p2: Vec2,
 }
 
 /// Control points for a left-to-right cubic between `p0` (an output-ish
@@ -54,7 +54,7 @@ pub(crate) struct CubicHandles {
 ///   `sqrt` keeps the loop scaling with the backward distance (so a far-away
 ///   `p3` still gets a proper loop, not a stub) while growing slowly enough
 ///   that it never sprawls out to the sides.
-pub(crate) fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
+pub(super) fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     let vertical = ((p3.y - p0.y).abs() * 0.5).clamp(MIN_HANDLE, MAX_HANDLE);
     let backreach = BACKREACH_GAIN * (p0.x - p3.x).max(0.0).sqrt();
     let len = vertical.max(backreach);
@@ -67,7 +67,7 @@ pub(crate) fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
 /// Emit a stroked cubic-bezier wire (round caps) from `p0` to `p3` through
 /// `handles`. The single place the wire `Shape` is built, so data, event, and
 /// pin curves can't drift in width policy, cap, or primitive.
-pub(crate) fn add_cubic_wire(
+pub(super) fn add_cubic_wire(
     ui: &mut Ui,
     p0: Vec2,
     p3: Vec2,
@@ -120,7 +120,7 @@ pub(crate) fn toward(c: Color, to: Color, t: f32) -> Color {
 /// paint needs a `MOVE` subscription (a record per mouse move) to stay
 /// fresh on screen.
 #[derive(Debug)]
-pub(crate) struct WireEmphasis {
+pub(super) struct WireEmphasis {
     fading: bool,
     canvas_bg: Color,
 }
@@ -129,19 +129,19 @@ impl WireEmphasis {
     /// Resolve this frame's emphasis inputs. `fading` is "any wire gesture
     /// is active" — the callers OR together the two drag controllers and
     /// the breaker.
-    pub(crate) fn resolve(canvas_bg: Color, fading: bool) -> Self {
+    pub(super) fn resolve(canvas_bg: Color, fading: bool) -> Self {
         Self { fading, canvas_bg }
     }
 
     /// Whether this wire is hover-emphasized: an endpoint glyph is
     /// hovered. Never while a gesture fades the set — the snap target's
     /// forced endpoint hover must not re-emphasize a faded wire.
-    pub(crate) fn hovered(&self, endpoint_hovered: bool) -> bool {
+    pub(super) fn hovered(&self, endpoint_hovered: bool) -> bool {
         !self.fading && endpoint_hovered
     }
 
     /// The tiered color for a (non-broken) wire endpoint.
-    pub(crate) fn tint(&self, c: Color, emphasized: bool) -> Color {
+    pub(super) fn tint(&self, c: Color, emphasized: bool) -> Color {
         if self.fading {
             c.with_alpha(WIRE_DRAG_FADE)
         } else if emphasized {
@@ -153,7 +153,7 @@ impl WireEmphasis {
 
     /// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
     /// too: full width against the faded rest of the set is the alarm.
-    pub(crate) fn width(&self, base: f32, emphasized: bool) -> f32 {
+    pub(super) fn width(&self, base: f32, emphasized: bool) -> f32 {
         if emphasized {
             base * WIRE_HOVER_WIDTH
         } else {

@@ -19,11 +19,11 @@ use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]
-pub(crate) struct TpsConfig {
+struct TpsConfig {
     /// Regularization parameter (lambda). Higher values produce smoother
     /// interpolation but may not pass exactly through control points.
     /// Default: 0.0 (exact interpolation)
-    pub regularization: f64,
+    regularization: f64,
 }
 
 impl Default for TpsConfig {
@@ -39,7 +39,7 @@ impl Default for TpsConfig {
 /// This implements a smooth, non-rigid transformation that can model
 /// local distortions in optical systems.
 #[derive(Debug, Clone)]
-pub(crate) struct ThinPlateSpline {
+struct ThinPlateSpline {
     /// Control points in normalized coordinates
     control_points: Vec<DVec2>,
     /// Weights for the radial basis functions (x-direction)
@@ -66,11 +66,7 @@ impl ThinPlateSpline {
     ///
     /// # Returns
     /// A fitted TPS model, or None if fitting fails (e.g., singular matrix)
-    pub(crate) fn fit(
-        source_points: &[DVec2],
-        target_points: &[DVec2],
-        config: TpsConfig,
-    ) -> Option<Self> {
+    fn fit(source_points: &[DVec2], target_points: &[DVec2], config: TpsConfig) -> Option<Self> {
         let n = source_points.len();
         if n < 3 {
             return None; // Need at least 3 points for TPS
@@ -172,7 +168,7 @@ impl ThinPlateSpline {
     ///
     /// # Returns
     /// Transformed coordinates
-    pub(crate) fn transform(&self, p: DVec2) -> DVec2 {
+    fn transform(&self, p: DVec2) -> DVec2 {
         // Normalize input to the same space used during fitting
         let pn = (p - self.norm_center) / self.norm_scale;
 
@@ -201,7 +197,7 @@ impl ThinPlateSpline {
     ///
     /// # Returns
     /// Vector of transformed points
-    pub(crate) fn transform_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+    fn transform_points(&self, points: &[DVec2]) -> Vec<DVec2> {
         points.iter().map(|&p| self.transform(p)).collect()
     }
 
@@ -209,7 +205,7 @@ impl ThinPlateSpline {
     ///
     /// Lower values indicate smoother interpolation. This is useful for
     /// comparing different TPS fits or for choosing regularization parameters.
-    pub(crate) fn bending_energy(&self) -> f64 {
+    fn bending_energy(&self) -> f64 {
         let n = self.control_points.len();
         let mut energy = 0.0;
 
@@ -228,12 +224,12 @@ impl ThinPlateSpline {
     }
 
     /// Get the number of control points.
-    pub(crate) fn num_control_points(&self) -> usize {
+    fn num_control_points(&self) -> usize {
         self.control_points.len()
     }
 
     /// Get the control points (in normalized coordinates, not pixel space).
-    pub(crate) fn control_points(&self) -> &[DVec2] {
+    fn control_points(&self) -> &[DVec2] {
         &self.control_points
     }
 
@@ -242,7 +238,7 @@ impl ThinPlateSpline {
     /// Returns the distance between the transformed source points
     /// and the original target points. With zero regularization,
     /// these should be very close to zero.
-    pub(crate) fn compute_residuals(&self, target_points: &[DVec2]) -> Vec<f64> {
+    fn compute_residuals(&self, target_points: &[DVec2]) -> Vec<f64> {
         self.control_points
             .iter()
             .zip(target_points.iter())
@@ -287,7 +283,7 @@ fn compute_normalization(points: &[DVec2]) -> (DVec2, f64) {
 ///
 /// For r = 0, we define U(0) = 0 (the limit as r → 0).
 #[inline]
-pub(crate) fn tps_kernel(r: f64) -> f64 {
+fn tps_kernel(r: f64) -> f64 {
     if r < 1e-10 { 0.0 } else { r * r * r.ln() }
 }
 
@@ -359,19 +355,19 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
 /// This structure stores the distortion vectors at a grid of points,
 /// useful for visualization and analysis.
 #[derive(Debug, Clone)]
-pub(crate) struct DistortionMap {
+struct DistortionMap {
     /// Width of the grid
-    pub width: usize,
+    width: usize,
     /// Height of the grid
-    pub height: usize,
+    height: usize,
     /// Grid spacing in pixels
-    pub spacing: f64,
+    spacing: f64,
     /// Distortion vectors at each grid point
-    pub vectors: Vec<DVec2>,
+    vectors: Vec<DVec2>,
     /// Maximum distortion magnitude
-    pub max_magnitude: f64,
+    max_magnitude: f64,
     /// Mean distortion magnitude
-    pub mean_magnitude: f64,
+    mean_magnitude: f64,
 }
 
 impl DistortionMap {
@@ -382,7 +378,7 @@ impl DistortionMap {
     /// * `image_width` - Image width in pixels
     /// * `image_height` - Image height in pixels
     /// * `grid_spacing` - Spacing between grid points
-    pub(crate) fn from_tps(
+    fn from_tps(
         tps: &ThinPlateSpline,
         image_width: usize,
         image_height: usize,
@@ -421,7 +417,7 @@ impl DistortionMap {
     }
 
     /// Get the distortion vector at a grid position.
-    pub(crate) fn get(&self, gx: usize, gy: usize) -> Option<DVec2> {
+    fn get(&self, gx: usize, gy: usize) -> Option<DVec2> {
         if gx < self.width && gy < self.height {
             Some(self.vectors[gy * self.width + gx])
         } else {
@@ -430,7 +426,7 @@ impl DistortionMap {
     }
 
     /// Interpolate the distortion at an arbitrary position.
-    pub(crate) fn interpolate(&self, p: DVec2) -> DVec2 {
+    fn interpolate(&self, p: DVec2) -> DVec2 {
         let gx = p.x / self.spacing;
         let gy = p.y / self.spacing;
 

@@ -15,14 +15,14 @@ use crate::gui::scene::Scene;
 /// reaches here. The open is latched off *last* frame's badge response;
 /// the shared [`AnchoredMenu`] handles the popup lifecycle.
 #[derive(Default, Debug)]
-pub(crate) struct GraphMenuUi {
+pub(super) struct GraphMenuUi {
     menu: AnchoredMenu,
     /// Badge node the open menu targets — set at open, read at pick.
     node_id: Option<NodeId>,
 }
 
 impl GraphMenuUi {
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,

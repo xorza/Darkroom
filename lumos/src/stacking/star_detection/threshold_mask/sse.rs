@@ -8,7 +8,7 @@ use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_s
 /// is unused and may be empty when `WITH_BG` is false.
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn process_words_sse<const WITH_BG: bool>(
+pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],

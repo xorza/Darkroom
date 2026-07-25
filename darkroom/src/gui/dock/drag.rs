@@ -16,22 +16,22 @@ use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
 /// A tab mid-drag: armed when a movable chip's drag latches, cleared on
 /// release or Esc.
 #[derive(Debug)]
-pub(crate) struct TabDrag {
-    pub(crate) tab: TabRef,
+pub(super) struct TabDrag {
+    pub(super) tab: TabRef,
     /// Where the chip lived when the drag latched — polled for the
     /// release edge (the layout can't change mid-drag, so the address
     /// stays valid).
-    pub(crate) source: (TabGroupId, usize),
+    pub(super) source: (TabGroupId, usize),
     /// Label for the ghost chip, snapshotted at arm time.
-    pub(crate) text: String,
+    pub(super) text: String,
 }
 
 /// Where a drop over a pane would land, plus the region to highlight
 /// while hovering it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct DropTarget {
-    pub(crate) drop: DockDrop,
-    pub(crate) highlight: Rect,
+pub(super) struct DropTarget {
+    pub(super) drop: DockDrop,
+    pub(super) highlight: Rect,
 }
 
 /// Insertion-caret breadth in the strip, logical px.
@@ -43,7 +43,7 @@ const CARET_W: f32 = 3.0;
 /// and the outer band splits toward the nearest edge — unless the pane
 /// sits at the nesting cap (`can_split` false), where everything
 /// degrades to a join. `chips` are the strip's chip rects in tab order.
-pub(crate) fn classify_drop(
+pub(super) fn classify_drop(
     group: TabGroupId,
     pane: Rect,
     strip: Rect,

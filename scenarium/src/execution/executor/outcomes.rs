@@ -13,7 +13,7 @@ use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 /// also flagged errored). Carries its own `RunError`/elapsed, so nothing lives in a side
 /// map.
 #[derive(Debug, Clone, Default)]
-pub(crate) enum NodeOutcome {
+pub(super) enum NodeOutcome {
     /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
     #[default]
     Pending,
@@ -45,7 +45,7 @@ impl NodeOutcome {
 /// this run's result, and record the outcome under the caller's reason —
 /// [`RunError::SkippedUpstream`] for an errored dependency or
 /// [`RunError::MissingLambda`] for a func with no implementation.
-pub(crate) fn mark_skipped(
+pub(super) fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeColumn<NodeOutcome>,
     node_idx: NodeIdx,
@@ -55,7 +55,7 @@ pub(crate) fn mark_skipped(
     outcomes[node_idx] = NodeOutcome::Skipped { error };
 }
 
-pub(crate) fn has_errored_dependency(
+pub(super) fn has_errored_dependency(
     program: &ExecutionProgram,
     outcomes: &NodeColumn<NodeOutcome>,
     node_idx: NodeIdx,
@@ -67,7 +67,7 @@ pub(crate) fn has_errored_dependency(
         })
 }
 
-pub(crate) fn collect_execution_outcome(
+pub(super) fn collect_execution_outcome(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     outcomes: &NodeColumn<NodeOutcome>,

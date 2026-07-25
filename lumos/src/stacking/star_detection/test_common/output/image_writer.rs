@@ -14,14 +14,14 @@ use crate::{
 
 /// Build an output path with the configured test image extension.
 /// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
-pub(crate) fn output_path(base: &Path) -> std::path::PathBuf {
+fn output_path(base: &Path) -> std::path::PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
 /// Convert f32 grayscale pixels to an imaginarium RGB_F32 image, clamped to `[0, 1]` (no stretch).
 /// Matches [`to_gray_image`]'s mapping so a comparison overlay reads at the same brightness as the
 /// `_input` image it sits beside.
-pub(crate) fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
+pub(super) fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
     let desc = ImageDesc::new(width, height, ColorFormat::RGB_F32);
     let rgb_pixels: Vec<f32> = pixels
         .iter()
@@ -34,7 +34,11 @@ pub(crate) fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> 
 }
 
 /// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
-pub(crate) fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) -> Image {
+pub(in crate::stacking::star_detection) fn gray_to_rgb_image_stretched(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+) -> Image {
     let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
     let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let range = (max - min).max(1e-10);
@@ -52,7 +56,7 @@ pub(crate) fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: 
 
 /// Save imaginarium Image to file using the configured test output format.
 /// Converts to RGB_U8 if needed since some formats don't support float data.
-pub(crate) fn save_image(image: Image, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_image(image: Image, path: &Path) {
     let out = output_path(path);
     let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
         image.convert(ColorFormat::RGB_U8).unwrap()
@@ -63,7 +67,7 @@ pub(crate) fn save_image(image: Image, path: &Path) {
 }
 
 /// Convert f32 pixels to grayscale image (clamped to 0-1).
-pub(crate) fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
+fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
     let bytes: Vec<u8> = pixels
         .iter()
         .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
@@ -72,7 +76,7 @@ pub(crate) fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> Gray
 }
 
 /// Convert f32 pixels to grayscale image with auto-stretching.
-pub(crate) fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
+fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
     let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
     let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let range = (max - min).max(1e-10);
@@ -87,7 +91,7 @@ pub(crate) fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> 
 
 /// Convert boolean mask to grayscale image.
 #[cfg(feature = "real-data")]
-pub(crate) fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
+fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|&b| if b { 255 } else { 0 }).collect();
     GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
 }
@@ -96,7 +100,9 @@ pub(crate) fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayIm
 ///
 /// Each label gets a unique color for easy visualization.
 #[cfg(feature = "real-data")]
-pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> image::RgbImage {
+pub(in crate::stacking::star_detection) fn labels_to_rgb(
+    labels: &imaginarium::Buffer2<u32>,
+) -> image::RgbImage {
     use image::{Rgb, RgbImage};
 
     // Generate distinct colors for labels using golden ratio
@@ -145,7 +151,12 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 }
 
 /// Save grayscale image to file using the configured test output format.
-pub(crate) fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_grayscale(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    path: &Path,
+) {
     let out = output_path(path);
     let img = to_gray_image(pixels, width, height);
     img.save(&out).expect("Failed to save grayscale image");
@@ -153,7 +164,12 @@ pub(crate) fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: 
 
 /// Save grayscale image with auto-stretch to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_grayscale_stretched(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    path: &Path,
+) {
     let out = output_path(path);
     let img = to_gray_stretched(pixels, width, height);
     img.save(&out)
@@ -162,13 +178,13 @@ pub(crate) fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usi
 
 /// Save RGB image to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_rgb(image: &image::RgbImage, path: &Path) {
     let out = output_path(path);
     image.save(&out).expect("Failed to save RGB image");
 }
 
 /// Save comparison image showing ground truth vs detected stars.
-pub(crate) fn save_comparison(
+pub(in crate::stacking::star_detection) fn save_comparison(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -184,7 +200,12 @@ pub(crate) fn save_comparison(
 
 /// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_mask(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    path: &Path,
+) {
     let out = output_path(path);
     let img = mask_to_gray(mask, width, height);
     img.save(&out).expect("Failed to save mask image");

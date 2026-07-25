@@ -130,14 +130,18 @@ impl Graph {
     /// a boundary node (its arity mirrors the enclosing interface, with no
     /// per-port type here) or a missing func/graph. The caller treats `None` as
     /// the polymorphic `Any`.
-    pub(crate) fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
+    pub(in crate::graph) fn input_type(
+        &self,
+        library: &Library,
+        port: InputPort,
+    ) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
     }
 
     /// The declared [`FuncInput`] of input `port` — its full spec (type +
     /// `value_variants` + flags), or `None` for a boundary / unresolved node.
     /// Resolution mirrors [`Self::input_type`].
-    pub(crate) fn input_spec<'a>(
+    pub(in crate::graph) fn input_spec<'a>(
         &'a self,
         library: &'a Library,
         port: InputPort,

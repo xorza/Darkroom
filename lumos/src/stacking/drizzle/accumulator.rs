@@ -648,7 +648,7 @@ impl DrizzleAccumulator {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::stacking::drizzle::accumulator::*;
 
     pub(crate) fn add_image(

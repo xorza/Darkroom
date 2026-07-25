@@ -16,15 +16,15 @@ use crate::gui::scene::Scene;
 /// nested call.
 #[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
-    pub(crate) origin: Vec2,
-    pub(crate) state: Option<&'a mut BreakerState>,
+    pub(super) origin: Vec2,
+    pub(super) state: Option<&'a mut BreakerState>,
 }
 
 impl BreakerProbe<'_> {
     /// True if a breaker gesture is live this frame. Wire-fade emphasis and
     /// similar ambient state read this instead of reaching into `state`
     /// directly.
-    pub(crate) fn is_active(&self) -> bool {
+    pub(super) fn is_active(&self) -> bool {
         self.state.is_some()
     }
 
@@ -43,7 +43,7 @@ impl BreakerProbe<'_> {
     /// True if the active breaker polyline crosses the cubic `p0..p3`. A
     /// no-op (false) when no breaker gesture is live, so wire renderers can
     /// call it unconditionally before deciding whether to record a cut.
-    pub(crate) fn crosses_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+    pub(super) fn crosses_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
         self.state
             .as_deref()
             .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3))
@@ -62,7 +62,7 @@ impl BreakerProbe<'_> {
     /// gesture is live, so the four `mark_broken_*` siblings are the one
     /// place that invariant is spelled out, instead of a copy-pasted
     /// `unwrap` at each of the four call sites.
-    pub(crate) fn mark_broken_input(&mut self, addr: InputPort) {
+    pub(super) fn mark_broken_input(&mut self, addr: InputPort) {
         self.live_state().broken.push(addr);
     }
 
@@ -72,12 +72,12 @@ impl BreakerProbe<'_> {
     }
 
     /// Record `s`'s event wire as targeted by the breaker this frame.
-    pub(crate) fn mark_broken_subscription(&mut self, s: Subscription) {
+    pub(super) fn mark_broken_subscription(&mut self, s: Subscription) {
         self.live_state().broken_subscriptions.push(s);
     }
 
     /// Record `port`'s pin glyph as targeted by the breaker this frame.
-    pub(crate) fn mark_broken_pin(&mut self, port: OutputPort) {
+    pub(super) fn mark_broken_pin(&mut self, port: OutputPort) {
         self.live_state().broken_pins.push(port);
     }
 
@@ -115,30 +115,30 @@ const BEZIER_SAMPLES: usize = 16;
 /// most once per frame, so within-frame duplicates aren't possible either
 /// way.
 #[derive(Debug)]
-pub(crate) struct BreakerState {
-    pub(crate) points: Vec<Vec2>,
+pub(super) struct BreakerState {
+    points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
     /// check polls `drag_delta_by(button)`, so a Cmd+LMB-launched
     /// breaker must keep reading the Left button, not Right.
-    pub(crate) button: PointerButton,
+    button: PointerButton,
     /// Target input ports whose data binding the breaker intersects this
     /// frame, drained on release into an unbound `Intent::SetInput`.
-    pub(crate) broken: Vec<InputPort>,
+    broken: Vec<InputPort>,
     /// Nodes whose body rect the breaker crosses this frame, drained on
     /// release into `Intent::RemoveNode`.
-    pub(crate) broken_nodes: Vec<NodeId>,
+    broken_nodes: Vec<NodeId>,
     /// Event subscriptions whose wire the breaker intersects this frame,
     /// drained on release into `SetSubscription { subscribe: false }`.
-    pub(crate) broken_subscriptions: Vec<Subscription>,
+    broken_subscriptions: Vec<Subscription>,
     /// Pinned outputs whose satellite glyph (or its connecting bezier) the
     /// breaker intersects this frame, drained on release into
     /// `Intent::SetOutputPinned { pinned: false }`.
-    pub(crate) broken_pins: Vec<OutputPort>,
+    broken_pins: Vec<OutputPort>,
 }
 
 impl BreakerState {
-    pub(crate) fn start(p: Vec2, button: PointerButton) -> Self {
+    pub(super) fn start(p: Vec2, button: PointerButton) -> Self {
         Self {
             points: vec![p],
             length: 0.0,
@@ -162,7 +162,7 @@ impl BreakerState {
         self.broken_pins.clear();
     }
 
-    pub(crate) fn add_point(&mut self, p: Vec2) {
+    pub(super) fn add_point(&mut self, p: Vec2) {
         let last = *self.points.last().unwrap();
         let seg = last.distance(p);
         if seg <= MIN_POINT_DISTANCE {
@@ -190,7 +190,7 @@ impl BreakerState {
     /// falls inside, or any breaker segment crosses one of the four
     /// edges. `rect` is in the same frame as the polyline (inner-
     /// canvas pre-transform world coords).
-    pub(crate) fn intersects_rect(&self, rect: Rect) -> bool {
+    fn intersects_rect(&self, rect: Rect) -> bool {
         if self.points.is_empty() {
             return false;
         }
@@ -220,7 +220,7 @@ impl BreakerState {
     /// segment. Samples the bezier into `BEZIER_SAMPLES` chords; this
     /// runs once per connection per frame while the gesture is
     /// active, so we don't cache.
-    pub(crate) fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+    fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
         if self.points.len() < 2 {
             return false;
         }
@@ -239,7 +239,7 @@ impl BreakerState {
     }
 }
 
-pub(crate) fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
+pub(super) fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
     let uu = u * u;
     let tt = t * t;
@@ -268,7 +268,7 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
 /// `BreakerProbe` to the canvas record so node and connection draws
 /// can flag intersections inline.
 #[derive(Default, Debug)]
-pub(crate) struct BreakerUI {
+pub(super) struct BreakerUI {
     state: Option<BreakerState>,
 }
 
@@ -281,7 +281,7 @@ impl BreakerUI {
     /// the same target — the undo step already detaches every incoming
     /// edge and pin, so emitting both would log a redundant history entry.
     /// Esc cancels without emitting.
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -362,7 +362,7 @@ impl BreakerUI {
     /// `broken_*` collection first — the one call site for that, since
     /// this is called exactly once per frame — then borrows live until the
     /// returned `BreakerProbe` is dropped.
-    pub(crate) fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
+    pub(super) fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
         if let Some(state) = self.state.as_mut() {
             state.begin_frame();
         }
@@ -374,7 +374,7 @@ impl BreakerUI {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
-    pub(crate) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
         let Some(b) = self.state.as_ref() else {
             return;
         };

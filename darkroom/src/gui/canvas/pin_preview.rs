@@ -36,13 +36,13 @@ use crate::gui::widgets::support::{
 /// a stable size regardless of content, so a drag never has to re-measure
 /// and an image never grows the widget. An image letterboxes inside via
 /// `Contain`; a non-image value's formatted text centers in the same frame.
-pub(crate) const PREVIEW_WIDTH: f32 = 280.0;
-pub(crate) const PREVIEW_HEIGHT: f32 = 200.0;
+pub(super) const PREVIEW_WIDTH: f32 = 280.0;
+pub(super) const PREVIEW_HEIGHT: f32 = 200.0;
 
 /// A preview widget's title: the producing node's name, plus the output's
 /// own name when it says something the node's doesn't (a node can have
 /// several pinned outputs, so the port name disambiguates them).
-pub(crate) fn preview_title(node_name: &str, output_name: &str) -> String {
+pub(super) fn preview_title(node_name: &str, output_name: &str) -> String {
     if output_name.is_empty() || output_name.eq_ignore_ascii_case(node_name) {
         node_name.to_owned()
     } else {
@@ -54,21 +54,21 @@ pub(crate) fn preview_title(node_name: &str, output_name: &str) -> String {
 /// for repositioning it. Reconstructible from the port so
 /// [`crate::gui::canvas::geometry::CanvasGeometry::rebuild`]-style polling
 /// can read its response without a cache.
-pub(crate) fn pin_preview_wid(port: OutputPort) -> WidgetId {
+pub(super) fn pin_preview_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.pin_preview", port.node_id, port.port_idx))
 }
 
-/// Stable id for a pin preview's refresh chip. `pub(crate)` so the
+/// Stable id for a pin preview's refresh chip. `pub(super)` so the
 /// canvas-level scan ([`crate::gui::canvas::pin_ui::emit_pin_refresh_clicks`])
 /// can poll the click from last frame's response.
-pub(crate) fn refresh_badge_wid(port: OutputPort) -> WidgetId {
+pub(super) fn refresh_badge_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.pin_refresh_badge", port.node_id, port.port_idx))
 }
 
 /// Stable id for the card's image viewport. It senses hover without
 /// capturing presses, leaving the parent card's click/drag gesture intact;
 /// the navigation scan combines its hover with the parent's click.
-pub(crate) fn preview_image_wid(port: OutputPort) -> WidgetId {
+pub(super) fn preview_image_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.pin_preview_image", port.node_id, port.port_idx))
 }
 
@@ -105,7 +105,7 @@ fn refresh_chip(ui: &mut Ui, theme: &Theme, port: OutputPort) {
 /// as the reposition drag's grab target and the selection click target
 /// ([`pin_preview_wid`]).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn draw_widget<'ui>(
+pub(super) fn draw_widget<'ui>(
     ui: &'ui mut Ui,
     theme: &Theme,
     port: OutputPort,

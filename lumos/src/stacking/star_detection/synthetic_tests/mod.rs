@@ -20,7 +20,7 @@ use glam::DVec2;
 
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
 /// so the measured FWHM stays accurate.
-pub(crate) fn synthetic_config() -> Config {
+fn synthetic_config() -> Config {
     let mut config = Config::default();
     config.fwhm.expected = 0.0;
     config.filter.min_snr = 5.0;
@@ -28,12 +28,12 @@ pub(crate) fn synthetic_config() -> Config {
 }
 
 /// True source positions of a rendered frame.
-pub(crate) fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
+fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
     frame.truth.sources.iter().map(|s| s.pos).collect()
 }
 
 /// Detect on `frame.image` with `config` and return the detected star positions.
-pub(crate) fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
+fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
     StarDetector::from_config(config.clone())
         .unwrap()
         .detect(&frame.image)
@@ -45,7 +45,7 @@ pub(crate) fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2
 
 /// Source placement for a forward-model detection scenario.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Placement {
+pub(super) enum Placement {
     Uniform { margin: f64 },
     Cluster,
 }
@@ -56,22 +56,22 @@ pub(crate) enum Placement {
 /// renders it (applying cosmic-ray / Bayer artifacts via the kept primitives) into a
 /// `SimFrame` whose `image` + `truth.sources` the tests grade against.
 #[derive(Debug, Clone)]
-pub(crate) struct Scenario {
-    pub(crate) width: usize,
-    pub(crate) height: usize,
-    pub(crate) num_stars: usize,
+pub(super) struct Scenario {
+    pub(super) width: usize,
+    pub(super) height: usize,
+    pub(super) num_stars: usize,
     /// Log-uniform total-flux range; higher = brighter / easier to detect.
-    pub(crate) flux: (f32, f32),
-    pub(crate) fwhm: f32,
-    pub(crate) psf: Option<PsfModel>,
-    pub(crate) background: BackgroundField,
+    pub(super) flux: (f32, f32),
+    pub(super) fwhm: f32,
+    pub(super) psf: Option<PsfModel>,
+    pub(super) background: BackgroundField,
     /// Sensor full well (electrons) — lower deepens shot noise.
-    pub(crate) full_well_e: f32,
-    pub(crate) read_noise_e: f32,
-    pub(crate) placement: Placement,
-    pub(crate) cosmic_rays: usize,
-    pub(crate) bayer: bool,
-    pub(crate) seed: u64,
+    pub(super) full_well_e: f32,
+    pub(super) read_noise_e: f32,
+    pub(super) placement: Placement,
+    pub(super) cosmic_rays: usize,
+    pub(super) bayer: bool,
+    pub(super) seed: u64,
 }
 
 impl Default for Scenario {
@@ -96,7 +96,7 @@ impl Default for Scenario {
 }
 
 impl Scenario {
-    pub(crate) fn frame(&self) -> SimFrame {
+    pub(super) fn frame(&self) -> SimFrame {
         let scene = match self.placement {
             Placement::Uniform { margin } => Scene::random_field(
                 self.width,

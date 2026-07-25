@@ -12,13 +12,13 @@ use glam::Vec2;
 /// background, hug sizing, 6 px padding, click-outside dismiss), and the
 /// "a pick or an outside dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
-pub(crate) struct AnchoredMenu {
+pub(super) struct AnchoredMenu {
     anchor: Option<Vec2>,
 }
 
 impl AnchoredMenu {
     /// Open (or re-anchor) the menu at a surface-space point.
-    pub(crate) fn open_at(&mut self, anchor: Vec2) {
+    pub(super) fn open_at(&mut self, anchor: Vec2) {
         self.anchor = Some(anchor);
     }
 
@@ -28,7 +28,7 @@ impl AnchoredMenu {
     /// menu. The pick is handed back for the caller to act on. `max_height`
     /// caps the popup so a tall body wraps/scrolls (the new-node palette);
     /// `None` hugs the content (the small context menus).
-    pub(crate) fn show<T>(
+    pub(super) fn show<T>(
         &mut self,
         ui: &mut Ui,
         id_salt: &'static str,

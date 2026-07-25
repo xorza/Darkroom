@@ -45,7 +45,7 @@ pub(crate) mod distortion;
 pub(crate) mod ransac;
 pub(crate) mod resample;
 pub(crate) mod result;
-pub(crate) mod spatial;
+mod spatial;
 pub(crate) mod transform;
 pub(crate) mod triangle;
 

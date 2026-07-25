@@ -8,7 +8,7 @@ use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_s
 /// unused and may be empty when `WITH_BG` is false. Uses unfused multiply-then-add (not `vfmaq_f32`)
 /// to stay bit-exact with the scalar / AVX2 / SSE backends at the `px == threshold` boundary.
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn process_words_neon<const WITH_BG: bool>(
+pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],

@@ -34,11 +34,11 @@ use imaginarium::Buffer2;
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
-pub(crate) struct MoffatFitConfig {
+pub(super) struct MoffatFitConfig {
     /// L-M optimization parameters.
-    pub lm: LMConfig,
+    pub(super) lm: LMConfig,
     /// Fixed Moffat β (wing-slope) used for the fit.
-    pub fixed_beta: f32,
+    pub(super) fixed_beta: f32,
 }
 
 impl Default for MoffatFitConfig {
@@ -52,32 +52,32 @@ impl Default for MoffatFitConfig {
 
 /// Result of 2D Moffat profile fitting.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct MoffatFitResult {
+pub(super) struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
-    pub pos: Vec2,
+    pub(super) pos: Vec2,
     /// FWHM computed from alpha and beta.
-    pub fwhm: f32,
+    pub(super) fwhm: f32,
     /// Whether the fit converged.
-    pub converged: bool,
+    pub(super) converged: bool,
     /// Fit diagnostics (amplitude/alpha/background/iteration count) that no
     /// production caller reads — `measure_star` only uses `pos`/`fwhm`/`converged` —
     /// but that tests need to verify LM convergence against synthetic ground truth.
     #[allow(dead_code)] // read only by tests
-    pub debug: MoffatFitDebug,
+    debug: MoffatFitDebug,
 }
 
 /// Fit diagnostics kept for tests; see [`MoffatFitResult::debug`].
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // read only by tests
-pub(crate) struct MoffatFitDebug {
+struct MoffatFitDebug {
     /// Amplitude of profile.
-    pub amplitude: f32,
+    amplitude: f32,
     /// Core width parameter (alpha).
-    pub alpha: f32,
+    alpha: f32,
     /// Background level.
-    pub background: f32,
+    background: f32,
     /// Number of iterations used.
-    pub iterations: usize,
+    iterations: usize,
 }
 
 /// Strategy for computing `u^(-beta)` efficiently.
@@ -152,14 +152,14 @@ fn select_pow_strategy(beta: f64) -> PowStrategy {
 /// Moffat model with fixed beta (5 parameters).
 /// Parameters: [x0, y0, amplitude, alpha, background]
 #[derive(Debug)]
-pub(crate) struct MoffatFixedBeta {
-    pub stamp_radius: f64,
-    pub beta: f64,
+struct MoffatFixedBeta {
+    stamp_radius: f64,
+    beta: f64,
     pow_strategy: PowStrategy,
 }
 
 impl MoffatFixedBeta {
-    pub(crate) fn new(stamp_radius: f64, beta: f64) -> Self {
+    fn new(stamp_radius: f64, beta: f64) -> Self {
         Self {
             stamp_radius,
             beta,
@@ -285,7 +285,7 @@ impl LMModel<5> for MoffatFixedBeta {
 /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
 /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
 /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
-pub(crate) fn fit_moffat_2d(
+pub(super) fn fit_moffat_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
     stamp_radius: usize,
@@ -372,13 +372,26 @@ fn validate_position(result_pos: Vec2, input_pos: Vec2, alpha: f32, stamp_radius
 /// Convert Moffat alpha and beta to FWHM.
 /// FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
 #[inline]
-pub(crate) fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
+pub(super) fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
     2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
 }
 
 /// Convert FWHM and beta to Moffat alpha.
 /// alpha = FWHM / (2 * sqrt(2^(1/beta) - 1))
 #[inline]
-pub(crate) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
+pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
     fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::stacking::star_detection::centroid::moffat_fit::MoffatFitResult;
+
+    impl MoffatFitResult {
+        /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
+        /// `moffat_fit` and so can't reach the private `debug` field directly.
+        pub(in crate::stacking::star_detection::centroid) fn debug_alpha(&self) -> f32 {
+            self.debug.alpha
+        }
+    }
 }

@@ -9,7 +9,7 @@ use scenarium::{
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::nodes::image_library;
-use crate::image::nodes::processing::adjust_image;
+use crate::image::nodes::processing::internals::adjust_image;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
 fn func<'a>(library: &'a scenarium::Library, name: &str) -> &'a Func {

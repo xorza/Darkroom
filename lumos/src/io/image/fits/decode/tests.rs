@@ -8,7 +8,7 @@ use fits_well::image::{Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
 use crate::io::image::fits::decode::plan;
-use crate::io::image::fits::decode::plan::test_support::description;
+use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,

@@ -47,7 +47,7 @@ const MAX_CALL_LEVELS: usize = 64;
 const MAX_EXPR_DEPTH: usize = 64;
 const MAX_FN_EXPR_DEPTH: usize = 32;
 
-pub(crate) fn build_engine(
+pub(super) fn build_engine(
     stdout: StdoutBuffer,
     inbound: InboundSender,
     library: PublishedLibrary,

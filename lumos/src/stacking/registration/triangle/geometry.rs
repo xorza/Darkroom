@@ -9,27 +9,27 @@ const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Orientation {
+pub(super) enum Orientation {
     Clockwise,
     CounterClockwise,
 }
 
 /// A triangle formed from three points.
 #[derive(Debug, Clone)]
-pub(crate) struct Triangle {
+pub(super) struct Triangle {
     /// Indices of the three points in the original list.
-    pub(crate) indices: [usize; 3],
+    pub(super) indices: [usize; 3],
     /// Invariant ratios: (sides[0]/sides[2], sides[1]/sides[2]).
-    pub(crate) ratios: (f64, f64),
+    pub(super) ratios: (f64, f64),
     /// Orientation of the triangle.
-    pub(crate) orientation: Orientation,
+    pub(super) orientation: Orientation,
 }
 
 impl Triangle {
     /// Create a triangle from three positions.
     ///
     /// Returns None if the triangle is degenerate (collinear points).
-    pub(crate) fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
+    pub(super) fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
         let p0 = positions[0];
         let p1 = positions[1];
         let p2 = positions[2];
@@ -117,7 +117,7 @@ impl Triangle {
     }
 
     /// Check if two triangles are similar within tolerance.
-    pub(crate) fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool {
+    pub(super) fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool {
         let dr0 = (self.ratios.0 - other.ratios.0).abs();
         let dr1 = (self.ratios.1 - other.ratios.1).abs();
         dr0 < tolerance && dr1 < tolerance

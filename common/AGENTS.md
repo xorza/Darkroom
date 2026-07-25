@@ -19,7 +19,7 @@ nothing in-tree.
 | `float_ext.rs` | `FloatExt::approximately_eq` for `f32`/`f64`/`Vec2` (within `EPSILON`). |
 | `constants.rs` | `EPSILON: f32 = 1e-6`. |
 | `debug.rs` | `is_debug()`: reports `debug_assertions`. |
-| `test_utils.rs` | `workspace_root`, `test_output_path` for tests. |
+| `internals.rs` | `workspace_root`, `test_output_path` for tests. |
 
 ## Key types
 

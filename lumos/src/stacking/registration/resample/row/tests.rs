@@ -240,7 +240,7 @@ fn test_lanczos_scalar_various_sizes_match_optimized() {
     // This replaces a weaker test that only checked is_finite().
     let height = 64;
     let input_base = patterns::diagonal_gradient(256, height);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos3);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
 
     for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
         let input = Buffer2::new(
@@ -280,7 +280,7 @@ fn test_lanczos_matches_scalar() {
     let height = 128;
     let input = patterns::diagonal_gradient(width, height);
     // Disable clamping to match unclamped scalar reference
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos3);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
 
     let transforms = vec![
         Transform::identity(),
@@ -320,7 +320,7 @@ fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
     ] {
-        let params = config::test_support::warp_params(method);
+        let params = config::internals::warp_params(method);
         for expected in [-1.25, 0.0, 2.5] {
             let input = patterns::uniform(width, height, expected);
             for y in [0, 1, 4, 10, height - 1] {
@@ -360,7 +360,7 @@ fn test_lanczos_is_translation_invariant_for_signed_data() {
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
     ] {
-        let params = config::test_support::warp_params(method);
+        let params = config::internals::warp_params(method);
         for y in [0, 1, 5, 10, height - 1] {
             let mut output = vec![0.0; width];
             let mut shifted_output = vec![0.0; width];
@@ -382,7 +382,7 @@ fn test_lanczos_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(256, height);
     // Disable clamping to match unclamped scalar reference
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos3);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
 
     for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
         let input = Buffer2::new(
@@ -560,7 +560,7 @@ fn test_lanczos2_matches_scalar_reference() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(width, height);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos2);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
 
     for transform in [
         Transform::identity(),
@@ -590,7 +590,7 @@ fn test_lanczos4_matches_scalar_reference() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(width, height);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos4);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
 
     for transform in [
         Transform::identity(),
@@ -619,7 +619,7 @@ fn test_lanczos4_matches_scalar_reference() {
 fn test_lanczos2_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(256, height);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos2);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
 
     for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
         let input = Buffer2::new(
@@ -657,7 +657,7 @@ fn test_lanczos2_various_sizes() {
 fn test_lanczos4_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(256, height);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos4);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
 
     for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
         let input = Buffer2::new(

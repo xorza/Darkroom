@@ -59,7 +59,7 @@ mod ml_support {
 
     /// Load the bundled linear master, neutralize its background and apply the default STF stretch —
     /// the display-domain `[0, 1]` input the ML filters (StarNet / DeepSNR) are trained for.
-    pub(crate) fn stretched_master() -> Image {
+    pub(super) fn stretched_master() -> Image {
         let mut img = Image::from(
             &LinearImage::from_file(
                 calibration_dir().join("stacked_light.tiff"),

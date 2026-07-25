@@ -24,7 +24,7 @@ pub struct DiskStore {
     codecs: Codecs,
     disk_root: Option<PathBuf>,
     #[cfg(test)]
-    pub(crate) store_io: test_support::StoreIoCounts,
+    pub(crate) store_io: internals::StoreIoCounts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,12 +37,12 @@ pub(crate) enum StorePolicy {
 
 #[derive(Debug)]
 pub(crate) struct BlobTarget {
-    pub(crate) path: PathBuf,
+    path: PathBuf,
     pub(crate) digest: Digest,
 }
 
 impl BlobTarget {
-    pub(crate) async fn delete(&self) {
+    async fn delete(&self) {
         let _ = tokio::fs::remove_file(&self.path).await;
     }
 }
@@ -53,7 +53,7 @@ impl DiskStore {
             codecs: library.codecs(),
             disk_root,
             #[cfg(test)]
-            store_io: test_support::StoreIoCounts::default(),
+            store_io: internals::StoreIoCounts::default(),
         }
     }
 
@@ -91,7 +91,7 @@ impl DiskStore {
         }
     }
 
-    pub(crate) async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {
+    async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {
         let Ok(mut file) = tokio::fs::File::open(&target.path).await else {
             return false;
         };
@@ -211,7 +211,7 @@ impl DiskStore {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::sync::atomic::AtomicU64;
 
     #[derive(Debug, Default)]

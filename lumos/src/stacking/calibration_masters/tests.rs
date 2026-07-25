@@ -954,7 +954,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
 #[test]
 fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
-    let path = common::test_utils::test_output_path("empty_calibration_masters.fits");
+    let path = common::internals::test_output_path("empty_calibration_masters.fits");
     CalibrationMasters::default().save(&path).unwrap();
 
     let bytes = std::fs::read(&path).unwrap();

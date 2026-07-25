@@ -72,7 +72,7 @@ fn test_load_raw_rejects_invalid_files() {
 
 #[test]
 fn malformed_xtrans_metadata_returns_raw_image_error() {
-    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+    use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 
     let path = Path::new("malformed-xtrans.raf");
     let mut pattern = test_pattern_array();
@@ -474,7 +474,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
 
 #[test]
 fn xtrans_direct_and_calibration_black_corrections_match() {
-    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+    use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     let raw_width = 11;

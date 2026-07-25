@@ -107,7 +107,7 @@ where
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::concurrency::JobScratchPool;
 
     pub(crate) fn job_count<T>(pool: &JobScratchPool<T>) -> usize {

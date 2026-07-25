@@ -12,9 +12,9 @@ use crate::stacking::star_detection::config::{
     BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
     FilterConfig, FwhmConfig, LocalBackgroundMethod, MeasurementConfig,
 };
-use crate::stacking::star_detection::detector::stages::detect::test_support::collect_components;
+use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
+use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use imaginarium::Buffer2;
@@ -110,7 +110,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::detector::stages::filter::remove_duplicate_stars;
+    use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
     use crate::stacking::star_detection::star::Star;
     use rand::prelude::*;
 
@@ -140,7 +140,7 @@ fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::detector::stages::filter::remove_duplicate_stars;
+    use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
     use crate::stacking::star_detection::star::Star;
     use rand::prelude::*;
 

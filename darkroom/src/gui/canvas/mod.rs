@@ -1,19 +1,19 @@
-pub(crate) mod anchored_menu;
-pub(crate) mod background;
+mod anchored_menu;
+mod background;
 pub(crate) mod breaker;
-pub(crate) mod connection_ui;
+mod connection_ui;
 pub(crate) mod cull;
 pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
-pub(crate) mod graph_menu;
+mod graph_menu;
 pub(crate) mod inspector;
-pub(crate) mod new_node_ui;
+mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
-pub(crate) mod pin_preview;
+mod pin_preview;
 pub(crate) mod pin_ui;
-pub(crate) mod selection_ui;
-pub(crate) mod subscription_ui;
+mod selection_ui;
+mod subscription_ui;
 pub(crate) mod wire;
 
 use aperture::{
@@ -76,7 +76,7 @@ pub(crate) struct GraphUI {
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
-    pub(crate) inspectors: Inspectors,
+    inspectors: Inspectors,
     /// In-flight gesture controllers. Grouped so a tab switch can reset
     /// *all* of them in one assignment (`clear_gestures`) without the
     /// caller enumerating each — and so the persistent caches
@@ -414,7 +414,7 @@ impl GraphUI {
 /// tracked by each controller's own `Option<state>`, and wheel/pinch zoom
 /// coexists with everything (handled in `emit_pan_zoom`, not here).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum CanvasGesture {
+enum CanvasGesture {
     /// Middle-button drag → viewport pan.
     Pan,
     /// Plain LMB-drag (no modifier) → rubber-band selection.
@@ -441,7 +441,7 @@ pub(crate) enum CanvasGesture {
 /// body or `G` badge routes to `node_menu` / `graph_menu` (which read
 /// those widgets' `secondary_clicked` directly) and never reaches here —
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
-pub(crate) fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
+fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
     let resp = ui.response_for(outer_canvas_widget_id());
     if resp.middle.drag.started() {
         return Some(CanvasGesture::Pan);
@@ -489,14 +489,14 @@ pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item
 /// Outer-canvas-local coords → inner-canvas pre-transform world
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
-pub(crate) fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
+fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
     (outer_local - viewport.pan) / viewport.zoom
 }
 
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.
 /// The free end of an in-flight wire that hasn't snapped to a target yet;
 /// `canvas_origin` is the inner canvas's pre-transform origin.
-pub(crate) fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
+fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
     ui.pointer_pos()
         .map(|p| to_world(p - canvas_origin, &scene.viewport))
 }
@@ -504,7 +504,7 @@ pub(crate) fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> 
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
 /// `file!()`/`line!()` so calls from different source lines stay
 /// distinct; here we only need the id to survive between frames.
-pub(crate) fn outer_canvas_widget_id() -> WidgetId {
+fn outer_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 
@@ -513,6 +513,6 @@ pub(crate) fn outer_canvas_widget_id() -> WidgetId {
 /// connection draws — and, in `PinUi::apply`, to convert a pin drag's
 /// release point into canvas-world coordinates during prepass (before
 /// `frame` computes its own copy for painting).
-pub(crate) fn inner_canvas_widget_id() -> WidgetId {
+fn inner_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }

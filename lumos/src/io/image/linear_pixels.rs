@@ -228,7 +228,7 @@ fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use rayon::prelude::*;
 
     use crate::io::image::linear_pixels::LinearPixels;

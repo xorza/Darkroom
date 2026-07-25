@@ -17,7 +17,10 @@ use imaginarium::Buffer2;
 ///   2. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
-pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buffer2<f32> {
+pub(in crate::stacking::star_detection) fn prepare(
+    image: &LinearImage,
+    pool: &mut DetectionResources,
+) -> Buffer2<f32> {
     let mut pixels = pool.acquire_f32();
 
     if image.is_grayscale() {

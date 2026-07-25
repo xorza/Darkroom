@@ -6,7 +6,7 @@ use imaginarium::Buffer2;
 use crate::io::image::ImageDimensions;
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
-use crate::stacking::drizzle::accumulator::test_support::{
+use crate::stacking::drizzle::accumulator::internals::{
     accumulated_flux_sum, add_image as add_test_image,
 };
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};

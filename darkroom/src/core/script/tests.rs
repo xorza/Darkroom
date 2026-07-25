@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::document::ItemRef;
-use crate::core::runtime_library::{PublishedLibrary, test_support};
+use crate::core::runtime_library::{PublishedLibrary, internals};
 use glam::Vec2;
 use rhai::Array;
 use scenarium::Library;
@@ -21,7 +21,7 @@ fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<ScriptMessage>) {
 }
 
 fn published_library(library: Library) -> PublishedLibrary {
-    test_support::published_library(library)
+    internals::published_library(library)
 }
 
 /// Drain the next inbound, asserting it's a single-batch `Apply`, and
@@ -88,7 +88,7 @@ fn list_funcs_returns_full_func_objects_sorted_by_name() {
         FuncId::unique(),
         "gamma",
     )));
-    test_support::replace(&library, replacement);
+    internals::replace(&library, replacement);
     let names: Array = engine.eval("list_funcs().map(|f| f.name)").unwrap();
     let names: Vec<String> = names
         .into_iter()
@@ -180,7 +180,7 @@ fn create_node_known_id_enqueues_add_node() {
     let beta_id = FuncId::unique();
     let mut replacement = Library::default();
     replacement.add(testing::with_stub_lambda(Func::new(beta_id, "beta")));
-    test_support::replace(&library, replacement);
+    internals::replace(&library, replacement);
     let script = format!(r#"create_node("{beta_id}", 1.0, 2.0)"#);
     engine.eval::<String>(&script).unwrap();
     let actions = expect_apply(&mut rx);

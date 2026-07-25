@@ -10,7 +10,7 @@
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
-use crate::stacking::registration::resample::{self, test_support};
+use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
@@ -28,11 +28,11 @@ fn do_warp(
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new_default(input.width(), input.height());
-    test_support::warp_plane(
+    internals::warp_plane(
         input,
         &mut output,
         &WarpTransform::new(inverse),
-        &config::test_support::warp_params(method),
+        &config::internals::warp_params(method),
     );
     output
 }
@@ -641,17 +641,17 @@ fn test_warp_with_sip_correction() {
     let mut output_no_sip = Buffer2::new_default(width, height);
     let mut output_with_sip = Buffer2::new_default(width, height);
 
-    test_support::warp_plane(
+    internals::warp_plane(
         &ref_buf,
         &mut output_no_sip,
         &WarpTransform::new(transform),
-        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
+        &config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
-    test_support::warp_plane(
+    internals::warp_plane(
         &ref_buf,
         &mut output_with_sip,
         &WarpTransform::with_sip(transform, sip),
-        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
+        &config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
 
     // The two outputs should differ — SIP applies nonlinear correction

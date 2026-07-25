@@ -256,7 +256,7 @@ fn write_archive(file: &mut File, json: &[u8]) -> io::Result<()> {
 mod tests {
     use std::io::Read as _;
 
-    use common::test_utils::test_output_path;
+    use common::internals::test_output_path;
     use scenarium::{GraphDef, GraphId, GraphInterface};
 
     use super::*;

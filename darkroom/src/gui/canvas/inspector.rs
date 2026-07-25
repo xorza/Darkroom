@@ -91,7 +91,7 @@ impl Inspectors {
 
     /// Drop transient (`Open`) panels, keeping pinned ones. Called when
     /// an outside action fires and on a tab switch.
-    pub(crate) fn close_unpinned(&mut self) {
+    pub(super) fn close_unpinned(&mut self) {
         self.modes.retain(|_, m| *m == InspectMode::Pinned);
     }
 
@@ -100,7 +100,7 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(crate) fn apply(&mut self, ui: &Ui, scene: &Scene) {
+    pub(super) fn apply(&mut self, ui: &Ui, scene: &Scene) {
         for n in scene.nodes.values() {
             if ui.response_for(inspect_badge_wid(n.id)).left.clicked() {
                 match cycle(self.modes.get(&n.id).copied()) {
@@ -123,7 +123,7 @@ impl Inspectors {
     /// its node in canvas-world coords. Call inside the inner-canvas
     /// closure, after the node bodies, so panels paint on top and win
     /// hit-tests over the nodes beneath.
-    pub(crate) fn draw_panels(
+    pub(super) fn draw_panels(
         &self,
         ui: &mut Ui,
         theme: &Theme,

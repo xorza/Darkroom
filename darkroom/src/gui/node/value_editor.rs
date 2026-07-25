@@ -47,7 +47,7 @@ use crate::gui::widgets::buffered_edit::EditBuffer;
 /// discrete pick), otherwise `None`. `id` must be stable across frames
 /// so the TextEdit / buffer state survives. Every visual axis (button
 /// look, field width) comes off `theme`.
-pub(crate) fn show(
+pub(super) fn show(
     ui: &mut Ui,
     theme: &StaticValueEditorTheme,
     library: &Library,

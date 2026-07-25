@@ -236,8 +236,8 @@ pub(crate) mod light {
 /// state → colour goes through one `pick`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct HoverColor {
-    pub rest: Color,
-    pub hover: Color,
+    pub(crate) rest: Color,
+    pub(crate) hover: Color,
 }
 
 impl HoverColor {
@@ -255,13 +255,13 @@ impl HoverColor {
 /// distinct colors; `image` is the fixed hue the lens image type owns.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TypeColors {
-    pub boolean: Color,
-    pub int: Color,
-    pub float: Color,
-    pub string: Color,
-    pub path: Color,
-    pub image: Color,
-    pub ramp: [Color; 4],
+    pub(crate) boolean: Color,
+    pub(crate) int: Color,
+    pub(crate) float: Color,
+    pub(crate) string: Color,
+    pub(crate) path: Color,
+    pub(crate) image: Color,
+    pub(crate) ramp: [Color; 4],
 }
 
 /// Declares a colour-roster struct plus its two built-in instances
@@ -355,77 +355,77 @@ pub(crate) struct Theme {
     /// Which built-in preset assembled this theme. Round-trips
     /// through TOML so a user-loaded file restores the same toggle
     /// behaviour the original `Theme::dark` / `light` had.
-    pub preset: ThemePreset,
+    pub(crate) preset: ThemePreset,
 
     /// Dotted backdrop grid: world-space base spacing between dots, and
     /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into
     /// noise — see `gui::background`. (Dot colour is `colors.canvas_dot`.)
-    pub canvas_dot_spacing: f32,
-    pub canvas_dot_radius: f32,
-    pub connection_width: f32,
-    pub breaker_stroke_width: f32,
-    pub node_border_width: f32,
-    pub node_corner_radius: f32,
+    pub(crate) canvas_dot_spacing: f32,
+    pub(crate) canvas_dot_radius: f32,
+    pub(crate) connection_width: f32,
+    pub(crate) breaker_stroke_width: f32,
+    pub(crate) node_border_width: f32,
+    pub(crate) node_corner_radius: f32,
     /// Minimum content size for a node body. Caps how tightly a node
     /// with very short port labels can shrink horizontally so the
     /// header stays legible at any zoom.
-    pub node_min_width: f32,
-    pub node_min_height: f32,
+    pub(crate) node_min_width: f32,
+    pub(crate) node_min_height: f32,
     /// Corner radius of the tab-strip tabs (the header derives its own
     /// radius from `node_corner_radius`, so it doesn't read this).
-    pub tab_corner_radius: f32,
+    pub(crate) tab_corner_radius: f32,
     /// Side of the port circle quad. The circle's corner radius is
     /// derived as `port_size * 0.5` (see [`Self::port_radius`]).
-    pub port_size: f32,
+    pub(crate) port_size: f32,
     /// Vertical inset at the top of each port column (gap below the
     /// header band before the first port).
-    pub port_col_pad_top: f32,
+    pub(crate) port_col_pad_top: f32,
     /// Horizontal inset on each side of the ports row. Port circles overhang
     /// by `-port_overhang()` (which folds in this inset + the body border) so
     /// their center sits on the node body edge regardless of this value.
-    pub port_col_pad_x: f32,
+    pub(crate) port_col_pad_x: f32,
     /// Vertical gap between adjacent ports in a column.
-    pub port_gap: f32,
+    pub(crate) port_gap: f32,
     /// Horizontal gap between the input and output port columns.
-    pub port_cols_gap: f32,
+    pub(crate) port_cols_gap: f32,
     /// Gap between a node's edge (or a port circle) and a floating widget's
     /// near edge — the pin-preview card anchors from the port circle, the
     /// inspector panel from the node's right edge, so both read as the same
     /// clearance.
-    pub floating_widget_gap: f32,
+    pub(crate) floating_widget_gap: f32,
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
-    pub new_node_popup_max_height: f32,
+    pub(crate) new_node_popup_max_height: f32,
 
     /// Every chrome colour — the palette half of the theme, serialized as
     /// the `[colors]` sub-table.
-    pub colors: PaletteColors,
+    pub(crate) colors: PaletteColors,
 
     /// Data-type → wire/port hue roster (see [`TypeColors`]),
     /// serialized as the `[type_colors]` sub-table.
-    pub type_colors: TypeColors,
+    pub(crate) type_colors: TypeColors,
 
     /// Look + dimensions for the inline static-value editor that hugs a
     /// `Binding::Const` input port (number/string field, file-pick chip).
-    pub static_value_editor: StaticValueEditorTheme,
+    pub(crate) static_value_editor: StaticValueEditorTheme,
 
     /// The pointer-over-node variant of `static_value_editor` (chip fill
     /// pre-lit at half the hover strength). Precomputed at construction —
     /// deriving it per frame would clone the whole nested theme in the
     /// record path — and kept next to its base so the pair can't drift.
-    pub static_value_editor_revealed: StaticValueEditorTheme,
+    pub(crate) static_value_editor_revealed: StaticValueEditorTheme,
 
     /// Look for the inline-rename widget (node title, boundary port,
     /// graph tab).
-    pub inline_rename: InlineRenameTheme,
+    pub(crate) inline_rename: InlineRenameTheme,
 
     /// Aperture-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every aperture widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
-    pub aperture_theme: aperture::Theme,
+    pub(crate) aperture_theme: aperture::Theme,
 }
 
 /// Per-widget theme bundle for the inline static-value editor on a
@@ -436,13 +436,13 @@ pub(crate) struct Theme {
 /// `drag_value.chip`, and the fixed field width.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StaticValueEditorTheme {
-    pub drag_value: DragValueTheme,
+    pub(crate) drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to
     /// at least this.
-    pub width: f32,
+    pub(crate) width: f32,
     /// Maximum logical-px width of the value column, so a wide editor (enum /
     /// preset dropdown, long path) ellipsizes rather than stretching the node.
-    pub max_width: f32,
+    pub(crate) max_width: f32,
 }
 
 impl StaticValueEditorTheme {
@@ -498,7 +498,7 @@ impl StaticValueEditorTheme {
 /// plain `Text` twin and the row doesn't reshape on a swap.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct InlineRenameTheme {
-    pub text_edit: TextEditTheme,
+    pub(crate) text_edit: TextEditTheme,
 }
 
 impl InlineRenameTheme {
@@ -706,8 +706,8 @@ impl PaletteColors {
 /// width every selectable card draws it at.
 #[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
-    pub color: Color,
-    pub width: f32,
+    pub(crate) color: Color,
+    pub(crate) width: f32,
 }
 
 impl Theme {

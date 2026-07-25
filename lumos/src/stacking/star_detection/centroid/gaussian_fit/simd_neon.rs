@@ -80,7 +80,7 @@ unsafe fn hsum(v: float64x2_t) -> f64 {
 /// For N=6 (Gaussian2D), accumulates 21 upper-triangle hessian elements,
 /// 6 gradient elements, and chi² directly in NEON registers (28 total).
 #[allow(clippy::needless_range_loop)]
-pub(crate) unsafe fn batch_build_normal_equations_neon(
+pub(super) unsafe fn batch_build_normal_equations_neon(
     _model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
@@ -282,7 +282,7 @@ pub(crate) unsafe fn batch_build_normal_equations_neon(
 }
 
 /// Batch compute chi² using NEON.
-pub(crate) unsafe fn batch_compute_chi2_neon(
+pub(super) unsafe fn batch_compute_chi2_neon(
     _model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],

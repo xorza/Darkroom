@@ -153,5 +153,5 @@ completion snapshot.
 
 Test fixtures and private-state builders are available only under tests or the
 `internals` feature; downstream crates enable `internals` only as a dev
-dependency. Test helpers stay in gated `test_support` modules beside the
+dependency. Test helpers stay in gated `internals` modules beside the
 private state they access.

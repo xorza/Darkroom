@@ -11,7 +11,11 @@ use std::collections::HashSet;
 ///
 /// Greedy in ascending distance; each truth and each recovered point is used at most once.
 /// Returns `(truth_idx, recovered_idx)` pairs.
-pub fn match_catalogs(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> Vec<(usize, usize)> {
+pub(crate) fn match_catalogs(
+    truth: &[DVec2],
+    recovered: &[DVec2],
+    max_dist: f64,
+) -> Vec<(usize, usize)> {
     let mut candidates: Vec<(f64, usize, usize)> = Vec::new();
     for (ti, t) in truth.iter().enumerate() {
         for (ri, r) in recovered.iter().enumerate() {
@@ -38,15 +42,15 @@ pub fn match_catalogs(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> Ve
 
 /// Detection completeness & reliability derived from a catalog match.
 #[derive(Debug, Clone, Copy)]
-pub struct DetectionScore {
-    pub matched: usize,
-    pub n_truth: usize,
-    pub n_recovered: usize,
+pub(crate) struct DetectionScore {
+    pub(crate) matched: usize,
+    pub(crate) n_truth: usize,
+    pub(crate) n_recovered: usize,
 }
 
 impl DetectionScore {
     /// Fraction of true sources recovered (1.0 for an empty truth set).
-    pub fn completeness(&self) -> f64 {
+    pub(crate) fn completeness(&self) -> f64 {
         if self.n_truth == 0 {
             1.0
         } else {
@@ -55,7 +59,7 @@ impl DetectionScore {
     }
 
     /// Fraction of detections that are real — `1 - false_positive_rate` (1.0 for no detections).
-    pub fn reliability(&self) -> f64 {
+    pub(crate) fn reliability(&self) -> f64 {
         if self.n_recovered == 0 {
             1.0
         } else {
@@ -65,7 +69,11 @@ impl DetectionScore {
 }
 
 /// Score a detector's output catalog against truth within `max_dist` pixels.
-pub fn score_detection(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> DetectionScore {
+pub(crate) fn score_detection(
+    truth: &[DVec2],
+    recovered: &[DVec2],
+    max_dist: f64,
+) -> DetectionScore {
     DetectionScore {
         matched: match_catalogs(truth, recovered, max_dist).len(),
         n_truth: truth.len(),
@@ -74,7 +82,7 @@ pub fn score_detection(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> D
 }
 
 /// RMS positional error (pixels) over matched pairs; `INFINITY` if nothing matches.
-pub fn astrometric_rms(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> f64 {
+pub(crate) fn astrometric_rms(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> f64 {
     let pairs = match_catalogs(truth, recovered, max_dist);
     if pairs.is_empty() {
         return f64::INFINITY;
@@ -91,16 +99,16 @@ pub fn astrometric_rms(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> f
 /// Both arguments are sets of opaque indices (e.g. a pixel index, or a `(frame, pixel)`
 /// pair encoded as one `usize`).
 #[derive(Debug, Clone, Copy)]
-pub struct RejectionScore {
-    pub precision: f64,
-    pub recall: f64,
-    pub true_positive: usize,
-    pub false_positive: usize,
-    pub false_negative: usize,
+pub(crate) struct RejectionScore {
+    pub(crate) precision: f64,
+    pub(crate) recall: f64,
+    pub(crate) true_positive: usize,
+    pub(crate) false_positive: usize,
+    pub(crate) false_negative: usize,
 }
 
 /// Grade a set of `rejected` indices against the `injected` outliers.
-pub fn score_rejection(rejected: &[usize], injected: &[usize]) -> RejectionScore {
+pub(crate) fn score_rejection(rejected: &[usize], injected: &[usize]) -> RejectionScore {
     let inj: HashSet<usize> = injected.iter().copied().collect();
     let rej: HashSet<usize> = rejected.iter().copied().collect();
     let tp = rej.iter().filter(|p| inj.contains(p)).count();
@@ -125,13 +133,13 @@ pub fn score_rejection(rejected: &[usize], injected: &[usize]) -> RejectionScore
 
 /// Mean and (population) standard deviation of a pixel slice.
 #[derive(Debug, Clone, Copy)]
-pub struct PixelStats {
-    pub mean: f64,
-    pub std: f64,
+pub(super) struct PixelStats {
+    pub(super) mean: f64,
+    pub(super) std: f64,
 }
 
 /// Compute mean and standard deviation of `pixels`.
-pub fn pixel_stats(pixels: &[f32]) -> PixelStats {
+pub(super) fn pixel_stats(pixels: &[f32]) -> PixelStats {
     let n = pixels.len();
     if n == 0 {
         return PixelStats {
@@ -152,7 +160,7 @@ pub fn pixel_stats(pixels: &[f32]) -> PixelStats {
 }
 
 /// Root-mean-square difference between two equal-length pixel slices.
-pub fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
+pub(crate) fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
     assert_eq!(a.len(), b.len(), "slice lengths differ");
     if a.is_empty() {
         return 0.0;

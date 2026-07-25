@@ -51,7 +51,7 @@ fn source_position_in_footprint(
 }
 
 #[inline]
-pub(crate) fn for_each_source_position(
+pub(super) fn for_each_source_position(
     output_y: usize,
     wt: &WarpTransform,
     output_width: usize,
@@ -87,7 +87,7 @@ pub(crate) fn for_each_source_position(
 /// so value and support coordinates cannot drift. Non-finite projected coordinates produce
 /// `invalid_value` without reaching a sampler.
 #[inline]
-pub(crate) fn sample(
+pub(super) fn sample(
     output_y: usize,
     wt: &WarpTransform,
     output_row: &mut [f32],
@@ -104,7 +104,7 @@ pub(crate) fn sample(
 /// Uses AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping elsewhere.
 /// When SIP is active, falls back to scalar (SIP is nonlinear).
 #[inline]
-pub(crate) fn bilinear(
+pub(super) fn bilinear(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -169,7 +169,7 @@ fn bilinear_scalar(
 /// 3. SIMD tap-weight computation: x86 gathers the LUT for Lanczos3/4; otherwise scalar lookups
 /// 4. SIMD interior fast path: x86_64 AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
 ///    aarch64 NEON (128-bit, all sizes)
-pub(crate) fn lanczos(
+pub(super) fn lanczos(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,

@@ -8,7 +8,7 @@
 //! glyph primitives (circle, event triangle, hit-box growth) this grid
 //! renders each cell with live in the sibling [`glyph`] module.
 
-pub(crate) mod glyph;
+pub(super) mod glyph;
 
 use aperture::{
     Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Sense, Sizing, Spacing, Text,
@@ -54,7 +54,7 @@ const COL_OUTPUT: u16 = 3;
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
-pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
@@ -149,7 +149,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
 /// `(node_id, kind, port_idx)` so prepass can look up
 /// `response_for(port_circle_wid(..))` without threading the cache —
 /// every port's id is reconstructible from its domain coordinates.
-pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
+pub(in crate::gui) fn port_circle_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "graph.node.port_circle",
         port.node_id,
@@ -161,14 +161,14 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 /// Stable widget id for an input port's inline const editor (text field,
 /// checkbox, or file-pick button). Reconstructible from domain coords so
 /// the path-pick scan can poll the button's click without threading state.
-pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
+pub(super) fn const_editor_wid(input: InputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.const_editor", input.node_id, input.port_idx))
 }
 
 /// Stable widget id for an input port's cell (circle + label). The prepass
 /// polls it for a double-click on the label area (the circle has its own
 /// `port_circle_wid`) to toggle the input's binding.
-pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
+pub(super) fn input_cell_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash(("graph.node.input_cell", port.node_id, port.port_idx))
 }
 
@@ -491,9 +491,9 @@ fn event_cell(
 
 /// Stable widget id for an event port glyph. A separate id space from data
 /// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs. `pub(crate)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
+/// outputs. `pub(in crate::gui)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
 /// from domain coords (`EventRef`) to poll the drag.
-pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
+pub(in crate::gui) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
 }
 

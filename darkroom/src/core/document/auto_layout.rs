@@ -12,8 +12,8 @@ use crate::core::document::{GraphView, ItemRef};
 const AUTO_LAYOUT_COL_SPACING: f32 = 220.0;
 const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
 /// Also reused by `Document::create_graph`'s explicit boundary-node
-/// placement (its own `BOUNDARY_LAYOUT_GAP`), so this stays `pub(crate)`.
-pub(crate) const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
+/// placement (its own `BOUNDARY_LAYOUT_GAP`).
+pub(super) const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
 
 /// Where auto-layout parks a pinned output's preview relative to its owner
 /// node: above and to the right, clear of the node body (the widget is
@@ -28,7 +28,7 @@ impl GraphView {
     /// column per max-upstream-depth. Within a column, stack vertically in
     /// the current view order. Pinned-output previews then park beside their
     /// owner node.
-    pub(crate) fn auto_layout(&mut self, graph: &CoreGraph) {
+    pub(super) fn auto_layout(&mut self, graph: &CoreGraph) {
         let mut depth: HashMap<NodeId, u32> = graph.iter().map(|node| (node.id, 0)).collect();
         for _ in 0..graph.len().saturating_sub(1) {
             let mut changed = false;

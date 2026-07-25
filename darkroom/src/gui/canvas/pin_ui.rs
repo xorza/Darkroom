@@ -74,7 +74,7 @@ pub(crate) fn default_pin_offset(theme: &Theme) -> Vec2 {
 /// same absolute position [`draw_pin`](PinUi::draw_pin) paints at. Shared
 /// by the rubber-band sweep's hit-test and [`resolve_pin_geometry`]'s
 /// breaker/hover geometry.
-pub(crate) fn pin_preview_rect(top_left: Vec2) -> Rect {
+pub(super) fn pin_preview_rect(top_left: Vec2) -> Rect {
     Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn seed_pin_position_intent(port: OutputPort, position: Vec2) -> Inte
 /// [`crate::gui::node::prepass::emit_play_clicks`]: the pin UI surfaces only the
 /// domain fact (which node to re-run); the canvas translates it into the
 /// run command so this file never names `AppCommand`.
-pub(crate) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+pub(super) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .pinned_outputs()
         .find(|pin| {
@@ -157,7 +157,7 @@ impl PinUi {
     /// Grabbing a pin that's already part of a multi-selection drags the
     /// whole group (nodes and pins alike) together, exactly like grabbing
     /// an already-selected node does.
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -242,7 +242,7 @@ impl PinUi {
     /// glyph and the card paint at their own slot in the shared paint
     /// stack (see [`draw_pin`](Self::draw_pin)).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn draw_wire(
+    pub(super) fn draw_wire(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,

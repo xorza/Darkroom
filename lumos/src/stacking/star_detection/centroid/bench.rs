@@ -7,10 +7,10 @@ use glam::Vec2;
 use std::hint::black_box;
 
 use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+use crate::stacking::star_detection::centroid::internals::make_gaussian_star;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use crate::stacking::star_detection::centroid::refine_centroid;
-use crate::stacking::star_detection::centroid::test_utils::make_gaussian_star;
 use crate::stacking::star_detection::config::{
     BackgroundConfig, CentroidMethod, DetectionConfig, LocalBackgroundMethod, MeasurementConfig,
 };

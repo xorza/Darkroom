@@ -16,7 +16,7 @@ cfg_x86_64! {
 }
 
 cfg_aarch64! {
-    pub(crate) mod neon;
+    mod neon;
 }
 
 #[cfg(test)]
@@ -30,7 +30,7 @@ mod tests;
 ///
 /// For indices far out of bounds, clamps to valid range after reflection.
 #[inline]
-pub(crate) fn mirror_index(i: isize, len: usize) -> usize {
+pub(super) fn mirror_index(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
 
     if i < 0 {
@@ -48,7 +48,7 @@ pub(crate) fn mirror_index(i: isize, len: usize) -> usize {
 
 /// Scalar convolution for a single pixel with mirror boundary handling.
 #[inline]
-pub(crate) fn convolve_pixel_scalar(
+fn convolve_pixel_scalar(
     input: &[f32],
     kernel: &[f32],
     radius: usize,
@@ -70,7 +70,7 @@ pub(crate) fn convolve_pixel_scalar(
 ///
 /// Falls back to scalar implementation on unsupported platforms.
 #[inline]
-pub(crate) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_avx2_fma() {
@@ -102,7 +102,7 @@ pub(crate) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], ra
 
 /// Scalar implementation of row convolution.
 #[inline]
-pub(crate) fn convolve_row_scalar(
+pub(super) fn convolve_row_scalar(
     input: &[f32],
     output: &mut [f32],
     kernel: &[f32],
@@ -118,7 +118,7 @@ pub(crate) fn convolve_row_scalar(
 /// Column (vertical) convolution over the whole image. Each output row depends on input rows
 /// `[y-radius, y+radius]` (mirror edges), so rows are independent and computed in parallel across
 /// rayon workers — one row per chunk, SIMD across the columns within a row.
-pub(crate) fn convolve_cols_direct(
+pub(super) fn convolve_cols_direct(
     input: &[f32],
     output: &mut [f32],
     width: usize,
@@ -136,7 +136,7 @@ pub(crate) fn convolve_cols_direct(
 
 /// Convolve one output column-row `y` with the 1D kernel (mirror edges), SIMD when available.
 #[inline]
-pub(crate) fn convolve_cols_row(
+fn convolve_cols_row(
     input: &[f32],
     out_row: &mut [f32],
     width: usize,
@@ -175,7 +175,7 @@ pub(crate) fn convolve_cols_row(
 
 /// Scalar single column-row convolution.
 #[inline]
-pub(crate) fn convolve_cols_row_scalar(
+fn convolve_cols_row_scalar(
     input: &[f32],
     out_row: &mut [f32],
     width: usize,
@@ -199,7 +199,7 @@ pub(crate) fn convolve_cols_row_scalar(
 /// This processes one output row at a given y coordinate.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convolve_2d_row(
+pub(super) fn convolve_2d_row(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,
@@ -245,7 +245,7 @@ pub(crate) fn convolve_2d_row(
 /// Scalar implementation of single-row 2D convolution.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convolve_2d_row_scalar(
+fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,

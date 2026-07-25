@@ -244,7 +244,7 @@ impl RunResourceStamps {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use common::CancelToken;
     use hashbrown::HashSet;
 

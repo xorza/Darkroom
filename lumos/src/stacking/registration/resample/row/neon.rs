@@ -20,7 +20,7 @@ use crate::stacking::registration::transform::Transform;
 ///
 /// # Safety
 /// Caller must be on aarch64 (NEON is always available there).
-pub(crate) unsafe fn bilinear_neon(
+pub(super) unsafe fn bilinear_neon(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -133,7 +133,7 @@ pub(crate) unsafe fn bilinear_neon(
 /// - Caller must be on aarch64.
 /// - The `SIZE×SIZE` window at `(kx, ky)` must be fully in bounds. For `SIZE > 4`,
 ///   `kx + 7 < input_width` (reads 8 floats/row); for `SIZE = 4`, `kx + 3 < input_width`.
-pub(crate) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
+pub(super) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,

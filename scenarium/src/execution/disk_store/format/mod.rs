@@ -53,7 +53,7 @@ struct BlobHeader {
     descriptors: Vec<OutputDescriptor>,
 }
 
-pub(crate) async fn write<W>(
+pub(super) async fn write<W>(
     writer: &mut W,
     digest: Digest,
     outputs: &[DynamicValue],
@@ -120,7 +120,7 @@ where
     Ok(())
 }
 
-pub(crate) async fn covers_outputs<R>(
+pub(super) async fn covers_outputs<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
@@ -139,7 +139,7 @@ where
     Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
 }
 
-pub(crate) async fn read<R>(
+pub(super) async fn read<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,

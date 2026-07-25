@@ -1,12 +1,12 @@
 use super::*;
 use crate::StaticValue;
-use crate::execution::cache::runtime::test_support::hydrate;
+use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::resource::RunResourceStamps;
-use crate::execution::resource::test_support::prepare_node;
+use crate::execution::resource::internals::prepare_node;
 use crate::node::definition::FuncId;
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are

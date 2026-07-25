@@ -20,7 +20,7 @@ pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_lib
 pub use error::{GraphDeserializeError, GraphValidationError};
 pub use execution::codec::{CodecError, CustomValueCodec};
 #[cfg(any(test, feature = "internals"))]
-pub use execution::compile::test_support::CompiledGraphBuilder;
+pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
 pub use execution::disk_store::DiskStore;
 pub use execution::error::{Error, Result, RunError};
@@ -50,7 +50,7 @@ pub use node::lambda::{
 pub use node::special::{SPECIAL_NODES, SpecialNode};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]
-pub use runtime::context::test_support::insert_context;
+pub use runtime::context::internals::insert_context;
 pub use runtime::context::{ContextManager, ContextStore, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;

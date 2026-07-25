@@ -49,7 +49,7 @@ impl PaletteEntry<'_> {
 /// emits an `Intent::AddNode` placed at the click's world position (inner-
 /// canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
-pub(crate) struct NewNodeUi {
+pub(super) struct NewNodeUi {
     menu: AnchoredMenu,
     /// Inner-canvas pre-transform position of the current open — the
     /// spawned node lands exactly under the click. Set at open, read at pick.
@@ -71,7 +71,7 @@ pub(crate) struct NewNodeUi {
 }
 
 impl NewNodeUi {
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -140,7 +140,7 @@ impl NewNodeUi {
 
     /// Take the source of a wire whose drop spawned a node this frame — the
     /// canvas re-floats it on `ConnectionUI`. `None` on a plain palette open.
-    pub(crate) fn take_resume_floating(&mut self) -> Option<PortRef> {
+    pub(super) fn take_resume_floating(&mut self) -> Option<PortRef> {
         self.resume_floating.take()
     }
 }

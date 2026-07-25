@@ -88,11 +88,11 @@ const REQUEST_QUEUE_DEPTH: usize = 4;
 /// receiver is dropped and `reply.send` returns `Err` — scripts still
 /// run to completion, the reply is just discarded.
 #[derive(Debug)]
-pub(crate) struct ScriptRequest {
-    pub origin: String,
-    pub session_id: Option<Uuid>,
-    pub source: String,
-    pub reply: oneshot::Sender<ScriptResult>,
+struct ScriptRequest {
+    origin: String,
+    session_id: Option<Uuid>,
+    source: String,
+    reply: oneshot::Sender<ScriptResult>,
 }
 
 /// One-to-one with the JSON body the TCP transport writes back. Derive-
@@ -100,19 +100,19 @@ pub(crate) struct ScriptRequest {
 /// def and a hand-built JSON payload. `Deserialize` is for test clients
 /// (and any future in-process consumer) to parse the reply symmetrically.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ScriptResult {
+struct ScriptResult {
     /// Session the script ran in. Echoed on success (whether resumed or
     /// freshly created). `None` only when the request failed before a
     /// session was resolvable (unknown id, store full).
-    pub session: Option<Uuid>,
+    session: Option<Uuid>,
     /// Everything the script sent through Rhai's `print` during its run,
     /// with a `\n` after each call. Empty when no prints occurred.
-    pub print: String,
+    print: String,
     /// JSON representation of the script's final expression value. A
     /// statement-terminated script and any failed request yield `null`;
     /// `error` distinguishes failure.
-    pub result: serde_json::Value,
-    pub error: Option<String>,
+    result: serde_json::Value,
+    error: Option<String>,
 }
 
 /// Inbound signals from the script executor to [`crate::gui::app::App`]. Each
@@ -186,13 +186,13 @@ type StdoutBuffer = Arc<Mutex<String>>;
 /// shutdown of the whole app. Both the transport listener and the executor
 /// loop are exactly this — "a task you cancel on drop" — so they share it.
 #[derive(Debug)]
-pub(crate) struct CancellableTask {
+struct CancellableTask {
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
 }
 
 impl CancellableTask {
-    pub(crate) fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
+    fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
         Self {
             cancel,
             task: Some(task),
@@ -213,7 +213,7 @@ impl Drop for CancellableTask {
 /// Both are [`CancellableTask`]s, so dropping this cancels + aborts each
 /// (executor first, then transport) with no hand-written `Drop`.
 #[derive(Debug)]
-pub(crate) struct ScriptExecutor {
+struct ScriptExecutor {
     _executor: CancellableTask,
     _transport: CancellableTask,
 }
@@ -222,7 +222,7 @@ impl ScriptExecutor {
     /// Spawn the TCP transport's listener task and the executor task that
     /// drains it. Must be called from a tokio runtime context. `action_tx`
     /// is the host-side sender for the side effects script functions emit.
-    pub(crate) fn new(
+    fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
         library: PublishedLibrary,

@@ -9,7 +9,7 @@ use crate::testing::TestRng;
 /// Add random cosmic ray hits to the image.
 ///
 /// Returns the positions of added cosmic rays for verification.
-pub fn add_cosmic_rays(
+pub(crate) fn add_cosmic_rays(
     pixels: &mut [f32],
     width: usize,
     count: usize,
@@ -52,7 +52,12 @@ pub fn add_cosmic_rays(
 ///
 /// This simulates the checkerboard pattern visible in debayered images
 /// when color channels have different sensitivities.
-pub fn add_bayer_pattern(pixels: &mut [f32], width: usize, strength: f32, pattern: BayerPattern) {
+pub(crate) fn add_bayer_pattern(
+    pixels: &mut [f32],
+    width: usize,
+    strength: f32,
+    pattern: BayerPattern,
+) {
     let height = pixels.len() / width;
 
     // Pattern offsets for RGGB, GRBG, etc.
@@ -87,9 +92,12 @@ pub fn add_bayer_pattern(pixels: &mut [f32], width: usize, strength: f32, patter
 }
 
 /// Bayer pattern types.
+// Only RGGB is exercised today; the others stay available for future synthetic fixtures
+// needing a non-default CFA layout.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
-pub enum BayerPattern {
+pub(crate) enum BayerPattern {
     RGGB,
     GRBG,
     GBRG,

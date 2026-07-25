@@ -10,7 +10,7 @@ use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{CentroidMethod, ImageDimensions};
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;

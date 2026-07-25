@@ -1,4 +1,4 @@
-pub(crate) mod auto_layout;
+mod auto_layout;
 pub(crate) mod dock;
 pub(crate) mod open_document;
 mod serde;
@@ -64,9 +64,9 @@ impl PortKind {
 /// [`Document::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct PortRef {
-    pub node_id: NodeId,
-    pub kind: PortKind,
-    pub port_idx: usize,
+    pub(crate) node_id: NodeId,
+    pub(crate) kind: PortKind,
+    pub(crate) port_idx: usize,
 }
 
 /// What an editor tab shows. Most tabs are graphs — the root and any
@@ -133,8 +133,8 @@ impl ItemRef {
 /// drift on field names or semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Viewport {
-    pub pan: Vec2,
-    pub zoom: f32,
+    pub(crate) pan: Vec2,
+    pub(crate) zoom: f32,
 }
 
 impl Viewport {
@@ -179,12 +179,12 @@ pub(crate) struct GraphView {
     /// that node is moved — only its wire re-routes, like a connection
     /// to another node would.
     #[serde(with = "crate::core::document::serde")]
-    pub item_placements: IndexMap<ItemRef, Vec2>,
-    pub viewport: Viewport,
+    pub(crate) item_placements: IndexMap<ItemRef, Vec2>,
+    pub(crate) viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering). Holds both node bodies
     /// and pinned-output preview widgets — see [`ItemRef`].
-    pub selected: BTreeSet<ItemRef>,
+    pub(crate) selected: BTreeSet<ItemRef>,
 }
 
 impl PartialEq for GraphView {
@@ -236,14 +236,14 @@ impl GraphView {
 /// disjoint across separate accessor calls). Mutable counterpart of
 /// [`EditScopeRef`].
 pub(crate) struct EditScope<'a> {
-    pub graph: &'a mut CoreGraph,
-    pub view: &'a mut GraphView,
+    pub(crate) graph: &'a mut CoreGraph,
+    pub(crate) view: &'a mut GraphView,
 }
 
 /// Read-only graph + view pair, for `build_step`'s pre-mutation reads.
 pub(crate) struct EditScopeRef<'a> {
-    pub graph: &'a CoreGraph,
-    pub view: &'a GraphView,
+    pub(crate) graph: &'a CoreGraph,
+    pub(crate) view: &'a GraphView,
 }
 
 impl EditScope<'_> {
@@ -266,17 +266,17 @@ impl EditScope<'_> {
 /// resolves against lives one level up on `App` (runtime-owned).
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
-    pub graph: CoreGraph,
-    pub main_view: GraphView,
+    pub(crate) graph: CoreGraph,
+    pub(crate) main_view: GraphView,
     /// View metadata for local graph interiors, created lazily when a
     /// graph is first opened in a tab. Keyed by `GraphId`.
     #[serde(default)]
-    pub local_views: HashMap<GraphId, GraphView>,
+    local_views: HashMap<GraphId, GraphView>,
     /// The pane arrangement: open tabs grouped into split panes, plus
     /// the focused group. Persisted + undoable like the rest of the view
     /// state (every layout mutation is an undoable `Intent::Dock`).
     #[serde(default)]
-    pub layout: DockLayout,
+    pub(crate) layout: DockLayout,
 }
 
 /// Whether a tab still resolves against the graph: `Main` and
@@ -539,6 +539,7 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::dock::DockOp;
     use crate::core::document::validate::{DocumentValidationError, GraphViewValidationError};
     use scenarium::testing::test_graph as core_test_graph;
     use scenarium::{FuncId, GraphInterface};
@@ -1057,7 +1058,10 @@ mod tests {
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         for active in [1, 2] {
-            doc.layout.activate(primary, active);
+            doc.layout.apply(DockOp::ActivateTab {
+                group: primary,
+                index: active,
+            });
             assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
         }
 
@@ -1087,7 +1091,10 @@ mod tests {
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
-        doc.layout.activate(primary, 3); // viewing the image tab
+        doc.layout.apply(DockOp::ActivateTab {
+            group: primary,
+            index: 3,
+        }); // viewing the image tab
         // Drop the graph out from under its open tab.
         doc.graph.graphs.remove(&id);
 
@@ -1145,13 +1152,13 @@ mod tests {
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         // A split pane too, so the whole tree shape round-trips — not
         // just a flat strip.
-        doc.layout.move_tab(
-            TabRef::ImageViewer(out_port(node_id)),
-            DockDrop::Split {
+        doc.layout.apply(DockOp::MoveTab {
+            tab: TabRef::ImageViewer(out_port(node_id)),
+            to: DockDrop::Split {
                 group: primary,
                 side: SplitSide::Right,
             },
-        );
+        });
         let bytes = serde_json::to_vec_pretty(&doc).expect("serialize with dock layout");
         let back: Document = serde_json::from_slice(&bytes).expect("deserialize");
         back.validate().expect("round-tripped document is valid");

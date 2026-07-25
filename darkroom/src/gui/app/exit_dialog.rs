@@ -7,7 +7,7 @@ use aperture::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
 
 /// The user's answer to the unsaved-changes prompt for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExitChoice {
+pub(super) enum ExitChoice {
     /// No button pressed yet — keep the dialog up.
     Stay,
     /// Keep editing (Cancel button, Esc, or backdrop click).
@@ -20,18 +20,18 @@ pub(crate) enum ExitChoice {
 
 /// What the exit dialog reported this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExitOutcome {
-    pub choice: ExitChoice,
+pub(super) struct ExitOutcome {
+    pub(super) choice: ExitChoice,
     /// "Don't ask again" checkbox state. Honored only when `choice` is a
     /// proceed action (`Save`/`Discard`) — a `Cancel` leaves the
     /// preference untouched.
-    pub dont_ask_again: bool,
+    pub(super) dont_ask_again: bool,
 }
 
 /// Render the modal over the current frame. `file_name` names the document
 /// in the prompt (`None` for a never-saved one). Returns the choice the
 /// user made this frame plus the "Don't ask again" state.
-pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
+pub(super) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
     let title = match file_name {
         Some(name) => ui.fmt(format_args!("Save changes to “{name}” before quitting?")),
         None => ui.fmt(format_args!("Save changes before quitting?")),

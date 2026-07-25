@@ -9,7 +9,7 @@ use crate::math::vec2us::Vec2us;
 /// labeling, and optional deblending. Each region may correspond to a single
 /// star or other source.
 #[derive(Debug)]
-pub(crate) struct Region {
+pub(in crate::stacking::star_detection) struct Region {
     /// Bounding box of the region.
     pub bbox: URect,
     /// Peak pixel coordinates within the region.

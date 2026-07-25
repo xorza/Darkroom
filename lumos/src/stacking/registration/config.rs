@@ -362,7 +362,7 @@ impl Config {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 
     pub(crate) fn warp_params(method: InterpolationMethod) -> WarpParams {

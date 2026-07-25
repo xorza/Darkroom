@@ -20,7 +20,7 @@ use crate::astro::nodes::runtime;
 const CACHE_PRESENT: &str = "present:";
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FrameSetKeyError {
+enum FrameSetKeyError {
     #[error("failed to read metadata for '{path}': {source}", path = .path.display())]
     Metadata {
         path: PathBuf,
@@ -30,7 +30,7 @@ pub(crate) enum FrameSetKeyError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum BuildMastersError {
+enum BuildMastersError {
     #[error("cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -122,7 +122,7 @@ fn frames_input(name: &str, what: &str) -> FuncInput {
         .description(format!("Camera-RAW {what} to stack."))
 }
 
-pub(crate) fn build_masters_cached(
+fn build_masters_cached(
     frame_sets: [Option<Vec<PathBuf>>; 4],
     sigma: f32,
     cache: bool,
@@ -225,7 +225,7 @@ fn role_cache_paths(
     Ok(RoleCachePaths { master, marker })
 }
 
-pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
+fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
     let mut hasher = blake3::Hasher::new();
     for frame in frames {
         let name = frame
@@ -250,13 +250,22 @@ pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyErr
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-pub(crate) fn cache_marker_path(cache_path: &Path) -> PathBuf {
+fn cache_marker_path(cache_path: &Path) -> PathBuf {
     let mut name = cache_path
         .file_name()
         .expect("master cache path has a file name")
         .to_os_string();
     name.push(".source");
     cache_path.with_file_name(name)
+}
+
+#[cfg(test)]
+pub(in crate::astro::nodes) mod internals {
+    use std::path::PathBuf;
+
+    pub(in crate::astro::nodes) fn frame_set_key(frames: &[PathBuf]) -> Result<String, String> {
+        super::frame_set_key(frames).map_err(|error| error.to_string())
+    }
 }
 
 #[cfg(test)]

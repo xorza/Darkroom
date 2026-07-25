@@ -8,12 +8,17 @@ use imaginarium::Buffer2;
 use crate::testing::TestRng;
 
 /// Create a uniform image filled with a single value.
-pub fn uniform(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+pub(crate) fn uniform(width: usize, height: usize, value: f32) -> Buffer2<f32> {
     Buffer2::new_filled(width, height, value)
 }
 
 /// Create a horizontal gradient from left to right.
-pub fn horizontal_gradient(width: usize, height: usize, left: f32, right: f32) -> Buffer2<f32> {
+pub(super) fn horizontal_gradient(
+    width: usize,
+    height: usize,
+    left: f32,
+    right: f32,
+) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; width * height];
     for y in 0..height {
         for x in 0..width {
@@ -33,7 +38,7 @@ pub fn horizontal_gradient(width: usize, height: usize, left: f32, right: f32) -
 /// Formula: `(x + y * 0.5) / (width + height)`
 /// This creates a gradient that varies in both X and Y directions,
 /// making it useful for testing interpolation accuracy.
-pub fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
+pub(crate) fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
     let scale = (width + height) as f32;
     let pixels: Vec<f32> = (0..height)
         .flat_map(|y| (0..width).map(move |x| (x as f32 + y as f32 * 0.5) / scale))
@@ -44,7 +49,7 @@ pub fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
 /// Create a checkerboard pattern.
 ///
 /// Useful for phase correlation and registration tests.
-pub fn checkerboard(
+pub(super) fn checkerboard(
     width: usize,
     height: usize,
     cell_size: usize,
@@ -66,7 +71,7 @@ pub fn checkerboard(
 /// Uses Box-Muller transform via `TestRng::next_gaussian_f32()`.
 /// This is the canonical noise helper — all test code should use this
 /// instead of reimplementing Gaussian noise locally.
-pub fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
+pub(crate) fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     let mut rng = TestRng::new(seed);
     for p in pixels.iter_mut() {
         *p += rng.next_gaussian_f32() * sigma;

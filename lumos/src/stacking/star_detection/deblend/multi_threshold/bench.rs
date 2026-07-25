@@ -14,7 +14,7 @@ use crate::stacking::star_detection::deblend::multi_threshold::{
     DeblendBuffers, deblend_multi_threshold,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
+use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::fixtures::cluster_field;
 use imaginarium::Buffer2;
 

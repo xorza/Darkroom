@@ -1,4 +1,4 @@
-use crate::background_mesh::workspace::test_support::compute_grid;
+use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
 
 /// Number of sigma-clipping iterations for tests.

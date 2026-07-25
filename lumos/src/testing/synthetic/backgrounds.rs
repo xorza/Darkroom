@@ -10,7 +10,7 @@
 use glam::Vec2;
 
 /// Add uniform background to image.
-pub fn add_uniform_background(pixels: &mut [f32], level: f32) {
+pub(super) fn add_uniform_background(pixels: &mut [f32], level: f32) {
     for p in pixels.iter_mut() {
         *p += level;
     }
@@ -24,7 +24,7 @@ pub fn add_uniform_background(pixels: &mut [f32], level: f32) {
 /// * `level_start` - Background level at top-left
 /// * `level_end` - Background level at bottom-right
 /// * `angle` - Gradient direction in radians (0 = horizontal left-to-right)
-pub fn add_gradient_background(
+pub(super) fn add_gradient_background(
     pixels: &mut [f32],
     width: usize,
     height: usize,
@@ -56,7 +56,7 @@ pub fn add_gradient_background(
 /// * `center_level` - Background level at image center
 /// * `edge_level` - Background level at corners
 /// * `falloff` - Power of radial falloff (1.0 = linear, 2.0 = quadratic)
-pub fn add_vignette_background(
+pub(super) fn add_vignette_background(
     pixels: &mut [f32],
     width: usize,
     height: usize,
@@ -80,19 +80,19 @@ pub fn add_vignette_background(
 
 /// Configuration for nebula-like background structure.
 #[derive(Debug, Clone)]
-pub struct NebulaConfig {
+pub(crate) struct NebulaConfig {
     /// Center position (fraction of image width/height, 0.0-1.0)
-    pub center: Vec2,
+    pub(crate) center: Vec2,
     /// Radius as fraction of image diagonal
-    pub radius: f32,
+    pub(crate) radius: f32,
     /// Peak brightness
-    pub amplitude: f32,
+    pub(crate) amplitude: f32,
     /// Edge softness (higher = softer edges)
-    pub softness: f32,
+    pub(crate) softness: f32,
     /// Ellipticity (1.0 = circular)
-    pub aspect_ratio: f32,
+    pub(crate) aspect_ratio: f32,
     /// Rotation angle in radians
-    pub angle: f32,
+    pub(crate) angle: f32,
 }
 
 impl Default for NebulaConfig {
@@ -112,7 +112,7 @@ impl Default for NebulaConfig {
 ///
 /// Creates an elliptical Gaussian-like bright region to simulate
 /// emission nebulae or light pollution gradients.
-pub fn add_nebula_background(
+pub(super) fn add_nebula_background(
     pixels: &mut [f32],
     width: usize,
     height: usize,

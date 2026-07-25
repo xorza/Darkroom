@@ -10,7 +10,7 @@ use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
 /// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
 /// the general-purpose populated field.
-pub fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::random_field(
         width,
         height,
@@ -29,7 +29,7 @@ pub fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> S
 
 /// A crowded central cluster of `num_stars` with heavy blending over a dark sky — for
 /// deblend, labeling, and crowded-detection stress.
-pub fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::cluster(
         width,
         height,

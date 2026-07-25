@@ -193,7 +193,7 @@ impl Iterator for Attribution<'_> {
 }
 
 #[cfg(any(test, feature = "internals"))]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
     use crate::graph::NodeId;
 

@@ -9,9 +9,9 @@ use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, GraphRef, ItemRef, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::build::build_step;
+use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{
-    DUPLICATE_OFFSET, build_duplicate_intent, build_duplicate_intent_for, remove_selection_intents,
-    selected_node_ids,
+    build_duplicate_intent, build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
 use crate::core::edit::intent::types::{
     DocStep, GestureKey, GraphStep, Intent, NodeProperty, UndoStep,
@@ -309,7 +309,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     );
     let a_clone = nodes
         .iter()
-        .find(|(pos, _, _)| *pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _, _)| *pos == Vec2::new(0.0, 0.0) + duplicate_offset())
         .map(|(_, node_id, _)| *node_id)
         .expect("a's clone offset from its origin");
 
@@ -318,7 +318,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(bindings.len(), 2);
     let b_clone = nodes
         .iter()
-        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + duplicate_offset())
         .map(|(_, node_id, _)| *node_id)
         .unwrap();
     let internal = bindings
@@ -358,7 +358,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(incoming.len(), 3, "internal + const + kept external");
     let b_clone2 = incoming_nodes
         .iter()
-        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + duplicate_offset())
         .map(|(_, node_id, _)| *node_id)
         .unwrap();
     let external = incoming

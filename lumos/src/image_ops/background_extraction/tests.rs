@@ -1,6 +1,6 @@
 use crate::image_ops::background_extraction::*;
+use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::{channel_plane as channel, gray_image, rgb_image as rgb};
 use imaginarium::Image;
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {

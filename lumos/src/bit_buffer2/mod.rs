@@ -267,7 +267,7 @@ impl Iterator for BitIter<'_> {
 impl ExactSizeIterator for BitIter<'_> {}
 
 #[cfg(test)]
-mod test_support {
+mod internals {
     use crate::bit_buffer2::{BitBuffer2, bit_layout};
 
     impl BitBuffer2 {

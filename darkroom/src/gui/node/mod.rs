@@ -1,10 +1,10 @@
-pub(crate) mod header;
-pub(crate) mod memory_row;
-pub(crate) mod port_color;
-pub(crate) mod port_rename;
-pub(crate) mod port_row;
-pub(crate) mod prepass;
-pub(crate) mod value_editor;
+pub(super) mod header;
+mod memory_row;
+pub(super) mod port_color;
+mod port_rename;
+pub(super) mod port_row;
+pub(super) mod prepass;
+mod value_editor;
 
 use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
@@ -41,23 +41,23 @@ use std::collections::BTreeSet;
 /// `actions`) and the breaker `probe` stay separate params.
 #[derive(Clone, Copy)]
 pub(crate) struct RecordCtx<'a> {
-    pub(crate) theme: &'a Theme,
+    pub(super) theme: &'a Theme,
     /// The runtime library, for resolving a port's registered type metadata
     /// (display name, enum variants) — `DataType` carries only the id.
-    pub(crate) library: &'a Library,
-    pub(crate) scene: &'a Scene,
+    pub(super) library: &'a Library,
+    pub(super) scene: &'a Scene,
     /// Effective selection to paint: the committed set (`scene.selected`)
     /// or, mid-rubber-band, the live swept preview owned by `SelectionUI`.
     /// Kept off `Scene` so the projection stays a read-only mirror — the
     /// gesture no longer scribbles its preview into the committed field.
-    pub(crate) selected: &'a BTreeSet<ItemRef>,
-    pub(crate) geometry: &'a CanvasGeometry,
+    pub(super) selected: &'a BTreeSet<ItemRef>,
+    pub(super) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
-    pub(crate) inspectors: &'a Inspectors,
+    pub(super) inspectors: &'a Inspectors,
     /// Live run results — the pin previews drawn interleaved with the
     /// node bodies read their pinned values from here.
-    pub(crate) run_state: &'a RunState,
+    pub(super) run_state: &'a RunState,
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -70,7 +70,7 @@ pub(crate) struct RecordCtx<'a> {
 /// frame after [`crate::gui::canvas::geometry::CanvasGeometry`] has been rebuilt
 /// from last-frame's responses.
 #[derive(Default, Debug)]
-pub(crate) struct NodeUI {
+pub(super) struct NodeUI {
     drag_anchor: Option<DragAnchor>,
     /// The node kept recorded by the focus cull-exemption last frame.
     /// Focus clears during input, *before* the record, so on the blur
@@ -99,7 +99,7 @@ impl NodeUI {
     /// (port circles capture their own presses via `Sense::CLICK`, so
     /// drags don't latch off the port grabs); `prepass` converts the
     /// anchor into `Intent::MoveSelection` on later frames.
-    pub(crate) fn draw_all(
+    pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
@@ -291,7 +291,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub(crate) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         // `key`/`widget_id` are `Copy`, so pull them out and drop the
         // borrow — that lets the early returns below reassign
         // `self.drag_anchor` without cloning the `start_*_positions` `Vec`s,
@@ -337,7 +337,7 @@ impl NodeUI {
 /// The accent color for a node's last-run status, or `None` when it
 /// didn't run. Shared by the body glow and the header time label so they
 /// read as one cue.
-pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
+pub(super) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
     match status {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.colors.exec_cached_glow),
@@ -369,7 +369,7 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
 /// the domain `NodeId` so `response_for` can probe last-frame's
 /// arranged rect (used by the connection breaker's body-hit test)
 /// without needing the panel's response to round-trip first.
-pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
+pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
 }
 
@@ -382,7 +382,7 @@ pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
 /// a repaint is already scheduled — no `MOVE` subscription needed — and
 /// it's occlusion-aware (a panel stacked over the node wins the
 /// pointer).
-pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
+fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
 }
 
@@ -390,11 +390,11 @@ pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
 /// label), so the same id is recorded across the label⇄editor swap.
 /// Polled here to drag the node by its title (the idle label senses
 /// `DRAG`) and by [`header::title`] to render the field.
-pub(crate) fn node_rename_wid(node_id: NodeId) -> WidgetId {
+fn node_rename_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
-pub(crate) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent {
+pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent {
     Intent::SetInput {
         input: InputPort::new(port.node_id, port.port_idx),
         to: to.into(),
@@ -402,7 +402,7 @@ pub(crate) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent
 }
 
 /// Toggle (or set) whether an output port is pinned.
-pub(crate) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
+pub(super) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
     Intent::SetOutputPinned {
         output: OutputPort::new(port.node_id, port.port_idx),
         pinned,
@@ -416,7 +416,7 @@ pub(crate) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body; also shared by the pin preview widget's own click.
-pub(crate) fn click_intents(shift: bool, scene: &Scene, key: ItemRef, out: &mut Vec<Intent>) {
+pub(super) fn click_intents(shift: bool, scene: &Scene, key: ItemRef, out: &mut Vec<Intent>) {
     out.push(select_intent(shift, scene, key));
     let deselecting = shift && scene.selected.contains(&key);
     if !deselecting {

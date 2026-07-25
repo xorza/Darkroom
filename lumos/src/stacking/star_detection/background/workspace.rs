@@ -35,7 +35,7 @@ impl InterpolateScratch {
 
 #[cfg(test)]
 mod tests {
-    use crate::concurrency::test_support::job_count;
+    use crate::concurrency::internals::job_count;
     use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
 
     #[test]

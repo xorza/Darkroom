@@ -6,7 +6,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
-pub(crate) fn subtract(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
+pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
     if let Some(subtractor) = subtractor {
         assert!(
             subtractor.data.width() == flat.data.width()
@@ -26,7 +26,7 @@ pub(crate) fn subtract(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> Cfa
     flat
 }
 
-pub(crate) fn normalize(mut flat: CfaImage) -> CfaImage {
+pub(super) fn normalize(mut flat: CfaImage) -> CfaImage {
     match flat.metadata.cfa_type.as_ref() {
         Some(cfa_type) if cfa_type.num_colors() == 3 => {
             normalize_cfa(&mut flat.data, cfa_type);
@@ -37,7 +37,7 @@ pub(crate) fn normalize(mut flat: CfaImage) -> CfaImage {
     flat
 }
 
-pub(crate) fn apply(flat: &CfaImage, image: &mut CfaImage) {
+pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
     assert!(
         image.data.width() == flat.data.width() && image.data.height() == flat.data.height(),
         "Flat dimensions mismatch: {}x{} vs {}x{}",

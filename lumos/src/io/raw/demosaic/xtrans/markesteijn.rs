@@ -265,10 +265,10 @@ pub(crate) fn demosaic(
 #[cfg(test)]
 mod tests {
     use crate::io::raw::demosaic::interleave_planes;
-    use crate::io::raw::demosaic::xtrans::markesteijn::*;
-    use crate::io::raw::demosaic::xtrans::test_support::{
+    use crate::io::raw::demosaic::xtrans::internals::{
         TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
     };
+    use crate::io::raw::demosaic::xtrans::markesteijn::*;
 
     #[derive(Clone, Copy, Debug)]
     enum SyntheticScene {

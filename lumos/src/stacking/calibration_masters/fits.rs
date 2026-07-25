@@ -69,7 +69,7 @@ struct BundleIndices {
     defects: Option<usize>,
 }
 
-pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result<()> {
+pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result<()> {
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer
@@ -120,7 +120,7 @@ pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
     })
 }
 
-pub(crate) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
+pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     let bytes = std::fs::read(path)?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(fits_to_io)?;
     validate_primary(&reader)?;

@@ -12,7 +12,7 @@ use crate::core::edit::intent::types::Intent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
-pub(crate) const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
+const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
 /// The `NodeId`s among `view`'s selection, dropping pin-preview keys (which
 /// carry no node identity). Shared by the Ctrl+D duplicate path
@@ -141,4 +141,15 @@ pub(crate) fn remove_selection_intents(selected: &BTreeSet<ItemRef>) -> Vec<Inte
             },
         })
         .collect()
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use glam::Vec2;
+
+    use super::DUPLICATE_OFFSET;
+
+    pub(crate) fn duplicate_offset() -> Vec2 {
+        DUPLICATE_OFFSET
+    }
 }

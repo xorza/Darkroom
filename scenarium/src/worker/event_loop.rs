@@ -28,7 +28,7 @@ pub(crate) enum EventLoopWake {
 pub(crate) struct ActiveEventLoop {
     tasks: JoinSet<()>,
     task_nodes: HashMap<Id, ExecutionNodeId>,
-    pub(crate) events: Receiver<ExecutionEventPort>,
+    events: Receiver<ExecutionEventPort>,
 }
 
 impl ActiveEventLoop {
@@ -158,5 +158,20 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         message.clone()
     } else {
         "unknown panic".to_string()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::execution::identity::ExecutionEventPort;
+    use crate::worker::event_loop::ActiveEventLoop;
+
+    impl ActiveEventLoop {
+        /// Raw next event from the loop's channel, bypassing the join-set
+        /// machinery `recv` also watches — what tests want when they only
+        /// care about the event stream itself.
+        pub(crate) async fn recv_event(&mut self) -> Option<ExecutionEventPort> {
+            self.events.recv().await
+        }
     }
 }

@@ -20,7 +20,7 @@ const BAR_H: f32 = 3.0;
 
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram`
 /// is mirrored from the run cache; each pool shows only when non-zero.
-pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
+pub(super) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
     let ram = node.ram;
     if ram.total() == 0 {
         return;

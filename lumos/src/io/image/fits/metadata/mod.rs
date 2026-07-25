@@ -6,7 +6,7 @@ use crate::io::image::{BitPix, ImageMetadata, ImageProvenance, TransferProvenanc
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 
-pub(crate) fn read_metadata(
+pub(super) fn read_metadata(
     header: &Header,
     header_dimensions: Vec<usize>,
     bitpix: BitPix,
@@ -43,7 +43,7 @@ pub(crate) fn read_metadata(
     })
 }
 
-pub(crate) fn write_image_metadata(
+pub(super) fn write_image_metadata(
     header: &mut Header,
     metadata: &ImageMetadata,
     image_type: Option<&str>,
@@ -90,7 +90,7 @@ pub(crate) fn write_image_metadata(
     Ok(())
 }
 
-pub(crate) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
+pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
     match cfa.metadata.cfa_type.as_ref() {
         Some(CfaType::Mono) => {
             header.set("CFATYPE", "MONO")?;
@@ -181,7 +181,7 @@ fn bayerpat(pattern: CfaPattern) -> &'static str {
     }
 }
 
-pub(crate) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> {
+pub(super) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> {
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
@@ -293,7 +293,7 @@ fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 
     }
 }
 
-pub(crate) fn read_quantization_sigma(header: &Header) -> fits_well::Result<Option<f32>> {
+pub(super) fn read_quantization_sigma(header: &Header) -> fits_well::Result<Option<f32>> {
     header
         .get_real("QNTZSIG")?
         .map(|value| {
@@ -344,7 +344,7 @@ fn parse_sexagesimal(value: &str) -> Option<f64> {
     Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0))
 }
 
-pub(crate) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<String>> {
+pub(super) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<String>> {
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 

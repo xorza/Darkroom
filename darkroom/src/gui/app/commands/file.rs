@@ -23,7 +23,7 @@ pub(crate) enum FileCommand {
 }
 
 impl App {
-    pub(crate) fn handle_file(&mut self, command: FileCommand) {
+    pub(super) fn handle_file(&mut self, command: FileCommand) {
         match command {
             FileCommand::New => self.new_document(),
             FileCommand::Load => {
@@ -52,7 +52,7 @@ impl App {
     /// Load `path` into a fresh editor. Returns whether it loaded — `false`
     /// when the file is missing or corrupt, leaving the open document intact.
     /// The failure surfaces in the status bar with its reason.
-    pub(crate) fn load_document(&mut self, path: &Path) -> bool {
+    fn load_document(&mut self, path: &Path) -> bool {
         let open = match OpenDocument::load(path.to_path_buf()) {
             Ok(open) => open,
             Err(err) => {
@@ -74,7 +74,7 @@ impl App {
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
-    pub(crate) fn save_current(&mut self) {
+    pub(in crate::gui::app) fn save_current(&mut self) {
         match self.workspace.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),

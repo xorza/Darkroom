@@ -226,8 +226,8 @@ impl Drop for SpillFiles {
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
 pub(crate) struct StoredImage {
-    pub(crate) metadata: ImageMetadata,
-    pub(crate) dimensions: ImageDimensions,
+    pub(super) metadata: ImageMetadata,
+    pub(super) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
     _spill_files: SpillFiles,
 }
@@ -363,7 +363,7 @@ pub(crate) fn reusable_plane(path: &Path, dimensions: ImageDimensions) -> bool {
     metadata.len() == expected
 }
 
-pub(crate) fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
+fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
     let bytes = bytemuck::cast_slice(pixels);
     file_utils::publish_bytes(path, bytes, file_utils::PublicationMode::Cache).map_err(|source| {
         FrameStoreError::WriteFile {
@@ -392,7 +392,7 @@ pub(crate) fn map_plane(path: PathBuf) -> Result<Mmap, FrameStoreError> {
     Ok(mmap)
 }
 
-pub(crate) const MIN_CHUNK_ROWS: usize = 64;
+const MIN_CHUNK_ROWS: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChunkMemoryLayout {
     /// Planes read concurrently for the active row chunk.

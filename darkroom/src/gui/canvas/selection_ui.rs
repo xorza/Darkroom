@@ -20,7 +20,7 @@ use crate::gui::scene::Scene;
 /// that fall through to the bare canvas (node bodies hit-test first, so
 /// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
-pub(crate) struct SelectionUI {
+pub(super) struct SelectionUI {
     band: Option<RubberBand>,
     /// Pre-drag selection captured at latch (empty unless Shift extends).
     /// The swept set unions onto this each frame, so we never re-read
@@ -57,7 +57,7 @@ impl SelectionUI {
     /// The live swept set while a band is in flight, for node/pin draw to
     /// paint against; `None` when no band is active (the caller falls back
     /// to the committed `scene.selected`).
-    pub(crate) fn preview(&self) -> Option<&BTreeSet<ItemRef>> {
+    pub(super) fn preview(&self) -> Option<&BTreeSet<ItemRef>> {
         self.preview.as_ref()
     }
 
@@ -69,7 +69,7 @@ impl SelectionUI {
     /// committing `SetSelection` emitted on release. Esc cancels without
     /// emitting.
     ///
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -151,7 +151,7 @@ impl SelectionUI {
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active or the rect has no area yet.
-    pub(crate) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
         let Some(band) = self.band else {
             return;
         };

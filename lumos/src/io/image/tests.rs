@@ -1,11 +1,11 @@
 use crate::image_ops::rgb::Rgb;
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
 use crate::io::image::LoadContext;
 #[cfg(feature = "real-data")]
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::linear::{LinearImage, test_support};
+use crate::io::image::linear::{LinearImage, internals};
 use crate::io::image::*;
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
@@ -134,7 +134,7 @@ fn test_from_image_no_stride_padding() {
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let linear = test_support::from_image(&image);
+    let linear = internals::from_image(&image);
 
     assert_eq!(linear.width(), 3);
     assert_eq!(linear.height(), 2);
@@ -270,7 +270,7 @@ fn test_roundtrip_linear_to_image_to_linear() {
     );
 
     let image: Image = gray.clone().into();
-    let restored = test_support::from_image(&image);
+    let restored = internals::from_image(&image);
 
     assert_eq!(restored.dimensions(), gray.dimensions());
     for (a, b) in gray.channel(0).iter().zip(restored.channel(0).iter()) {
@@ -283,7 +283,7 @@ fn test_roundtrip_linear_to_image_to_linear() {
     );
 
     let image: Image = rgb.clone().into();
-    let restored = test_support::from_image(&image);
+    let restored = internals::from_image(&image);
 
     assert_eq!(restored.dimensions(), rgb.dimensions());
     for c in 0..rgb.channels() {
@@ -300,7 +300,7 @@ fn test_image_rgba_to_linear_drops_alpha() {
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let linear = test_support::from_image(&image);
+    let linear = internals::from_image(&image);
 
     assert_eq!(linear.channels(), 3);
     assert!((linear.channel(0)[0] - 1.0).abs() < 1e-6);

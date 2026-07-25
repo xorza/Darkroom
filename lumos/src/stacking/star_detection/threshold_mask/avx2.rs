@@ -11,7 +11,7 @@ use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_s
 /// false. See `process_words_scalar`.
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn process_words_avx2<const WITH_BG: bool>(
+pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],

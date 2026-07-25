@@ -9,7 +9,7 @@ use crate::io::image::linear::LinearImage;
 use glam::DVec2;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
-use crate::stacking::registration::resample::test_support;
+use crate::stacking::registration::resample::internals;
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::{Config, TransformType, register};
@@ -46,11 +46,11 @@ fn transform_image(
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new_default(width, height);
-    test_support::warp_plane(
+    internals::warp_plane(
         &src_buf,
         &mut output,
         &WarpTransform::new(inverse),
-        &config::test_support::warp_params(InterpolationMethod::Bilinear),
+        &config::internals::warp_params(InterpolationMethod::Bilinear),
     );
     output.into_vec()
 }
@@ -63,11 +63,11 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new_default(width, height);
-    test_support::warp_plane(
+    internals::warp_plane(
         &src_buf,
         &mut output,
         &WarpTransform::new(inverse),
-        &config::test_support::warp_params(InterpolationMethod::Bilinear),
+        &config::internals::warp_params(InterpolationMethod::Bilinear),
     );
     output.into_vec()
 }

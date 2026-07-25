@@ -4,11 +4,11 @@
 
 use crate::math::fwhm_to_sigma;
 use crate::stacking::star_detection::config::BackgroundConfig;
-use crate::stacking::star_detection::convolution::gaussian_convolve;
+use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::test_common::output::image_writer::save_grayscale;
 use crate::testing::{estimate_background, init_tracing};
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::synthetic_tests::stage_tests::TILE_SIZE;

@@ -476,14 +476,14 @@ fn test_moffat_fit_alpha_recovery() {
 
         // Check that alpha is accurate (convergence flag may be false if
         // initial guess was already close)
-        let alpha_error = (result.debug.alpha - true_alpha).abs() / true_alpha;
+        let alpha_error = (result.debug_alpha() - true_alpha).abs() / true_alpha;
 
         assert!(
             alpha_error < 0.15,
             "Alpha error {:.1}% too large for alpha={} (got={})",
             alpha_error * 100.0,
             true_alpha,
-            result.debug.alpha
+            result.debug_alpha()
         );
     }
 }

@@ -14,7 +14,7 @@ use crate::stacking::star_detection::deblend::local_maxima::{
     deblend_local_maxima, find_local_maxima,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
+use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::fixtures::cluster_field;
 use imaginarium::Buffer2;
 

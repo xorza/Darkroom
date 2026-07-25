@@ -2,9 +2,9 @@
 //! also the home of [`Image`] (a [`imaginarium::ImageBuffer`] wrapped as a
 //! scenarium [`CustomValue`]).
 
-pub(crate) mod codec;
-pub(crate) mod context;
-pub(crate) mod format;
+mod codec;
+mod context;
+mod format;
 pub(crate) mod nodes;
 
 use std::any::Any;

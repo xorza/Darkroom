@@ -5,8 +5,8 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::stacking::star_detection::centroid::internals::make_moffat_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
-use crate::stacking::star_detection::centroid::test_utils::make_moffat_star;
 use glam::Vec2;
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]

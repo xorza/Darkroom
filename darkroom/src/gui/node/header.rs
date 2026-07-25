@@ -49,7 +49,7 @@ const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
 
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
 /// that keeps 2–3 significant digits.
-pub(crate) fn fmt_elapsed(secs: f64) -> String {
+pub(in crate::gui) fn fmt_elapsed(secs: f64) -> String {
     if secs >= 1.0 {
         format!("{secs:.2}s")
     } else if secs >= 1e-3 {
@@ -73,7 +73,7 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
 /// node (the body records after, so it hit-tests on top), while
 /// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
 /// while a drag snaps to it) tints the triangle as drop feedback.
-pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
+pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
     let port = theme.port_size;
     let hit = port * PORT_HIT_SCALE;
     let inset = (hit - port) * 0.5;
@@ -116,7 +116,7 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
 /// subscription is whole-node, not per-port), so `CanvasGeometry` /
 /// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
-pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
+pub(in crate::gui) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
@@ -126,7 +126,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -202,7 +202,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
@@ -425,10 +425,10 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
     }
 }
 
-/// Stable id for a node's clickable run-to-node play chip. `pub(crate)` so
+/// Stable id for a node's clickable run-to-node play chip. `pub(super)` so
 /// the canvas-level scan ([`crate::gui::node::prepass::emit_play_clicks`]) can poll
 /// the click from last frame's response.
-pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
+pub(super) fn play_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.play_badge", node_id))
 }
 
@@ -447,12 +447,12 @@ fn disk_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.disk_badge", node_id))
 }
 
-pub(crate) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
+pub(super) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.cache_eviction_badge", node_id))
 }
 
 /// Stable id for a graph node's clickable open-in-tab chip.
-pub(crate) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
+pub(in crate::gui) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.graph_badge", node_id))
 }
 
@@ -486,11 +486,11 @@ enum BadgeGlyph {
 /// [`BadgeKind`]). Build one with [`Badge::control`] /
 /// [`Badge::control_drawn`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
-/// frame (always `false` for a marker). `pub(crate)` so
+/// frame (always `false` for a marker). `pub(in crate::gui)` so
 /// [`crate::gui::canvas::pin_preview`]'s refresh chip can reuse the same
 /// framing rather than re-deriving the chip look.
 #[derive(Debug)]
-pub(crate) struct Badge {
+pub(in crate::gui) struct Badge {
     glyph: BadgeGlyph,
     color: Color,
     tip: &'static str,
@@ -499,7 +499,7 @@ pub(crate) struct Badge {
 
 impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    pub(crate) fn control(
+    pub(in crate::gui) fn control(
         glyph: &'static str,
         color: Color,
         filled: bool,
@@ -540,7 +540,7 @@ impl Badge {
         }
     }
 
-    pub(crate) fn show(self, ui: &mut Ui) -> bool {
+    pub(in crate::gui) fn show(self, ui: &mut Ui) -> bool {
         let Badge {
             glyph,
             color,
