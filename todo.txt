@@ -43,3 +43,5 @@ imageview to load only when active, until then save to disk
 remove replay
 
 split subscribe and get position aand keyboard getters in ui
+
+claim keybaord and claim mouse
