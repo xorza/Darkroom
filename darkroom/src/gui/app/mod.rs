@@ -128,9 +128,9 @@ impl App {
     /// already scheduled by the worker's wake callback. Drained before the
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {
-        // Collect to drop the channel borrow before the status writes below
-        // (both live on `self.workspace.runtime`).
-        let events: Vec<WorkerReport> = self.workspace.runtime.drain_worker().collect();
+        // Owned, so the channel borrow is gone before the status writes
+        // below (both live on `self.workspace.runtime`).
+        let events = self.workspace.runtime.drain_worker();
         for report in events {
             match report {
                 WorkerReport::Installed(compiled) => {

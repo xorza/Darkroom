@@ -41,3 +41,5 @@ move benches and put alongside the code they bench
 imageview to load only when active, until then save to disk
 
 remove replay
+
+split subscribe and get position aand keyboard getters in ui

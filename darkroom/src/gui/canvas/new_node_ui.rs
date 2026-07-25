@@ -28,6 +28,7 @@ struct ChosenNode {
 /// One row of a category's palette list: a library `Func`, a built-in special
 /// node, or a shared graph. Collecting the three into one type lets a
 /// category's rows be sorted by name into a single alphabetical list.
+#[derive(Debug)]
 enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),

@@ -24,9 +24,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 
 use crate::core::document::Viewport;
-use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
-use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
@@ -49,7 +47,7 @@ use crate::gui::node::prepass::{
     emit_cache_evictions, emit_path_picks, emit_play_clicks, emit_port_dblclicks,
 };
 use crate::gui::node::{NodeUI, RecordCtx};
-use crate::gui::scene::{Scene, SceneNode};
+use crate::gui::scene::Scene;
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the
 /// `NodeUI` that renders every graph node, and the manual pan/zoom
@@ -508,34 +506,6 @@ fn emit_chip_command(ui: &Ui, scene: &Scene) -> Option<AppCommand> {
         return Some(AppCommand::Run(RunCommand::Node(node_id)));
     }
     None
-}
-
-/// Every `EventRef` of `node`, in declaration order — the emitter-glyph
-/// counterpart of [`node_ports`], shared by `CanvasGeometry::rebuild` and
-/// the subscription-wire scans so record order and scan order can't drift
-/// apart.
-pub(crate) fn node_events(node: &SceneNode) -> impl Iterator<Item = EventRef> + '_ {
-    (0..node.events.len as usize).map(|event_idx| EventRef {
-        node_id: node.id,
-        event_idx,
-    })
-}
-
-/// Every `PortRef` of `node` on the given side, in port order. Single
-/// source for the "iterate a node's ports by kind" loop that
-/// `CanvasGeometry::rebuild` and the connection scans all need, so scan order
-/// and paint order can't drift apart.
-pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item = PortRef> + '_ {
-    let span = match kind {
-        PortKind::Input => node.inputs,
-        PortKind::Output => node.outputs,
-    };
-    let count = span.len as usize;
-    (0..count).map(move |port_idx| PortRef {
-        node_id: node.id,
-        kind,
-        port_idx,
-    })
 }
 
 /// Outer-canvas-local coords → inner-canvas pre-transform world

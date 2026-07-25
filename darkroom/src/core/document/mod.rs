@@ -203,12 +203,10 @@ impl PartialEq for GraphView {
     fn eq(&self, other: &Self) -> bool {
         self.viewport == other.viewport
             && self.selected == other.selected
-            && self.item_placements.len() == other.item_placements.len()
-            && self
-                .item_placements
-                .iter()
-                .zip(&other.item_placements)
-                .all(|(left, right)| left == right)
+            // `IndexMap`'s own `PartialEq` ignores order; the paint stack *is*
+            // the order, so compare as sequences. `Iterator::eq` is exactly
+            // that — same length, pairwise equal.
+            && self.item_placements.iter().eq(other.item_placements.iter())
     }
 }
 
