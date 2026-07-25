@@ -15,11 +15,11 @@ use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
 
-/// Owns the in-flight new-connection wire (a held drag or a free-floating
-/// wire — see [`InFlight`]) plus the existing-connection renderer.
-/// Single-wire-at-a-time means one `Option` is enough; the permanent
-/// connection list lives on `Scene` and is iterated each frame by
-/// [`Self::draw`].
+/// Owns the in-flight new-connection wire — a held drag or a free-floating
+/// wire, see [`InFlight`]. Single-wire-at-a-time means one `Option` is
+/// enough. The permanent connections aren't state at all: they live on
+/// `Scene` and are painted straight off it by the module-level [`draw`],
+/// which needs nothing from here.
 #[derive(Default, Debug)]
 pub(super) struct ConnectionUI {
     state: Option<InFlight>,
@@ -264,74 +264,6 @@ impl ConnectionUI {
         self.state.and_then(|s| s.snap_end)
     }
 
-    /// Paint every permanent connection on the current scene retained by
-    /// the pass's cull region, marking those the active breaker crosses as
-    /// broken via `probe.mark_broken_input` for the breaker's
-    /// release-frame drain.
-    pub(super) fn draw(&self, ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-        let (theme, scene) = (pass.theme, pass.scene);
-        for c in &scene.connections {
-            let src_port = PortRef {
-                node_id: c.src.node_id,
-                kind: PortKind::Output,
-                port_idx: c.src.port_idx,
-            };
-            let tgt_port = PortRef {
-                node_id: c.tgt.node_id,
-                kind: PortKind::Input,
-                port_idx: c.tgt.port_idx,
-            };
-            let (Some(p0), Some(p3)) = (
-                pass.geometry.ports.center(src_port),
-                pass.geometry.ports.center(tgt_port),
-            ) else {
-                continue;
-            };
-            let wire = Wire::data(p0, p3);
-            let endpoint_hover = pass.geometry.ports.is_hovered(src_port)
-                || pass.geometry.ports.is_hovered(tgt_port);
-            let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
-                continue;
-            };
-            if stroke.broken {
-                pass.probe.mark_broken_input(c.tgt);
-            }
-            // Gradient from output (p0) → input (p3) port color so each
-            // end of a connection visually matches the port it touches —
-            // and, with per-type port colors, the wire reads as its data
-            // type (both ends share it unless one side is the untyped
-            // `Any` wildcard). Aperture's cubic-curve lowering samples
-            // `CurveBrush::Linear` along the curve parameter `t` and ignores
-            // `angle` — we pass 0.0. Broken-state still wins as a flat color
-            // so the alarm read doesn't get diluted by the gradient.
-            let src_ty = port_data_type(scene, src_port).unwrap_or_default();
-            let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
-            let brush = if stroke.broken {
-                CurveBrush::Solid(theme.colors.connection_broken)
-            } else if !tgt_ty.compatible_with(&src_ty) {
-                // A wildcard retype upstream left this wire type-mismatched.
-                // Nothing severs it — it flattens as unbound (drift
-                // tolerance) — so paint it in the missing-input warning
-                // color, matching the port glow the run will report.
-                CurveBrush::Solid(
-                    pass.emphasis
-                        .tint(theme.colors.exec_missing_glow, stroke.hovered),
-                )
-            } else {
-                let a = pass.emphasis.tint(
-                    port_color(theme, &src_ty, PortKind::Output, false),
-                    stroke.hovered,
-                );
-                let b = pass.emphasis.tint(
-                    port_color(theme, &tgt_ty, PortKind::Input, false),
-                    stroke.hovered,
-                );
-                port_gradient(a, b)
-            };
-            wire.add(ui, stroke.width, brush);
-        }
-    }
-
     /// Paint the in-flight drag preview: cubic from the start port's
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
@@ -364,6 +296,77 @@ impl ConnectionUI {
         let drag_ty = port_data_type(scene, start_port).unwrap_or_default();
         let color = port_color(ctx.theme, &drag_ty, start_port.kind, false);
         Wire::data(p0, p3).add(ui, ctx.theme.connection_width, port_gradient(color, color));
+    }
+}
+
+/// Paint every permanent connection on the current scene retained by the
+/// pass's cull region, marking those the active breaker crosses as broken
+/// via `probe.mark_broken_input` for the breaker's release-frame drain.
+///
+/// Reads nothing but committed scene state off `pass`, so it belongs to the
+/// module rather than [`ConnectionUI`] — the in-flight gesture that struct
+/// owns has no bearing on how the standing wires paint.
+pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+    let (theme, scene) = (pass.theme, pass.scene);
+    for c in &scene.connections {
+        let src_port = PortRef {
+            node_id: c.src.node_id,
+            kind: PortKind::Output,
+            port_idx: c.src.port_idx,
+        };
+        let tgt_port = PortRef {
+            node_id: c.tgt.node_id,
+            kind: PortKind::Input,
+            port_idx: c.tgt.port_idx,
+        };
+        let (Some(p0), Some(p3)) = (
+            pass.geometry.ports.center(src_port),
+            pass.geometry.ports.center(tgt_port),
+        ) else {
+            continue;
+        };
+        let wire = Wire::data(p0, p3);
+        let endpoint_hover =
+            pass.geometry.ports.is_hovered(src_port) || pass.geometry.ports.is_hovered(tgt_port);
+        let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
+            continue;
+        };
+        if stroke.broken {
+            pass.probe.mark_broken_input(c.tgt);
+        }
+        // Gradient from output (p0) → input (p3) port color so each
+        // end of a connection visually matches the port it touches —
+        // and, with per-type port colors, the wire reads as its data
+        // type (both ends share it unless one side is the untyped
+        // `Any` wildcard). Aperture's cubic-curve lowering samples
+        // `CurveBrush::Linear` along the curve parameter `t` and ignores
+        // `angle` — we pass 0.0. Broken-state still wins as a flat color
+        // so the alarm read doesn't get diluted by the gradient.
+        let src_ty = port_data_type(scene, src_port).unwrap_or_default();
+        let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
+        let brush = if stroke.broken {
+            CurveBrush::Solid(theme.colors.connection_broken)
+        } else if !tgt_ty.compatible_with(&src_ty) {
+            // A wildcard retype upstream left this wire type-mismatched.
+            // Nothing severs it — it flattens as unbound (drift
+            // tolerance) — so paint it in the missing-input warning
+            // color, matching the port glow the run will report.
+            CurveBrush::Solid(
+                pass.emphasis
+                    .tint(theme.colors.exec_missing_glow, stroke.hovered),
+            )
+        } else {
+            let a = pass.emphasis.tint(
+                port_color(theme, &src_ty, PortKind::Output, false),
+                stroke.hovered,
+            );
+            let b = pass.emphasis.tint(
+                port_color(theme, &tgt_ty, PortKind::Input, false),
+                stroke.hovered,
+            );
+            port_gradient(a, b)
+        };
+        wire.add(ui, stroke.width, brush);
     }
 }
 
