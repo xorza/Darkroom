@@ -2,8 +2,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
-use crate::execution::program::index::NodeIdx;
-use crate::execution::program::index::OutputAddr;
+use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
 };

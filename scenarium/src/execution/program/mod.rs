@@ -9,8 +9,7 @@ pub(crate) mod pool;
 use hashbrown::HashMap;
 
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
-use crate::execution::program::index::OutputAddr;
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputIdx};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::pool::{Pool, PoolRange};
 use crate::graph::CacheMode;
 use crate::library::Library;
@@ -142,15 +141,16 @@ impl ExecutionProgram {
         node_idx
     }
 
-    /// Adopt the flattened node set, assigning dense indices in id order so
-    /// the compiled artifact is deterministic regardless of flatten's walk.
-    pub(crate) fn adopt_nodes(&mut self, e_nodes: HashMap<ExecutionNodeId, ExecutionNode>) {
+    /// Adopt the flattened node set, assigning dense indices in id order so the
+    /// compiled artifact is deterministic regardless of flatten's walk. Drains
+    /// `e_nodes` (sorting it in place) so the flattener keeps the allocation for
+    /// the next compile.
+    pub(crate) fn adopt_nodes(&mut self, e_nodes: &mut Vec<(ExecutionNodeId, ExecutionNode)>) {
         self.e_nodes.clear();
         self.e_node_ids.clear();
         self.e_node_index.clear();
-        let mut entries: Vec<_> = e_nodes.into_iter().collect();
-        entries.sort_unstable_by_key(|(id, _)| *id);
-        for (id, e_node) in entries {
+        e_nodes.sort_unstable_by_key(|(id, _)| *id);
+        for (id, e_node) in e_nodes.drain(..) {
             self.push(id, e_node);
         }
     }
@@ -181,7 +181,7 @@ impl ExecutionProgram {
             let Some(&emitter_idx) = self.e_node_index.get(&event.e_node_id) else {
                 continue;
             };
-            let events = self.e_nodes[emitter_idx.idx()].events;
+            let events = self[emitter_idx].events;
             self.events[events][event.event_idx]
                 .subscribers
                 .push(subscriber_idx);
@@ -189,7 +189,7 @@ impl ExecutionProgram {
     }
 
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
-        let outputs = self.e_nodes[address.node_idx.idx()].outputs;
+        let outputs = self[address.node_idx].outputs;
         debug_assert!(
             address.port_idx < outputs.len,
             "output port is out of range"
@@ -259,7 +259,7 @@ pub(crate) mod test_support {
     /// their stable id; production paths carry `NodeIdx` instead.
     impl ExecutionProgram {
         pub(crate) fn by_id(&self, id: ExecutionNodeId) -> &ExecutionNode {
-            &self.e_nodes[self.e_node_index[&id].idx()]
+            &self[self.e_node_index[&id]]
         }
 
         pub(crate) fn by_id_mut(&mut self, id: ExecutionNodeId) -> &mut ExecutionNode {
@@ -268,3 +268,6 @@ pub(crate) mod test_support {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -20,8 +20,7 @@
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::index::OutputAddr;
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputColumn, OutputIdx};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::OutputDemand;
