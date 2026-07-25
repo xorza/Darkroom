@@ -612,9 +612,56 @@ fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
 mod tests {
     use super::*;
     use scenarium::NodeId;
+    use scenarium::{FuncId, GraphDef, GraphId, Node, NodeKind};
 
     fn port() -> OutputPort {
         OutputPort::new(NodeId::from_u128(1), 0)
+    }
+
+    /// A `Func` node called `name` (empty for an unnamed one).
+    fn named_node(name: &str) -> Node {
+        let mut node = Node::new(NodeKind::Func(FuncId::unique()));
+        node.name = name.to_owned();
+        node
+    }
+
+    #[test]
+    fn port_label_names_the_node_and_its_port_at_any_depth() {
+        let mut doc = Document::default();
+        let stack = doc.graph.add(named_node("stack"));
+        let unnamed = doc.graph.add(named_node(""));
+
+        // A node in a nested definition resolves too: viewer tabs can be
+        // opened from a graph interior, and the label is what tells two
+        // ports of one node apart.
+        let def_id = GraphId::unique();
+        let mut def = GraphDef::new("S");
+        let interior = def.body.add(named_node("blur"));
+        doc.graph.insert_graph(def_id, def);
+
+        assert_eq!(
+            port_label(&doc, OutputPort::new(stack, 1)),
+            "stack \u{b7} out 1"
+        );
+        assert_eq!(
+            port_label(&doc, OutputPort::new(stack, 0)),
+            "stack \u{b7} out 0",
+            "the port tag distinguishes two ports of one node"
+        );
+        assert_eq!(
+            port_label(&doc, OutputPort::new(interior, 0)),
+            "blur \u{b7} out 0"
+        );
+        assert_eq!(
+            port_label(&doc, OutputPort::new(unnamed, 0)),
+            "image \u{b7} out 0",
+            "an unnamed node falls back rather than labelling a bare tag"
+        );
+        assert_eq!(
+            port_label(&doc, OutputPort::new(NodeId::unique(), 3)),
+            "image \u{b7} out 3",
+            "a node that no longer exists keeps the tab labelled"
+        );
     }
 
     #[test]
