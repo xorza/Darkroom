@@ -126,7 +126,7 @@ struct DigestPair {
 /// resource stamps each call. Returns the cache, holding every computed digest.
 fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), program);
+    cache.reconcile(program);
     let mut resource_stamps = RunResourceStamps::default();
     for idx in 0..=through {
         prepare_node(&mut resource_stamps, program, &cache, node_idx(idx));
@@ -346,7 +346,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&ExecutionProgram::default(), &p.program);
+        cache.reconcile(&p.program);
         let mut resource_stamps = RunResourceStamps::default();
         let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
         cache.slots[node_idx(0)].current_digest = Some(producer);
@@ -440,7 +440,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
     let mut resource_stamps = RunResourceStamps::default();
     let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
     cache.slots[node_idx(0)].current_digest = Some(producer);

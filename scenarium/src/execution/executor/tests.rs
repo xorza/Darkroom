@@ -202,7 +202,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
 async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), program);
+    cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let mut stats = ExecutionOutcome::default();
@@ -265,7 +265,7 @@ async fn run_with_pinned(
     run: &TestRun,
 ) -> (RuntimeCache, ExecutionOutcome, Vec<PinnedOutputs>) {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), program);
+    cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
@@ -414,7 +414,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     let run = run_with_readers(&p.program, vec![1]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
     let mut stats = ExecutionOutcome::default();
@@ -671,7 +671,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     run.resolved.disposition[nx(&p.program, a)] = Disposition::Reuse;
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
     cache.slots[nx(&p.program, a)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
         produced_under: None,
@@ -835,7 +835,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
 
     let plan = structural_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
     let first = run_with(&p.program, &plan, &mut cache).await;
     assert_eq!(first.executed_nodes.len(), 3);
 
@@ -913,7 +913,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     plan.roots.reset(p.program.e_nodes.len());
     plan.roots.insert(nx(&p.program, downstream));
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
     cache.slots[nx(&p.program, missing)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         produced_under: None,
@@ -993,7 +993,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&ExecutionProgram::default(), &p.program);
+    cache.reconcile(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &plan.plan, &mut cache).await;
