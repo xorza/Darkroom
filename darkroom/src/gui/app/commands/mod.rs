@@ -47,7 +47,7 @@ pub(crate) enum AppCommand {
 
 impl App {
     /// Dispatch a command after the editor has finished authoring its pass.
-    pub(crate) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
+    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
         match command {
             AppCommand::File(c) => self.handle_file(c),
             AppCommand::Graph(c) => self.handle_graph(c),

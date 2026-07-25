@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::execution::cache::runtime::{RuntimeCache, test_support};
+use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;
@@ -425,7 +425,7 @@ fn hydrate_turns_a_miss_into_a_hit() {
         "empty slot misses"
     );
 
-    test_support::hydrate(&mut cache, node_idx, complete_snapshot(out()), d);
+    internals::hydrate(&mut cache, node_idx, complete_snapshot(out()), d);
     assert!(
         cache.is_resident_hit(node_idx, DEMANDED),
         "a slot hydrated under its current digest hits"

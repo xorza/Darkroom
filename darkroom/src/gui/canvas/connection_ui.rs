@@ -23,7 +23,7 @@ use crate::gui::scene::{InputBindingView, Scene};
 /// connection list lives on `Scene` and is iterated each frame by
 /// [`Self::draw`].
 #[derive(Default, Debug)]
-pub(crate) struct ConnectionUI {
+pub(super) struct ConnectionUI {
     state: Option<InFlight>,
     /// Source port of a wire dropped on empty canvas this frame. Handed to
     /// the new-node popup so it opens; the wire then resumes *floating*
@@ -76,7 +76,7 @@ impl ConnectionUI {
     /// `resume` (the source of such a wire, after its node was picked)
     /// re-enters [`InFlight::Floating`] so the user clicks the exact port
     /// to land it. Esc cancels either mode without emitting anything.
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -128,20 +128,20 @@ impl ConnectionUI {
 
     /// Take the source port of a wire dropped on empty canvas this frame,
     /// if any. The canvas hands it to the new-node popup to open it.
-    pub(crate) fn take_pending_connection(&mut self) -> Option<PortRef> {
+    pub(super) fn take_pending_connection(&mut self) -> Option<PortRef> {
         self.pending_open.take()
     }
 
     /// Whether a new-connection gesture is in flight — feeds the shared
-    /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
+    /// wire-fade tier. (A method, not a `pub(super)` field: `InFlight` is
     /// module-private.)
-    pub(crate) fn dragging(&self) -> bool {
+    pub(super) fn dragging(&self) -> bool {
         self.state.is_some()
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
     /// canvas suppresses the palette that same right-click would open.
-    pub(crate) fn ended_on_secondary(&self) -> bool {
+    pub(super) fn ended_on_secondary(&self) -> bool {
         self.ended_on_secondary
     }
 
@@ -249,7 +249,7 @@ impl ConnectionUI {
     /// during an active drag, or `None`. Read by `GraphUI` to force
     /// the hover state in `CanvasGeometry` (otherwise aperture's
     /// drag-capture suppression would hide it).
-    pub(crate) fn snap_port(&self) -> Option<PortRef> {
+    pub(super) fn snap_port(&self) -> Option<PortRef> {
         self.state.and_then(|s| s.snap_end)
     }
 
@@ -260,7 +260,7 @@ impl ConnectionUI {
     /// the scribble is always on-screen, so it can't cross an off-screen
     /// curve.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn draw(
+    pub(super) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -341,7 +341,7 @@ impl ConnectionUI {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent connections.
-    pub(crate) fn draw_in_flight(
+    pub(super) fn draw_in_flight(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -515,9 +515,8 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
 }
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
-/// if the port isn't present (e.g. mid-rebuild). `pub(crate)`: also used by
-/// `PinUi` to tint its pin-creation drag preview.
-pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
+/// if the port isn't present (e.g. mid-rebuild).
+fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     let node = scene.nodes.get(&port.node_id)?;
     let ty = match port.kind {
         PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),

@@ -9,9 +9,9 @@ use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::compute_roundness;
+use crate::stacking::star_detection::centroid::internals::add_noise;
+use crate::stacking::star_detection::centroid::internals::make_elliptical_star;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
-use crate::stacking::star_detection::centroid::test_utils::add_noise;
-use crate::stacking::star_detection::centroid::test_utils::make_elliptical_star;
 use crate::stacking::star_detection::centroid::*;
 use crate::stacking::star_detection::config::{
     BackgroundConfig, Config, DetectionConfig, FwhmConfig, MeasurementConfig,
@@ -28,7 +28,7 @@ const TEST_STAMP_RADIUS: usize = 7;
 /// Default expected FWHM for tests (sigma=2.5 -> FWHM≈5.9 pixels).
 const TEST_EXPECTED_FWHM: f32 = 5.9;
 
-use crate::stacking::star_detection::centroid::test_utils::make_gaussian_star;
+use crate::stacking::star_detection::centroid::internals::make_gaussian_star;
 
 fn make_uniform_background(
     width: usize,

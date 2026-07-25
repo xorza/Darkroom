@@ -19,9 +19,9 @@ use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::labeling::LabelMap;
 use imaginarium::Buffer2;
 
-pub(crate) mod local_maxima;
-pub(crate) mod multi_threshold;
-pub(crate) mod region;
+pub(super) mod local_maxima;
+pub(super) mod multi_threshold;
+pub(super) mod region;
 
 use region::Region;
 
@@ -30,11 +30,11 @@ mod tests;
 
 /// Maximum number of peaks/candidates per component.
 /// Components with more peaks than this will have excess peaks ignored.
-pub(crate) const MAX_PEAKS: usize = 8;
+const MAX_PEAKS: usize = 8;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Pixel {
+struct Pixel {
     pub pos: Vec2us,
     pub value: f32,
 }
@@ -44,7 +44,7 @@ pub(crate) struct Pixel {
 /// Instead of storing pixel coordinates, we store the component label
 /// and iterate over the bounding box on-demand, checking the labels buffer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ComponentData {
+pub(super) struct ComponentData {
     /// Bounding box of the component.
     pub bbox: URect,
     /// Component label in the labels buffer.
@@ -58,7 +58,7 @@ impl ComponentData {
     ///
     /// Scans the bounding box and yields pixels that match the component label.
     #[inline]
-    pub(crate) fn iter_pixels<'a>(
+    fn iter_pixels<'a>(
         &'a self,
         pixels: &'a Buffer2<f32>,
         labels: &'a LabelMap,
@@ -82,7 +82,7 @@ impl ComponentData {
 
     /// Find the peak pixel (maximum value) in this component.
     #[inline]
-    pub(crate) fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
+    fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
         self.iter_pixels(pixels, labels)
             .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(Ordering::Equal))
             .expect("component must have at least one pixel")
@@ -93,7 +93,7 @@ impl ComponentData {
 /// ties) and build one [`Region`] per peak, accumulating bounding box and area and dropping peaks that
 /// captured no pixels. Peaks beyond [`MAX_PEAKS`] are ignored. This is the shared tail of both the
 /// local-maxima and multi-threshold deblenders.
-pub(crate) fn assign_to_nearest_peak(
+fn assign_to_nearest_peak(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
@@ -159,12 +159,12 @@ fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 /// `min_separation * min_separation`, pre-squared by the caller since peak-separation
 /// checks run in a loop over many candidate pairs.
 #[inline]
-pub(crate) fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
+fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
     dist_sq(a, b) < min_sep_sq
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+mod internals {
     use crate::math::vec2us::Vec2us;
     use imaginarium::Buffer2;
     use smallvec::SmallVec;
@@ -176,16 +176,16 @@ pub(crate) mod test_support {
     use crate::stacking::star_detection::deblend::region::Region;
     use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
     use crate::stacking::star_detection::labeling::LabelMap;
-    use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
+    use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
 
     #[derive(Debug)]
-    pub(crate) struct TestComponent {
-        pub(crate) pixels: Buffer2<f32>,
-        pub(crate) labels: LabelMap,
-        pub(crate) data: ComponentData,
+    pub(super) struct TestComponent {
+        pub(super) pixels: Buffer2<f32>,
+        pub(super) labels: LabelMap,
+        pub(super) data: ComponentData,
     }
 
-    pub(crate) fn make_test_component(
+    pub(super) fn make_test_component(
         width: usize,
         height: usize,
         stars: &[(usize, usize, f32, f32)],
@@ -232,7 +232,7 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn deblend_multi_threshold_test(
+    pub(super) fn deblend_multi_threshold_test(
         data: &ComponentData,
         pixels: &Buffer2<f32>,
         labels: &LabelMap,

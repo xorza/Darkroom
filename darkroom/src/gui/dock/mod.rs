@@ -18,8 +18,8 @@
 //! Submodules: `strip` (the chip row) and `drag` (gesture state + the
 //! pure pointer→drop-zone math).
 
-pub(crate) mod drag;
-pub(crate) mod strip;
+mod drag;
+mod strip;
 
 use std::borrow::Cow;
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use scenarium::{NodeId, StaticValue};
 
 use crate::core::document::Document;
@@ -8,7 +8,7 @@ use crate::core::document::open_document::OpenDocument;
 use crate::core::io::cache::document_cache_root;
 use crate::core::io::document;
 use crate::core::io::preferences::{MlModelPreferences, Preferences};
-use crate::core::runtime_host::test_support;
+use crate::core::runtime_host::internals;
 use crate::core::script::ScriptConfig;
 use crate::core::status::StatusLog;
 use crate::core::workspace::{self as workspace_module, Workspace};
@@ -125,7 +125,7 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         Some(StaticValue::FsPath(updated_star_removal_path.to_owned()))
     );
     assert_eq!(
-        test_support::disk_root(&workspace.runtime),
+        internals::disk_root(&workspace.runtime),
         Some(document_cache_root(&first_path))
     );
 
@@ -133,7 +133,7 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
     workspace.replace_document(OpenDocument::load(second_path.clone()).unwrap());
     assert_eq!(workspace.open.path, Some(second_path.clone()));
     assert_eq!(
-        test_support::disk_root(&workspace.runtime),
+        internals::disk_root(&workspace.runtime),
         Some(document_cache_root(&second_path))
     );
 

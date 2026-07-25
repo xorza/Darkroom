@@ -212,7 +212,7 @@ impl Default for BackgroundConfig {
 }
 
 impl BackgroundConfig {
-    pub(crate) fn validate(&self) -> Result<(), StarDetectionConfigError> {
+    pub(super) fn validate(&self) -> Result<(), StarDetectionConfigError> {
         if !(16..=256).contains(&self.tile_size) {
             return Err(StarDetectionConfigError::InvalidTileSize {
                 value: self.tile_size,

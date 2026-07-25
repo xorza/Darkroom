@@ -1,10 +1,10 @@
 //! Integration tests for deblending algorithms.
 //! These tests compare behavior between local_maxima and multi_threshold.
 
-use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
-use crate::stacking::star_detection::deblend::test_support::{
+use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
+use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
 
 #[test]
 fn test_local_vs_multi_threshold_single_star() {

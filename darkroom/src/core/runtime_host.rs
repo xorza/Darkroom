@@ -226,7 +226,7 @@ impl RuntimeHost {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::path::PathBuf;
 
     use crate::core::runtime_host::RuntimeHost;

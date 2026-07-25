@@ -34,7 +34,7 @@ pub(crate) struct PointMatch {
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
 #[derive(Debug)]
-pub(crate) enum VoteMatrix {
+pub(super) enum VoteMatrix {
     /// Dense storage for small point counts: votes[ref_idx * n_target + target_idx]
     Dense { votes: Vec<u16>, n_target: usize },
     /// Sparse storage for large point counts (u32 saves memory vs usize)
@@ -42,7 +42,7 @@ pub(crate) enum VoteMatrix {
 }
 
 impl VoteMatrix {
-    pub(crate) fn new(n_ref: usize, n_target: usize) -> Self {
+    pub(super) fn new(n_ref: usize, n_target: usize) -> Self {
         let size = n_ref * n_target;
         if size < DENSE_VOTE_THRESHOLD {
             VoteMatrix::Dense {
@@ -55,7 +55,7 @@ impl VoteMatrix {
     }
 
     #[inline]
-    pub(crate) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
+    pub(super) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
         match self {
             VoteMatrix::Dense { votes, n_target } => {
                 let idx = ref_idx * *n_target + target_idx;
@@ -75,7 +75,7 @@ impl VoteMatrix {
     }
 
     /// Iterate over all non-zero entries as `(ref_idx, target_idx, votes)`.
-    pub(crate) fn iter_nonzero(&self) -> VoteIter<'_> {
+    pub(super) fn iter_nonzero(&self) -> VoteIter<'_> {
         match self {
             VoteMatrix::Dense { votes, n_target } => VoteIter::Dense(DenseVoteIter {
                 iter: votes.iter().enumerate(),
@@ -88,7 +88,7 @@ impl VoteMatrix {
 
 /// Iterator over non-zero entries in a dense vote matrix.
 #[derive(Debug)]
-pub(crate) struct DenseVoteIter<'a> {
+pub(super) struct DenseVoteIter<'a> {
     iter: std::iter::Enumerate<std::slice::Iter<'a, u16>>,
     n_target: usize,
 }
@@ -108,7 +108,7 @@ impl Iterator for DenseVoteIter<'_> {
 
 /// Either-style iterator for [`VoteMatrix::iter_nonzero`].
 #[derive(Debug)]
-pub(crate) enum VoteIter<'a> {
+pub(super) enum VoteIter<'a> {
     Dense(DenseVoteIter<'a>),
     Sparse(Iter<'a, (usize, usize), u32>),
 }
@@ -128,7 +128,7 @@ impl Iterator for VoteIter<'_> {
 ///
 /// Each triangle's (ratio.0, ratio.1) pair is stored as a 2D point,
 /// enabling efficient radius queries in invariant space.
-pub(crate) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
+pub(super) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
     let invariants: Vec<DVec2> = triangles
         .iter()
         .map(|t| DVec2::new(t.ratios.0, t.ratios.1))
@@ -143,7 +143,7 @@ pub(crate) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
 ///
 /// Uses dense matrix for small point counts (faster due to direct indexing),
 /// sparse HashMap for large counts (memory efficient).
-pub(crate) fn vote_for_correspondences(
+pub(super) fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],
     invariant_tree: &KdTree,
@@ -195,7 +195,7 @@ pub(crate) fn vote_for_correspondences(
 ///
 /// Filters matches by minimum votes, sorts by vote count, and greedily assigns
 /// matches ensuring each reference and target point is used at most once.
-pub(crate) fn resolve_matches(
+pub(super) fn resolve_matches(
     vote_matrix: VoteMatrix,
     n_ref: usize,
     n_target: usize,

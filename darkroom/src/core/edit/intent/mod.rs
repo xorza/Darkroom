@@ -25,7 +25,7 @@
 pub(crate) mod apply;
 pub(crate) mod build;
 pub(crate) mod duplicate;
-pub(crate) mod query;
+mod query;
 pub(crate) mod types;
 
 #[cfg(test)]

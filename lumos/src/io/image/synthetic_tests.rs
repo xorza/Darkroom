@@ -12,7 +12,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::load_linear_fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::stacking::frame_store::StackableImage;
 use crate::testing::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
@@ -24,7 +24,7 @@ use imaginarium::ColorFormat;
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_linear_fits`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
-    let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -32,7 +32,7 @@ fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> 
 }
 
 fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::PathBuf {
-    let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image_with_header(image, header).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -40,7 +40,7 @@ fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::P
 }
 
 fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, ImageError> {
-    let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();

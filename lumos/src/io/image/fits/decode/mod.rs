@@ -22,12 +22,12 @@ use crate::io::image::{
 };
 use crate::io::raw::demosaic::DemosaicError;
 
-pub(crate) mod pixels;
-pub(crate) mod plan;
-pub(crate) mod selection;
+mod pixels;
+mod plan;
+mod selection;
 
 #[derive(Debug)]
-pub(crate) struct DecodedFitsImage {
+struct DecodedFitsImage {
     metadata: ImageMetadata,
     pixels: LinearPixels,
 }

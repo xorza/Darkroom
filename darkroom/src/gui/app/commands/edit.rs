@@ -23,7 +23,7 @@ pub(crate) enum EditCommand {
 }
 
 impl App {
-    pub(crate) fn handle_edit(&mut self, command: EditCommand) {
+    pub(super) fn handle_edit(&mut self, command: EditCommand) {
         match command {
             EditCommand::PickInputPath(req) => self.pick_input_path(req),
         }

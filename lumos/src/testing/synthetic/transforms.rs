@@ -12,7 +12,7 @@ use glam::DVec2;
 /// Generate random star positions within a bounded area (default 50-px margin).
 ///
 /// Uses a deterministic LCG random number generator for reproducibility.
-pub fn generate_random_positions(
+pub(crate) fn generate_random_positions(
     num_stars: usize,
     width: f64,
     height: f64,
@@ -35,7 +35,7 @@ pub fn generate_random_positions(
 ///
 /// Creates Star structs suitable for registration testing with default properties.
 /// The FWHM is set uniformly to allow `register()` to derive `max_sigma` correctly.
-pub fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
+pub(crate) fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
     positions
         .iter()
         .enumerate()
@@ -54,7 +54,7 @@ pub fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
 }
 
 /// Generate random star positions and convert to Star structs.
-pub fn generate_random_stars(
+pub(crate) fn generate_random_stars(
     num_stars: usize,
     width: f64,
     height: f64,
@@ -66,7 +66,7 @@ pub fn generate_random_stars(
 }
 
 /// Apply a translation transform to Stars.
-pub fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
+pub(crate) fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
     let offset = DVec2::new(dx, dy);
     stars
         .iter()
@@ -81,7 +81,7 @@ pub fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
 ///
 /// The transform is applied around a center point: translate to origin relative to
 /// center, rotate + scale, translate back, then apply the translation offset.
-pub fn transform_star_list(
+pub(crate) fn transform_star_list(
     stars: &[Star],
     dx: f64,
     dy: f64,
@@ -110,7 +110,7 @@ pub fn transform_star_list(
 }
 
 /// Add positional noise to Stars.
-pub fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
+pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
     let mut rng = TestRng::new(seed);
     stars
         .iter()
@@ -128,7 +128,7 @@ pub fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<St
 }
 
 /// Remove random stars from a list (simulate missed detections).
-pub fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<Star> {
+pub(crate) fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<Star> {
     assert!(
         (0.0..=1.0).contains(&fraction),
         "fraction must be between 0.0 and 1.0"
@@ -142,7 +142,7 @@ pub fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<
 }
 
 /// Add random spurious stars (simulate false detections).
-pub fn add_spurious_star_list(
+pub(crate) fn add_spurious_star_list(
     stars: &[Star],
     count: usize,
     width: f64,
@@ -174,7 +174,7 @@ pub fn add_spurious_star_list(
 }
 
 /// Filter Stars to a bounding box (simulate partial overlap).
-pub fn filter_stars_to_bounds(
+pub(crate) fn filter_stars_to_bounds(
     stars: &[Star],
     min_x: f64,
     max_x: f64,
@@ -189,7 +189,7 @@ pub fn filter_stars_to_bounds(
 }
 
 /// Translate Stars and keep only those that remain within the margin (partial overlap).
-pub fn translate_stars_with_overlap(
+pub(crate) fn translate_stars_with_overlap(
     stars: &[Star],
     dx: f64,
     dy: f64,

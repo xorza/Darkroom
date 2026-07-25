@@ -16,8 +16,8 @@
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::detector::test_support::buffer_counts_for;
-use crate::stacking::star_detection::resources::test_support::BufferCounts;
+use crate::stacking::star_detection::detector::internals::buffer_counts_for;
+use crate::stacking::star_detection::resources::internals::BufferCounts;
 use crate::testing::synthetic::fixtures::star_field;
 
 /// The detection working set at its high-water mark, for the default config: the buffers the pool

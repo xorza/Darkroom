@@ -1,8 +1,8 @@
 use crate::image_ops::color_calibration::*;
-use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::{
+use crate::image_ops::internals::{
     channel_samples as channel, gray_image as gray, rgb_image as rgb,
 };
+use crate::image_ops::op::OpError;
 
 #[test]
 fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {

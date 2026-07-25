@@ -15,7 +15,7 @@ use tokio::sync::Notify;
 
 use crate::core::terminal_session::TerminalSession;
 
-pub(crate) async fn run(session: &mut TerminalSession, notify: &Notify) -> io::Result<()> {
+pub(super) async fn run(session: &mut TerminalSession, notify: &Notify) -> io::Result<()> {
     println!("darkroom TUI — type 'help' for commands.");
     prompt()?;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();

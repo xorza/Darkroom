@@ -1,8 +1,8 @@
 use scenarium::ContextType;
 
 #[derive(Debug)]
-pub(crate) struct VisionCtx {
-    pub processing_ctx: imaginarium::ProcessingContext,
+pub(super) struct VisionCtx {
+    pub(super) processing_ctx: imaginarium::ProcessingContext,
 }
 
 impl Default for VisionCtx {
@@ -14,4 +14,4 @@ impl Default for VisionCtx {
     }
 }
 
-pub(crate) const VISION_CTX_TYPE: ContextType<VisionCtx> = ContextType::new(VisionCtx::default);
+pub(super) const VISION_CTX_TYPE: ContextType<VisionCtx> = ContextType::new(VisionCtx::default);

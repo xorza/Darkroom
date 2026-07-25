@@ -12,12 +12,12 @@ use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::InvokeInput;
 
 #[derive(Default, Debug)]
-pub(crate) struct RemainingOutputReads {
-    pub(crate) counts: OutputColumn<u32>,
+pub(super) struct RemainingOutputReads {
+    pub(super) counts: OutputColumn<u32>,
 }
 
 impl RemainingOutputReads {
-    pub(crate) fn seed(&mut self, resolved: &ResolvedRun) {
+    pub(super) fn seed(&mut self, resolved: &ResolvedRun) {
         self.counts.clone_from(&resolved.outputs.readers);
     }
 
@@ -25,7 +25,7 @@ impl RemainingOutputReads {
         self.counts[output_idx] == 1
     }
 
-    pub(crate) fn consume(&mut self, output_idx: OutputIdx) -> bool {
+    pub(super) fn consume(&mut self, output_idx: OutputIdx) -> bool {
         let remaining = &mut self.counts[output_idx];
         debug_assert!(
             *remaining > 0,
@@ -44,17 +44,17 @@ impl RemainingOutputReads {
 }
 
 #[derive(Debug)]
-pub(crate) struct ExecutionFrame<'a> {
-    pub(crate) program: &'a ExecutionProgram,
-    pub(crate) plan: &'a ExecutionPlan,
-    pub(crate) cache: &'a mut RuntimeCache,
-    pub(crate) resource_stamps: &'a mut RunResourceStamps,
-    pub(crate) remaining_reads: &'a mut RemainingOutputReads,
-    pub(crate) inputs: &'a mut Vec<InvokeInput>,
+pub(super) struct ExecutionFrame<'a> {
+    pub(super) program: &'a ExecutionProgram,
+    pub(super) plan: &'a ExecutionPlan,
+    pub(super) cache: &'a mut RuntimeCache,
+    pub(super) resource_stamps: &'a mut RunResourceStamps,
+    pub(super) remaining_reads: &'a mut RemainingOutputReads,
+    pub(super) inputs: &'a mut Vec<InvokeInput>,
 }
 
 impl ExecutionFrame<'_> {
-    pub(crate) fn emit_pinned_values(
+    pub(super) fn emit_pinned_values(
         &mut self,
         node_idx: NodeIdx,
         events: Option<&UnboundedSender<RunEvent>>,
@@ -89,7 +89,7 @@ impl ExecutionFrame<'_> {
             .expect(EVENTS_OUTLIVE_RUN);
     }
 
-    pub(crate) fn collect_inputs(&mut self, node_idx: NodeIdx) {
+    pub(super) fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
         for input in &self.program.inputs[self.program[node_idx].inputs] {
             let binding = &input.binding;
@@ -115,7 +115,7 @@ impl ExecutionFrame<'_> {
 
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
-    pub(crate) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
+    pub(super) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
             let address = match &input.binding {
                 ExecutionBinding::Bind(address) => Some(*address),
@@ -127,7 +127,7 @@ impl ExecutionFrame<'_> {
         }
     }
 
-    pub(crate) fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
+    pub(super) fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
         if !self.program[node_idx].cache.caches_in_ram()
             && self.remaining_reads.node_drained(self.program, node_idx)
         {

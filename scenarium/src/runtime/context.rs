@@ -121,7 +121,7 @@ impl ContextManager {
 }
 
 #[cfg(any(test, feature = "internals"))]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::any::{Any, TypeId};
 
     use crate::runtime::context::ContextStore;

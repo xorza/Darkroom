@@ -12,7 +12,7 @@ use crate::stacking::star_detection::convolution::simd::convolve_pixel_scalar;
 ///
 /// # Safety
 /// Caller must ensure running on aarch64 (NEON is always available on aarch64).
-pub(crate) unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(super) unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     unsafe {
         let width = input.len();
 
@@ -77,7 +77,7 @@ pub(crate) unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
-pub(crate) unsafe fn convolve_cols_row_neon(
+pub(super) unsafe fn convolve_cols_row_neon(
     input: &[f32],
     out_row: &mut [f32],
     width: usize,
@@ -120,7 +120,7 @@ pub(crate) unsafe fn convolve_cols_row_neon(
 /// # Safety
 /// Caller must ensure running on aarch64.
 #[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn convolve_2d_row_neon(
+pub(super) unsafe fn convolve_2d_row_neon(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,

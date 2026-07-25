@@ -7,23 +7,23 @@ use crate::stacking::star_detection::centroid::linear_solver::solve;
 
 /// Configuration for Levenberg-Marquardt optimization.
 #[derive(Debug, Clone)]
-pub(crate) struct LMConfig {
+pub(super) struct LMConfig {
     /// Maximum iterations.
-    pub max_iterations: usize,
+    pub(super) max_iterations: usize,
     /// Convergence threshold for parameter changes.
-    pub convergence_threshold: f64,
+    pub(super) convergence_threshold: f64,
     /// Initial damping parameter.
-    pub initial_lambda: f64,
+    pub(super) initial_lambda: f64,
     /// Factor to increase lambda on failed step.
-    pub lambda_up: f64,
+    pub(super) lambda_up: f64,
     /// Factor to decrease lambda on successful step.
-    pub lambda_down: f64,
+    pub(super) lambda_down: f64,
     /// Early termination when position parameters (first 2) converge to this threshold.
     /// The optimizer stops once both x0 and y0 deltas are below this value,
     /// even if other parameters (amplitude, sigma, background) are still changing.
     /// Default is 0 (disabled). Set to 0.0001 for sub-pixel astrometric precision
     /// in centroid-only use cases where non-position parameters don't matter.
-    pub position_convergence_threshold: f64,
+    pub(super) position_convergence_threshold: f64,
 }
 
 impl Default for LMConfig {
@@ -41,11 +41,11 @@ impl Default for LMConfig {
 
 /// Result of L-M optimization.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LMResult<const N: usize> {
-    pub params: [f64; N],
-    pub chi2: f64,
-    pub converged: bool,
-    pub iterations: usize,
+pub(super) struct LMResult<const N: usize> {
+    pub(super) params: [f64; N],
+    pub(super) chi2: f64,
+    pub(super) converged: bool,
+    pub(super) iterations: usize,
 }
 
 /// Accumulate the normal equations (Hessian upper triangle, gradient) and chi² over
@@ -60,7 +60,7 @@ pub(crate) struct LMResult<const N: usize> {
 /// mirror the hessian's lower triangle; callers that need a full matrix do that once
 /// after accumulating.
 #[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-pub(crate) fn accumulate_normal_equations<const N: usize>(
+pub(super) fn accumulate_normal_equations<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
     data_x: &[f64],
     data_y: &[f64],
@@ -90,7 +90,7 @@ pub(crate) fn accumulate_normal_equations<const N: usize>(
 /// Companion to [`accumulate_normal_equations`] for the gradient-free chi²-only
 /// batch path — see that function's doc for why this is shared rather than
 /// duplicated per model/backend.
-pub(crate) fn accumulate_chi2<const N: usize>(
+pub(super) fn accumulate_chi2<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
     data_x: &[f64],
     data_y: &[f64],
@@ -113,7 +113,7 @@ pub(crate) fn accumulate_chi2<const N: usize>(
 /// [`LMModel::batch_build_normal_equations`] and its weighted variant, also called
 /// directly by the fit models' scalar fallbacks when no SIMD backend applies.
 #[allow(clippy::needless_range_loop)]
-pub(crate) fn build_normal_equations_scalar<const N: usize>(
+pub(super) fn build_normal_equations_scalar<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
     data_x: &[f64],
     data_y: &[f64],
@@ -149,7 +149,7 @@ pub(crate) fn build_normal_equations_scalar<const N: usize>(
 }
 
 /// Trait for models that can be fit with L-M optimization.
-pub(crate) trait LMModel<const N: usize> {
+pub(super) trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
     fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
@@ -231,7 +231,7 @@ pub(crate) trait LMModel<const N: usize> {
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
-pub(crate) fn optimize<const N: usize, M: LMModel<N>>(
+pub(super) fn optimize<const N: usize, M: LMModel<N>>(
     model: &M,
     data_x: &[f64],
     data_y: &[f64],

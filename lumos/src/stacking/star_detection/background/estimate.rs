@@ -12,9 +12,9 @@ use crate::stacking::star_detection::resources::DetectionResources;
 #[derive(Debug)]
 pub(crate) struct BackgroundEstimate {
     /// Per-pixel background values (sky level).
-    pub background: Buffer2<f32>,
+    pub(crate) background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
-    pub noise: Buffer2<f32>,
+    pub(crate) noise: Buffer2<f32>,
 }
 
 impl BackgroundEstimate {

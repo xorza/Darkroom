@@ -13,7 +13,7 @@ use std::f32::consts::PI;
 
 /// Point-spread function the camera convolves every point source with.
 #[derive(Debug, Clone, Copy)]
-pub enum PsfModel {
+pub(crate) enum PsfModel {
     /// Circular Gaussian, `fwhm` in pixels.
     Gaussian { fwhm: f32 },
     /// Moffat profile (extended atmospheric wings), `fwhm` in pixels, shape `beta`.
@@ -29,7 +29,7 @@ pub enum PsfModel {
 
 impl PsfModel {
     /// The round-equivalent FWHM (in pixels) a detector should recover.
-    pub fn fwhm(&self) -> f32 {
+    pub(crate) fn fwhm(&self) -> f32 {
         match self {
             PsfModel::Gaussian { fwhm } => *fwhm,
             PsfModel::Moffat { fwhm, .. } => *fwhm,
@@ -40,7 +40,7 @@ impl PsfModel {
     /// Render a source of total `flux` centered at (`x`, `y`) into `pixels`, scaling the PSF
     /// width by `seeing_scale` (1.0 == nominal). Amplitudes are normalized so the rendered
     /// profile integrates to `flux` (flux is conserved up to the kernel's radius truncation).
-    pub fn render(
+    pub(crate) fn render(
         &self,
         pixels: &mut [f32],
         width: usize,
@@ -88,11 +88,11 @@ impl PsfModel {
 
 /// A multiplicative flat field (sensor response): optional radial vignette × per-channel gain.
 #[derive(Debug, Clone)]
-pub struct FlatField {
+pub(crate) struct FlatField {
     /// `(center, edge, falloff)` radial vignette multiplier, or `None` for a flat 1.0 response.
-    pub vignette: Option<(f32, f32, f32)>,
+    pub(crate) vignette: Option<(f32, f32, f32)>,
     /// Per-RGB-channel multiplicative gain (1.0 == no shift). Mono uses index 0.
-    pub channel_gain: [f32; 3],
+    pub(crate) channel_gain: [f32; 3],
 }
 
 impl Default for FlatField {
@@ -106,7 +106,7 @@ impl Default for FlatField {
 
 impl FlatField {
     /// Render the flat-field response map for `channel` into a fresh `width*height` buffer.
-    pub fn render(&self, width: usize, height: usize, channel: usize) -> Vec<f32> {
+    pub(crate) fn render(&self, width: usize, height: usize, channel: usize) -> Vec<f32> {
         let gain = self.channel_gain[channel];
         let mut flat = vec![gain; width * height];
         if let Some((center, edge, falloff)) = self.vignette {
@@ -129,47 +129,47 @@ impl FlatField {
 /// Sensor defects baked into a frame: hot pixels (additive spikes) and dead pixels
 /// (forced to zero). Coordinates are `(x, y)`.
 #[derive(Debug, Clone, Default)]
-pub struct SensorDefects {
+pub(crate) struct SensorDefects {
     /// `(x, y, excess)` — hot pixels add `excess` normalized counts.
-    pub hot: Vec<(usize, usize, f32)>,
+    pub(crate) hot: Vec<(usize, usize, f32)>,
     /// `(x, y)` — dead pixels forced to ~zero response.
-    pub dead: Vec<(usize, usize)>,
+    pub(crate) dead: Vec<(usize, usize)>,
 }
 
 /// Bias structure: a constant pedestal plus optional anomalous columns.
 #[derive(Debug, Clone, Default)]
-pub struct BiasField {
+pub(crate) struct BiasField {
     /// Constant additive pedestal (normalized).
-    pub offset: f32,
+    pub(crate) offset: f32,
     /// `(column_x, excess_offset)` — bad columns sit above the base bias.
-    pub bad_columns: Vec<(usize, f32)>,
+    pub(crate) bad_columns: Vec<(usize, f32)>,
 }
 
 /// The instrument + sensor: PSF, charge capacity & noise, flat, defects, bias.
 #[derive(Debug, Clone)]
-pub struct Camera {
-    pub psf: PsfModel,
+pub(crate) struct Camera {
+    pub(crate) psf: PsfModel,
     /// Electrons at normalized value 1.0 (full well); sets the shot-noise scale. Inert when
     /// [`noiseless`](Self::noiseless) is set.
-    pub full_well_e: f32,
+    pub(crate) full_well_e: f32,
     /// Read noise in electrons (Gaussian).
-    pub read_noise_e: f32,
+    pub(crate) read_noise_e: f32,
     /// Dark current in electrons per pixel per second (Poisson, × exposure).
-    pub dark_current_e_per_s: f32,
+    pub(crate) dark_current_e_per_s: f32,
     /// Saturation clip level in normalized units (typically 1.0).
-    pub saturation: f32,
-    pub flat: FlatField,
-    pub defects: SensorDefects,
-    pub bias: BiasField,
+    pub(crate) saturation: f32,
+    pub(crate) flat: FlatField,
+    pub(crate) defects: SensorDefects,
+    pub(crate) bias: BiasField,
     /// When set, render emits the clean signal — the stochastic layers (shot/dark/read) are
     /// skipped, so the frame *is* its own ground truth.
-    pub noiseless: bool,
+    pub(crate) noiseless: bool,
 }
 
 impl Camera {
     /// A noiseless camera (Gaussian PSF, no read/dark/shot noise, unit flat, no defects or
     /// bias). Rendering a scene through it yields the clean ground-truth image.
-    pub fn ideal(fwhm: f32) -> Self {
+    pub(crate) fn ideal(fwhm: f32) -> Self {
         Self {
             psf: PsfModel::Gaussian { fwhm },
             full_well_e: 50_000.0,
@@ -184,7 +184,7 @@ impl Camera {
     }
 
     /// A representative cooled-CMOS camera: 50 ke⁻ well, 3 e⁻ read noise, low dark current.
-    pub fn realistic(fwhm: f32) -> Self {
+    pub(crate) fn realistic(fwhm: f32) -> Self {
         Self {
             psf: PsfModel::Gaussian { fwhm },
             full_well_e: 50_000.0,

@@ -3,7 +3,7 @@
 //! This module contains the main [`StarDetector`] struct and its associated
 //! types for detecting stars in astronomical images.
 
-pub(crate) mod stages;
+pub(in crate::stacking::star_detection) mod stages;
 
 #[cfg(test)]
 mod bench;
@@ -222,12 +222,14 @@ impl StarDetector {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(in crate::stacking::star_detection) mod internals {
     use crate::stacking::star_detection::detector::StarDetector;
-    use crate::stacking::star_detection::resources::test_support::BufferCounts;
-    use crate::stacking::star_detection::resources::test_support::buffer_counts;
+    use crate::stacking::star_detection::resources::internals::BufferCounts;
+    use crate::stacking::star_detection::resources::internals::buffer_counts;
 
-    pub(crate) fn buffer_counts_for(detector: &StarDetector) -> Option<BufferCounts> {
+    pub(in crate::stacking::star_detection) fn buffer_counts_for(
+        detector: &StarDetector,
+    ) -> Option<BufferCounts> {
         detector.resources.as_ref().map(buffer_counts)
     }
 }

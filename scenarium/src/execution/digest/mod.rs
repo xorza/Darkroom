@@ -118,7 +118,7 @@ impl DigestHasher {
 
     /// Fold a length-prefixed byte string (a `u64` length then the bytes), so
     /// concatenations of variable-length data can't collide.
-    pub(crate) fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
+    fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
         self.write_pod(bytes.len() as u64).write_bytes(bytes)
     }
 
@@ -128,7 +128,7 @@ impl DigestHasher {
     }
 
     /// Fold another digest (its fixed 32 bytes).
-    pub(crate) fn write_digest(&mut self, digest: &Digest) -> &mut Self {
+    fn write_digest(&mut self, digest: &Digest) -> &mut Self {
         self.write_bytes(&digest.0)
     }
 

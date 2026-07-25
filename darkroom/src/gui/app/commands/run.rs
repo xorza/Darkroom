@@ -24,7 +24,7 @@ pub(crate) enum RunCommand {
 }
 
 impl App {
-    pub(crate) fn handle_run(&mut self, command: RunCommand) {
+    pub(super) fn handle_run(&mut self, command: RunCommand) {
         match command {
             RunCommand::Once => self.run_graph(),
             RunCommand::Node(node_id) => self.run_node(node_id),
@@ -40,13 +40,13 @@ impl App {
     /// synchronously — no run starts, so the prior run's status stays
     /// untouched. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
-    pub(crate) fn run_graph(&mut self) {
+    pub(in crate::gui::app) fn run_graph(&mut self) {
         self.workspace.run_once();
     }
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
     /// upstream cone executes and its outputs are delivered.
-    pub(crate) fn run_node(&mut self, node_id: NodeId) {
+    fn run_node(&mut self, node_id: NodeId) {
         if self.workspace.open.document.active_target() != Some(GraphRef::Main) {
             unimplemented!("run-node commands are only implemented for the main graph");
         }

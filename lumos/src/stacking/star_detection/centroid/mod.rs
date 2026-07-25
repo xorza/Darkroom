@@ -8,15 +8,15 @@
 //!
 //! All fitting and accumulation operations use f64 for numerical stability.
 
-pub(crate) mod gaussian_fit;
+mod gaussian_fit;
 mod linear_solver;
 mod lm_optimizer;
-pub(crate) mod moffat_fit;
+mod moffat_fit;
 
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
-pub(crate) mod test_utils;
+mod internals;
 #[cfg(test)]
 mod tests;
 
@@ -71,14 +71,14 @@ const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // 
 const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.0001;
 
 /// Maximum weighted-moments iterations for standalone centroid (no fitting follows).
-pub(crate) const MAX_MOMENTS_ITERATIONS: usize = 10;
+const MAX_MOMENTS_ITERATIONS: usize = 10;
 
 /// Weighted-moments iterations when L-M fitting follows.
 /// Only needs to provide a rough seed — L-M refines position independently.
 const MOMENTS_ITERATIONS_BEFORE_FIT: usize = 2;
 
 /// Convergence threshold in pixels squared.
-pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
+const CONVERGENCE_THRESHOLD_SQ: f32 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
 
 /// Compute stamp radius from expected FWHM.
@@ -90,12 +90,7 @@ fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-pub(crate) fn is_valid_stamp_position(
-    pos: Vec2,
-    width: usize,
-    height: usize,
-    stamp_radius: usize,
-) -> bool {
+fn is_valid_stamp_position(pos: Vec2, width: usize, height: usize, stamp_radius: usize) -> bool {
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     icx >= stamp_radius as isize
@@ -107,26 +102,22 @@ pub(crate) fn is_valid_stamp_position(
 /// Stack-allocated stamp data extracted around a star candidate.
 /// Uses ArrayVec to avoid heap allocations for typical stamp sizes.
 #[derive(Debug)]
-pub(crate) struct StampData {
+struct StampData {
     /// X coordinates of stamp pixels (relative to image origin).
-    pub x: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    x: ArrayVec<f32, MAX_STAMP_PIXELS>,
     /// Y coordinates of stamp pixels.
-    pub y: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    y: ArrayVec<f32, MAX_STAMP_PIXELS>,
     /// Pixel values (background-subtracted at the caller if needed).
-    pub z: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    z: ArrayVec<f32, MAX_STAMP_PIXELS>,
     /// Peak pixel value within the stamp.
-    pub peak: f32,
+    peak: f32,
 }
 
 /// Extract a square stamp of pixel data around a position.
 ///
 /// Returns [`StampData`] or None if position is outside the valid stamp region.
 /// Uses stack-allocated ArrayVec to avoid heap allocations.
-pub(crate) fn extract_stamp(
-    pixels: &Buffer2<f32>,
-    pos: Vec2,
-    stamp_radius: usize,
-) -> Option<StampData> {
+fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Option<StampData> {
     let width = pixels.width();
     let height = pixels.height();
 
@@ -167,7 +158,7 @@ pub(crate) fn extract_stamp(
 ///
 /// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
 /// This gives a better initial guess for L-M optimization than a fixed value.
-pub(crate) fn estimate_sigma_from_moments(
+fn estimate_sigma_from_moments(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
@@ -201,7 +192,7 @@ pub(crate) fn estimate_sigma_from_moments(
 ///
 /// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
 /// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux).
-pub(crate) fn inverse_variance_weights(
+fn inverse_variance_weights(
     data_z: &[f64],
     background: f64,
     sky_noise: f64,
@@ -221,14 +212,14 @@ pub(crate) fn inverse_variance_weights(
 /// Noise inputs for an inverse-variance-weighted fit: the local sky σ plus the
 /// normalized-domain sensor model. `None` (absent) means an unweighted fit.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FitNoise {
-    pub sky_noise: f32,
-    pub noise_model: NoiseModel,
+struct FitNoise {
+    sky_noise: f32,
+    noise_model: NoiseModel,
 }
 
 /// Per-pixel fit weights for a stamp, or `None` for an unweighted fit;
 /// see [`inverse_variance_weights`].
-pub(crate) fn fit_weights(
+fn fit_weights(
     data_z: &[f64],
     background: f32,
     noise: Option<FitNoise>,
@@ -241,9 +232,9 @@ pub(crate) fn fit_weights(
 /// Flat per-stamp sky estimate: one (background, noise) pair valid at the stamp
 /// scale, as opposed to the per-pixel tiled global map.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LocalBackground {
-    pub bg: f32,
-    pub noise: f32,
+struct LocalBackground {
+    bg: f32,
+    noise: f32,
 }
 
 /// Compute local background and noise using an annular region around the star.
@@ -332,7 +323,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
 /// - `WeightedMoments`: Iterative weighted centroid (~0.05 pixel accuracy, fast)
 /// - `GaussianFit`: 2D Gaussian fitting (~0.01 pixel accuracy, slower)
 /// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
-pub(crate) fn measure_star(
+pub(super) fn measure_star(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     region: &Region,
@@ -486,7 +477,7 @@ pub(crate) fn measure_star(
 ///
 /// Returns the new position or None if position is invalid.
 /// Uses f64 accumulators for numerical stability.
-pub(crate) fn refine_centroid(
+fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,

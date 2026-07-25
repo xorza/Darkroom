@@ -25,7 +25,12 @@ use crate::gui::theme::{Theme, ThemePreset, TypeColors};
 /// (dark theme) or darkens (light theme) the typed hue for emphasis;
 /// untyped (`Any`) ports defer to the theme's positional port colors,
 /// which carry their own hover variants.
-pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> Color {
+pub(in crate::gui) fn port_color(
+    theme: &Theme,
+    ty: &DataType,
+    kind: PortKind,
+    hovered: bool,
+) -> Color {
     if matches!(ty, DataType::Any) {
         return fallback(theme, kind, hovered);
     }
@@ -40,7 +45,7 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
 /// Color for an event emitter glyph, subscription pin, or event wire.
 /// Events carry no data type, so they use the theme's neutral event swatch
 /// (not a type hue); `hovered` lifts it like the positional port colors.
-pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
+pub(in crate::gui) fn event_color(theme: &Theme, hovered: bool) -> Color {
     theme.colors.event_port.pick(hovered)
 }
 

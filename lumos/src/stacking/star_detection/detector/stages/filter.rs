@@ -20,17 +20,20 @@ const SPATIAL_HASH_CROSSOVER: usize = 100;
 
 /// Result of the filter stage: the surviving stars plus rejection statistics.
 #[derive(Debug)]
-pub(crate) struct FilterOutcome {
+pub(in crate::stacking::star_detection::detector) struct FilterOutcome {
     /// Filtered stars, sorted by flux (brightest first).
-    pub stars: Vec<Star>,
-    pub diagnostics: QualityFilterDiagnostics,
+    pub(in crate::stacking::star_detection::detector) stars: Vec<Star>,
+    pub(in crate::stacking::star_detection::detector) diagnostics: QualityFilterDiagnostics,
 }
 
 /// Filter stars by quality metrics, remove duplicates, and sort by flux.
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
-pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
+pub(in crate::stacking::star_detection::detector) fn filter(
+    mut stars: Vec<Star>,
+    config: &FilterConfig,
+) -> FilterOutcome {
     let mut diagnostics = QualityFilterDiagnostics::default();
 
     // Apply quality filters
@@ -99,7 +102,7 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// pass `stars` already sorted by flux descending (as `filter()` does via
 /// `sort_by_flux` before calling this) for "first kept" to mean "brightest
 /// kept"; otherwise an arbitrary, non-brightest star in each cluster survives.
-pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     if stars.len() < 2 {
         return 0;
     }
@@ -191,6 +194,20 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
     stars.truncate(write_idx);
 
     removed_count
+}
+
+#[cfg(test)]
+pub(in crate::stacking::star_detection::detector) mod internals {
+    use crate::stacking::star_detection::star::Star;
+
+    /// Exposes `remove_duplicate_stars` to the detector's benchmarks; production
+    /// code only ever reaches it through `filter()`.
+    pub(in crate::stacking::star_detection::detector) fn remove_duplicate_stars(
+        stars: &mut Vec<Star>,
+        min_separation: f32,
+    ) -> usize {
+        super::remove_duplicate_stars(stars, min_separation)
+    }
 }
 
 #[cfg(test)]

@@ -26,7 +26,7 @@ pub(crate) struct CfaFitsHdu {
     pub(crate) header: Header,
 }
 
-pub(crate) fn validate_cfa_container_format(
+pub(super) fn validate_cfa_container_format(
     path: &Path,
     primary: Option<&Header>,
 ) -> Result<(), ImageError> {
@@ -44,7 +44,7 @@ pub(crate) fn validate_cfa_container_format(
     Ok(())
 }
 
-pub(crate) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<bool, ImageError> {
+pub(super) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<bool, ImageError> {
     let is_lumos_cfa = image
         .get_text("LUMOSFMT")
         .map_err(|source| fits_err(path, source))?

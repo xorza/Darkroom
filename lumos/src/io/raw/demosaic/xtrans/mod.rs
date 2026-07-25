@@ -383,7 +383,7 @@ mod tests {
     use common::CancelToken;
 
     use crate::io::raw::demosaic::DemosaicError;
-    use crate::io::raw::demosaic::xtrans::test_support::{test_pattern, test_pattern_array};
+    use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
     use crate::io::raw::demosaic::xtrans::*;
 
     #[test]
@@ -901,7 +901,7 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     const TEST_PATTERN: [[u8; 6]; 6] = [

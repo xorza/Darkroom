@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 
 use crate::core::document::ItemRef;
 
-pub(crate) fn serialize<S>(
+pub(super) fn serialize<S>(
     placements: &IndexMap<ItemRef, Vec2>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
@@ -15,7 +15,7 @@ where
     serializer.collect_seq(placements.iter())
 }
 
-pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<IndexMap<ItemRef, Vec2>, D::Error>
+pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<IndexMap<ItemRef, Vec2>, D::Error>
 where
     D: Deserializer<'de>,
 {

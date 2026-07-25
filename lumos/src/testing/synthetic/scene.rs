@@ -17,17 +17,17 @@ use glam::DVec2;
 /// A true point source (star) in sky coordinates. Its on-sensor shape comes entirely from
 /// the [`Camera`](crate::testing::synthetic::camera::Camera) PSF.
 #[derive(Debug, Clone, Copy)]
-pub struct TrueSource {
+pub(crate) struct TrueSource {
     /// Position in sky / reference-frame pixel coordinates (sub-pixel).
-    pub pos: DVec2,
+    pub(crate) pos: DVec2,
     /// Total integrated flux in normalized units (1.0 == one full-well pixel of light).
-    pub flux: f32,
+    pub(crate) flux: f32,
 }
 
 /// Astrophysical background (sky glow / light pollution / nebulosity), additive in
 /// normalized units. Delegates to the existing `backgrounds` generators.
 #[derive(Debug, Clone)]
-pub enum BackgroundField {
+pub(crate) enum BackgroundField {
     Uniform {
         level: f32,
     },
@@ -46,7 +46,7 @@ pub enum BackgroundField {
 
 impl BackgroundField {
     /// Render this background into a fresh `width*height` buffer of normalized values.
-    pub fn render(&self, width: usize, height: usize) -> Vec<f32> {
+    pub(crate) fn render(&self, width: usize, height: usize) -> Vec<f32> {
         let mut pixels = vec![0.0f32; width * height];
         match self {
             BackgroundField::Uniform { level } => add_uniform_background(&mut pixels, *level),
@@ -89,18 +89,18 @@ impl LogUniformFlux {
 
 /// The true sky for a simulated observation session.
 #[derive(Debug, Clone)]
-pub struct Scene {
+pub(crate) struct Scene {
     /// Sky extent in reference-frame pixels; sources/background live within this.
-    pub width: usize,
-    pub height: usize,
-    pub sources: Vec<TrueSource>,
-    pub background: BackgroundField,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) sources: Vec<TrueSource>,
+    pub(crate) background: BackgroundField,
 }
 
 impl Scene {
     /// A single source at `pos` with `flux` over `background`. Useful for precise
     /// photometric/astrometric verification.
-    pub fn single(
+    pub(crate) fn single(
         width: usize,
         height: usize,
         pos: DVec2,
@@ -119,7 +119,7 @@ impl Scene {
     ///
     /// Fluxes are drawn **log-uniformly** in `flux_range` (a realistic brightness spread, not a
     /// flat one); `margin` keeps sources off the edges. Deterministic in `seed`.
-    pub fn random_field(
+    pub(crate) fn random_field(
         width: usize,
         height: usize,
         count: usize,
@@ -150,7 +150,7 @@ impl Scene {
     /// A centrally-concentrated field: most sources packed into a Gaussian core, the rest a
     /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
     /// `flux_range`; deterministic in `seed`.
-    pub fn cluster(
+    pub(crate) fn cluster(
         width: usize,
         height: usize,
         count: usize,
@@ -200,7 +200,7 @@ impl Scene {
     }
 
     /// True source positions as a catalog (for matching against detector output).
-    pub fn positions(&self) -> Vec<DVec2> {
+    fn positions(&self) -> Vec<DVec2> {
         self.sources.iter().map(|s| s.pos).collect()
     }
 }

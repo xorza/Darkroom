@@ -74,7 +74,7 @@ impl SigmaClipConfig {
     ///
     /// The cheap `no_outliers_possible` screen runs **before** sorting: clean pixels (the majority
     /// in a smooth flat/light) can't reject anything, so they skip the sort entirely.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(&mut scratch.indices, values.len());
@@ -315,7 +315,7 @@ impl WinsorizedClipConfig {
     ///
     /// Standard sigma clipping with the Winsorized (center, sigma) and
     /// the user's sigma_low/sigma_high thresholds.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(&mut scratch.indices, values.len());
@@ -403,7 +403,7 @@ impl LinearFitClipConfig {
     ///
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(&mut scratch.indices, values.len());
@@ -562,7 +562,7 @@ impl PercentileClipConfig {
     ///
     /// Sorts values (with index co-array) and moves the surviving middle range
     /// to `values[..remaining]` and `indices[..remaining]`.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         let n = values.len();
@@ -639,7 +639,7 @@ impl GesdConfig {
     ///
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         let original_len = values.len();
@@ -922,7 +922,7 @@ impl Rejection {
     ///
     /// After return, `values[..remaining]` holds the surviving values and `scratch.indices`
     /// their original frame indices (kept paired). `None` does no work and returns `values.len()`.
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         match self {
             Rejection::None => values.len(),
             Rejection::SigmaClip(c) => c.reject(values, scratch),

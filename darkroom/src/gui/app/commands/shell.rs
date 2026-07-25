@@ -14,7 +14,7 @@ pub(crate) enum ShellCommand {
 }
 
 impl App {
-    pub(crate) fn handle_shell(&mut self, command: ShellCommand) {
+    pub(super) fn handle_shell(&mut self, command: ShellCommand) {
         match command {
             ShellCommand::OpenPreferences => {
                 self.editor.open_preferences(&mut self.workspace.open);

@@ -66,21 +66,21 @@ const MAX_CONNECTIONS: usize = 4;
 /// callers pass [`TcpTimeouts::default`] to [`TcpTransport::bind`];
 /// tests may pass short values to drive timeout paths in real time.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TcpTimeouts {
+struct TcpTimeouts {
     /// Window for the initial auth token frame (16 bytes). Keep short —
     /// a legitimate client has the token ready on connect.
-    pub auth: Duration,
+    auth: Duration,
     /// Window between the end of one reply and the start (first byte)
     /// of the next request frame. Matches [`session::SESSION_IDLE_TIMEOUT`]
     /// because a client who hasn't sent anything for this long is
     /// probably better off reconnecting on a new socket.
-    pub idle: Duration,
+    idle: Duration,
     /// Window for the remaining bytes of an in-flight request once its
     /// first byte has been received. Short — the client has committed.
-    pub frame: Duration,
+    frame: Duration,
     /// Window for writing the JSON reply. Caps the damage a slow/dead
     /// reader can do by filling the kernel TX buffer.
-    pub write: Duration,
+    write: Duration,
 }
 
 impl Default for TcpTimeouts {
@@ -98,7 +98,7 @@ impl Default for TcpTimeouts {
 /// caller can inspect [`local_addr`] (useful when `port = 0`) before the
 /// accept loop starts.
 #[derive(Debug)]
-pub(crate) struct TcpTransport {
+pub(super) struct TcpTransport {
     listener: StdTcpListener,
     token: Option<Uuid>,
     timeouts: TcpTimeouts,
@@ -109,11 +109,7 @@ impl TcpTransport {
     /// port — read it back with [`Self::local_addr`]. Production
     /// callers pass `TcpTimeouts::default()`; tests may pass short
     /// values to exercise timeout paths in real time.
-    pub(crate) fn bind(
-        addr: SocketAddr,
-        token: Option<Uuid>,
-        timeouts: TcpTimeouts,
-    ) -> std::io::Result<Self> {
+    fn bind(addr: SocketAddr, token: Option<Uuid>, timeouts: TcpTimeouts) -> std::io::Result<Self> {
         let listener = StdTcpListener::bind(addr)?;
         // Required to convert into a `tokio::net::TcpListener` inside the task.
         listener.set_nonblocking(true)?;
@@ -124,7 +120,7 @@ impl TcpTransport {
         })
     }
 
-    pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
 }
@@ -152,19 +148,19 @@ pub(crate) struct TcpScriptConfig {
 /// decides how to surface it (stdout banner for CLI, status bar for GUI,
 /// log line for tests).
 #[derive(Debug, Clone)]
-pub(crate) struct TcpStartReport {
-    pub addr: SocketAddr,
-    pub token: Option<Uuid>,
+pub(super) struct TcpStartReport {
+    pub(super) addr: SocketAddr,
+    pub(super) token: Option<Uuid>,
     /// `None` = no discovery file requested.
     /// `Some(Ok(path))` = file written to `path`.
     /// `Some(Err(msg))` = requested but the write failed.
-    pub token_file: Option<Result<PathBuf, String>>,
+    pub(super) token_file: Option<Result<PathBuf, String>>,
 }
 
 /// Boot a TCP transport from config: binds the socket and (if requested)
 /// writes the discovery file. Returns the transport together with a
 /// pure report — no stdout I/O happens inside, so this is unit-testable.
-pub(crate) fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
+pub(super) fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
     let transport = TcpTransport::bind(cfg.bind, cfg.token, TcpTimeouts::default())?;
     let addr = transport.local_addr()?;
 
@@ -193,7 +189,7 @@ pub(crate) fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, Tcp
 
 /// Pure rendering of the discovery-file body. Exposed so tests can
 /// byte-diff the output without touching the filesystem.
-pub(crate) fn render_token_file(port: u16, token: Option<Uuid>) -> String {
+fn render_token_file(port: u16, token: Option<Uuid>) -> String {
     let payload = serde_json::json!({
         "port": port,
         "token": token.map(|t| t.to_string()),
@@ -218,7 +214,7 @@ impl TcpTransport {
     /// Spawn the accept loop on the ambient runtime; the returned handle
     /// owns the task (dropping it cancels + aborts the listener). Pairs
     /// requests onto `tx` and stops cooperatively on `cancel`.
-    pub(crate) fn start(
+    pub(super) fn start(
         self,
         tx: mpsc::Sender<ScriptRequest>,
         cancel: CancellationToken,

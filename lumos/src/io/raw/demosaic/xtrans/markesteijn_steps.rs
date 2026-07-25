@@ -1013,8 +1013,8 @@ fn demosaic_border(
 mod tests {
     use crate::io::raw::demosaic::interleave_planes;
     use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
+    use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
     use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
-    use crate::io::raw::demosaic::xtrans::test_support::{make_xtrans, test_pattern, to_u16};
 
     #[test]
     fn test_green_minmax_uniform() {

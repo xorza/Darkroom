@@ -33,7 +33,7 @@ pub(crate) struct ExecutionEngine {
     /// The installed shared compile artifact: the program plus its compact
     /// execution-to-authoring attribution map.
     /// Replaced wholesale by [`Self::install`].
-    pub(crate) compiled: Arc<CompiledGraph>,
+    compiled: Arc<CompiledGraph>,
     /// Per-node cross-run cache (output values, digests, node state) plus the
     /// [`disk_store::DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
@@ -183,7 +183,7 @@ impl ExecutionEngine {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+mod internals {
     use common::CancelToken;
 
     use crate::DynamicValue;
@@ -202,9 +202,9 @@ pub(crate) mod test_support {
     use crate::node::lambda::OutputDemand;
 
     #[derive(Debug, Default)]
-    pub(crate) struct ArgumentValues {
-        pub(crate) inputs: Vec<Option<DynamicValue>>,
-        pub(crate) outputs: Vec<DynamicValue>,
+    pub(super) struct ArgumentValues {
+        pub(super) inputs: Vec<Option<DynamicValue>>,
+        pub(super) outputs: Vec<DynamicValue>,
     }
 
     /// Test-only inspection of the last plan's per-run flags and runtime slots.
@@ -212,7 +212,7 @@ pub(crate) mod test_support {
         /// Compile + install in one step — the pre-split `update` shape the
         /// in-tree tests are written against. Production compiles on the host
         /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
-        pub(crate) fn update(
+        pub(super) fn update(
             &mut self,
             graph: &crate::graph::Graph,
             library: &crate::library::Library,
@@ -221,7 +221,7 @@ pub(crate) mod test_support {
             Ok(())
         }
 
-        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
+        pub(super) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
             let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
@@ -236,7 +236,7 @@ pub(crate) mod test_support {
             Ok(outcome)
         }
 
-        pub(crate) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
+        pub(super) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
             &mut self,
             events: T,
         ) -> Result<ExecutionOutcome> {
@@ -254,7 +254,7 @@ pub(crate) mod test_support {
             Ok(outcome)
         }
 
-        pub(crate) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
+        pub(super) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
             &mut self,
             nodes: T,
         ) -> Result<ExecutionOutcome> {
@@ -273,7 +273,7 @@ pub(crate) mod test_support {
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-        pub(crate) async fn prepare_execution(
+        pub(super) async fn prepare_execution(
             &mut self,
             sinks: bool,
             event_sources: bool,
@@ -299,17 +299,17 @@ pub(crate) mod test_support {
             Ok(())
         }
 
-        pub(crate) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
+        pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
             let program = &self.compiled.program;
             &program.inputs[program.by_id(e_node_id).inputs]
         }
 
-        pub(crate) fn node_events(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
+        pub(super) fn node_events(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionEvent] {
             let events = self.compiled.program.by_id(e_node_id).events;
             &self.compiled.program.events[events]
         }
 
-        pub(crate) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
+        pub(super) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
             self.resolver
                 .run
                 .outputs
@@ -317,7 +317,7 @@ pub(crate) mod test_support {
                 .slice(self.compiled.program.by_id(e_node_id).outputs)
         }
 
-        pub(crate) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
+        pub(super) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
             self.resolver
                 .run
                 .outputs
@@ -326,17 +326,17 @@ pub(crate) mod test_support {
         }
 
         /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.
-        pub(crate) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
+        pub(super) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
             self.executor.ran(&self.compiled.program, e_node_id)
         }
 
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
-        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
+        pub(super) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
             self.get_argument_values_at(ExecutionNodeId::from_authoring(&[*node_id]))
         }
 
-        pub(crate) fn get_argument_values_at(
+        pub(super) fn get_argument_values_at(
             &self,
             e_node_id: ExecutionNodeId,
         ) -> Option<ArgumentValues> {
@@ -368,13 +368,13 @@ pub(crate) mod test_support {
         }
 
         /// The runtime slot for a stable id — test introspection.
-        pub(crate) fn slot(&self, e_node_id: ExecutionNodeId) -> &RuntimeSlot {
+        pub(super) fn slot(&self, e_node_id: ExecutionNodeId) -> &RuntimeSlot {
             &self.cache.slots[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
-        pub(crate) fn set_output_values(
+        pub(super) fn set_output_values(
             &mut self,
             e_node_id: ExecutionNodeId,
             values: Vec<DynamicValue>,

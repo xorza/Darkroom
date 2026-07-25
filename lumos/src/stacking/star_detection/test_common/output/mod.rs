@@ -1,9 +1,9 @@
 //! Output utilities for visual tests.
 
-pub(crate) mod comparison;
-pub(crate) mod image_writer;
-pub(crate) mod metrics;
+mod comparison;
+pub(in crate::stacking::star_detection) mod image_writer;
+pub(in crate::stacking::star_detection) mod metrics;
 
 /// File extension for test output images.
 /// Change this to switch the output format for all tests (e.g., "png", "tiff").
-pub(crate) const TEST_OUTPUT_IMAGE_EXT: &str = "tiff";
+const TEST_OUTPUT_IMAGE_EXT: &str = "tiff";

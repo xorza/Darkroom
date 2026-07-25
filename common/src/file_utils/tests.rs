@@ -10,7 +10,7 @@ use crate::file_utils::{
     AtomicFile, PublicationMode, SyncAtomicFile, files_with_extensions, publish, publish_bytes,
     publish_with_replacement, replace,
 };
-use crate::test_utils::test_output_path;
+use crate::internals::test_output_path;
 
 fn fixture_dir(name: &str) -> PathBuf {
     let dir = test_output_path(&format!("common/file_utils/{name}"));

@@ -18,11 +18,11 @@ use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
 /// (hover-target) box carries the emphasis zone, so entering/leaving it
 /// is a hover-target change and repaints without any pointer
 /// subscription.
-pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
+pub(in crate::gui::node) const PORT_HIT_SCALE: f32 = 1.8;
 
 /// Corner rounding of the event triangles (emitter glyph + subscription
 /// pin), matching the soft corners of the rest of the chrome.
-pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
+pub(in crate::gui::node) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
 /// Stroke width of the muted ring drawn around a non-required input's port
 /// circle (see `circle_frame`'s `outline` param). Also the amount a
@@ -36,7 +36,7 @@ const PORT_OUTLINE_WIDTH: f32 = 2.5;
 /// [`PORT_OUTLINE_WIDTH`] on each side to match a non-required input's
 /// circle-plus-ring footprint (a required input, via [`circle_frame`]'s
 /// `diameter`).
-pub(crate) fn port_diameter(base: f32, enlarged: bool) -> f32 {
+pub(super) fn port_diameter(base: f32, enlarged: bool) -> f32 {
     if enlarged {
         base + 2.0 * PORT_OUTLINE_WIDTH
     } else {
@@ -49,13 +49,13 @@ pub(crate) fn port_diameter(base: f32, enlarged: bool) -> f32 {
 /// `crate::gui::canvas::pin_ui`). A flag rather than a bare `Option<Color>`
 /// so a future second decoration doesn't need restructuring.
 #[derive(Debug)]
-pub(crate) enum PortDecoration {
+pub(super) enum PortDecoration {
     None,
     Outline(Color),
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn circle_frame(
+pub(super) fn circle_frame(
     ui: &mut Ui,
     wid: WidgetId,
     diameter: f32,
@@ -118,7 +118,7 @@ pub(crate) fn circle_frame(
 /// `PORT_HIT_SCALE`-grown with the extra pulled back out of layout via
 /// negative margin, so the triangle stays put while hover/grab (and the
 /// wire hover-highlight zone) get generous.
-pub(crate) fn event_glyph(
+pub(super) fn event_glyph(
     ui: &mut Ui,
     theme: &Theme,
     wid: WidgetId,

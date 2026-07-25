@@ -160,7 +160,7 @@ impl std::fmt::Debug for FuncLambda {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::error;
     use std::fmt;
 

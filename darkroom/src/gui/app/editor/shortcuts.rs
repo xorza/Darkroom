@@ -45,7 +45,7 @@ impl Editor {
     /// (subscriptions clear each frame). Focus only gates the *action*:
     /// while a widget holds focus, Ctrl+Z must undo that widget's text,
     /// so the graph-level handling stands down.
-    pub(crate) fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
+    pub(super) fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         if ui.focused_id().is_some() {
@@ -76,7 +76,7 @@ impl Editor {
     /// nothing. Chords are sampled unconditionally (see `apply_undo_redo`)
     /// and gated by focus. Pushes intents only — their relayout is decided
     /// by the post-record drain, so this returns nothing.
-    pub(crate) fn apply_canvas_shortcuts(
+    pub(super) fn apply_canvas_shortcuts(
         &mut self,
         ui: &mut Ui,
         open: &OpenDocument,
@@ -129,7 +129,7 @@ impl Editor {
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its
     /// combo. Theme actions are menu-only — no shortcut.
-    pub(crate) fn menu_shortcut(&self, ui: &mut Ui) -> Option<AppCommand> {
+    pub(super) fn menu_shortcut(&self, ui: &mut Ui) -> Option<AppCommand> {
         let new = ui.key_pressed(NEW_SHORTCUT);
         let open = ui.key_pressed(OPEN_SHORTCUT);
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);

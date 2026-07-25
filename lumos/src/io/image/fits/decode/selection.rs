@@ -25,7 +25,7 @@ fn hdu_is_image(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
     })
 }
 
-pub(crate) fn selected_hdu(
+pub(super) fn selected_hdu(
     path: &Path,
     hdus: &[Hdu],
     index: usize,
@@ -54,7 +54,7 @@ pub(crate) fn selected_hdu(
     })
 }
 
-pub(crate) fn select_image_hdu(
+pub(super) fn select_image_hdu(
     path: &Path,
     hdus: &[Hdu],
     selector: &FitsHduSelector,
@@ -156,7 +156,7 @@ fn checksum_provenance(report: ChecksumReport) -> FitsChecksumProvenance {
     }
 }
 
-pub(crate) fn verify_selected_checksum(
+pub(super) fn verify_selected_checksum(
     reader: &mut StreamReader<File>,
     index: usize,
     path: &Path,

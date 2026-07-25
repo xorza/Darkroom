@@ -93,7 +93,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
 
     /// `true` when `pointer` (screen coords) falls inside this widget's
     /// post-transform/clip rect.
-    pub(crate) fn contains_pointer(&self, key: K, pointer: Vec2) -> bool {
+    pub(super) fn contains_pointer(&self, key: K, pointer: Vec2) -> bool {
         self.live
             .get(&key)
             .and_then(|i| i.screen_rect)
@@ -101,7 +101,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     }
 
     /// `true` on the one-frame edge of a drag-start on this widget.
-    pub(crate) fn drag_started(&self, key: K) -> bool {
+    fn drag_started(&self, key: K) -> bool {
         self.live.get(&key).is_some_and(|i| i.drag_started)
     }
 
@@ -110,12 +110,12 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     /// controller (connection/pin/event/subscription) needs, differing only
     /// in the key sequence it feeds in (a node's ports, its events, or its
     /// subscription pin).
-    pub(crate) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
+    pub(super) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
         keys.find(|k| self.drag_started(*k))
     }
 
     /// `true` while a drag started on this widget is still live.
-    pub(crate) fn dragging(&self, key: K) -> bool {
+    pub(super) fn dragging(&self, key: K) -> bool {
         self.live.get(&key).is_some_and(|i| i.dragging)
     }
 
@@ -126,7 +126,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
 
     /// Force the hover flag on (idempotent) — the active drag's snap target,
     /// which aperture's drag-capture suppression hides from `response.hovered`.
-    pub(crate) fn set_hovered(&mut self, key: K) {
+    pub(super) fn set_hovered(&mut self, key: K) {
         if let Some(info) = self.live.get_mut(&key) {
             info.hovered = true;
         }
@@ -173,7 +173,7 @@ impl CanvasGeometry {
         })
     }
 
-    pub(crate) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
+    pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
@@ -247,13 +247,13 @@ fn snapshot<K: Eq + Hash + Copy>(
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use super::*;
 
     impl CanvasGeometry {
         /// Seed the cross-frame size cache directly, standing in for a
         /// past frame's record of the node.
-        pub(crate) fn seed_node_size(&mut self, id: NodeId, size: Size) {
+        pub(in crate::gui::canvas) fn seed_node_size(&mut self, id: NodeId, size: Size) {
             self.node_sizes.insert(id, size);
         }
     }

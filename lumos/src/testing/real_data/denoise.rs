@@ -2,7 +2,7 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::image_ops::test_support::channel_plane;
+use crate::image_ops::internals::channel_plane;
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};

@@ -71,13 +71,13 @@ impl PhaseGate {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PeakRss {
     /// Peak `RssAnon` (heap — the OOM-relevant figure) over the whole run.
-    pub anon_mb: u64,
+    pub(crate) anon_mb: u64,
     /// Peak `VmRSS` (total resident, including reclaimable mmap pages) over the whole run.
-    pub total_mb: u64,
+    pub(crate) total_mb: u64,
     /// Peak `RssAnon` sampled while the [`PhaseGate`] was open (e.g. combine / steady state).
-    pub gated_anon_mb: u64,
+    pub(crate) gated_anon_mb: u64,
     /// Peak `RssAnon` sampled while the [`PhaseGate`] was closed (e.g. load / warmup).
-    pub ungated_anon_mb: u64,
+    pub(crate) ungated_anon_mb: u64,
 }
 
 /// Background sampler of peak heap (`RssAnon`) and total resident (`VmRSS`) for the duration of a
@@ -160,12 +160,7 @@ impl RssSampler {
 /// handful of bright per-frame outliers (cosmic-ray stand-ins). The outliers differ every frame, so
 /// sigma-clipping and median combine actually have something to reject — a mean combine would keep
 /// them. Deterministic in `(seed, frame_idx)`; rows are generated in parallel with per-row RNGs.
-pub(crate) fn synth_frame_u16(
-    width: usize,
-    height: usize,
-    frame_idx: usize,
-    seed: u64,
-) -> Vec<u16> {
+fn synth_frame_u16(width: usize, height: usize, frame_idx: usize, seed: u64) -> Vec<u16> {
     const PEDESTAL: f32 = 0.08;
     const READ_NOISE: f32 = 0.012;
 
@@ -210,7 +205,7 @@ pub(crate) fn synth_frame_u16(
 /// Write `data` as a 16-bit (BITPIX=16, BZERO=32768) FITS image, reusing `buf` as the encode scratch
 /// so a whole stack allocates it once. `std::fs::write` flushes reliably (unlike a `BufWriter`
 /// dropped inside the FITS writer).
-pub(crate) fn write_fits_u16(
+fn write_fits_u16(
     path: &Path,
     width: usize,
     height: usize,

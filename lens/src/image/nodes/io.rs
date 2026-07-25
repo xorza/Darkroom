@@ -12,7 +12,7 @@ use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
-pub(crate) fn register(library: &mut Library) {
+pub(super) fn register(library: &mut Library) {
     register_load(library);
     register_save(library);
 }

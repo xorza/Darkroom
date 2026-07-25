@@ -50,7 +50,7 @@ pub(crate) struct Editor {
     /// Read by `App` on exit to decide whether to prompt. It can read
     /// "dirty" after an undo returns the document to its saved state — the
     /// safe direction (prompt rather than silently discard).
-    pub(crate) dirty: bool,
+    pub(super) dirty: bool,
     action_stack: ActionStack,
     scene: Scene,
     main_window: MainWindow,
@@ -89,12 +89,12 @@ pub(crate) struct Editor {
     /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
     /// it as it drains the worker (`RunState::apply_worker_status` / `clear`).
     /// Off the serialized state.
-    pub(crate) run_state: RunState,
+    pub(super) run_state: RunState,
 }
 
 impl Editor {
     /// Build fresh GUI editing state for an open document.
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             dirty: false,
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
@@ -114,7 +114,7 @@ impl Editor {
     /// drain — e.g. a file-picker result `App` handles after the record.
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
-    pub(crate) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
+    pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
         self.commit_batch(open, target, [intent]);
     }
@@ -124,7 +124,7 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(crate) fn apply_external_intents(&mut self, open: &mut OpenDocument, intents: Vec<Intent>) {
+    pub(super) fn apply_external_intents(&mut self, open: &mut OpenDocument, intents: Vec<Intent>) {
         let target = open.document.active_target().unwrap_or(GraphRef::Main);
         self.commit_batch(open, target, intents);
     }
@@ -165,7 +165,7 @@ impl Editor {
     /// graph), because input that switches tabs/opens graphs comes from
     /// *last* frame's click responses and must resolve before anything
     /// edits or records.
-    pub(crate) fn frame(
+    pub(super) fn frame(
         &mut self,
         open: &mut OpenDocument,
         ui: &mut Ui,
@@ -344,7 +344,7 @@ impl Editor {
     /// points at. For a `Local` target, also hands the scene the enclosing
     /// `Graph` so the interior's boundary nodes can mirror its
     /// interface as their ports.
-    pub(crate) fn rebuild_scene(
+    fn rebuild_scene(
         &mut self,
         ui: &mut Ui,
         open: &OpenDocument,
@@ -476,7 +476,7 @@ impl Editor {
     /// routes through a recorded activation. Called from the File ▸
     /// Preferences menu via `App`, so it records the switch and drains it
     /// immediately like every external edit.
-    pub(crate) fn open_preferences(&mut self, open: &mut OpenDocument) {
+    pub(super) fn open_preferences(&mut self, open: &mut OpenDocument) {
         let group = open.document.layout.focused;
         let addr = open
             .document

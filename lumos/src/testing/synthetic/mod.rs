@@ -36,16 +36,16 @@
 //! registration), [`patterns`] (warp/interpolation fixtures), [`background_map`]
 //! (`BackgroundEstimate` fixtures).
 
-pub mod artifacts;
-pub mod background_map;
-pub mod backgrounds;
-pub mod camera;
-pub mod fixtures;
-pub mod gallery;
-pub mod metrics;
-pub mod noise;
-pub mod observe;
-pub mod patterns;
-pub mod scene;
-pub mod star_profiles;
-pub mod transforms;
+pub(crate) mod artifacts;
+pub(crate) mod background_map;
+pub(crate) mod backgrounds;
+pub(crate) mod camera;
+pub(crate) mod fixtures;
+mod gallery;
+pub(crate) mod metrics;
+pub(crate) mod noise;
+pub(crate) mod observe;
+pub(crate) mod patterns;
+pub(crate) mod scene;
+pub(crate) mod star_profiles;
+pub(crate) mod transforms;

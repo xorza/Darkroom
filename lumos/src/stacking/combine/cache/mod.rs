@@ -62,9 +62,9 @@ impl ScratchBuffers {
 /// One reduced channel sample and the effective quality of the samples that survived rejection.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CombinedSample {
-    pub(crate) value: f32,
-    pub(crate) weight: f32,
-    pub(crate) linear_variance: f32,
+    value: f32,
+    weight: f32,
+    linear_variance: f32,
 }
 
 impl CombinedSample {
@@ -100,8 +100,8 @@ impl CombinedSample {
 /// Channel-shaped result of one light-frame combine pass and its pre-output memory snapshot.
 #[derive(Debug)]
 pub(crate) struct LightCombineOutput {
-    pub(crate) pixels: LinearPixels,
-    pub(crate) weight: LinearPixels,
+    pub(super) pixels: LinearPixels,
+    weight: LinearPixels,
     pub(crate) linear_variance: Option<LinearPixels>,
     chunk_available_memory: Option<u64>,
 }

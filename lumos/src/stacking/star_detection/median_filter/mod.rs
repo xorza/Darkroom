@@ -3,7 +3,7 @@
 //! This filter is essential for images from color sensors where alternating rows
 //! have different sensitivities due to the Bayer color filter array.
 
-pub(crate) mod simd;
+mod simd;
 
 #[cfg(test)]
 mod tests;

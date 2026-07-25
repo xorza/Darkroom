@@ -290,7 +290,7 @@ impl ExecutionProgram {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::{ExecutionNode, ExecutionProgram};
 

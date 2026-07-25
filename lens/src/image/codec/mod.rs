@@ -103,7 +103,7 @@ impl CustomValueCodec for ImageCodec {
     }
 }
 
-pub(crate) fn image_type_entry() -> TypeEntry {
+pub(super) fn image_type_entry() -> TypeEntry {
     TypeEntry::custom_with_codec("Image", Arc::new(ImageCodec))
 }
 

@@ -10,44 +10,44 @@ use std::path::Path;
 
 /// Comprehensive detection metrics.
 #[derive(Debug, Clone)]
-pub(crate) struct DetectionMetrics {
+pub(in crate::stacking::star_detection) struct DetectionMetrics {
     // Counts
     /// Number of correctly detected stars (within match radius of ground truth)
-    pub true_positives: usize,
+    true_positives: usize,
     /// Number of spurious detections (no matching ground truth)
-    pub false_positives: usize,
+    false_positives: usize,
     /// Number of missed ground truth stars
-    pub false_negatives: usize,
+    false_negatives: usize,
     /// Total ground truth stars
-    pub total_truth: usize,
+    total_truth: usize,
     /// Total detected stars
-    pub total_detected: usize,
+    total_detected: usize,
 
     // Rates
     /// Detection rate: TP / (TP + FN)
-    pub detection_rate: f32,
+    pub(in crate::stacking::star_detection) detection_rate: f32,
     /// Precision: TP / (TP + FP)
-    pub precision: f32,
+    precision: f32,
     /// F1 score: harmonic mean of detection rate and precision
-    pub f1_score: f32,
+    f1_score: f32,
     /// False positive rate: FP / total_detected
-    pub false_positive_rate: f32,
+    pub(in crate::stacking::star_detection) false_positive_rate: f32,
 
     // Positional accuracy
     /// Mean centroid error
-    pub mean_centroid_error: f32,
+    mean_centroid_error: f32,
     /// Median centroid error
-    pub median_centroid_error: f32,
+    median_centroid_error: f32,
     /// Maximum centroid error
-    pub max_centroid_error: f32,
+    max_centroid_error: f32,
     /// Standard deviation of centroid errors
-    pub std_centroid_error: f32,
+    std_centroid_error: f32,
 
     // Property accuracy (for matched stars)
     /// Mean FWHM error
-    pub mean_fwhm_error: f32,
+    mean_fwhm_error: f32,
     /// Mean flux error
-    pub mean_flux_error: f32,
+    mean_flux_error: f32,
 }
 
 impl Default for DetectionMetrics {
@@ -129,7 +129,7 @@ impl fmt::Display for DetectionMetrics {
 /// * `ground_truth` - True star positions and properties
 /// * `detected` - Detected stars
 /// * `match_radius` - Maximum distance for matching (typically 2 × FWHM)
-pub(crate) fn compute_detection_metrics(
+pub(in crate::stacking::star_detection) fn compute_detection_metrics(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
@@ -252,22 +252,22 @@ pub(crate) fn compute_detection_metrics(
 }
 
 /// Save metrics to a text file.
-pub(crate) fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
+pub(in crate::stacking::star_detection) fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
     let mut file = File::create(path).expect("Failed to create metrics file");
     write!(file, "{}", metrics).expect("Failed to write metrics");
 }
 
 /// Pass/fail criteria for visual tests.
 #[derive(Debug, Clone)]
-pub(crate) struct PassCriteria {
+pub(in crate::stacking::star_detection) struct PassCriteria {
     /// Minimum detection rate
-    pub min_detection_rate: f32,
+    pub(in crate::stacking::star_detection) min_detection_rate: f32,
     /// Maximum false positive rate
-    pub max_false_positive_rate: f32,
+    pub(in crate::stacking::star_detection) max_false_positive_rate: f32,
     /// Maximum mean centroid error (pixels)
-    pub max_mean_centroid_error: f32,
+    pub(in crate::stacking::star_detection) max_mean_centroid_error: f32,
     /// Maximum FWHM error (relative)
-    pub max_fwhm_error: f32,
+    pub(in crate::stacking::star_detection) max_fwhm_error: f32,
 }
 
 impl Default for PassCriteria {
@@ -282,7 +282,7 @@ impl Default for PassCriteria {
 }
 
 /// Standard test criteria.
-pub(crate) fn standard_criteria() -> PassCriteria {
+pub(in crate::stacking::star_detection) fn standard_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.98,
         max_false_positive_rate: 0.02,
@@ -292,7 +292,7 @@ pub(crate) fn standard_criteria() -> PassCriteria {
 }
 
 /// Crowded field criteria (relaxed).
-pub(crate) fn crowded_criteria() -> PassCriteria {
+pub(in crate::stacking::star_detection) fn crowded_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.90,
         max_false_positive_rate: 0.05,
@@ -302,7 +302,7 @@ pub(crate) fn crowded_criteria() -> PassCriteria {
 }
 
 /// Faint star criteria (relaxed).
-pub(crate) fn faint_star_criteria() -> PassCriteria {
+pub(in crate::stacking::star_detection) fn faint_star_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.80,
         max_false_positive_rate: 0.10,
@@ -312,7 +312,7 @@ pub(crate) fn faint_star_criteria() -> PassCriteria {
 }
 
 /// Check if metrics pass the given criteria.
-pub(crate) fn check_pass(
+pub(in crate::stacking::star_detection) fn check_pass(
     metrics: &DetectionMetrics,
     criteria: &PassCriteria,
 ) -> Result<(), Vec<String>> {

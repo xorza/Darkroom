@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use common::test_utils;
+use common::internals;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::execution::cache::slot::OutputSnapshot;
@@ -29,7 +29,7 @@ impl Drop for TempFile {
 fn temp_file(tag: &str) -> TempFile {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    TempFile(test_utils::test_output_path(&format!(
+    TempFile(internals::test_output_path(&format!(
         "scenarium/disk-store/{tag}-{}-{sequence}.bin",
         std::process::id()
     )))

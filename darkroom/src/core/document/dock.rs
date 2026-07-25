@@ -198,11 +198,11 @@ pub(crate) enum DockOp {
 /// One pane's tab strip: the open tabs plus which one is visible.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TabGroup {
-    pub id: TabGroupId,
+    pub(crate) id: TabGroupId,
     /// Non-empty; a group whose last tab closes collapses out of the tree.
-    pub tabs: Vec<TabRef>,
+    pub(crate) tabs: Vec<TabRef>,
     /// Index of the visible tab; always in range.
-    pub active: usize,
+    pub(crate) active: usize,
 }
 
 impl TabGroup {
@@ -230,12 +230,12 @@ pub(crate) enum DockNode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DockSplit {
-    pub dir: SplitDir,
+    pub(crate) dir: SplitDir,
     /// The first child's share of the free space, in
     /// `RATIO_MIN..=RATIO_MAX`.
-    pub ratio: f32,
-    pub first: NodeIdx,
-    pub second: NodeIdx,
+    pub(crate) ratio: f32,
+    pub(crate) first: NodeIdx,
+    pub(crate) second: NodeIdx,
 }
 
 /// The whole pane arrangement: the flat split tree plus which group has
@@ -246,7 +246,7 @@ pub(crate) struct DockLayout {
     /// Canonical pre-order (see the module doc). Private so every
     /// structural mutation goes through the ops that renormalize.
     nodes: Vec<DockNode>,
-    pub focused: TabGroupId,
+    pub(crate) focused: TabGroupId,
 }
 
 impl Default for DockLayout {
@@ -269,8 +269,8 @@ impl Default for DockLayout {
 /// A tab's position in the tree: which group holds it and where.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TabAddress {
-    pub group: TabGroupId,
-    pub index: usize,
+    pub(crate) group: TabGroupId,
+    pub(crate) index: usize,
 }
 
 impl DockLayout {
@@ -297,11 +297,11 @@ impl DockLayout {
         self.groups().flat_map(|g| g.tabs.iter().copied())
     }
 
-    pub(crate) fn group(&self, id: TabGroupId) -> Option<&TabGroup> {
+    fn group(&self, id: TabGroupId) -> Option<&TabGroup> {
         self.groups().find(|g| g.id == id)
     }
 
-    pub(crate) fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
+    fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
         self.nodes.iter_mut().find_map(|n| match n {
             DockNode::Group(g) if g.id == id => Some(g),
             _ => None,
@@ -338,7 +338,7 @@ impl DockLayout {
 
     /// Focus `group` and make its `index` tab visible. Out-of-range
     /// input is ignored.
-    pub(crate) fn activate(&mut self, group: TabGroupId, index: usize) {
+    fn activate(&mut self, group: TabGroupId, index: usize) {
         if let Some(g) = self.group_mut(group)
             && index < g.tabs.len()
         {
@@ -372,7 +372,7 @@ impl DockLayout {
     /// Close `group`'s tab at `index`. The `Main` tab never closes (also
     /// guarded at intent build). A group emptied by the close collapses
     /// out of the tree; a vanished focus falls back to the primary group.
-    pub(crate) fn close_tab(&mut self, group: TabGroupId, index: usize) {
+    fn close_tab(&mut self, group: TabGroupId, index: usize) {
         let Some(g) = self.group_mut(group) else {
             return;
         };
@@ -393,7 +393,7 @@ impl DockLayout {
     /// Degenerate moves — a split off a group that holds only this tab,
     /// targeting itself — leave the layout unchanged (the snapshot diff
     /// drops them).
-    pub(crate) fn move_tab(&mut self, tab: TabRef, drop: DockDrop) {
+    fn move_tab(&mut self, tab: TabRef, drop: DockDrop) {
         if matches!(tab, TabRef::Graph(_)) {
             return;
         }
@@ -459,7 +459,7 @@ impl DockLayout {
     /// Set the ratio of the split at `path`, clamped to the ratio
     /// bounds. A path that doesn't land on a split (the tree changed
     /// under a stale intent) is ignored.
-    pub(crate) fn set_ratio(&mut self, path: DockPath, ratio: f32) {
+    fn set_ratio(&mut self, path: DockPath, ratio: f32) {
         // A sentinel-less byte is a corrupt address, not the root —
         // ignore it like any other stale path.
         if path.0 == 0 {
@@ -602,7 +602,7 @@ impl DockLayout {
     /// caller's ([`Document::validate`] holds the graph).
     ///
     /// [`Document::validate`]: crate::core::document::Document::validate
-    pub(crate) fn validate(&self) -> Result<(), DockValidationError> {
+    pub(super) fn validate(&self) -> Result<(), DockValidationError> {
         // Canonical pre-order: walking the tree must visit exactly the
         // slots 0..len in order — this covers reachability, no dead
         // slots, and acyclicity in one sweep.

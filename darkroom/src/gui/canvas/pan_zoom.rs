@@ -125,7 +125,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 ///   up) → zoom in.
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
-pub(crate) fn emit_pan_zoom(
+pub(super) fn emit_pan_zoom(
     pan_anchor: &mut PanAnchor,
     ui: &Ui,
     scene: &Scene,
@@ -304,7 +304,7 @@ mod tests {
     use scenarium::NodeId;
 
     use super::*;
-    use crate::gui::scene::test_support::scene_node_stub;
+    use crate::gui::scene::internals::scene_node_stub;
 
     #[test]
     fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {

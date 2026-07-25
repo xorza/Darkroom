@@ -107,7 +107,7 @@ macro_rules! median9_simd_sort {
 mod sse;
 
 #[cfg(target_arch = "aarch64")]
-pub(crate) mod neon;
+mod neon;
 
 /// Process a row of interior pixels using SIMD-accelerated median9.
 ///
@@ -121,7 +121,7 @@ pub(crate) mod neon;
 /// * `output_row` - Output buffer for this row
 /// * `width` - Image width
 #[inline]
-pub(crate) fn median_filter_row_simd(
+pub(super) fn median_filter_row_simd(
     row_above: &[f32],
     row_curr: &[f32],
     row_below: &[f32],
@@ -160,7 +160,7 @@ pub(crate) fn median_filter_row_simd(
 
 /// Scalar implementation of median filter row processing.
 #[inline]
-pub(crate) fn median_filter_row_scalar(
+fn median_filter_row_scalar(
     row_above: &[f32],
     row_curr: &[f32],
     row_below: &[f32],
@@ -185,7 +185,7 @@ pub(crate) fn median_filter_row_scalar(
 /// Scalar median of 9 elements using sorting network.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn median9_scalar(
+fn median9_scalar(
     mut v0: f32,
     mut v1: f32,
     mut v2: f32,

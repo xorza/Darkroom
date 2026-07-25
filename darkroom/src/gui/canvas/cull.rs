@@ -22,7 +22,7 @@ pub(crate) struct CullRegion {
 }
 
 impl CullRegion {
-    pub(crate) fn from_canvas(
+    pub(super) fn from_canvas(
         outer_screen: Option<Rect>,
         canvas_origin: Vec2,
         viewport: &Viewport,
@@ -48,7 +48,7 @@ impl CullRegion {
         rect.is_none_or(|rect| self.keeps_rect(rect))
     }
 
-    pub(crate) fn keeps_wire(self, p0: Vec2, handles: &CubicHandles, p3: Vec2) -> bool {
+    pub(super) fn keeps_wire(self, p0: Vec2, handles: &CubicHandles, p3: Vec2) -> bool {
         // A cubic stays inside its control-point hull, so this bound is conservative.
         let min = p0.min(handles.p1).min(handles.p2).min(p3);
         let max = p0.max(handles.p1).max(handles.p2).max(p3);
@@ -58,7 +58,7 @@ impl CullRegion {
         })
     }
 
-    pub(crate) fn keeps_pin(
+    pub(super) fn keeps_pin(
         self,
         card: Rect,
         port_center: Vec2,

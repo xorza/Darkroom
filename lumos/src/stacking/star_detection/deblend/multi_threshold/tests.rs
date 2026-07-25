@@ -1,11 +1,11 @@
 //! Tests for multi-threshold deblending.
 
 use crate::math::rect::URect;
-use crate::stacking::star_detection::deblend::multi_threshold::*;
-use crate::stacking::star_detection::deblend::test_support::{
+use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
-use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
+use crate::stacking::star_detection::deblend::multi_threshold::*;
+use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
 
 #[test]
 fn test_single_star_no_deblending() {

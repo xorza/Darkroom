@@ -113,7 +113,7 @@ impl DetectionResources {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::stacking::star_detection::resources::DetectionResources;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,9 +144,9 @@ pub(crate) mod test_support {
 mod tests {
     use crate::math::vec2us::Vec2us;
     use crate::stacking::star_detection::resources::DetectionResources;
-    use crate::stacking::star_detection::resources::test_support::BufferCounts;
-    use crate::stacking::star_detection::resources::test_support::buffer_counts;
-    use crate::stacking::star_detection::resources::test_support::matches_dimensions;
+    use crate::stacking::star_detection::resources::internals::BufferCounts;
+    use crate::stacking::star_detection::resources::internals::buffer_counts;
+    use crate::stacking::star_detection::resources::internals::matches_dimensions;
     use imaginarium::Buffer2;
 
     #[test]

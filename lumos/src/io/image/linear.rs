@@ -264,7 +264,7 @@ fn linear_from_image(image: &Image) -> LinearImage {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use imaginarium::Image;
 
     use crate::image_ops::rgb::Rgb;
@@ -315,7 +315,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn into_interleaved_pixels(self) -> Vec<f32> {
-            linear_pixels::test_support::into_interleaved_pixels(self.pixels)
+            linear_pixels::internals::into_interleaved_pixels(self.pixels)
         }
     }
 }

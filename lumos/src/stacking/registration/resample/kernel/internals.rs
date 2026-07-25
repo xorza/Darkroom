@@ -5,7 +5,7 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 #[inline]
-pub(crate) fn interpolate_lanczos(
+pub(in crate::stacking::registration::resample) fn interpolate_lanczos(
     data: &Buffer2<f32>,
     pos: Vec2,
     a: usize,
@@ -71,7 +71,11 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     }
 }
 
-pub(crate) fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
+pub(in crate::stacking::registration::resample) fn interpolate(
+    data: &Buffer2<f32>,
+    pos: Vec2,
+    params: &WarpParams,
+) -> f32 {
     match params.method {
         InterpolationMethod::Nearest => kernel::interpolate_nearest(data, pos, params.border_value),
         InterpolationMethod::Bilinear => kernel::bilinear_sample(data, pos, params.border_value),

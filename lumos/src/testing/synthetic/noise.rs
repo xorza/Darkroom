@@ -15,7 +15,7 @@ use crate::testing::TestRng;
 /// Knuth's multiplicative method for `lambda < 30`; a Gaussian approximation
 /// `N(λ, λ)` (clamped ≥ 0, rounded) above that, where the two distributions agree to
 /// well under a percent and Knuth's loop would run ~λ iterations per sample.
-pub fn poisson(rng: &mut TestRng, lambda: f32) -> f32 {
+fn poisson(rng: &mut TestRng, lambda: f32) -> f32 {
     if lambda <= 0.0 {
         return 0.0;
     }
@@ -44,7 +44,7 @@ pub fn poisson(rng: &mut TestRng, lambda: f32) -> f32 {
 /// Each pixel `v` is treated as `v * full_well_e` electrons, resampled from a Poisson
 /// distribution, and converted back to normalized units. Mean is preserved in
 /// expectation; variance per pixel is `v / full_well_e`.
-pub fn apply_shot_noise(pixels: &mut [f32], full_well_e: f32, rng: &mut TestRng) {
+pub(crate) fn apply_shot_noise(pixels: &mut [f32], full_well_e: f32, rng: &mut TestRng) {
     assert!(full_well_e > 0.0, "full_well_e must be positive");
     for p in pixels.iter_mut() {
         let electrons = (*p * full_well_e).max(0.0);
@@ -55,7 +55,12 @@ pub fn apply_shot_noise(pixels: &mut [f32], full_well_e: f32, rng: &mut TestRng)
 /// Add Gaussian read noise (σ given in electrons) to a normalized signal in place.
 ///
 /// The normalized standard deviation is `read_noise_e / full_well_e`.
-pub fn add_read_noise(pixels: &mut [f32], read_noise_e: f32, full_well_e: f32, rng: &mut TestRng) {
+pub(crate) fn add_read_noise(
+    pixels: &mut [f32],
+    read_noise_e: f32,
+    full_well_e: f32,
+    rng: &mut TestRng,
+) {
     assert!(full_well_e > 0.0, "full_well_e must be positive");
     if read_noise_e <= 0.0 {
         return;
@@ -68,7 +73,7 @@ pub fn add_read_noise(pixels: &mut [f32], read_noise_e: f32, full_well_e: f32, r
 
 /// Add a Poisson-distributed dark-current pedestal of mean `dark_current_e_per_s *
 /// exposure_s` electrons per pixel, in normalized units, in place.
-pub fn add_dark_current(
+pub(super) fn add_dark_current(
     pixels: &mut [f32],
     dark_current_e_per_s: f32,
     exposure_s: f32,

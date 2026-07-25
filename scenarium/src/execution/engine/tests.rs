@@ -13,7 +13,7 @@ use crate::graph::{
 use crate::library::Library;
 use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncBehavior};
-use crate::node::lambda::test_support;
+use crate::node::lambda::internals;
 use crate::node::lambda::{InvokeError, OutputDemand};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
@@ -4138,7 +4138,7 @@ mod error_propagation {
     async fn node_error_propagates_to_dependents() -> TestResult {
         let graph = test_graph();
         let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Err(test_support::failure("Intentional failure in get_a"))),
+            get_a: Arc::new(|| Err(internals::failure("Intentional failure in get_a"))),
             get_b: Arc::new(|| 42),
             print: Arc::new(|_| {}),
         });

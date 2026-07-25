@@ -27,15 +27,15 @@ use crate::stacking::star_detection::threshold_mask::{
 
 /// Result of detection stage with diagnostic statistics.
 #[derive(Debug)]
-pub(crate) struct DetectResult {
+pub(in crate::stacking::star_detection::detector) struct DetectResult {
     /// Detected regions after filtering.
-    pub regions: Vec<Region>,
+    pub(in crate::stacking::star_detection::detector) regions: Vec<Region>,
     /// Number of pixels above the detection threshold.
-    pub pixels_above_threshold: usize,
+    pub(in crate::stacking::star_detection::detector) pixels_above_threshold: usize,
     /// Number of connected components found.
-    pub connected_components: usize,
+    pub(in crate::stacking::star_detection::detector) connected_components: usize,
     /// Number of components that were deblended into multiple regions.
-    pub deblended_components: usize,
+    pub(in crate::stacking::star_detection::detector) deblended_components: usize,
 }
 
 /// Result of candidate extraction (internal).
@@ -50,7 +50,7 @@ struct ExtractionResult {
 /// connected component labeling, and deblending to extract candidate regions.
 ///
 /// All buffer management is contained within this function.
-pub(crate) fn detect(
+pub(in crate::stacking::star_detection::detector) fn detect(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     fwhm: Option<f32>,
@@ -354,10 +354,23 @@ fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
 }
 
 #[cfg(test)]
+pub(in crate::stacking::star_detection::detector) mod internals {
+    use crate::stacking::star_detection::deblend::ComponentData;
+    use crate::stacking::star_detection::detector::stages::detect::collect_component_data;
+    use crate::stacking::star_detection::labeling::LabelMap;
+
+    pub(in crate::stacking::star_detection::detector) fn collect_components(
+        label_map: &LabelMap,
+    ) -> Vec<ComponentData> {
+        collect_component_data(label_map)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::math::rect::URect;
     use crate::stacking::star_detection::detector::stages::detect::*;
-    use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
+    use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
 
     /// Render Gaussian `stars` (cx, cy, amplitude, sigma) into a single connected
     /// component: every lit pixel gets label 1.
@@ -518,16 +531,5 @@ mod tests {
                  region must be filtered out"
             );
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod test_support {
-    use crate::stacking::star_detection::deblend::ComponentData;
-    use crate::stacking::star_detection::detector::stages::detect::collect_component_data;
-    use crate::stacking::star_detection::labeling::LabelMap;
-
-    pub(crate) fn collect_components(label_map: &LabelMap) -> Vec<ComponentData> {
-        collect_component_data(label_map)
     }
 }

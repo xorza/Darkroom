@@ -21,7 +21,7 @@ mod tests;
 /// - Caller must ensure AVX2 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn bilinear_avx2(
+pub(super) unsafe fn bilinear_avx2(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -169,7 +169,7 @@ pub(crate) unsafe fn bilinear_avx2(
 /// - Caller must ensure SSE4.1 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn bilinear_sse(
+pub(super) unsafe fn bilinear_sse(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -316,7 +316,7 @@ pub(crate) unsafe fn bilinear_sse(
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn lanczos_kernel_fma<const SIZE: usize>(
+pub(super) unsafe fn lanczos_kernel_fma<const SIZE: usize>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,
@@ -391,7 +391,7 @@ unsafe fn hsum256_ps(v: __m256) -> f32 {
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn lanczos_weights_gather<const SIZE: usize>(
+pub(super) unsafe fn lanczos_weights_gather<const SIZE: usize>(
     lut_values: *const f32,
     base: &[f32; 8],
     sign: &[f32; 8],

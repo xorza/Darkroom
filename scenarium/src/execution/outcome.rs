@@ -6,14 +6,14 @@ use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutedNodeOutcome {
-    pub e_node_id: ExecutionNodeId,
-    pub elapsed_secs: f64,
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) elapsed_secs: f64,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct NodeError {
-    pub e_node_id: ExecutionNodeId,
-    pub error: RunError,
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) error: RunError,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,8 +32,8 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NodeRamUsage {
-    pub e_node_id: ExecutionNodeId,
-    pub usage: RamUsage,
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) usage: RamUsage,
 }
 
 #[derive(Debug, Default)]

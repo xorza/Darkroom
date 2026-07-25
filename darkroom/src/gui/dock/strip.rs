@@ -28,24 +28,24 @@ const GRAPH_NAME_MAX_CHARS: usize = 32;
 /// `Document`). Everything else a chip renders — closability,
 /// movability, renamability — is derived from the tab itself.
 #[derive(Debug)]
-pub(crate) struct TabLabel {
-    pub(crate) tab: TabRef,
-    pub(crate) text: InternedStr,
+pub(super) struct TabLabel {
+    pub(super) tab: TabRef,
+    pub(super) text: InternedStr,
 }
 
 /// Every tab except the pinned `Main` graph carries a close button.
-pub(crate) fn closable(tab: TabRef) -> bool {
+pub(super) fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph(GraphRef::Main)
 }
 
 /// Non-graph tabs can move between panes (drag or the split menu);
 /// graph tabs are pinned to the primary pane.
-pub(crate) fn movable(tab: TabRef) -> bool {
+pub(super) fn movable(tab: TabRef) -> bool {
     !matches!(tab, TabRef::Graph(_))
 }
 
 /// The graph behind an inline-renamable tab (a `Local` graph tab).
-pub(crate) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
+pub(super) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
     match tab {
         TabRef::Graph(GraphRef::Local(id)) => Some(id),
         _ => None,
@@ -55,18 +55,18 @@ pub(crate) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
 /// Stable id for `group`'s tab chip at `index` — deterministic so the
 /// prepass (activation clicks, the drag scan) can read it without the
 /// live response.
-pub(crate) fn tab_chip_wid(group: TabGroupId, index: usize) -> WidgetId {
+pub(super) fn tab_chip_wid(group: TabGroupId, index: usize) -> WidgetId {
     WidgetId::from_hash(("dock.tab", group, index))
 }
 
 /// Stable id for `group`'s whole strip row — the drag scan's
 /// insertion-zone rect.
-pub(crate) fn strip_wid(group: TabGroupId) -> WidgetId {
+pub(super) fn strip_wid(group: TabGroupId) -> WidgetId {
     WidgetId::from_hash(("dock.strip", group))
 }
 
 /// Stable id for the close button of `group`'s tab at `index`.
-pub(crate) fn tab_close_wid(group: TabGroupId, index: usize) -> WidgetId {
+pub(super) fn tab_close_wid(group: TabGroupId, index: usize) -> WidgetId {
     WidgetId::from_hash(("dock.tab_close", group, index))
 }
 
@@ -79,12 +79,12 @@ fn tab_menu_wid(group: TabGroupId, index: usize) -> WidgetId {
 /// graph id (not group/index) so the editing state survives the tab
 /// moving or reordering. A click landing on the label is captured
 /// there, so the scan polls this id alongside the outer chip's.
-pub(crate) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
+pub(super) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
 
 /// Stable id for the trailing "+" new-graph chip.
-pub(crate) fn tab_new_wid() -> WidgetId {
+pub(super) fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("dock.tab_new")
 }
 
@@ -149,7 +149,7 @@ struct StripCtx<'a> {
 /// Draw one group's strip. Tab activate / close clicks are handled in
 /// [`DockUi::scan`](super::DockUi::scan) (prepass); graph-rename commits and split-menu
 /// picks push directly into `out` this frame.
-pub(crate) fn show(
+pub(super) fn show(
     ui: &mut Ui,
     theme: &Theme,
     group: &TabGroup,

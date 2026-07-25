@@ -282,7 +282,7 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::image_ops::gather_channel;
     use imaginarium::{Buffer2, Image, PlanarPixels};
 

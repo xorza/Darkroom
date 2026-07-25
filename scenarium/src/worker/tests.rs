@@ -370,8 +370,7 @@ async fn start_event_loop_forwards_events() {
     let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     let event = active
-        .events
-        .recv()
+        .recv_event()
         .await
         .expect("Expected event loop event");
     assert_eq!(
@@ -402,7 +401,7 @@ async fn start_event_loop_waits_for_callback() {
 
     notify_for_callback.notify_waiters();
 
-    let event = timeout(Duration::from_millis(200), active.events.recv())
+    let event = timeout(Duration::from_millis(200), active.recv_event())
         .await
         .expect("Expected event")
         .expect("Event channel closed");
@@ -436,7 +435,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     let (mut active, _node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
 
     // Wait for first event to arrive
-    let _ = timeout(Duration::from_millis(100), active.events.recv())
+    let _ = timeout(Duration::from_millis(100), active.recv_event())
         .await
         .expect("Expected first event");
 
@@ -1268,7 +1267,7 @@ async fn stopped_event_loop_channel_is_closed() {
     // bounded per-recv timeout so a regression that stops closing
     // the channel fails fast instead of wedging the test.
     loop {
-        let item = timeout(Duration::from_millis(500), active.events.recv())
+        let item = timeout(Duration::from_millis(500), active.recv_event())
             .await
             .expect("recv must complete — channel must eventually close after handle.stop()");
         if item.is_none() {

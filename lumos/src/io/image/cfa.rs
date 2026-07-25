@@ -276,7 +276,7 @@ mod tests {
     use crate::io::image::cfa::*;
     use crate::io::image::error::ImageError;
     use crate::io::raw::demosaic::DemosaicKind;
-    use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
+    use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
     use crate::testing::make_cfa;
 
     #[test]
@@ -290,7 +290,7 @@ mod tests {
             },
             quantization_sigma: Some(0.000_01),
         };
-        let path = common::test_utils::test_output_path("cfa_master_roundtrip.fits");
+        let path = common::internals::test_output_path("cfa_master_roundtrip.fits");
         cfa.save_fits(&path).unwrap();
         let info = CfaFrameInfo::from_file(&path, &LoadContext::default()).unwrap();
         assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
@@ -360,7 +360,7 @@ mod tests {
                 },
                 quantization_sigma: None,
             };
-            let path = common::test_utils::test_output_path(&format!("cfa_master_{name}.fits"));
+            let path = common::internals::test_output_path(&format!("cfa_master_{name}.fits"));
 
             image.save_fits(&path).unwrap();
             let loaded = CfaImage::from_file(path, &LoadContext::default()).unwrap();

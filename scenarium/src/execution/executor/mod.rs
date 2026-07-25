@@ -56,7 +56,7 @@ use crate::execution::resource::RunResourceStamps;
 /// drop this whole future before a send is ever reached, never selectively
 /// close just the receiver. A failed send here means that lifetime invariant
 /// broke — a real bug, not an expected failure to shrug off.
-pub(crate) const EVENTS_OUTLIVE_RUN: &str =
+const EVENTS_OUTLIVE_RUN: &str =
     "the events receiver outlives this future — the worker only drops it after `execute` resolves";
 
 #[derive(Default, Debug)]
@@ -368,7 +368,7 @@ impl Executor {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::execution::executor::Executor;
     use crate::execution::executor::outcomes::NodeOutcome;
     use crate::execution::identity::ExecutionNodeId;

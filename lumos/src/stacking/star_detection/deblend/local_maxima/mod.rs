@@ -33,7 +33,7 @@ mod bench;
 /// candidates if the component contains multiple peaks.
 ///
 /// Uses `ArrayVec` to avoid heap allocation.
-pub(crate) fn deblend_local_maxima(
+pub(in crate::stacking::star_detection) fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
@@ -75,7 +75,7 @@ pub(crate) fn deblend_local_maxima(
 /// A pixel is a local maximum if it's greater than all 8 neighbors.
 /// Only returns peaks that are sufficiently separated and prominent.
 /// Returns at most `MAX_PEAKS` peaks to avoid heap allocation.
-pub(crate) fn find_local_maxima(
+fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
@@ -116,7 +116,7 @@ pub(crate) fn find_local_maxima(
 /// Check if a pixel is a local maximum (greater than all 8 neighbors).
 /// Uses explicit neighbor checks instead of loops for better performance.
 #[inline]
-pub(crate) fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
+fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
     let x = pixel.pos.x;
     let y = pixel.pos.y;
     let v = pixel.value;

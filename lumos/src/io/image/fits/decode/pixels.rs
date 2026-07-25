@@ -22,7 +22,7 @@ use crate::io::image::{
     SourceContainer, TransferProvenance,
 };
 
-pub(crate) fn read_stream_hdu(
+pub(super) fn read_stream_hdu(
     reader: &mut StreamReader<File>,
     selected: FitsHduProvenance,
     checksum: FitsChecksumProvenance,
@@ -39,7 +39,7 @@ pub(crate) fn read_stream_hdu(
     })
 }
 
-pub(crate) fn read_decoded_hdu(
+pub(super) fn read_decoded_hdu(
     header: &Header,
     plan: FitsDecodePlan,
     hdu: FitsHduProvenance,

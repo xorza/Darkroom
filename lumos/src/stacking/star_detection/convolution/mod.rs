@@ -35,11 +35,11 @@ struct GaussianKernel2d {
 #[derive(Debug)]
 pub(crate) struct MatchedFilterBuffers<'a> {
     /// Convolved output (the result).
-    pub output: &'a mut Buffer2<f32>,
+    pub(crate) output: &'a mut Buffer2<f32>,
     /// Scratch space for background subtraction.
-    pub subtraction_scratch: &'a mut Buffer2<f32>,
+    pub(crate) subtraction_scratch: &'a mut Buffer2<f32>,
     /// Temporary buffer for separable convolution passes.
-    pub temp: &'a mut Buffer2<f32>,
+    pub(crate) temp: &'a mut Buffer2<f32>,
 }
 
 /// Apply matched filter convolution optimized for star detection.
@@ -123,7 +123,7 @@ pub(crate) fn matched_filter(
 /// Uses separable convolution: first convolve rows, then columns.
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
 /// Returns `sqrt(sum(K²))` for the equivalent normalized 2D kernel.
-pub(crate) fn gaussian_convolve(
+fn gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     output: &mut Buffer2<f32>,
@@ -169,7 +169,7 @@ fn gaussian_convolve_with_kernel(
 /// require full 2D convolution which is O(n×k²). This is used when the PSF
 /// is known to be non-circular.
 /// Returns `sqrt(sum(K²))` for the normalized 2D kernel.
-pub(crate) fn elliptical_gaussian_convolve(
+fn elliptical_gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     axis_ratio: f32,
@@ -222,7 +222,7 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
-pub(crate) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
+fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
     let radius = (3.0 * sigma).ceil() as usize;
@@ -247,11 +247,7 @@ pub(crate) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
 }
 
 /// Convolve all rows in parallel using SIMD.
-pub(crate) fn convolve_rows_parallel(
-    input: &Buffer2<f32>,
-    output: &mut Buffer2<f32>,
-    kernel: &[f32],
-) {
+fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let radius = kernel.len() / 2;
 
@@ -265,7 +261,7 @@ pub(crate) fn convolve_rows_parallel(
 }
 
 /// Convolve all columns: rayon-parallel over output rows, SIMD across the columns within each row.
-pub(crate) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();
     let radius = kernel.len() / 2;
@@ -371,5 +367,20 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
     GaussianKernel2d {
         weights: kernel,
         size,
+    }
+}
+
+#[cfg(test)]
+pub(in crate::stacking::star_detection) mod internals {
+    use imaginarium::Buffer2;
+
+    /// Proxy for `synthetic_tests`, a cousin module of `convolution` under `star_detection`.
+    pub(in crate::stacking::star_detection) fn gaussian_convolve(
+        pixels: &Buffer2<f32>,
+        sigma: f32,
+        output: &mut Buffer2<f32>,
+        temp: &mut Buffer2<f32>,
+    ) -> f32 {
+        crate::stacking::star_detection::convolution::gaussian_convolve(pixels, sigma, output, temp)
     }
 }

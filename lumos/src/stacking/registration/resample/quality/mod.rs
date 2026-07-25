@@ -27,9 +27,9 @@ struct SampleQuality {
 }
 
 #[derive(Debug)]
-pub(crate) struct Maps {
-    pub(crate) coverage: Buffer2<f32>,
-    pub(crate) confidence: Buffer2<f32>,
+pub(super) struct Maps {
+    pub(super) coverage: Buffer2<f32>,
+    pub(super) confidence: Buffer2<f32>,
 }
 
 fn axis_weight_stats(start: i32, weights: &[f32], length: usize) -> AxisWeightStats {
@@ -147,7 +147,7 @@ fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQua
     }
 }
 
-pub(crate) fn maps(dims: Vec2us, transform: &WarpTransform, method: InterpolationMethod) -> Maps {
+pub(super) fn maps(dims: Vec2us, transform: &WarpTransform, method: InterpolationMethod) -> Maps {
     let mut coverage = Buffer2::new_default(dims.x, dims.y);
     let mut confidence = Buffer2::new_default(dims.x, dims.y);
     coverage

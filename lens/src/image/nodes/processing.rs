@@ -10,7 +10,7 @@ use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, convers
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
-pub(crate) fn register(library: &mut Library) {
+pub(super) fn register(library: &mut Library) {
     register_brightness(library);
     register_convert(library);
     register_blend(library);
@@ -265,7 +265,7 @@ fn register_transform(library: &mut Library) {
     );
 }
 
-pub(crate) fn adjust_image(
+fn adjust_image(
     op: ContrastBrightness,
     context: &mut imaginarium::ProcessingContext,
     value: DynamicValue,
@@ -300,4 +300,20 @@ fn adjust_into_fresh(
     op.execute(context, &input.buffer, &mut output)
         .map_err(InvokeError::external)?;
     Ok(Image::from(output))
+}
+
+#[cfg(test)]
+pub(in crate::image::nodes) mod internals {
+    use imaginarium::ContrastBrightness;
+    use scenarium::{DynamicValue, InvokeResult};
+
+    use crate::image::Image;
+
+    pub(in crate::image::nodes) fn adjust_image(
+        op: ContrastBrightness,
+        context: &mut imaginarium::ProcessingContext,
+        value: DynamicValue,
+    ) -> InvokeResult<Image> {
+        super::adjust_image(op, context, value)
+    }
 }

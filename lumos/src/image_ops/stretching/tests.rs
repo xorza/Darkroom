@@ -1,8 +1,6 @@
+use crate::image_ops::internals::{channel_plane as channel, gray_image as gray, rgb_image as rgb};
 use crate::image_ops::op::OpError;
 use crate::image_ops::stretching::*;
-use crate::image_ops::test_support::{
-    channel_plane as channel, gray_image as gray, rgb_image as rgb,
-};
 use crate::math::statistics::median_f32_mut;
 
 fn median_of(v: &[f32]) -> f32 {

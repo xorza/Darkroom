@@ -25,13 +25,13 @@ use crate::node::definition::{FuncInput, FuncOutput};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DetachedGraphInput {
     pub idx: usize,
-    pub spec: FuncInput,
+    spec: FuncInput,
     /// Interior consumers fed by the `GraphInput` boundary output `idx`.
-    pub interior: Vec<BindingEntry>,
+    interior: Vec<BindingEntry>,
     /// Pins on the boundary output `idx`.
     pub pins: Vec<OutputPort>,
     /// Owning-graph bindings on instance input `idx`.
-    pub parent: Vec<BindingEntry>,
+    parent: Vec<BindingEntry>,
 }
 
 /// A subgraph *output* removed from the interface at `idx` — the output-side
@@ -41,13 +41,13 @@ pub struct DetachedGraphInput {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DetachedGraphOutput {
     pub idx: usize,
-    pub spec: FuncOutput,
+    spec: FuncOutput,
     /// The binding on the `GraphOutput` boundary input `idx`.
-    pub interior: Vec<BindingEntry>,
+    interior: Vec<BindingEntry>,
     /// Pins on instance outputs `idx` in the owning graph.
     pub pins: Vec<OutputPort>,
     /// Owning-graph consumers bound to instance output `idx`.
-    pub parent: Vec<BindingEntry>,
+    parent: Vec<BindingEntry>,
 }
 
 impl DetachedGraphInput {

@@ -16,7 +16,7 @@
 mod tests;
 
 mod magsac;
-pub(crate) mod transforms;
+pub(super) mod transforms;
 
 use std::cmp::Ordering;
 
@@ -99,7 +99,7 @@ impl Default for RansacConfig {
 }
 
 impl RansacConfig {
-    pub(crate) fn validate(&self) -> Result<(), RegistrationError> {
+    pub(super) fn validate(&self) -> Result<(), RegistrationError> {
         let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
         if self.max_iterations == 0 {
             return invalid(format!(
@@ -162,27 +162,27 @@ fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
 
 /// Result of RANSAC estimation.
 #[derive(Debug, Clone)]
-pub(crate) struct RansacResult {
+pub(super) struct RansacResult {
     /// Best transformation found.
-    pub(crate) transform: Transform,
+    pub(super) transform: Transform,
     /// Indices of inlier matches.
-    pub(crate) inliers: Vec<usize>,
+    pub(super) inliers: Vec<usize>,
     /// RANSAC iterations performed — a diagnostic; the adaptive-early-termination
     /// test asserts on it (no production reader yet).
     #[allow(dead_code)]
-    pub(crate) iterations: usize,
+    iterations: usize,
 }
 
 /// RANSAC estimator for robust transformation fitting.
 #[derive(Debug)]
-pub(crate) struct RansacEstimator {
+pub(super) struct RansacEstimator {
     config: RansacConfig,
     max_sigma: f64,
 }
 
 impl RansacEstimator {
     /// Create a RANSAC estimator for the runtime-derived maximum noise scale.
-    pub(crate) fn new(config: RansacConfig, max_sigma: f64) -> Self {
+    pub(super) fn new(config: RansacConfig, max_sigma: f64) -> Self {
         assert!(max_sigma.is_finite() && max_sigma > 0.0);
         Self { config, max_sigma }
     }
@@ -468,7 +468,7 @@ impl RansacEstimator {
     ///
     /// # Returns
     /// Best transformation found, or None if estimation failed.
-    pub(crate) fn estimate(
+    pub(super) fn estimate(
         &self,
         matches: &[PointMatch],
         ref_stars: &[DVec2],

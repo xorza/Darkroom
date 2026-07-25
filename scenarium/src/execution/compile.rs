@@ -163,7 +163,7 @@ impl Compiler {
 }
 
 #[cfg(any(test, feature = "internals"))]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use std::sync::Arc;
 
     use crate::execution::compile::CompiledGraph;
@@ -217,7 +217,7 @@ mod tests {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
     use crate::execution::identity::ExecutionEventPort;
-    use crate::execution::identity::test_support::FlattenMapBuilder;
+    use crate::execution::identity::internals::FlattenMapBuilder;
     use crate::execution::program::index::OutputAddr;
     use crate::execution::program::{ExecutionNode, PendingSubscription};
     use crate::execution::validate::CompiledGraphValidationError;

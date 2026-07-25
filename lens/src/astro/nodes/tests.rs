@@ -16,9 +16,9 @@ use crate::astro::config::processing::{
 };
 use crate::astro::config::stacking::{CombineConfigDef, DetectionConfigDef, RegistrationConfigDef};
 use crate::astro::masters::MASTERS_DATA_TYPE;
-use crate::astro::nodes::calibration::frame_set_key;
+use crate::astro::nodes::calibration::internals::frame_set_key;
 use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
-use crate::astro::nodes::runtime::image_to_cpu;
+use crate::astro::nodes::runtime::internals::image_to_cpu;
 use crate::astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
 use crate::config_node::config_data_type;
 use crate::image::{IMAGE_DATA_TYPE, Image};

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use scenarium::{GraphDef, GraphEvent, GraphId, NodeId};
 
 use crate::core::graph_library::GraphLibrary;

@@ -35,7 +35,7 @@ where
         .map_err(InvokeError::external)
 }
 
-pub(crate) fn image_to_cpu(value: DynamicValue) -> imaginarium::Result<RawImage> {
+fn image_to_cpu(value: DynamicValue) -> imaginarium::Result<RawImage> {
     let cpu = ProcessingContext::cpu_only();
     match value.into_custom::<Image>() {
         Ok(image) => image.buffer.to_cpu(&cpu),
@@ -62,5 +62,17 @@ where
         Ok(value) => Ok(value),
         Err(_) if cancel.is_cancelled() => Err(InvokeError::Cancelled),
         Err(error) => Err(InvokeError::external(error)),
+    }
+}
+
+#[cfg(test)]
+pub(in crate::astro::nodes) mod internals {
+    use imaginarium::Image as RawImage;
+    use scenarium::DynamicValue;
+
+    pub(in crate::astro::nodes) fn image_to_cpu(
+        value: DynamicValue,
+    ) -> imaginarium::Result<RawImage> {
+        super::image_to_cpu(value)
     }
 }

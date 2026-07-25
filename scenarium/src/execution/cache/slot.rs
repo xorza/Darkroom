@@ -24,7 +24,7 @@ impl OutputSnapshot {
         self.values.resize(output_count, DynamicValue::Unbound);
     }
 
-    pub(crate) fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
+    pub(super) fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
         debug_assert_eq!(
             self.values.len(),
             demand.len(),
@@ -92,7 +92,7 @@ impl RuntimeSlot {
     /// and `event_state` when a different one owned them — a changed function must
     /// not inherit state written by its predecessor. The output value stays: its
     /// validity is digest-keyed and the digest already folds the owner.
-    pub(crate) fn reown(&mut self, owner: StateOwner) {
+    pub(super) fn reown(&mut self, owner: StateOwner) {
         if self.owner == owner {
             return;
         }

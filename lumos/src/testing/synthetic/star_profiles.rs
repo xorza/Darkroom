@@ -14,7 +14,7 @@
 /// * `x`, `y` - Star center position (sub-pixel)
 /// * `sigma` - Gaussian sigma (FWHM = 2.355 * sigma)
 /// * `amplitude` - Peak brightness above background
-pub fn render_gaussian_star(
+pub(crate) fn render_gaussian_star(
     pixels: &mut [f32],
     width: usize,
     x: f32,
@@ -59,7 +59,7 @@ pub fn render_gaussian_star(
 /// * `alpha` - Scale parameter
 /// * `beta` - Shape parameter (typical: 2.5-4.0)
 /// * `amplitude` - Peak brightness
-pub fn render_moffat_star(
+pub(super) fn render_moffat_star(
     pixels: &mut [f32],
     width: usize,
     x: f32,
@@ -93,12 +93,12 @@ pub fn render_moffat_star(
 }
 
 /// Convert Moffat parameters to FWHM.
-pub fn moffat_fwhm(alpha: f32, beta: f32) -> f32 {
+fn moffat_fwhm(alpha: f32, beta: f32) -> f32 {
     2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
 }
 
 /// Convert FWHM to Moffat alpha parameter (given beta).
-pub fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
+pub(super) fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
     fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
 }
 
@@ -113,7 +113,7 @@ pub fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
 /// * `angle` - Rotation angle in radians (0 = major axis horizontal)
 /// * `amplitude` - Peak brightness
 #[allow(clippy::too_many_arguments)]
-pub fn render_elliptical_star(
+pub(super) fn render_elliptical_star(
     pixels: &mut [f32],
     width: usize,
     x: f32,
@@ -167,7 +167,7 @@ pub fn render_elliptical_star(
 /// * `sigma` - Gaussian sigma
 /// * `amplitude` - Peak brightness (before saturation)
 /// * `saturation_level` - Maximum pixel value (typically 0.95-1.0)
-pub fn render_saturated_star(
+fn render_saturated_star(
     pixels: &mut [f32],
     width: usize,
     x: f32,

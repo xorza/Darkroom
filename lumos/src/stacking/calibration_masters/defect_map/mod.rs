@@ -74,7 +74,7 @@ pub struct DefectMap {
     /// local-neighbourhood median in the flat), ascending.
     pub cold_indices: Vec<usize>,
     /// Sensor dimensions the indices apply to — `None` until the first `detect_*` call records them.
-    pub(crate) dimensions: Option<Vec2us>,
+    pub(super) dimensions: Option<Vec2us>,
 }
 
 impl DefectMap {
@@ -878,12 +878,12 @@ impl XTransOffsets {
 #[cfg(test)]
 impl DefectMap {
     /// Number of hot pixels detected.
-    pub fn hot_count(&self) -> usize {
+    pub(super) fn hot_count(&self) -> usize {
         self.hot_indices.len()
     }
 
     /// Number of cold/dead pixels detected.
-    pub fn cold_count(&self) -> usize {
+    pub(super) fn cold_count(&self) -> usize {
         self.cold_indices.len()
     }
 }

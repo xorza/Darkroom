@@ -18,20 +18,20 @@ use imaginarium::Buffer2;
 
 /// Geometry + exposure parameters for one frame.
 #[derive(Debug, Clone)]
-pub struct Observation {
+pub(crate) struct Observation {
     /// Maps sky/reference coordinates → this frame's sensor coordinates.
-    pub transform: Transform,
+    pub(crate) transform: Transform,
     /// Exposure time in seconds (scales dark current).
-    pub exposure_s: f32,
+    pub(crate) exposure_s: f32,
     /// Per-frame PSF width scale (seeing jitter); 1.0 == nominal.
-    pub seeing_scale: f32,
+    pub(crate) seeing_scale: f32,
     /// Seed for this frame's noise streams.
-    pub seed: u64,
+    pub(crate) seed: u64,
 }
 
 impl Observation {
     /// A reference exposure: identity transform, 1 s, nominal seeing.
-    pub fn reference(seed: u64) -> Self {
+    pub(crate) fn reference(seed: u64) -> Self {
         Self {
             transform: Transform::identity(),
             exposure_s: 1.0,
@@ -43,30 +43,30 @@ impl Observation {
 
 /// A source as it actually lands on the sensor (post-transform) — the truth a detector recovers.
 #[derive(Debug, Clone, Copy)]
-pub struct ObservedSource {
-    pub pos: DVec2,
-    pub flux: f32,
-    pub fwhm: f32,
+pub(crate) struct ObservedSource {
+    pub(crate) pos: DVec2,
+    pub(crate) flux: f32,
+    pub(crate) fwhm: f32,
 }
 
 /// Ground truth captured alongside a rendered frame.
 #[derive(Debug, Clone)]
-pub struct FrameTruth {
+pub(crate) struct FrameTruth {
     /// Noiseless, flat-fielded signal `(background + sources) × flat` — the detection target.
-    pub clean: Buffer2<f32>,
+    pub(crate) clean: Buffer2<f32>,
     /// Sources as they land on the sensor (post-transform).
-    pub sources: Vec<ObservedSource>,
+    pub(crate) sources: Vec<ObservedSource>,
 }
 
 /// A rendered frame plus its ground truth.
 #[derive(Debug, Clone)]
-pub struct SimFrame {
-    pub image: LinearImage,
-    pub truth: FrameTruth,
+pub(crate) struct SimFrame {
+    pub(crate) image: LinearImage,
+    pub(crate) truth: FrameTruth,
 }
 
 /// Render `scene` through `camera` for one `obs` into a grayscale [`SimFrame`].
-pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
+pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
     let width = scene.width;
     let height = scene.height;
 
@@ -161,7 +161,7 @@ pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
 
 /// Render one `scene` through `camera` as `dithers.len()` frames, each translated by its
 /// dither offset and given an independent noise seed derived from `base_seed`.
-pub fn observe_dithered(
+pub(super) fn observe_dithered(
     scene: &Scene,
     camera: &Camera,
     dithers: &[DVec2],

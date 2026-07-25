@@ -19,7 +19,7 @@ use crate::gui::scene::Scene;
 /// `Editor` resolves against the live selection (where the `Document` is
 /// available to build the clone / removal intents).
 #[derive(Default, Debug)]
-pub(crate) struct NodeMenuUi {
+pub(super) struct NodeMenuUi {
     menu: AnchoredMenu,
     action: Option<NodeMenuAction>,
     /// Node whose body opened the menu — the "Run to this node" target,
@@ -48,7 +48,7 @@ enum MenuChoice {
 }
 
 impl NodeMenuUi {
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -123,7 +123,7 @@ impl NodeMenuUi {
     /// Take the structural action picked since the last call, if any. The
     /// `Editor` drains this each frame and resolves it against the live
     /// selection.
-    pub(crate) fn take_action(&mut self) -> Option<NodeMenuAction> {
+    pub(super) fn take_action(&mut self) -> Option<NodeMenuAction> {
         self.action.take()
     }
 }

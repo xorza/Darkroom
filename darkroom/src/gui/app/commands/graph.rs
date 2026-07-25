@@ -22,7 +22,7 @@ pub(crate) enum GraphCommand {
 }
 
 impl App {
-    pub(crate) fn handle_graph(&mut self, command: GraphCommand) {
+    pub(super) fn handle_graph(&mut self, command: GraphCommand) {
         match command {
             GraphCommand::ExportGraphTemplate => self.export_active_graph_template(),
             GraphCommand::ImportGraphTemplateIntoLibrary => {

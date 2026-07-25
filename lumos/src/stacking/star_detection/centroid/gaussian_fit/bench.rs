@@ -7,7 +7,7 @@ use std::hint::black_box;
 
 use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFitConfig;
 use crate::stacking::star_detection::centroid::gaussian_fit::fit_gaussian_2d;
-use crate::stacking::star_detection::centroid::test_utils::make_gaussian_star;
+use crate::stacking::star_detection::centroid::internals::make_gaussian_star;
 use glam::Vec2;
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]

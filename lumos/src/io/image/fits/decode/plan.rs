@@ -13,14 +13,14 @@ use crate::io::image::{BitPix, ImageDimensions};
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FitsHduDescription<'a> {
+pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
     kind: HduKind,
     source_bytes: u64,
 }
 
 impl<'a> FitsHduDescription<'a> {
-    pub(crate) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
+    pub(super) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
         let source_bytes = padded_data_bytes(path, hdu.data_bytes)?;
         Ok(Self {
             header: &hdu.header,
@@ -31,18 +31,18 @@ impl<'a> FitsHduDescription<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct FitsDecodePlan {
-    pub(crate) shape: Vec<usize>,
-    pub(crate) dimensions: ImageDimensions,
-    pub(crate) bitpix: BitPix,
-    pub(crate) scaling: fits_well::image::Scaling,
-    pub(crate) source_bytes: u64,
-    pub(crate) decoded_bytes: u64,
-    pub(crate) peak_bytes: u64,
-    pub(crate) rows_per_chunk: usize,
+pub(super) struct FitsDecodePlan {
+    pub(super) shape: Vec<usize>,
+    pub(super) dimensions: ImageDimensions,
+    pub(super) bitpix: BitPix,
+    pub(super) scaling: fits_well::image::Scaling,
+    pub(super) source_bytes: u64,
+    pub(super) decoded_bytes: u64,
+    pub(super) peak_bytes: u64,
+    pub(super) rows_per_chunk: usize,
 }
 
-pub(crate) fn preflight_fits_image(
+pub(super) fn preflight_fits_image(
     path: &Path,
     hdu: FitsHduDescription<'_>,
     cube: FitsCubeInterpretation,
@@ -205,7 +205,7 @@ fn compressed_shape(header: &Header) -> fits_well::Result<Vec<usize>> {
         .collect()
 }
 
-pub(crate) fn dimensions_from_shape(
+pub(super) fn dimensions_from_shape(
     path: &Path,
     shape: &[usize],
     cube: FitsCubeInterpretation,
@@ -258,13 +258,13 @@ fn map_bitpix(sample_type: SampleType) -> BitPix {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(super) mod internals {
     use fits_well::header::Header;
     use fits_well::io::HduKind;
 
     use crate::io::image::fits::decode::plan::FitsHduDescription;
 
-    pub(crate) fn description(
+    pub(in crate::io::image::fits::decode) fn description(
         header: &Header,
         kind: HduKind,
         source_bytes: u64,

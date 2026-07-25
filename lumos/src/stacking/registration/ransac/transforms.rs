@@ -12,7 +12,7 @@ use crate::math::dmat3::DMat3;
 use crate::stacking::registration::transform::{Transform, TransformType};
 
 /// Compute adaptive iteration count for early termination.
-pub(crate) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f64) -> usize {
+pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f64) -> usize {
     if inlier_ratio <= 0.0 || inlier_ratio >= 1.0 {
         return 1;
     }
@@ -33,7 +33,7 @@ pub(crate) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
 }
 
 /// Estimate transformation from point correspondences.
-pub(crate) fn estimate_transform(
+pub(in crate::stacking::registration) fn estimate_transform(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform_type: TransformType,
@@ -108,10 +108,7 @@ fn estimate_euclidean(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<T
 }
 
 /// Estimate similarity transform (translation + rotation + uniform scale).
-pub(crate) fn estimate_similarity(
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
-) -> Option<Transform> {
+fn estimate_similarity(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.len() < 2 {
         return None;
     }
@@ -168,7 +165,7 @@ pub(crate) fn estimate_similarity(
 /// Points are normalized (centered, scaled to avg distance √2) before solving
 /// the normal equations, then the solution is denormalized. This dramatically
 /// improves numerical stability for large coordinate ranges.
-pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
+fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.len() < 3 {
         return None;
     }
@@ -260,10 +257,7 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
 }
 
 /// Estimate homography using Direct Linear Transform (DLT).
-pub(crate) fn estimate_homography(
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
-) -> Option<Transform> {
+fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.len() < 4 {
         return None;
     }
@@ -335,21 +329,21 @@ pub(crate) fn estimate_homography(
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PointNormalization {
-    pub(crate) transform: Transform,
+pub(super) struct PointNormalization {
+    pub(super) transform: Transform,
     centroid: DVec2,
     scale: f64,
 }
 
 impl PointNormalization {
     #[inline]
-    pub(crate) fn apply(self, point: DVec2) -> DVec2 {
+    pub(super) fn apply(self, point: DVec2) -> DVec2 {
         (point - self.centroid) * self.scale
     }
 }
 
 /// Compute the Hartley normalization applied lazily by the estimators.
-pub(crate) fn point_normalization(points: &[DVec2]) -> PointNormalization {
+pub(super) fn point_normalization(points: &[DVec2]) -> PointNormalization {
     if points.is_empty() {
         return PointNormalization {
             transform: Transform::identity(),
@@ -443,7 +437,7 @@ fn solve_homogeneous_svd_dynamic(a: DMatrix<f64>) -> Option<DMat3> {
 }
 
 /// Compute centroid of points.
-pub(crate) fn centroid(points: &[DVec2]) -> DVec2 {
+pub(super) fn centroid(points: &[DVec2]) -> DVec2 {
     if points.is_empty() {
         return DVec2::ZERO;
     }

@@ -22,38 +22,38 @@ pub(crate) struct Scene {
     /// node bodies and pinned-output previews interleaved, later entries
     /// drawn in front. The canvas draw pass iterates this and dispatches on
     /// the key kind; everything else looks items up through `nodes`.
-    pub z_order: Vec<ItemRef>,
+    pub(crate) z_order: Vec<ItemRef>,
     /// Keyed node projections in relative paint order. Interaction scans use
     /// this order to resolve overlapping node and port hits.
-    pub nodes: IndexMap<NodeId, SceneNode>,
-    pub connections: Vec<SceneConnection>,
+    pub(crate) nodes: IndexMap<NodeId, SceneNode>,
+    pub(crate) connections: Vec<SceneConnection>,
     /// Event-subscription edges (emitter event → subscriber node), mirrored
     /// from the active graph each rebuild. Drawn as event wires; the editor
     /// adds/removes them via the subscription drag gesture. The model's
     /// `Subscription` is a plain `Copy` id-bundle with no render-only fields,
     /// so it's mirrored verbatim (unlike `SceneConnection`, which flattens).
-    pub subscriptions: Vec<Subscription>,
+    pub(crate) subscriptions: Vec<Subscription>,
     /// One flat pool of [`SceneInput`] across every node, sliced by the single
     /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so the
     /// per-port fields can't desync. Keeps per-node allocations to zero in
     /// steady state (the `Vec` retains capacity across the per-frame `clear` +
     /// re-`extend`).
-    pub inputs: Vec<SceneInput>,
+    pub(crate) inputs: Vec<SceneInput>,
     /// One flat pool of [`SceneOutput`] across every node, sliced by the single
     /// `SceneNode::outputs` span.
-    pub outputs: Vec<SceneOutput>,
+    pub(crate) outputs: Vec<SceneOutput>,
     /// One flat pool of [`SceneEvent`] across every node, sliced by the single
     /// `SceneNode::events` span. Events are emitter ports (always outgoing), so
     /// the UI lists them under the output ports.
-    pub events: Vec<SceneEvent>,
+    pub(crate) events: Vec<SceneEvent>,
     /// One flat pool of every input's picker options across all nodes, sliced
     /// per input by [`SceneInput::value_variants`].
-    pub value_variants_pool: Vec<ValueVariant>,
+    pub(crate) value_variants_pool: Vec<ValueVariant>,
     /// Live viewport, mirrored from the active `GraphView` each `rebuild`.
     /// Read by the canvas transform and the pointer↔world mapping; the
     /// pan/zoom gesture writes it back here, and `App` copies it onto the
     /// document so it persists (single owner = `Document`).
-    pub viewport: Viewport,
+    pub(crate) viewport: Viewport,
     /// Currently-selected nodes and pinned-output previews, the committed
     /// set mirrored from `Document` each rebuild so `node_ui`/`pin_ui` can
     /// pick a different paint without taking a `&Document`. Read-only, like
@@ -61,7 +61,7 @@ pub(crate) struct Scene {
     /// `SelectionUI` (read back via `SelectionUI::preview`) and the canvas
     /// unions the two when drawing, so the gesture never writes into this
     /// projection.
-    pub selected: BTreeSet<ItemRef>,
+    pub(crate) selected: BTreeSet<ItemRef>,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -87,26 +87,26 @@ impl From<Option<&Binding>> for InputBindingView {
 /// per port (so an AoS pool beats parallel columns here).
 #[derive(Debug)]
 pub(crate) struct SceneInput {
-    pub name: InternedStr,
+    pub(crate) name: InternedStr,
     /// Port tooltip from the func's [`FuncInput::description`]; empty when the
     /// port declares none.
-    pub description: InternedStr,
-    pub ty: DataType,
+    pub(crate) description: InternedStr,
+    pub(crate) ty: DataType,
     /// Per-frame snapshot of the input's [`Binding`].
-    pub binding: InputBindingView,
+    pub(crate) binding: InputBindingView,
     /// Default literal (from the func/graph interface), resolved once per rebuild
     /// so the UI can offer "set constant" without re-resolving the func lib.
     /// `None` for types with no `StaticValue` (a `Custom` image port).
-    pub default: Option<StaticValue>,
+    pub(crate) default: Option<StaticValue>,
     /// A required input with no binding is a missing input — its port renders
     /// highlighted.
-    pub required: bool,
+    pub(crate) required: bool,
     /// Const-only inputs reject a wired binding: the connection gesture won't
     /// snap to them, so they can only hold a literal.
-    pub const_only: bool,
+    pub(crate) const_only: bool,
     /// Span into [`Scene::value_variants_pool`] for this input's editor picker
     /// options. Empty = no options (the common case).
-    pub value_variants: Span,
+    pub(crate) value_variants: Span,
 }
 
 /// One output port in the per-frame projection. `ty` is the *resolved* type —
@@ -116,91 +116,91 @@ pub(crate) struct SceneInput {
 /// wires on an input change is handled at edit time, not from the projection.
 #[derive(Debug)]
 pub(crate) struct SceneOutput {
-    pub name: InternedStr,
+    pub(crate) name: InternedStr,
     /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
     /// port declares none.
-    pub description: InternedStr,
-    pub ty: DataType,
+    pub(crate) description: InternedStr,
+    pub(crate) ty: DataType,
     /// The pinned preview widget's top-left corner in absolute
     /// canvas-world coordinates — `Some` iff this output is pinned
     /// (kept computed and read even with no in-graph consumer — see
     /// [`scenarium::Graph::is_output_pinned`]). Mirrors the port's
     /// `GraphView::item_placements` entry, which exists exactly while pinned,
     /// so pinned-ness and position can't desync.
-    pub pin_position: Option<Vec2>,
+    pub(crate) pin_position: Option<Vec2>,
 }
 
 /// One event (emitter) port in the per-frame projection. Events carry no data
 /// type — they are pure triggers — so a name is all the UI needs to list them.
 #[derive(Debug)]
 pub(crate) struct SceneEvent {
-    pub name: InternedStr,
+    pub(crate) name: InternedStr,
 }
 
 #[derive(Debug)]
 pub(crate) struct SceneNode {
-    pub id: NodeId,
-    pub pos: Vec2,
-    pub name: InternedStr,
+    pub(crate) id: NodeId,
+    pub(crate) pos: Vec2,
+    pub(crate) name: InternedStr,
     /// Human-readable type identity: the func name, the graph
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
-    pub kind_label: InternedStr,
+    pub(crate) kind_label: InternedStr,
     /// The func's [`Func::description`] (empty for graph/boundary nodes).
     /// Shown by the inspection panel and the new-node palette tooltip.
-    pub description: InternedStr,
+    pub(crate) description: InternedStr,
     /// Span into [`Scene::inputs`].
-    pub inputs: Span,
+    pub(crate) inputs: Span,
     /// Span into [`Scene::outputs`].
-    pub outputs: Span,
+    pub(crate) outputs: Span,
     /// Span into [`Scene::events`]. Listed under the output ports.
-    pub events: Span,
+    pub(crate) events: Span,
     /// `Some` for a composite (`NodeKind::Graph`) instance — carries
     /// the ref so the header's open-in-tab action knows which graph to
     /// target. `None` for a plain func node.
-    pub graph: Option<GraphLink>,
+    pub(crate) graph: Option<GraphLink>,
     /// Sink node (its func is `sink` — no outputs feed downstream).
-    pub sink: bool,
+    pub(crate) sink: bool,
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
     /// toggle; the body paints any authored disabled node dimmed.
-    pub disabled: bool,
+    pub(crate) disabled: bool,
     /// Where this node's output is cached ([`CacheMode`]). The header's two storage
     /// chips toggle its RAM and disk bits.
-    pub cache: CacheMode,
+    pub(crate) cache: CacheMode,
     /// Whether this node has an executable slot whose RAM/disk storage policy can
     /// be changed directly.
-    pub cache_controls: bool,
+    pub(crate) cache_controls: bool,
     /// Whether the header offers runtime cache eviction for this node. A graph
     /// instance evicts its flattened interior; a func needs a reproducible
     /// output. Boundary and impure nodes have no reusable output to evict.
-    pub can_evict_cache: bool,
+    pub(crate) can_evict_cache: bool,
     /// The node's func is `Impure`. An impure node has no content digest, so no
     /// cache mode is ever honored (folded into the cache controls); the header also
     /// paints the `~` marker off this flag to say *why* it has no cache controls.
     /// `false` for composites and boundary nodes.
-    pub impure: bool,
+    pub(crate) impure: bool,
     /// A `GraphInput`/`GraphOutput` interface boundary node. Its
     /// ports route the graph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
     /// constant" menu, drag-to-own-body) are suppressed on them.
-    pub boundary: bool,
+    pub(crate) boundary: bool,
     /// Outcome of the last graph run, mirrored from `WorkerStatus`. Drives the
     /// node's status-glow shadow and (for
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
-    pub exec_status: ExecStatus,
+    pub(crate) exec_status: ExecStatus,
     /// RAM this node's cached output currently holds (system vs GPU), mirrored
     /// from `run_state`. Non-zero only for nodes that retain a value; drives the
     /// node body's memory readout, hidden when zero.
-    pub ram: RamUsage,
+    pub(crate) ram: RamUsage,
     /// The node's func/graph is absent from the library (e.g. a
     /// document saved against an older library), so its interface can't be
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
-    pub missing: bool,
+    pub(crate) missing: bool,
     /// Whether this editor target has an exact identity in the root compiled
     /// program. Local definition tabs lack their enclosing instance path.
-    pub run_available: bool,
+    pub(crate) run_available: bool,
 }
 
 impl SceneNode {
@@ -228,9 +228,9 @@ impl SceneNode {
 #[derive(Debug)]
 pub(crate) struct SceneConnection {
     /// Producer side — the output feeding the wire.
-    pub src: OutputPort,
+    pub(crate) src: OutputPort,
     /// Consumer side — the input the wire lands on.
-    pub tgt: InputPort,
+    pub(crate) tgt: InputPort,
 }
 
 /// What a rebuild projects. An enum rather than a graph + optional
@@ -564,9 +564,9 @@ impl Scene {
 /// [`SceneOutput::pin_position`]), and the projected output.
 #[derive(Debug)]
 pub(crate) struct PinnedOutput<'a> {
-    pub port: OutputPort,
-    pub pos: Vec2,
-    pub output: &'a SceneOutput,
+    pub(crate) port: OutputPort,
+    pub(crate) pos: Vec2,
+    pub(crate) output: &'a SceneOutput,
 }
 
 fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
@@ -662,7 +662,7 @@ fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use super::*;
 
     /// Minimal node for viewport/bounds math tests: identity + position
@@ -696,7 +696,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::scene::test_support::scene_node_stub;
+    use crate::gui::scene::internals::scene_node_stub;
     use scenarium::DataType;
     use scenarium::testing;
     use scenarium::{Graph, GraphDef};

@@ -24,7 +24,7 @@ use imaginarium::Buffer2;
 use crate::stacking::star_detection::config::Connectivity;
 
 #[cfg(test)]
-pub(crate) mod test_utils;
+pub(crate) mod internals;
 
 /// Pixel count below which sequential CCL is faster than parallel.
 /// Determined by benchmark: parallel overhead dominates for small images.

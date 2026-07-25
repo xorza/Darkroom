@@ -13,7 +13,7 @@ use crate::stacking::star_detection::test_common::output::image_writer::{
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

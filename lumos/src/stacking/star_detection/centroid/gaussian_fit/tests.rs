@@ -2,7 +2,7 @@
 
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
-use crate::stacking::star_detection::centroid::test_utils::{
+use crate::stacking::star_detection::centroid::internals::{
     add_noise, approx_eq, compute_hessian_gradient,
 };
 use glam::Vec2;

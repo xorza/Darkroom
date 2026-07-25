@@ -35,7 +35,7 @@ fn port_rename_wid(port: PortRef) -> WidgetId {
 /// [`Intent::RenameBoundaryPort`], Esc cancels. `None` (regular node
 /// ports and the trailing "+" placeholder) renders plain text. `tip`
 /// (the port's data type) shows as a hover tooltip; empty = no tooltip.
-pub(crate) fn port_label(
+pub(super) fn port_label(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,

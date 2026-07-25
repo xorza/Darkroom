@@ -16,7 +16,7 @@ mod tests;
 
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
-pub(crate) const LANCZOS_LUT_RESOLUTION: usize = 4096;
+pub(super) const LANCZOS_LUT_RESOLUTION: usize = 4096;
 
 /// Direct Lanczos kernel computation (used for LUT initialization).
 #[inline]
@@ -33,8 +33,8 @@ fn lanczos_kernel_compute(x: f32, a: f32) -> f32 {
 }
 
 #[derive(Debug)]
-pub(crate) struct LanczosLut {
-    pub(crate) values: Vec<f32>,
+pub(super) struct LanczosLut {
+    pub(super) values: Vec<f32>,
     a: usize,
 }
 
@@ -52,7 +52,7 @@ impl LanczosLut {
     }
 
     #[inline]
-    pub(crate) fn lookup(&self, x: f32) -> f32 {
+    pub(super) fn lookup(&self, x: f32) -> f32 {
         let abs_x = x.abs();
         if abs_x >= self.a as f32 {
             return 0.0;
@@ -67,7 +67,7 @@ impl LanczosLut {
     /// `abs_x` is in `[0, a]`. Used in the Lanczos3 inner loop where fractional
     /// parts are computed such that all distances are known-positive.
     #[inline(always)]
-    pub(crate) fn lookup_positive(&self, abs_x: f32) -> f32 {
+    pub(super) fn lookup_positive(&self, abs_x: f32) -> f32 {
         debug_assert!(abs_x >= 0.0 && abs_x <= self.a as f32);
         let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
         unsafe { *self.values.get_unchecked(idx) }
@@ -79,7 +79,7 @@ static LANCZOS3_LUT: OnceLock<LanczosLut> = OnceLock::new();
 static LANCZOS4_LUT: OnceLock<LanczosLut> = OnceLock::new();
 
 #[inline]
-pub(crate) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
+pub(super) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
     match a {
         2 => LANCZOS2_LUT.get_or_init(|| LanczosLut::new(2)),
         3 => LANCZOS3_LUT.get_or_init(|| LanczosLut::new(3)),
@@ -90,7 +90,7 @@ pub(crate) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
 
 /// Bicubic kernel (Catmull-Rom, a = -0.5).
 #[inline]
-pub(crate) fn bicubic_kernel(x: f32) -> f32 {
+fn bicubic_kernel(x: f32) -> f32 {
     const A: f32 = -0.5;
     let abs_x = x.abs();
     if abs_x <= 1.0 {
@@ -106,7 +106,7 @@ pub(crate) fn bicubic_kernel(x: f32) -> f32 {
 /// taps at `floor - 1 ..= floor + 2`. Single source of truth shared by the
 /// bicubic sampler and the coverage pass.
 #[inline]
-pub(crate) fn bicubic_weights(f: f32) -> [f32; 4] {
+pub(super) fn bicubic_weights(f: f32) -> [f32; 4] {
     [
         bicubic_kernel(f + 1.0),
         bicubic_kernel(f),
@@ -120,13 +120,13 @@ pub(crate) fn bicubic_weights(f: f32) -> [f32; 4] {
 /// Truncates toward zero then corrects for negatives: for `x = -0.5`, `i = 0`, `x < 0.0` so result
 /// `-1`. Correct for the finite source coordinates the warp paths produce.
 #[inline(always)]
-pub(crate) fn fast_floor_i32(x: f32) -> i32 {
+pub(super) fn fast_floor_i32(x: f32) -> i32 {
     let i = x as i32;
     i - (x < i as f32) as i32
 }
 
 #[inline]
-pub(crate) fn source_footprint_contains(pos: Vec2, dims: Vec2us) -> bool {
+pub(super) fn source_footprint_contains(pos: Vec2, dims: Vec2us) -> bool {
     if dims.x == 0 || dims.y == 0 || !pos.is_finite() {
         return false;
     }
@@ -135,7 +135,7 @@ pub(crate) fn source_footprint_contains(pos: Vec2, dims: Vec2us) -> bool {
 }
 
 #[inline]
-pub(crate) fn clamp_to_pixel_centers(pos: Vec2, dims: Vec2us) -> Vec2 {
+pub(super) fn clamp_to_pixel_centers(pos: Vec2, dims: Vec2us) -> Vec2 {
     debug_assert!(dims.x > 0 && dims.y > 0);
     pos.clamp(
         Vec2::ZERO,
@@ -146,7 +146,7 @@ pub(crate) fn clamp_to_pixel_centers(pos: Vec2, dims: Vec2us) -> Vec2 {
 /// Bilinear sample at a single point. The per-pixel primitive shared by the scalar bilinear row path,
 /// the SIMD bilinear backends' border/tail handling, and the test oracle.
 #[inline]
-pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+pub(super) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let pixels = input.pixels();
     let dims = Vec2us::new(input.width(), input.height());
     if !source_footprint_contains(pos, dims) {
@@ -173,7 +173,7 @@ pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32
 }
 
 #[inline]
-pub(crate) fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+pub(super) fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let dims = Vec2us::new(data.width(), data.height());
     if !source_footprint_contains(pos, dims) {
         return border_value;
@@ -184,7 +184,7 @@ pub(crate) fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: 
     data.pixels()[y * dims.x + x]
 }
 
-pub(crate) fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+pub(super) fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let dims = Vec2us::new(data.width(), data.height());
     if !source_footprint_contains(pos, dims) {
         return border_value;
@@ -229,4 +229,4 @@ pub(crate) fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: 
 }
 
 #[cfg(test)]
-pub(crate) mod test_support;
+pub(super) mod internals;

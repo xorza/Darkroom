@@ -9,7 +9,7 @@ use crate::stacking::star_detection::test_common::output::metrics::{
     DetectionMetrics, compute_detection_metrics, save_metrics,
 };
 use crate::testing::synthetic::observe::SimFrame;
-use common::test_utils::test_output_path;
+use common::internals::test_output_path;
 
 mod challenging_tests;
 mod standard_tests;

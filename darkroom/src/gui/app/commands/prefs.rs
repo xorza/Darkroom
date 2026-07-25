@@ -29,7 +29,7 @@ pub(crate) enum MlModelKind {
 }
 
 impl App {
-    pub(crate) fn handle_prefs(&mut self, ui: &mut Ui, command: PrefsCommand) {
+    pub(super) fn handle_prefs(&mut self, ui: &mut Ui, command: PrefsCommand) {
         match command {
             PrefsCommand::Changed => self.apply_preferences(ui),
             PrefsCommand::PickMlModel(kind) => self.pick_ml_model(kind),
@@ -51,7 +51,7 @@ impl App {
     /// Persist the preferences, surfacing a failed write in the status
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
-    pub(crate) fn save_preferences(&mut self) {
+    pub(in crate::gui::app) fn save_preferences(&mut self) {
         if let Err(err) = self.preferences.save() {
             self.workspace.runtime.status.error(err);
         }
@@ -77,7 +77,7 @@ impl App {
     /// Persist whether quitting with unsaved changes prompts to save.
     /// Shared by the Preferences checkbox (via `Changed`) and the exit
     /// dialog's "Don't ask again", which calls this directly.
-    pub(crate) fn set_confirm_exit(&mut self, on: bool) {
+    pub(in crate::gui::app) fn set_confirm_exit(&mut self, on: bool) {
         self.preferences.confirm_unsaved_on_exit = on;
         self.save_preferences();
     }

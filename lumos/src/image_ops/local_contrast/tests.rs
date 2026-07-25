@@ -1,9 +1,9 @@
-use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
-use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::{
+use crate::image_ops::internals::{
     channel_plane as channel, gray_image as gray, mean, rgb_image as rgb,
     standard_deviation as std_dev,
 };
+use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
+use crate::image_ops::op::OpError;
 use imaginarium::Buffer2;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).

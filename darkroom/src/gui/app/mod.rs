@@ -43,14 +43,14 @@ pub(crate) struct AppContext<'a> {
 /// `Editor::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
-    pub(crate) editor: Editor,
-    pub(crate) workspace: Workspace,
-    pub(crate) theme: Theme,
-    pub(crate) host_handle: HostHandle,
+    editor: Editor,
+    workspace: Workspace,
+    theme: Theme,
+    host_handle: HostHandle,
     /// Persisted session state (active theme name + last document).
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
-    pub(crate) preferences: Preferences,
+    preferences: Preferences,
     /// Whether the "save changes before quitting?" dialog is currently up.
     /// Raised when a quit is requested (window close, File ▸ Quit) with
     /// unsaved changes; cleared when the user answers.

@@ -17,7 +17,7 @@ use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resol
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
-use crate::node::lambda::test_support;
+use crate::node::lambda::internals;
 use crate::node::lambda::{FuncLambda, OutputDemand};
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue};
@@ -332,7 +332,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         Ok(())
     });
     let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
-        Err(test_support::failure("boom"))
+        Err(internals::failure("boom"))
     });
     let skipped = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
@@ -769,7 +769,7 @@ async fn non_pinned_node_pushes_nothing() {
 async fn failed_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
     let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, _outputs| {
-        Err(test_support::failure("boom"))
+        Err(internals::failure("boom"))
     });
     let a = p.node(&[], 1, failing);
     p.set_output_pinned(a, 0, true);
@@ -962,7 +962,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         1,
         async_lambda!(|_ctx, state, _ev, _inputs, _demand, outputs| {
             if state.get::<bool>().is_some() {
-                return Err(test_support::failure("transient failure"));
+                return Err(internals::failure("transient failure"));
             }
             state.set(true);
             outputs[0] = DynamicValue::Static(StaticValue::Int(5));

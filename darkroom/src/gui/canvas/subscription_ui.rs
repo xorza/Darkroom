@@ -42,7 +42,7 @@ fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
 /// an emitter and drop on a pin, or pull from a pin and drop on an emitter.
 /// Held-drag only; no const-drop or new-node spawn.
 #[derive(Default, Debug)]
-pub(crate) struct SubscriptionUI {
+pub(super) struct SubscriptionUI {
     state: Option<InFlight>,
 }
 
@@ -68,9 +68,9 @@ enum InFlight {
 
 impl SubscriptionUI {
     /// Whether a subscription-wire gesture is in flight — feeds the shared
-    /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
+    /// wire-fade tier. (A method, not a `pub(super)` field: `InFlight` is
     /// module-private.)
-    pub(crate) fn dragging(&self) -> bool {
+    pub(super) fn dragging(&self) -> bool {
         self.state.is_some()
     }
 
@@ -78,7 +78,7 @@ impl SubscriptionUI {
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
     /// a valid target. Esc cancels.
-    pub(crate) fn apply(
+    pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -152,7 +152,7 @@ impl SubscriptionUI {
     /// The subscription pin currently snapped under the pointer (an
     /// emitter-started drag), if any — read by `GraphUI` to highlight the
     /// drop target.
-    pub(crate) fn snap_sub(&self) -> Option<NodeId> {
+    pub(super) fn snap_sub(&self) -> Option<NodeId> {
         match self.state {
             Some(InFlight::FromEmitter { snap_sub, .. }) => snap_sub,
             _ => None,
@@ -162,7 +162,7 @@ impl SubscriptionUI {
     /// The emitter event glyph currently snapped under the pointer (a
     /// subscriber-started drag), if any — read by `GraphUI` to highlight the
     /// drop target.
-    pub(crate) fn snap_emitter(&self) -> Option<EventRef> {
+    pub(super) fn snap_emitter(&self) -> Option<EventRef> {
         match self.state {
             Some(InFlight::FromSubscriber { snap_emitter, .. }) => snap_emitter,
             _ => None,
@@ -175,7 +175,7 @@ impl SubscriptionUI {
     /// release-frame drain. A culled wire skips the breaker probe too — the
     /// scribble is always on-screen, so it can't cross an off-screen curve.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn draw(
+    pub(super) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -227,7 +227,7 @@ impl SubscriptionUI {
     /// from is fixed to its glyph; the free end follows the snapped opposite
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
-    pub(crate) fn draw_in_flight(
+    pub(super) fn draw_in_flight(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,

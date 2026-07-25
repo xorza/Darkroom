@@ -1,4 +1,4 @@
-use crate::stacking::star_detection::centroid::test_utils::{
+use crate::stacking::star_detection::centroid::internals::{
     make_elliptical_star as make_elliptical_gaussian, make_moffat_star,
 };
 use crate::stacking::star_detection::centroid::tests::*;

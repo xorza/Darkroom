@@ -1,6 +1,6 @@
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
-use crate::stacking::registration::resample::kernel::test_support as kernel_test_support;
+use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
 use crate::stacking::registration::resample::{plane, quality};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use glam::{DVec2, Vec2};
@@ -16,7 +16,7 @@ fn test_warp_identity_preserves_image() {
         &input_buf,
         &mut output,
         &WarpTransform::new(Transform::identity()),
-        &config::test_support::warp_params(InterpolationMethod::Bilinear),
+        &config::internals::warp_params(InterpolationMethod::Bilinear),
     );
 
     for (i, (&inp, &out)) in input.iter().zip(output.iter()).enumerate() {
@@ -42,7 +42,7 @@ fn test_warp_integer_translation() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &config::test_support::warp_params(InterpolationMethod::Bilinear),
+        &config::internals::warp_params(InterpolationMethod::Bilinear),
     );
 
     // output(0,0) samples input(1,1) = 1.0
@@ -71,7 +71,7 @@ fn test_plane_warp_lanczos3_identity() {
         &input_buf,
         &mut output,
         &WarpTransform::new(Transform::identity()),
-        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
+        &config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
 
     // Interior pixels should match input closely
@@ -101,7 +101,7 @@ fn test_plane_warp_lanczos3_integer_translation() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &config::test_support::warp_params(InterpolationMethod::Lanczos3),
+        &config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
 
     for y in 8..height - 8 {
@@ -128,7 +128,7 @@ fn test_plane_warp_lanczos3_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
 
     let mut output = Buffer2::new_filled(width, height, 0.0);
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos3);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     plane::warp(
         &input_buf,
         &mut output,
@@ -191,7 +191,7 @@ fn test_generic_stepping_bicubic_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.05, 1.02);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = config::test_support::warp_params(InterpolationMethod::Bicubic);
+    let params = config::internals::warp_params(InterpolationMethod::Bicubic);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -221,7 +221,7 @@ fn test_generic_stepping_lanczos2_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(5.0, -1.0), 0.03, 0.98);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos2);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -251,7 +251,7 @@ fn test_generic_stepping_lanczos4_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(2.0, 3.0), -0.02, 1.01);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos4);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -281,7 +281,7 @@ fn test_generic_stepping_nearest_matches_per_pixel() {
     let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.01, 1.0);
     let wt = WarpTransform::new(transform);
     assert!(wt.is_linear());
-    let params = config::test_support::warp_params(InterpolationMethod::Nearest);
+    let params = config::internals::warp_params(InterpolationMethod::Nearest);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -315,7 +315,7 @@ fn test_generic_stepping_disabled_for_homography() {
     let transform = Transform::homography([1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 0.001, 0.0005]);
     let wt = WarpTransform::new(transform);
     assert!(!wt.is_linear());
-    let params = config::test_support::warp_params(InterpolationMethod::Bicubic);
+    let params = config::internals::warp_params(InterpolationMethod::Bicubic);
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
@@ -406,7 +406,7 @@ fn warp_tiny_image_smaller_than_lanczos4_kernel() {
     let input = Buffer2::new_filled(w, h, 0.5f32);
     let mut output = Buffer2::new_default(w, h);
     let wt = WarpTransform::new(Transform::identity());
-    let params = config::test_support::warp_params(InterpolationMethod::Lanczos4);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
     plane::warp(&input, &mut output, &wt, &params);
     for &value in output.pixels() {
         assert!(

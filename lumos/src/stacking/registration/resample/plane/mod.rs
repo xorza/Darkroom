@@ -10,7 +10,7 @@ use imaginarium::Buffer2;
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn warp(
+pub(super) fn warp(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
     transform: &WarpTransform,

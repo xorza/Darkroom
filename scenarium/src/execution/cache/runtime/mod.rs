@@ -167,7 +167,7 @@ impl RuntimeCache {
         }
     }
 
-    pub(crate) fn is_resident_hit(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
+    fn is_resident_hit(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
         match (
             &self.slots[node_idx].value,
             self.slots[node_idx].current_digest,
@@ -332,7 +332,7 @@ impl RuntimeCache {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+pub(crate) mod internals {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{OutputSnapshot, ValueState};
     use crate::execution::digest::Digest;
