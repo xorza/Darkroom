@@ -69,6 +69,11 @@ pub(crate) fn build_duplicate_intent_for(
         let Some(node) = graph.find(*old_id, NodeSearch::TopLevel) else {
             continue;
         };
+        // A boundary node *is* the graph's interface, and a graph holds at
+        // most one per side, so a copy would make the graph invalid.
+        if node.kind.is_boundary() {
+            continue;
+        }
         let new_id = NodeId::unique();
         id_map.insert(*old_id, new_id);
         let clone = node.clone();
@@ -79,6 +84,9 @@ pub(crate) fn build_duplicate_intent_for(
             + DUPLICATE_OFFSET;
         nodes.push((pos, new_id, clone));
     }
+    if nodes.is_empty() {
+        return None;
+    }
 
     // Each cloned node's own input ports. Const/None copy verbatim; a `Bind`
     // to a source inside the set is remapped to that source's clone. A `Bind`
@@ -86,6 +94,9 @@ pub(crate) fn build_duplicate_intent_for(
     // the clone keeps the wire to the original producer.
     let mut bindings = Vec::new();
     for old_id in node_ids {
+        let Some(&new_id) = id_map.get(old_id) else {
+            continue; // skipped above (vanished, or a boundary node)
+        };
         for entry in graph.bindings_touching(*old_id) {
             let port = entry.port;
             let binding = entry.binding;
@@ -100,7 +111,7 @@ pub(crate) fn build_duplicate_intent_for(
                 },
                 other => other,
             };
-            bindings.push((InputPort::new(id_map[old_id], port.port_idx), new_binding));
+            bindings.push((InputPort::new(new_id, port.port_idx), new_binding));
         }
     }
 

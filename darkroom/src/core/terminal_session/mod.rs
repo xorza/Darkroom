@@ -8,7 +8,7 @@ use scenarium::{WorkerReport, WorkerStatusKind};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::{Intent, Refusal};
 use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
@@ -43,7 +43,12 @@ impl TerminalSession {
                     self.workspace.runtime.status.info(format!("script: {msg}"))
                 }
                 ScriptMessage::Apply(intents) => {
-                    apply_intents(&mut self.workspace.open.document, intents);
+                    for reason in apply_intents(&mut self.workspace.open.document, intents) {
+                        self.workspace
+                            .runtime
+                            .status
+                            .error(format!("script edit refused: {reason}"));
+                    }
                 }
                 ScriptMessage::RunOnce => run = true,
                 ScriptMessage::Shutdown => self.quit = true,
@@ -104,9 +109,17 @@ impl TerminalSession {
     }
 }
 
-fn apply_intents(document: &mut Document, intents: Vec<Intent>) {
+/// Commit each intent against the active target, returning the reason for
+/// every one the edit layer refused as malformed. A stale or no-op intent
+/// drops silently; a script's payload is decoded straight into an [`Intent`],
+/// so one that could never have applied answers back instead.
+fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> Vec<String> {
     let target = document.active_target().unwrap_or(GraphRef::Main);
-    for intent in intents {
-        commit_intent(intent, document, target);
-    }
+    intents
+        .into_iter()
+        .filter_map(|intent| match commit_intent(intent, document, target) {
+            Ok(_) | Err(Refusal::Quiet) => None,
+            Err(Refusal::Invalid(reason)) => Some(reason),
+        })
+        .collect()
 }

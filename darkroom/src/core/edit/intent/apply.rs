@@ -13,7 +13,7 @@ use scenarium::{NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::core::document::{BoundarySide, Document, EditScope, GraphRef, ItemRef};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{
-    DetachedBoundaryPort, DocStep, GraphStep, Intent, NodeProperty, UndoStep,
+    DetachedBoundaryPort, DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
 };
 
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
@@ -23,22 +23,25 @@ use crate::core::edit::intent::types::{
 /// see scenarium's `typed_binding`), so the edit stays a single step.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
-/// `requires_*` signals), or `None` when `build_step` dropped the intent
-/// (invalid, stale, or a cycle-forming bind) or the step was a no-op — in
-/// all cases nothing was written. `build_step` / `apply_step` stay separate
-/// for the undo-stack redo path, which applies a stored step without
-/// rebuilding it (a redo replays already-valid history).
+/// `requires_*` signals), or the [`Refusal`] that stopped it — in which case
+/// nothing was written. A stale anchor, a cycle-forming bind, and a no-op
+/// all refuse [`Refusal::Quiet`]ly; only a payload that could never have
+/// applied carries a reason back (see [`build_step`]).
+///
+/// `build_step` / `apply_step` stay separate for the undo-stack redo path,
+/// which applies a stored step without rebuilding it (a redo replays
+/// already-valid history).
 pub(crate) fn commit_intent(
     intent: Intent,
     doc: &mut Document,
     target: GraphRef,
-) -> Option<UndoStep> {
+) -> Result<UndoStep, Refusal> {
     let step = build_step(intent, doc, target)?;
     if step.is_noop() {
-        return None;
+        return Err(Refusal::Quiet);
     }
     apply_step(&step, doc, target);
-    Some(step)
+    Ok(step)
 }
 
 /// Resolve the right graph+view for a scoped step, run `body`, and
@@ -122,6 +125,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             graph,
             bindings,
         } => {
+            // Freshness is established by `build_step`, for every caller;
+            // this only catches a stored step replayed out of order.
             assert!(
                 scope.graph.find(*node_id, NodeSearch::TopLevel).is_none(),
                 "apply AddNode expects node to be absent"
