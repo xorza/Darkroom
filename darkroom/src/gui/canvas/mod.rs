@@ -279,7 +279,10 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
-                    pin_ui,
+                    // The pin card and wire renderers are free functions —
+                    // only the drag gesture needs the controller, and that
+                    // ran back in `prepass`.
+                    pin_ui: _,
                     subscription_ui,
                     new_node_ui: _,
                     graph_menu: _,
@@ -376,9 +379,9 @@ impl GraphUI {
                                 probe: &mut probe,
                                 emphasis: &emphasis,
                             };
-                            connection_ui.draw(ui, &mut wires);
-                            subscription_ui.draw(ui, &mut wires);
-                            pin_ui.draw_wire(ui, &mut wires);
+                            connection_ui::draw(ui, &mut wires);
+                            subscription_ui::draw(ui, &mut wires);
+                            pin_ui::draw_wires(ui, &mut wires);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -393,7 +396,7 @@ impl GraphUI {
                             // paint stack, so either kind can sit above the
                             // other and clicking raises it. Only the pin
                             // wire (above) shares the other wires' z-order.
-                            node_ui.draw_all(ui, rcx, cull, &mut probe, pin_ui, out);
+                            node_ui.draw_all(ui, rcx, cull, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

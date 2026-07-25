@@ -350,7 +350,7 @@ fn value_cell(
 /// Column 3: the output label + circle, right-aligned (the fill column
 /// pins it to the node's right edge); the circle overhangs that edge. A
 /// pinned output's bezier + satellite are a canvas-level decoration, not
-/// painted here — see `crate::gui::canvas::pin_ui::PinUi::draw` (a dragged
+/// painted here — see `crate::gui::canvas::pin_ui::draw_pin` (a dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
 fn output_cell(

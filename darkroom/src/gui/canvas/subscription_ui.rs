@@ -11,10 +11,10 @@ use crate::gui::canvas::{free_end, node_events};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
 
-/// Owns the in-flight subscription wire (an emitter *or* subscriber drag)
-/// plus the committed subscription-wire renderer. One wire at a time, so a
-/// single `Option` suffices; the committed list lives on
-/// `Scene::subscriptions`.
+/// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
+/// One wire at a time, so a single `Option` suffices. The committed wires
+/// live on `Scene::subscriptions` and are painted by the module-level
+/// [`draw`], which needs nothing from here.
 ///
 /// A sibling of [`crate::gui::canvas::connection_ui::ConnectionUI`] rather
 /// than a mode of it: an event wire carries no data type, runs no cycle /
@@ -152,47 +152,6 @@ impl SubscriptionUI {
         }
     }
 
-    /// Paint every committed subscription wire on the current scene retained
-    /// by the pass's cull region, marking those the active breaker crosses
-    /// as broken via `probe.mark_broken_subscription` for the breaker's
-    /// release-frame drain.
-    pub(super) fn draw(&self, ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-        let (theme, scene) = (pass.theme, pass.scene);
-        for s in &scene.subscriptions {
-            let emitter = EventRef {
-                node_id: s.emitter,
-                event_idx: s.event_idx,
-            };
-            let (Some(p0), Some(p3)) = (
-                pass.geometry.events.center(emitter),
-                pass.geometry.subs.center(s.subscriber),
-            ) else {
-                continue;
-            };
-            let wire = Wire::event(p0, p3);
-            let endpoint_hover = pass.geometry.events.is_hovered(emitter)
-                || pass.geometry.subs.is_hovered(s.subscriber);
-            let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
-                continue;
-            };
-            if stroke.broken {
-                pass.probe.mark_broken_subscription(*s);
-            }
-            // Event wires share the breaker-alarm hue, so a broken one paints
-            // flat rather than tinted — full strength against the
-            // breaker-faded rest of the set.
-            let brush = if stroke.broken {
-                CurveBrush::Solid(theme.colors.connection_broken)
-            } else {
-                CurveBrush::Solid(
-                    pass.emphasis
-                        .tint(event_color(theme, false), stroke.hovered),
-                )
-            };
-            wire.add(ui, stroke.width, brush);
-        }
-    }
-
     /// Paint the in-flight drag preview: a cubic between the emitter side
     /// (`p0`) and the subscriber side (`p3`). Whichever end the drag started
     /// from is fixed to its glyph; the free end follows the snapped opposite
@@ -236,6 +195,50 @@ impl SubscriptionUI {
             ctx.theme.connection_width,
             CurveBrush::Solid(event_color(ctx.theme, false)),
         );
+    }
+}
+
+/// Paint every committed subscription wire on the current scene retained by
+/// the pass's cull region, marking those the active breaker crosses as broken
+/// via `probe.mark_broken_subscription` for the breaker's release-frame drain.
+///
+/// Reads nothing but committed scene state off `pass`, so — like
+/// [`crate::gui::canvas::connection_ui::draw`] — it belongs to the module
+/// rather than [`SubscriptionUI`].
+pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+    let (theme, scene) = (pass.theme, pass.scene);
+    for s in &scene.subscriptions {
+        let emitter = EventRef {
+            node_id: s.emitter,
+            event_idx: s.event_idx,
+        };
+        let (Some(p0), Some(p3)) = (
+            pass.geometry.events.center(emitter),
+            pass.geometry.subs.center(s.subscriber),
+        ) else {
+            continue;
+        };
+        let wire = Wire::event(p0, p3);
+        let endpoint_hover =
+            pass.geometry.events.is_hovered(emitter) || pass.geometry.subs.is_hovered(s.subscriber);
+        let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
+            continue;
+        };
+        if stroke.broken {
+            pass.probe.mark_broken_subscription(*s);
+        }
+        // Event wires share the breaker-alarm hue, so a broken one paints
+        // flat rather than tinted — full strength against the
+        // breaker-faded rest of the set.
+        let brush = if stroke.broken {
+            CurveBrush::Solid(theme.colors.connection_broken)
+        } else {
+            CurveBrush::Solid(
+                pass.emphasis
+                    .tint(event_color(theme, false), stroke.hovered),
+            )
+        };
+        wire.add(ui, stroke.width, brush);
     }
 }
 
