@@ -1,7 +1,8 @@
 //! The cross-run runtime cache: the per-node RAM slots (output values + content digests +
 //! node state, index-aligned to the installed program) **plus** the
-//! [`DiskStore`] backing them, and the caching policy over the two — reuse detection, frontier
-//! hydration, persistence, and RAM eviction. Owned by the
+//! [`DiskStore`] backing them, and the caching policy over the two — reuse detection (the
+//! header-only [`probe_reuse`](RuntimeCache::probe_reuse)), frontier hydration (the decode,
+//! deferred to the node's turn in the run loop), persistence, and RAM eviction. Owned by the
 //! [`ExecutionEngine`](crate::execution::engine::ExecutionEngine); the executor's run loop drives
 //! it a node at a time. The [`DiskStore`] is pure blob I/O and knows nothing of the cache; this type
 //! reads a node's digest/value-state off its slot and the blob off disk, and pushes the result
@@ -16,7 +17,7 @@ use hashbrown::HashMap;
 
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
 use crate::execution::digest::node_digest;
-use crate::execution::disk_store::{DiskStore, StorePolicy};
+use crate::execution::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::ExecutionProgram;
@@ -224,7 +225,7 @@ impl RuntimeCache {
 
     /// Stamp `e_node_id`'s structural content digest into its slot. The producer-first resolver
     /// pass calls this before exact output demand is known; cache coverage is probed later by
-    /// [`check_reuse`](Self::check_reuse).
+    /// [`probe_reuse`](Self::probe_reuse).
     pub(crate) fn stamp_digest(
         &mut self,
         program: &ExecutionProgram,
@@ -235,21 +236,34 @@ impl RuntimeCache {
         self.slots[node_idx].current_digest = digest;
     }
 
-    /// Whether an unchanged output can satisfy this run's exact demand — already resident in
-    /// RAM ([`is_resident_hit`](Self::is_resident_hit)) or successfully hydrated from disk. A
-    /// `None` digest (an impure cone, or a bound path not yet readable) never reuses.
+    /// Blobs are named by stable id, so they survive installs that shift indices.
+    fn blob_target(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> Option<BlobTarget> {
+        self.disk_store.blob_target(
+            program.e_node_ids[node_idx],
+            &program[node_idx],
+            self.slots[node_idx].current_digest,
+        )
+    }
+
+    /// Whether an unchanged output can satisfy this run's exact demand — the verdict alone,
+    /// **without loading anything**, so the resolver can cut a producer cone without paying
+    /// for a decode. A `None` digest (an impure cone, or a bound path not yet readable)
+    /// never reuses.
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
     /// under it — however the value came to be resident (mode retention or a preview pin).
-    /// Disk reuse stays gated on `persists_to_disk`
-    /// (`Disk`/`Both`, enforced in [`DiskStore::blob_target`]).
-    pub(crate) async fn check_reuse(
+    /// Disk reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
+    /// [`DiskStore::blob_target`]) and is answered from the blob header alone.
+    ///
+    /// Takes `&mut self` without mutating anything: the slots hold `Send`-but-not-`Sync`
+    /// node state, so a *shared* cache borrow held across this await would make the whole
+    /// worker future non-`Send`.
+    pub(crate) async fn probe_reuse(
         &mut self,
         program: &ExecutionProgram,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
-        ctx: &mut ContextStore,
     ) -> bool {
         if self.slots[node_idx].current_digest.is_none() {
             return false;
@@ -257,12 +271,33 @@ impl RuntimeCache {
         if self.is_resident_hit(node_idx, demand) {
             return true;
         }
-        // Blobs are named by stable id, so they survive installs that shift indices.
-        let Some(target) = self.disk_store.blob_target(
-            program.e_node_ids[node_idx],
-            &program[node_idx],
-            self.slots[node_idx].current_digest,
-        ) else {
+        let Some(target) = self.blob_target(program, node_idx) else {
+            return false;
+        };
+        self.disk_store.covers_demand(&target, demand).await
+    }
+
+    /// [`probe_reuse`](Self::probe_reuse)'s verdict, but leaving the value readable by the
+    /// node's consumers: a resident one needs no load, and a blob is decoded into the slot
+    /// here. The run loop calls this when it *reaches* a reuse rather than the resolver when
+    /// it probes, so frontier decodes interleave with execution instead of accumulating
+    /// ahead of the first lambda, and a reused value lives exactly as long as a freshly
+    /// computed one — released by the same last-read bookkeeping.
+    ///
+    /// `false` when nothing loads: no usable blob, or one that stopped decoding since the
+    /// probe. The decode path deletes an undecodable blob, so the next run misses cleanly
+    /// and recomputes.
+    pub(crate) async fn hydrate_reuse(
+        &mut self,
+        program: &ExecutionProgram,
+        node_idx: NodeIdx,
+        demand: &[OutputDemand],
+        ctx: &mut ContextStore,
+    ) -> bool {
+        if self.is_resident_hit(node_idx, demand) {
+            return true;
+        }
+        let Some(target) = self.blob_target(program, node_idx) else {
             return false;
         };
         let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
@@ -295,11 +330,7 @@ impl RuntimeCache {
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
-        let target = self.disk_store.blob_target(
-            program.e_node_ids[node_idx],
-            &program[node_idx],
-            self.slots[node_idx].current_digest,
-        );
+        let target = self.blob_target(program, node_idx);
         let resident = self.is_resident_current(node_idx).then(|| {
             let ValueState::Resident { snapshot, .. } = &self.slots[node_idx].value else {
                 unreachable!("a current resident slot must contain resident values")

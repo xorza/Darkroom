@@ -9,6 +9,7 @@ use tokio::io::{
 use crate::execution::codec;
 use crate::execution::codec::Codecs;
 use crate::execution::digest::Digest;
+use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue, TypeId};
 
@@ -139,28 +140,38 @@ where
     Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
 }
 
+/// Whether this blob can serve `demand` under `digest`: [`read`] stopped after its header
+/// check. Reads the fixed prefix plus one descriptor per output and stops, so a reuse
+/// verdict costs one small sequential read instead of decoding the body (and needs no
+/// [`ContextStore`]). Sharing `read_header` is what keeps a probe's verdict and the later
+/// read's from drifting apart.
+pub(super) async fn covers_demand<R>(
+    reader: &mut R,
+    file_len: u64,
+    digest: Digest,
+    codecs: &Codecs,
+    demand: &[OutputDemand],
+) -> codec::Result<bool>
+where
+    R: AsyncRead + Unpin + Send,
+{
+    Ok(read_header(reader, file_len, digest, codecs, demand)
+        .await?
+        .is_some())
+}
+
 pub(super) async fn read<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
     codecs: &Codecs,
     ctx: &mut ContextStore,
-    expected_output_count: usize,
-    mut output_required: impl FnMut(usize) -> bool,
+    demand: &[OutputDemand],
 ) -> codec::Result<Option<Vec<DynamicValue>>>
 where
     R: AsyncRead + Unpin + Send,
 {
-    let Some(header) = read_header(
-        reader,
-        file_len,
-        digest,
-        codecs,
-        expected_output_count,
-        &mut output_required,
-    )
-    .await?
-    else {
+    let Some(header) = read_header(reader, file_len, digest, codecs, demand).await? else {
         return Ok(None);
     };
     let mut values = Vec::with_capacity(header.descriptors.len());
@@ -191,22 +202,26 @@ where
     Ok(Some(values))
 }
 
+/// The blob's descriptors, or `None` when it cannot serve `demand` — a different digest, a
+/// different arity, a codec version the library no longer has, or a demanded output the
+/// blob left `Unbound`. Undemanded outputs may be missing; that is what makes a narrow
+/// snapshot reusable by a run that wants less than the one which wrote it.
 async fn read_header<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
     codecs: &Codecs,
-    expected_output_count: usize,
-    output_required: &mut impl FnMut(usize) -> bool,
+    demand: &[OutputDemand],
 ) -> codec::Result<Option<BlobHeader>>
 where
     R: AsyncRead + Unpin + Send,
 {
     let mut descriptors = Vec::new();
     let prefix = scan_header(reader, file_len, digest, codecs, |index, descriptor| {
-        if index >= expected_output_count
-            || output_required(index) && matches!(descriptor.kind, OutputKind::Unbound)
-        {
+        let Some(output_demand) = demand.get(index) else {
+            return false;
+        };
+        if !output_demand.is_skip() && matches!(descriptor.kind, OutputKind::Unbound) {
             return false;
         }
         descriptors.push(descriptor);
@@ -214,7 +229,7 @@ where
     })
     .await?;
     Ok(prefix
-        .filter(|prefix| prefix.output_count == expected_output_count)
+        .filter(|prefix| prefix.output_count == demand.len())
         .map(|_| BlobHeader { descriptors }))
 }
 
@@ -586,6 +601,15 @@ fn descriptor_payload_len_offset(index: usize) -> u64 {
 
 fn invalid_data(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    /// Byte offset of the first output payload: where a test corrupts a blob body while
+    /// leaving the header — and so a reuse probe's verdict — intact.
+    pub(crate) fn body_offset(output_count: usize) -> usize {
+        super::header_len(output_count)
+    }
 }
 
 #[cfg(test)]

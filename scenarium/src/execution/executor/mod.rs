@@ -161,6 +161,8 @@ impl Executor {
                     Disposition::Reuse | Disposition::Run => {}
                 }
 
+                let demand = resolved.outputs.demand.slice(e_node.outputs);
+
                 // The resolver's pre-run verdict is authoritative — a `Reuse` is never
                 // re-derived here, since its producers may already be pruned (see `resolve.rs`).
                 // The one sanctioned improvement is a `Run` whose stamped digest is `None`: the
@@ -187,10 +189,14 @@ impl Executor {
                         frame
                             .cache
                             .stamp_digest(program, frame.resource_stamps, node_idx);
-                        let demand = resolved.outputs.demand.slice(e_node.outputs);
                         let reused = frame
                             .cache
-                            .check_reuse(program, node_idx, demand, &mut self.ctx_manager.contexts)
+                            .hydrate_reuse(
+                                program,
+                                node_idx,
+                                demand,
+                                &mut self.ctx_manager.contexts,
+                            )
                             .await;
                         if reused {
                             frame.abandon_input_reads(node_idx);
@@ -203,6 +209,29 @@ impl Executor {
                     }
                 };
                 if reused {
+                    // The resolver only *probed* a disk hit, so the decode happens here, at
+                    // the node's own turn: producer-first order puts it ahead of every
+                    // consumer that reads it, and `release_drained_outputs` below frees it
+                    // on the same last-read bookkeeping a computed value gets. A no-op for a
+                    // resident value and for the re-stamp arm above, which already loaded.
+                    // A blob that stopped loading since the probe can't fall back to running
+                    // — the cut already pruned this node's producers — so it fails the node
+                    // and its consumers skip as errored-upstream.
+                    if !frame
+                        .cache
+                        .hydrate_reuse(program, node_idx, demand, &mut self.ctx_manager.contexts)
+                        .await
+                    {
+                        mark_skipped(
+                            frame.cache,
+                            &mut self.outcomes,
+                            node_idx,
+                            RunError::CacheLoadFailed {
+                                func_id: e_node.func_id,
+                            },
+                        );
+                        continue;
+                    }
                     self.outcomes[node_idx] = NodeOutcome::Reused;
                     frame.emit_pinned_values(node_idx, events);
                     frame.release_drained_outputs(node_idx);
@@ -224,7 +253,7 @@ impl Executor {
                 }
 
                 // Read already-resolved inputs and release each producer whose last read this
-                // satisfies. Disk reuse is hydrated before the resolver cuts producer cones.
+                // satisfies. A disk-reused producer was decoded at its own earlier turn.
                 frame.collect_inputs(node_idx);
 
                 let output_count = e_node.outputs.len as usize;
@@ -243,7 +272,6 @@ impl Executor {
                         }))
                         .expect(EVENTS_OUTLIVE_RUN);
                 }
-                let demand = resolved.outputs.demand.slice(e_node.outputs);
                 let result = {
                     let slot = frame.cache.slots[node_idx].invoke_slot(output_count);
                     e_node

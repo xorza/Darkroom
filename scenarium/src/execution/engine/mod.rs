@@ -127,7 +127,6 @@ impl ExecutionEngine {
                 &self.plan,
                 &mut self.cache,
                 &self.resource_stamps,
-                &mut self.executor.ctx_manager.contexts,
             )
             .await;
 
@@ -196,6 +195,7 @@ mod internals {
     use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::program;
     use crate::execution::program::ExecutionBinding;
+    use crate::execution::resolve::Disposition;
     use crate::execution::resource::RunResourceStamps;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::NodeId;
@@ -293,10 +293,14 @@ mod internals {
                     &self.plan,
                     &mut self.cache,
                     &self.resource_stamps,
-                    &mut self.executor.ctx_manager.contexts,
                 )
                 .await;
             Ok(())
+        }
+
+        /// The resolved disposition for a stable id — test introspection.
+        pub(super) fn node_disposition(&self, e_node_id: ExecutionNodeId) -> Disposition {
+            self.resolver.run.disposition[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {

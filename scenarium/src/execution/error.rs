@@ -51,6 +51,12 @@ pub enum RunError {
     MissingLambda { func_id: FuncId },
     #[error("skipped: an upstream dependency errored")]
     SkippedUpstream { func_id: FuncId },
+    /// A disk blob the resolver verified by header no longer loaded when the run loop
+    /// reached the node — deleted or corrupted in between. The reuse verdict already cut
+    /// this node's producers, so the run can't fall back to recomputing it; the undecodable
+    /// blob is dropped, so the next run misses cleanly.
+    #[error("the node's cached output could not be loaded")]
+    CacheLoadFailed { func_id: FuncId },
     #[error("demanded outputs {outputs:?} were left unbound")]
     OutputsNotProduced {
         func_id: FuncId,

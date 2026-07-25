@@ -140,6 +140,7 @@ mod cache_persistence {
     use crate::execution::cache::slot::ValueState;
     use crate::execution::disk_store::DiskStore;
     use crate::execution::report::{PinnedOutputs, RunEvent};
+    use crate::execution::resolve::Disposition;
     use crate::node::definition::{FuncId, FuncOutput};
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -752,9 +753,26 @@ mod cache_persistence {
         engine.execute_sinks().await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
-        // Reopen over the same store with fresh RAM, then run.
+        // Reopen over the same store with fresh RAM. Resolution alone settles `mult` as a
+        // reuse — its blob header covers the demand — without decoding the body: the value
+        // only enters RAM when the run loop reaches the node, so a run's reusable frontier
+        // never accumulates ahead of the first lambda.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
+        engine.prepare_execution(true, false, &[]).await.unwrap();
+        assert_eq!(
+            engine.node_disposition(root_execution_node(mult_id)),
+            Disposition::Reuse,
+            "the frontier blob is verified from its header during resolution"
+        );
+        assert!(
+            matches!(
+                engine.slot(root_execution_node(mult_id)).value,
+                ValueState::Empty
+            ),
+            "...and is not decoded there"
+        );
+
         let stats = engine.execute_sinks().await.unwrap();
 
         // Only frontier `mult` is verified and reused. `sum` and `get_a` are behind that
@@ -820,6 +838,102 @@ mod cache_persistence {
             2,
             "recomputing sum also restores its pruned memory-only input"
         );
+    }
+
+    /// A blob that satisfies the resolver's header probe but fails to decode when the run
+    /// loop reaches it. The reuse verdict already cut the node's producers, so the run
+    /// cannot fall back to recomputing: the node fails, its consumers skip as
+    /// errored-upstream, and the undecodable blob is dropped so the next run recomputes.
+    #[tokio::test]
+    async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
+        let dir = TempDir::new("corrupt-frontier");
+
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a(7) → mult(Disk) = 49 → print.
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a"));
+        let mut mult = node(&lib, "mult");
+        mult.cache = CacheMode::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let print_id = graph
+            .find_by_name("Print", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
+        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
+        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_sinks().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+        // Reopen, then corrupt the stored value while leaving the header that the probe
+        // reads — digest, arity, and per-output coverage — untouched.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine
+            .cache
+            .disk_store
+            .corrupt_payload(root_execution_node(mult_id), 1);
+        engine.prepare_execution(true, false, &[]).await.unwrap();
+        assert_eq!(
+            engine.node_disposition(root_execution_node(mult_id)),
+            Disposition::Reuse,
+            "a header-only probe cannot see a corrupt payload"
+        );
+
+        let stats = engine.execute_sinks().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            1,
+            "the reuse verdict already pruned the producer, so nothing recomputes"
+        );
+        let error_for = |node_id| {
+            stats
+                .node_errors
+                .iter()
+                .find(|failure| failure.e_node_id == root_execution_node(node_id))
+                .map(|failure| failure.error.clone())
+        };
+        assert!(
+            matches!(error_for(mult_id), Some(RunError::CacheLoadFailed { .. })),
+            "the node whose cache stopped loading fails, rather than serving nothing"
+        );
+        assert!(
+            matches!(error_for(print_id), Some(RunError::SkippedUpstream { .. })),
+            "its consumer skips as errored-upstream"
+        );
+        assert!(!stats.cached_nodes.contains(&root_execution_node(mult_id)));
+        assert_eq!(
+            blob_count(&dir),
+            0,
+            "the undecodable blob is dropped rather than left to fail every future run"
+        );
+
+        // Nothing left to reuse: the whole cone recomputes and republishes.
+        let stats = engine.execute_sinks().await.unwrap();
+        assert!(stats.node_errors.is_empty(), "the next run is clean");
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(blob_count(&dir), 1);
     }
 
     /// A `Both` value remains resident even when a later run neither executes nor reads it.

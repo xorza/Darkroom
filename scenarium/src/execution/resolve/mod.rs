@@ -24,7 +24,6 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputCo
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::OutputDemand;
-use crate::runtime::context::ContextStore;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the states are mutually exclusive by
@@ -39,8 +38,9 @@ pub(crate) enum Disposition {
     /// the sweep never promotes stays cut.
     #[default]
     Cut,
-    /// An unchanged demanded output is verified and resident — serve it without running the
-    /// lambda.
+    /// An unchanged demanded output is verified *available* — resident, or covered by a
+    /// digest-matched blob the run loop decodes when it reaches the node. Serve it without
+    /// running the lambda.
     Reuse,
     /// Reached, but its func has no implementation. Report the error without probing its cache
     /// or keeping its input cone alive.
@@ -117,18 +117,18 @@ pub(crate) struct Resolver {
 
 impl Resolver {
     /// Stamp the structural schedule, then resolve exact liveness and cache reuse.
-    /// **Mutates `cache`**: stamps each runnable node's `current_digest` and hydrates each live
-    /// disk-cache frontier before declaring it reusable.
+    /// **Mutates `cache`** only to stamp each runnable node's `current_digest`: a live
+    /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
+    /// run loop, when it reaches the node.
     pub(crate) async fn resolve(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
         resource_stamps: &RunResourceStamps,
-        ctx: &mut ContextStore,
     ) {
         stamp_digests(program, cache, resource_stamps, plan);
-        resolve_run(program, plan, cache, ctx, &mut self.run).await;
+        resolve_run(program, plan, cache, &mut self.run).await;
     }
 }
 
@@ -158,7 +158,6 @@ async fn resolve_run(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     cache: &mut RuntimeCache,
-    ctx: &mut ContextStore,
     run: &mut ResolvedRun,
 ) {
     run.reset_for_program(program);
@@ -182,7 +181,7 @@ async fn resolve_run(
         let outputs = program[node_idx].outputs;
         let demand = run.outputs.demand.slice(outputs);
         if !plan.event_sources.contains(node_idx)
-            && cache.check_reuse(program, node_idx, demand, ctx).await
+            && cache.probe_reuse(program, node_idx, demand).await
         {
             run.disposition[node_idx] = Disposition::Reuse;
             continue;

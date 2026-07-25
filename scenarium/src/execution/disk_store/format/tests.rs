@@ -15,10 +15,21 @@ use crate::execution::disk_store::format::{
     covers_outputs, header_len, read, write,
 };
 use crate::library::{Library, TypeEntry};
+use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
 
 static BLOB_TYPE: LazyLock<TypeId> = LazyLock::new(TypeId::unique);
+
+/// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
+/// skipped — the shape the run loop hands the decoder.
+fn demand(output_count: usize, produced: &[usize]) -> Vec<OutputDemand> {
+    let mut demand = vec![OutputDemand::Skip; output_count];
+    for &index in produced {
+        demand[index] = OutputDemand::Produce;
+    }
+    demand
+}
 
 #[derive(Debug)]
 struct ChunkedIo<T, const N: usize>(T);
@@ -248,8 +259,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             digest,
             &library.codecs(),
             &mut ContextStore::default(),
-            outputs.len(),
-            |index| index == 0,
+            &demand(outputs.len(), &[0]),
         )
         .await
         .unwrap()
@@ -264,8 +274,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         digest,
         &library.codecs(),
         &mut ContextStore::default(),
-        outputs.len(),
-        |_| false,
+        &demand(outputs.len(), &[]),
     )
     .await
     .unwrap()
@@ -308,8 +317,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         digest,
         &complete_library.codecs(),
         &mut ContextStore::default(),
-        outputs.len(),
-        |_| false,
+        &demand(outputs.len(), &[]),
     )
     .await
     .unwrap()
@@ -328,8 +336,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         digest,
         &underread_library.codecs(),
         &mut ContextStore::default(),
-        outputs.len(),
-        |_| false,
+        &demand(outputs.len(), &[]),
     )
     .await
     .unwrap_err();
@@ -460,8 +467,7 @@ async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
         digest,
         &library.codecs(),
         &mut ContextStore::default(),
-        outputs.len(),
-        |_| false,
+        &demand(outputs.len(), &[]),
     )
     .await
     .unwrap_err();

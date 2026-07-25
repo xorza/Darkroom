@@ -103,6 +103,24 @@ impl DiskStore {
             .is_ok_and(|covers| covers)
     }
 
+    /// Whether the blob at `target` can serve this run's `demand` — the reuse verdict
+    /// without the decode. Header-only (magic, version, digest, arity, codec versions,
+    /// per-output coverage), so it needs no [`ContextStore`] and can be answered before the
+    /// run commits to reusing the node; [`read`](Self::read) decodes the body later. Any
+    /// read or framing failure reads as "cannot serve" — the node then runs and republishes
+    /// the blob.
+    pub(crate) async fn covers_demand(&self, target: &BlobTarget, demand: &[OutputDemand]) -> bool {
+        let Ok(mut file) = tokio::fs::File::open(&target.path).await else {
+            return false;
+        };
+        let Ok(file_len) = file.metadata().await.map(|metadata| metadata.len()) else {
+            return false;
+        };
+        format::covers_demand(&mut file, file_len, target.digest, &self.codecs, demand)
+            .await
+            .unwrap_or(false)
+    }
+
     pub(crate) async fn read(
         &self,
         target: &BlobTarget,
@@ -130,8 +148,7 @@ impl DiskStore {
             target.digest,
             &self.codecs,
             ctx,
-            demand.len(),
-            |index| !demand[index].is_skip(),
+            demand,
         )
         .await
         {
@@ -214,10 +231,27 @@ impl DiskStore {
 pub(crate) mod internals {
     use std::sync::atomic::AtomicU64;
 
+    use crate::execution::disk_store::{DiskStore, format};
+    use crate::execution::identity::ExecutionNodeId;
+
     #[derive(Debug, Default)]
     pub(crate) struct StoreIoCounts {
         pub(crate) coverage_probes: AtomicU64,
         pub(crate) publication_attempts: AtomicU64,
+    }
+
+    impl DiskStore {
+        /// Replace the first output payload's value tag with an unknown one, leaving the
+        /// header — and so [`DiskStore::covers_demand`]'s verdict — intact. Models a blob
+        /// that passes the resolver's probe and then fails to decode.
+        pub(crate) fn corrupt_payload(&self, e_node_id: ExecutionNodeId, output_count: usize) {
+            let path = self
+                .node_path(e_node_id)
+                .expect("a disk-backed store has a root");
+            let mut bytes = std::fs::read(&path).unwrap();
+            bytes[format::internals::body_offset(output_count)] = u8::MAX;
+            std::fs::write(&path, bytes).unwrap();
+        }
     }
 }
 

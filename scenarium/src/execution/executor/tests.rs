@@ -19,7 +19,6 @@ use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::internals;
 use crate::node::lambda::{FuncLambda, OutputDemand};
-use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue};
 
 /// Hand-built program with real lambdas. Inputs are all optional here (the
@@ -70,6 +69,12 @@ impl Prog {
     /// output-release tests, which turn on the non-RAM modes.
     fn set_cache(&mut self, e_node_id: ExecutionNodeId, cache: CacheMode) {
         self.program.by_id_mut(e_node_id).cache = cache;
+    }
+
+    /// Override a node's [`FuncBehavior`] (nodes default to `Impure`, which has no digest
+    /// and so can never be reused).
+    fn set_behavior(&mut self, e_node_id: ExecutionNodeId, behavior: FuncBehavior) {
+        self.program.by_id_mut(e_node_id).behavior = behavior;
     }
 
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
@@ -234,13 +239,7 @@ async fn run_with(
     let mut resolver = Resolver::default();
     let mut resource_stamps = RunResourceStamps::default();
     resolver
-        .resolve(
-            program,
-            plan,
-            cache,
-            &resource_stamps,
-            &mut ContextStore::default(),
-        )
+        .resolve(program, plan, cache, &resource_stamps)
         .await;
     let mut outcome = ExecutionOutcome::default();
     executor
@@ -665,19 +664,24 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
     let a = p.node(&[], 1, producer);
     p.set_cache(a, CacheMode::Disk);
     p.set_output_pinned(a, 0, true);
+    // Only a `Pure` node earns a digest, and the run loop serves a `Reuse` by asking the
+    // cache for the value — so the fixture has to be the coherent state a resolver `Reuse`
+    // implies: a resident snapshot produced under the node's current digest.
+    p.set_behavior(a, FuncBehavior::Pure);
 
     let mut run = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut run, output(&p.program, a, 0));
     run.resolved.disposition[nx(&p.program, a)] = Disposition::Reuse;
 
+    let mut resource_stamps = RunResourceStamps::default();
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
+    cache.stamp_digest(&p.program, &resource_stamps, nx(&p.program, a));
     cache.slots[nx(&p.program, a)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
-        produced_under: None,
+        produced_under: cache.slots[nx(&p.program, a)].current_digest,
     };
     let mut executor = Executor::default();
-    let mut resource_stamps = RunResourceStamps::default();
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
     let mut stats = ExecutionOutcome::default();
     executor
