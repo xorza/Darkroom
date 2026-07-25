@@ -5,7 +5,8 @@
 //! a viewer first needs the full texture, then drop the source after that
 //! upload. Non-image values are formatted on receipt and dropped immediately.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::mem::take;
 
 use aperture::{Image as AptImage, ImageHandle, Ui};
 use glam::UVec2;
@@ -21,6 +22,14 @@ const FULL_TEXTURE_DIM: u32 = 8192;
 #[derive(Default, Debug)]
 pub(crate) struct PinnedOutputStore {
     pub(crate) entries: HashMap<OutputPort, StoredContent>,
+    /// Whether [`Self::reconcile`] has work to do: the document's retained
+    /// set may have moved, or a fresh value landed that a viewer still needs
+    /// uploaded at full resolution. The flag lives here rather than beside
+    /// `Editor::needs_relayout` because the store is also written *outside*
+    /// the frame — `ingest` runs from the worker drain in `App::update` — so
+    /// a request has to survive until the next frame instead of resetting
+    /// with it.
+    needs_reconcile: bool,
 }
 
 #[derive(Debug)]
@@ -76,20 +85,42 @@ impl PinnedOutputStore {
             // PortRef cannot identify a particular graph instance, so the
             // latest push is the only value the UI can consistently present.
             self.entries.insert(port, prepare_content(ui, output.value));
+            // A fresh image arrives preview-only; an open viewer needs the
+            // reconcile pass to upload its full-resolution texture.
+            self.needs_reconcile = true;
         }
     }
 
-    pub(crate) fn reconcile(&mut self, ui: &Ui, document: &Document) {
-        let viewer_ports: HashSet<OutputPort> = document.viewer_outputs().collect();
-        for &port in &viewer_ports {
+    /// Ask for a reconcile pass on the next frame. Raised by every edit whose
+    /// step [`crate::core::edit::intent::types::UndoStep::requires_reconcile`]
+    /// and by the non-undoable half of opening a viewer tab.
+    pub(crate) fn request_reconcile(&mut self) {
+        self.needs_reconcile = true;
+    }
+
+    /// Reconcile only if something asked for it. An idle frame changes
+    /// neither the retained set nor the stored values, so it skips the pass
+    /// entirely.
+    pub(crate) fn reconcile_if_needed(&mut self, ui: &Ui, document: &Document) {
+        if take(&mut self.needs_reconcile) {
+            self.reconcile(ui, document);
+        }
+    }
+
+    /// Release every presentation resource the document no longer retains and
+    /// upload the full-resolution texture each *visible* viewer needs.
+    fn reconcile(&mut self, ui: &Ui, document: &Document) {
+        // Scoped to what the coming record pass draws: a full texture is up
+        // to 8192² RGBA8, so uploading one for a viewer tab stacked behind
+        // another in the same pane would cost hundreds of MB unseen.
+        for port in document.visible_viewer_outputs() {
             self.materialize_full(ui, port);
         }
-        // Both membership sets are collected once. The pinned test recurses
-        // every nested graph, so calling it from the retain predicate cost
-        // one whole-document walk per stored entry.
-        let pinned = document.pinned_outputs();
-        self.entries
-            .retain(|port, _| viewer_ports.contains(port) || pinned.contains(port));
+        // Collected once: the pinned half recurses every nested graph, so
+        // calling it from the retain predicate cost one whole-document walk
+        // per stored entry.
+        let retained = document.retained_output_ports();
+        self.entries.retain(|port, _| retained.contains(port));
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
@@ -184,6 +215,7 @@ mod tests {
     use scenarium::StaticValue;
 
     use crate::core::document::TabRef;
+    use crate::core::document::dock::DockOp;
 
     fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
         let desc = ImageDesc::new(width, height, format);
@@ -192,14 +224,17 @@ mod tests {
         DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
     }
 
+    /// A document retaining `port` through a graph pin, an open viewer tab, or
+    /// both. The viewer tab is activated, as opening one always does — only a
+    /// group's visible tab draws, so only that one materializes.
     fn demanding_document(port: OutputPort, pinned: bool, viewer: bool) -> Document {
         let mut document = Document::default();
         document.graph.set_output_pinned(port, pinned);
         if viewer {
             let primary = document.layout.primary().id;
-            document
-                .layout
-                .find_or_insert(TabRef::ImageViewer(port), primary);
+            let tab = TabRef::ImageViewer(port);
+            document.layout.find_or_insert(tab, primary);
+            document.layout.apply(DockOp::ActivateTab { tab });
         }
         document
     }
@@ -330,6 +365,109 @@ mod tests {
         assert!(
             store.entries.is_empty(),
             "no graph pin or viewer leaves presentation resources alive"
+        );
+    }
+
+    #[test]
+    fn the_reconcile_pass_runs_only_when_it_was_requested() {
+        let ui = Ui::default();
+        let mut store = PinnedOutputStore::default();
+        let node = NodeId::unique();
+        let port = OutputPort::new(node, 0);
+        let pinned = demanding_document(port, true, false);
+        store.ingest(
+            &ui,
+            node,
+            vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
+            &pinned,
+        );
+
+        // Spend the request `ingest` raised for its own value.
+        store.reconcile_if_needed(&ui, &pinned);
+        assert!(store.entries.contains_key(&port), "the pin retains it");
+
+        // Against a document that retains nothing, the entry still survives
+        // while nothing has asked for a pass — that's what makes the gate
+        // load-bearing rather than decorative.
+        let empty = Document::default();
+        store.reconcile_if_needed(&ui, &empty);
+        assert!(
+            store.entries.contains_key(&port),
+            "an unrequested pass releases nothing"
+        );
+
+        store.request_reconcile();
+        store.reconcile_if_needed(&ui, &empty);
+        assert!(
+            store.entries.is_empty(),
+            "a requested pass releases what the document stopped retaining"
+        );
+    }
+
+    #[test]
+    fn only_the_visible_viewer_tab_pays_for_a_full_texture() {
+        let ui = Ui::default();
+        let mut store = PinnedOutputStore::default();
+        let front = NodeId::unique();
+        let back = NodeId::unique();
+        let front_port = OutputPort::new(front, 0);
+        let back_port = OutputPort::new(back, 0);
+
+        // Two viewer tabs stacked in one pane: `back_port` opens first, then
+        // `front_port` lands on top and becomes the group's visible tab.
+        let mut document = Document::default();
+        let primary = document.layout.primary().id;
+        for port in [back_port, front_port] {
+            document.graph.set_output_pinned(port, true);
+            document
+                .layout
+                .find_or_insert(TabRef::ImageViewer(port), primary);
+        }
+        document.layout.apply(DockOp::ActivateTab {
+            tab: TabRef::ImageViewer(front_port),
+        });
+        for (node, port) in [(front, front_port), (back, back_port)] {
+            store.ingest(
+                &ui,
+                node,
+                vec![PinnedOutput {
+                    port_idx: 0,
+                    value: image_value(512, 256, ColorFormat::RGBA_U8),
+                }],
+                &document,
+            );
+            assert!(store.entries.contains_key(&port));
+        }
+
+        fn full(store: &PinnedOutputStore, port: OutputPort) -> &FullImage {
+            match &store.entries[&port] {
+                StoredContent::Image(image) => &image.full,
+                other => panic!("expected an image resource, got {other:?}"),
+            }
+        }
+
+        store.reconcile_if_needed(&ui, &document);
+        assert!(
+            matches!(full(&store, front_port), FullImage::Resident(_)),
+            "the visible tab's texture is uploaded"
+        );
+        assert!(
+            matches!(full(&store, back_port), FullImage::Deferred(_)),
+            "the tab behind it keeps only its preview — no full-resolution upload"
+        );
+
+        // Activating the back tab makes it the one that pays.
+        document.layout.apply(DockOp::ActivateTab {
+            tab: TabRef::ImageViewer(back_port),
+        });
+        store.request_reconcile();
+        store.reconcile_if_needed(&ui, &document);
+        assert!(
+            matches!(full(&store, back_port), FullImage::Resident(_)),
+            "activation uploads the newly-visible tab"
         );
     }
 }

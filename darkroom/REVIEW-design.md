@@ -73,17 +73,6 @@ Findings are ordered by severity × payoff.
   forwarders. The project's own style rule discourages thin wrapper methods;
   this is the same call restated at three altitudes.
 
-- [ ] **Pinned-output reconciliation is document-wide work, per entry, per
-  frame.** `Editor::frame` calls `PinnedOutputStore::reconcile`
-  unconditionally (`gui/app/editor/mod.rs:226`). That collects
-  `document.viewer_outputs()` into a fresh `HashSet` (a walk of every dock
-  group and tab), calls `materialize_full` for each viewer port, then
-  `entries.retain(…)` — and the retain predicate calls
-  `Document::is_output_pinned` (`core/document/mod.rs:355-365`), which
-  recursively walks *every nested graph* in the document, once per stored
-  entry (`gui/pinned_output.rs:78-96`). `PinnedOutputStore::ingest` runs the
-  same recursive walk per pushed value.
-
 - [ ] **`image_viewer::port_label` does a recursive whole-document node search
   per viewer tab, twice per frame.** `gui/image_viewer.rs:379-391` uses
   `NodeSearch::Recursive` to find the node's name, and it is called from

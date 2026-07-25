@@ -43,14 +43,24 @@ impl App {
         }
     }
 
-    /// Replace the document with an empty one. A fresh [`Editor`] resets
-    /// all derived/transient state in one move: empty undo history
-    /// (restoring the old doc via Cmd-Z would replay nodes from intent
-    /// history that no longer matches the live tree), forced reconcile +
-    /// scene rebuild, dropped gesture state, and cleared run results.
+    /// Replace the document with an empty one.
     pub(crate) fn new_document(&mut self) {
+        self.adopt_document(OpenDocument::default());
+    }
+
+    /// Swap in `open` and reset every piece of state derived from the
+    /// document it replaces. A fresh [`Editor`] does most of it in one move:
+    /// empty undo history (restoring the old doc via Cmd-Z would replay
+    /// nodes from intent history that no longer matches the live tree),
+    /// dropped gesture state, forced scene rebuild, and cleared run results —
+    /// pinned-output textures included. The explicit reconcile request is the
+    /// belt: the store's release pass is gated on being asked, so a future
+    /// `Editor` that survives the swap would otherwise keep the previous
+    /// document's textures alive, keyed by node ids that no longer exist.
+    fn adopt_document(&mut self, open: OpenDocument) {
         self.editor = Editor::new();
-        self.workspace.replace_document(OpenDocument::default());
+        self.editor.run_state.pinned_outputs.request_reconcile();
+        self.workspace.replace_document(open);
         self.remember_document_path();
     }
 
@@ -67,11 +77,7 @@ impl App {
                 return;
             }
         };
-        // Fresh editor around the loaded doc — see `new_document` for why
-        // a wholesale reset (rather than poking individual fields) is right.
-        self.editor = Editor::new();
-        self.workspace.replace_document(open);
-        self.remember_document_path();
+        self.adopt_document(open);
         self.workspace.runtime.status.error = None;
     }
 

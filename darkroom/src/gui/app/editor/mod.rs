@@ -180,6 +180,9 @@ impl Editor {
                 Ok(step) => {
                     self.needs_relayout |= step.requires_relayout();
                     self.dirty |= step.dirties_document();
+                    if step.requires_reconcile() {
+                        self.run_state.pinned_outputs.request_reconcile();
+                    }
                     batch.push(step);
                 }
                 Err(Refusal::Quiet) => {}
@@ -223,7 +226,11 @@ impl Editor {
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers(open);
-        self.run_state.pinned_outputs.reconcile(ui, &open.document);
+        // Only when an edit moved the retained set or a fresh value landed —
+        // an idle frame has nothing to release or upload.
+        self.run_state
+            .pinned_outputs
+            .reconcile_if_needed(ui, &open.document);
         // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
         // tab is active.
@@ -465,6 +472,10 @@ impl Editor {
         let group = open.document.layout.focused;
         let tab = TabRef::ImageViewer(port);
         open.document.layout.find_or_insert(tab, group);
+        // Inserting the tab is the half no step records, so it has to ask for
+        // the reconcile itself: the port's stored value is preview-only until
+        // this viewer's full-resolution upload.
+        self.run_state.pinned_outputs.request_reconcile();
         self.push_activate(tab);
     }
 
