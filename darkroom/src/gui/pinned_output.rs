@@ -64,9 +64,13 @@ impl PinnedOutputStore {
         if values.is_empty() {
             return;
         }
+        // Collected once for the whole push: the membership test recurses
+        // every nested graph, so asking per value re-walked the document
+        // once per pushed output.
+        let retained = document.retained_output_ports();
         for output in values {
             let port = OutputPort::new(node_id, output.port_idx);
-            if !document.retains_output_resource(port) {
+            if !retained.contains(&port) {
                 continue;
             }
             // PortRef cannot identify a particular graph instance, so the
@@ -80,8 +84,12 @@ impl PinnedOutputStore {
         for &port in &viewer_ports {
             self.materialize_full(ui, port);
         }
+        // Both membership sets are collected once. The pinned test recurses
+        // every nested graph, so calling it from the retain predicate cost
+        // one whole-document walk per stored entry.
+        let pinned = document.pinned_outputs();
         self.entries
-            .retain(|port, _| viewer_ports.contains(port) || document.is_output_pinned(*port));
+            .retain(|port, _| viewer_ports.contains(port) || pinned.contains(port));
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
@@ -175,7 +183,7 @@ mod tests {
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
     use scenarium::StaticValue;
 
-    use crate::core::document::{PortKind, PortRef, TabRef};
+    use crate::core::document::TabRef;
 
     fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
         let desc = ImageDesc::new(width, height, format);
@@ -189,14 +197,9 @@ mod tests {
         document.graph.set_output_pinned(port, pinned);
         if viewer {
             let primary = document.layout.primary().id;
-            document.layout.find_or_insert(
-                TabRef::ImageViewer(PortRef {
-                    node_id: port.node_id,
-                    kind: PortKind::Output,
-                    port_idx: port.port_idx,
-                }),
-                primary,
-            );
+            document
+                .layout
+                .find_or_insert(TabRef::ImageViewer(port), primary);
         }
         document
     }

@@ -22,12 +22,14 @@ mod drag;
 mod strip;
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use aperture::{
     Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
     Splitter, Stroke, Text, Ui, WidgetId,
 };
 use glam::Vec2;
+use scenarium::OutputPort;
 
 use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
@@ -53,6 +55,20 @@ fn pane_wid(group: TabGroupId) -> WidgetId {
 /// Stable id for the splitter at a tree path.
 fn splitter_wid(path: DockPath) -> WidgetId {
     WidgetId::from_hash(("dock.splitter", path))
+}
+
+/// What the render walk needs from outside the layout: the document, plus
+/// this frame's viewer-tab labels resolved once by the caller.
+///
+/// `image_viewer::port_label` runs a recursive whole-document node search
+/// and allocates a `String`, and a visible viewer tab is labelled twice a
+/// frame — once for its strip chip, once for its pane header — so resolving
+/// it at each call site repeated that walk. Carried alongside `doc` rather
+/// than as another parameter so the recursive render keeps its arity.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DockContext<'a> {
+    pub(crate) doc: &'a Document,
+    pub(crate) viewer_labels: &'a HashMap<OutputPort, String>,
 }
 
 /// The dock's persistent GUI state — just the drag in flight; the
@@ -141,14 +157,14 @@ impl DockUi {
         &self,
         ui: &mut Ui,
         theme: &Theme,
-        doc: &Document,
+        cx: DockContext<'_>,
         out: &mut Vec<Intent>,
         mut content: impl FnMut(&mut Ui, TabRef, &mut Vec<Intent>),
     ) {
         render_node(
             ui,
             theme,
-            doc,
+            cx,
             DockLayout::ROOT,
             DockPath::ROOT,
             out,
@@ -156,7 +172,7 @@ impl DockUi {
         );
         if let Some(dragged) = &self.tab_drag {
             ui.set_cursor(CursorIcon::Grabbing);
-            draw_drag_feedback(ui, theme, doc, dragged);
+            draw_drag_feedback(ui, theme, cx.doc, dragged);
         }
     }
 }
@@ -167,14 +183,14 @@ impl DockUi {
 fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
     ui: &mut Ui,
     theme: &Theme,
-    doc: &Document,
+    cx: DockContext<'_>,
     idx: NodeIdx,
     path: DockPath,
     out: &mut Vec<Intent>,
     content: &mut F,
 ) {
-    match doc.layout.node(idx) {
-        DockNode::Group(group) => render_group(ui, theme, doc, group, out, content),
+    match cx.doc.layout.node(idx) {
+        DockNode::Group(group) => render_group(ui, theme, cx, group, out, content),
         DockNode::Split(split) => {
             let DockSplit {
                 dir,
@@ -195,7 +211,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
                         SplitHalf::First => (first, path.first()),
                         SplitHalf::Second => (second, path.second()),
                     };
-                    render_node(ui, theme, doc, child, child_path, out, content);
+                    render_node(ui, theme, cx, child, child_path, out, content);
                 });
             // The widget wrote the divider drag into `live_ratio`; the
             // layout itself only changes through the recorded intent
@@ -214,13 +230,13 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
 fn render_group<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
     ui: &mut Ui,
     theme: &Theme,
-    doc: &Document,
+    cx: DockContext<'_>,
     group: &TabGroup,
     out: &mut Vec<Intent>,
     content: &mut F,
 ) {
-    let labels = tab_labels(ui, doc, group);
-    let focused = doc.layout.focused == group.id;
+    let labels = tab_labels(ui, cx, group);
+    let focused = cx.doc.layout.focused == group.id;
     Panel::vstack()
         .id(pane_wid(group.id))
         .size((Sizing::FILL, Sizing::FILL))
@@ -308,15 +324,28 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
 
 /// Project one group's tabs into the strip's per-tab labels — the label
 /// text is the one thing the strip needs the `Document` for.
-fn tab_labels(ui: &mut Ui, doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
+fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabel> {
     group
         .tabs
         .iter()
         .map(|&tab| TabLabel {
             tab,
-            text: ui.intern(tab_text(doc, tab)),
+            text: ui.intern(viewer_aware_text(cx, tab)),
         })
         .collect()
+}
+
+/// Per-frame label for a strip chip. Viewer tabs read the caller's
+/// resolved map instead of re-running [`image_viewer::port_label`]'s
+/// recursive node search; every other kind is cheap and formats inline.
+fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
+    match tab {
+        TabRef::ImageViewer(port) => match cx.viewer_labels.get(&port) {
+            Some(label) => Cow::Borrowed(label.as_str()),
+            None => Cow::Borrowed("image"),
+        },
+        _ => tab_text(cx.doc, tab),
+    }
 }
 
 /// A tab's display text — shared by the strip labels and the drag's

@@ -13,7 +13,7 @@ use scenarium::{
     DetachedNode, Graph as CoreGraph, GraphDef as CoreGraphDef, NodeId, NodeSearch, OutputPort,
 };
 use scenarium::{Node, NodeKind};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::DockLayout;
@@ -85,7 +85,12 @@ pub(crate) enum TabRef {
     /// (`crate::gui::image_viewer`): a restored tab pulls any current value
     /// from `RunState` when drawn. Pruned when its node is deleted, like a
     /// graph tab whose def vanished.
-    ImageViewer(PortRef),
+    ///
+    /// Carries an [`OutputPort`] rather than a `PortRef` so an input-side
+    /// port is unrepresentable: a persisted document cannot deserialize a
+    /// viewer tab that no code path could have produced, and the readers
+    /// need no filter, assert, or unreachable arm to cope with one.
+    ImageViewer(OutputPort),
 }
 
 /// Which side of a graph interface a boundary-port edit targets.
@@ -352,6 +357,11 @@ impl Document {
         }
     }
 
+    /// Whether `port` is pinned anywhere in the graph tree.
+    ///
+    /// Recurses every nested graph, so a caller testing more than one port
+    /// per frame wants [`Self::pinned_outputs`] instead — one walk for the
+    /// whole set rather than one walk per port.
     pub(crate) fn is_output_pinned(&self, port: OutputPort) -> bool {
         fn graph_contains(graph: &CoreGraph, port: OutputPort) -> bool {
             graph.is_output_pinned(port)
@@ -364,13 +374,32 @@ impl Document {
         graph_contains(&self.graph, port)
     }
 
+    /// Every pinned output across the graph tree, collected in one walk.
+    pub(crate) fn pinned_outputs(&self) -> HashSet<OutputPort> {
+        fn collect(graph: &CoreGraph, out: &mut HashSet<OutputPort>) {
+            out.extend(graph.pinned_outputs());
+            for nested in graph.graphs.values() {
+                collect(&nested.body, out);
+            }
+        }
+
+        let mut out = HashSet::new();
+        collect(&self.graph, &mut out);
+        out
+    }
+
+    /// The ports whose pushed values the UI must keep: pinned previews plus
+    /// open viewer tabs. One document walk, so per-value ingest filtering
+    /// tests a set rather than re-walking per push.
+    pub(crate) fn retained_output_ports(&self) -> HashSet<OutputPort> {
+        let mut retained = self.pinned_outputs();
+        retained.extend(self.viewer_outputs());
+        retained
+    }
+
     pub(crate) fn viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
         self.layout.all_tabs().filter_map(|tab| match tab {
-            TabRef::ImageViewer(PortRef {
-                node_id,
-                kind: PortKind::Output,
-                port_idx,
-            }) => Some(OutputPort::new(node_id, port_idx)),
+            TabRef::ImageViewer(port) => Some(port),
             _ => None,
         })
     }
@@ -1018,13 +1047,9 @@ mod tests {
             .expect("document still validates after edits");
     }
 
-    /// An output-0 [`PortRef`] on `node_id`, for viewer-tab tests.
-    fn out_port(node_id: NodeId) -> PortRef {
-        PortRef {
-            node_id,
-            kind: PortKind::Output,
-            port_idx: 0,
-        }
+    /// An output-0 [`OutputPort`] on `node_id`, for viewer-tab tests.
+    fn out_port(node_id: NodeId) -> OutputPort {
+        OutputPort::new(node_id, 0)
     }
 
     /// All open tabs across the layout, for order-sensitive asserts.

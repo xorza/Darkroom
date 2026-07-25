@@ -688,15 +688,10 @@ impl DockLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::{PortKind, PortRef};
-    use scenarium::NodeId;
+    use scenarium::{NodeId, OutputPort};
 
     fn viewer(n: u128) -> TabRef {
-        TabRef::ImageViewer(PortRef {
-            node_id: NodeId::from_u128(n),
-            kind: PortKind::Output,
-            port_idx: 0,
-        })
+        TabRef::ImageViewer(OutputPort::new(NodeId::from_u128(n), 0))
     }
 
     fn main_tab() -> TabRef {

@@ -4,7 +4,7 @@ use std::mem::take;
 use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 use scenarium::OutputPort;
 
-use crate::core::document::{Document, PortRef, TabRef};
+use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::types::Intent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -13,7 +13,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::pin_ui::emit_pin_image_opens;
-use crate::gui::dock::DockUi;
+use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
@@ -34,7 +34,7 @@ pub(crate) struct MainWindow {
     /// One image-viewer navigation state per rendered viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
     /// centralized in the pinned-output store.
-    pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
+    pub(crate) image_viewers: HashMap<OutputPort, ImageViewer>,
     dock: DockUi,
     first_frame: bool,
 }
@@ -83,6 +83,17 @@ impl MainWindow {
             dock,
             ..
         } = self;
+        // One recursive node search + one `String` per viewer tab for the
+        // whole frame. Both readers — the strip chip and the pane header —
+        // take their label from here.
+        let viewer_labels: HashMap<OutputPort, String> = doc
+            .viewer_outputs()
+            .map(|port| (port, image_viewer::port_label(doc, port)))
+            .collect();
+        let dock_cx = DockContext {
+            doc,
+            viewer_labels: &viewer_labels,
+        };
         Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))
@@ -95,7 +106,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         command = menu_bar::show(ui);
                     });
-                dock.render(ui, ctx.theme, doc, out, |ui, tab, out| match tab {
+                dock.render(ui, ctx.theme, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph(_) => {
                         // Overlay the run/cancel toggle on the canvas's
                         // top-left corner; it hit-tests above the canvas,
@@ -120,18 +131,17 @@ impl MainWindow {
                         }
                     }
                     TabRef::ImageViewer(port) => {
-                        let title = image_viewer::port_label(doc, port);
-                        let source = ctx
-                            .run_state
-                            .pinned_outputs
-                            .entries
-                            .get(&OutputPort::new(port.node_id, port.port_idx));
+                        let title = viewer_labels
+                            .get(&port)
+                            .map(String::as_str)
+                            .unwrap_or("image");
+                        let source = ctx.run_state.pinned_outputs.entries.get(&port);
                         let viewer = image_viewers
                             .entry(port)
                             .or_insert_with(|| ImageViewer::new(port));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, ctx.theme, &mut prefs.viewer, &title, source) {
+                        if viewer.show(ui, ctx.theme, &mut prefs.viewer, title, source) {
                             command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }

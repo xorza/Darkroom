@@ -122,11 +122,10 @@ pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiA
     }) else {
         return;
     };
-    actions.push(UiAction::OpenImageViewer(PortRef {
-        node_id: port.node_id,
-        kind: PortKind::Output,
-        port_idx: port.port_idx,
-    }));
+    actions.push(UiAction::OpenImageViewer(OutputPort::new(
+        port.node_id,
+        port.port_idx,
+    )));
 }
 
 /// The pin (or brand-new pin) a drag latched onto, and every member moving

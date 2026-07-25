@@ -47,8 +47,14 @@ impl App {
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
     /// upstream cone executes and its outputs are delivered.
     fn run_node(&mut self, node_id: NodeId) {
+        // A local definition tab has no enclosing instance path, so no
+        // execution seed resolves. The UI gates the play chip and the menu
+        // action on `SceneNode::runnable`, which is false there — reaching
+        // this is a gating bug, not user input, so refuse rather than kill
+        // the editor from a live command handler.
         if self.workspace.open.document.active_target() != Some(GraphRef::Main) {
-            unimplemented!("run-node commands are only implemented for the main graph");
+            debug_assert!(false, "run-node reached from a non-main graph tab");
+            return;
         }
         self.workspace.run_node(node_id);
     }
