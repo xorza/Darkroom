@@ -118,4 +118,27 @@ fn intern_bindings_resolves_ids_to_dense_addresses_over_emit_ordered_pools() {
     // index 0 while owning slots 2..4, and id 3 at index 2 owning slots 0..2.
     assert_eq!(program.output_idx(addresses[0]).idx(), 3);
     assert_eq!(program.output_idx(addresses[1]).idx(), 0);
+
+    // A producer that was never adopted is a flatten bug, not bad input, so it
+    // panics here rather than degrading to an unbound input.
+    let unemitted = ExecutionNodeId::from_u128(9);
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        program.intern_bindings(&[(
+            0,
+            ExecutionOutputPort {
+                e_node_id: unemitted,
+                port_idx: 0,
+            },
+        )]);
+    }));
+    let payload = panic.expect_err("interning an unemitted producer must panic");
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("flatten only binds producers it emitted"),
+        "the panic must name the violated invariant, got {message:?}"
+    );
 }
