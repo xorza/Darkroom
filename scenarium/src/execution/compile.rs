@@ -237,10 +237,73 @@ mod tests {
     use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
     use crate::execution::identity::test_support::FlattenMapBuilder;
     use crate::execution::program::ExecutionNode;
+    use crate::execution::program::index::OutputAddr;
+    use crate::execution::validate::CompiledGraphValidationError;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::graph::{GraphDef, NodeSearch};
     use crate::node::definition::FuncId;
-    use crate::testing::{TestFuncHooks, test_func_lib};
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+    /// The binding-integrity backstops. `intern_bindings` mints an address only
+    /// from a successful id lookup and a real compile can't reach either arm, so
+    /// they are only worth keeping if they still fire — corrupt a compiled
+    /// program's interned address two ways and check both do.
+    #[test]
+    fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
+        let library = test_func_lib(TestFuncHooks::default());
+        let compile = || {
+            Compiler::default()
+                .compile(&test_graph(), &library)
+                .unwrap()
+        };
+        let bound_input = |compiled: &CompiledGraph| {
+            (0..compiled.program.inputs.len())
+                .find(|i| {
+                    matches!(
+                        compiled.program.inputs[*i].binding,
+                        ExecutionBinding::Bind(_)
+                    )
+                })
+                .expect("the test graph wires bindings")
+        };
+
+        // One past the last node: the address names no node at all.
+        let mut compiled = compile();
+        let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+        let input = bound_input(&compiled);
+        compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+            node_idx: past_the_end,
+            port_idx: 0,
+        });
+        assert!(
+            matches!(
+                compiled.validate(&library),
+                Err(CompiledGraphValidationError::MissingBindingTarget { target, .. })
+                    if target.node_idx == past_the_end
+            ),
+            "a bind past the node vector is a missing target"
+        );
+
+        // A real node, one past its last output port.
+        let mut compiled = compile();
+        let input = bound_input(&compiled);
+        let ExecutionBinding::Bind(address) = compiled.program.inputs[input].binding else {
+            unreachable!("bound_input selected a bind")
+        };
+        let port_idx = compiled.program[address.node_idx].outputs.len;
+        compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+            node_idx: address.node_idx,
+            port_idx,
+        });
+        assert!(
+            matches!(
+                compiled.validate(&library),
+                Err(CompiledGraphValidationError::BindingOutputOutOfRange { target, .. })
+                    if target.port_idx == port_idx
+            ),
+            "a bind past the producer's last port is out of range"
+        );
+    }
 
     #[test]
     fn compilation_retains_a_disabled_composite_interior_as_disabled() {

@@ -160,7 +160,10 @@ impl ExecutionProgram {
     /// run. Every target exists: flatten only records producers it emitted.
     pub(crate) fn intern_bindings(&mut self, binds: &[(u32, ExecutionOutputPort)]) {
         for &(input_idx, port) in binds {
-            let node_idx = self.e_node_index[&port.e_node_id];
+            let node_idx = *self
+                .e_node_index
+                .get(&port.e_node_id)
+                .expect("flatten only binds producers it emitted");
             self.inputs[input_idx as usize].binding = ExecutionBinding::Bind(OutputAddr {
                 node_idx,
                 port_idx: port.port_idx as u32,
