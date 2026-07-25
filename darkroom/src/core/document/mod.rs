@@ -357,23 +357,6 @@ impl Document {
         }
     }
 
-    /// Whether `port` is pinned anywhere in the graph tree.
-    ///
-    /// Recurses every nested graph, so a caller testing more than one port
-    /// per frame wants [`Self::pinned_outputs`] instead — one walk for the
-    /// whole set rather than one walk per port.
-    pub(crate) fn is_output_pinned(&self, port: OutputPort) -> bool {
-        fn graph_contains(graph: &CoreGraph, port: OutputPort) -> bool {
-            graph.is_output_pinned(port)
-                || graph
-                    .graphs
-                    .values()
-                    .any(|nested| graph_contains(&nested.body, port))
-        }
-
-        graph_contains(&self.graph, port)
-    }
-
     /// Every pinned output across the graph tree, collected in one walk.
     pub(crate) fn pinned_outputs(&self) -> HashSet<OutputPort> {
         fn collect(graph: &CoreGraph, out: &mut HashSet<OutputPort>) {
@@ -389,8 +372,9 @@ impl Document {
     }
 
     /// The ports whose pushed values the UI must keep: pinned previews plus
-    /// open viewer tabs. One document walk, so per-value ingest filtering
-    /// tests a set rather than re-walking per push.
+    /// open viewer tabs. Collected in one document walk — the pinned side
+    /// recurses every nested graph, so a per-port predicate called from a
+    /// loop re-walked the whole document per item.
     pub(crate) fn retained_output_ports(&self) -> HashSet<OutputPort> {
         let mut retained = self.pinned_outputs();
         retained.extend(self.viewer_outputs());
@@ -402,10 +386,6 @@ impl Document {
             TabRef::ImageViewer(port) => Some(port),
             _ => None,
         })
-    }
-
-    pub(crate) fn retains_output_resource(&self, port: OutputPort) -> bool {
-        self.is_output_pinned(port) || self.viewer_outputs().any(|viewer_port| viewer_port == port)
     }
 
     /// Ensure a `GraphView` exists for a local graph interior,
@@ -1062,12 +1042,12 @@ mod tests {
         let mut doc = Document::default();
         let root_node = add_node_at(&mut doc, Vec2::ZERO);
         let root_port = OutputPort::new(root_node, 0);
-        assert!(!doc.retains_output_resource(root_port));
+        assert!(!doc.retained_output_ports().contains(&root_port));
 
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
-        assert!(doc.retains_output_resource(root_port));
+        assert!(doc.retained_output_ports().contains(&root_port));
 
         let def_id = doc.create_graph(GraphRef::Main).unwrap();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
@@ -1076,10 +1056,10 @@ mod tests {
         let nested_port = OutputPort::new(nested_node_id, 0);
         definition.body.set_output_pinned(nested_port, true);
         assert!(
-            doc.is_output_pinned(nested_port),
+            doc.pinned_outputs().contains(&nested_port),
             "pins in nested authoring graphs retain their presentation resource"
         );
-        assert!(doc.retains_output_resource(nested_port));
+        assert!(doc.retained_output_ports().contains(&nested_port));
     }
 
     #[test]
