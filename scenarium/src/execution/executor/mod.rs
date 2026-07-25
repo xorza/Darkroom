@@ -388,7 +388,7 @@ pub(crate) mod test_support {
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
         pub(crate) fn ran(&self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> bool {
-            let node = program.index[&e_node_id];
+            let node = program.e_node_index[&e_node_id];
             self.outcomes.values.get(node.idx()).is_none_or(|outcome| {
                 matches!(
                     outcome,

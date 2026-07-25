@@ -394,8 +394,8 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     let flat_input = |g: &Graph, node: NodeId| {
         assert!(g.validate_for_execution(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node =
-            &compiled.program[compiled.program.index[&ExecutionNodeId::from_authoring(&[node])]];
+        let e_node = &compiled.program
+            [compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[node])]];
         compiled.program.inputs[e_node.inputs.start as usize]
             .binding
             .clone()
@@ -700,8 +700,8 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     let sink_binding = |g: &Graph| {
         let mut compiler = Compiler::default();
         let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node =
-            &compiled.program[compiled.program.index[&ExecutionNodeId::from_authoring(&[sink])]];
+        let e_node = &compiled.program
+            [compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[sink])]];
         match &compiled.program.inputs[e_node.inputs.start as usize].binding {
             ExecutionBinding::Bind(addr) => {
                 FlatSink::Bound(compiled.program.e_node_ids[addr.node_idx])

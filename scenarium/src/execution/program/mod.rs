@@ -105,7 +105,7 @@ pub(crate) struct ExecutionProgram {
     pub(crate) e_node_ids: NodeColumn<ExecutionNodeId>,
     /// Id → `NodeIdx`, for resolving host-supplied identities once per use;
     /// nothing per-run iterates or rebuilds it.
-    pub(crate) index: HashMap<ExecutionNodeId, NodeIdx>,
+    pub(crate) e_node_index: HashMap<ExecutionNodeId, NodeIdx>,
     pub(crate) inputs: Pool<ExecutionInput>,
     pub(crate) events: Pool<ExecutionEvent>,
     /// Each node's resolved declared output types (wildcards followed) and pin bits,
@@ -135,7 +135,7 @@ impl ExecutionProgram {
             "program node count must fit in u32"
         );
         let node_idx = NodeIdx(self.e_nodes.len() as u32);
-        let previous = self.index.insert(id, node_idx);
+        let previous = self.e_node_index.insert(id, node_idx);
         assert!(previous.is_none(), "flattened node ids must be unique");
         self.e_node_ids.values.push(id);
         self.e_nodes.push(e_node);
@@ -147,7 +147,7 @@ impl ExecutionProgram {
     pub(crate) fn adopt_nodes(&mut self, e_nodes: HashMap<ExecutionNodeId, ExecutionNode>) {
         self.e_nodes.clear();
         self.e_node_ids.values.clear();
-        self.index.clear();
+        self.e_node_index.clear();
         let mut entries: Vec<_> = e_nodes.into_iter().collect();
         entries.sort_unstable_by_key(|(id, _)| *id);
         for (id, e_node) in entries {
@@ -160,7 +160,7 @@ impl ExecutionProgram {
     /// run. Every target exists: flatten only records producers it emitted.
     pub(crate) fn intern_bindings(&mut self, binds: &[(u32, ExecutionOutputPort)]) {
         for &(input_idx, port) in binds {
-            let node_idx = self.index[&port.e_node_id];
+            let node_idx = self.e_node_index[&port.e_node_id];
             self.inputs[input_idx as usize].binding = ExecutionBinding::Bind(OutputAddr {
                 node_idx,
                 port_idx: port.port_idx as u32,
@@ -175,10 +175,10 @@ impl ExecutionProgram {
         subs: impl IntoIterator<Item = (ExecutionEventPort, ExecutionNodeId)>,
     ) {
         for (event, subscriber) in subs {
-            let Some(&subscriber_idx) = self.index.get(&subscriber) else {
+            let Some(&subscriber_idx) = self.e_node_index.get(&subscriber) else {
                 continue;
             };
-            let Some(&emitter_idx) = self.index.get(&event.e_node_id) else {
+            let Some(&emitter_idx) = self.e_node_index.get(&event.e_node_id) else {
                 continue;
             };
             let events = self.e_nodes[emitter_idx.idx()].events;
@@ -259,11 +259,11 @@ pub(crate) mod test_support {
     /// their stable id; production paths carry `NodeIdx` instead.
     impl ExecutionProgram {
         pub(crate) fn by_id(&self, id: ExecutionNodeId) -> &ExecutionNode {
-            &self.e_nodes[self.index[&id].idx()]
+            &self.e_nodes[self.e_node_index[&id].idx()]
         }
 
         pub(crate) fn by_id_mut(&mut self, id: ExecutionNodeId) -> &mut ExecutionNode {
-            let node_idx = self.index[&id];
+            let node_idx = self.e_node_index[&id];
             &mut self.e_nodes[node_idx.idx()]
         }
     }

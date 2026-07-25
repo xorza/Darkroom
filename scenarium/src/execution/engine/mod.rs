@@ -262,7 +262,7 @@ pub(crate) mod test_support {
             let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
-                    nodes: nodes.into_iter().collect(),
+                    e_node_ids: nodes.into_iter().collect(),
                     ..Default::default()
                 },
                 None,
@@ -284,7 +284,7 @@ pub(crate) mod test_support {
                 sinks,
                 event_sources,
                 events: events.to_vec(),
-                nodes: Vec::new(),
+                e_node_ids: Vec::new(),
             };
             self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
             self.resource_stamps = RunResourceStamps::default();
@@ -341,7 +341,7 @@ pub(crate) mod test_support {
             &self,
             e_node_id: ExecutionNodeId,
         ) -> Option<ArgumentValues> {
-            self.compiled.program.index.get(&e_node_id)?;
+            self.compiled.program.e_node_index.get(&e_node_id)?;
             Some(self.argument_values_at(e_node_id))
         }
 

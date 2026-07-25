@@ -62,7 +62,7 @@ impl PendingRun {
                 sinks: intent.execute_sinks,
                 event_sources: start_event_loop || intent.execute_event_sources,
                 events: intent.events.drain(..).collect(),
-                nodes: intent.execute_nodes.drain(..).collect(),
+                e_node_ids: intent.execute_nodes.drain(..).collect(),
             },
             start_event_loop,
         })
@@ -533,7 +533,7 @@ mod tests {
         assert!(run.seeds.event_sources);
         assert!(!run.seeds.sinks);
         assert!(run.seeds.events.is_empty());
-        assert!(run.seeds.nodes.is_empty());
+        assert!(run.seeds.e_node_ids.is_empty());
 
         let e_node_id = ExecutionNodeId::unique();
         let mut explicit = BatchIntent::default();
@@ -546,7 +546,7 @@ mod tests {
         let run = PendingRun::take(&mut explicit, EventLoopTransition::Preserve).unwrap();
         assert!(!run.start_event_loop);
         assert!(!run.seeds.event_sources);
-        assert_eq!(run.seeds.nodes, [e_node_id]);
+        assert_eq!(run.seeds.e_node_ids, [e_node_id]);
     }
 
     #[test]

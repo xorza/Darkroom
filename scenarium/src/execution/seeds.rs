@@ -18,7 +18,7 @@ pub struct RunSeeds {
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
     /// [`Error::NodeSeedNotFound`](crate::execution::error::Error::NodeSeedNotFound).
-    pub nodes: Vec<ExecutionNodeId>,
+    pub e_node_ids: Vec<ExecutionNodeId>,
 }
 
 impl RunSeeds {
@@ -29,9 +29,9 @@ impl RunSeeds {
         }
     }
 
-    pub fn nodes(nodes: Vec<ExecutionNodeId>) -> Self {
+    pub fn nodes(e_node_ids: Vec<ExecutionNodeId>) -> Self {
         Self {
-            nodes,
+            e_node_ids,
             ..Self::default()
         }
     }
