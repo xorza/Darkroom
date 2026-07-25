@@ -1,6 +1,5 @@
 //! Structural validation for documents and their per-graph editor views.
 
-use common::is_debug;
 use scenarium::{Graph as CoreGraph, GraphId, GraphValidationError, NodeId, OutputPort};
 
 use crate::core::document::dock::DockValidationError;
@@ -123,14 +122,5 @@ impl Document {
             }
         }
         Ok(())
-    }
-
-    /// Debug-only assert form of [`Self::validate`].
-    pub(crate) fn validate_debug(&self) {
-        if !is_debug() {
-            return;
-        }
-        self.validate()
-            .expect("document structural invariant violated");
     }
 }

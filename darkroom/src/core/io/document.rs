@@ -91,6 +91,16 @@ pub(crate) enum DocumentSaveError {
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
+    /// Refused *before* writing, so a document that the next [`load`]
+    /// would reject can never replace the file already on disk. Same
+    /// predicate as [`DocumentLoadError::InvalidDocument`] — the two
+    /// directions can't drift.
+    #[error("{path}: {source}", path = .path.display())]
+    InvalidDocument {
+        path: PathBuf,
+        #[source]
+        source: DocumentValidationError,
+    },
     #[error("{path}: {source}", path = .path.display())]
     Publish {
         path: PathBuf,
@@ -179,7 +189,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
 
 pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveError> {
     ensure_extension(path)?;
-    document.validate_debug();
+    document
+        .validate()
+        .map_err(|source| DocumentSaveError::InvalidDocument {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
     let json =
         serde_json::to_vec_pretty(document).map_err(|source| DocumentSaveError::Serialize {
@@ -311,6 +326,44 @@ mod tests {
             with_extension(PathBuf::from("scene.DARKROOM")),
             PathBuf::from("scene.DARKROOM")
         );
+    }
+
+    #[test]
+    fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
+        // Save validates with the same predicate as load, so a document
+        // the next launch would refuse can never replace the one on disk.
+        // Before this, save only asserted in debug builds — a release
+        // build wrote the bad project happily and failed at reopen.
+        let path = test_output_path("darkroom_document/refused.darkroom");
+        let good = Document::default();
+        save(&good, &path).expect("a valid document saves");
+        let on_disk = std::fs::read(&path).unwrap();
+
+        let mut bad = Document::default();
+        bad.graph.insert_graph(
+            GraphId::unique(),
+            GraphDef {
+                interface: GraphInterface {
+                    origin: Some(GraphId::nil()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        assert!(
+            matches!(
+                save(&bad, &path).unwrap_err(),
+                DocumentSaveError::InvalidDocument { path: p, source }
+                    if p == path && source.to_string().contains("nil origin")
+            ),
+            "the refusal names the path and the reason"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            on_disk,
+            "the previously saved document is still intact"
+        );
+        assert_eq!(load(&path).unwrap(), good, "and still loads");
     }
 
     #[test]

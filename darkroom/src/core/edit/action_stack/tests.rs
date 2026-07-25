@@ -179,7 +179,7 @@ fn tab_ops_follow_their_tab_across_a_layout_change() {
         [main],
         "the op closed b, not whatever now occupies slot 2"
     );
-    doc.validate_debug();
+    doc.validate().unwrap();
 }
 
 #[test]
