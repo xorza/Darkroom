@@ -360,7 +360,7 @@ pub(crate) struct Theme {
     /// Dotted backdrop grid: world-space base spacing between dots, and
     /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into
-    /// noise — see `gui::background`. (Dot colour is `colors.canvas_dot`.)
+    /// noise — see `gui::canvas::background`. (Dot colour is `colors.canvas_dot`.)
     pub(crate) canvas_dot_spacing: f32,
     pub(crate) canvas_dot_radius: f32,
     pub(crate) connection_width: f32,

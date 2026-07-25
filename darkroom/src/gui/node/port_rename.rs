@@ -1,6 +1,6 @@
 //! Inline rename for a graph boundary port's name. A plain label that
 //! swaps to a `TextEdit` on double-click (via the shared
-//! [`crate::gui::node::inline_rename`] widget); commit emits an
+//! [`crate::gui::widgets::inline_rename`] widget); commit emits an
 //! [`Intent::RenameBoundaryPort`]. Used only by the boundary
 //! (`GraphInput`/`GraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.

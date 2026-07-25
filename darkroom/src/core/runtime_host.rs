@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::DiskStore;
-use scenarium::{CompiledGraph, Compiler, ExecutionNodeId, WorkerReport};
+use scenarium::{CompiledGraph, Compiler, ExecutionNodeId, WorkerExited, WorkerReport};
 use scenarium::{Graph, GraphDef, NodeId};
 
 use crate::core::document::{Document, GraphRef};
@@ -155,31 +155,35 @@ impl RuntimeHost {
     }
 
     /// Compile `graph` against the current library and send it to the worker
-    /// for one evaluation. Returns whether it was sent — a compile failure is
-    /// reported to [`Self::status`] synchronously and nothing reaches the
-    /// worker. Results arrive via [`Self::drain_worker`].
+    /// for one evaluation. `false` means the compile failed — it is reported
+    /// to [`Self::status`] synchronously and nothing reaches the worker.
+    /// Results arrive via [`Self::drain_worker`].
     pub(crate) fn run_once(&mut self, graph: &Graph) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.install(compiled);
-        self.worker.run_sinks();
+        self.dispatch(|worker| {
+            worker.install(compiled)?;
+            worker.run_sinks()
+        });
         true
     }
 
     /// Compile `graph` and evaluate the root execution node for authored
     /// `node_id`, delivering its outputs for the preview fetch ("run to this node").
     /// The explicit node seed overrides disabled occurrences during planning.
-    /// Returns whether it was sent — a compile failure is reported to
-    /// [`Self::status`] and nothing reaches the worker. Results arrive via
+    /// `false` means the compile failed — it is reported to [`Self::status`]
+    /// and nothing reaches the worker. Results arrive via
     /// [`Self::drain_worker`].
     pub(crate) fn run_node(&mut self, graph: &Graph, node_id: NodeId) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
         let e_node_id = ExecutionNodeId::from_authoring(&[node_id]);
-        self.worker.install(compiled);
-        self.worker.run_node(e_node_id);
+        self.dispatch(|worker| {
+            worker.install(compiled)?;
+            worker.run_node(e_node_id)
+        });
         true
     }
 
@@ -189,7 +193,7 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.install_and_evict_cache(compiled, node_id);
+        self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
         true
     }
 
@@ -201,20 +205,39 @@ impl RuntimeHost {
 
     /// Start the event loop on `graph` (compiles + loads it, then fires
     /// events). The worker's `Update` tears down any prior loop first.
-    /// Returns whether it was sent — a compile failure is reported to
-    /// [`Self::status`] and the loop's running state is untouched.
+    /// `false` means the compile failed — it is reported to [`Self::status`]
+    /// and the loop's running state is untouched.
     pub(crate) fn start_event_loop(&mut self, graph: &Graph) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.install(compiled);
-        self.worker.start_event_loop();
+        self.dispatch(|worker| {
+            worker.install(compiled)?;
+            worker.start_event_loop()
+        });
         true
     }
 
-    /// Stop the event loop.
+    /// Stop the event loop. Best-effort: a worker that has already exited
+    /// has no loop left to stop, which is the outcome the caller wanted.
     pub(crate) fn stop_event_loop(&self) {
         self.worker.stop_event_loop();
+    }
+
+    /// Send a batch of worker commands.
+    ///
+    /// A send only fails once the worker task is gone, and the host owns
+    /// that task for the whole session — it is stopped exactly once, in
+    /// [`WorkerBridge`]'s `Drop`. Reaching here therefore means the worker
+    /// panicked: a broken invariant, not a condition to report and carry
+    /// on from. Nothing can compute afterwards and no report will ever
+    /// arrive, so the honest response is to fail loudly rather than leave
+    /// the editor alive and inert.
+    fn dispatch(&self, commands: impl FnOnce(&WorkerBridge) -> Result<(), WorkerExited>) {
+        if let Err(error) = commands(&self.worker) {
+            tracing::error!(%error, "worker task is gone; no command can be delivered");
+            panic!("worker exited while the host was still running: {error}");
+        }
     }
 
     /// Non-blocking drain of worker results posted since the last frame.
