@@ -218,37 +218,26 @@ impl GraphUI {
         self.gestures
             .new_node_ui
             .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
-        self.gestures.graph_menu.apply(ui, scene, out, cmd);
-        self.gestures.node_menu.apply(ui, scene, out, cmd);
-        // A click on an FsPath input's pick button surfaces a PickInputPath
-        // command that App handles after authoring.
-        // The node UI returns a domain request; the canvas — which owns the
-        // command channel — translates it, so node code never names
-        // `AppCommand`. A command already set this frame wins.
-        if cmd.is_none()
-            && let Some(req) = emit_path_picks(ui, scene)
-        {
-            *cmd = Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
-        }
-        // A header play-chip click runs that node's cone — the same command
-        // the context menu's "Run to this node" resolves to.
-        if cmd.is_none()
-            && let Some(node_id) = emit_play_clicks(ui, scene)
-        {
-            *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
-        }
-        if cmd.is_none()
-            && let Some(node_id) = emit_cache_evictions(ui, scene)
-        {
-            *cmd = Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
-        }
-        // A pin's own header refresh-chip click re-runs the node its output
-        // came from, refreshing the value the card is showing — same
-        // command, same translation point.
-        if cmd.is_none()
-            && let Some(node_id) = pin_ui::emit_pin_refresh_clicks(ui, scene)
-        {
-            *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
+        // Exactly one `AppCommand` leaves a frame, and this is the single
+        // place that decides which: sources in the precedence order written
+        // here, first to claim it wins, nothing below able to overwrite a
+        // decision above. That includes a command the *caller* already
+        // placed — the menu bar records before this — so the canvas never
+        // clobbers one.
+        //
+        // The two context menus are polled unconditionally even so. Their
+        // popups own a lifecycle that has to record every frame, and a
+        // pick's other effects (a `DetachGraph` intent, a stashed
+        // `NodeMenuAction`) still land; only the command they would have
+        // contributed is dropped when the slot is already taken. The chip
+        // scans below them are pure reads, so those are skipped outright.
+        let menu_command = self
+            .gestures
+            .graph_menu
+            .apply(ui, scene, out)
+            .or(self.gestures.node_menu.apply(ui, scene, out));
+        if cmd.is_none() {
+            *cmd = menu_command.or_else(|| emit_chip_command(ui, scene));
         }
         // Bake the snap target into `CanvasGeometry.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
@@ -485,6 +474,38 @@ fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
     }
     if resp.left.clicked() {
         return Some(CanvasGesture::Deselect);
+    }
+    None
+}
+
+/// The one `AppCommand` a chip click in the recorded tree can produce this
+/// frame: an `FsPath` input's pick button, a node header's play or
+/// cache-eviction chip, or a pin card's refresh chip. First hit in that
+/// order wins.
+///
+/// Each scan surfaces only a domain fact — which node to run, which port to
+/// pick a path for — and naming `AppCommand` is the canvas's job, since it
+/// owns the command channel. So the translation lives here rather than in
+/// `node` or `pin_ui`. All four are pure reads over last frame's responses,
+/// which is why [`GraphUI::frame`] can skip the whole group once something
+/// else has claimed the frame.
+fn emit_chip_command(ui: &Ui, scene: &Scene) -> Option<AppCommand> {
+    if let Some(req) = emit_path_picks(ui, scene) {
+        return Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
+    }
+    // A header play-chip click runs that node's cone — the same command the
+    // context menu's "Run to this node" resolves to.
+    if let Some(node_id) = emit_play_clicks(ui, scene) {
+        return Some(AppCommand::Run(RunCommand::Node(node_id)));
+    }
+    if let Some(node_id) = emit_cache_evictions(ui, scene) {
+        return Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
+    }
+    // A pin's own header refresh chip re-runs the node its output came from,
+    // refreshing the value the card is showing — same command, same
+    // translation point.
+    if let Some(node_id) = pin_ui::emit_pin_refresh_clicks(ui, scene) {
+        return Some(AppCommand::Run(RunCommand::Node(node_id)));
     }
     None
 }
