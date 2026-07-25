@@ -9,7 +9,7 @@ use glam::Vec2;
 
 use crate::core::document::Viewport;
 use crate::gui::canvas::to_world;
-use crate::gui::canvas::wire::CubicHandles;
+use crate::gui::canvas::wire::Wire;
 
 /// World-space slack added around the viewport so paint that extends past
 /// an element's layout rect (status-glow shadow, wire stroke width,
@@ -48,24 +48,14 @@ impl CullRegion {
         rect.is_none_or(|rect| self.keeps_rect(rect))
     }
 
-    pub(super) fn keeps_wire(self, p0: Vec2, handles: &CubicHandles, p3: Vec2) -> bool {
-        // A cubic stays inside its control-point hull, so this bound is conservative.
-        let min = p0.min(handles.p1).min(handles.p2).min(p3);
-        let max = p0.max(handles.p1).max(handles.p2).max(p3);
-        self.keeps_rect(Rect {
-            min,
-            size: Size::new(max.x - min.x, max.y - min.y),
-        })
+    pub(super) fn keeps_wire(self, wire: &Wire) -> bool {
+        self.keeps_rect(wire.hull())
     }
 
-    pub(super) fn keeps_pin(
-        self,
-        card: Rect,
-        port_center: Vec2,
-        handles: &CubicHandles,
-        wire_end: Vec2,
-    ) -> bool {
-        self.keeps_rect(card) || self.keeps_wire(port_center, handles, wire_end)
+    /// A pinned output stays recorded while *either* half of its glyph is
+    /// visible: the preview card or the bezier reaching back to its port.
+    pub(super) fn keeps_pin(self, card: Rect, wire: &Wire) -> bool {
+        self.keeps_rect(card) || self.keeps_wire(wire)
     }
 
     fn keeps_rect(self, rect: Rect) -> bool {
@@ -76,7 +66,6 @@ impl CullRegion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::canvas::wire::cubic_handles;
 
     #[test]
     fn region_inverts_the_canvas_transform() {
@@ -137,33 +126,28 @@ mod tests {
         let region = CullRegion {
             visible: Some(Rect::new(0.0, 0.0, 100.0, 100.0)),
         };
-        let flat = |x0: f32, x1: f32| {
-            // Level wire: zero-height hull box, handles between the ends.
-            let h = CubicHandles {
-                p1: Vec2::new(x0 + 10.0, 50.0),
-                p2: Vec2::new(x1 - 10.0, 50.0),
-            };
-            (Vec2::new(x0, 50.0), h, Vec2::new(x1, 50.0))
+        // Level wire: zero-height hull box, handles between the ends.
+        let flat = |x0: f32, x1: f32| Wire {
+            p0: Vec2::new(x0, 50.0),
+            p1: Vec2::new(x0 + 10.0, 50.0),
+            p2: Vec2::new(x1 - 10.0, 50.0),
+            p3: Vec2::new(x1, 50.0),
         };
 
         // Both endpoints off-screen left/right, hull crosses the view.
-        let (p0, h, p3) = flat(-50.0, 150.0);
-        assert!(region.keeps_wire(p0, &h, p3));
+        assert!(region.keeps_wire(&flat(-50.0, 150.0)));
         // Entirely right of the view.
-        let (p0, h, p3) = flat(200.0, 300.0);
-        assert!(!region.keeps_wire(p0, &h, p3));
+        assert!(!region.keeps_wire(&flat(200.0, 300.0)));
         // Endpoints outside the view, but a handle drags the hull in —
         // the curve can bow into the viewport, so it must not cull.
-        let p0 = Vec2::new(150.0, -50.0);
-        let p3 = Vec2::new(150.0, 150.0);
-        let h = CubicHandles {
+        assert!(region.keeps_wire(&Wire {
+            p0: Vec2::new(150.0, -50.0),
             p1: Vec2::new(50.0, -50.0),
             p2: Vec2::new(50.0, 150.0),
-        };
-        assert!(region.keeps_wire(p0, &h, p3));
+            p3: Vec2::new(150.0, 150.0),
+        }));
         // No viewport → no culling.
-        let (p0, h, p3) = flat(200.0, 300.0);
-        assert!(CullRegion { visible: None }.keeps_wire(p0, &h, p3));
+        assert!(CullRegion { visible: None }.keeps_wire(&flat(200.0, 300.0)));
     }
 
     #[test]
@@ -193,13 +177,9 @@ mod tests {
         ];
 
         for (label, port_center, top_left, expected) in cases {
-            let handles = cubic_handles(port_center, top_left);
             let card = Rect::new(top_left.x, top_left.y, 280.0, 200.0);
-            assert_eq!(
-                region.keeps_pin(card, port_center, &handles, top_left),
-                expected,
-                "{label}"
-            );
+            let wire = Wire::data(port_center, top_left);
+            assert_eq!(region.keeps_pin(card, &wire), expected, "{label}");
         }
     }
 }

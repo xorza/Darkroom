@@ -8,11 +8,9 @@ use scenarium::{Binding, InputPort, closes_data_cycle};
 use crate::core::document::{BoundarySide, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{WireEmphasis, add_cubic_wire, cubic_handles};
-use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
+use crate::gui::canvas::wire::{Wire, WirePass};
+use crate::gui::canvas::{free_end, node_ports, outer_canvas_widget_id};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
@@ -267,23 +265,11 @@ impl ConnectionUI {
     }
 
     /// Paint every permanent connection on the current scene retained by
-    /// `cull`, marking those the active breaker crosses as
+    /// the pass's cull region, marking those the active breaker crosses as
     /// broken via `probe.mark_broken_input` for the breaker's
-    /// release-frame drain. A culled wire skips the breaker probe too —
-    /// the scribble is always on-screen, so it can't cross an off-screen
-    /// curve.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn draw(
-        &self,
-        ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        scene: &Scene,
-        geometry: &CanvasGeometry,
-        cull: CullRegion,
-        probe: &mut BreakerProbe<'_>,
-        emphasis: &WireEmphasis,
-    ) {
-        let width = ctx.theme.connection_width;
+    /// release-frame drain.
+    pub(super) fn draw(&self, ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+        let (theme, scene) = (pass.theme, pass.scene);
         for c in &scene.connections {
             let src_port = PortRef {
                 node_id: c.src.node_id,
@@ -296,18 +282,19 @@ impl ConnectionUI {
                 port_idx: c.tgt.port_idx,
             };
             let (Some(p0), Some(p3)) = (
-                geometry.ports.center(src_port),
-                geometry.ports.center(tgt_port),
+                pass.geometry.ports.center(src_port),
+                pass.geometry.ports.center(tgt_port),
             ) else {
                 continue;
             };
-            let handles = cubic_handles(p0, p3);
-            if !cull.keeps_wire(p0, &handles, p3) {
+            let wire = Wire::data(p0, p3);
+            let endpoint_hover = pass.geometry.ports.is_hovered(src_port)
+                || pass.geometry.ports.is_hovered(tgt_port);
+            let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
                 continue;
-            }
-            let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
-            if broken {
-                probe.mark_broken_input(c.tgt);
+            };
+            if stroke.broken {
+                pass.probe.mark_broken_input(c.tgt);
             }
             // Gradient from output (p0) → input (p3) port color so each
             // end of a connection visually matches the port it touches —
@@ -317,36 +304,31 @@ impl ConnectionUI {
             // `CurveBrush::Linear` along the curve parameter `t` and ignores
             // `angle` — we pass 0.0. Broken-state still wins as a flat color
             // so the alarm read doesn't get diluted by the gradient.
-            //
-            // Emphasis tiers resolve through the shared `WireEmphasis` (see
-            // wire.rs). A broken wire is the alarm: full color and full
-            // width against the (breaker-faded) rest of the set.
-            let endpoint_hover =
-                geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
-            let hovered = !broken && emphasis.hovered(endpoint_hover);
             let src_ty = port_data_type(scene, src_port).unwrap_or_default();
             let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
-            let brush = if broken {
-                CurveBrush::Solid(ctx.theme.colors.connection_broken)
+            let brush = if stroke.broken {
+                CurveBrush::Solid(theme.colors.connection_broken)
             } else if !tgt_ty.compatible_with(&src_ty) {
                 // A wildcard retype upstream left this wire type-mismatched.
                 // Nothing severs it — it flattens as unbound (drift
                 // tolerance) — so paint it in the missing-input warning
                 // color, matching the port glow the run will report.
-                CurveBrush::Solid(emphasis.tint(ctx.theme.colors.exec_missing_glow, hovered))
+                CurveBrush::Solid(
+                    pass.emphasis
+                        .tint(theme.colors.exec_missing_glow, stroke.hovered),
+                )
             } else {
-                let a = emphasis.tint(
-                    port_color(ctx.theme, &src_ty, PortKind::Output, false),
-                    hovered,
+                let a = pass.emphasis.tint(
+                    port_color(theme, &src_ty, PortKind::Output, false),
+                    stroke.hovered,
                 );
-                let b = emphasis.tint(
-                    port_color(ctx.theme, &tgt_ty, PortKind::Input, false),
-                    hovered,
+                let b = pass.emphasis.tint(
+                    port_color(theme, &tgt_ty, PortKind::Input, false),
+                    stroke.hovered,
                 );
                 port_gradient(a, b)
             };
-            let w = emphasis.width(width, hovered || broken);
-            add_cubic_wire(ui, p0, p3, handles, w, brush);
+            wire.add(ui, stroke.width, brush);
         }
     }
 
@@ -367,11 +349,9 @@ impl ConnectionUI {
         let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
-        let end = match state.snap_end {
-            Some(snap) => geometry.ports.center(snap),
-            None => pointer_world(ui, scene, canvas_origin),
+        let Some(end) = free_end(ui, scene, canvas_origin, &geometry.ports, state.snap_end) else {
+            return;
         };
-        let Some(end) = end else { return };
         // Orient handles by kind: outputs grow rightward, inputs grow
         // leftward. Same dx algebra as `draw` so the preview matches
         // the eventual permanent curve exactly when snapped.
@@ -382,15 +362,8 @@ impl ConnectionUI {
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
         let drag_ty = port_data_type(scene, start_port).unwrap_or_default();
-        let wire = port_color(ctx.theme, &drag_ty, start_port.kind, false);
-        add_cubic_wire(
-            ui,
-            p0,
-            p3,
-            cubic_handles(p0, p3),
-            ctx.theme.connection_width,
-            port_gradient(wire, wire),
-        );
+        let color = port_color(ctx.theme, &drag_ty, start_port.kind, false);
+        Wire::data(p0, p3).add(ui, ctx.theme.connection_width, port_gradient(color, color));
     }
 }
 
@@ -447,7 +420,6 @@ fn scan_snap_target(
     scene: &Scene,
     start: PortRef,
 ) -> Option<PortRef> {
-    let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
     // snaps anywhere, so its release falls through to the set-const gesture.
@@ -460,52 +432,46 @@ fn scan_snap_target(
     // the other. The only boundary→boundary link possible is exactly that
     // passthrough, so a blanket reject is precise.
     let start_boundary = scene.nodes.get(&start.node_id).is_some_and(|n| n.boundary);
-    let start_type = port_data_type(scene, start);
-    for n in scene.nodes.values() {
-        if n.id == start.node_id {
-            continue;
-        }
-        if start_boundary && n.boundary {
-            continue;
-        }
-        for port in node_ports(n, want_kind) {
-            // A const-only input is never a valid wire target.
-            if input_const_only(scene, port) {
-                continue;
-            }
-            if geometry.ports.contains_pointer(port, pointer) {
-                // Reject a drop onto an incompatible port so the wire
-                // won't latch. Geometrically only one port sits under the
-                // pointer, so a reject here falls through to `None` (drop)
-                // rather than snapping elsewhere.
-                let compatible = match (&start_type, port_data_type(scene, port)) {
-                    (Some(a), Some(b)) => a.compatible_with(&b),
-                    // Missing type info (port not in the scene this frame)
-                    // — don't block; let the intent layer decide.
-                    _ => true,
-                };
-                // ...and reject a drop that would close a data-flow cycle: the
-                // planner rejects a cyclic graph outright (`CycleDetected`) and
-                // the intent layer refuses to commit one, so the wire must never
-                // latch. `start.kind` fixes which side is the producer (output)
-                // and which the consumer (input). `scene.connections` is the
-                // active graph's edge mirror, fed to the same scenarium check
-                // the intent layer uses.
-                let (producer, consumer) = match start.kind {
-                    PortKind::Output => (start.node_id, port.node_id),
-                    PortKind::Input => (port.node_id, start.node_id),
-                };
-                let edges = scene
-                    .connections
-                    .iter()
-                    .map(|c| (c.src.node_id, c.tgt.node_id));
-                if compatible && !closes_data_cycle(edges, producer, consumer) {
-                    return Some(port);
-                }
-            }
-        }
-    }
-    None
+    let candidates = scene
+        .nodes
+        .values()
+        .filter(|n| n.id != start.node_id && !(start_boundary && n.boundary))
+        .flat_map(|n| node_ports(n, start.kind.opposite()))
+        // A const-only input is never a valid wire target.
+        .filter(|&port| !input_const_only(scene, port));
+    // Geometrically only one port sits under the pointer, so a port the
+    // pointer is over but that `accepts_wire` rejects falls through to
+    // `None` (drop) rather than snapping elsewhere.
+    geometry
+        .ports
+        .first_containing(pointer, candidates)
+        .filter(|&port| accepts_wire(scene, start, port))
+}
+
+/// Whether a wire dragged from `start` may land on `port` — the two
+/// rejections that outlive the geometric hit test in [`scan_snap_target`].
+fn accepts_wire(scene: &Scene, start: PortRef, port: PortRef) -> bool {
+    let compatible = match (port_data_type(scene, start), port_data_type(scene, port)) {
+        (Some(a), Some(b)) => a.compatible_with(&b),
+        // Missing type info (port not in the scene this frame) — don't
+        // block; let the intent layer decide.
+        _ => true,
+    };
+    // ...and reject a drop that would close a data-flow cycle: the planner
+    // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
+    // refuses to commit one, so the wire must never latch. `start.kind` fixes
+    // which side is the producer (output) and which the consumer (input).
+    // `scene.connections` is the active graph's edge mirror, fed to the same
+    // scenarium check the intent layer uses.
+    let (producer, consumer) = match start.kind {
+        PortKind::Output => (start.node_id, port.node_id),
+        PortKind::Input => (port.node_id, start.node_id),
+    };
+    let edges = scene
+        .connections
+        .iter()
+        .map(|c| (c.src.node_id, c.tgt.node_id));
+    compatible && !closes_data_cycle(edges, producer, consumer)
 }
 
 /// Whether the pointer is over the canvas but not over any node body —
