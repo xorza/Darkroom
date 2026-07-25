@@ -137,7 +137,7 @@ impl ExecutionProgram {
         let node_idx = NodeIdx(self.e_nodes.len() as u32);
         let previous = self.e_node_index.insert(id, node_idx);
         assert!(previous.is_none(), "flattened node ids must be unique");
-        self.e_node_ids.values.push(id);
+        self.e_node_ids.push(id);
         self.e_nodes.push(e_node);
         node_idx
     }
@@ -146,7 +146,7 @@ impl ExecutionProgram {
     /// the compiled artifact is deterministic regardless of flatten's walk.
     pub(crate) fn adopt_nodes(&mut self, e_nodes: HashMap<ExecutionNodeId, ExecutionNode>) {
         self.e_nodes.clear();
-        self.e_node_ids.values.clear();
+        self.e_node_ids.clear();
         self.e_node_index.clear();
         let mut entries: Vec<_> = e_nodes.into_iter().collect();
         entries.sort_unstable_by_key(|(id, _)| *id);

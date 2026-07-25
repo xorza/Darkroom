@@ -47,16 +47,11 @@ impl NodeOutcome {
 /// [`RunError::MissingLambda`] for a func with no implementation.
 pub(crate) fn mark_skipped(
     cache: &mut RuntimeCache,
-    program: &ExecutionProgram,
     outcomes: &mut NodeColumn<NodeOutcome>,
     node_idx: NodeIdx,
     error: RunError,
 ) {
-    cache
-        .slots
-        .get_mut(&program.e_node_ids[node_idx])
-        .unwrap()
-        .clear_output();
+    cache.slots[node_idx].clear_output();
     outcomes[node_idx] = NodeOutcome::Skipped { error };
 }
 

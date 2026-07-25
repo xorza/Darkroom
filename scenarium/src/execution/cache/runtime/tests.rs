@@ -23,10 +23,9 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
     OutputSnapshot::new(values)
 }
 
-fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> ExecutionNodeId {
-    let e_node_id = ExecutionNodeId::from_u128(id);
-    assert!(cache.slots.insert(e_node_id, slot).is_none());
-    e_node_id
+fn insert_slot(cache: &mut RuntimeCache, slot: RuntimeSlot) -> NodeIdx {
+    cache.slots.push(slot);
+    NodeIdx(cache.slots.len() as u32 - 1)
 }
 
 #[tokio::test]
@@ -44,13 +43,16 @@ async fn eviction_clears_only_the_output_cache() {
     slot.event_state.lock().await.set(23_u32);
 
     let mut cache = RuntimeCache::default();
-    let e_node_id = insert_slot(&mut cache, 1, slot);
-    let failures = cache.evict(&[e_node_id]).await;
+    let node_idx = insert_slot(&mut cache, slot);
+    let e_node_id = ExecutionNodeId::from_u128(1);
+    let mut program = ExecutionProgram::default();
+    program.push(e_node_id, ExecutionNode::default());
+    let failures = cache.evict(&program, &[e_node_id]).await;
 
     assert!(failures.is_empty());
-    assert!(matches!(cache.slots[&e_node_id].value, ValueState::Empty));
-    assert_eq!(cache.slots[&e_node_id].state.get::<u32>(), Some(&17));
-    let event_state = cache.slots[&e_node_id].event_state.lock().await;
+    assert!(matches!(cache.slots[node_idx].value, ValueState::Empty));
+    assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
+    let event_state = cache.slots[node_idx].event_state.lock().await;
     assert_eq!(event_state.get::<u32>(), Some(&23));
 }
 
@@ -66,7 +68,6 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     // 0: impure cone (no current digest) — never hits, even holding values.
     let impure = insert_slot(
         &mut cache,
-        1,
         RuntimeSlot {
             value: ValueState::Resident {
                 snapshot: complete_snapshot(out()),
@@ -79,7 +80,6 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     // 1: has a current digest but no cached values.
     let empty = insert_slot(
         &mut cache,
-        2,
         RuntimeSlot {
             current_digest: Some(d),
             ..Default::default()
@@ -88,7 +88,6 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     // 2: values present, but produced under a *different* digest (stale).
     let stale = insert_slot(
         &mut cache,
-        3,
         RuntimeSlot {
             current_digest: Some(d),
             value: ValueState::Resident {
@@ -101,7 +100,6 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     // 3: values produced under the current digest — the only hit.
     let current = insert_slot(
         &mut cache,
-        4,
         RuntimeSlot {
             current_digest: Some(d),
             value: ValueState::Resident {
@@ -208,7 +206,6 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         );
         insert_slot(
             &mut cache,
-            index as u128 + 1,
             RuntimeSlot {
                 current_digest: *current_digest,
                 value: ValueState::Resident {
@@ -223,9 +220,8 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
     cache.release_dead_outputs(&program);
 
     for (index, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
-        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
         assert_eq!(
-            cache.slots[&e_node_id].output_values().is_some(),
+            cache.slots[NodeIdx(index as u32)].output_values().is_some(),
             *expected_resident,
             "{name}"
         );
@@ -256,7 +252,6 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
         );
         insert_slot(
             &mut cache,
-            index as u128 + 1,
             RuntimeSlot {
                 current_digest: Some(digest),
                 value: ValueState::Resident {
@@ -273,12 +268,11 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
             .cache = *mode;
     }
 
-    cache.reconcile(&program);
+    cache.reconcile(&program, &program);
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
-        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
         assert_eq!(
-            cache.slots[&e_node_id].output_values().is_some(),
+            cache.slots[NodeIdx(index as u32)].output_values().is_some(),
             *expected_resident,
             "{mode:?}"
         );
@@ -300,9 +294,10 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     program.push(e_node_id, node(func_id, 0));
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&program);
+    cache.reconcile(&ExecutionProgram::default(), &program);
     let digest = Digest([5u8; 32]);
-    let slot = cache.slots.get_mut(&e_node_id).unwrap();
+    let node_idx = NodeIdx(0);
+    let slot = &mut cache.slots[node_idx];
     slot.state.set(17_u32);
     slot.event_state.lock().await.set(23_u32);
     slot.current_digest = Some(digest);
@@ -312,14 +307,10 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     };
 
     // Same (func, version): everything survives.
-    cache.reconcile(&program);
-    assert_eq!(cache.slots[&e_node_id].state.get::<u32>(), Some(&17));
+    cache.reconcile(&program, &program);
+    assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
-        cache.slots[&e_node_id]
-            .event_state
-            .lock()
-            .await
-            .get::<u32>(),
+        cache.slots[node_idx].event_state.lock().await.get::<u32>(),
         Some(&23),
         "a same-owner reconcile must keep event state"
     );
@@ -327,23 +318,23 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     // Bumped version: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the version.
     *program.by_id_mut(e_node_id) = node(func_id, 1);
-    cache.reconcile(&program);
+    cache.reconcile(&program, &program);
     assert!(
-        cache.slots[&e_node_id].state.is_none(),
+        cache.slots[node_idx].state.is_none(),
         "a version bump must drop the predecessor's state"
     );
-    assert!(cache.slots[&e_node_id].event_state.lock().await.is_none());
+    assert!(cache.slots[node_idx].event_state.lock().await.is_none());
     assert!(
-        cache.slots[&e_node_id].output_values().is_some(),
+        cache.slots[node_idx].output_values().is_some(),
         "reowning must not touch the digest-keyed value"
     );
 
     // Changed func id at the same version: state drops too.
-    cache.slots.get_mut(&e_node_id).unwrap().state.set(31_u32);
+    cache.slots[node_idx].state.set(31_u32);
     *program.by_id_mut(e_node_id) = node(FuncId::from_u128(78), 1);
-    cache.reconcile(&program);
+    cache.reconcile(&program, &program);
     assert!(
-        cache.slots[&e_node_id].state.is_none(),
+        cache.slots[node_idx].state.is_none(),
         "a func change must drop the predecessor's state"
     );
 }
@@ -352,29 +343,28 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
     let mut cache = RuntimeCache::default();
-    let e_node_id = insert_slot(
+    let node_idx = insert_slot(
         &mut cache,
-        1,
         RuntimeSlot {
             current_digest: Some(d),
             ..Default::default()
         },
     );
     assert!(
-        !cache.is_resident_hit(e_node_id, DEMANDED),
+        !cache.is_resident_hit(node_idx, DEMANDED),
         "empty slot misses"
     );
 
-    test_support::hydrate(&mut cache, e_node_id, complete_snapshot(out()), d);
+    test_support::hydrate(&mut cache, node_idx, complete_snapshot(out()), d);
     assert!(
-        cache.is_resident_hit(e_node_id, DEMANDED),
+        cache.is_resident_hit(node_idx, DEMANDED),
         "a slot hydrated under its current digest hits"
     );
 
     // Hydrating under a digest that is no longer current does not hit.
-    cache.slots.get_mut(&e_node_id).unwrap().current_digest = Some(Digest([9u8; 32]));
+    cache.slots[node_idx].current_digest = Some(Digest([9u8; 32]));
     assert!(
-        !cache.is_resident_hit(e_node_id, DEMANDED),
+        !cache.is_resident_hit(node_idx, DEMANDED),
         "current digest moved on ⇒ miss"
     );
 }
@@ -389,36 +379,22 @@ fn resident_hit_derives_coverage_from_values() {
     };
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
-    let e_node_id = insert_slot(&mut cache, 1, slot);
-    let mut program = ExecutionProgram::default();
-    let outputs = program
-        .outputs
-        .append([ExecutionOutput::default(), ExecutionOutput::default()]);
-    program.push(
-        e_node_id,
-        ExecutionNode {
-            outputs,
-            ..Default::default()
-        },
-    );
+    let node_idx = insert_slot(&mut cache, slot);
 
-    let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
+    let ValueState::Resident { snapshot, .. } = &cache.slots[node_idx].value else {
         panic!("the invocation result was stamped resident");
     };
     assert_eq!(snapshot.values[0].as_i64(), Some(10));
     assert!(matches!(snapshot.values[1], DynamicValue::Unbound));
 
-    assert!(cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
-    assert!(!cache.is_resident_hit(e_node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
+    assert!(cache.is_resident_hit(node_idx, &[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!cache.is_resident_hit(node_idx, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache.clear_output_port(
-        &program,
-        OutputAddr {
-            node_idx: NodeIdx(0),
-            port_idx: 0,
-        },
-    );
-    let ValueState::Resident { snapshot, .. } = &cache.slots[&e_node_id].value else {
+    cache.clear_output_port(OutputAddr {
+        node_idx,
+        port_idx: 0,
+    });
+    let ValueState::Resident { snapshot, .. } = &cache.slots[node_idx].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
     assert!(matches!(
@@ -464,7 +440,6 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     let mut cache = RuntimeCache::default();
     insert_slot(
         &mut cache,
-        1,
         RuntimeSlot {
             value: ValueState::Resident {
                 snapshot: OutputSnapshot::new(vec![DynamicValue::Unbound]),
@@ -489,13 +464,10 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            cache.clear_output_port(
-                &program,
-                OutputAddr {
-                    node_idx: NodeIdx(0),
-                    port_idx: 1,
-                },
-            );
+            cache.clear_output_port(OutputAddr {
+                node_idx: NodeIdx(0),
+                port_idx: 1,
+            });
         }))
         .is_err(),
         "a released output port must be in range"
@@ -554,7 +526,6 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
     insert_slot(
         &mut cache,
-        1,
         RuntimeSlot {
             current_digest: Some(d),
             value: ValueState::Resident {
@@ -575,7 +546,6 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     // Slot B: the *same* shared Arc again — must not be counted twice.
     insert_slot(
         &mut cache,
-        2,
         RuntimeSlot {
             current_digest: Some(d),
             value: ValueState::Resident {
@@ -586,11 +556,15 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
         },
     );
     // Slot C: empty — contributes zero.
-    insert_slot(&mut cache, 3, RuntimeSlot::default());
+    insert_slot(&mut cache, RuntimeSlot::default());
+    let mut program = ExecutionProgram::default();
+    for id in 1..=3u128 {
+        program.push(ExecutionNodeId::from_u128(id), ExecutionNode::default());
+    }
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
     let mut by_node = Vec::new();
-    let total = cache.resident_ram_stats(&mut by_node);
+    let total = cache.resident_ram_stats(&program, &mut by_node);
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);
 
@@ -613,7 +587,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     let capacity = by_node.capacity();
     let seen_capacity = cache.ram_seen.capacity();
     assert_eq!(
-        cache.resident_ram_stats(&mut by_node),
+        cache.resident_ram_stats(&program, &mut by_node),
         RamUsage { cpu: 105, gpu: 10 }
     );
     assert_eq!(by_node.as_ptr(), allocation);

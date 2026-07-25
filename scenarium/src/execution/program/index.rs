@@ -34,7 +34,7 @@ impl From<usize> for OutputIdx {
 /// their compiled output range, while individual entries require an [`OutputIdx`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OutputColumn<T> {
-    pub(crate) values: Vec<T>,
+    values: Vec<T>,
 }
 
 impl<T: Clone> OutputColumn<T> {
@@ -92,13 +92,45 @@ pub(crate) struct OutputAddr {
 /// resets are memsets and lookups are array reads, with no id hashing anywhere.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NodeColumn<T> {
-    pub(crate) values: Vec<T>,
+    values: Vec<T>,
 }
 
 impl<T: Clone> NodeColumn<T> {
     pub(crate) fn reset(&mut self, len: usize, value: T) {
         self.values.clear();
         self.values.resize(len, value);
+    }
+}
+
+impl<T> NodeColumn<T> {
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Append the entry for the next dense index — build-time only; per-run
+    /// columns size themselves with [`reset`](Self::reset).
+    pub(crate) fn push(&mut self, value: T) {
+        self.values.push(value);
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.values.clear();
+    }
+
+    /// The entry at `node_idx`, or `None` past the column's length — for
+    /// callers probing a column that may not span the program (an empty
+    /// pre-run column, a validation bounds check). In-range access uses
+    /// indexing.
+    pub(crate) fn get(&self, node_idx: NodeIdx) -> Option<&T> {
+        self.values.get(node_idx.idx())
+    }
+
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.values.iter()
+    }
+
+    pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, T> {
+        self.values.drain(..)
     }
 }
 
@@ -152,5 +184,16 @@ impl<T> OutputColumn<T> {
 
     pub(crate) fn slice_mut(&mut self, outputs: OutputRange) -> &mut [T] {
         &mut self.values[outputs.range()]
+    }
+}
+
+#[cfg(test)]
+mod test_support {
+    use crate::execution::program::index::OutputColumn;
+
+    impl<T> OutputColumn<T> {
+        pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
+            self.values.iter()
+        }
     }
 }

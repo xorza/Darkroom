@@ -71,18 +71,19 @@ impl ExecutionEngine {
     /// The plan isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable plan buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
-        self.compiled = compiled;
+        let previous = std::mem::replace(&mut self.compiled, compiled);
 
         // Realign the runtime cache to the new node set (preserve by id,
         // default new, trim gone).
-        self.cache.reconcile(&self.compiled.program);
+        self.cache
+            .reconcile(&previous.program, &self.compiled.program);
 
         self.compiled.validate_installed_debug(&self.cache);
     }
 
     pub(crate) async fn evict_cache(&mut self, node_ids: &[NodeId]) -> Vec<CacheEvictionFailure> {
         let e_node_ids = self.compiled.data_consumer_closure(node_ids);
-        self.cache.evict(&e_node_ids).await
+        self.cache.evict(&self.compiled.program, &e_node_ids).await
     }
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
@@ -151,7 +152,9 @@ impl ExecutionEngine {
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
-        outcome.cache_ram = self.cache.resident_ram_stats(&mut outcome.node_ram);
+        outcome.cache_ram = self
+            .cache
+            .resident_ram_stats(&self.compiled.program, &mut outcome.node_ram);
 
         outcome.triggered_events.append(&mut seeds.events);
 
@@ -188,7 +191,7 @@ pub(crate) mod test_support {
     use common::CancelToken;
 
     use crate::DynamicValue;
-    use crate::execution::cache::slot::{OutputSnapshot, ValueState};
+    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
     use crate::execution::compile;
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
@@ -353,20 +356,24 @@ pub(crate) mod test_support {
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(value) => Some(DynamicValue::from(value)),
-                    ExecutionBinding::Bind(address) => self.cache.slots
-                        [&self.compiled.program.e_node_ids[address.node_idx]]
+                    ExecutionBinding::Bind(address) => self.cache.slots[address.node_idx]
                         .output_values()
                         .and_then(|outputs| outputs.get(address.port_idx as usize))
                         .cloned(),
                 })
                 .collect();
 
-            let outputs = self.cache.slots[&e_node_id]
+            let outputs = self.cache.slots[self.compiled.program.e_node_index[&e_node_id]]
                 .output_values()
                 .map(|outputs| outputs.to_vec())
                 .unwrap_or_default();
 
             ArgumentValues { inputs, outputs }
+        }
+
+        /// The runtime slot for a stable id — test introspection.
+        pub(crate) fn slot(&self, e_node_id: ExecutionNodeId) -> &RuntimeSlot {
+            &self.cache.slots[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
@@ -376,7 +383,8 @@ pub(crate) mod test_support {
             e_node_id: ExecutionNodeId,
             values: Vec<DynamicValue>,
         ) {
-            let slot = self.cache.slots.get_mut(&e_node_id).unwrap();
+            let node_idx = self.compiled.program.e_node_index[&e_node_id];
+            let slot = &mut self.cache.slots[node_idx];
             slot.value = ValueState::Resident {
                 snapshot: OutputSnapshot::new(values),
                 produced_under: slot.current_digest,

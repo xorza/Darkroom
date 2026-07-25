@@ -157,7 +157,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     std::fs::write(&file, b"x").unwrap();
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&fixture.program);
+    cache.reconcile(&ExecutionProgram::default(), &fixture.program);
     let mut resource_stamps = RunResourceStamps::default();
 
     resource_stamps
@@ -181,11 +181,12 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         fixture.program.e_node_index[&fixture.second],
     );
     assert_eq!(
-        cache.slots[&fixture.first].current_digest, cache.slots[&fixture.second].current_digest,
+        cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest,
+        cache.slots[fixture.program.e_node_index[&fixture.second]].current_digest,
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache.slots[&fixture.first].current_digest;
+    let first_run = cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest;
     resource_stamps
         .prepare_run(
             &fixture.program,
@@ -200,7 +201,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         fixture.program.e_node_index[&fixture.first],
     );
     assert_ne!(
-        cache.slots[&fixture.first].current_digest, first_run,
+        cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
         "the next run refreshes resource identity"
     );
 }

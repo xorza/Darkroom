@@ -132,11 +132,7 @@ impl ExecutionFrame<'_> {
         if !self.program[node_idx].cache.caches_in_ram()
             && self.remaining_reads.node_drained(self.program, node_idx)
         {
-            self.cache
-                .slots
-                .get_mut(&self.program.e_node_ids[node_idx])
-                .unwrap()
-                .clear_output();
+            self.cache.slots[node_idx].clear_output();
         }
     }
 
@@ -145,9 +141,7 @@ impl ExecutionFrame<'_> {
     fn complete_planned_read(&mut self, address: OutputAddr) {
         let output_idx = self.program.output_idx(address);
         if !self.remaining_reads.consume(output_idx)
-            || self.cache.slots[&self.program.e_node_ids[address.node_idx]]
-                .output_values()
-                .is_none()
+            || self.cache.slots[address.node_idx].output_values().is_none()
         {
             return;
         }
@@ -157,7 +151,7 @@ impl ExecutionFrame<'_> {
         {
             self.release_drained_outputs(address.node_idx);
         } else if !self.program[address.node_idx].cache.caches_in_ram() {
-            self.cache.clear_output_port(self.program, address);
+            self.cache.clear_output_port(address);
         }
     }
 }

@@ -169,7 +169,7 @@ impl RunResourceStamps {
                     self.collect_fs_paths(requests, paths);
                 }
                 ExecutionBinding::Bind(address) if input.stamps_fs_path => {
-                    let Some(value) = cache.slots[&program.e_node_ids[address.node_idx]]
+                    let Some(value) = cache.slots[address.node_idx]
                         .output_values()
                         .and_then(|values| values.get(address.port_idx as usize))
                     else {

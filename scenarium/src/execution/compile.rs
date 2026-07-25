@@ -69,7 +69,7 @@ impl CompiledGraph {
         let mut in_closure = NodeSet::default();
         in_closure.reset(program.e_nodes.len());
         let mut pending: Vec<NodeIdx> = Vec::new();
-        for (i, e_node_id) in program.e_node_ids.values.iter().enumerate() {
+        for (i, e_node_id) in program.e_node_ids.iter().enumerate() {
             if self
                 .flatten_map
                 .attribution(*e_node_id)

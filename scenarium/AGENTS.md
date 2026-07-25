@@ -36,8 +36,9 @@ are dissolved into flat function nodes stored in a dense, id-sorted vector
 Each node stores typed ranges into those shared vectors, avoiding per-node
 port allocations, and every compiled `Bind` edge is interned to a dense
 `OutputAddr` — per-run scheduling, resolution, and execution state are
-`NodeIdx`-aligned columns and bitsets, so runs walk arrays without hashing
-ids. Top-level nodes retain
+`NodeIdx`-aligned columns and bitsets — as is the cross-run `RuntimeCache`,
+whose slots are re-paired with the new index order by stable id at each
+install — so runs walk arrays without hashing ids. Top-level nodes retain
 the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
 BLAKE3 from the enclosing instance ids and interior node id. `FlattenMap`
