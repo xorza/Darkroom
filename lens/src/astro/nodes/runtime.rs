@@ -66,13 +66,11 @@ where
 }
 
 #[cfg(test)]
-pub(in crate::astro::nodes) mod internals {
+pub(super) mod internals {
     use imaginarium::Image as RawImage;
     use scenarium::DynamicValue;
 
-    pub(in crate::astro::nodes) fn image_to_cpu(
-        value: DynamicValue,
-    ) -> imaginarium::Result<RawImage> {
+    pub(crate) fn image_to_cpu(value: DynamicValue) -> imaginarium::Result<RawImage> {
         super::image_to_cpu(value)
     }
 }

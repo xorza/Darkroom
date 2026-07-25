@@ -10,13 +10,13 @@ use crate::core::wake::Wake;
 use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
-use crate::gui::app::exit_dialog::{ExitChoice, ExitOutcome};
+use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
 pub(crate) mod commands;
+mod discard_dialog;
 pub(crate) mod editor;
-mod exit_dialog;
 
 use editor::Editor;
 
@@ -51,10 +51,31 @@ pub(crate) struct App {
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
     preferences: Preferences,
-    /// Whether the "save changes before quitting?" dialog is currently up.
-    /// Raised when a quit is requested (window close, File ▸ Quit) with
-    /// unsaved changes; cleared when the user answers.
-    confirm_quit: bool,
+    /// The document-replacing transition waiting on the unsaved-changes
+    /// prompt, and thus whether that prompt is up at all. Raised by
+    /// [`Self::guard_discard`]; cleared when the user answers.
+    confirm_discard: Option<PendingAction>,
+}
+
+/// A transition that replaces or discards the open document. Held while
+/// the unsaved-changes prompt is up, then carried out (or dropped) by the
+/// answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingAction {
+    Quit,
+    New,
+    Load,
+}
+
+impl PendingAction {
+    /// How the prompt finishes "Save changes to X before …?".
+    fn prompt_tail(self) -> &'static str {
+        match self {
+            Self::Quit => "quitting",
+            Self::New => "closing it",
+            Self::Load => "opening another document",
+        }
+    }
 }
 
 impl App {
@@ -86,7 +107,7 @@ impl App {
             theme: Theme::default(),
             host_handle: handle,
             preferences,
-            confirm_quit: false,
+            confirm_discard: None,
         };
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
@@ -178,6 +199,10 @@ impl App {
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch
                 // (the app is closing, so any remaining edits/runs are moot).
+                // Deliberately not routed through `guard_discard`: an
+                // automated client asked to exit, and a modal it can't
+                // answer would hang the session. The interactive quit paths
+                // still prompt.
                 ScriptMessage::Shutdown => {
                     self.quit();
                     return;
@@ -226,59 +251,78 @@ impl App {
         self.host_handle.quit();
     }
 
-    /// Whether a pending quit needs to prompt before proceeding: unsaved
-    /// changes and the confirm-on-exit preference both hold. Shared by the
-    /// titlebar-X path ([`Self::handle_close_request`]) and File ▸ Quit
-    /// (`commands::shell::ShellCommand`'s handler), which both raise the
-    /// same dialog off the same condition.
-    fn needs_exit_confirmation(&self) -> bool {
-        self.editor.dirty && self.preferences.confirm_unsaved_on_exit
+    /// Whether a destructive transition has to prompt before proceeding:
+    /// unsaved changes and the confirm preference both hold. The single
+    /// predicate behind every path that replaces or discards the document.
+    fn needs_discard_confirmation(&self) -> bool {
+        self.editor.dirty && self.preferences.confirm_unsaved_changes
     }
 
+    /// Carry out `action`, or raise the unsaved-changes prompt first when
+    /// the document holds edits worth protecting. Every path that would
+    /// discard the open document routes through here — File ▸ New, File ▸
+    /// Open, File ▸ Quit, ⌘Q — so the policy lives in one place instead of
+    /// being restated (or forgotten) per caller.
+    fn guard_discard(&mut self, action: PendingAction) {
+        if self.needs_discard_confirmation() {
+            self.confirm_discard = Some(action);
+        } else {
+            self.perform(action);
+        }
+    }
+
+    /// Run a transition the guard cleared. `Load` picks its file here
+    /// rather than before the prompt, so a cancelled prompt doesn't leave
+    /// the user having chosen a file for nothing.
+    fn perform(&mut self, action: PendingAction) {
+        match action {
+            PendingAction::Quit => self.quit(),
+            PendingAction::New => self.new_document(),
+            PendingAction::Load => self.load_picked_document(),
+        }
+    }
+
+    /// The titlebar X. The window stays open only while the prompt is up
+    /// ([`Self::record_discard_prompt`] calls `keep_open`); with nothing to
+    /// protect, the close proceeds untouched.
     fn handle_close_request(&mut self, ui: &Ui) {
         if !ui.close_requested() {
             return;
         }
 
         self.save_preferences();
-        if self.needs_exit_confirmation() {
-            self.confirm_quit = true;
+        if self.needs_discard_confirmation() {
+            self.confirm_discard = Some(PendingAction::Quit);
         }
     }
 
-    fn apply_exit_outcome(&mut self, outcome: ExitOutcome) {
-        match outcome.choice {
-            ExitChoice::Stay => unreachable!("exit outcome must resolve the dialog"),
-            ExitChoice::Cancel => self.confirm_quit = false,
-            ExitChoice::Discard => {
-                self.confirm_quit = false;
-                if outcome.dont_ask_again {
-                    self.set_confirm_exit(false);
-                }
-                self.quit();
-            }
-            ExitChoice::Save => {
-                self.confirm_quit = false;
-                if outcome.dont_ask_again {
-                    self.set_confirm_exit(false);
-                }
-                self.save_current();
-                // Save As can be cancelled, leaving the document dirty.
-                if !self.editor.dirty {
-                    self.quit();
-                }
-            }
+    /// Apply the prompt's answer: run the save it asked for, then let
+    /// [`DiscardOutcome::resolve`] decide — against the dirty flag that
+    /// save left behind — whether the transition goes through and whether
+    /// the guard stays on.
+    fn apply_discard_outcome(&mut self, outcome: DiscardOutcome) {
+        let Some(pending) = self.confirm_discard.take() else {
+            return;
+        };
+        if outcome.choice == DiscardChoice::Save {
+            self.save_current();
+        }
+        let resolution = outcome.resolve(self.editor.dirty);
+        if resolution.silence_prompt {
+            self.set_confirm_unsaved(false);
+        }
+        if resolution.proceed {
+            self.perform(pending);
         }
     }
 
-    fn record_exit(&mut self, ui: &mut Ui) {
-        if ui.close_requested() && self.confirm_quit {
+    fn record_discard_prompt(&mut self, ui: &mut Ui) {
+        let Some(pending) = self.confirm_discard else {
+            return;
+        };
+        if ui.close_requested() {
             ui.keep_open();
         }
-        if !self.confirm_quit {
-            return;
-        }
-
         let file_name = self
             .workspace
             .open
@@ -286,9 +330,9 @@ impl App {
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        let outcome = exit_dialog::show(ui, file_name);
-        if outcome.choice != ExitChoice::Stay {
-            self.apply_exit_outcome(outcome);
+        let outcome = discard_dialog::show(ui, file_name, pending.prompt_tail());
+        if outcome.choice != DiscardChoice::Stay {
+            self.apply_discard_outcome(outcome);
         }
     }
 }
@@ -335,6 +379,6 @@ impl aperture::App for App {
             self.handle_command(ui, command);
         }
 
-        self.record_exit(ui);
+        self.record_discard_prompt(ui);
     }
 }

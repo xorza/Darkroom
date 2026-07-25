@@ -316,13 +316,13 @@ fn adjust_into_fresh(
 }
 
 #[cfg(test)]
-pub(in crate::image::nodes) mod internals {
+pub(super) mod internals {
     use imaginarium::ContrastBrightness;
     use scenarium::{DynamicValue, InvokeResult};
 
     use crate::image::Image;
 
-    pub(in crate::image::nodes) fn adjust_image(
+    pub(crate) fn adjust_image(
         op: ContrastBrightness,
         context: &mut imaginarium::ProcessingContext,
         value: DynamicValue,

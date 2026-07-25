@@ -264,7 +264,7 @@ pub(super) mod internals {
 
     use crate::io::image::fits::decode::plan::FitsHduDescription;
 
-    pub(in crate::io::image::fits::decode) fn description(
+    pub(crate) fn description(
         header: &Header,
         kind: HduKind,
         source_bytes: u64,

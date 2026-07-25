@@ -123,7 +123,7 @@ pub struct SipPolynomial {
 #[derive(Debug, Clone)]
 pub struct SipFitResult {
     /// The fitted polynomial.
-    pub(in crate::stacking::registration) polynomial: SipPolynomial,
+    pub(crate) polynomial: SipPolynomial,
     /// RMS residual in pixels (after SIP correction, across surviving points).
     pub rms_residual: f64,
     /// Maximum residual in pixels (worst surviving point).

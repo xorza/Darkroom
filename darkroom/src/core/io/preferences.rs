@@ -31,11 +31,12 @@ pub(crate) struct Preferences {
     /// an empty document (the path is still remembered, just not opened).
     /// Defaults to `true` — the historical reopen-where-you-left-off behavior.
     pub load_last_document: bool,
-    /// Prompt to save unsaved changes before quitting (window close, ⌘Q,
-    /// File ▸ Quit). When `false`, quitting discards unsaved changes without
-    /// asking. The exit dialog's "Don't ask again" checkbox clears it; the
-    /// Preferences tab can restore it. Defaults to `true`.
-    pub confirm_unsaved_on_exit: bool,
+    /// Prompt to save unsaved changes before any transition that would
+    /// discard them — window close, ⌘Q, File ▸ Quit, File ▸ New, File ▸
+    /// Open. When `false`, those proceed without asking. The prompt's
+    /// "Don't ask again" checkbox clears it; the Preferences tab can
+    /// restore it. Defaults to `true`.
+    pub confirm_unsaved_changes: bool,
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
     /// (platform picks). A TOML `[window]` table — a table field, so it
@@ -106,7 +107,7 @@ impl Default for Preferences {
             theme: ThemeChoice::default(),
             document_path: None,
             load_last_document: true,
-            confirm_unsaved_on_exit: true,
+            confirm_unsaved_changes: true,
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPreferences::default(),
@@ -191,7 +192,7 @@ mod tests {
             document_path: Some(PathBuf::from("/tmp/graph.darkroom")),
             // Non-defaults (defaults are `true`) so the round-trip is meaningful.
             load_last_document: false,
-            confirm_unsaved_on_exit: false,
+            confirm_unsaved_changes: false,
             window: Some(WindowState {
                 size: UVec2::new(1440, 900),
                 maximized: true,
@@ -219,7 +220,7 @@ mod tests {
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
         assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
         assert!(!back.load_last_document);
-        assert!(!back.confirm_unsaved_on_exit);
+        assert!(!back.confirm_unsaved_changes);
         assert_eq!(
             back.window,
             Some(WindowState {
@@ -249,7 +250,7 @@ mod tests {
         // Defaults to reopening the last document (historical behavior).
         assert!(back.load_last_document);
         // Defaults to prompting before quitting with unsaved changes.
-        assert!(back.confirm_unsaved_on_exit);
+        assert!(back.confirm_unsaved_changes);
         // No remembered window geometry until a session saves one.
         assert_eq!(back.window, None);
         // Viewer toolbar defaults: theme backdrop, nearest sampling.

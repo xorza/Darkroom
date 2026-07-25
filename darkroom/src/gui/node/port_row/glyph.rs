@@ -18,11 +18,11 @@ use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
 /// (hover-target) box carries the emphasis zone, so entering/leaving it
 /// is a hover-target change and repaints without any pointer
 /// subscription.
-pub(in crate::gui::node) const PORT_HIT_SCALE: f32 = 1.8;
+pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 
 /// Corner rounding of the event triangles (emitter glyph + subscription
 /// pin), matching the soft corners of the rest of the chrome.
-pub(in crate::gui::node) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
+pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
 /// Stroke width of the muted ring drawn around a non-required input's port
 /// circle (see `circle_frame`'s `outline` param). Also the amount a

@@ -314,7 +314,7 @@ struct DeblendNode {
 /// All reusable buffers for deblending. Create once per thread and pass to
 /// `deblend_multi_threshold` with pre-allocated buffers to avoid per-call allocations.
 #[derive(Debug)]
-pub(in crate::stacking::star_detection) struct DeblendBuffers {
+pub(crate) struct DeblendBuffers {
     /// Collected component pixels.
     component_pixels: Vec<Pixel>,
     /// Node assignment grid.
@@ -334,7 +334,7 @@ pub(in crate::stacking::star_detection) struct DeblendBuffers {
 }
 
 impl DeblendBuffers {
-    pub(in crate::stacking::star_detection) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             component_pixels: Vec::new(),
             pixel_to_node: NodeGrid::empty(),
@@ -359,7 +359,7 @@ impl DeblendBuffers {
 ///
 /// Buffers are reused across threshold levels within a single component, and
 /// can be reused across multiple components by the caller (e.g., one per rayon thread).
-pub(in crate::stacking::star_detection) fn deblend_multi_threshold(
+pub(crate) fn deblend_multi_threshold(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,

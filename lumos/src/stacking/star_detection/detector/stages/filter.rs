@@ -20,20 +20,17 @@ const SPATIAL_HASH_CROSSOVER: usize = 100;
 
 /// Result of the filter stage: the surviving stars plus rejection statistics.
 #[derive(Debug)]
-pub(in crate::stacking::star_detection::detector) struct FilterOutcome {
+pub(crate) struct FilterOutcome {
     /// Filtered stars, sorted by flux (brightest first).
-    pub(in crate::stacking::star_detection::detector) stars: Vec<Star>,
-    pub(in crate::stacking::star_detection::detector) diagnostics: QualityFilterDiagnostics,
+    pub(crate) stars: Vec<Star>,
+    pub(crate) diagnostics: QualityFilterDiagnostics,
 }
 
 /// Filter stars by quality metrics, remove duplicates, and sort by flux.
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
-pub(in crate::stacking::star_detection::detector) fn filter(
-    mut stars: Vec<Star>,
-    config: &FilterConfig,
-) -> FilterOutcome {
+pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
     let mut diagnostics = QualityFilterDiagnostics::default();
 
     // Apply quality filters
@@ -197,15 +194,12 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
 }
 
 #[cfg(test)]
-pub(in crate::stacking::star_detection::detector) mod internals {
+pub(crate) mod internals {
     use crate::stacking::star_detection::star::Star;
 
     /// Exposes `remove_duplicate_stars` to the detector's benchmarks; production
     /// code only ever reaches it through `filter()`.
-    pub(in crate::stacking::star_detection::detector) fn remove_duplicate_stars(
-        stars: &mut Vec<Star>,
-        min_separation: f32,
-    ) -> usize {
+    pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
         super::remove_duplicate_stars(stars, min_separation)
     }
 }

@@ -30,7 +30,7 @@ use crate::gui::scene::{InputBindingView, Scene};
 /// ahead of Pass A, so the graph records a pass earlier and its
 /// connections draw with no first-frame gap. Linked graphs aren't
 /// editable targets yet, so only `Local` opens.
-pub(in crate::gui) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
     for n in scene.nodes.values() {
         // Instances are always `Local` (library graphs are localized on
         // instance), so the "G" chip opens the graph directly.
@@ -47,7 +47,7 @@ pub(in crate::gui) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec
 /// frame. The node UI surfaces only the domain fact (which node); the
 /// canvas translates it into the run command. The `runnable` guard matches
 /// where the chip draws, so a stale response can't seed an unrunnable node.
-pub(in crate::gui) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .nodes
         .values()
@@ -57,7 +57,7 @@ pub(in crate::gui) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId>
 
 /// Scan for a click on a node's runtime-cache eviction chip. The canvas
 /// translates the returned authored node into a worker command.
-pub(in crate::gui) fn emit_cache_evictions(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+pub(crate) fn emit_cache_evictions(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .nodes
         .values()
@@ -78,17 +78,17 @@ pub(in crate::gui) fn emit_cache_evictions(ui: &Ui, scene: &Scene) -> Option<Nod
 /// owns the command channel, does the translation.
 #[derive(Clone, Debug)]
 pub(crate) struct PathPickRequest {
-    pub(in crate::gui) port: InputPort,
+    pub(crate) port: InputPort,
     /// The picker config is type-level metadata, taken from the port's
     /// `DataType` (the value only carries the selected path strings).
-    pub(in crate::gui) config: Arc<FsPathConfig>,
+    pub(crate) config: Arc<FsPathConfig>,
 }
 
 /// Scan for a click on an `FsPath` input's inline pick button (polled by
 /// its const-editor id, from last frame's responses). Returns the first
 /// hit — one pick per frame — for the caller to open a blocking file dialog
 /// after authoring.
-pub(in crate::gui) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
+pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
     for node in scene.nodes.values() {
         for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
             let port = InputPort::new(node.id, port_idx);
@@ -117,7 +117,7 @@ pub(in crate::gui) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPick
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(in crate::gui) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
     for node in scene.nodes.values() {
         // Boundary ports route the interface — no const affordance, so an
         // unbound one has nothing to seed (its label double-click renames).

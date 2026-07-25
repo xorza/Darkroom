@@ -390,7 +390,7 @@ mod internals {
     impl MoffatFitResult {
         /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
         /// `moffat_fit` and so can't reach the private `debug` field directly.
-        pub(in crate::stacking::star_detection::centroid) fn debug_alpha(&self) -> f32 {
+        pub(crate) fn debug_alpha(&self) -> f32 {
             self.debug.alpha
         }
     }

@@ -5,8 +5,8 @@
 use std::path::Path;
 
 use crate::core::document::open_document::OpenDocument;
-use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
+use crate::gui::app::{App, PendingAction};
 use crate::gui::dialogs;
 
 /// Document file lifecycle. Handled by [`App::handle_file`].
@@ -25,16 +25,21 @@ pub(crate) enum FileCommand {
 impl App {
     pub(super) fn handle_file(&mut self, command: FileCommand) {
         match command {
-            FileCommand::New => self.new_document(),
-            FileCommand::Load => {
-                if let Some(path) =
-                    dialogs::pick_project_open_path(self.workspace.open.path.as_deref())
-                {
-                    self.load_document(&path);
-                }
-            }
+            // Both replace the open document, so they clear the
+            // unsaved-changes guard before doing anything.
+            FileCommand::New => self.guard_discard(PendingAction::New),
+            FileCommand::Load => self.guard_discard(PendingAction::Load),
             FileCommand::Save => self.save_current(),
             FileCommand::SaveAs => self.save_document_as(),
+        }
+    }
+
+    /// Prompt for a project file and load it. The [`PendingAction::Load`]
+    /// body: the picker runs here, *after* the guard cleared, so cancelling
+    /// the unsaved-changes prompt never costs the user a file choice.
+    pub(crate) fn load_picked_document(&mut self) {
+        if let Some(path) = dialogs::pick_project_open_path(self.workspace.open.path.as_deref()) {
+            self.load_document(&path);
         }
     }
 
@@ -43,16 +48,15 @@ impl App {
     /// (restoring the old doc via Cmd-Z would replay nodes from intent
     /// history that no longer matches the live tree), forced reconcile +
     /// scene rebuild, dropped gesture state, and cleared run results.
-    fn new_document(&mut self) {
+    pub(crate) fn new_document(&mut self) {
         self.editor = Editor::new();
         self.workspace.replace_document(OpenDocument::default());
         self.remember_document_path();
     }
 
-    /// Load `path` into a fresh editor. Returns whether it loaded — `false`
-    /// when the file is missing or corrupt, leaving the open document intact.
-    /// The failure surfaces in the status bar with its reason.
-    fn load_document(&mut self, path: &Path) -> bool {
+    /// Load `path` into a fresh editor. A missing or corrupt file leaves the
+    /// open document intact and surfaces its reason in the status bar.
+    fn load_document(&mut self, path: &Path) {
         let open = match OpenDocument::load(path.to_path_buf()) {
             Ok(open) => open,
             Err(err) => {
@@ -60,7 +64,7 @@ impl App {
                     .runtime
                     .status
                     .error(format!("load failed: {err:#}"));
-                return false;
+                return;
             }
         };
         // Fresh editor around the loaded doc — see `new_document` for why
@@ -69,12 +73,11 @@ impl App {
         self.workspace.replace_document(open);
         self.remember_document_path();
         self.workspace.runtime.status.error = None;
-        true
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
-    pub(in crate::gui::app) fn save_current(&mut self) {
+    pub(crate) fn save_current(&mut self) {
         match self.workspace.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),

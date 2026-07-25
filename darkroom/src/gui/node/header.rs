@@ -49,7 +49,7 @@ const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
 
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
 /// that keeps 2–3 significant digits.
-pub(in crate::gui) fn fmt_elapsed(secs: f64) -> String {
+pub(crate) fn fmt_elapsed(secs: f64) -> String {
     if secs >= 1.0 {
         format!("{secs:.2}s")
     } else if secs >= 1e-3 {
@@ -116,7 +116,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
 /// subscription is whole-node, not per-port), so `CanvasGeometry` /
 /// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
-pub(in crate::gui) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
@@ -452,7 +452,7 @@ pub(super) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
 }
 
 /// Stable id for a graph node's clickable open-in-tab chip.
-pub(in crate::gui) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.graph_badge", node_id))
 }
 
@@ -486,11 +486,11 @@ enum BadgeGlyph {
 /// [`BadgeKind`]). Build one with [`Badge::control`] /
 /// [`Badge::control_drawn`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
-/// frame (always `false` for a marker). `pub(in crate::gui)` so
+/// frame (always `false` for a marker). `pub(crate)` so
 /// [`crate::gui::canvas::pin_preview`]'s refresh chip can reuse the same
 /// framing rather than re-deriving the chip look.
 #[derive(Debug)]
-pub(in crate::gui) struct Badge {
+pub(crate) struct Badge {
     glyph: BadgeGlyph,
     color: Color,
     tip: &'static str,
@@ -499,7 +499,7 @@ pub(in crate::gui) struct Badge {
 
 impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    pub(in crate::gui) fn control(
+    pub(crate) fn control(
         glyph: &'static str,
         color: Color,
         filled: bool,
@@ -540,7 +540,7 @@ impl Badge {
         }
     }
 
-    pub(in crate::gui) fn show(self, ui: &mut Ui) -> bool {
+    pub(crate) fn show(self, ui: &mut Ui) -> bool {
         let Badge {
             glyph,
             color,

@@ -34,11 +34,7 @@ pub(super) fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> 
 }
 
 /// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
-pub(in crate::stacking::star_detection) fn gray_to_rgb_image_stretched(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-) -> Image {
+pub(crate) fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) -> Image {
     let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
     let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let range = (max - min).max(1e-10);
@@ -56,7 +52,7 @@ pub(in crate::stacking::star_detection) fn gray_to_rgb_image_stretched(
 
 /// Save imaginarium Image to file using the configured test output format.
 /// Converts to RGB_U8 if needed since some formats don't support float data.
-pub(in crate::stacking::star_detection) fn save_image(image: Image, path: &Path) {
+pub(crate) fn save_image(image: Image, path: &Path) {
     let out = output_path(path);
     let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
         image.convert(ColorFormat::RGB_U8).unwrap()
@@ -100,9 +96,7 @@ fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
 ///
 /// Each label gets a unique color for easy visualization.
 #[cfg(feature = "real-data")]
-pub(in crate::stacking::star_detection) fn labels_to_rgb(
-    labels: &imaginarium::Buffer2<u32>,
-) -> image::RgbImage {
+pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> image::RgbImage {
     use image::{Rgb, RgbImage};
 
     // Generate distinct colors for labels using golden ratio
@@ -151,12 +145,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 }
 
 /// Save grayscale image to file using the configured test output format.
-pub(in crate::stacking::star_detection) fn save_grayscale(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    path: &Path,
-) {
+pub(crate) fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = to_gray_image(pixels, width, height);
     img.save(&out).expect("Failed to save grayscale image");
@@ -164,12 +153,7 @@ pub(in crate::stacking::star_detection) fn save_grayscale(
 
 /// Save grayscale image with auto-stretch to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(in crate::stacking::star_detection) fn save_grayscale_stretched(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    path: &Path,
-) {
+pub(crate) fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = to_gray_stretched(pixels, width, height);
     img.save(&out)
@@ -178,13 +162,13 @@ pub(in crate::stacking::star_detection) fn save_grayscale_stretched(
 
 /// Save RGB image to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(in crate::stacking::star_detection) fn save_rgb(image: &image::RgbImage, path: &Path) {
+pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
     let out = output_path(path);
     image.save(&out).expect("Failed to save RGB image");
 }
 
 /// Save comparison image showing ground truth vs detected stars.
-pub(in crate::stacking::star_detection) fn save_comparison(
+pub(crate) fn save_comparison(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -200,12 +184,7 @@ pub(in crate::stacking::star_detection) fn save_comparison(
 
 /// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(in crate::stacking::star_detection) fn save_mask(
-    mask: &[bool],
-    width: usize,
-    height: usize,
-    path: &Path,
-) {
+pub(crate) fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = mask_to_gray(mask, width, height);
     img.save(&out).expect("Failed to save mask image");

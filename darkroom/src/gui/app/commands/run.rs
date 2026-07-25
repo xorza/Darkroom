@@ -40,7 +40,7 @@ impl App {
     /// synchronously — no run starts, so the prior run's status stays
     /// untouched. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
-    pub(in crate::gui::app) fn run_graph(&mut self) {
+    pub(crate) fn run_graph(&mut self) {
         self.workspace.run_once();
     }
 
