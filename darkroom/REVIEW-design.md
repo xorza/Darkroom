@@ -217,9 +217,9 @@ edit.
   `matches!(n.graph, Some(GraphLink::Local(_)))`) → test
   `response_for(<id>(n.id)).right.clicked()` → stash a target `NodeId` →
   `AnchoredMenu::open_at(pointer)` → `menu.show` with a body returning a
-  `MenuChoice` → route the pick. `AnchoredMenu` already factored out the popup
-  chrome; the *scan + target latch + route* half is still duplicated, and each
-  declares its own private `MenuChoice`.
+  `MenuChoice` → map that to an `Option<AppCommand>`. `AnchoredMenu` already
+  factored out the popup chrome; the *scan + target latch* half is still
+  duplicated, and each declares its own private `MenuChoice`.
 
 - [ ] **`connection_ui::add_boundary_port_intent` matches on `port.kind` three
   separate times** — for `(count, side, prefix)`, then again for `taken`, each
@@ -241,7 +241,7 @@ edit.
   two sharing a name, one unnamed — nothing states which frame each produces or
   that they agree.
 
-- [ ] **`GraphUI::frame` is a ~220-line function doing five jobs.** Gesture
+- [ ] **`GraphUI::frame` is a ~240-line function doing five jobs.** Gesture
   arbitration, deselect emission, six controller `apply` calls, command
   arbitration, three hover overrides, then the entire two-level nested record
   closure. The `let Self { .. }` destructure with four `_:` placeholders exists
@@ -250,13 +250,13 @@ edit.
 
 - [ ] **`canvas/mod.rs` is orchestration plus a helper grab-bag.** Alongside
   `GraphUI` it holds `CanvasGesture` + `classify_canvas_gesture`,
-  `emit_chip_command`, `node_events`, `node_ports`, `to_world`, `pointer_world`,
-  `free_end`, `outer_canvas_widget_id`, `inner_canvas_widget_id` — items every
-  sibling imports from the parent module. Coordinate conversion, glyph
-  iteration, and widget ids are three separable concerns living in the file that
+  `emit_chip_command`, `to_world`, `pointer_world`, `free_end`,
+  `outer_canvas_widget_id`, `inner_canvas_widget_id` — items every sibling
+  imports from the parent module. Coordinate conversion, command translation,
+  and widget ids are three separable concerns living in the file that
   arbitrates gestures.
 
-- [ ] **`canvas/pan_zoom.rs` holds three unrelated concerns.** (a) generic
+- [ ] **`canvas/pan_zoom/` holds three unrelated concerns.** (a) generic
   viewport algebra shared with the image viewer — `PanAnchor`,
   `fold_scroll_zoom`, `zoom_about`, `scroll_to_zoom_factor`, all `pub(crate)`
   and all imported by `gui/image_viewer.rs`; (b) the canvas's own pan gesture,
@@ -340,10 +340,10 @@ edit.
   stair-stepping is the dominant detail in the dot.
 
 - [ ] **Comment volume outruns its own rule in places.** `gui/canvas` carries
-  ~1120 doc lines + ~500 comment lines against ~3900 code lines. Much is genuine
+  ~1180 doc lines + ~575 comment lines against ~4100 code lines. Much is genuine
   "why" and earns its place (the pre-record commit ordering in `canvas/mod.rs`,
   the drag-capture hover suppression in `geometry.rs`). But `GraphUI::frame`
-  carries ~90 comment lines in a ~220-line body, several narrating the next
+  carries ~90 comment lines in a ~240-line body, several narrating the next
   statement; `PortInfo`'s field docs largely restate the field names; and
   `pin_ui.rs`'s 29-line module header describes the paint-stack mechanics twice
   more inside `draw_wires`/`draw_pin`'s own docs.
