@@ -179,7 +179,7 @@ Everything else is editor view-state, split per graph:
   `local_views` (lazily seeded + auto-laid-out on first open). **All of this
   is persisted and undoable by design** — reopening restores camera +
   selection, and Ctrl+Z walks them alongside structural edits.
-- **`layout: DockLayout`** (`src/document/dock.rs`) — the pane arrangement:
+- **`layout: DockLayout`** (`src/core/document/dock.rs`) — the pane arrangement:
   a binary split tree stored as a flat, canonically pre-ordered
   `Vec<DockNode>` whose leaves are `TabGroup`s (tabs + per-group active),
   plus the focused group. The *primary* group holds the `Main` graph tab
@@ -199,7 +199,7 @@ coordinates that single library entity with the worker and script host.
 Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
-### Intent / undo layer (`src/edit/intent.rs`, `src/edit/action_stack/`)
+### Intent / undo layer (`src/core/edit/intent/`, `src/core/edit/action_stack/`)
 - Every mutation is scoped to a `GraphRef` target. `Intent` = forward-only
   "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
   snapshot and folds both halves into one self-contained `UndoStep`;
@@ -274,7 +274,7 @@ the missing-input warning color and skips a wire whose endpoint has no
 rendered port. Editing never severs wires for type reasons — a `SetInput`
 is always a single undo step.
 
-### Render projection: `Scene` (`src/scene.rs`)
+### Render projection: `Scene` (`src/gui/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
 (`Scene::rebuild(ui, graph, view, library, run_state)` — see
 `Editor::rebuild_scene`). Names are `InternedStr` handles into aperture's
@@ -450,21 +450,32 @@ run, a file op) assigns `None`. Compile failures report themselves from
 `RuntimeHost::compile`; frontends report their own outcomes (run results, file
 ops, graph ops).
 
-### Theme (`src/theme.rs`)
-The look is **code-defined**, not embedded TOML. Module consts hold every
-color (`CANVAS_BG`, `NODE_FILL`, `BADGE_GRAPH`, `EXEC_EXECUTED_GLOW`,
-`INPUT_PORT`, …) and layout dimension (`NODE_MIN_WIDTH`, `PORT_SIZE`,
-`CANVAS_DOT_SPACING`, …). `Theme::default()` assembles them. `Theme` bundles
+### Theme (`src/gui/theme.rs`)
+The look is **code-defined**, not embedded TOML. Two sibling const modules
+(`dark` / `light`, field-for-field peers) hold every color (`CANVAS_BG`,
+`NODE_FILL`, `BADGE_GRAPH`, `EXEC_EXECUTED_GLOW`, `INPUT_PORT`, …), while the
+layout dimensions (`NODE_MIN_WIDTH`, `PORT_SIZE`, `CANVAS_DOT_SPACING`, …) are
+palette-independent and shared. `Theme::from_preset(ThemePreset)` assembles
+either one through the shared `Theme::build`; `Theme::default()` is
+`Theme::dark()`. `Theme` bundles
 darkroom's own fields *and* the nested `aperture::Theme` (scalar fields first,
 the aperture table last — a TOML serialization ordering requirement), so it's a
 complete bundle serialized as TOML. The checked-in `assets/ayu-graphite.toml`
 is a reference/round-trip fixture kept in sync by a test, **not** a
 parallel source of truth.
 
-**Colors come from the palette.** Values trace back to the semantic Ayu Mirage
-High Contrast palette (backgrounds, borders, text, accent/status, syntax). When
+**Colors come from the palette.** Dark traces back to the semantic Ayu Mirage
+High Contrast palette, light to Zed's "Ayu Light" (backgrounds, borders, text,
+accent/status, syntax); the hand-edited reference TOMLs live in `assets/`. When
 adding or restyling a field, reuse an existing palette swatch rather than
-inventing a hex value, so a palette re-seed propagates cleanly. The
-`MenuCommand::InvertColors` command is a reversible light-theme stub that flips
-every color in place.
+inventing a hex value, so a palette re-seed propagates cleanly — and add it to
+*both* const modules, which the `PaletteColors` presets won't compile without.
+
+**Which preset loads** is the persisted `ThemeChoice` (`system`/`dark`/`light`,
+in `core/theme_pref.rs`) written by the Preferences tab's Appearance radios.
+`ThemeChoice::resolve` maps `System` through `ThemePreset::from_system` (OS
+detection, falling back to dark) and the explicit choices straight through.
+`App::new` resolves it once at startup; a later edit re-resolves via
+`PrefsCommand::Changed` → `App::apply_preferences`, which rebuilds the `Theme`
+and pushes `aperture_theme` onto `ui.theme`.
 </content>

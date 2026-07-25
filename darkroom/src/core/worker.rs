@@ -16,7 +16,7 @@ use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::ExecutionNodeId;
 use scenarium::NodeId;
-use scenarium::{RunSeeds, Worker, WorkerMessage, WorkerReport};
+use scenarium::{RunSeeds, Worker, WorkerExited, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
@@ -58,42 +58,59 @@ impl WorkerBridge {
 
     /// Install a compiled program. The worker acknowledges it with
     /// `WorkerReport::Installed` before processing reports from later commands.
-    pub(crate) fn install(&self, compiled: Arc<CompiledGraph>) {
-        let _ = self.worker.send(WorkerMessage::Update { compiled });
+    ///
+    /// Every command here answers whether the worker took it. A send only
+    /// fails once the worker task is gone, and then *no report will ever
+    /// arrive* — so a caller that assumed success would leave the UI
+    /// waiting on a run that can never report back.
+    pub(crate) fn install(&self, compiled: Arc<CompiledGraph>) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::Update { compiled })
     }
 
     /// Install the current program and evict an authored node's cache cone as
     /// one worker commit. Stopping the event loop keeps it from immediately
     /// repopulating the entries being removed.
-    pub(crate) fn install_and_evict_cache(&self, compiled: Arc<CompiledGraph>, node_id: NodeId) {
-        let _ = self.worker.send_many([
+    pub(crate) fn install_and_evict_cache(
+        &self,
+        compiled: Arc<CompiledGraph>,
+        node_id: NodeId,
+    ) -> Result<(), WorkerExited> {
+        self.worker.send_many([
             WorkerMessage::Update { compiled },
             WorkerMessage::EvictCache {
                 nodes: vec![node_id],
             },
             WorkerMessage::StopEventLoop,
-        ]);
+        ])
     }
 
     /// Execute every sink in the installed program.
-    pub(crate) fn run_sinks(&self) {
-        let _ = self.worker.send(WorkerMessage::Run {
+    pub(crate) fn run_sinks(&self) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::Run {
             seeds: RunSeeds::sinks(),
-        });
+        })
     }
 
     /// Execute one exact node in the installed program and deliver its outputs.
-    pub(crate) fn run_node(&self, e_node_id: ExecutionNodeId) {
-        let _ = self.worker.send(WorkerMessage::Run {
+    pub(crate) fn run_node(&self, e_node_id: ExecutionNodeId) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::Run {
             seeds: RunSeeds::nodes(vec![e_node_id]),
-        });
+        })
     }
 
     /// Swap the engine's output cache (codec registry + store root) — e.g. to
-    /// repoint at the active document's store. Takes effect before
-    /// the next run's compile. A dropped send (worker exited) is a harmless no-op.
+    /// repoint at the active document's store. Takes effect before the next
+    /// run's compile. No caller is waiting on an answer, so the outcome is
+    /// traced rather than returned; a run is where a dead worker becomes the
+    /// user's problem.
     pub(crate) fn set_disk_store(&self, cache: DiskStore) {
-        let _ = self.worker.send(WorkerMessage::SetDiskStore(cache));
+        if self
+            .worker
+            .send(WorkerMessage::SetDiskStore(cache))
+            .is_err()
+        {
+            tracing::warn!("worker exited; disk store not installed");
+        }
     }
 
     /// Request cancellation of the in-flight run. Coarse: the running node
@@ -105,8 +122,8 @@ impl WorkerBridge {
 
     /// Start the installed program's event loop, firing each emitter's events
     /// and executing their subscribers.
-    pub(crate) fn start_event_loop(&self) {
-        let _ = self.worker.send(WorkerMessage::StartEventLoop);
+    pub(crate) fn start_event_loop(&self) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::StartEventLoop)
     }
 
     /// Stop the event loop (aborts the per-event tasks). A dropped send
@@ -173,8 +190,12 @@ mod tests {
             .compile(&graph, &library)
             .unwrap()
             .into();
-        bridge.install(compiled);
-        bridge.start_event_loop();
+        bridge
+            .install(compiled)
+            .expect("worker accepts the program");
+        bridge
+            .start_event_loop()
+            .expect("worker accepts the event-loop start");
 
         loop {
             let report = bridge
@@ -195,5 +216,29 @@ mod tests {
         drop(bridge);
 
         assert_eq!(wake_count.load(Ordering::SeqCst), before_drop + 1);
+    }
+
+    #[test]
+    fn commands_report_a_dead_worker_instead_of_reading_as_queued() {
+        // A send only fails once the worker task is gone, and then no
+        // report can ever arrive — so a caller told "queued" would wait
+        // forever on a run that will never report back.
+        let mut bridge = WorkerBridge::new(Arc::new(|| {}));
+        assert!(bridge.run_sinks().is_ok(), "a live worker takes commands");
+
+        // Stop the worker the way shutdown does, then keep issuing commands.
+        bridge
+            .runtime
+            .block_on(bridge.worker.exit())
+            .expect("worker task joins cleanly");
+
+        assert!(
+            bridge.run_sinks().is_err(),
+            "a run command to a dead worker must not read as accepted"
+        );
+        assert!(
+            bridge.start_event_loop().is_err(),
+            "nor an event-loop start"
+        );
     }
 }

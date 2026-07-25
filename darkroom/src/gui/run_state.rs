@@ -3,12 +3,24 @@
 //! [`RunState`] per [`Editor`], updated as worker reports arrive.
 //!
 //! Execution dissolves graphs and remaps interior node ids, so a run's
-//! raw node statuses are keyed by *flattened* ids. [`RunState::apply_worker_status`]
-//! projects them through the worker-confirmed [`CompiledGraph`] to fold each outcome
-//! onto the authoring nodes: onto the node itself (unique per editor
-//! node — a graph's interior aggregates across its instances) and onto every
-//! ancestor composite instance, so an instance node reflects its whole
-//! subtree. Logs attribute the same way.
+//! raw node statuses are keyed by *flattened* ids.
+//! [`RunState::apply_worker_status`] projects them through the
+//! worker-confirmed [`CompiledGraph`] onto the authoring nodes: onto the
+//! node itself and onto every ancestor composite instance, so an instance
+//! node reflects its whole subtree. Logs attribute the same way.
+//!
+//! The two report kinds fold differently, on purpose:
+//!
+//! - The **completed** snapshot aggregates. It clears the previous run
+//!   first, then merges every occurrence by severity (and sums `Executed`
+//!   times), so an authored interior node reflects the worst outcome across
+//!   its instances and an instance node reflects its whole subtree.
+//! - Live **patches** show the latest status received per authored node,
+//!   with no accumulation. An authored node that runs once per instance
+//!   therefore reports whichever occurrence most recently changed state —
+//!   including a later `Running` replacing an earlier `Errored`. Progress
+//!   is a liveness cue, not a verdict; the completed snapshot is the
+//!   authority and corrects it at the end of the run.
 //!
 //! [`Editor`]: crate::gui::app::editor::Editor
 
@@ -160,6 +172,10 @@ impl RunState {
         }
     }
 
+    /// Live progress: assign each occurrence's status to its authored nodes
+    /// as it arrives. Deliberately last-write-wins rather than merged — see
+    /// the module docs. Merging would also pin a node at `Running` forever,
+    /// since `Executed` ranks *below* it and could never replace it.
     fn apply_node_patch(&mut self, update: &WorkerStatus) {
         let compiled = Arc::clone(
             self.compiled
@@ -285,19 +301,37 @@ impl RunState {
         }
     }
 
+    /// Store one occurrence's pinned values, but only for a node in the
+    /// entry graph.
+    ///
+    /// The store is keyed by authored `OutputPort` and there is exactly one
+    /// preview widget per port, while a node inside a graph definition runs
+    /// once *per instance* — so several occurrences would land on one slot
+    /// and the value shown would be whichever finished last. A definition
+    /// tab isn't any one instance, so there's no principled winner to pick;
+    /// until the store and the widgets can address an occurrence, nested
+    /// pins deliver nothing rather than something arbitrary.
+    ///
+    /// `attribution` yields the authored leaf followed by each enclosing
+    /// instance, so a lone element *is* the "top-level occurrence" test.
     pub(crate) fn ingest_pinned_outputs(
         &mut self,
         ui: &Ui,
         pushed: PinnedOutputs,
         document: &Document,
     ) {
-        let compiled = self
-            .compiled
-            .as_ref()
-            .expect("worker pushed outputs before installing a compiled graph");
-        let node_id = compiled
-            .leaf(pushed.e_node_id)
-            .expect("pinned output identity must belong to the installed compile");
+        let compiled = Arc::clone(
+            self.compiled
+                .as_ref()
+                .expect("worker pushed outputs before installing a compiled graph"),
+        );
+        let mut attribution = attributed_nodes(&compiled, pushed.e_node_id);
+        let node_id = attribution
+            .next()
+            .expect("execution attribution must start with its authored leaf");
+        if attribution.next().is_some() {
+            return;
+        }
         self.pinned_outputs
             .ingest(ui, node_id, pushed.values, document);
     }
@@ -494,20 +528,30 @@ mod tests {
     }
 
     #[test]
-    fn pinned_outputs_project_execution_occurrences_to_the_authored_port() {
+    fn pinned_outputs_are_delivered_only_for_entry_graph_nodes() {
+        // The store is keyed by authored `OutputPort` and there's one
+        // preview widget per port, but a node inside a definition runs once
+        // per instance. Delivering those would make the shown value a race
+        // between occurrences, so they deliver nothing until the store can
+        // address an occurrence.
         let interior = nid(1);
         let (instance_a, instance_b) = (nid(10), nid(20));
-        let (e_node_id_a, e_node_id_b) = (eid(101), eid(102));
+        let (nested_a, nested_b) = (eid(101), eid(102));
+        let top_level = nid(2);
+        let top_level_occurrence = eid(103);
         let mut run_state = run_state([
-            (e_node_id_a, vec![instance_a], interior),
-            (e_node_id_b, vec![instance_b], interior),
+            (nested_a, vec![instance_a], interior),
+            (nested_b, vec![instance_b], interior),
+            (top_level_occurrence, vec![], top_level),
         ]);
-        let port = OutputPort::new(interior, 0);
         let mut document = Document::default();
-        document.graph.set_output_pinned(port, true);
+        let nested_port = OutputPort::new(interior, 0);
+        let top_level_port = OutputPort::new(top_level, 0);
+        document.graph.set_output_pinned(nested_port, true);
+        document.graph.set_output_pinned(top_level_port, true);
         let ui = Ui::default();
 
-        for (e_node_id, value) in [(e_node_id_a, 7), (e_node_id_b, 8)] {
+        let push = |run_state: &mut RunState, e_node_id, value| {
             run_state.ingest_pinned_outputs(
                 &ui,
                 PinnedOutputs {
@@ -519,13 +563,23 @@ mod tests {
                 },
                 &document,
             );
-        }
+        };
 
-        assert_eq!(run_state.pinned_outputs.entries.len(), 1);
+        push(&mut run_state, nested_a, 7);
+        push(&mut run_state, nested_b, 8);
+        assert!(
+            !run_state.pinned_outputs.entries.contains_key(&nested_port),
+            "neither instance claims the shared slot"
+        );
+
+        // The entry graph has exactly one occurrence per node, so its pins
+        // are unambiguous and still deliver.
+        push(&mut run_state, top_level_occurrence, 9);
         assert!(matches!(
-            &run_state.pinned_outputs.entries[&port],
-            StoredContent::Text(text) if text == "8"
+            &run_state.pinned_outputs.entries[&top_level_port],
+            StoredContent::Text(text) if text == "9"
         ));
+        assert_eq!(run_state.pinned_outputs.entries.len(), 1);
     }
 
     /// A node nested two levels deep accumulates onto *both* enclosing
