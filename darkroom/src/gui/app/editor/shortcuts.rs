@@ -16,7 +16,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::commands::shell::ShellCommand;
-use crate::gui::app::editor::Editor;
+use crate::gui::app::editor::{Editor, StepSignals};
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -51,29 +51,16 @@ impl Editor {
         if ui.focused_id().is_some() {
             return;
         }
-        let mut relayout = false;
-        let mut dirtied = false;
-        let mut reconcile = false;
-        let mut on_step = |step: &UndoStep| {
-            relayout |= step.requires_relayout();
-            dirtied |= step.dirties_document();
-            reconcile |= step.requires_reconcile();
-        };
+        // Folded into a value first: the replay callback runs while
+        // `action_stack` is mutably borrowed, so it can't touch `self`.
+        let mut signals = StepSignals::default();
+        let mut on_step = |step: &UndoStep| signals.fold(step);
         if undo {
             self.action_stack.undo(&mut open.document, &mut on_step);
         } else if redo {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
-        self.needs_relayout |= relayout;
-        // Replay moves pins and viewer tabs in both directions, so the
-        // store's retained set has to be re-derived either way.
-        if reconcile {
-            self.run_state.pinned_outputs.request_reconcile();
-        }
-        // A content edit undone/redone leaves the doc differing from the
-        // last save (barring the exact round-trip back to it — we accept a
-        // stale "dirty" there rather than tracking saved state precisely).
-        self.dirty |= dirtied;
+        self.absorb_signals(signals);
     }
 
     /// Esc-deselect and Ctrl+0 reset-zoom — both act on the active view,

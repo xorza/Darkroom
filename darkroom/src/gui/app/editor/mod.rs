@@ -18,7 +18,7 @@ use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::duplicate::{
     build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
-use crate::core::edit::intent::types::{Intent, Refusal};
+use crate::core::edit::intent::types::{Intent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
@@ -61,6 +61,27 @@ impl BatchOutcome {
         for reason in &self.rejected {
             tracing::warn!(target: "darkroom::edit", "rejected intent: {reason}");
         }
+    }
+}
+
+/// What applying one or more [`UndoStep`]s obliges the frame to do, folded
+/// off the steps' own predicates. Accumulated as a value rather than written
+/// straight onto [`Editor`] because undo/redo replay folds its steps from a
+/// callback while `action_stack` itself is mutably borrowed — so both the
+/// commit path and the replay path fold here and hand the result to
+/// [`Editor::absorb_signals`], and a seventh signal is added in one place.
+#[derive(Default, Debug)]
+struct StepSignals {
+    relayout: bool,
+    dirtied: bool,
+    reconcile: bool,
+}
+
+impl StepSignals {
+    fn fold(&mut self, step: &UndoStep) {
+        self.relayout |= step.requires_relayout();
+        self.dirtied |= step.dirties_document();
+        self.reconcile |= step.requires_reconcile();
     }
 }
 
@@ -175,25 +196,39 @@ impl Editor {
     ) -> BatchOutcome {
         let mut batch = Vec::new();
         let mut rejected = Vec::new();
+        let mut signals = StepSignals::default();
         for intent in intents {
             match commit_intent(intent, &mut open.document, target) {
                 Ok(step) => {
-                    self.needs_relayout |= step.requires_relayout();
-                    self.dirty |= step.dirties_document();
-                    if step.requires_reconcile() {
-                        self.run_state.pinned_outputs.request_reconcile();
-                    }
+                    signals.fold(&step);
                     batch.push(step);
                 }
                 Err(Refusal::Quiet) => {}
                 Err(Refusal::Invalid(reason)) => rejected.push(reason),
             }
         }
+        self.absorb_signals(signals);
         let applied = !batch.is_empty();
         if applied {
             self.action_stack.push_current(target, &batch);
         }
         BatchOutcome { applied, rejected }
+    }
+
+    /// Land folded [`StepSignals`] on the frame's accumulators. The one place
+    /// each signal's *effect* is spelled out, for both the commit path and
+    /// undo/redo replay.
+    fn absorb_signals(&mut self, signals: StepSignals) {
+        self.needs_relayout |= signals.relayout;
+        // A content edit (or an undone/redone one) leaves the doc differing
+        // from the last save — barring the exact round-trip back to it, where
+        // we accept a stale "dirty" rather than tracking saved state precisely.
+        self.dirty |= signals.dirtied;
+        // Pins and viewer tabs move in both directions, so the store has to
+        // re-derive which ports it still owes a presentation resource.
+        if signals.reconcile {
+            self.run_state.pinned_outputs.request_reconcile();
+        }
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime
