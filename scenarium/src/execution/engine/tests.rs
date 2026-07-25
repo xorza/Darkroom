@@ -7,6 +7,7 @@ use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::execution::program::ExecutionNode;
+use crate::execution::report::internals::DiscardedReports;
 use crate::graph::{
     Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
@@ -139,7 +140,7 @@ mod cache_persistence {
     use crate::async_lambda;
     use crate::execution::cache::slot::ValueState;
     use crate::execution::disk_store::DiskStore;
-    use crate::execution::report::{PinnedOutputs, RunEvent};
+    use crate::execution::report::internals::CollectingReporter;
     use crate::execution::resolve::Disposition;
     use crate::node::definition::{FuncId, FuncOutput};
     use std::collections::HashSet;
@@ -147,16 +148,6 @@ mod cache_persistence {
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-    use tokio::sync::mpsc::UnboundedReceiver;
-
-    fn receive_pinned(rx: &mut UnboundedReceiver<RunEvent>) -> PinnedOutputs {
-        loop {
-            match rx.try_recv().expect("run must deliver a pinned output") {
-                RunEvent::PinnedOutputs(outputs) => return outputs,
-                RunEvent::Progress(_) => {}
-            }
-        }
-    }
 
     /// A unique temp directory removed on drop, so tests don't collide or leak.
     struct TempDir(PathBuf);
@@ -522,7 +513,7 @@ mod cache_persistence {
         // recomputed on reopen (the win the removed plan-time pass used to give).
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut reporter = CollectingReporter::default();
         let mut stats = ExecutionOutcome::default();
         engine
             .execute(
@@ -530,13 +521,12 @@ mod cache_persistence {
                     sinks: true,
                     ..Default::default()
                 },
-                Some(&tx),
+                &mut reporter,
                 CancelToken::never(),
                 &mut stats,
             )
             .await
             .unwrap();
-        drop(tx);
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             1,
@@ -560,7 +550,7 @@ mod cache_persistence {
                 .any(|n| n.e_node_id == root_execution_node(mult_id)),
             "mult did not recompute"
         );
-        let pinned = receive_pinned(&mut rx);
+        let pinned = reporter.expect_pinned();
         assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
         assert_eq!(pinned.values.len(), 1);
         assert_eq!(pinned.values[0].port_idx, 0);
@@ -578,14 +568,14 @@ mod cache_persistence {
 
         // Refreshing that preview targets `mult` directly. Delivery hydrates the disk hit,
         // but targeting must not turn it into an implicit RAM cache.
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut reporter = CollectingReporter::default();
         engine
             .execute(
                 RunSeeds {
                     e_node_ids: vec![root_execution_node(mult_id)],
                     ..Default::default()
                 },
-                Some(&tx),
+                &mut reporter,
                 CancelToken::never(),
                 &mut stats,
             )
@@ -601,7 +591,7 @@ mod cache_persistence {
         );
         assert_eq!(stats.executed_nodes.as_ptr(), executed_allocation);
         assert_eq!(stats.executed_nodes.capacity(), executed_capacity);
-        let pinned = receive_pinned(&mut rx);
+        let pinned = reporter.expect_pinned();
         assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
         assert_eq!(pinned.values[0].value.as_i64(), Some(49));
 
@@ -3018,35 +3008,32 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_emits_started_then_finished_progress_per_node() -> TestResult {
-        use crate::execution::report::{RunEvent, RunPhase};
-        use tokio::sync::mpsc::unbounded_channel;
+        use crate::execution::report::RunPhase;
+        use crate::execution::report::internals::CollectingReporter;
 
         let graph = test_graph();
         let library = test_func_lib(default_hooks());
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let (tx, mut rx) = unbounded_channel::<RunEvent>();
+        let mut reporter = CollectingReporter::default();
         let mut stats = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
                 sinks: true,
                 ..Default::default()
             },
-            Some(&tx),
+            &mut reporter,
             CancelToken::never(),
             &mut stats,
         )
         .await?;
-        drop(tx);
 
-        let mut events: Vec<(ExecutionNodeId, RunPhase)> = Vec::new();
-        while let Ok(e) = rx.try_recv() {
-            let RunEvent::Progress(p) = e else {
-                continue;
-            };
-            events.push((p.e_node_id, p.phase));
-        }
+        let events: Vec<(ExecutionNodeId, RunPhase)> = reporter
+            .progress
+            .iter()
+            .map(|progress| (progress.e_node_id, progress.phase))
+            .collect();
 
         let name_of: std::collections::HashMap<ExecutionNodeId, String> =
             ["get_a", "get_b", "sum", "mult", "Print"]
@@ -3110,7 +3097,7 @@ mod behavior {
                 sinks: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             tripped,
             &mut stats,
         )
@@ -3128,7 +3115,7 @@ mod behavior {
                 sinks: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::new(),
             &mut stats,
         )
@@ -3196,7 +3183,7 @@ mod behavior {
                 sinks: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::new(),
             &mut stats,
         )
@@ -3223,7 +3210,7 @@ mod behavior {
                 sinks: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::new(),
             &mut stats,
         )
@@ -3280,7 +3267,7 @@ mod behavior {
                 sinks: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             common::CancelToken::new(),
             &mut stats,
         )
@@ -3504,9 +3491,8 @@ mod composite_behavior {
     /// that occurrence's disabled flag for the run, and delivers its addressed value.
     #[tokio::test]
     async fn seeding_a_disabled_definition_node_runs_one_exact_instance() {
-        use crate::execution::report::RunEvent;
+        use crate::execution::report::internals::CollectingReporter;
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use tokio::sync::mpsc::unbounded_channel;
 
         let get_b_calls = Arc::new(AtomicUsize::new(0));
         let library = test_func_lib(TestFuncHooks {
@@ -3547,29 +3533,26 @@ mod composite_behavior {
         let first_e_node_id = ExecutionNodeId::from_authoring(&[first_instance, inner_id]);
         let second_e_node_id = ExecutionNodeId::from_authoring(&[second_instance, inner_id]);
 
-        let (tx, mut rx) = unbounded_channel();
+        let mut reporter = CollectingReporter::default();
         let mut stats = ExecutionOutcome::default();
         eg.execute(
             RunSeeds {
                 e_node_ids: vec![first_e_node_id],
                 ..Default::default()
             },
-            Some(&tx),
+            &mut reporter,
             CancelToken::never(),
             &mut stats,
         )
         .await
         .unwrap();
-        drop(tx);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
         assert_eq!(stats.executed_nodes.len(), 1);
 
         let mut pushed = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            if let RunEvent::PinnedOutputs(outputs) = event {
-                assert_eq!(outputs.values[0].value.as_i64(), Some(11));
-                pushed.push(outputs.e_node_id);
-            }
+        for outputs in &reporter.pinned {
+            assert_eq!(outputs.values[0].value.as_i64(), Some(11));
+            pushed.push(outputs.e_node_id);
         }
         pushed.sort();
         let expected = vec![first_e_node_id];
@@ -4030,7 +4013,7 @@ mod node_seeds {
                 e_node_ids: vec![root_execution_node(sum_id)],
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::never(),
             &mut stats,
         )
@@ -4548,7 +4531,7 @@ mod events {
                 event_sources: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::never(),
             &mut outcome,
         )
@@ -4584,7 +4567,7 @@ mod events {
                     event_sources: true,
                     ..Default::default()
                 },
-                None,
+                &mut DiscardedReports,
                 CancelToken::never(),
                 &mut outcome,
             )
@@ -4620,8 +4603,13 @@ mod events {
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
         let mut outcome = ExecutionOutcome::default();
-        eg.execute(RunSeeds::sinks(), None, CancelToken::never(), &mut outcome)
-            .await?;
+        eg.execute(
+            RunSeeds::sinks(),
+            &mut DiscardedReports,
+            CancelToken::never(),
+            &mut outcome,
+        )
+        .await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
         assert!(
@@ -4654,7 +4642,7 @@ mod events {
                 event_sources: true,
                 ..Default::default()
             },
-            None,
+            &mut DiscardedReports,
             CancelToken::never(),
             &mut outcome,
         )

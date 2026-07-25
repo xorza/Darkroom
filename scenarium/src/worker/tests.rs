@@ -777,11 +777,11 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     use crate::DataType;
     use crate::node::definition::{FuncInput, FuncOutput};
 
-    // A → B with trivial sync lambdas: they give the run future no suspension
-    // point of their own, so only the executor's per-node yield lets the relay
-    // forward events mid-run. B records how many node-status patch entries the
-    // host callback has already seen — A's `Started` and `Finished` must both
-    // have reached the host before B is invoked.
+    // A → B with trivial sync lambdas, which give the run future no suspension point of
+    // their own: nothing but direct reporting can get their progress out mid-run. B records
+    // how many node-status patch entries the host callback has already seen — A's `Started`
+    // and `Finished` *and* B's own `Started` must all have reached the host by the time B's
+    // lambda runs.
     let patch_entries = Arc::new(AtomicU64::new(0));
     let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));
 
@@ -850,8 +850,9 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     }
     assert_eq!(
         seen_by_second.load(Ordering::SeqCst),
-        2,
-        "the first node's Started and Finished patches must reach the host before the second node runs"
+        3,
+        "the first node's Started and Finished patches, and the second's own Started, must \
+         reach the host before the second node's lambda runs"
     );
 }
 

@@ -1,15 +1,16 @@
+use std::fmt;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
 use crate::execution::engine::ExecutionEngine;
-use crate::execution::error::{Error, Result};
+use crate::execution::error::Error;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::report::RunEvent;
+use crate::execution::report::{PinnedOutputs, RunProgress, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::event_loop::{
@@ -18,8 +19,6 @@ use crate::worker::event_loop::{
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{WorkerActivity, WorkerStatusPublisher};
-
-const RUN_EVENT_BATCH_SIZE: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventLoopTransition {
@@ -88,7 +87,6 @@ pub(crate) struct WorkerTask<ExecutionCallback> {
     intent: BatchIntent,
     messages: Vec<WorkerMessage>,
     event_buffer: Vec<ExecutionEventPort>,
-    run_events: Vec<RunEvent>,
     event_loop: Option<ActiveEventLoop>,
     event_loop_pause_gate: PauseGate,
 }
@@ -114,7 +112,6 @@ where
             intent: BatchIntent::default(),
             messages: Vec::new(),
             event_buffer: Vec::with_capacity(EVENT_LOOP_BACKPRESSURE),
-            run_events: Vec::with_capacity(RUN_EVENT_BATCH_SIZE),
             event_loop: None,
             event_loop_pause_gate: PauseGate::default(),
         }
@@ -243,16 +240,19 @@ where
         let activity = self.executing_activity();
         (self.callback)(WorkerReport::Status(self.status.activity(activity)));
         let _pause_guard = self.event_loop_pause_gate.close();
-        let result = run_and_forward(
-            &mut self.engine,
-            &mut self.outcome,
-            &mut self.run_events,
-            &mut self.status,
-            run.seeds,
-            self.run_cancel.clone(),
-            &self.callback,
-        )
-        .await;
+        let mut reporter = WorkerRunReporter {
+            status: &mut self.status,
+            callback: &self.callback,
+        };
+        let result = self
+            .engine
+            .execute(
+                run.seeds,
+                &mut reporter,
+                self.run_cancel.clone(),
+                &mut self.outcome,
+            )
+            .await;
 
         match result {
             Ok(()) => {
@@ -336,61 +336,33 @@ where
     }
 }
 
-async fn run_and_forward<C>(
-    engine: &mut ExecutionEngine,
-    outcome: &mut ExecutionOutcome,
-    events: &mut Vec<RunEvent>,
-    status: &mut WorkerStatusPublisher,
-    seeds: RunSeeds,
-    cancel: CancelToken,
-    callback: &C,
-) -> Result<()>
+/// Publishes a run's live feedback to the host as the run loop produces it. Owns the
+/// borrows a report needs — the status publisher's retained allocation and the host
+/// callback — so the executor can hand each event straight over instead of queueing it for
+/// a relay to drain.
+struct WorkerRunReporter<'a, C> {
+    status: &'a mut WorkerStatusPublisher,
+    callback: &'a C,
+}
+
+impl<C> fmt::Debug for WorkerRunReporter<'_, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WorkerRunReporter").finish_non_exhaustive()
+    }
+}
+
+impl<C> RunReporter for WorkerRunReporter<'_, C>
 where
     C: Fn(WorkerReport) + Sync,
 {
-    events.clear();
-    let (event_tx, mut event_rx) = unbounded_channel::<RunEvent>();
-    let result = {
-        let run = engine.execute(seeds, Some(&event_tx), cancel, outcome);
-        tokio::pin!(run);
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut run => break result,
-                _ = event_rx.recv_many(events, RUN_EVENT_BATCH_SIZE) => {
-                    forward_run_events(events, status, callback);
-                }
-            }
-        }
-    };
-    drop(event_tx);
-    event_rx.recv_many(events, usize::MAX).await;
-    forward_run_events(events, status, callback);
-    result
-}
+    fn progress(&mut self, progress: RunProgress) {
+        let mut patch = self.status.patch();
+        patch.push(progress);
+        (self.callback)(WorkerReport::Status(patch.finish()));
+    }
 
-fn forward_run_events<C>(
-    events: &mut Vec<RunEvent>,
-    status: &mut WorkerStatusPublisher,
-    callback: &C,
-) where
-    C: Fn(WorkerReport),
-{
-    let mut events = events.drain(..).peekable();
-    while let Some(event) = events.next() {
-        match event {
-            RunEvent::Progress(progress) => {
-                let mut patch = status.patch();
-                patch.push(progress);
-                while let Some(RunEvent::Progress(progress)) =
-                    events.next_if(|event| matches!(event, RunEvent::Progress(_)))
-                {
-                    patch.push(progress);
-                }
-                callback(WorkerReport::Status(patch.finish()));
-            }
-            RunEvent::PinnedOutputs(outputs) => callback(WorkerReport::PinnedOutputs(outputs)),
-        }
+    fn pinned(&mut self, outputs: PinnedOutputs) {
+        (self.callback)(WorkerReport::PinnedOutputs(outputs));
     }
 }
 
@@ -405,14 +377,14 @@ mod tests {
     use common::CancelToken;
 
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::report::{RunEvent, RunPhase, RunProgress};
+    use crate::execution::report::{RunPhase, RunProgress, RunReporter};
     use crate::execution::seeds::RunSeeds;
     use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
     use crate::worker::protocol::{WorkerMessage, WorkerReport};
     use crate::worker::status::{
         NodeExecutionStatus, WorkerActivity, WorkerStatusKind, WorkerStatusPublisher,
     };
-    use crate::worker::task::{EventLoopTransition, PendingRun, WorkerTask, forward_run_events};
+    use crate::worker::task::{EventLoopTransition, PendingRun, WorkerRunReporter, WorkerTask};
 
     #[tokio::test]
     async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
@@ -549,59 +521,70 @@ mod tests {
         assert_eq!(run.seeds.e_node_ids, [e_node_id]);
     }
 
+    /// Each reported event publishes its own snapshot the moment it happens, and a snapshot
+    /// the host has not drained yet is never mutated by the next one.
     #[test]
-    fn worker_status_batches_nodes_and_preserves_published_snapshots() {
+    fn worker_reporter_publishes_each_event_and_preserves_published_snapshots() {
         let first_node = ExecutionNodeId::unique();
         let second_node = ExecutionNodeId::unique();
-        let mut events = vec![
-            RunEvent::Progress(RunProgress {
-                e_node_id: first_node,
-                phase: RunPhase::Started { at: Instant::now() },
-            }),
-            RunEvent::Progress(RunProgress {
-                e_node_id: second_node,
-                phase: RunPhase::Finished { elapsed_secs: 0.25 },
-            }),
-        ];
         let mut status = WorkerStatusPublisher::default();
         drop(status.activity(WorkerActivity::Executing));
         let (tx, mut rx) = mpsc::unbounded_channel();
         let callback = |report| tx.send(report).unwrap();
+        let mut reporter = WorkerRunReporter {
+            status: &mut status,
+            callback: &callback,
+        };
 
-        forward_run_events(&mut events, &mut status, &callback);
-        let WorkerReport::Status(patch) = rx.try_recv().unwrap() else {
+        reporter.progress(RunProgress {
+            e_node_id: first_node,
+            phase: RunPhase::Started { at: Instant::now() },
+        });
+        reporter.progress(RunProgress {
+            e_node_id: second_node,
+            phase: RunPhase::Finished { elapsed_secs: 0.25 },
+        });
+
+        let WorkerReport::Status(started) = rx.try_recv().unwrap() else {
             panic!("progress must produce a status patch");
         };
-        assert_eq!(patch.kind, WorkerStatusKind::Patch);
-        assert_eq!(patch.nodes.len(), 2);
-        assert_eq!(patch.nodes[0].e_node_id, first_node);
+        let WorkerReport::Status(finished) = rx.try_recv().unwrap() else {
+            panic!("progress must produce a status patch");
+        };
+        assert!(rx.try_recv().is_err());
+        assert_eq!(started.kind, WorkerStatusKind::Patch);
+        assert_eq!(started.activity, WorkerActivity::Executing);
+        assert_eq!(started.nodes.len(), 1);
+        assert_eq!(started.nodes[0].e_node_id, first_node);
         assert!(matches!(
-            patch.nodes[0].status,
+            started.nodes[0].status,
             Some(NodeExecutionStatus::Running { .. })
         ));
-        assert_eq!(patch.nodes[1].e_node_id, second_node);
+        assert_eq!(finished.nodes.len(), 1);
+        assert_eq!(finished.nodes[0].e_node_id, second_node);
         assert!(matches!(
-            patch.nodes[1].status,
+            finished.nodes[0].status,
             Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
         ));
-        let idle = status.activity(WorkerActivity::Idle);
-        assert!(!Arc::ptr_eq(&patch, &idle));
-        assert_eq!(patch.activity, WorkerActivity::Executing);
-        assert_eq!(patch.nodes.len(), 2);
-        assert_eq!(idle.activity, WorkerActivity::Idle);
-        assert!(idle.nodes.is_empty());
-        assert_eq!(
-            idle.nodes.capacity(),
-            0,
-            "publishing over a still-queued snapshot allocates fresh rather than \
-             deep-cloning vectors it immediately clears"
-        );
+        // The second patch could not reuse the first's still-queued allocation.
+        assert!(!Arc::ptr_eq(&started, &finished));
 
-        drop(patch);
+        // Publishing over a still-queued snapshot allocates fresh rather than deep-cloning
+        // vectors it immediately clears — a clone would carry the previous capacity over.
+        let idle = status.activity(WorkerActivity::Idle);
+        assert!(idle.nodes.is_empty());
+        assert_eq!(idle.nodes.capacity(), 0);
+        assert_eq!(started.nodes.len(), 1, "a published snapshot is immutable");
+
+        drop((started, finished));
         let allocation = Arc::as_ptr(&idle);
         drop(idle);
         let executing = status.activity(WorkerActivity::Executing);
-        assert_eq!(Arc::as_ptr(&executing), allocation);
+        assert_eq!(
+            Arc::as_ptr(&executing),
+            allocation,
+            "a drained snapshot's allocation is recycled"
+        );
         assert!(rx.try_recv().is_err());
     }
 }

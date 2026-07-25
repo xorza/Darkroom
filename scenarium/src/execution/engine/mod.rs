@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use common::CancelToken;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
 use crate::execution::compile::CompiledGraph;
@@ -15,7 +14,7 @@ use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::plan::{ExecutionPlan, Planner};
 use crate::execution::program::index::NodeIdx;
-use crate::execution::report::RunEvent;
+use crate::execution::report::RunReporter;
 use crate::execution::resolve::Resolver;
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::seeds::RunSeeds;
@@ -85,18 +84,16 @@ impl ExecutionEngine {
         self.cache.evict(&self.compiled.program, &e_node_ids).await
     }
 
-    /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
-    /// feedback ahead of the final outcome: a `RunEvent::Progress` before and
-    /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` when a
-    /// node with a pinned output (or that is itself a pinned root) produces or
-    /// reuses its value, so a GUI preview updates without polling. When `cancel`
-    /// is set mid-run, scheduling stops after the in-flight node and the
+    /// `reporter` receives live feedback ahead of the final outcome: progress before and
+    /// after each node's lambda runs, and the pinned outputs of a node that produces or
+    /// reuses one (or is itself a pinned root), so a GUI preview updates without polling.
+    /// When `cancel` is set mid-run, scheduling stops after the in-flight node and the
     /// caller-owned outcome is marked `cancelled`. The outcome also owns triggers
     /// initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
         mut seeds: RunSeeds,
-        events: Option<&UnboundedSender<RunEvent>>,
+        reporter: &mut dyn RunReporter,
         cancel: CancelToken,
         outcome: &mut ExecutionOutcome,
     ) -> Result<()> {
@@ -141,7 +138,10 @@ impl ExecutionEngine {
                     resolved: &self.resolver.run,
                     cache: &mut self.cache,
                     resource_stamps: &mut self.resource_stamps,
-                    events,
+                    // Reborrowed, not moved: a `&mut dyn` is invariant, so passing the
+                    // caller's borrow on would hold the engine's own fields for the caller's
+                    // whole lifetime rather than just this call.
+                    reporter,
                     cancel,
                 },
                 outcome,
@@ -197,6 +197,7 @@ mod internals {
     use crate::execution::outcome::ExecutionOutcome;
     use crate::execution::program;
     use crate::execution::program::ExecutionBinding;
+    use crate::execution::report::internals::DiscardedReports;
     use crate::execution::resolve::Disposition;
     use crate::execution::resource::RunResourceStamps;
     use crate::execution::seeds::RunSeeds;
@@ -230,7 +231,7 @@ mod internals {
                     sinks: true,
                     ..Default::default()
                 },
-                None,
+                &mut DiscardedReports,
                 CancelToken::never(),
                 &mut outcome,
             )
@@ -248,7 +249,7 @@ mod internals {
                     events: events.into_iter().collect(),
                     ..Default::default()
                 },
-                None,
+                &mut DiscardedReports,
                 CancelToken::never(),
                 &mut outcome,
             )
@@ -266,7 +267,7 @@ mod internals {
                     e_node_ids: nodes.into_iter().collect(),
                     ..Default::default()
                 },
-                None,
+                &mut DiscardedReports,
                 CancelToken::never(),
                 &mut outcome,
             )

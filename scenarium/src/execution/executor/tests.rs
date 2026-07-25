@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
 use super::*;
 use crate::async_lambda;
 use crate::execution::cache::runtime::RuntimeCache;
@@ -13,6 +11,7 @@ use crate::execution::program::index::{
 };
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::PinnedOutputs;
+use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
@@ -219,7 +218,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
                 resolved: &run.resolved,
                 cache: &mut cache,
                 resource_stamps: &mut resource_stamps,
-                events: None,
+                reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },
             &mut stats,
@@ -252,7 +251,7 @@ async fn run_with(
                 resolved: &resolver.run,
                 cache,
                 resource_stamps: &mut resource_stamps,
-                events: None,
+                reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },
             &mut outcome,
@@ -261,8 +260,8 @@ async fn run_with(
     outcome
 }
 
-/// Like [`run`] but wires a live [`RunEvent`] channel through the executor and
-/// drains every `PinnedOutputs` it sent.
+/// Like [`run`] but wires a reporter through the executor and returns every `PinnedOutputs`
+/// it pushed.
 async fn run_with_pinned(
     program: &ExecutionProgram,
     run: &TestRun,
@@ -271,7 +270,7 @@ async fn run_with_pinned(
     cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resource_stamps = RunResourceStamps::default();
-    let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
+    let mut reporter = CollectingReporter::default();
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
@@ -281,20 +280,13 @@ async fn run_with_pinned(
                 resolved: &run.resolved,
                 cache: &mut cache,
                 resource_stamps: &mut resource_stamps,
-                events: Some(&tx),
+                reporter: &mut reporter,
                 cancel: CancelToken::never(),
             },
             &mut stats,
         )
         .await;
-    drop(tx);
-    let mut pushes = Vec::new();
-    while let Some(event) = rx.recv().await {
-        if let RunEvent::PinnedOutputs(p) = event {
-            pushes.push(p);
-        }
-    }
-    (cache, stats, pushes)
+    (cache, stats, reporter.pinned)
 }
 
 #[tokio::test]
@@ -431,7 +423,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
                 resolved: &run.resolved,
                 cache: &mut cache,
                 resource_stamps: &mut resource_stamps,
-                events: None,
+                reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
             },
             &mut stats,
@@ -690,7 +682,7 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
         produced_under: cache.slots[nx(&p.program, a)].current_digest,
     };
     let mut executor = Executor::default();
-    let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
+    let mut reporter = CollectingReporter::default();
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
@@ -700,19 +692,13 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
                 resolved: &run.resolved,
                 cache: &mut cache,
                 resource_stamps: &mut resource_stamps,
-                events: Some(&tx),
+                reporter: &mut reporter,
                 cancel: CancelToken::never(),
             },
             &mut stats,
         )
         .await;
-    drop(tx);
-    let pushes: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
-        .filter_map(|event| match event {
-            RunEvent::PinnedOutputs(outputs) => Some(outputs),
-            RunEvent::Progress(_) => None,
-        })
-        .collect();
+    let pushes = reporter.pinned;
 
     assert_eq!(stats.cached_nodes, vec![a]);
     assert_eq!(pushes.len(), 1);
