@@ -10,7 +10,7 @@ use scenarium::Library;
 use scenarium::{
     Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
-use scenarium::{DataType, GraphDef, GraphInterface, RamUsage, StaticValue};
+use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, StaticValue};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
 use crate::core::document::{GraphView, ItemRef, Viewport};
@@ -296,6 +296,11 @@ impl Scene {
         self.events.clear();
         self.value_variants_pool.clear();
 
+        // One handle for the empty string, cloned wherever a port declares no
+        // description or a node carries no authored name — see
+        // `intern_or_empty`.
+        let empty = ui.intern("");
+
         for (key, position) in &view.item_placements {
             let id = match *key {
                 ItemRef::Node(id) => id,
@@ -319,10 +324,14 @@ impl Scene {
                 NodeKind::Func(_) | NodeKind::Graph(_) | NodeKind::Special(_) => {
                     graph.node_ports(node, library).map(|ports| NodeInterface {
                         kind_label: ui.intern(ports.name),
-                        description: ui.intern(ports.description.unwrap_or_default()),
+                        description: intern_or_empty(
+                            ui,
+                            &empty,
+                            ports.description.unwrap_or_default(),
+                        ),
                         inputs: Cow::Borrowed(ports.inputs),
                         outputs: Cow::Borrowed(ports.outputs),
-                        events: ports.events.names().map(|name| ui.intern(name)).collect(),
+                        events: Some(ports.events),
                         graph: match node.kind {
                             NodeKind::Graph(link) => Some(link),
                             _ => None,
@@ -350,17 +359,12 @@ impl Scene {
                     let mut outputs: Vec<FuncOutput> =
                         interface.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
-                    NodeInterface {
-                        kind_label: ui.intern("Input"),
-                        description: ui.intern(""),
-                        inputs: Cow::Borrowed(&[]),
-                        outputs: Cow::Owned(outputs),
-                        events: Vec::new(),
-                        graph: None,
-                        sink: false,
-                        uncacheable: true,
-                        impure: false,
-                    }
+                    NodeInterface::synthesized(
+                        ui.intern("Input"),
+                        empty.clone(),
+                        Cow::Borrowed(&[]),
+                        Cow::Owned(outputs),
+                    )
                 }),
                 // Outbound boundary: one input per graph output (synthesized
                 // as `FuncInput`s for names + zero defaults), plus a
@@ -370,17 +374,12 @@ impl Scene {
                     let mut inputs: Vec<FuncInput> =
                         interface.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
-                    NodeInterface {
-                        kind_label: ui.intern("Output"),
-                        description: ui.intern(""),
-                        inputs: Cow::Owned(inputs),
-                        outputs: Cow::Borrowed(&[]),
-                        events: Vec::new(),
-                        graph: None,
-                        sink: false,
-                        uncacheable: true,
-                        impure: false,
-                    }
+                    NodeInterface::synthesized(
+                        ui.intern("Output"),
+                        empty.clone(),
+                        Cow::Owned(inputs),
+                        Cow::Borrowed(&[]),
+                    )
                 }),
             };
             // A func or graph node whose target is absent
@@ -403,17 +402,12 @@ impl Scene {
                             unreachable!("special and boundary interfaces always resolve")
                         }
                     };
-                    NodeInterface {
-                        kind_label: ui.intern(kind_label),
-                        description: ui.intern(""),
-                        inputs: Cow::Borrowed(&[]),
-                        outputs: Cow::Borrowed(&[]),
-                        events: Vec::new(),
-                        graph: None,
-                        sink: false,
-                        uncacheable: true,
-                        impure: false,
-                    }
+                    NodeInterface::synthesized(
+                        ui.intern(kind_label),
+                        empty.clone(),
+                        Cow::Borrowed(&[]),
+                        Cow::Borrowed(&[]),
+                    )
                 }
             };
             // One `SceneInput` per input port, sliced by the node's `inputs`
@@ -428,7 +422,11 @@ impl Scene {
                 let port = InputPort::new(id, port_idx);
                 self.inputs.push(SceneInput {
                     name: ui.intern(&input.name),
-                    description: ui.intern(input.description.as_deref().unwrap_or_default()),
+                    description: intern_or_empty(
+                        ui,
+                        &empty,
+                        input.description.as_deref().unwrap_or_default(),
+                    ),
                     ty: input.data_type.clone(),
                     binding: InputBindingView::from(graph.bindings.get(&port)),
                     default: default_static_value(library, input),
@@ -449,7 +447,11 @@ impl Scene {
                     .enumerate()
                     .map(|(i, o)| SceneOutput {
                         name: ui.intern(&o.name),
-                        description: ui.intern(o.description.as_deref().unwrap_or_default()),
+                        description: intern_or_empty(
+                            ui,
+                            &empty,
+                            o.description.as_deref().unwrap_or_default(),
+                        ),
                         // A wildcard output (passthrough / reroute) reports the type
                         // resolved through the input it mirrors; a fixed output uses
                         // its declared type.
@@ -465,19 +467,26 @@ impl Scene {
                             .copied(),
                     }),
             );
-            let events = extend_pool(
-                &mut self.events,
-                interface
-                    .events
-                    .iter()
-                    .map(|name| SceneEvent { name: name.clone() }),
-            );
+            let events = match interface.events {
+                None => Span::default(),
+                Some(events) => extend_pool(
+                    &mut self.events,
+                    events.names().map(|name| SceneEvent {
+                        name: ui.intern(name),
+                    }),
+                ),
+            };
+            let boundary = matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput);
+            // Resolved before the literal below, which moves `description`
+            // out of `interface` and so ends the borrow these need.
+            let cache_controls = interface.cache_controls();
+            let can_evict_cache = interface.can_evict_cache(boundary);
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
             let name = match (&node.kind, node.name.is_empty()) {
                 (NodeKind::GraphInput, true) => ui.intern("Inputs"),
                 (NodeKind::GraphOutput, true) => ui.intern("Outputs"),
-                _ => ui.intern(&node.name),
+                _ => intern_or_empty(ui, &empty, &node.name),
             };
             self.nodes.insert(
                 id,
@@ -494,16 +503,10 @@ impl Scene {
                     sink: interface.sink,
                     disabled: node.disabled,
                     cache: node.cache,
-                    cache_controls: interface.graph.is_none()
-                        && !interface.uncacheable
-                        && !interface.outputs.is_empty()
-                        && !interface.impure,
-                    can_evict_cache: interface.graph.is_some()
-                        || (!interface.outputs.is_empty()
-                            && !interface.impure
-                            && !matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput)),
+                    cache_controls,
+                    can_evict_cache,
                     impure: interface.impure,
-                    boundary: matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput),
+                    boundary,
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
                     missing,
@@ -585,11 +588,15 @@ struct NodeInterface<'a> {
     description: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
-    /// Event (emitter) port names, in declaration order. `FuncEvent` and
-    /// `GraphEvent` differ in type but both expose a `name`, and the UI
-    /// only lists the name — so the interface flattens them to owned
-    /// names rather than threading a third `Cow<[_]>` of incompatible types.
-    events: Vec<InternedStr>,
+    /// Event (emitter) ports, in declaration order. `FuncEvent` and
+    /// `GraphEvent` differ in type, so they can't share a slice — but
+    /// [`NodeEvents`] is a `Copy` borrow of either, which is all the UI
+    /// needs to read the names off at pool-fill time. Borrowed rather than
+    /// eagerly interned into a `Vec`, which cost one heap allocation per
+    /// node per frame for a list that was copied into `Scene::events` and
+    /// dropped immediately. `None` for boundary and missing-stub nodes,
+    /// which expose no events at all.
+    events: Option<NodeEvents<'a>>,
     graph: Option<GraphLink>,
     sink: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
@@ -600,6 +607,49 @@ struct NodeInterface<'a> {
     /// [`SceneNode::impure`]). Only set from a func spec; `false` for composites
     /// (aggregate purity isn't known here) and boundary/stub nodes.
     impure: bool,
+}
+
+impl<'a> NodeInterface<'a> {
+    /// An interface the editor synthesizes rather than reads off a func or a
+    /// definition: the two boundary nodes, and the stub standing in for a
+    /// node whose target is gone. None of them emits events, instantiates a
+    /// graph, sinks, or has anything cacheable — only the label and the
+    /// ports differ between the three.
+    fn synthesized(
+        kind_label: InternedStr,
+        description: InternedStr,
+        inputs: Cow<'a, [FuncInput]>,
+        outputs: Cow<'a, [FuncOutput]>,
+    ) -> Self {
+        Self {
+            kind_label,
+            description,
+            inputs,
+            outputs,
+            events: None,
+            graph: None,
+            sink: false,
+            uncacheable: true,
+            impure: false,
+        }
+    }
+
+    /// Whether the header offers the RAM/disk storage chips — see
+    /// [`SceneNode::cache_controls`]. A composite's storage is its interior's
+    /// business, an impure func has no content digest to key a cache on, and
+    /// a func that declares itself uncacheable or exposes no outputs has
+    /// nothing to store.
+    fn cache_controls(&self) -> bool {
+        self.graph.is_none() && !self.uncacheable && !self.outputs.is_empty() && !self.impure
+    }
+
+    /// Whether the header offers runtime cache eviction — see
+    /// [`SceneNode::can_evict_cache`]. A graph instance always can, evicting
+    /// its flattened interior; anything else needs a reproducible output,
+    /// which rules out impure funcs, portless nodes, and the boundary pair.
+    fn can_evict_cache(&self, boundary: bool) -> bool {
+        self.graph.is_some() || (!self.outputs.is_empty() && !self.impure && !boundary)
+    }
 }
 
 /// The literal a port falls back to when given a const binding: its declared
@@ -659,6 +709,20 @@ fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span
     let start = pool.len();
     pool.extend(items);
     Span::new(start as u32, (pool.len() - start) as u32)
+}
+
+/// Intern `text`, reusing the pre-made `empty` handle when it has none.
+///
+/// `Ui::intern` takes the arena's `RefCell` and clones its `Rc` even for
+/// `""`, and empty is the *common* case here: most ports declare no
+/// description and most nodes carry no authored name. Cloning one handle
+/// instead is a span copy and a refcount bump.
+fn intern_or_empty(ui: &mut Ui, empty: &InternedStr, text: &str) -> InternedStr {
+    if text.is_empty() {
+        empty.clone()
+    } else {
+        ui.intern(text)
+    }
 }
 
 #[cfg(test)]
