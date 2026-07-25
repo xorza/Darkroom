@@ -23,7 +23,6 @@ mod value_flow;
 
 use std::time::Instant;
 
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::task;
 
 use common::CancelToken;
@@ -32,7 +31,7 @@ use crate::execution::event::EventTrigger;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
 use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::program::index::{NodeColumn, NodeIdx};
-use crate::execution::report::{RunEvent, RunPhase, RunProgress};
+use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::node::lambda::{InvokeError, InvokeInput, OutputDemand};
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -49,17 +48,6 @@ use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::{Disposition, ResolvedRun};
 use crate::execution::resource::RunResourceStamps;
 
-/// Why every `events.send(..)` in this module is `.expect`-asserted rather than
-/// silently ignored: `send` only fails once every receiver is dropped, and the
-/// worker task's `event_rx` isn't dropped until *after*
-/// the `execute` future this `run` lives inside resolves — `send` isn't an
-/// await point, so an abort mid-run can only land at an earlier `.await` and
-/// drop this whole future before a send is ever reached, never selectively
-/// close just the receiver. A failed send here means that lifetime invariant
-/// broke — a real bug, not an expected failure to shrug off.
-const EVENTS_OUTLIVE_RUN: &str =
-    "the events receiver outlives this future — the worker only drops it after `execute` resolves";
-
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
@@ -75,16 +63,17 @@ pub(crate) struct Executor {
 
 /// Everything one run borrows from the engine. A parameter struct rather than eight
 /// positional arguments, so the call site names each collaborator and a new one doesn't
-/// become another slot to count.
+/// become another slot to count. `'r` is the reporter's own lifetime — see
+/// [`ExecutionFrame`].
 #[derive(Debug)]
-pub(crate) struct RunRequest<'a> {
+pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) program: &'a ExecutionProgram,
     pub(crate) plan: &'a ExecutionPlan,
     pub(crate) resolved: &'a ResolvedRun,
     pub(crate) cache: &'a mut RuntimeCache,
     pub(crate) resource_stamps: &'a mut RunResourceStamps,
-    /// When set, live per-node feedback streams ahead of the final outcome.
-    pub(crate) events: Option<&'a UnboundedSender<RunEvent>>,
+    /// Live per-node feedback, published ahead of the final outcome.
+    pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
     pub(crate) cancel: CancelToken,
 }
 
@@ -92,14 +81,18 @@ impl Executor {
     /// Walk `plan.process_order` (producer-first), giving each node one turn. The loop
     /// itself owns only the two decisions that end it early or skip it wholesale — the
     /// per-node work is [`ExecutionFrame::run_node`].
-    pub(crate) async fn run(&mut self, request: RunRequest<'_>, outcome: &mut ExecutionOutcome) {
+    pub(crate) async fn run(
+        &mut self,
+        request: RunRequest<'_, '_>,
+        outcome: &mut ExecutionOutcome,
+    ) {
         let RunRequest {
             program,
             plan,
             resolved,
             cache,
             resource_stamps,
-            events,
+            reporter,
             cancel,
         } = request;
 
@@ -125,8 +118,11 @@ impl Executor {
                 inputs: &mut self.inputs,
                 node_outcomes: &mut self.outcomes,
                 ctx: &mut self.ctx_manager,
-                events,
-                outcome: &mut *outcome,
+                // Reborrowed rather than moved: a `&mut dyn` is invariant, so handing the
+                // caller's own borrow to the frame would pin every other field to the
+                // caller's lifetime for the whole call.
+                reporter,
+                outcome,
             };
 
             // The producer-first schedule excludes unseeded disabled nodes; the
@@ -160,8 +156,12 @@ impl Executor {
 ///
 /// Value movement — input collection, pinned delivery, and the last-read releases — lives in
 /// [`value_flow`].
+///
+/// `'r` is the reporter's own lifetime, kept separate from the frame's `'a`: a
+/// `&mut dyn Trait` is invariant, so sharing one lifetime would extend every borrow here to
+/// the caller's.
 #[derive(Debug)]
-pub(crate) struct ExecutionFrame<'a> {
+pub(crate) struct ExecutionFrame<'a, 'r> {
     program: &'a ExecutionProgram,
     plan: &'a ExecutionPlan,
     resolved: &'a ResolvedRun,
@@ -172,11 +172,11 @@ pub(crate) struct ExecutionFrame<'a> {
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
     node_outcomes: &'a mut NodeColumn<NodeOutcome>,
     ctx: &'a mut ContextManager,
-    events: Option<&'a UnboundedSender<RunEvent>>,
+    reporter: &'a mut (dyn RunReporter + 'r),
     outcome: &'a mut ExecutionOutcome,
 }
 
-impl ExecutionFrame<'_> {
+impl ExecutionFrame<'_, '_> {
     /// One node's turn. The resolver's disposition decides which of the four things happens,
     /// and it is authoritative — a [`Disposition::Reuse`] is never re-derived here, since its
     /// producers may already be pruned (see `resolve.rs`).
@@ -427,12 +427,8 @@ impl ExecutionFrame<'_> {
         );
     }
 
-    fn report_progress(&self, e_node_id: ExecutionNodeId, phase: RunPhase) {
-        if let Some(events) = self.events {
-            events
-                .send(RunEvent::Progress(RunProgress { e_node_id, phase }))
-                .expect(EVENTS_OUTLIVE_RUN);
-        }
+    fn report_progress(&mut self, e_node_id: ExecutionNodeId, phase: RunPhase) {
+        self.reporter.progress(RunProgress { e_node_id, phase });
     }
 }
 

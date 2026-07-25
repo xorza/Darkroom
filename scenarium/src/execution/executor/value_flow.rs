@@ -4,10 +4,10 @@
 //! beside it in the parent module.
 
 use crate::DynamicValue;
-use crate::execution::executor::{EVENTS_OUTLIVE_RUN, ExecutionFrame};
+use crate::execution::executor::ExecutionFrame;
 use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent};
+use crate::execution::report::{PinnedOutput, PinnedOutputs};
 use crate::execution::resolve::ResolvedRun;
 use crate::node::lambda::InvokeInput;
 
@@ -43,9 +43,8 @@ impl RemainingOutputReads {
     }
 }
 
-impl ExecutionFrame<'_> {
+impl ExecutionFrame<'_, '_> {
     pub(super) fn emit_pinned_values(&mut self, node_idx: NodeIdx) {
-        let Some(events) = self.events else { return };
         let outputs = self.program[node_idx].outputs;
         let pinned_root = self.plan.pinned.contains(node_idx);
         let values: Vec<_> = self.program.outputs[outputs]
@@ -67,12 +66,8 @@ impl ExecutionFrame<'_> {
         if values.is_empty() {
             return;
         }
-        events
-            .send(RunEvent::PinnedOutputs(PinnedOutputs {
-                e_node_id: self.program.e_node_ids[node_idx],
-                values,
-            }))
-            .expect(EVENTS_OUTLIVE_RUN);
+        let e_node_id = self.program.e_node_ids[node_idx];
+        self.reporter.pinned(PinnedOutputs { e_node_id, values });
     }
 
     pub(super) fn collect_inputs(&mut self, node_idx: NodeIdx) {
