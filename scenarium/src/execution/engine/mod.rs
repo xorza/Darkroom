@@ -166,8 +166,7 @@ impl ExecutionEngine {
     /// snapshot preserves an existing blob that already covers it. Also a no-op for a node with
     /// no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for i in 0..self.compiled.program.e_nodes.len() {
-            let node_idx = NodeIdx(i as u32);
+        for node_idx in (0..self.compiled.program.e_nodes.len()).map(|i| NodeIdx(i as u32)) {
             if !self.compiled.program[node_idx].cache.persists_to_disk() {
                 continue;
             }

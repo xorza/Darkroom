@@ -69,26 +69,26 @@ impl CompiledGraph {
         let mut in_closure = NodeSet::default();
         in_closure.reset(program.e_nodes.len());
         let mut pending: Vec<NodeIdx> = Vec::new();
-        for (i, e_node_id) in program.e_node_ids.iter().enumerate() {
+        for (node_idx, e_node_id) in program.e_node_ids.iter_indexed() {
             if self
                 .flatten_map
                 .attribution(*e_node_id)
                 .expect("every execution node has authored attribution")
                 .any(|node_id| selected.contains(&node_id))
             {
-                in_closure.insert(NodeIdx(i as u32));
-                pending.push(NodeIdx(i as u32));
+                in_closure.insert(node_idx);
+                pending.push(node_idx);
             }
         }
 
         let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
-        for (i, e_node) in program.e_nodes.iter().enumerate() {
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             for input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
                     consumers
                         .entry(address.node_idx)
                         .or_default()
-                        .push(NodeIdx(i as u32));
+                        .push(node_idx);
                 }
             }
         }

@@ -279,8 +279,7 @@ fn collect_roots(
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
     // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
-    for (i, e_node) in program.e_nodes.iter().enumerate() {
-        let node_idx = NodeIdx(i as u32);
+    for (node_idx, e_node) in program.e_nodes.iter_indexed() {
         if e_node.disabled {
             continue;
         }
