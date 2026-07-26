@@ -6,9 +6,6 @@ file name as argument clap
 
 autoupdate image review and autorun node
 
-[dev-dependencies]
-scenarium = { workspace = true, features = ["internals"] }
-
 stacking frames (outer, inner, reference)
 
 auto chosen reference frame for stacking and manually specified
