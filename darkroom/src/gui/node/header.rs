@@ -37,6 +37,22 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 const BADGE_SIZE: f32 = 18.0;
 const BADGE_FONT: f32 = 12.0;
 
+/// Width floor for the run-time label, ~7 mono glyphs at [`BADGE_FONT`].
+///
+/// The node is `Hug` above a min width, so anything that changes the
+/// header's measured width moves the node's right edge — and with it the
+/// cached intra-node offsets of every *output* port, which is what wires
+/// anchor to. A live timer re-formats every frame, so without a floor a
+/// running node twitches its outgoing wires each time the digit count
+/// changes (`9.99s` → `10.00s`, `999.9ms` → `1.00s`). That is not an
+/// `UndoStep`, so nothing requests the settle pass that would hide it.
+///
+/// A floor rather than a fixed width: every value up to `999.99s` fits
+/// inside it and measures identically, and the rare longer one still
+/// renders rather than clipping. Generous on purpose — costing a few px
+/// of header is cheaper than being one glyph short of the common case.
+const RUN_TIME_MIN_WIDTH: f32 = 52.0;
+
 /// Shared chip tint opacity: a marker's fill and a hollow control's hover-lift
 /// both paint their color at this alpha, so the two families feel like one system.
 const CHIP_TINT_ALPHA: f32 = 0.20;
@@ -239,6 +255,7 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                         family: FontFamily::Mono,
                         ..ui.theme.text.clone()
                     })
+                    .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);
             }
             // Pushes the controls to the right edge, keeping the
@@ -613,5 +630,42 @@ impl Badge {
         let clicked = chip.response.left.clicked();
         tooltip_after(ui, &snapshot, tip);
         clicked
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::gui::node::header::fmt_elapsed;
+
+    /// `RUN_TIME_MIN_WIDTH` reserves ~7 mono glyphs so a running node's
+    /// label measures the same across every digit-count change, which is
+    /// what stops its outgoing wires twitching mid-run. That only holds
+    /// while `fmt_elapsed` stays inside 7 characters — widen it and the
+    /// floor silently stops covering the common range.
+    #[test]
+    fn fmt_elapsed_stays_within_the_reserved_width() {
+        // Both sides of every unit switch, plus the digit-count steps
+        // within seconds, which is where a live timer spends its time.
+        let cases = [
+            (0.0, "0µs"),
+            (9.99e-7, "1µs"),
+            (999.4e-6, "999µs"),
+            (1e-3, "1.0ms"),
+            (999.94e-3, "999.9ms"),
+            (1.0, "1.00s"),
+            (9.994, "9.99s"),
+            (10.0, "10.00s"),
+            (99.999, "100.00s"),
+            (999.994, "999.99s"),
+        ];
+        for (secs, expected) in cases {
+            let got = fmt_elapsed(secs);
+            assert_eq!(got, expected, "fmt_elapsed({secs})");
+            assert!(
+                got.chars().count() <= 7,
+                "{got:?} is {} chars — past what RUN_TIME_MIN_WIDTH reserves",
+                got.chars().count(),
+            );
+        }
     }
 }
