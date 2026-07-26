@@ -24,11 +24,10 @@ save caches on cache click
 
 subgraph to newnodeui
 
-subgraphs tabs movable
-intents target graph
-
 what is resourcestamps  simplify
 
 contextmenu for boundary nodes
 
 imageview to load only when active, until then save to disk
+
+expose test framework for palantir

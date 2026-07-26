@@ -8,7 +8,7 @@ use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
-use crate::core::document::{ItemRef, Viewport};
+use crate::core::document::{GraphRef, ItemRef, Viewport};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -20,23 +20,44 @@ use crate::gui::scene::GraphScene;
 /// per-frame rounding drift). Shared by the canvas and image-viewer
 /// pans — each caller keeps its own latch policy (which buttons, which
 /// arbitration) and folds the live drag through [`Self::apply`].
-#[derive(Debug, Default)]
-pub(crate) struct PanAnchor(Option<Vec2>);
+///
+/// `K` identifies **which** surface holds the anchor. One `PanAnchor`
+/// can be driven by several surfaces — the canvas keeps a single one
+/// while running [`emit_pan_zoom`] once per visible graph pane — and
+/// only one of them is ever being dragged. Without the key, every idle
+/// surface passes `delta: None`, which reads as the release edge and
+/// tears down the live drag's anchor. The image viewer has one surface
+/// and uses the default `()`.
+#[derive(Debug)]
+pub(crate) struct PanAnchor<K = ()>(Option<(K, Vec2)>);
 
-impl PanAnchor {
-    /// Capture the gesture-start pan.
-    pub(crate) fn latch(&mut self, pan: Vec2) {
-        self.0 = Some(pan);
+impl<K> Default for PanAnchor<K> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<K: Copy + PartialEq> PanAnchor<K> {
+    /// Capture `owner`'s gesture-start pan, replacing any anchor held by
+    /// another surface — one pointer means one pan at a time.
+    pub(crate) fn latch(&mut self, owner: K, pan: Vec2) {
+        self.0 = Some((owner, pan));
     }
 
-    /// Fold the live drag into `pan`: `anchor + delta` while the drag is
-    /// held; a missing delta after a latch is the release edge and drops
-    /// the anchor.
-    pub(crate) fn apply(&mut self, delta: Option<Vec2>, pan: &mut Vec2) {
-        match (self.0, delta) {
-            (Some(anchor), Some(d)) => *pan = anchor + d,
-            (Some(_), None) => self.0 = None,
-            _ => {}
+    /// Fold `owner`'s live drag into `pan`: `anchor + delta` while the
+    /// drag is held; a missing delta after a latch is the release edge
+    /// and drops the anchor. A call from a surface that doesn't hold the
+    /// anchor does nothing at all — neither panning nor releasing.
+    pub(crate) fn apply(&mut self, owner: K, delta: Option<Vec2>, pan: &mut Vec2) {
+        let Some((holder, anchor)) = self.0 else {
+            return;
+        };
+        if holder != owner {
+            return;
+        }
+        match delta {
+            Some(d) => *pan = anchor + d,
+            None => self.0 = None,
         }
     }
 
@@ -127,21 +148,22 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
 pub(super) fn emit_pan_zoom(
-    pan_anchor: &mut PanAnchor,
+    pan_anchor: &mut PanAnchor<GraphRef>,
     ui: &Ui,
     graph: GraphScene<'_>,
     gesture: Option<CanvasGesture>,
     out: &mut Intents,
 ) {
+    let target = graph.target();
     let viewport = graph.viewport();
-    let resp = ui.response_for(outer_canvas_widget_id(graph.target()));
+    let resp = ui.response_for(outer_canvas_widget_id(target));
     let mut v = viewport;
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
     if gesture == Some(CanvasGesture::Pan) {
-        pan_anchor.latch(viewport.pan);
+        pan_anchor.latch(target, viewport.pan);
     }
-    pan_anchor.apply(resp.middle.drag.delta(), &mut v.pan);
+    pan_anchor.apply(target, resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
@@ -150,9 +172,7 @@ pub(super) fn emit_pan_zoom(
     // idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.for_graph(graph.target(), |out| {
-            out.push(Intent::SetViewport { to: v })
-        });
+        out.for_graph(target, |out| out.push(Intent::SetViewport { to: v }));
     }
 }
 

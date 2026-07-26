@@ -125,10 +125,12 @@ struct Gestures {
     node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
-    /// latched. While the drag is active, `scene.pan = anchor +
-    /// drag_delta`. Input bookkeeping (lifetime = one gesture), not
-    /// viewport state.
-    pan_anchor: PanAnchor,
+    /// latched, keyed by the pane that latched it. While the drag is
+    /// active, that pane's `viewport.pan = anchor + drag_delta`. Input
+    /// bookkeeping (lifetime = one gesture), not viewport state — and
+    /// keyed because `emit_pan_zoom` runs once per visible pane, so the
+    /// idle ones must not consume the live one's release edge.
+    pan_anchor: PanAnchor<GraphRef>,
 }
 
 impl GraphUI {
@@ -397,12 +399,15 @@ impl GraphUI {
                         // connections and node bodies.
                         selection_ui.draw(ui, ctx, target);
                         {
-                            let mut probe = breaker_ui.probe(canvas_origin);
+                            let mut probe = breaker_ui.probe(canvas_origin, target);
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
-                            let fading = connection_ui.dragging()
-                                || subscription_ui.dragging()
+                            // All three are scoped to this pane, so a gesture
+                            // running on a neighbouring canvas leaves these
+                            // wires at full strength.
+                            let fading = connection_ui.dragging_in(graph)
+                                || subscription_ui.dragging_in(graph)
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);

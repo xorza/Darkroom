@@ -1,4 +1,4 @@
-use scenarium::NodeId;
+use scenarium::{GraphId, NodeId};
 
 use super::*;
 use crate::gui::scene::Scene;
@@ -252,4 +252,45 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
         assert_eq!(pan, pan0, "pan moved on bad factor {bad}");
         assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
     }
+}
+
+/// Two panes sharing one anchor, as `GraphUI` drives it: `emit_pan_zoom`
+/// runs once per visible pane every frame, so the pane *not* being
+/// dragged calls `apply` with no delta each time.
+#[test]
+fn an_idle_pane_does_not_consume_the_dragging_pane_s_anchor() {
+    // Regression: middle-drag panning died after one frame once a second
+    // graph pane was open. `apply(None, ..)` is the release edge, and the
+    // idle pane's call was tearing down the live drag's anchor — so the
+    // next frame's real delta found no anchor and panned nothing.
+    let dragged = GraphRef::Local(GraphId::from_u128(1));
+    let idle = GraphRef::Main;
+    let mut anchor = PanAnchor::default();
+    let start = Vec2::new(100.0, 40.0);
+    anchor.latch(dragged, start);
+
+    // Frame 1: the idle pane runs first (pane order is arbitrary) and
+    // must leave the anchor alone; the dragged pane then pans.
+    let mut pan = start;
+    anchor.apply(idle, None, &mut pan);
+    anchor.apply(dragged, Some(Vec2::new(10.0, -5.0)), &mut pan);
+    assert_eq!(pan, Vec2::new(110.0, 35.0), "start + delta");
+
+    // Frame 2: same order, larger travel. Measured from the *latch*, not
+    // integrated, so this is start + the new total — and it only holds if
+    // frame 1's idle call left the anchor standing.
+    anchor.apply(idle, None, &mut pan);
+    anchor.apply(dragged, Some(Vec2::new(30.0, -12.0)), &mut pan);
+    assert_eq!(pan, Vec2::new(130.0, 28.0), "start + total, not integrated");
+
+    // The idle pane can't pan with the dragged pane's anchor either.
+    let mut stolen = Vec2::ZERO;
+    anchor.apply(idle, Some(Vec2::new(99.0, 99.0)), &mut stolen);
+    assert_eq!(stolen, Vec2::ZERO, "a pane that never latched cannot pan");
+
+    // Release: only the holder's `None` ends the gesture.
+    anchor.apply(dragged, None, &mut pan);
+    let mut after = pan;
+    anchor.apply(dragged, Some(Vec2::new(5.0, 5.0)), &mut after);
+    assert_eq!(after, pan, "a released anchor drives nothing");
 }

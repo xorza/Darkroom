@@ -370,3 +370,80 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
         TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::UVec2;
+
+    /// Drive a real press + past-threshold drag over `tab`'s chip and
+    /// report whether `DockUi::scan` arms off it.
+    ///
+    /// Records through [`DockUi::render`] rather than reaching for
+    /// `strip::show`, so the chips are laid out by the same walk (and wear
+    /// the same labels) they do in production — chip width follows the
+    /// label text, and the press is aimed at a chip's arranged center. The
+    /// scan runs *inside* a record, which is where it runs in production
+    /// too (`Editor::frame` is called from `App::record`), and is the only
+    /// place `response_for` resolves against a live cascade.
+    fn drag_arms_on(doc: &Document, tab: TabRef) -> bool {
+        let surface = UVec2::new(600, 200);
+        let mut ui = Ui::for_test_at(surface);
+        let theme = Theme::default();
+        let viewer_labels = HashMap::new();
+        let cx = DockContext {
+            doc,
+            theme: &theme,
+            viewer_labels: &viewer_labels,
+        };
+        let mut dock = DockUi::default();
+        // Two frames to settle layout, then read the chip's arranged rect.
+        for _ in 0..2 {
+            ui.run_at(surface, |ui| {
+                dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
+            });
+        }
+        let origin = ui
+            .response_for(strip::tab_chip_wid(tab))
+            .rect
+            .expect("the chip measured")
+            .center();
+
+        ui.press_at(origin);
+        // Well past `DRAG_THRESHOLD`, so the capture latches a drag.
+        ui.move_to(origin + Vec2::new(40.0, 0.0));
+
+        let mut armed = false;
+        ui.run_at(surface, |ui| {
+            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
+            dock.scan(ui, doc, &mut Vec::new());
+            armed = dock.tab_drag.is_some();
+        });
+        armed
+    }
+
+    #[test]
+    fn a_subgraph_chip_arms_a_tab_drag_through_the_real_hit_test() {
+        // The regression that shipped: a `Local` graph tab draws its label
+        // as an `InlineRename`, whose idle panel senses `DRAG` and
+        // swallows the press — so the outer chip never reported
+        // `drag.started()` and subgraph tabs could not be moved between
+        // panes. Unit-testing `strip::drag_handles` pins the *id set*;
+        // only driving a real press through palantir's hit-test proves the
+        // press actually lands where the scan is looking.
+        let mut doc = Document::default();
+        let local = doc.create_graph(GraphRef::Main).unwrap();
+        let primary = doc.layout.primary().id;
+        let subgraph = TabRef::Graph(GraphRef::Local(local));
+        doc.layout.find_or_insert(subgraph, primary);
+
+        assert!(
+            drag_arms_on(&doc, subgraph),
+            "a subgraph chip must arm a drag — its rename label swallows \
+             the press, so the chip id alone never sees it"
+        );
+        // Main has a plain label and always worked; pinned so a future
+        // change can't fix one and break the other.
+        assert!(drag_arms_on(&doc, TabRef::Graph(GraphRef::Main)));
+    }
+}
