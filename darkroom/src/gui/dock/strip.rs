@@ -24,14 +24,32 @@ use crate::gui::widgets::support::{colored_text, muted_text};
 /// Character cap for a graph name in the inline rename editor.
 const GRAPH_NAME_MAX_CHARS: usize = 32;
 
-/// One tab's display state, built by `main_window` from its group: the
-/// tab plus its resolved label text (the one projection that needs the
-/// `Document`). Everything else a chip renders — closability,
-/// movability, renamability — is derived from the tab itself.
+/// Font size of every chip label — the tabs' and the "+" chip's alike.
+const CHIP_LABEL_PX: f32 = 13.0;
+
+/// A chip's combined top + bottom inset. The active tab splits it
+/// differently (`ACCENT` px of it move to the outer panel so the accent
+/// cap adds no height), but the total is what sets the row's height.
+const CHIP_INSET_Y: f32 = 8.0;
+
+/// One chip's whole draw state, resolved from its group by
+/// [`tab_labels`](super::tab_labels): the tab, its label text (the one
+/// projection that needs the `Document`), and the two flags that used to
+/// travel beside the slice as `group.active` / `focused`.
+///
+/// `active` lives here rather than being re-derived by position because
+/// the strip walks *labels* while `TabGroup::active` indexes `tabs` — a
+/// slice that didn't correspond 1:1 would silently cap the wrong chip.
+/// Closability and renamability stay derived from `tab` itself.
 #[derive(Debug)]
 pub(super) struct TabLabel {
     pub(super) tab: TabRef,
     pub(super) text: InternedStr,
+    /// This tab is its group's visible one.
+    pub(super) active: bool,
+    /// This tab's group holds the dock focus — the accent cap dims
+    /// elsewhere so one pane always reads as "where actions go".
+    pub(super) focused: bool,
 }
 
 /// Every tab except the pinned `Main` graph carries a close button.
@@ -45,6 +63,19 @@ pub(super) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
         TabRef::Graph(GraphRef::Local(id)) => Some(id),
         _ => None,
     }
+}
+
+/// Every widget whose drag can start `tab`'s dock gesture, in the order
+/// [`DockUi::scan`](super::DockUi::scan) tries them.
+///
+/// Not just the chip: a renamable tab draws its label as an
+/// [`InlineRename`], whose idle panel senses `DRAG` and **swallows the
+/// press**, so the outer chip never sees `drag.started()` on one. At most
+/// one of these can latch — the label is inside the chip, so whichever
+/// gets the press is the one that reports it, and the same widget must be
+/// polled for the release edge.
+pub(super) fn drag_handles(tab: TabRef) -> impl Iterator<Item = WidgetId> {
+    std::iter::once(tab_chip_wid(tab)).chain(renamable_graph(tab).map(tab_rename_wid))
 }
 
 /// Stable id for `tab`'s chip — deterministic so the prepass
@@ -84,10 +115,16 @@ pub(super) fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("dock.tab_new")
 }
 
-/// Side of the square "+" chip. Matches the tab chips' content height —
-/// the 13px label's 1.2× line box plus their 4px top/bottom insets — so it
-/// stands exactly as tall as a tab while being square.
-const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
+/// Side of the square "+" chip: exactly a tab chip's height, so it stands
+/// level with them while staying square. Derived from the same constants
+/// `tab_chip` lays its label out with rather than restating their values,
+/// which drifted apart silently when any one of them changed.
+const NEW_TAB_CHIP_SIDE: f32 = CHIP_LABEL_PX * DEFAULT_LINE_HEIGHT_MULT + CHIP_INSET_Y;
+
+/// Palantir's default `TextStyle::line_height_mult`, which the chip labels
+/// inherit — the "+" chip has no label to measure, so its box has to
+/// account for the same leading.
+const DEFAULT_LINE_HEIGHT_MULT: f32 = 1.2;
 
 /// The trailing "+" chip that creates and opens a fresh graph. A square,
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
@@ -135,10 +172,8 @@ fn hover_bg(hovered: bool, theme: &Theme, corners: Corners) -> Background {
 #[derive(Debug)]
 struct StripCtx<'a> {
     theme: &'a Theme,
+    /// The group a split-menu pick splits.
     group: TabGroupId,
-    /// Whether this strip's group holds the dock focus — the accent cap
-    /// dims elsewhere so one pane always reads as "where actions go".
-    focused: bool,
     out: &'a mut Intents,
 }
 
@@ -150,13 +185,11 @@ pub(super) fn show(
     theme: &Theme,
     group: &TabGroup,
     labels: &[TabLabel],
-    focused: bool,
     out: &mut Intents,
 ) {
     let mut strip = StripCtx {
         theme,
         group: group.id,
-        focused,
         out,
     };
     // The strip wears the chrome band; the active tab below punches
@@ -169,8 +202,8 @@ pub(super) fn show(
         .child_align(Align::v(VAlign::Bottom))
         .background(Background::fill(theme.colors.chrome_fill))
         .show(ui, |ui| {
-            for (i, label) in labels.iter().enumerate() {
-                tab_chip(ui, &mut strip, label, i == group.active);
+            for label in labels {
+                tab_chip(ui, &mut strip, label);
             }
             if group.tabs.contains(&TabRef::Graph(GraphRef::Main)) {
                 new_tab_chip(ui, theme);
@@ -178,8 +211,9 @@ pub(super) fn show(
         });
 }
 
-fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
+fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
     let theme = s.theme;
+    let active = label.active;
     let r = theme.tab_corner_radius;
     // Active-tab selection cue: a 2px accent cap along the top, built from two
     // layered backgrounds. The outer is filled with the accent and rounded to
@@ -192,7 +226,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
     const ACCENT: f32 = 2.0;
     let outer_top = if active { ACCENT } else { 0.0 };
     let outer_bg = if active {
-        let cap = if s.focused {
+        let cap = if label.focused {
             theme.colors.selection_rect
         } else {
             theme.colors.header_fill
@@ -225,7 +259,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
     } else {
         theme.colors.text_muted
     };
-    let label_style = colored_text(ui, ink, 13.0);
+    let label_style = colored_text(ui, ink, CHIP_LABEL_PX);
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
     // accent shows only as a top cap. Every chip also senses drags — the
@@ -305,7 +339,7 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
             // instead of riding high.
             let style = TextStyle {
                 line_height_mult: 1.0,
-                ..muted_text(ui, theme, 13.0)
+                ..muted_text(ui, theme, CHIP_LABEL_PX)
             };
             Text::new("\u{00d7}")
                 .style(&style)
@@ -314,8 +348,8 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
         });
 }
 
-/// Right-click split menu — the phase-1 stand-in for drag-docking (and a
-/// keeper: cheap and discoverable). Opens on the chip's secondary click;
+/// Right-click split menu: the keyboard-free, discoverable route to the
+/// same split a chip drag performs. Opens on the chip's secondary click;
 /// a pick moves `tab` into a fresh pane on the chosen side.
 fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
     let menu_wid = tab_menu_wid(tab);
@@ -344,4 +378,42 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 }));
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenarium::{NodeId, OutputPort};
+
+    #[test]
+    fn a_renamable_tab_offers_its_label_as_a_drag_handle() {
+        // Regression: subgraph tabs could not be dragged between panes.
+        // A `Local` graph tab draws its label as an `InlineRename`, whose
+        // idle panel senses `DRAG` and swallows the press — so the outer
+        // chip never reports `drag.started()` for one. Polling the chip
+        // alone is what left them stuck; the label has to be a candidate
+        // too, and it must come back so the release edge is polled on the
+        // same widget.
+        let id = GraphId::from_u128(9);
+        let local = TabRef::Graph(GraphRef::Local(id));
+        assert_eq!(
+            drag_handles(local).collect::<Vec<_>>(),
+            [tab_chip_wid(local), tab_rename_wid(id)],
+            "a renamable tab is draggable by its chip or its label"
+        );
+
+        // Main and non-graph tabs draw a plain label that captures
+        // nothing, so their chip is the only handle.
+        for tab in [
+            TabRef::Graph(GraphRef::Main),
+            TabRef::Preferences,
+            TabRef::ImageViewer(OutputPort::new(NodeId::from_u128(1), 0)),
+        ] {
+            assert_eq!(
+                drag_handles(tab).collect::<Vec<_>>(),
+                [tab_chip_wid(tab)],
+                "{tab:?} has no inline-rename label to swallow the press"
+            );
+        }
+    }
 }

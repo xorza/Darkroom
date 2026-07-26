@@ -92,6 +92,7 @@ impl MainWindow {
             .collect();
         let dock_cx = DockContext {
             doc,
+            theme: ctx.theme,
             viewer_labels: &viewer_labels,
         };
         Panel::vstack()
@@ -106,7 +107,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         command = menu_bar::show(ui);
                     });
-                dock.render(ui, ctx.theme, dock_cx, out, |ui, tab, out| match tab {
+                dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph(target) => {
                         // A graph tab whose projection is missing means the
                         // pane's graph died this frame; `reconcile_with_graph`
