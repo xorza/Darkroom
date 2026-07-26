@@ -62,11 +62,13 @@ impl InFlight {
 }
 
 impl SubscriptionUI {
-    /// Whether a subscription-wire gesture is in flight — feeds the shared
-    /// wire-fade tier. (A method, not a `pub(super)` field: `InFlight` is
-    /// module-private.)
-    pub(super) fn dragging(&self) -> bool {
-        self.state.is_some()
+    /// Whether a subscription-wire gesture is in flight **over `graph`'s
+    /// pane** — feeds that pane's wire-fade tier. Scoped, so dragging an
+    /// event wire in one pane doesn't dim every other pane's wires.
+    /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
+    pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
+        self.state
+            .is_some_and(|state| graph.contains(state.anchor_node()))
     }
 
     /// Drive the in-flight subscription wire: latch a fresh drag from either
@@ -190,7 +192,10 @@ impl SubscriptionUI {
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
-        let (p0, p3) = match self.state {
+        // Scoped to the pane holding the drag's fixed end — see
+        // `ConnectionUI::draw_in_flight` for what an unscoped preview
+        // paints on the neighbouring canvases.
+        let (p0, p3) = match self.state.filter(|s| graph.contains(s.anchor_node())) {
             None => return,
             Some(InFlight::FromEmitter { emitter, snap_sub }) => {
                 let Some(p0) = geometry.events.center(emitter) else {

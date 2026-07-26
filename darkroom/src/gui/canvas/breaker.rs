@@ -379,19 +379,24 @@ impl BreakerUI {
         }
     }
 
-    /// Hand the active state to inline intersection consumers (node body,
-    /// connection, subscription, and pin-glyph hit-tests). Clears every
-    /// `broken_*` collection first — the one call site for that, since
-    /// this is called exactly once per frame — then borrows live until the
-    /// returned `BreakerProbe` is dropped.
-    pub(super) fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
-        if let Some(state) = self.state.as_mut() {
-            state.begin_frame();
+    /// Hand the active state to `graph`'s inline intersection consumers
+    /// (node body, connection, subscription, and pin-glyph hit-tests), or
+    /// an inert probe when the scribble belongs to another pane.
+    ///
+    /// The pane check is load-bearing, not cosmetic. The polyline lives in
+    /// its own graph's pre-transform world coordinates, and every pane has
+    /// its own origin — so an unscoped probe would test one pane's
+    /// scribble against another's rects and mark wires and nodes broken in
+    /// a graph the pointer never touched, deleting them on release. It
+    /// also keeps `begin_frame` to one call per frame: this runs once per
+    /// visible pane, and a second call would clear the marks the owning
+    /// pane just recorded.
+    pub(super) fn probe(&mut self, origin: Vec2, graph: GraphRef) -> BreakerProbe<'_> {
+        let mut state = self.state.as_mut().filter(|b| b.graph == graph);
+        if let Some(b) = state.as_deref_mut() {
+            b.begin_frame();
         }
-        BreakerProbe {
-            origin,
-            state: self.state.as_mut(),
-        }
+        BreakerProbe { origin, state }
     }
 
     /// Paint the polyline. No-op when no gesture is active or the
@@ -433,6 +438,38 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scribble_is_inert_on_every_pane_but_its_own() {
+        // Regression: the probe handed the live state to *every* visible
+        // pane. The polyline lives in its own graph's pre-transform world
+        // coordinates, so an unscoped probe tests one pane's scribble
+        // against another's rects — marking wires and nodes broken in a
+        // graph the pointer never touched, and deleting them on release.
+        // It also let each pane's `begin_frame` clear the marks the owning
+        // pane had just recorded.
+        let other = GraphRef::Local(scenarium::GraphId::from_u128(1));
+        let mut ui = BreakerUI {
+            state: Some(BreakerState::start(
+                GraphRef::Main,
+                Vec2::ZERO,
+                PointerButton::Right,
+            )),
+        };
+        // A rect the scribble genuinely crosses, offered by the wrong pane.
+        let crossed = Rect::new(-10.0, -10.0, 20.0, 20.0);
+        assert!(
+            !ui.probe(Vec2::ZERO, other).is_active(),
+            "a foreign pane sees no gesture at all"
+        );
+        assert!(
+            !ui.probe(Vec2::ZERO, other).crosses_rect(crossed),
+            "and so cannot register a hit on its own geometry"
+        );
+        // The owning pane still probes normally.
+        let mine = ui.probe(Vec2::ZERO, GraphRef::Main);
+        assert!(mine.is_active() && mine.crosses_rect(crossed));
+    }
 
     #[test]
     fn begin_frame_clears_every_broken_collection() {
@@ -478,7 +515,7 @@ mod tests {
             .unwrap()
             .broken_pins
             .push(OutputPort::new(NodeId::from_u128(1), 0));
-        let probe = ui.probe(Vec2::ZERO);
+        let probe = ui.probe(Vec2::ZERO, GraphRef::Main);
         assert!(probe.state.unwrap().broken_pins.is_empty());
     }
 

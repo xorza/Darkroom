@@ -375,10 +375,10 @@ impl ImageViewer {
         let mut v = self.effective_view(img, pane);
 
         if resp.left.drag.started() || resp.middle.drag.started() {
-            self.pan_anchor.latch(v.pan);
+            self.pan_anchor.latch((), v.pan);
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
-        self.pan_anchor.apply(drag, &mut v.pan);
+        self.pan_anchor.apply((), drag, &mut v.pan);
         fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
         self.view = Some(v);
     }

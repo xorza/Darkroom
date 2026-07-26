@@ -155,11 +155,13 @@ impl ConnectionUI {
         })
     }
 
-    /// Whether a new-connection gesture is in flight — feeds the shared
-    /// wire-fade tier. (A method, not a `pub(super)` field: `InFlight` is
-    /// module-private.)
-    pub(super) fn dragging(&self) -> bool {
-        self.state.is_some()
+    /// Whether a new-connection gesture is in flight **over `graph`'s
+    /// pane** — feeds that pane's wire-fade tier. Scoped, so pulling a
+    /// wire in one pane doesn't dim the standing wires in every other.
+    /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
+    pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
+        self.state
+            .is_some_and(|state| graph.contains(state.start.node_id))
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
@@ -288,7 +290,14 @@ impl ConnectionUI {
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
-        let Some(state) = self.state else { return };
+        // Scoped: the preview belongs to the pane holding the wire's
+        // start node. Unscoped, every *other* pane also drew it — from
+        // its own `canvas_origin` and under its own transform, so the
+        // wire's graph-space endpoints landed as a phantom curve over an
+        // unrelated graph.
+        let Some(state) = self.state.filter(|s| graph.contains(s.start.node_id)) else {
+            return;
+        };
         let start_port = state.start;
         let Some(start) = geometry.ports.center(start_port) else {
             return;
