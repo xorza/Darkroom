@@ -14,14 +14,14 @@
 
 use std::fmt::Write as _;
 
+use glam::{UVec2, Vec2};
+use imaginarium::ColorFormat;
 #[cfg(test)]
-use aperture::Image as AptImage;
-use aperture::{
+use palantir::Image as AptImage;
+use palantir::{
     Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
     Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
 };
-use glam::{UVec2, Vec2};
-use imaginarium::ColorFormat;
 use scenarium::{NodeSearch, OutputPort};
 
 use crate::core::document::{Document, Viewport};
@@ -190,7 +190,7 @@ impl ImageViewer {
                                 .mag_filter(prefs.mag_filter),
                         );
                     }
-                    // Pane not measured yet (first frame): let aperture fit it.
+                    // Pane not measured yet (first frame): let palantir fit it.
                     (Some(shown), None) => {
                         ui.add_shape(
                             Shape::image(shown.handle.clone())
@@ -478,7 +478,7 @@ const CHECKER_DARK_U8: u8 = 51; // #333333
 
 /// The 2×2 checkerboard tile — one full checker period, stamped across
 /// the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
-fn checker_image() -> aperture::Image {
+fn checker_image() -> palantir::Image {
     const L: u8 = CHECKER_LIGHT_U8;
     const D: u8 = CHECKER_DARK_U8;
     let px = [
@@ -487,7 +487,7 @@ fn checker_image() -> aperture::Image {
         [D, D, D, 255],
         [L, L, L, 255],
     ];
-    aperture::Image::from_rgba8(2, 2, px.into_iter().flatten().collect())
+    palantir::Image::from_rgba8(2, 2, px.into_iter().flatten().collect())
 }
 
 /// The viewport at `zoom` that keeps the texel under the pane center

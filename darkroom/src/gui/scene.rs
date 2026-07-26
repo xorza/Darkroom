@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use aperture::{InternedStr, Ui};
 use common::Span;
 use glam::Vec2;
 use indexmap::IndexMap;
+use palantir::{InternedStr, Ui};
 use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{

@@ -8,8 +8,8 @@
 //! renderers share, so they stay visually identical apart from brush and
 //! handle shape and can't drift.
 
-use aperture::{Color, CurveBrush, LineCap, Rect, Shape, Size, Ui};
 use glam::Vec2;
+use palantir::{Color, CurveBrush, LineCap, Rect, Shape, Size, Ui};
 
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;

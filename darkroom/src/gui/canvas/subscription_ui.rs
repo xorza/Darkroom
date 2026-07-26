@@ -1,5 +1,5 @@
-use aperture::{CurveBrush, Ui};
 use glam::Vec2;
+use palantir::{CurveBrush, Ui};
 use scenarium::NodeId;
 
 use crate::core::edit::intent::types::Intent;

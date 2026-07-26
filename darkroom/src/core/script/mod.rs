@@ -140,7 +140,7 @@ pub(crate) enum ScriptMessage {
     /// with no autorun toggle.
     RunOnce,
     /// `shutdown()` — ask the host to quit, via
-    /// [`aperture::HostHandle::quit`].
+    /// [`palantir::HostHandle::quit`].
     Shutdown,
 }
 

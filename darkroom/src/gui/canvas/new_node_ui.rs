@@ -1,8 +1,8 @@
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
     WidgetId,
 };
-use glam::Vec2;
 use scenarium::NodeId;
 use scenarium::{Binding, InputPort, Node, NodeKind};
 use scenarium::{Func, NodePorts};

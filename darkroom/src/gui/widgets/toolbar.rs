@@ -3,7 +3,7 @@
 //! toolbar and the image viewer's control panel; each caller keeps its
 //! own glyphs and toggle color policy.
 
-use aperture::{
+use palantir::{
     Background, Color, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
 };
 
@@ -71,7 +71,7 @@ pub(crate) fn pill_rule(ui: &mut Ui, theme: &Theme) {
 /// Momentary by default — neutral fill lifting on hover, muted glyph;
 /// [`toggled`](Self::toggled) turns it into a toggle whose active state
 /// inverts the chip (accent fill under a dark glyph). Builder chain
-/// ending in [`show`](Self::show), like an aperture widget.
+/// ending in [`show`](Self::show), like an palantir widget.
 #[derive(Debug)]
 pub(crate) struct Chip {
     wid: WidgetId,

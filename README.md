@@ -13,7 +13,7 @@
 Darkroom lets you assemble a processing pipeline as a node graph and run it
 live: wire nodes together and the graph **compiles → plans → executes** on a
 background worker, streaming each node's status and results back onto the canvas
-as it goes. It's a native desktop app built on [Aperture](aperture) — an
+as it goes. It's a native desktop app built on [Palantir](palantir) — an
 in-house immediate-mode GUI with a wgpu renderer — over a domain-agnostic graph
 engine. Its first workload is imaging: general image processing and an
 astronomical stacking pipeline.
@@ -58,7 +58,7 @@ GUI, and the imaging stack it draws on:
 |-------|------|
 | **[darkroom](darkroom)** | The editor app itself — canvas, node UI, and the edit/undo pipeline. *Default member.* |
 | **scenarium** | The headless graph engine: the graph model plus compile→plan→execute on a tokio worker. |
-| **[aperture](https://github.com/xorza/Aperture)** | The immediate-mode GUI — WPF-style two-pass layout, wgpu renderer. *Submodule.* |
+| **[palantir](https://github.com/xorza/palantir)** | The immediate-mode GUI — WPF-style two-pass layout, wgpu renderer. *Submodule.* |
 | **common** | Shared leaf utilities: typed UUID ids, serialization + format detection, 2D buffers, async primitives. |
 | **lens** | The image + astronomical node libraries — adapts `imaginarium` operations into graph nodes. |
 | **imaginarium** | Image library with CPU and wgpu GPU operations. *Submodule.* |
@@ -67,5 +67,5 @@ GUI, and the imaging stack it draws on:
 | **quickbench** | A tiny micro-benchmark harness (`#[test] #[ignore]`, run via `cargo test`). *Submodule.* |
 
 `common` is the pure leaf; `scenarium` builds the graph engine on it; `darkroom`
-edits a `scenarium::Graph`, renders it through `aperture`, and pulls node
+edits a `scenarium::Graph`, renders it through `palantir`, and pulls node
 libraries from `lens` (over `imaginarium` / `lumos` / `fits-well`).

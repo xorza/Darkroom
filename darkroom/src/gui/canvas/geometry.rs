@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use aperture::{Rect, ResponseState, Size, Ui};
 use glam::Vec2;
+use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
@@ -98,7 +98,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     /// a rejected winner means "no snap", not "keep looking". Sibling of
     /// [`Self::first_drag_started`].
     ///
-    /// Tests the post-transform/clip rect, so it sees through aperture's
+    /// Tests the post-transform/clip rect, so it sees through palantir's
     /// drag-capture hover suppression.
     pub(super) fn first_containing(
         &self,
@@ -133,7 +133,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     }
 
     /// Force the hover flag on (idempotent) — the active drag's snap target,
-    /// which aperture's drag-capture suppression hides from `response.hovered`.
+    /// which palantir's drag-capture suppression hides from `response.hovered`.
     pub(super) fn set_hovered(&mut self, key: K) {
         if let Some(info) = self.live.get_mut(&key) {
             info.hovered = true;
@@ -150,13 +150,13 @@ struct PortInfo {
     /// when either the port or its parent node hasn't measured yet.
     layout_center: Option<Vec2>,
     /// Post-transform/clip screen rect for pointer hit-test (snap).
-    /// Bypasses aperture's drag-capture hover suppression by reading
+    /// Bypasses palantir's drag-capture hover suppression by reading
     /// geometry directly.
     screen_rect: Option<Rect>,
     /// `true` when the port should paint with its hover color. Filled
     /// from `response.hovered` in `rebuild`; an active connection
     /// drag's snap target gets it forced on via `set_hovered` after
-    /// `ConnectionUI::apply` (aperture's drag-capture suppression
+    /// `ConnectionUI::apply` (palantir's drag-capture suppression
     /// otherwise hides the snap target from `response.hovered`).
     hovered: bool,
     /// One-frame edge: pointer-down → drag latched on this port this

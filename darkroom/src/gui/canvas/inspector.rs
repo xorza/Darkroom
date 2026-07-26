@@ -6,7 +6,7 @@
 //! neither reads a runtime value (that on-demand fetch pipeline was
 //! removed pending a redesign).
 //!
-//! Panels are **not** aperture `Popup`s — those record into the
+//! Panels are **not** palantir `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
 //! [`Inspectors::draw_panels`] records ordinary `Panel`s as direct
 //! children of the inner (transformed) canvas in
@@ -22,11 +22,11 @@
 
 use std::collections::HashMap;
 
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Background, Color, Configure, Corners, FontWeight, InternedStr, Panel, Sense, Shadow, Sizing,
     Spacing, Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId,
 };
-use glam::Vec2;
 use scenarium::DataType;
 use scenarium::Library;
 use scenarium::LogLevel;

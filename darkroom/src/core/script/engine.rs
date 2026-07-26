@@ -146,7 +146,7 @@ fn register_run(engine: &mut Engine, output: SharedOutput, inbound: InboundSende
 
 /// `shutdown()` — ask the host to quit. Pushed through the inbound
 /// channel like every other side effect; `App` translates it into
-/// [`aperture::HostHandle::quit`].
+/// [`palantir::HostHandle::quit`].
 fn register_shutdown(engine: &mut Engine, output: SharedOutput, inbound: InboundSender) {
     engine.register_fn(
         "shutdown",

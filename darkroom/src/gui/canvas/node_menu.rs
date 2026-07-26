@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use aperture::{MenuItem, Ui};
+use palantir::{MenuItem, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::ItemRef;

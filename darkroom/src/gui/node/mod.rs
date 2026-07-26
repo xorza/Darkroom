@@ -22,10 +22,10 @@ use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::theme::Theme;
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
-use glam::Vec2;
 use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::Library;
@@ -81,7 +81,7 @@ pub(super) struct NodeUI {
     /// when an in-progress const edit commits (the editor's pending draft
     /// resolves on its first post-blur record). One frame of hysteresis
     /// keeps the node recorded through it; otherwise the cull would let
-    /// aperture sweep the draft unseen.
+    /// palantir sweep the draft unseen.
     focus_kept_last: Option<NodeId>,
 }
 
@@ -113,9 +113,9 @@ impl NodeUI {
         //
         // Culled nodes are skipped entirely — no measure, arrange, or
         // paint. Every widget id in a node's subtree derives from its
-        // `NodeId` (explicit `from_hash` ids, and aperture resolves auto ids
+        // `NodeId` (explicit `from_hash` ids, and palantir resolves auto ids
         // parent-scoped under them), so culling a sibling can't re-key
-        // anything that stays on screen. Aperture *does* drop widget state
+        // anything that stays on screen. Palantir *does* drop widget state
         // for ids not recorded this frame, so a node whose subtree holds the
         // keyboard focus (`focus_within` — an in-progress title/const/port
         // edit) stays recorded even off-screen; otherwise panning away
@@ -277,7 +277,7 @@ impl NodeUI {
         }
     }
 
-    /// Pre-record pass: peek aperture's input state for any widgets
+    /// Pre-record pass: peek palantir's input state for any widgets
     /// this `NodeUI` owns and push the corresponding `Intent`s into
     /// `out`. Runs before `Scene::rebuild` in `App::record`, so any
     /// state mutation applied from these intents (notably drag-driven

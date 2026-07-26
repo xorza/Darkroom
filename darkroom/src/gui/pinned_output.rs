@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 use std::mem::{replace, take};
 
-use aperture::{Image as AptImage, ImageHandle, Ui};
 use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
+use palantir::{Image as AptImage, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId, OutputPort, PinnedOutput};
 
 use crate::core::document::Document;

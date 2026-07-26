@@ -1,7 +1,7 @@
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Color, CurveBrush, LinearGradient, PointerButton, PointerEvent, PointerWake, Stop, Ui,
 };
-use glam::Vec2;
 use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
 
@@ -258,7 +258,7 @@ impl ConnectionUI {
 
     /// Compatible-kind port currently snapped under the pointer
     /// during an active drag, or `None`. Read by `GraphUI` to force
-    /// the hover state in `CanvasGeometry` (otherwise aperture's
+    /// the hover state in `CanvasGeometry` (otherwise palantir's
     /// drag-capture suppression would hide it).
     pub(super) fn snap_port(&self) -> Option<PortRef> {
         self.state.and_then(|s| s.snap_end)
@@ -338,7 +338,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         // end of a connection visually matches the port it touches —
         // and, with per-type port colors, the wire reads as its data
         // type (both ends share it unless one side is the untyped
-        // `Any` wildcard). Aperture's cubic-curve lowering samples
+        // `Any` wildcard). Palantir's cubic-curve lowering samples
         // `CurveBrush::Linear` along the curve parameter `t` and ignores
         // `angle` — we pass 0.0. Broken-state still wins as a flat color
         // so the alarm read doesn't get diluted by the gradient.
@@ -372,7 +372,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 
 /// Linear gradient running along the curve parameter from `start`
 /// (`t = 0`, the output-port side at `p0`) to `end` (`t = 1`, the
-/// input-port side at `p3`). Aperture's cubic-curve lowering samples
+/// input-port side at `p3`). Palantir's cubic-curve lowering samples
 /// the brush along `t` and ignores `angle`, so the geometric direction
 /// doesn't matter here.
 fn port_gradient(start: Color, end: Color) -> CurveBrush {
@@ -418,7 +418,7 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
 /// Port currently under the pointer that is a compatible target for `start` —
 /// opposite kind, a different node, type-compatible, and not cycle-forming.
 /// Uses a geometry test against the cached port rect rather than
-/// `response.hovered`: aperture suppresses `hovered` on every widget except the
+/// `response.hovered`: palantir suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the capture no
 /// other port can ever read `hovered = true`.
 fn scan_snap_target(

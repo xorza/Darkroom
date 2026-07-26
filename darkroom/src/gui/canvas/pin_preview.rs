@@ -14,13 +14,13 @@
 //! own outline too doubled up the color right next to it and read as
 //! over-decorated.
 
-use aperture::{
+use glam::Vec2;
+use imaginarium::ColorFormat;
+use palantir::{
     Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFit, Justify, Panel,
     Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
     WidgetId,
 };
-use glam::Vec2;
-use imaginarium::ColorFormat;
 use scenarium::OutputPort;
 
 use crate::gui::format::fmt_bytes;

@@ -1,4 +1,4 @@
-use aperture::{
+use palantir::{
     Brush, ButtonTheme, Color, DragValueTheme, Shadow, Spacing, Stroke, TextEditTheme, WidgetLook,
 };
 
@@ -48,7 +48,7 @@ const MENU_FONT_SIZE: f32 = 13.0;
 
 pub(crate) mod dark {
     use super::{HoverColor, TypeColors};
-    use aperture::Color;
+    use palantir::Color;
 
     pub(crate) const CANVAS_BG: Color = Color::hex(0x1a1a1a);
     pub(crate) const SELECTION_RECT: Color = Color::hex(0x9adbfb);
@@ -132,9 +132,9 @@ pub(crate) mod dark {
         ],
     };
 
-    // aperture sub-theme palette — values aperture's widgets normally
+    // palantir sub-theme palette — values palantir's widgets normally
     // read from its own `palette::*` consts. Pushed through
-    // `AperturePalette` so the live `ui.theme` recolours alongside
+    // `PalantirPalette` so the live `ui.theme` recolours alongside
     // darkroom chrome; reused by `StaticValueEditorTheme::dark` for
     // the per-palette path-pick chip.
     pub(crate) const PAL_TEXT: Color = Color::hex(0xe2dfd3);
@@ -146,7 +146,7 @@ pub(crate) mod dark {
 
 pub(crate) mod light {
     use super::{HoverColor, TypeColors};
-    use aperture::Color;
+    use palantir::Color;
 
     pub(crate) const CANVAS_BG: Color = Color::hex(0xfcfcfc);
     pub(crate) const SELECTION_RECT: Color = Color::hex(0x3b9ee5);
@@ -222,7 +222,7 @@ pub(crate) mod light {
         ],
     };
 
-    // aperture sub-theme palette — see `dark::PAL_*` for the contract.
+    // palantir sub-theme palette — see `dark::PAL_*` for the contract.
     pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
     pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0xa9acae);
     pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0xdfe0e1);
@@ -231,7 +231,7 @@ pub(crate) mod light {
 }
 
 /// Two-state colour pack for chrome that lifts under the pointer —
-/// the colour-granularity peer of aperture's `StatefulLook`: the pair
+/// the colour-granularity peer of palantir's `StatefulLook`: the pair
 /// is structural (a hover variant can't exist without its rest), and
 /// state → colour goes through one `pick`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -270,8 +270,8 @@ pub(crate) struct TypeColors {
 /// sit in the struct while a preset forgets it: the presets won't
 /// compile until every field is filled. The serialized
 /// [`PaletteColors`] chrome roster is built this way; the
-/// aperture-side rosters are plain [`aperture::Palette`] consts
-/// (`APERTURE_DARK` / `APERTURE_LIGHT`).
+/// palantir-side rosters are plain [`palantir::Palette`] consts
+/// (`PALANTIR_DARK` / `PALANTIR_LIGHT`).
 macro_rules! palette_struct {
     (
         $(#[$smeta:meta])*
@@ -336,20 +336,20 @@ impl ThemeChoice {
 /// node ports, value editors, etc. — so a theme swap can restyle
 /// geometry as well as color.
 ///
-/// Also owns the aperture [`aperture::Theme`] this app wants on its
-/// `Ui`. [`crate::gui::app::App::new`] copies `aperture_theme` into
-/// `ui.theme` once before the first frame, so aperture-side widgets
+/// Also owns the palantir [`palantir::Theme`] this app wants on its
+/// `Ui`. [`crate::gui::app::App::new`] copies `palantir_theme` into
+/// `ui.theme` once before the first frame, so palantir-side widgets
 /// (buttons, text edits, menus, scrollbars) read from the same source.
-/// Tweak fields on `theme.aperture_theme` during construction to
-/// override aperture's defaults.
+/// Tweak fields on `theme.palantir_theme` during construction to
+/// override palantir's defaults.
 ///
-/// Serializable so the whole bundle (aperture palette + darkroom
+/// Serializable so the whole bundle (palantir palette + darkroom
 /// layout + colors) round-trips through serde for the Theme → Load /
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Theme {
     // Scalar fields (`preset` + the layout `f32`s) come first; the tables
-    // (`colors`, the per-widget sub-themes, `aperture_theme`) follow. TOML
+    // (`colors`, the per-widget sub-themes, `palantir_theme`) follow. TOML
     // serialization requires every scalar value to precede any table at the
     // same level — otherwise the serializer errors with `ValueAfterTable`.
     /// Which built-in preset assembled this theme. Round-trips
@@ -420,12 +420,12 @@ pub(crate) struct Theme {
     /// graph tab).
     pub(crate) inline_rename: InlineRenameTheme,
 
-    /// Aperture-side widget theme. Pushed onto `Ui::theme` once at
-    /// startup so every aperture widget (Button, TextEdit, MenuItem,
+    /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
+    /// startup so every palantir widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
-    pub(crate) aperture_theme: aperture::Theme,
+    pub(crate) palantir_theme: palantir::Theme,
 }
 
 /// Per-widget theme bundle for the inline static-value editor on a
@@ -458,7 +458,7 @@ impl StaticValueEditorTheme {
     /// the inline `editor`'s normal state (string/`Any` editors, which are
     /// always a `TextEdit` and so show `editor.normal` at rest) get the same
     /// fill, so every field's edit affordance surfaces together.
-    fn revealed_from_palette(p: &aperture::Palette) -> Self {
+    fn revealed_from_palette(p: &palantir::Palette) -> Self {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = Self::from_palette(p);
         let reveal = Brush::Solid(p.elem_hover.with_alpha(REVEAL_ALPHA));
@@ -474,12 +474,12 @@ impl StaticValueEditorTheme {
         out
     }
 
-    /// Shared shape: aperture's `menu_button` preset over `p` (transparent
+    /// Shared shape: palantir's `menu_button` preset over `p` (transparent
     /// at rest + disabled, no border) as the chip, with the inline editor
     /// derived from that chip so both modes share one box, and
     /// caret/selection/placeholder from the same palette's text-edit
     /// recipe so it matches the app's other text fields.
-    fn from_palette(p: &aperture::Palette) -> Self {
+    fn from_palette(p: &palantir::Palette) -> Self {
         Self {
             drag_value: DragValueTheme::from_chip(
                 ButtonTheme::menu_button(p),
@@ -507,7 +507,7 @@ impl InlineRenameTheme {
     /// strip every visual that would reshape the row (padding, margin,
     /// border, fill) so the field reads against whichever canvas hosts
     /// it.
-    fn from_palette(p: &aperture::Palette) -> Self {
+    fn from_palette(p: &palantir::Palette) -> Self {
         let mut style = TextEditTheme {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
@@ -528,15 +528,15 @@ impl InlineRenameTheme {
     }
 }
 
-/// The [`aperture::Palette`] each preset hands to
-/// [`aperture::Theme::from_palette`], filled from the preset's swatches
-/// so swapping dark ⇄ light recolours every widget aperture paints, not
+/// The [`palantir::Palette`] each preset hands to
+/// [`palantir::Theme::from_palette`], filled from the preset's swatches
+/// so swapping dark ⇄ light recolours every widget palantir paints, not
 /// just darkroom-owned chrome. Notes on the mapping:
 /// - `terminal_bg` wants the editor / terminal surface — the same
 ///   swatch as the graph canvas in both themes.
 /// - `elem` and our `NODE_FILL` are the same swatch by design: nodes
-///   and aperture surfaces sit on the same surface tier.
-const APERTURE_DARK: aperture::Palette = aperture::Palette {
+///   and palantir surfaces sit on the same surface tier.
+const PALANTIR_DARK: palantir::Palette = palantir::Palette {
     text: dark::PAL_TEXT,
     text_muted: dark::TEXT_MUTED,
     text_disabled: dark::PAL_TEXT_DISABLED,
@@ -548,8 +548,8 @@ const APERTURE_DARK: aperture::Palette = aperture::Palette {
     accent: dark::SELECTION_RECT,
 };
 
-/// Light peer of [`APERTURE_DARK`] — same mapping over `light::*`.
-const APERTURE_LIGHT: aperture::Palette = aperture::Palette {
+/// Light peer of [`PALANTIR_DARK`] — same mapping over `light::*`.
+const PALANTIR_LIGHT: palantir::Palette = palantir::Palette {
     text: light::PAL_TEXT,
     text_muted: light::TEXT_MUTED,
     text_disabled: light::PAL_TEXT_DISABLED,
@@ -561,13 +561,13 @@ const APERTURE_LIGHT: aperture::Palette = aperture::Palette {
     accent: light::SELECTION_RECT,
 };
 
-/// Aperture sub-theme for darkroom: assemble every widget recipe from
-/// the palette via [`aperture::Theme::from_palette`], then apply the
+/// Palantir sub-theme for darkroom: assemble every widget recipe from
+/// the palette via [`palantir::Theme::from_palette`], then apply the
 /// darkroom-only tweaks (smaller menu/context-menu font; menu-bar
 /// triggers muted + transparent at rest so they read as menus, not
 /// buttons).
-fn aperture_theme_for(p: &aperture::Palette, chrome_fill: Color) -> aperture::Theme {
-    let mut theme = aperture::Theme::from_palette(p);
+fn palantir_theme_for(p: &palantir::Palette, chrome_fill: Color) -> palantir::Theme {
+    let mut theme = palantir::Theme::from_palette(p);
 
     // Dock splitter: the resting seam paints the chrome band that frames
     // the panes, so the gap reads as part of that surround rather than a
@@ -580,7 +580,7 @@ fn aperture_theme_for(p: &aperture::Palette, chrome_fill: Color) -> aperture::Th
     // (the `menu_button` preset already is — no chip overlay), the label
     // muted until hovered, and the whole thing at the smaller menu scale.
     // hover/pressed keep the `elem_hover`/`elem_active` fills that
-    // `recolour_aperture` set.
+    // `recolour_palantir` set.
     let base = &theme.text;
     // Font-only shrink (keeps each look's own colour) for the context-menu
     // rows; menu-bar triggers also recolour per state, so they use `restyle`.
@@ -696,7 +696,7 @@ impl PaletteColors {
     }
 
     /// Soft hairline rule — `text_muted` at 18%, the peer of
-    /// aperture's `Palette::border_soft`.
+    /// palantir's `Palette::border_soft`.
     pub(crate) fn border_soft(&self) -> Color {
         self.text_muted.with_alpha(0.18)
     }
@@ -814,7 +814,7 @@ impl Theme {
             ThemePreset::Dark,
             PaletteColors::DARK,
             dark::TYPE_COLORS,
-            &APERTURE_DARK,
+            &PALANTIR_DARK,
         )
     }
 
@@ -825,15 +825,15 @@ impl Theme {
             ThemePreset::Light,
             PaletteColors::LIGHT,
             light::TYPE_COLORS,
-            &APERTURE_LIGHT,
+            &PALANTIR_LIGHT,
         )
     }
 
     /// Shared assembly path — the darkroom peer of
-    /// `aperture::Theme::from_palette`: dimensions are
+    /// `palantir::Theme::from_palette`: dimensions are
     /// palette-independent; `colors` / `type_colors` (moved in, not
     /// copied) drive darkroom chrome, and every sub-recipe (the
-    /// aperture widget theme, the static-value editor, inline rename)
+    /// palantir widget theme, the static-value editor, inline rename)
     /// cascades from `p` here rather than being hand-assembled per
     /// preset. `preset` tags which built-in produced this theme so the
     /// toggle command doesn't have to guess.
@@ -841,7 +841,7 @@ impl Theme {
         preset: ThemePreset,
         colors: PaletteColors,
         type_colors: TypeColors,
-        p: &aperture::Palette,
+        p: &palantir::Palette,
     ) -> Self {
         let chrome_fill = colors.chrome_fill;
         Self {
@@ -867,7 +867,7 @@ impl Theme {
             static_value_editor: StaticValueEditorTheme::from_palette(p),
             static_value_editor_revealed: StaticValueEditorTheme::revealed_from_palette(p),
             inline_rename: InlineRenameTheme::from_palette(p),
-            aperture_theme: aperture_theme_for(p, chrome_fill),
+            palantir_theme: palantir_theme_for(p, chrome_fill),
         }
     }
 }
@@ -900,7 +900,7 @@ mod tests {
     /// the file. The asset is a generated artifact (a reference theme
     /// users can copy / the Theme → Load-Export format), not a source of
     /// truth — running the suite regenerates it, so any change to the
-    /// consts (or aperture's defaults) surfaces as an asset diff to commit.
+    /// consts (or palantir's defaults) surfaces as an asset diff to commit.
     /// Writing is idempotent when already in sync, so it's a no-op on a
     /// clean tree.
     #[test]
@@ -911,7 +911,7 @@ mod tests {
     }
 
     /// The whole bundle — darkroom's own fields *and* the nested
-    /// aperture palette — must survive a TOML round-trip; that's the
+    /// palantir palette — must survive a TOML round-trip; that's the
     /// on-disk format the Theme → Load / Export menu and the preferences
     /// rely on. Exercises the formerly-fragile case too: the tooltip's
     /// infinite max-size axis (handled by `Size`'s custom serde).
@@ -922,7 +922,7 @@ mod tests {
             ..Theme::default()
         };
         theme.colors.text_muted = Color::hex(0x123456);
-        theme.aperture_theme.window_clear = Color::hex(0xabcdef);
+        theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
         let bytes = common::serialize(&theme, SerdeFormat::Toml).expect("serialize theme");
         let back: Theme = common::deserialize(&bytes, SerdeFormat::Toml)
@@ -931,17 +931,17 @@ mod tests {
         assert_eq!(back.node_min_width, 137.5);
         assert_eq!(back.colors.text_muted, Color::hex(0x123456));
         assert_eq!(back.colors.canvas_bg, theme.colors.canvas_bg);
-        // Nested aperture palette round-trips too.
-        assert_eq!(back.aperture_theme.window_clear, Color::hex(0xabcdef));
+        // Nested palantir palette round-trips too.
+        assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
-        assert!(back.aperture_theme.tooltip.max_size.h.is_infinite());
-        assert_eq!(back.aperture_theme.tooltip.max_size.w, 280.0);
+        assert!(back.palantir_theme.tooltip.max_size.h.is_infinite());
+        assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
     }
 
     /// Pin a few const-defined default values (Ayu Mirage High Contrast:
     /// canvas = terminal_bg, ports = success-green / syn-keyword-orange)
-    /// plus the non-trivial aperture tweak, so an accidental const edit or
-    /// a regression in `default_aperture_theme` fails loudly.
+    /// plus the non-trivial palantir tweak, so an accidental const edit or
+    /// a regression in `default_palantir_theme` fails loudly.
     #[test]
     fn default_palette_and_menu_tweak() {
         let theme = Theme::default();
@@ -953,10 +953,10 @@ mod tests {
         // Impure marker is the palette `constant` purple.
         assert_eq!(theme.colors.badge_impure, Color::hex(0xc56cff));
         assert_eq!(theme.node_min_width, 160.0);
-        assert!(theme.aperture_theme.tooltip.max_size.h.is_infinite());
-        // The menu-bar font was shrunk from aperture's default to ours.
+        assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
+        // The menu-bar font was shrunk from palantir's default to ours.
         let menu_text = theme
-            .aperture_theme
+            .palantir_theme
             .menu_button
             .looks
             .normal

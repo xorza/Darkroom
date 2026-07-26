@@ -1,6 +1,6 @@
 //! Shared cross-frame core behind [`crate::gui::widgets::inline_rename`]
 //! and [`crate::gui::node::value_editor`]: a text buffer that survives
-//! across frames in aperture's `StateMap`, plus detection of the exact
+//! across frames in palantir's `StateMap`, plus detection of the exact
 //! frame focus transitions `true → false` (the "blur edge") — the
 //! conventional trigger to commit a text-field edit.
 //!

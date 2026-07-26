@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use aperture::{
+use palantir::{
     Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
     Sizing, Stroke, Text, TextStyle, Tooltip, Ui,
 };

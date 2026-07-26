@@ -1,4 +1,4 @@
-use aperture::{MenuItem, Ui};
+use palantir::{MenuItem, Ui};
 use scenarium::GraphLink;
 use scenarium::NodeId;
 

@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use aperture::{
+use palantir::{
     Align, Background, Button, Checkbox, Color, Configure, FontWeight, HAlign, Panel, RadioButton,
     Sense, Sizing, Spacing, Stroke, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };

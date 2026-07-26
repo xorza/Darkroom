@@ -55,7 +55,7 @@ fn scroll_to_zoom_factor_zero_delta_is_identity() {
 
 #[test]
 fn scroll_to_zoom_factor_wheel_up_zooms_in() {
-    // One classic wheel notch up after aperture line→pixel
+    // One classic wheel notch up after palantir line→pixel
     // conversion lands around `-line_px` (theme default ≈ 18 px,
     // sign-flipped at ingest). Round-trip check: a typical wheel
     // notch produces a > 1.0 factor; magnitude is the documented

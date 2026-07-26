@@ -7,7 +7,7 @@
 //! is omitted when both are empty — an idle empty graph never grows a blank
 //! strip.
 
-use aperture::{Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign};
+use palantir::{Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign};
 use scenarium::RamUsage;
 
 use crate::gui::app::AppContext;

@@ -7,7 +7,7 @@
 //! pushed as `Intent`s directly). Pure view state; never touches the
 //! document.
 
-use aperture::{
+use palantir::{
     Align, Background, Configure, ContextMenu, Corners, InternedStr, MenuItem, Panel, Sense,
     Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };

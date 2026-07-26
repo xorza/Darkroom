@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aperture::Ui;
+use palantir::Ui;
 use scenarium::{Library, WorkerError, WorkerReport, WorkerStatusKind};
 
 use crate::core::io::preferences::{Preferences, WindowState};
@@ -80,11 +80,11 @@ impl PendingAction {
 
 impl App {
     /// Build the app before the first frame: restore the preferred document,
-    /// assemble runtime services, and push the resolved aperture theme onto
+    /// assemble runtime services, and push the resolved palantir theme onto
     /// `Ui`. Document restore failures degrade to an empty document and are
     /// retained in the shared status log rather than blocking launch.
     ///
-    /// Handed to [`aperture::WinitHost::run`], which calls it once the
+    /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
     pub(crate) fn new(
         ui: &mut Ui,
@@ -113,8 +113,8 @@ impl App {
         // the OS light/dark setting, re-queried each launch.
         app.theme = Theme::from_preset(app.preferences.theme.resolve());
         // Resolved theme (default, or whatever the preferences restored)
-        // onto the Ui so aperture widgets paint correctly frame 1.
-        ui.theme = app.theme.aperture_theme.clone();
+        // onto the Ui so palantir widgets paint correctly frame 1.
+        ui.theme = app.theme.palantir_theme.clone();
         // ui.debug_overlay.damage_rect = true;
         app
     }
@@ -337,8 +337,8 @@ impl App {
     }
 }
 
-impl aperture::App for App {
-    fn update(&mut self, _win: aperture::WindowToken, ui: &Ui) {
+impl palantir::App for App {
+    fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
         self.track_window_state(ui);
@@ -355,7 +355,7 @@ impl aperture::App for App {
         self.handle_close_request(ui);
     }
 
-    fn record(&mut self, _win: aperture::WindowToken, ui: &mut Ui) {
+    fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.

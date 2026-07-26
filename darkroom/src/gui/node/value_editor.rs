@@ -24,7 +24,7 @@
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
-//! to "3" on the next frame). The buffer lives in aperture's StateMap
+//! to "3" on the next frame). The buffer lives in palantir's StateMap
 //! keyed by the editor id ([`crate::gui::widgets::buffered_edit::EditBuffer`],
 //! shared with [`crate::gui::widgets::inline_rename`]'s renaming editor);
 //! we mirror canonical → buffer only while unfocused — skipping the blur
@@ -33,7 +33,7 @@
 
 use std::path::Path;
 
-use aperture::{
+use palantir::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
     Ui, WidgetId,
 };
@@ -281,7 +281,7 @@ struct TextEditOutcome {
     committed: bool,
 }
 
-/// Render a TextEdit whose buffer survives across frames via aperture's
+/// Render a TextEdit whose buffer survives across frames via palantir's
 /// StateMap. While the editor is unfocused, the buffer mirrors the
 /// canonical value (re-formatted via `fmt`); while focused, the user's
 /// in-progress text is left alone. The blur frame is detected *before*
