@@ -33,3 +33,5 @@ imageview to load only when active, until then save to disk
 expose test framework for palantir
 
 subgraphs have run buttons and widget collisions
+
+surface config before framecpu? do we skip cpu if invalid surface?
