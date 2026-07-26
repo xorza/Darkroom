@@ -242,12 +242,11 @@ impl NodeUI {
                 ports_row(ui, rcx, node, out);
                 memory_row(ui, rcx, node);
             });
-        // Pull the body response's flags into locals so its `&mut ui`
-        // borrow ends before the `response_for(title)` peek below.
-        let response = panel.response;
-        let body_clicked = response.left.clicked();
-        let body_drag_started = response.left.drag.started();
-        let body_wid = response.id;
+        // Pull the body response's click flag into a local so its `&Ui`
+        // borrow ends before the handle scan below. (`Response` is a lazy
+        // probe over `response_for`, so reading the body through either is
+        // the same last-frame state.)
+        let body_clicked = panel.response.left.clicked();
 
         // Click without drag → select. Plain click selects only this
         // node; Shift-click toggles its membership in the current
@@ -257,20 +256,14 @@ impl NodeUI {
             click_intents(shift_click, rcx.graph, ItemRef::Node(node.id), out);
         }
 
-        // The header title doubles as a drag handle: its idle label
-        // senses `DRAG`, so a drag latched there moves the node like a
-        // body drag (the title swallows the press, so the body never sees
-        // it). `response_for` is last-frame, matching how `prepass` reads
-        // the delta. While renaming the title is a `TextEdit` (no `DRAG`),
-        // so this can't fire mid-edit.
-        let title_wid = node_rename_wid(node.id);
-        let title_drag = ui.response_for(title_wid).left.drag.started();
-
-        // Latch the anchor on the press-frame edge; subsequent frames'
-        // `prepass` peeks `response_for(widget_id)` before record runs
-        // and converts `drag_delta` into a `MoveSelection` applied to
-        // `Document` upstream of `Scene::rebuild`.
-        if title_drag || body_drag_started {
+        // Latch the anchor on the press-frame edge, off whichever handle
+        // caught the press; subsequent frames' `prepass` peeks
+        // `response_for(widget_id)` before record runs and converts
+        // `drag_delta` into a `MoveSelection` applied to `Document`
+        // upstream of `Scene::rebuild`.
+        if let Some(handle) =
+            drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
+        {
             // Grabbing a node already in the selection drags the whole
             // group (nodes and pinned-output previews alike) together;
             // grabbing an unselected node selects only it and drags it
@@ -281,12 +274,8 @@ impl NodeUI {
                 click_intents(false, rcx.graph, ItemRef::Node(node.id), out);
                 vec![(ItemRef::Node(node.id), node.pos)]
             };
-            self.drag.latch(
-                ItemRef::Node(node.id),
-                node.owner,
-                start_positions,
-                if title_drag { title_wid } else { body_wid },
-            );
+            self.drag
+                .latch(ItemRef::Node(node.id), node.owner, start_positions, handle);
         }
     }
 
@@ -338,6 +327,27 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
 /// without needing the panel's response to round-trip first.
 pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
+}
+
+/// Every widget whose drag moves `node_id`'s body, in the order
+/// [`NodeUI::draw_one`] tries them.
+///
+/// Not just the body panel: the header title doubles as a drag handle —
+/// its idle label senses `DRAG` and **swallows the press**, so the body
+/// never sees one latched there. (While renaming, the title is a
+/// `TextEdit` with no `DRAG`, so it can't fire mid-edit.)
+///
+/// Deliberately *curated*, not "everything under the node". Port
+/// circles, header chips, and the inline value editors are all inside
+/// the body panel and all latch a drag of their own once the pointer
+/// travels — palantir's drag latch ignores `Sense`, so even a
+/// `Sense::CLICK` port circle reports one. Each of those owns its own
+/// gesture (a wire, a chip click, a text drag), so a subtree-wide
+/// "did anything in here start a drag" would wrongly move the node
+/// along with them. The dock's tab chips carry the same shape for the
+/// same reason (`gui::dock::strip::drag_handles`).
+pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
+    [node_widget_id(node_id), node_rename_wid(node_id)].into_iter()
 }
 
 /// Pointer-over-node for hover-reveal affordances (the value-editor
@@ -413,6 +423,7 @@ fn select_intent(shift: bool, graph: GraphScene<'_>, key: ItemRef) -> Intent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::PortKind;
     use crate::gui::scene::internals::scene_node_stub;
 
     /// A one-pane scene holding `selected` as both its node set and its
@@ -426,6 +437,44 @@ mod tests {
                 .map(|id| scene_node_stub(&mut ui, *id, Vec2::ZERO)),
         )
         .with_selection(ids.iter().copied().map(ItemRef::Node))
+    }
+
+    #[test]
+    fn a_nodes_drag_handles_are_its_body_and_title_only() {
+        // The header title's idle label senses `DRAG` and swallows the
+        // press, so polling the body alone would miss a title drag —
+        // the same gap that left dock tabs unmovable.
+        let id = NodeId::unique();
+        assert_eq!(
+            drag_handles(id).collect::<Vec<_>>(),
+            [node_widget_id(id), node_rename_wid(id)],
+            "a node drags by its body or its title"
+        );
+
+        // And *only* those two. Every other widget inside the body —
+        // port circles, header chips, value editors — latches a drag of
+        // its own (palantir's latch ignores `Sense`), so widening this
+        // to the node's whole subtree would move the node whenever a
+        // wire was pulled off a port.
+        assert_eq!(drag_handles(id).count(), 2);
+        for wid in [
+            port_row::port_circle_wid(PortRef {
+                node_id: id,
+                kind: PortKind::Output,
+                port_idx: 0,
+            }),
+            header::play_badge_wid(id),
+            header::graph_badge_wid(id),
+        ] {
+            assert!(
+                !drag_handles(id).any(|h| h == wid),
+                "{wid:?} owns its own gesture and must not drag the node"
+            );
+        }
+
+        // Handles are node-keyed, so two nodes never share one.
+        let other = NodeId::unique();
+        assert!(drag_handles(id).all(|h| !drag_handles(other).any(|o| o == h)));
     }
 
     fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {

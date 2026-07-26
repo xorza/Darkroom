@@ -24,6 +24,7 @@ mod strip;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use common::FloatExt;
 use glam::Vec2;
 use palantir::{
     Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
@@ -38,7 +39,7 @@ use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
-use crate::gui::dock::drag::{DropTarget, TabDrag, classify_drop};
+use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
 use crate::gui::image_viewer;
 use crate::gui::theme::Theme;
@@ -58,6 +59,16 @@ fn splitter_wid(path: DockPath) -> WidgetId {
     WidgetId::from_hash(("dock.splitter", path))
 }
 
+/// Stable id for the in-flight drag's drop-zone highlight.
+fn drag_highlight_wid() -> WidgetId {
+    WidgetId::from_hash("dock.drag_highlight")
+}
+
+/// Stable id for the ghost chip trailing the pointer mid-drag.
+fn drag_ghost_wid() -> WidgetId {
+    WidgetId::from_hash("dock.drag_ghost")
+}
+
 /// What the render walk needs from outside the layout: the document, plus
 /// this frame's viewer-tab labels resolved once by the caller.
 ///
@@ -69,6 +80,7 @@ fn splitter_wid(path: DockPath) -> WidgetId {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DockContext<'a> {
     pub(crate) doc: &'a Document,
+    pub(crate) theme: &'a Theme,
     pub(crate) viewer_labels: &'a HashMap<OutputPort, String>,
 }
 
@@ -86,11 +98,11 @@ impl DockUi {
     /// Navigation-phase scan over last frame's chip responses, one pass
     /// over every strip: close clicks (which win over activation),
     /// activation clicks (a graph tab's inner rename label captures
-    /// the click, so its response is polled too), drag arming on a
-    /// a chip's latched drag — then the in-flight drag's
-    /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
-    /// release resolve the pane under the pointer into a
-    /// [`DockOp::MoveTab`].
+    /// the click, so its response is polled too), drag arming off
+    /// whichever of the tab's [`strip::drag_handles`] latched — then the
+    /// in-flight drag's lifecycle: cancel on Esc (or the tab vanishing
+    /// under it), and on release resolve the pane under the pointer into
+    /// a [`DockOp::MoveTab`].
     ///
     /// Scanning in the *prepass* (not as record-time pushes) is
     /// load-bearing: the navigation phase settles the new arrangement
@@ -108,14 +120,12 @@ impl DockUi {
                 actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
             }
             if self.tab_drag.is_none()
-                && ui
-                    .response_for(strip::tab_chip_wid(tab))
-                    .left
-                    .drag
-                    .started()
+                && let Some(handle) =
+                    strip::drag_handles(tab).find(|w| ui.response_for(*w).left.drag.started())
             {
                 self.tab_drag = Some(TabDrag {
                     tab,
+                    handle,
                     text: tab_text(doc, tab).into_owned(),
                 });
             }
@@ -127,17 +137,14 @@ impl DockUi {
         let Some(dragged) = &self.tab_drag else {
             return;
         };
-        let tab = dragged.tab;
+        let (tab, handle) = (dragged.tab, dragged.handle);
         if ui.escape_pressed() || doc.layout.find_tab(tab).is_none() {
             self.tab_drag = None;
             return;
         }
-        if ui
-            .response_for(strip::tab_chip_wid(tab))
-            .left
-            .drag
-            .stopped()
-        {
+        // The release edge fires on whichever handle caught the press —
+        // for a renamable tab that's the label, not the chip around it.
+        if ui.response_for(handle).left.drag.stopped() {
             if let Some(target) = drop_target(ui, doc) {
                 actions.push(UiAction::Dock(DockOp::MoveTab {
                     tab,
@@ -156,23 +163,14 @@ impl DockUi {
     pub(crate) fn render(
         &self,
         ui: &mut Ui,
-        theme: &Theme,
         cx: DockContext<'_>,
         out: &mut Intents,
         mut content: impl FnMut(&mut Ui, TabRef, &mut Intents),
     ) {
-        render_node(
-            ui,
-            theme,
-            cx,
-            DockLayout::ROOT,
-            DockPath::ROOT,
-            out,
-            &mut content,
-        );
+        render_node(ui, cx, DockLayout::ROOT, DockPath::ROOT, out, &mut content);
         if let Some(dragged) = &self.tab_drag {
             ui.set_cursor(CursorIcon::Grabbing);
-            draw_drag_feedback(ui, theme, cx.doc, dragged);
+            draw_drag_feedback(ui, cx, dragged);
         }
     }
 }
@@ -182,7 +180,6 @@ impl DockUi {
 /// group as its strip + the active tab's view.
 fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     ui: &mut Ui,
-    theme: &Theme,
     cx: DockContext<'_>,
     idx: NodeIdx,
     path: DockPath,
@@ -190,7 +187,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     content: &mut F,
 ) {
     match cx.doc.layout.node(idx) {
-        DockNode::Group(group) => render_group(ui, theme, cx, group, out, content),
+        DockNode::Group(group) => render_group(ui, cx, group, out, content),
         DockNode::Split(split) => {
             let DockSplit {
                 dir,
@@ -211,12 +208,14 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
                         SplitHalf::First => (first, path.first()),
                         SplitHalf::Second => (second, path.second()),
                     };
-                    render_node(ui, theme, cx, child, child_path, out, content);
+                    render_node(ui, cx, child, child_path, out, content);
                 });
             // The widget wrote the divider drag into `live_ratio`; the
             // layout itself only changes through the recorded intent
-            // (drained post-record, coalescing per divider).
-            if live_ratio != ratio {
+            // (drained post-record, coalescing per divider). Approximate
+            // compare for the same reason `pan_zoom::emit_pan_zoom` uses
+            // one — an exact `!=` emits on sub-epsilon jitter.
+            if !live_ratio.approximately_eq(ratio) {
                 out.push(Intent::Dock(DockOp::SetRatio {
                     split: path,
                     ratio: live_ratio,
@@ -229,19 +228,17 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
 /// One pane: the group's tab strip over its active tab's view.
 fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     ui: &mut Ui,
-    theme: &Theme,
     cx: DockContext<'_>,
     group: &TabGroup,
     out: &mut Intents,
     content: &mut F,
 ) {
     let labels = tab_labels(ui, cx, group);
-    let focused = cx.doc.layout.focused == group.id;
     Panel::vstack()
         .id(pane_wid(group.id))
         .size((Sizing::FILL, Sizing::FILL))
         .show(ui, |ui| {
-            strip::show(ui, theme, group, &labels, focused, out);
+            strip::show(ui, cx.theme, group, &labels, out);
             content(ui, group.active_tab(), out);
         });
 }
@@ -272,11 +269,13 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
             .filter_map(|&tab| ui.response_for(strip::tab_chip_wid(tab)).rect)
             .collect();
         return Some(classify_drop(
-            group.id,
-            pane,
-            strip_rect,
-            &chips,
-            doc.layout.can_split(group.id),
+            PaneGeometry {
+                group: group.id,
+                pane,
+                strip: strip_rect,
+                chips: &chips,
+                can_split: doc.layout.can_split(group.id),
+            },
             p,
         ));
     }
@@ -288,13 +287,14 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
 /// split, a caret between chips for a strip insert) and a small ghost
 /// chip trailing the pointer. `Sense::NONE` throughout, so the overlay
 /// never intercepts the drag's own hit-testing.
-fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabDrag) {
+fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
+    let theme = cx.theme;
     let accent = theme.colors.selection_rect;
-    if let Some(target) = drop_target(ui, doc) {
+    if let Some(target) = drop_target(ui, cx.doc) {
         let r = target.highlight;
         ui.layer(Layer::Tooltip, r.min, Some(r.size), |ui| {
             Panel::zstack()
-                .id(WidgetId::from_hash("dock.drag_highlight"))
+                .id(drag_highlight_wid())
                 .size((Sizing::FILL, Sizing::FILL))
                 .background(
                     Background::rounded(accent.with_alpha(0.18), Corners::all(2.0))
@@ -308,7 +308,7 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
         let label_style = sized_text(ui, 13.0);
         ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
             Panel::hstack()
-                .id(WidgetId::from_hash("dock.drag_ghost"))
+                .id(drag_ghost_wid())
                 .size((Sizing::HUG, Sizing::HUG))
                 .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
                 .background(
@@ -325,12 +325,16 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
 /// Project one group's tabs into the strip's per-tab labels — the label
 /// text is the one thing the strip needs the `Document` for.
 fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabel> {
+    let focused = cx.doc.layout.focused == group.id;
     group
         .tabs
         .iter()
-        .map(|&tab| TabLabel {
+        .enumerate()
+        .map(|(i, &tab)| TabLabel {
             tab,
             text: ui.intern(viewer_aware_text(cx, tab)),
+            active: i == group.active,
+            focused,
         })
         .collect()
 }
@@ -340,9 +344,12 @@ fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabe
 /// recursive node search; every other kind is cheap and formats inline.
 fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
     match tab {
+        // A hit skips `port_label`'s recursive search; a miss falls through
+        // to it rather than to a placeholder, so the cache can only make the
+        // label cheaper, never different.
         TabRef::ImageViewer(port) => match cx.viewer_labels.get(&port) {
             Some(label) => Cow::Borrowed(label.as_str()),
-            None => Cow::Borrowed("image"),
+            None => tab_text(cx.doc, tab),
         },
         _ => tab_text(cx.doc, tab),
     }

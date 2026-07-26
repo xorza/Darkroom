@@ -8,19 +8,25 @@
 //! `Ui`.
 
 use glam::Vec2;
-use palantir::Rect;
+use palantir::{Rect, WidgetId};
 
 use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
 
-/// A tab mid-drag: armed when a chip's drag latches, cleared on
-/// release or Esc. Holds the tab itself and nothing positional — the
-/// release edge is polled through `tab_chip_wid(tab)`, so an undo that
-/// rearranges the strip mid-drag can't strand the gesture on a slot the
-/// tab has left.
+/// A tab mid-drag: armed when one of the tab's drag handles latches,
+/// cleared on release or Esc. Nothing here is positional — `tab` and
+/// `handle` are both keyed by identity, never by strip slot, so an undo
+/// that rearranges the strip mid-drag can't strand the gesture on a slot
+/// the tab has left.
 #[derive(Debug)]
 pub(super) struct TabDrag {
     pub(super) tab: TabRef,
+    /// The widget that actually caught the press — the chip, or a
+    /// renamable tab's inline-rename label, which swallows it (see
+    /// [`strip::drag_handles`](super::strip::drag_handles)). The release
+    /// edge only fires on this one, so it's captured at arm time rather
+    /// than re-derived.
+    pub(super) handle: WidgetId,
     /// Label for the ghost chip, snapshotted at arm time.
     pub(super) text: String,
 }
@@ -36,20 +42,38 @@ pub(super) struct DropTarget {
 /// Insertion-caret breadth in the strip, logical px.
 const CARET_W: f32 = 3.0;
 
+/// One pane's last-frame geometry, as [`classify_drop`] needs it. A
+/// struct rather than four positional parameters: `pane` and `strip` are
+/// both `Rect`, so transposing them type-checks and yields a plausible
+/// but wrong classification.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PaneGeometry<'a> {
+    pub(super) group: TabGroupId,
+    /// The whole pane — strip row and content together.
+    pub(super) pane: Rect,
+    /// The strip row alone, along the pane's top edge.
+    pub(super) strip: Rect,
+    /// The strip's chip rects, in tab order.
+    pub(super) chips: &'a [Rect],
+    /// Whether this pane may still split (the nesting cap) — when it
+    /// can't, every edge zone degrades to a join.
+    pub(super) can_split: bool,
+}
+
 /// Classify pointer `p` against one pane (the caller already
 /// established `p` is over it): the tab strip yields an insertion slot
 /// between chips, the content's inner half joins the group (append),
 /// and the outer band splits toward the nearest edge — unless the pane
 /// sits at the nesting cap (`can_split` false), where everything
 /// degrades to a join. `chips` are the strip's chip rects in tab order.
-pub(super) fn classify_drop(
-    group: TabGroupId,
-    pane: Rect,
-    strip: Rect,
-    chips: &[Rect],
-    can_split: bool,
-    p: Vec2,
-) -> DropTarget {
+pub(super) fn classify_drop(pane: PaneGeometry<'_>, p: Vec2) -> DropTarget {
+    let PaneGeometry {
+        group,
+        pane,
+        strip,
+        chips,
+        can_split,
+    } = pane;
     if strip.contains(p) {
         let index = chips.iter().filter(|c| c.center().x < p.x).count();
         return DropTarget {
@@ -157,7 +181,16 @@ mod tests {
 
     fn classify(p: Vec2, can_split: bool) -> DropTarget {
         let (pane, strip, chips) = fixture();
-        classify_drop(group(), pane, strip, &chips, can_split, p)
+        classify_drop(
+            PaneGeometry {
+                group: group(),
+                pane,
+                strip,
+                chips: &chips,
+                can_split,
+            },
+            p,
+        )
     }
 
     #[test]
