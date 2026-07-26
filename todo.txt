@@ -32,5 +32,3 @@ what is resourcestamps  simplify
 contextmenu for boundary nodes
 
 imageview to load only when active, until then save to disk
-
-remove replay
