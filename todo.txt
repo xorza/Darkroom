@@ -31,8 +31,6 @@ what is resourcestamps  simplify
 
 contextmenu for boundary nodes
 
-split winithost to winit and host
-
 imageview to load only when active, until then save to disk
 
 remove replay
