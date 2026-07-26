@@ -1,5 +1,6 @@
 use super::*;
 use crate::gui::scene::internals::scene_node_stub;
+use palantir::internals::UiHarness;
 use scenarium::DataType;
 use scenarium::testing;
 use scenarium::{Graph, GraphDef};
@@ -31,8 +32,8 @@ fn rebuild_entry<'a>(
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
-    let mut ui = Ui::default();
-    let mut node = scene_node_stub(&mut ui, NodeId::unique(), Vec2::ZERO);
+    let mut arena = UiHarness::arena();
+    let mut node = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
     assert!(!node.can_disable(), "a non-sink has no disable toggle");
 
     node.sink = true;
@@ -87,10 +88,10 @@ fn boundary_nodes_mirror_graph_interface() {
     let fixture = adder_graph();
     let view = GraphView::for_graph(&fixture.graph.body);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
+    let mut arena = UiHarness::arena();
     let def_id = GraphId::unique();
     scene.rebuild(
-        &mut ui,
+        arena.ui(),
         &Library::default(),
         &RunState::default(),
         [GraphProjection {
@@ -214,9 +215,9 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     def_view.selected.insert(ItemRef::Node(fixture.input));
 
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
+    let mut arena = UiHarness::arena();
     scene.rebuild(
-        &mut ui,
+        arena.ui(),
         &library,
         &RunState::default(),
         [
@@ -289,7 +290,7 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     assert!(nested.nodes().all(|n| !n.run_available));
 
     // A second rebuild with only the root drops the closed pane wholesale.
-    rebuild_entry(&mut scene, &mut ui, &library, &root, &root_view);
+    rebuild_entry(&mut scene, arena.ui(), &library, &root, &root_view);
     assert!(scene.graph(GraphRef::Local(def_id)).is_none());
     assert_eq!(scene.nodes.len(), 2, "the closed pane's nodes are gone");
     assert_eq!(scene.graph(GraphRef::Main).unwrap().nodes().count(), 2);
@@ -320,8 +321,8 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     let projected = scene.graph(GraphRef::Main).unwrap();
 
     // Every node renders, not silently dropped — so the unresolvable ones
@@ -377,7 +378,7 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
     };
     let def_id = GraphId::unique();
     scene.rebuild(
-        &mut ui,
+        arena.ui(),
         &library,
         &RunState::default(),
         [GraphProjection {
@@ -411,8 +412,8 @@ fn func_events_project_in_order_alongside_outputs() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     let projected = scene.graph(GraphRef::Main).unwrap();
 
     let n = projected.node(node_id).unwrap();
@@ -453,8 +454,8 @@ fn pinned_output_projects_per_output_port_and_shares_the_z_order() {
     let pin_key = ItemRef::Pin(port);
     *view.item_placements.get_mut(&pin_key).unwrap() = Vec2::new(320.0, -40.0);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     let projected = scene.graph(GraphRef::Main).unwrap();
 
     let n = projected.node(node_id).unwrap();
@@ -486,7 +487,7 @@ fn pinned_output_projects_per_output_port_and_shares_the_z_order() {
 
     // ...and a reorder (pin buried beneath the node) projects verbatim.
     view.move_item_to_index(&pin_key, 0);
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     assert_eq!(
         scene.graph(GraphRef::Main).unwrap().z_order(),
         [pin_key, ItemRef::Node(node_id)],
@@ -510,8 +511,8 @@ fn subscriptions_project_from_graph() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
 
     let subs = scene.graph(GraphRef::Main).unwrap().subscriptions();
     assert_eq!(subs.len(), 1);
@@ -543,8 +544,8 @@ fn cache_mode_projects_verbatim_per_node() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     let projected = scene.graph(GraphRef::Main).unwrap();
 
     for (id, mode) in ids {
@@ -567,8 +568,8 @@ fn graph_instances_can_evict_but_have_no_direct_cache_storage_controls() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
 
     let instance = scene
         .graph(GraphRef::Main)
@@ -617,8 +618,8 @@ fn impure_flag_projects_from_func_behavior() {
 
     let view = GraphView::for_graph(&graph);
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
-    rebuild_entry(&mut scene, &mut ui, &library, &graph, &view);
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
     let projected = scene.graph(GraphRef::Main).unwrap();
 
     let pure = projected.node(pure_id).unwrap();

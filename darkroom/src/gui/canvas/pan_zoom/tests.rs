@@ -1,3 +1,4 @@
+use palantir::internals::UiHarness;
 use scenarium::{GraphId, NodeId};
 
 use super::*;
@@ -14,11 +15,11 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let mut ui = Ui::default();
+    let mut arena = UiHarness::arena();
     let scene = Scene::with_nodes([
-        scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)),
-        scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)),
-        scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)),
+        scene_node_stub(arena.ui(), a, Vec2::new(0.0, 0.0)),
+        scene_node_stub(arena.ui(), b, Vec2::new(1000.0, 500.0)),
+        scene_node_stub(arena.ui(), c, Vec2::new(-50.0, 300.0)),
     ]);
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));

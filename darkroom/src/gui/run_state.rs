@@ -347,6 +347,7 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::internals::UiHarness;
 
     use scenarium::CompiledGraphBuilder;
     use scenarium::FuncId;
@@ -549,11 +550,11 @@ mod tests {
         let top_level_port = OutputPort::new(top_level, 0);
         document.graph.set_output_pinned(nested_port, true);
         document.graph.set_output_pinned(top_level_port, true);
-        let ui = Ui::default();
+        let mut arena = UiHarness::arena();
 
-        let push = |run_state: &mut RunState, e_node_id, value| {
+        let mut push = |run_state: &mut RunState, e_node_id, value| {
             run_state.ingest_pinned_outputs(
-                &ui,
+                arena.ui(),
                 PinnedOutputs {
                     e_node_id,
                     values: vec![PinnedOutput {

@@ -425,16 +425,17 @@ mod tests {
     use super::*;
     use crate::core::document::PortKind;
     use crate::gui::scene::internals::scene_node_stub;
+    use palantir::internals::UiHarness;
 
     /// A one-pane scene holding `selected` as both its node set and its
     /// committed selection — enough for the click-intent rules, which read
     /// nothing else.
     fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> Scene {
-        let mut ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let ids: Vec<NodeId> = selected.into_iter().collect();
         Scene::with_nodes(
             ids.iter()
-                .map(|id| scene_node_stub(&mut ui, *id, Vec2::ZERO)),
+                .map(|id| scene_node_stub(arena.ui(), *id, Vec2::ZERO)),
         )
         .with_selection(ids.iter().copied().map(ItemRef::Node))
     }

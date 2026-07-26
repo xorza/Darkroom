@@ -168,6 +168,7 @@ pub(crate) fn selected_group_positions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::internals::UiHarness;
     use scenarium::{NodeId, OutputPort};
 
     use crate::gui::scene::internals::scene_node_stub;
@@ -236,16 +237,19 @@ mod tests {
         // node that left the scene panics in `build_step`. The grabbed key
         // here is a *pin*, so this also covers `ItemRef::owner` reaching
         // through to the node a pin hangs off.
-        let mut ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let survivor = NodeId::unique();
-        let scene = scene_with(&mut ui, survivor);
+        let scene = scene_with(arena.ui(), survivor);
 
         let mut drag = GroupDrag::default();
         let gone = ItemRef::Pin(OutputPort::new(NodeId::unique(), 0));
         drag.latch(gone, GraphRef::Main, vec![(gone, Vec2::ZERO)], wid());
 
         let mut out = Intents::default();
-        assert!(!drag.advance(&ui, &scene, &mut out), "the drag is over");
+        assert!(
+            !drag.advance(arena.ui(), &scene, &mut out),
+            "the drag is over"
+        );
         assert!(out.is_empty(), "a stale anchor emits nothing");
         assert!(drag.anchor.is_none(), "and drops itself");
     }
@@ -255,9 +259,9 @@ mod tests {
         // A bare `Ui` reports no drag on the anchor's widget, which is the
         // release edge: the gesture ends without emitting, so the next press
         // latches fresh instead of resuming this one's start positions.
-        let mut ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let id = NodeId::unique();
-        let scene = scene_with(&mut ui, id);
+        let scene = scene_with(arena.ui(), id);
 
         let mut drag = GroupDrag::default();
         let key = ItemRef::Node(id);
@@ -265,7 +269,7 @@ mod tests {
         assert!(drag.anchor.is_some(), "latched");
 
         let mut out = Intents::default();
-        assert!(!drag.advance(&ui, &scene, &mut out));
+        assert!(!drag.advance(arena.ui(), &scene, &mut out));
         assert!(out.is_empty(), "a release commits nothing of its own");
         assert!(drag.anchor.is_none(), "the slot is free for the next press");
     }
