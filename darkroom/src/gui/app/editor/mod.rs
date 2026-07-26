@@ -72,14 +72,14 @@ impl BatchOutcome {
 /// [`Editor::absorb_signals`], and a seventh signal is added in one place.
 #[derive(Default, Debug)]
 struct StepSignals {
-    relayout: bool,
+    geometry_stale: bool,
     dirtied: bool,
     reconcile: bool,
 }
 
 impl StepSignals {
     fn fold(&mut self, step: &UndoStep) {
-        self.relayout |= step.requires_relayout();
+        self.geometry_stale |= step.invalidates_cached_geometry();
         self.dirtied |= step.dirties_document();
         self.reconcile |= step.requires_reconcile();
     }
@@ -111,12 +111,13 @@ pub(crate) struct Editor {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
-    /// Per-frame accumulator: set by any step/transition that changes
-    /// something the layout engine reads (see `requires_relayout`), and
-    /// consumed once at the end of `frame` as a single
-    /// `ui.request_relayout()`. Reset at the top of every frame. A plain
-    /// side-effect field like `scene_dirty`, rather
-    /// than a `bool` threaded back through every helper's return.
+    /// Per-frame accumulator: set by any step that strands
+    /// `CanvasGeometry`'s cross-frame caches (see
+    /// `invalidates_cached_geometry`) and by `sync_target` for a graph
+    /// that has never recorded, then consumed once at the end of `frame`
+    /// as a single `ui.request_relayout()`. Reset at the top of every
+    /// frame. A plain side-effect field like `scene_dirty`, rather than a
+    /// `bool` threaded back through every helper's return.
     needs_relayout: bool,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
@@ -219,7 +220,7 @@ impl Editor {
     /// each signal's *effect* is spelled out, for both the commit path and
     /// undo/redo replay.
     fn absorb_signals(&mut self, signals: StepSignals) {
-        self.needs_relayout |= signals.relayout;
+        self.needs_relayout |= signals.geometry_stale;
         // A content edit (or an undone/redone one) leaves the doc differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state precisely.
@@ -335,9 +336,12 @@ impl Editor {
         // drains against `Main` (the target is unused for them).
         self.drain_intents(open, graph_target.unwrap_or(GraphRef::Main));
 
-        // Single consumption point for the frame's accumulated relayout
-        // signal (edits, tab switch, undo/redo). A menu side effect adds
-        // its own relayout in `App`, since it runs after this returns.
+        // Sole consumption point for the frame's accumulated signal (edits,
+        // tab switch, undo/redo), and darkroom's only `request_relayout`.
+        // Resizes driven by something other than an `UndoStep` — the
+        // header's elapsed-time label growing as a run reports — are not
+        // covered: they leave `CanvasGeometry`'s offsets stale for one
+        // frame rather than buying a pass.
         if self.needs_relayout {
             ui.request_relayout();
         }
