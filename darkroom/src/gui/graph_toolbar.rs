@@ -12,34 +12,38 @@ use palantir::{
     Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
-use crate::core::edit::intent::types::Intent;
+use crate::core::document::GraphRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
-fn run_button_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.run_button")
+/// Toolbar chip ids are keyed by the pane they sit on: every visible
+/// graph pane draws its own toolbar, so a shared id would record the same
+/// widget several times in one frame.
+fn run_button_wid(graph: GraphRef) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.run_button", graph))
 }
 
-fn events_button_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.events_button")
+fn events_button_wid(graph: GraphRef) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.events_button", graph))
 }
 
-fn reset_view_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.reset_view_button")
+fn reset_view_wid(graph: GraphRef) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.reset_view_button", graph))
 }
 
-fn show_all_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.show_all_button")
+fn show_all_wid(graph: GraphRef) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.show_all_button", graph))
 }
 
-fn show_selected_wid() -> WidgetId {
-    WidgetId::from_hash("darkroom.graph.show_selected_button")
+fn show_selected_wid(graph: GraphRef) -> WidgetId {
+    WidgetId::from_hash(("darkroom.graph.show_selected_button", graph))
 }
 
 /// Draw the toolbar over the graph view's top-left corner. Returns the
@@ -49,13 +53,14 @@ fn show_selected_wid() -> WidgetId {
 pub(crate) fn show(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     geometry: &CanvasGeometry,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) -> Option<AppCommand> {
+    let target = graph.target();
     let mut command = None;
     Panel::vstack()
-        .id_salt("graph_toolbar")
+        .id_salt(("graph_toolbar", target))
         .size((Sizing::HUG, Sizing::HUG))
         .align(Align::new(HAlign::Left, VAlign::Top))
         .child_align(Align::new(HAlign::Left, VAlign::Top))
@@ -67,7 +72,7 @@ pub(crate) fn show(
             pill(
                 ui,
                 ctx.theme,
-                Panel::hstack().id_salt("graph_toolbar_run"),
+                Panel::hstack().id_salt(("graph_toolbar_run", target)),
                 |ui| {
                     // Run / cancel: toggled while a one-shot run is in flight.
                     let running = ctx.run_state.activity.is_executing();
@@ -75,7 +80,7 @@ pub(crate) fn show(
                     // Run is the one primary action in the cluster — it alone
                     // idles with the accent glyph; the event-loop toggle sits
                     // muted beside it like the framing buttons below.
-                    if Chip::new(run_button_wid(), run_tip)
+                    if Chip::new(run_button_wid(target), run_tip)
                         .toggled(running)
                         .idle_glyph(ctx.theme.colors.exec_executed_glow)
                         .toggled_fill(ctx.theme.colors.exec_running_glow)
@@ -94,7 +99,7 @@ pub(crate) fn show(
                     } else {
                         "Start events"
                     };
-                    if Chip::new(events_button_wid(), events_tip)
+                    if Chip::new(events_button_wid(target), events_tip)
                         .toggled(event_loop_active)
                         .toggled_fill(ctx.theme.colors.exec_running_glow)
                         .show(ui, ctx.theme, draw_play_bar)
@@ -112,26 +117,26 @@ pub(crate) fn show(
             // ride the same path as a manual pan/zoom rather than mutating the
             // viewport out of band.
             let framing = Panel::vstack()
-                .id_salt("graph_toolbar_framing")
+                .id_salt(("graph_toolbar_framing", target))
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill(ui, ctx.theme, framing, |ui| {
-                if Chip::new(reset_view_wid(), "Reset view").show(ui, ctx.theme, draw_reset) {
+                if Chip::new(reset_view_wid(target), "Reset view").show(ui, ctx.theme, draw_reset) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        scene,
+                        graph,
                         ViewAction::Reset,
                     ));
                 }
-                if Chip::new(show_all_wid(), "Show all").show(ui, ctx.theme, draw_show_all) {
+                if Chip::new(show_all_wid(target), "Show all").show(ui, ctx.theme, draw_show_all) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        scene,
+                        graph,
                         ViewAction::ShowAll,
                     ));
                 }
-                if Chip::new(show_selected_wid(), "Show selected").show(
+                if Chip::new(show_selected_wid(target), "Show selected").show(
                     ui,
                     ctx.theme,
                     draw_show_selected,
@@ -139,7 +144,7 @@ pub(crate) fn show(
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        scene,
+                        graph,
                         ViewAction::ShowSelected,
                     ));
                 }

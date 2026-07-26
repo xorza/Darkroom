@@ -18,6 +18,7 @@ use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::duplicate::{
     build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{Intent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -25,7 +26,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{Scene, SceneSource};
+use crate::gui::scene::{GraphProjection, Scene, SceneSource};
 use crate::gui::theme::Theme;
 
 use crate::gui::app::AppContext;
@@ -99,12 +100,13 @@ pub(crate) struct Editor {
     action_stack: ActionStack,
     scene: Scene,
     main_window: MainWindow,
-    /// Which graph `scene` last reflected. A mismatch with the active
-    /// target means the tab changed: drop transient gesture state
-    /// (`reset_transient`) and request a relayout. `None` forces that on
-    /// the next frame (a fresh `Editor`). It does *not* gate the rebuild
-    /// itself — the projection is rebuilt every frame regardless.
-    scene_target: Option<GraphRef>,
+    /// Which graphs `scene` last reflected, in pane order. A mismatch
+    /// with this frame's visible set means a tab was switched, opened, or
+    /// closed: drop transient gesture state (`reset_transient`) and
+    /// request a relayout. Empty forces that on the first frame (a fresh
+    /// `Editor`). It does *not* gate the rebuild itself — the projection
+    /// is rebuilt every frame regardless.
+    scene_targets: Vec<GraphRef>,
     /// Set by `drain_intents` whenever it applies a step; consumed by the
     /// pre-record rebuild so the record sees doc edits the pre-record
     /// drain made (drag, connection commit). Only meaningful in the
@@ -119,12 +121,13 @@ pub(crate) struct Editor {
     /// frame. A plain side-effect field like `scene_dirty`, rather than a
     /// `bool` threaded back through every helper's return.
     needs_relayout: bool,
-    /// Per-frame scratch buffer of pending mutations. Cleared at the
-    /// top of every `frame`, filled by prepass/record/shortcut
+    /// Per-frame scratch buffer of pending mutations, each paired with
+    /// the graph it commits against (several can be on screen). Cleared
+    /// at the top of every `frame`, filled by prepass/record/shortcut
     /// handling, and fully drained before `frame` returns — it carries
     /// no state across frames. Kept as a field only to reuse the
     /// allocation; not part of the observable state.
-    intents: Vec<Intent>,
+    intents: Intents,
     /// Per-frame scratch buffer of view-state requests (open/activate/
     /// close tab) raised during record. Drained each frame; carries no
     /// cross-frame state — kept only to reuse the allocation.
@@ -146,10 +149,10 @@ impl Editor {
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             scene: Scene::default(),
             main_window: MainWindow::default(),
-            scene_target: None,
+            scene_targets: Vec::new(),
             scene_dirty: false,
             needs_relayout: false,
-            intents: Vec::new(),
+            intents: Intents::default(),
             actions: Vec::new(),
             run_state: RunState::default(),
         }
@@ -161,8 +164,8 @@ impl Editor {
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
     pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
-        let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, [intent]).warn_rejected();
+        let target = open.document.focused_target().unwrap_or(GraphRef::Main);
+        self.commit_batch(open, [(target, intent)]).warn_rejected();
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -180,25 +183,37 @@ impl Editor {
         open: &mut OpenDocument,
         intents: Vec<Intent>,
     ) -> Vec<String> {
-        let target = open.document.active_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, target, intents).rejected
+        let target = open.document.focused_target().unwrap_or(GraphRef::Main);
+        self.commit_batch(open, intents.into_iter().map(|intent| (target, intent)))
+            .rejected
     }
 
-    /// Build, apply, and record `intents` against `target` as one undo
-    /// entry, accumulating the frame's relayout/reconcile signals. Shared
+    /// Build, apply, and record `intents` — each against the graph it
+    /// names — accumulating the frame's relayout/reconcile signals. Shared
     /// core of [`Self::apply_edit`], [`Self::apply_external_intents`], and
     /// [`Self::drain_intents`]: no-op and stale intents (anchor node already
     /// gone) are dropped per-intent, and an empty batch records nothing.
+    ///
+    /// A *run* of intents sharing a target becomes one undo entry, so a
+    /// gesture that emits N of them is still one Ctrl+Z. A change of target
+    /// mid-stream flushes first — an entry records against exactly one
+    /// graph, and undoing across two panes at once would be a lie about
+    /// what the user did.
     fn commit_batch(
         &mut self,
         open: &mut OpenDocument,
-        target: GraphRef,
-        intents: impl IntoIterator<Item = Intent>,
+        intents: impl IntoIterator<Item = (GraphRef, Intent)>,
     ) -> BatchOutcome {
         let mut batch = Vec::new();
+        let mut batch_target = None;
+        let mut applied = false;
         let mut rejected = Vec::new();
         let mut signals = StepSignals::default();
-        for intent in intents {
+        for (target, intent) in intents {
+            if batch_target != Some(target) {
+                applied |= self.flush_batch(batch_target, &mut batch);
+                batch_target = Some(target);
+            }
             match commit_intent(intent, &mut open.document, target) {
                 Ok(step) => {
                     signals.fold(&step);
@@ -208,12 +223,22 @@ impl Editor {
                 Err(Refusal::Invalid(reason)) => rejected.push(reason),
             }
         }
+        applied |= self.flush_batch(batch_target, &mut batch);
         self.absorb_signals(signals);
-        let applied = !batch.is_empty();
-        if applied {
-            self.action_stack.push_current(target, &batch);
-        }
         BatchOutcome { applied, rejected }
+    }
+
+    /// Record the accumulated run as one undo entry against its target and
+    /// empty it, reporting whether anything was there. `target` is `None`
+    /// only before the first intent, when `batch` is necessarily empty.
+    fn flush_batch(&mut self, target: Option<GraphRef>, batch: &mut Vec<UndoStep>) -> bool {
+        if batch.is_empty() {
+            return false;
+        }
+        let target = target.expect("a non-empty batch was opened by some intent's target");
+        self.action_stack.push_current(target, batch);
+        batch.clear();
+        true
     }
 
     /// Land folded [`StepSignals`] on the frame's accumulators. The one place
@@ -267,28 +292,27 @@ impl Editor {
         self.run_state
             .pinned_outputs
             .reconcile_if_needed(ui, &open.document);
-        // `Some` for a graph pane, `None` for a non-graph view (Preferences):
-        // the scene projection + canvas edit pipeline run only when a graph
-        // tab is active.
-        let graph_target = open.document.active_target();
+        // Every pane showing a graph gets a canvas; a layout of nothing but
+        // non-graph views (Preferences, viewers) leaves the set empty and
+        // skips the canvas pipeline entirely.
+        self.sync_targets(open);
 
-        if let Some(target) = graph_target {
-            self.sync_target(target);
+        // Rebuild the projection for this frame, after the navigation
+        // phase has fully settled the document — so prepass and
+        // `CanvasGeometry` never read a stale graph. Unconditional:
+        // `Scene` re-interns port names into the active record-pass text
+        // arena.
+        self.rebuild_scene(ui, open, library);
+        self.scene_dirty = false;
 
-            // Rebuild the projection for this frame, after the navigation
-            // phase has fully settled the document — so prepass and
-            // `CanvasGeometry` never read a stale graph. Unconditional for a
-            // graph tab: `Scene` re-interns port names into the active
-            // record-pass text arena.
-            self.rebuild_scene(ui, open, target, library);
-            self.scene_dirty = false;
-
+        if !self.scene_targets.is_empty() {
             // Prepass emits input-derived graph mutations (drag, pan/zoom,
             // connection commit) drained *before* the record so Pass A sees
-            // the settled doc. It reads everything off `Scene`.
+            // the settled doc. It reads everything off `Scene`, and each
+            // intent it raises carries the pane it came from.
             self.main_window.prepass(ui, &self.scene, &mut self.intents);
-            self.drain_intents(open, target);
-            self.apply_canvas_shortcuts(ui, open, target);
+            self.drain_intents(open);
+            self.apply_canvas_shortcuts(ui, open);
         }
 
         let command_from_shortcut = self.menu_shortcut(ui);
@@ -297,9 +321,7 @@ impl Editor {
         // changed the doc (drag, connection commit) — an idle frame or a
         // bare tab switch leaves `scene_dirty` false and skips it.
         if self.scene_dirty {
-            if let Some(target) = graph_target {
-                self.rebuild_scene(ui, open, target, library);
-            }
+            self.rebuild_scene(ui, open, library);
             self.scene_dirty = false;
         }
         let ctx = AppContext {
@@ -324,17 +346,16 @@ impl Editor {
         // available to build the duplicate / removal intents against the
         // live selection (the canvas gesture only sees the read-only Scene).
         // Pushed before the post-record drain so it lands this frame.
-        if let Some(target) = graph_target
-            && let Some(action) = self.main_window.graph_ui.take_node_menu_action()
+        if let Some(action) = self.main_window.graph_ui.take_node_menu_action()
+            && let Some(target) = open.document.focused_target()
         {
             self.apply_node_menu_action(open, action, target);
         }
 
         // Post-record drain — graph edits the record surfaced (node select,
-        // cache toggle, const edit) plus tab-strip renames. Those and the
-        // navigation steps are graph-agnostic, so a non-graph active tab
-        // drains against `Main` (the target is unused for them).
-        self.drain_intents(open, graph_target.unwrap_or(GraphRef::Main));
+        // cache toggle, const edit) plus tab-strip renames. Each carries its
+        // own target; the graph-agnostic ones (dock ops, renames) ignore it.
+        self.drain_intents(open);
 
         // Sole consumption point for the frame's accumulated signal (edits,
         // tab switch, undo/redo), and darkroom's only `request_relayout`.
@@ -396,63 +417,64 @@ impl Editor {
             .scan_navigation(ui, &open.document, &self.scene, &mut self.actions);
         // Open mutates the layout directly; activate/close queue
         // undoable `Intent::Dock` ops — drain them (dock steps are
-        // graph-agnostic, so the target passed here doesn't matter).
+        // graph-agnostic, so whichever target they carry doesn't matter).
         self.apply_view_actions(open);
-        // The queued intents (switch/close/rename) are graph-agnostic, so
-        // a non-graph active tab drains against `Main` harmlessly.
-        self.drain_intents(
-            open,
-            open.document.active_target().unwrap_or(GraphRef::Main),
-        );
+        self.drain_intents(open);
         // A closed/deleted target can't be active; fall back to Main.
         open.document.reconcile_with_graph();
     }
 
-    /// Note a possible active-graph change: when `target` differs from
-    /// what `scene` last reflected, drop transient gesture state (so a
-    /// drag started on one graph can't bleed into another) and request a
-    /// relayout. Keeps `CanvasGeometry`'s offset cache, so a graph shown again
-    /// resolves its port centers immediately. The rebuild itself is the
-    /// caller's unconditional one — this only reacts to the switch.
-    fn sync_target(&mut self, target: GraphRef) {
-        if self.scene_target == Some(target) {
+    /// Note a possible change to *which* graphs are on screen: when the
+    /// visible set differs from what `scene` last reflected — a tab
+    /// switched, a pane split, a graph closed — drop transient gesture
+    /// state (so a drag started on one graph can't bleed into another) and
+    /// request a relayout. Keeps `CanvasGeometry`'s offset cache, so a
+    /// graph shown again resolves its port centers immediately. The
+    /// rebuild itself is the caller's unconditional one — this only
+    /// reacts to the change.
+    fn sync_targets(&mut self, open: &OpenDocument) {
+        let visible = open.document.visible_targets();
+        if self.scene_targets.iter().copied().eq(visible) {
             return;
         }
         self.main_window.reset_transient();
-        self.scene_target = Some(target);
+        self.scene_targets.clear();
+        self.scene_targets.extend(open.document.visible_targets());
         self.needs_relayout = true;
     }
 
-    /// Rebuild the `Scene` projection from the graph + view the `target`
-    /// points at. For a `Local` target, also hands the scene the enclosing
-    /// `Graph` so the interior's boundary nodes can mirror its
-    /// interface as their ports.
-    fn rebuild_scene(
-        &mut self,
-        ui: &mut Ui,
-        open: &OpenDocument,
-        target: GraphRef,
-        library: &Library,
-    ) {
-        // Only a local definition carries the interface its boundary nodes
-        // mirror; the root graph has neither.
-        let source = match target {
-            GraphRef::Main => SceneSource::Entry(&open.document.graph),
-            GraphRef::Local(id) => SceneSource::Def(
-                open.document
-                    .graph
-                    .find_graph(id)
-                    .expect("active tab graph exists"),
-            ),
-        };
-        let view = open.document.view(target).expect("active tab view exists");
-        self.scene.rebuild(
+    /// Rebuild the `Scene` projection from every graph currently on a
+    /// canvas. For a `Local` target the scene gets the whole `GraphDef`,
+    /// so the interior's boundary nodes can mirror its interface as their
+    /// ports.
+    fn rebuild_scene(&mut self, ui: &mut Ui, open: &OpenDocument, library: &Library) {
+        let document = &open.document;
+        // Destructured so `scene` and `run_state` are borrowed as disjoint
+        // fields — otherwise `&self.run_state` and `&mut self.scene` collide
+        // and the projections have to be collected into a `Vec` first.
+        let Self {
+            scene, run_state, ..
+        } = self;
+        scene.rebuild(
             ui,
-            source,
-            view,
             library,
-            &self.run_state,
-            target == GraphRef::Main,
+            run_state,
+            document.visible_targets().filter_map(|target| {
+                // Only a local definition carries the interface its
+                // boundary nodes mirror; the root graph has neither. A
+                // target that no longer resolves is a tab
+                // `reconcile_with_graph` is about to prune — skip it rather
+                // than panic mid-frame.
+                let source = match target {
+                    GraphRef::Main => SceneSource::Entry(&document.graph),
+                    GraphRef::Local(id) => SceneSource::Def(document.graph.find_graph(id)?),
+                };
+                Some(GraphProjection {
+                    target,
+                    source,
+                    view: document.view(target)?,
+                })
+            }),
         );
     }
 
@@ -463,12 +485,16 @@ impl Editor {
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
-    fn drain_intents(&mut self, open: &mut OpenDocument, target: GraphRef) {
+    fn drain_intents(&mut self, open: &mut OpenDocument) {
+        // Called three times a frame and usually with nothing queued.
+        if self.intents.is_empty() {
+            return;
+        }
         // Move the scratch buffer out so it can drive `commit_batch` (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
-        let outcome = self.commit_batch(open, target, scratch.drain(..));
+        let outcome = self.commit_batch(open, scratch.drain());
         outcome.warn_rejected();
         if outcome.applied {
             self.scene_dirty = true;
@@ -491,9 +517,9 @@ impl Editor {
                     // history references the fresh graph, so the stack stays
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
-                    // Scoped to the active graph: a new graph made inside a
-                    // local tab nests there.
-                    let target = open.document.active_target().unwrap_or(GraphRef::Main);
+                    // Scoped to the focused graph: a new graph made from a
+                    // local tab's strip nests there.
+                    let target = open.document.focused_target().unwrap_or(GraphRef::Main);
                     if let Some(id) = open.document.create_graph(target) {
                         self.dirty = true;
                         self.open_graph(open, GraphRef::Local(id));
@@ -532,14 +558,18 @@ impl Editor {
         self.intents.push(activate_intent(tab));
     }
 
-    /// Open `target`'s tab in the primary group (graph tabs are pinned
-    /// there) and focus it. Adding the tab to the strip (lazily seeding a
-    /// `Local` interior's view) is the non-undoable part; focusing it
-    /// routes through a recorded activation like every other focus
-    /// change — queued here, drained right after. Undo then faithfully
-    /// reverses focus (the opened tab stays open) and a fresh open
-    /// discards the redo tail, instead of mutating focus outside the
+    /// Open `target`'s tab in the focused group and focus it — the same
+    /// rule the preferences and viewer tabs follow, now that graph tabs
+    /// are no longer pinned to one pane. Adding the tab to the strip
+    /// (lazily seeding a `Local` interior's view) is the non-undoable
+    /// part; focusing it routes through a recorded activation like every
+    /// other focus change — queued here, drained right after. Undo then
+    /// faithfully reverses focus (the opened tab stays open) and a fresh
+    /// open discards the redo tail, instead of mutating focus outside the
     /// record.
+    ///
+    /// To see two graphs at once, drag one's chip onto a pane edge: the
+    /// split is an ordinary `DockOp::MoveTab`.
     fn open_graph(&mut self, open: &mut OpenDocument, target: GraphRef) {
         // Idempotent view seeding, so it can run before the open-or-focus
         // dedupe rather than only inside the "new tab" arm.
@@ -548,7 +578,7 @@ impl Editor {
         {
             return; // graph vanished — nothing to open
         }
-        let group = open.document.layout.primary().id;
+        let group = open.document.layout.focused;
         let tab = TabRef::Graph(target);
         open.document.layout.find_or_insert(tab, group);
         self.push_activate(tab);
@@ -582,7 +612,7 @@ mod tests {
     use scenarium::DataType;
     use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
-    use scenarium::{Graph, InputPort, Node, NodeKind, OutputPort};
+    use scenarium::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 
     use crate::core::document::open_document::OpenDocument;
     use crate::core::document::{Document, GraphRef, ItemRef, TabRef};
@@ -610,7 +640,7 @@ mod tests {
 
         fn open_graph(&mut self, target: GraphRef) {
             self.editor.open_graph(&mut self.open, target);
-            self.editor.drain_intents(&mut self.open, GraphRef::Main);
+            self.editor.drain_intents(&mut self.open);
         }
 
         fn undo(&mut self) -> bool {
@@ -688,7 +718,7 @@ mod tests {
         let open = |test: &mut TestEditor, p| {
             test.editor.actions.push(UiAction::OpenImageViewer(p));
             test.editor.apply_view_actions(&mut test.open);
-            test.editor.drain_intents(&mut test.open, GraphRef::Main);
+            test.editor.drain_intents(&mut test.open);
         };
         let tabs = |test: &TestEditor| test.open.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |test: &TestEditor| test.open.document.layout.primary().active;
@@ -738,6 +768,81 @@ mod tests {
         assert!(
             !test.editor.main_window.image_viewers.contains_key(&port(1)),
             "closed tab's viewer state is pruned"
+        );
+    }
+
+    #[test]
+    fn a_frames_intents_commit_against_their_own_graphs_and_undo_apart() {
+        // Two graph panes can be on screen, so one frame's intent queue can
+        // name two different targets. Each must land in *its* graph, and a
+        // target change must close the undo entry — undoing an edit on one
+        // pane must not drag an unrelated edit on the other back with it.
+        let mut test = TestEditor::new(Document::default());
+        let local = test.open.document.create_graph(GraphRef::Main).unwrap();
+        let nested = GraphRef::Local(local);
+
+        let root_node = NodeId::unique();
+        let local_node = NodeId::unique();
+        let add = |node_id| Intent::AddNode {
+            pos: Vec2::ZERO,
+            node_id,
+            node: Node::new(NodeKind::Func(FuncId::unique())),
+            graph: None,
+            bindings: vec![],
+        };
+        test.editor.intents.for_graph(GraphRef::Main, |out| {
+            out.push(add(root_node));
+        });
+        test.editor.intents.for_graph(nested, |out| {
+            out.push(add(local_node));
+        });
+        test.editor.drain_intents(&mut test.open);
+
+        let doc = &test.open.document;
+        let root = &doc.graph;
+        let body = &doc.graph.find_graph(local).unwrap().body;
+        assert!(
+            root.find(root_node, NodeSearch::TopLevel).is_some(),
+            "the Main-targeted intent landed in the root graph"
+        );
+        assert!(
+            body.find(local_node, NodeSearch::TopLevel).is_some(),
+            "the Local-targeted intent landed in the definition body"
+        );
+        assert!(
+            root.find(local_node, NodeSearch::TopLevel).is_none()
+                && body.find(root_node, NodeSearch::TopLevel).is_none(),
+            "neither intent leaked into the other pane's graph"
+        );
+
+        // Two entries, not one: the second undo reaches back to the root
+        // edit only after the nested one is undone.
+        assert!(test.undo(), "undo the nested add");
+        assert!(
+            test.open
+                .document
+                .graph
+                .find_graph(local)
+                .unwrap()
+                .body
+                .find(local_node, NodeSearch::TopLevel)
+                .is_none(),
+        );
+        assert!(
+            test.open
+                .document
+                .graph
+                .find(root_node, NodeSearch::TopLevel)
+                .is_some(),
+            "the root pane's edit survives the nested pane's undo"
+        );
+        assert!(test.undo(), "a second entry holds the root add");
+        assert!(
+            test.open
+                .document
+                .graph
+                .find(root_node, NodeSearch::TopLevel)
+                .is_none()
         );
     }
 

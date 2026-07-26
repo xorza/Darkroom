@@ -23,6 +23,7 @@ use scenarium::{DataType, FsPathMode};
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{PortKind, PortRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::canvas::pin_ui;
@@ -54,7 +55,7 @@ const COL_OUTPUT: u16 = 3;
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
-pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let theme = rcx.theme;
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
@@ -103,9 +104,9 @@ fn input_cells(
     rcx: RecordCtx<'_>,
     node: &SceneNode,
     sve: &StaticValueEditorTheme,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
-    let inputs = rcx.scene.inputs(node.inputs);
+    let inputs = rcx.graph.inputs(node.inputs);
     // Boundary (`GraphInput`/`GraphOutput`) ports route the
     // interface, not literal values — no const affordance.
     let allow_const = !node.boundary;
@@ -125,8 +126,8 @@ fn input_cells(
     }
 }
 
-fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    let outputs = rcx.scene.outputs(node.outputs);
+fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+    let outputs = rcx.graph.outputs(node.outputs);
     for (i, output) in outputs.iter().enumerate() {
         let port = PortRef {
             node_id: node.id,
@@ -140,7 +141,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
-    for (i, event) in rcx.scene.events(node.events).iter().enumerate() {
+    for (i, event) in rcx.graph.events(node.events).iter().enumerate() {
         event_cell(ui, rcx, node.id, i, outputs.len() + i, event);
     }
 }
@@ -201,7 +202,7 @@ fn input_label_cell(
     node: &SceneNode,
     input: &SceneInput,
     rename: Option<BoundarySide>,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
     let theme = rcx.theme;
     let allow_const = !node.boundary;
@@ -313,7 +314,7 @@ fn value_cell(
     sve: &StaticValueEditorTheme,
     port: PortRef,
     input: &SceneInput,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
@@ -321,7 +322,7 @@ fn value_cell(
         return;
     };
     let data_type = &input.ty;
-    let value_variants = rcx.scene.value_variants(input.value_variants);
+    let value_variants = rcx.graph.value_variants(input.value_variants);
     let editor_id = const_editor_wid(InputPort::new(port.node_id, port.port_idx));
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
@@ -360,7 +361,7 @@ fn output_cell(
     output: &SceneOutput,
     rename: Option<BoundarySide>,
     pinning_available: bool,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
     let theme = rcx.theme;
     let fill = port_color(

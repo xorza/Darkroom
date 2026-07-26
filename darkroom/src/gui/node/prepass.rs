@@ -16,12 +16,12 @@ use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::sink::Intents;
 use crate::gui::UiAction;
 use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
-use crate::gui::scene::{InputBindingView, Scene};
+use crate::gui::scene::{GraphScene, InputBindingView};
 
 /// Prepass scan: surface an `OpenGraph` for any graph node whose `G`
 /// chip was clicked (read from last frame's response). Detecting the
@@ -29,8 +29,8 @@ use crate::gui::scene::{InputBindingView, Scene};
 /// ahead of Pass A, so the graph records a pass earlier and its
 /// connections draw with no first-frame gap. Linked graphs aren't
 /// editable targets yet, so only `Local` opens.
-pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
-    for n in scene.nodes.values() {
+pub(crate) fn emit_graph_opens(ui: &Ui, graph: GraphScene<'_>, actions: &mut Vec<UiAction>) {
+    for n in graph.nodes() {
         // Instances are always `Local` (library graphs are localized on
         // instance), so the "G" chip opens the graph directly.
         if let Some(GraphLink::Local(id)) = n.graph
@@ -46,20 +46,18 @@ pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiActio
 /// frame. The node UI surfaces only the domain fact (which node); the
 /// canvas translates it into the run command. The `runnable` guard matches
 /// where the chip draws, so a stale response can't seed an unrunnable node.
-pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
-    scene
-        .nodes
-        .values()
+pub(crate) fn emit_play_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
+    graph
+        .nodes()
         .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).left.clicked())
         .map(|n| n.id)
 }
 
 /// Scan for a click on a node's runtime-cache eviction chip. The canvas
 /// translates the returned authored node into a worker command.
-pub(crate) fn emit_cache_evictions(ui: &Ui, scene: &Scene) -> Option<NodeId> {
-    scene
-        .nodes
-        .values()
+pub(crate) fn emit_cache_evictions(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
+    graph
+        .nodes()
         .find(|node| {
             node.can_evict_cache
                 && ui
@@ -87,9 +85,9 @@ pub(crate) struct PathPickRequest {
 /// its const-editor id, from last frame's responses). Returns the first
 /// hit — one pick per frame — for the caller to open a blocking file dialog
 /// after authoring.
-pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
-    for node in scene.nodes.values() {
-        for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
+pub(crate) fn emit_path_picks(ui: &Ui, graph: GraphScene<'_>) -> Option<PathPickRequest> {
+    for node in graph.nodes() {
+        for (port_idx, input) in graph.inputs(node.inputs).iter().enumerate() {
             let port = InputPort::new(node.id, port_idx);
             if matches!(
                 &input.binding,
@@ -116,12 +114,12 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest>
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-    for node in scene.nodes.values() {
+pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Intents) {
+    for node in graph.nodes() {
         // Boundary ports route the interface — no const affordance, so an
         // unbound one has nothing to seed (its label double-click renames).
         let can_set = !node.boundary;
-        for (i, input) in scene.inputs(node.inputs).iter().enumerate() {
+        for (i, input) in graph.inputs(node.inputs).iter().enumerate() {
             let port = PortRef {
                 node_id: node.id,
                 kind: PortKind::Input,
@@ -148,7 +146,7 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
         for port in node.ports(PortKind::Output) {
             if ui.response_for(port_circle_wid(port)).left.double_clicked() {
                 // An output may feed many inputs — clear each consumer.
-                for c in &scene.connections {
+                for c in graph.connections() {
                     if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
                         out.push(set_input(
                             PortRef {

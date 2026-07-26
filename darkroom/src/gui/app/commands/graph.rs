@@ -88,7 +88,7 @@ impl App {
     fn publish_graph_to_library(&mut self, node_id: NodeId) {
         // The G-badge that raises this only exists on the canvas, so a
         // graph tab is always active here; bail otherwise.
-        let Some(target) = self.workspace.open.document.active_target() else {
+        let Some(target) = self.workspace.open.document.focused_target() else {
             return;
         };
         let document = &mut self.workspace.open.document;

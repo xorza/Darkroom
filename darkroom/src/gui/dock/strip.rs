@@ -15,6 +15,7 @@ use scenarium::GraphId;
 
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
@@ -36,12 +37,6 @@ pub(super) struct TabLabel {
 /// Every tab except the pinned `Main` graph carries a close button.
 pub(super) fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph(GraphRef::Main)
-}
-
-/// Non-graph tabs can move between panes (drag or the split menu);
-/// graph tabs are pinned to the primary pane.
-pub(super) fn movable(tab: TabRef) -> bool {
-    !matches!(tab, TabRef::Graph(_))
 }
 
 /// The graph behind an inline-renamable tab (a `Local` graph tab).
@@ -144,7 +139,7 @@ struct StripCtx<'a> {
     /// Whether this strip's group holds the dock focus — the accent cap
     /// dims elsewhere so one pane always reads as "where actions go".
     focused: bool,
-    out: &'a mut Vec<Intent>,
+    out: &'a mut Intents,
 }
 
 /// Draw one group's strip. Tab activate / close clicks are handled in
@@ -156,7 +151,7 @@ pub(super) fn show(
     group: &TabGroup,
     labels: &[TabLabel],
     focused: bool,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
     let mut strip = StripCtx {
         theme,
@@ -233,18 +228,13 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
     let label_style = colored_text(ui, ink, 13.0);
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
-    // accent shows only as a top cap. Movable tabs also sense drags —
-    // the docking gesture (`gui::dock::drag`); the 4 px latch threshold
-    // keeps plain clicks working unchanged.
-    let sense = if movable(label.tab) {
-        Sense::CLICK | Sense::DRAG
-    } else {
-        Sense::CLICK
-    };
+    // accent shows only as a top cap. Every chip also senses drags — the
+    // docking gesture (`gui::dock::drag`); the 4 px latch threshold keeps
+    // plain clicks working unchanged.
     Panel::hstack()
         .id(tab_chip_wid(label.tab))
         .size((Sizing::HUG, Sizing::HUG))
-        .sense(sense)
+        .sense(Sense::CLICK | Sense::DRAG)
         .padding(Spacing::new(0.0, outer_top, 0.0, 0.0))
         .background(outer_bg)
         .show(ui, |ui| {
@@ -292,9 +282,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, active: bool) {
                 });
         });
 
-    if movable(label.tab) {
-        split_menu(ui, s, label.tab);
-    }
+    split_menu(ui, s, label.tab);
 }
 
 /// The chip's top-right `×`. Hover comes from last frame's response; the

@@ -2,12 +2,13 @@ use palantir::{MenuItem, Ui};
 use scenarium::GraphLink;
 use scenarium::NodeId;
 
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::graph::GraphCommand;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::header::graph_badge_wid;
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 
 /// Right-click on a graph node's `G` badge → a small popup with
 /// "Publish to library" and "Detach copy". Left-click still opens the
@@ -28,35 +29,37 @@ impl GraphMenuUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
-        out: &mut Vec<Intent>,
+        graph: GraphScene<'_>,
+        out: &mut Intents,
     ) -> Option<AppCommand> {
         // Latch on a secondary-click of any local-graph node's badge,
         // read from last frame's response (same timing as the open).
-        for n in scene.nodes.values() {
+        for n in graph.nodes() {
             if matches!(n.graph, Some(GraphLink::Local(_)))
                 && ui.response_for(graph_badge_wid(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {
                 self.node_id = Some(n.id);
-                self.menu.open_at(p);
+                self.menu.open_at(p, graph.target());
             }
         }
 
-        let pick = self.menu.show(ui, "graph_node_menu", None, |ui, popup| {
-            let mut chosen = None;
-            if MenuItem::new("Publish to library")
-                .show(ui, popup)
-                .left
-                .clicked()
-            {
-                chosen = Some(MenuChoice::Publish);
-            }
-            if MenuItem::new("Detach copy").show(ui, popup).left.clicked() {
-                chosen = Some(MenuChoice::Detach);
-            }
-            chosen
-        });
+        let pick = self
+            .menu
+            .show(ui, graph.target(), "graph_node_menu", None, |ui, popup| {
+                let mut chosen = None;
+                if MenuItem::new("Publish to library")
+                    .show(ui, popup)
+                    .left
+                    .clicked()
+                {
+                    chosen = Some(MenuChoice::Publish);
+                }
+                if MenuItem::new("Detach copy").show(ui, popup).left.clicked() {
+                    chosen = Some(MenuChoice::Detach);
+                }
+                chosen
+            });
         // A pick only fires while the menu is open, where `node_id` holds
         // this open's target.
         let (choice, node_id) = (pick?, self.node_id?);
@@ -65,7 +68,9 @@ impl GraphMenuUi {
                 node_id,
             })),
             MenuChoice::Detach => {
-                out.push(Intent::DetachGraph { node_id });
+                out.for_graph(graph.target(), |out| {
+                    out.push(Intent::DetachGraph { node_id })
+                });
                 None
             }
         }

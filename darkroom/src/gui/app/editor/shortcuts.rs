@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 
 use palantir::{Key, Shortcut, Ui};
 
+use crate::core::document::Viewport;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, remove_selection_intents};
 use crate::core::edit::intent::types::{Intent, UndoStep};
 use crate::gui::app::commands::AppCommand;
@@ -63,19 +63,16 @@ impl Editor {
         self.absorb_signals(signals);
     }
 
-    /// Esc-deselect and Ctrl+0 reset-zoom — both act on the active view,
-    /// so they take the settled `target`. Routed through the intent stack
-    /// (not a direct doc write) so they land in the undo history; the
-    /// `is_noop` filter in `drain_intents` drops them when they'd change
-    /// nothing. Chords are sampled unconditionally (see `apply_undo_redo`)
-    /// and gated by focus. Pushes intents only — their relayout is decided
-    /// by the post-record drain, so this returns nothing.
-    pub(super) fn apply_canvas_shortcuts(
-        &mut self,
-        ui: &mut Ui,
-        open: &OpenDocument,
-        target: GraphRef,
-    ) {
+    /// Esc-deselect, Ctrl+0 reset-zoom, Ctrl+D duplicate, and
+    /// Delete/Backspace. A keyboard chord has no pane under a pointer to
+    /// name, so it acts on the **focused** graph — the same rule every
+    /// other off-canvas edit follows. Routed through the intent stack (not
+    /// a direct doc write) so they land in the undo history; the `is_noop`
+    /// filter in `drain_intents` drops them when they'd change nothing.
+    /// Chords are sampled unconditionally (see `apply_undo_redo`) and
+    /// gated by focus. Pushes intents only — their relayout is decided by
+    /// the post-record drain, so this returns nothing.
+    pub(super) fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, open: &OpenDocument) {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
@@ -86,30 +83,38 @@ impl Editor {
         if ui.focused_id().is_some() {
             return;
         }
-        let view = open.document.view(target).expect("active tab view exists");
+        let Some(target) = open.document.focused_target() else {
+            return;
+        };
+        let Some(view) = open.document.view(target) else {
+            return;
+        };
         let has_selection = !view.selected.is_empty();
         let pan = view.viewport.pan;
-        if escape && has_selection {
-            self.intents.push(Intent::SetSelection {
-                to: BTreeSet::new(),
-            });
-        }
-        if reset_zoom {
-            self.intents.push(Intent::SetViewport {
-                to: Viewport { pan, zoom: 1.0 },
-            });
-        }
-        if duplicate && let Some(intent) = build_duplicate_intent(&open.document, target) {
-            self.intents.push(intent);
-        }
-        // Delete/Backspace removes the whole selection: a selected node
-        // becomes `RemoveNode`, a selected pin preview just unpins its
-        // port. `drain_intents` batches a frame's intents into a single
-        // undo entry, so it's one Cmd-Z (mirrors the breaker's multi-delete).
-        if delete {
-            self.intents
-                .extend(remove_selection_intents(&view.selected));
-        }
+        let document = &open.document;
+        self.intents.for_graph(target, |out| {
+            if escape && has_selection {
+                out.push(Intent::SetSelection {
+                    to: BTreeSet::new(),
+                });
+            }
+            if reset_zoom {
+                out.push(Intent::SetViewport {
+                    to: Viewport { pan, zoom: 1.0 },
+                });
+            }
+            if duplicate && let Some(intent) = build_duplicate_intent(document, target) {
+                out.push(intent);
+            }
+            // Delete/Backspace removes the whole selection: a selected node
+            // becomes `RemoveNode`, a selected pin preview just unpins its
+            // port. `drain_intents` batches a frame's intents into a single
+            // undo entry, so it's one Cmd-Z (mirrors the breaker's
+            // multi-delete).
+            if delete {
+                out.extend(remove_selection_intents(&view.selected));
+            }
+        });
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `AppCommand`.

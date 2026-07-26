@@ -1,9 +1,8 @@
 //! Graph execution + the worker event loop. Commands only request work;
 //! worker status reports drive the toolbar's execution and loop state.
 
-use scenarium::NodeId;
+use scenarium::{NodeId, NodeSearch};
 
-use crate::core::document::GraphRef;
 use crate::gui::app::App;
 
 /// Graph execution + the worker event loop. Handled by [`App::handle_run`].
@@ -47,13 +46,23 @@ impl App {
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
     /// upstream cone executes and its outputs are delivered.
     fn run_node(&mut self, node_id: NodeId) {
-        // A local definition tab has no enclosing instance path, so no
-        // execution seed resolves. The UI gates the play chip and the menu
-        // action on `SceneNode::runnable`, which is false there — reaching
-        // this is a gating bug, not user input, so refuse rather than kill
-        // the editor from a live command handler.
-        if self.workspace.open.document.active_target() != Some(GraphRef::Main) {
-            debug_assert!(false, "run-node reached from a non-main graph tab");
+        // A node inside a local definition has no enclosing instance path,
+        // so no execution seed resolves. The UI gates the play chip and the
+        // menu action on `SceneNode::runnable`, which is false there —
+        // reaching this is a gating bug, not user input, so refuse rather
+        // than kill the editor from a live command handler. Tested against
+        // the *node's* graph, not the focused pane's: with several graph
+        // panes open, a root node's chip stays valid while focus sits
+        // elsewhere.
+        if self
+            .workspace
+            .open
+            .document
+            .graph
+            .find(node_id, NodeSearch::TopLevel)
+            .is_none()
+        {
+            debug_assert!(false, "run-node reached for a node outside the root graph");
             return;
         }
         self.workspace.run_node(node_id);

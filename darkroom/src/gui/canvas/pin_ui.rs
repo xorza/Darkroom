@@ -29,13 +29,14 @@
 //! real position already reflects the live drag by the time
 //! [`PinUi::draw_wires`]/[`PinUi::draw_pin`] run.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use glam::Vec2;
 use palantir::{CurveBrush, Rect, Ui};
 use scenarium::{NodeId, OutputPort};
 
 use crate::core::document::{ItemRef, PortKind, PortRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::breaker::BreakerProbe;
@@ -51,7 +52,7 @@ use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::{RecordCtx, click_intents, set_output_pinned};
 use crate::gui::pinned_output::StoredContent;
-use crate::gui::scene::Scene;
+use crate::gui::scene::{GraphScene, Scene};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::dot;
 
@@ -95,16 +96,11 @@ pub(crate) fn seed_pin_position_intent(port: OutputPort, position: Vec2) -> Inte
 /// [`crate::gui::node::prepass::emit_play_clicks`]: the pin UI surfaces only the
 /// domain fact (which node to re-run); the canvas translates it into the
 /// run command so this file never names `AppCommand`.
-pub(super) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
-    scene
+pub(super) fn emit_pin_refresh_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
+    graph
         .pinned_outputs()
         .find(|pin| {
-            scene
-                .nodes
-                .get(&pin.port.node_id)
-                .expect("pinned output owner must exist in the scene")
-                .runnable()
-                && ui.response_for(refresh_badge_wid(pin.port)).left.clicked()
+            pin.node.runnable() && ui.response_for(refresh_badge_wid(pin.port)).left.clicked()
         })
         .map(|pin| pin.port.node_id)
 }
@@ -120,10 +116,7 @@ pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiA
     }) else {
         return;
     };
-    actions.push(UiAction::OpenImageViewer(OutputPort::new(
-        port.node_id,
-        port.port_idx,
-    )));
+    actions.push(UiAction::OpenImageViewer(port));
 }
 
 /// Pinned outputs' drag gesture plus this frame's resolved pin geometry.
@@ -160,13 +153,18 @@ impl PinUi {
     /// Grabbing a pin that's already part of a multi-selection drags the
     /// whole group (nodes and pins alike) together, exactly like grabbing
     /// an already-selected node does.
+    /// Swept over the whole scene once per frame, not per pane: only one
+    /// pointer drag can be in flight, and every key it works with
+    /// (`PortRef`, `OutputPort`) is document-unique. The graph each hit
+    /// belongs to comes from the node's own `owner`, so an intent lands on
+    /// the right pane's target without the caller knowing which pane the
+    /// press was over.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
-        selected: &BTreeSet<ItemRef>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         // A live drag owns the frame; only once it ends do the latch scans
         // below get a look at this frame's presses.
@@ -175,24 +173,32 @@ impl PinUi {
         }
         if ui.modifiers().ctrl
             && let Some(port_ref) = scan_port_drag_start(geometry, scene)
+            && let Some(graph) = scene.owner(port_ref.node_id)
         {
             let widget_id = port_circle_wid(port_ref);
-            out.push(set_output_pinned(port_ref, true));
             let port = OutputPort::new(port_ref.node_id, port_ref.port_idx);
-            // A brand-new pin isn't part of any selection yet — it drags
-            // alone, starting exactly at the port (so it visually "grows
-            // out of" the circle) and tracking the cursor from there.
-            // Seeded here — rather than left to `set_output_pinned`'s zero
-            // default — so this very first frame doesn't flash the widget
-            // at the canvas origin before the drag below places it. Its
-            // view item lands at the top of the paint stack, so no raise
-            // is needed.
+            out.for_graph(graph.target(), |out| {
+                out.push(set_output_pinned(port_ref, true));
+                // A brand-new pin isn't part of any selection yet — it drags
+                // alone, starting exactly at the port (so it visually "grows
+                // out of" the circle) and tracking the cursor from there.
+                // Seeded here — rather than left to `set_output_pinned`'s zero
+                // default — so this very first frame doesn't flash the widget
+                // at the canvas origin before the drag below places it. Its
+                // view item lands at the top of the paint stack, so no raise
+                // is needed.
+                if let Some(port_center) = geometry.ports.center(port_ref) {
+                    out.push(seed_pin_position_intent(port, port_center));
+                }
+            });
             if let Some(port_center) = geometry.ports.center(port_ref) {
-                out.push(seed_pin_position_intent(port, port_center));
                 let key = ItemRef::Pin(port);
-                self.drag.latch(key, vec![(key, port_center)], widget_id);
+                self.drag
+                    .latch(key, graph.target(), vec![(key, port_center)], widget_id);
             }
-        } else if let Some((port, start_position)) = scan_widget_drag_start(ui, scene) {
+        } else if let Some((port, start_position)) = scan_widget_drag_start(ui, scene)
+            && let Some(graph) = scene.owner(port.node_id)
+        {
             // Grabbing a pin already in the selection drags the whole
             // group (nodes + pins) together; grabbing an unselected pin
             // repositions it alone, leaving the selection untouched but —
@@ -200,14 +206,22 @@ impl PinUi {
             // of the paint stack, so the card being placed floats over
             // what it's dragged across.
             let key = ItemRef::Pin(port);
-            let start_positions = if selected.contains(&key) {
-                selected_group_positions(scene, selected)
+            let start_positions = if graph.is_selected(key) {
+                selected_group_positions(graph, graph.selected())
             } else {
-                out.push(Intent::Raise { key });
+                out.for_graph(graph.target(), |out| out.push(Intent::Raise { key }));
                 vec![(key, start_position)]
             };
-            self.drag.latch(key, start_positions, pin_preview_wid(port));
+            self.drag
+                .latch(key, graph.target(), start_positions, pin_preview_wid(port));
         }
+    }
+
+    /// Drop last frame's resolved geometry. Each visible pane appends its
+    /// own pins through [`Self::resolve`] during the record, so the clear
+    /// can't live there — it would leave only the last pane's pins.
+    pub(super) fn begin_frame(&mut self) {
+        self.pins.clear();
     }
 
     /// Refill [`Self::pins`] with every pinned output the cull region keeps,
@@ -218,13 +232,12 @@ impl PinUi {
     pub(super) fn resolve(
         &mut self,
         ui: &Ui,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         probe: &mut BreakerProbe<'_>,
         cull: CullRegion,
     ) {
-        self.pins.clear();
-        for pin in scene.pinned_outputs() {
+        for pin in graph.pinned_outputs() {
             let Some(port_center) = geometry.ports.center(output_port_ref(pin.port)) else {
                 continue;
             };
@@ -270,10 +283,10 @@ impl PinUi {
     /// [`Self::resolve`] already recorded whatever this pass crossed, and
     /// this half only paints the result.
     pub(super) fn draw_wires(&self, ui: &mut Ui, pass: &WirePass<'_, '_>) {
-        let (theme, scene, geometry) = (pass.theme, pass.scene, pass.geometry);
+        let (theme, graph, geometry) = (pass.theme, pass.graph, pass.geometry);
         // Iterating the scene rather than `self.pins` keeps the paint order
         // deterministic; the map is a lookup, not a sequence.
-        for pin in scene.pinned_outputs() {
+        for pin in graph.pinned_outputs() {
             let Some(g) = self.get(pin.port) else {
                 continue;
             };
@@ -309,10 +322,10 @@ impl PinUi {
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
         port: OutputPort,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         let theme = rcx.theme;
-        let scene = rcx.scene;
+        let graph = rcx.graph;
         // Absent when the cull region dropped this pin or its port hasn't
         // measured — the same decision `draw_wires` read, so the card and
         // its wire appear and disappear together.
@@ -322,10 +335,10 @@ impl PinUi {
         // A pin item only exists for a pinned output on a live node, but
         // the projection can still come up short (a missing-func stub
         // renders portless), so a failed lookup just skips the card.
-        let Some(n) = scene.nodes.get(&port.node_id) else {
+        let Some(n) = graph.node(port.node_id) else {
             return;
         };
-        let Some(output) = scene.outputs(n.outputs).get(port.port_idx) else {
+        let Some(output) = graph.outputs(n.outputs).get(port.port_idx) else {
             return;
         };
         // The data-type accent lives *only* on the port-circle
@@ -346,7 +359,7 @@ impl PinUi {
         // Same broken/selected/resting decision a node body draws
         // (`Theme::card_border`), so "in the selection" reads as one
         // visual language across nodes and pin previews.
-        let is_selected = rcx.selected.contains(&ItemRef::Pin(port));
+        let is_selected = rcx.is_selected(ItemRef::Pin(port));
         let border = theme.card_border(g.broken, is_selected);
         let value = rcx.run_state.pinned_outputs.entries.get(&port);
         let image = value.and_then(|value| match value {
@@ -381,7 +394,7 @@ impl PinUi {
         // `PinUi::apply`).
         if response.left.clicked() {
             let shift = ui.modifiers().shift;
-            click_intents(shift, scene, ItemRef::Pin(port), out);
+            click_intents(shift, graph, ItemRef::Pin(port), out);
         }
     }
 }
@@ -456,6 +469,7 @@ fn preview_hovered(ui: &Ui, port: OutputPort) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::GraphRef;
     use crate::core::document::Viewport;
     use crate::gui::canvas::breaker::{BreakerState, cubic_point};
     use crate::gui::scene::SceneOutput;
@@ -483,14 +497,12 @@ mod tests {
         let node_id = NodeId::unique();
         let mut node = scene_node_stub(ui, node_id, Vec2::ZERO);
         node.outputs = Span::new(0, 1);
-        let mut scene = Scene::default();
-        scene.nodes.insert(node_id, node);
-        scene.outputs.push(SceneOutput {
+        let scene = Scene::with_nodes([node]).with_outputs([SceneOutput {
             name: ui.intern("out"),
             description: ui.intern(""),
             ty: DataType::Int,
             pin_position: Some(top_left),
-        });
+        }]);
         let port = OutputPort::new(node_id, 0);
         let mut geometry = CanvasGeometry::default();
         geometry
@@ -545,7 +557,7 @@ mod tests {
             ),
         ];
         for (label, from, to, hits_card) in cases {
-            let mut breaker = BreakerState::start(from, PointerButton::Right);
+            let mut breaker = BreakerState::start(GraphRef::Main, from, PointerButton::Right);
             breaker.add_point(to);
             {
                 // Precondition: the second case really does hit both halves,
@@ -557,7 +569,7 @@ mod tests {
             let mut pin_ui = PinUi::default();
             {
                 let mut probe = probe_for(&mut breaker);
-                pin_ui.resolve(&ui, &scene, &geometry, &mut probe, no_cull());
+                pin_ui.resolve(&ui, scene.only_graph(), &geometry, &mut probe, no_cull());
             }
 
             let g = pin_ui.get(port).expect("an unculled pin resolves");
@@ -586,7 +598,11 @@ mod tests {
         let (scene, geometry, port) = pinned_fixture(&mut ui, top_left);
         let wire = Wire::data(Vec2::ZERO, top_left);
         let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
-        let mut breaker = BreakerState::start(mid + Vec2::new(0.0, -80.0), PointerButton::Right);
+        let mut breaker = BreakerState::start(
+            GraphRef::Main,
+            mid + Vec2::new(0.0, -80.0),
+            PointerButton::Right,
+        );
         breaker.add_point(mid + Vec2::new(0.0, 80.0));
 
         // Origin (-5000, -5000) puts the 10×10 visible rect at world
@@ -600,7 +616,7 @@ mod tests {
         let mut pin_ui = PinUi::default();
         {
             let mut probe = probe_for(&mut breaker);
-            pin_ui.resolve(&ui, &scene, &geometry, &mut probe, far);
+            pin_ui.resolve(&ui, scene.only_graph(), &geometry, &mut probe, far);
         }
 
         assert!(
@@ -622,13 +638,17 @@ mod tests {
         let rect = box_rect_at(top_left);
         let box_center = top_left + Vec2::new(PREVIEW_WIDTH, PREVIEW_HEIGHT) * 0.5;
 
-        let mut hit = BreakerState::start(box_center, PointerButton::Right);
+        let mut hit = BreakerState::start(GraphRef::Main, box_center, PointerButton::Right);
         assert!(
             pin_targeted(&probe_for(&mut hit), &wire, rect),
             "a breaker sample landing dead-center in the preview widget must register"
         );
 
-        let mut miss = BreakerState::start(Vec2::new(1000.0, 1000.0), PointerButton::Right);
+        let mut miss = BreakerState::start(
+            GraphRef::Main,
+            Vec2::new(1000.0, 1000.0),
+            PointerButton::Right,
+        );
         assert!(
             !pin_targeted(&probe_for(&mut miss), &wire, rect),
             "a breaker far from the glyph must not register"
@@ -646,7 +666,11 @@ mod tests {
         let rect = box_rect_at(top_left);
         let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
 
-        let mut state = BreakerState::start(mid + Vec2::new(0.0, -80.0), PointerButton::Right);
+        let mut state = BreakerState::start(
+            GraphRef::Main,
+            mid + Vec2::new(0.0, -80.0),
+            PointerButton::Right,
+        );
         state.add_point(mid + Vec2::new(0.0, 80.0));
         assert!(pin_targeted(&probe_for(&mut state), &wire, rect));
     }

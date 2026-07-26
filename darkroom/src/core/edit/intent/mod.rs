@@ -29,11 +29,16 @@
 //!   - [`duplicate`] — editor-side `Intent::DuplicateNodes` construction
 //!     from a selection (kept here rather than on `Document`, which is the
 //!     persisted model — intent construction is editing machinery).
+//!   - [`sink`] — `Intents`, the frame's queue of intents paired with the
+//!     graph each commits against. Several graph panes can be on screen, so
+//!     a target travels with every intent rather than being resolved once
+//!     per frame.
 
 pub(crate) mod apply;
 pub(crate) mod build;
 pub(crate) mod duplicate;
 mod query;
+pub(crate) mod sink;
 pub(crate) mod types;
 mod validate;
 

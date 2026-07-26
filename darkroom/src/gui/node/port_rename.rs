@@ -10,6 +10,7 @@ use palantir::{Configure, HAlign, InternedStr, Sense, Text, TextStyle, Tooltip, 
 use crate::core::document::BoundarySide;
 use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::node::{RecordCtx, click_intents};
 use crate::gui::widgets::inline_rename::InlineRename;
@@ -42,7 +43,7 @@ pub(super) fn port_label(
     name: InternedStr,
     tip: &str,
     rename: Option<BoundarySide>,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
     let Some(side) = rename else {
         // Regular node port: a plain label that opts into `Sense::HOVER`
@@ -78,7 +79,7 @@ pub(super) fn port_label(
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
-        click_intents(shift, rcx.scene, ItemRef::Node(port.node_id), out);
+        click_intents(shift, rcx.graph, ItemRef::Node(port.node_id), out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameBoundaryPort {
