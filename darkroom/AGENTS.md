@@ -44,7 +44,7 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
 Root holds the entry point; implementation is grouped by responsibility:
 
 - **`main.rs`** — module decls + `WinitHost` bootstrap.
-- **`gui/scene.rs`** — the render projection (see below).
+- **`gui/scene/`** — the render projection of every visible graph (see below).
 - **`gui/theme.rs`** — the visual/layout `Theme` bundle, code-defined (see below).
 - **`gui/run_state.rs`** — centralized runtime state: per-node execution
   status/logs and the latest worker-pushed pinned-output values.
@@ -74,16 +74,16 @@ Root holds the entry point; implementation is grouped by responsibility:
   `EditScope`), `open_document.rs` (`OpenDocument`: startup loading and the
   active path), `serde.rs` (custom ordered paint-stack
   wire format), and `validate.rs` (document/view structural validation).
-- **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
-  `action_stack/` (packed undo history), and `publish.rs` (local/shared graph
-  publication).
+- **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps,
+  plus `sink.rs`'s target-carrying `Intents` queue), `action_stack/` (packed
+  undo history), and `publish.rs` (local/shared graph publication).
 - **`core/io/`** — `document.rs` (`.darkroom` ZIP containing `document.json`),
   `graph_template/` (reusable graph-template serde I/O), `graph_library/`
   (`darkroom.graph-library.json` loading, quarantine, and durable writes),
   `preferences.rs` (`Preferences` session state), and `cache.rs`
   (per-document disk-cache root: `<stem>.darkroom-cache/` beside the file,
   with a self-ignoring `.gitignore`).
-- **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
+- **`gui/`** — the UI tree: `canvas/` (the graph canvases + their gestures/
   overlays/inspectors), `node/` (the node-body widget cluster), `dock/`
   (the dock's whole GUI half behind the two-call `DockUi` — pane-tree
   rendering, per-group strips, divider resize, drag-docking), `widgets/`
@@ -123,18 +123,29 @@ down the UI tree so child widgets don't grow a parameter fan-out.
 
 darkroom is immediate-mode but routes **all** graph mutations through an
 intent/undo layer rather than mutating the document inline. The frame splits
-into a **navigation phase** (settle *which* graph is active) and an **edit
-phase** (mutate that graph), because input that switches tabs/opens graphs
+into a **navigation phase** (settle *which* graphs are on screen) and an
+**edit phase** (mutate them), because input that switches tabs/opens graphs
 comes from *last* frame's click responses and must resolve before anything
 edits or records. `Editor` owns the GUI pipeline state while borrowing the
 workspace's `OpenDocument`:
 
 - `action_stack: ActionStack`, `scene: Scene`,
   `main_window: MainWindow`, `run_state: RunState`.
-- `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`, and
+- `scene_targets: Vec<GraphRef>` (the visible set `scene` last reflected —
+  a mismatch is a tab switch/open/close), `scene_dirty`, and
   `needs_relayout` flags.
-- `intents: Vec<Intent>` and `actions: Vec<UiAction>` — reused scratch buffers,
+- `intents: Intents` and `actions: Vec<UiAction>` — reused scratch buffers,
   cleared each record pass (no cross-frame state).
+
+**Several graph panes can be open at once**, so an intent only means
+something alongside the graph it applies to. `Intents`
+(`core/edit/intent/sink.rs`) queues `(GraphRef, Intent)` pairs behind a
+*current target*: `Intents::for_graph(target, |out| …)` sets it for a
+scope and every `push`/`extend` inside inherits it. A per-pane draw wraps
+its whole subtree in one call; a whole-scene scan resolves each hit's
+target from `SceneNode::owner` and wraps that push. `commit_batch` records
+a *run* of same-target intents as one undo entry and flushes on a target
+change — an undo entry never spans two graphs.
 
 One record pass:
 
@@ -142,14 +153,14 @@ One record pass:
 2. **navigate** — apply keyboard undo/redo (which can replay a dock-layout
    change), then surface tab activate/close + graph-open/new clicks off
    last frame's responses as `UiAction`s. Open mutates the layout directly;
-   activate/close queue undoable `Intent::Dock` ops. After this the active
-   target is fixed for the rest of the frame.
-3. **sync_target** — if the active graph changed since last frame, drop
+   activate/close queue undoable `Intent::Dock` ops. After this the visible
+   set of graphs is fixed for the rest of the frame.
+3. **sync_targets** — if the visible set changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
-4. **rebuild #1 (pre-prepass)** — `rebuild_scene(ui, target)`,
-   **unconditional**, because `Scene` re-interns names into palantir's active
-   record-pass text arena and refreshes the graph projection. Clears
-   `scene_dirty`.
+4. **rebuild #1 (pre-prepass)** — `rebuild_scene(ui)`, **unconditional**,
+   projecting *every* `Document::visible_targets()` graph, because `Scene`
+   re-interns names into palantir's active record-pass text arena and
+   refreshes the projections. Clears `scene_dirty`.
 5. **edit prepass** — read palantir's *current* input state (drag deltas,
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
@@ -168,7 +179,10 @@ The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
 Everything else is editor view-state, split per graph:
 
 - **`GraphRef`** — `Main` (root graph) or `Local(GraphId)` (a local graph).
-  The active-graph handle threaded through the whole edit pipeline.
+  The per-pane handle threaded through the whole edit pipeline.
+  `Document::visible_targets()` lists one per pane showing a graph (what
+  gets a canvas); `focused_target()` names the one an edit raised *outside*
+  any canvas — a menu command, a keyboard chord — belongs to.
 - **`GraphView`** — per-graph view metadata: `item_placements`
   (`IndexMap<ItemRef, Vec2>` of node-body and pinned-output preview positions
   whose *order* is the shared paint stack — later items
@@ -183,9 +197,11 @@ Everything else is editor view-state, split per graph:
   a binary split tree stored as a flat, canonically pre-ordered
   `Vec<DockNode>` whose leaves are `TabGroup`s (tabs + per-group active),
   plus the focused group. The *primary* group holds the `Main` graph tab
-  (successor of the old "tabs[0] is Main"); graph tabs are pinned there —
-  one canvas — while viewer/preferences tabs split into their own panes
-  (right-click a chip → "Split right/down", capped at 4 nested splits).
+  (successor of the old "tabs[0] is Main"), and `Main` can never be closed,
+  which is what keeps a primary group — and so the tree — alive. **Every
+  tab moves freely**: dragging a graph chip onto a pane edge is how two
+  graphs end up side by side, each with its own canvas (right-click a chip →
+  "Split right/down", capped at 4 nested splits).
   Splits are addressed by `DockPath` (turns from the root packed into one
   byte). Also persisted; every layout mutation is an undoable
   `Intent::Dock`.
@@ -274,17 +290,33 @@ the missing-input warning color and skips a wire whose endpoint has no
 rendered port. Editing never severs wires for type reasons — a `SetInput`
 is always a single undo step.
 
-### Render projection: `Scene` (`src/gui/scene.rs`)
-A flat, per-record snapshot rebuilt from the *active* graph+view
-(`Scene::rebuild(ui, graph, view, library, run_state)` — see
+### Render projection: `Scene` (`src/gui/scene/`)
+A flat, per-record snapshot of **every graph currently on screen** —
+`Scene::rebuild(ui, library, run_state, projections)` takes one
+`GraphProjection { target, source, view }` per visible pane (see
 `Editor::rebuild_scene`). Names are `InternedStr` handles into palantir's
-active text arena, so the rebuild both refreshes the projection and allows the
-previous arena to recycle. Port names, types, and input-binding snapshots are
-flattened into pooled `Vec`s sliced per node (zero per-node allocation in
-steady state). Each `SceneNode` carries its
-`exec_status` (copied from `run_state`) to drive the status glow + run-time
-label. Scene is read-only mirror state — viewport/selection are copied *from*
-the active `GraphView` each rebuild; the gesture writes back via intents.
+active text arena, so the rebuild both refreshes the projections and allows
+the previous arena to recycle.
+
+**One set of pools, sliced per graph.** Paint stack, node projections,
+wiring, subscriptions, selection, and the per-port pools under those are all
+single flat `Vec`s spanning every pane; a `SceneGraph` is nothing but
+`Span`s into them plus a `viewport`. Two panes therefore cost one set of
+allocations, and the steady-state rebuild still allocates nothing. `nodes`
+is one `IndexMap<NodeId, SceneNode>` across all of them — node ids are
+document-unique (enforced by `Document::validate`), so a by-id lookup stays
+a single hash however many panes are open, and `SceneNode::owner` names the
+graph a hit belongs to.
+
+Reads go through **`GraphScene<'a>`**, a `Copy` borrow pairing the scene
+with one of its graphs: `scene.graph(target)` for a named pane,
+`scene.owner(node_id)` for whichever pane a node sits in. Per-pane widgets
+take a `GraphScene`; the whole-scene sweeps keyed by document-unique ids
+(`CanvasGeometry::rebuild`, a drag's owner-still-alive check) take `&Scene`.
+Each `SceneNode` carries its `exec_status` (copied from `run_state`) to
+drive the status glow + run-time label. Scene is read-only mirror state —
+viewport/selection are copied *from* each `GraphView` each rebuild; the
+gesture writes back via intents.
 
 ### Graph execution: worker + run state (`core/worker.rs`, `gui/run_state.rs`)
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
@@ -369,7 +401,24 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   deletes nodes), `NewNodeUi` (right-click spawn popup), `GraphMenuUi`
   (RMB context menu on graph-instance nodes), `SelectionUI` (rubber-band),
   and the pan anchor. `pan_zoom` holds the viewport gesture + zoom math
-  (unit-tested). `cull.rs` is record-time viewport culling (unit-tested): only
+  (unit-tested).
+
+  **One `GraphUI` drives every pane**, not one per canvas: everything it
+  holds is either keyed by a document-unique id (geometry, inspectors) or
+  inherently singular (one pointer ⇒ one drag, one rubber band, one open
+  popup). The frame splits accordingly — `prepass` runs **once** over the
+  whole scene (with a small per-pane loop inside for the viewport-dependent
+  parts: gesture classification and pan/zoom), and `draw(graph)` runs **once
+  per visible graph pane** from the dock's content closure. Anything
+  per-pane comes off the `GraphScene`; the canvas panels and the graph
+  toolbar salt their `WidgetId`s by `GraphRef` so two panes never record the
+  same widget twice. Every gesture that outlives its frame records the
+  `GraphRef` it latched on (`RubberBand::graph`, `BreakerState::graph`,
+  `Anchor::target`, `AnchoredMenu::graph`) so the other panes' passes leave
+  it alone; a wire or subscription resolves its pane from the node at its
+  fixed end, which is also what makes a cross-pane wire unrepresentable.
+  `classify_canvas_gesture` is resolved once in `prepass` and parked in
+  `GraphUI::gesture` with its pane, so both phases agree on the winner. `cull.rs` is record-time viewport culling (unit-tested): only
   nodes and wires intersecting the visible world rect are recorded (off-screen
   ones cost no measure/paint). Safe because every node-subtree widget id
   derives from the `NodeId`; a node whose subtree holds keyboard focus

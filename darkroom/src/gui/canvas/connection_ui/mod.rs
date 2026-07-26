@@ -6,6 +6,7 @@ use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::document::{BoundarySide, PortKind, PortRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -13,7 +14,7 @@ use crate::gui::canvas::wire::{Wire, WirePass};
 use crate::gui::canvas::{free_end, outer_canvas_widget_id};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
-use crate::gui::scene::{InputBindingView, Scene};
+use crate::gui::scene::{GraphScene, InputBindingView, Scene};
 
 /// Owns the in-flight new-connection wire — a held drag or a free-floating
 /// wire, see [`InFlight`]. Single-wire-at-a-time means one `Option` is
@@ -74,13 +75,19 @@ impl ConnectionUI {
     /// `resume` (the source of such a wire, after its node was picked)
     /// re-enters [`InFlight::Floating`] so the user clicks the exact port
     /// to land it. Esc cancels either mode without emitting anything.
+    ///
+    /// Swept over the whole scene once per frame. The latch scan spans
+    /// every pane (only one press exists), but everything after it runs
+    /// against the pane that owns the wire's start node — which is also
+    /// what makes a cross-pane wire unrepresentable: the snap scan never
+    /// sees another graph's ports.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
         resume: Option<PortRef>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         self.ended_on_secondary = false;
 
@@ -107,40 +114,45 @@ impl ConnectionUI {
             return;
         }
         // Both modes span frames, and undo runs before this prepass, so the
-        // node the wire grew out of can disappear under it. Drop the
-        // gesture rather than let it keep snapping — a commit against a
-        // dead producer is refused at the edit boundary anyway, silently,
-        // and `port_data_type` would meanwhile report the start as untyped
-        // (which `scan_snap_target` reads as "compatible with anything").
-        if self
-            .state
-            .is_some_and(|state| !scene.nodes.contains_key(&state.start.node_id))
-        {
-            self.state = None;
-            return;
-        }
+        // node the wire grew out of can disappear under it (or its pane can
+        // close). Drop the gesture rather than let it keep snapping — a
+        // commit against a dead producer is refused at the edit boundary
+        // anyway, silently, and `port_data_type` would meanwhile report the
+        // start as untyped (which `scan_snap_target` reads as "compatible
+        // with anything").
         let Some(mut state) = self.state else {
+            return;
+        };
+        let Some(graph) = scene.owner(state.start.node_id) else {
+            self.state = None;
             return;
         };
 
         // Refresh the compatible port under the pointer for both modes.
-        state.snap_end = scan_snap_target(geometry, ui, scene, state.start);
+        state.snap_end = scan_snap_target(geometry, ui, graph, state.start);
         self.state = Some(state);
 
         match state.mode {
             DragMode::Held => {
-                self.resolve_held(ui, scene, geometry, state.start, state.snap_end, out)
+                self.resolve_held(ui, graph, geometry, state.start, state.snap_end, out)
             }
             DragMode::Floating => {
-                self.resolve_floating(ui, scene, state.start, state.snap_end, out)
+                self.resolve_floating(ui, graph, state.start, state.snap_end, out)
             }
         }
     }
 
     /// Take the source port of a wire dropped on empty canvas this frame,
-    /// if any. The canvas hands it to the new-node popup to open it.
-    pub(super) fn take_pending_connection(&mut self) -> Option<PortRef> {
-        self.pending_open.take()
+    /// if it started in `graph`'s pane — the canvas hands it to that pane's
+    /// new-node popup to open it. Every pane's draw asks, so the ownership
+    /// test and the take are one call: a pane that doesn't own the wire
+    /// must not consume it.
+    pub(super) fn take_pending_connection_in(&mut self, graph: GraphScene<'_>) -> Option<PortRef> {
+        let start = self.pending_open?;
+        graph.contains(start.node_id).then(|| {
+            self.pending_open = None;
+            start
+        })
     }
 
     /// Whether a new-connection gesture is in flight — feeds the shared
@@ -162,11 +174,11 @@ impl ConnectionUI {
     fn resolve_held(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         start: PortRef,
         snap_end: Option<PortRef>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         // `CanvasGeometry::dragging` rolls up `drag_delta().is_some() ||
         // drag_started()`; its transition to `false` is the release edge.
@@ -174,10 +186,10 @@ impl ConnectionUI {
             return;
         }
         if let Some(end) = snap_end {
-            commit_connection(scene, start, end, out);
-        } else if let Some(intent) = self.const_drop(ui, scene, start) {
-            out.push(intent);
-        } else if dropped_on_empty_canvas(ui, scene) {
+            commit_connection(graph, start, end, out);
+        } else if let Some(intent) = self.const_drop(ui, graph, start) {
+            out.for_graph(graph.target(), |out| out.push(intent));
+        } else if dropped_on_empty_canvas(ui, graph) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
             self.pending_open = Some(start);
@@ -194,10 +206,10 @@ impl ConnectionUI {
     fn resolve_floating(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         start: PortRef,
         snap_end: Option<PortRef>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         // `MOVE` wakes a repaint on every cursor move so the wire tracks the
         // pointer (no button is held, so there's no drag-capture keeping
@@ -215,7 +227,7 @@ impl ConnectionUI {
         match ended {
             Some(PointerButton::Left) => {
                 if let Some(end) = snap_end {
-                    commit_connection(scene, start, end, out);
+                    commit_connection(graph, start, end, out);
                 }
                 self.state = None;
             }
@@ -233,7 +245,7 @@ impl ConnectionUI {
     /// intent, or `None` when the gesture doesn't apply — drag started
     /// on an output, released off the start node, the port is unknown,
     /// or the input is already a const (don't clobber the value).
-    fn const_drop(&self, ui: &mut Ui, scene: &Scene, start: PortRef) -> Option<Intent> {
+    fn const_drop(&self, ui: &mut Ui, graph: GraphScene<'_>, start: PortRef) -> Option<Intent> {
         if start.kind != PortKind::Input {
             return None;
         }
@@ -242,13 +254,13 @@ impl ConnectionUI {
         if !body.contains(pointer) {
             return None;
         }
-        let node = scene.nodes.get(&start.node_id)?;
+        let node = graph.node(start.node_id)?;
         // Boundary ports route the interface, not literal values.
         if node.boundary {
             return None;
         }
         // Don't overwrite an existing const value.
-        let input = scene.inputs(node.inputs).get(start.port_idx)?;
+        let input = graph.inputs(node.inputs).get(start.port_idx)?;
         if matches!(input.binding, InputBindingView::Const(_)) {
             return None;
         }
@@ -272,7 +284,7 @@ impl ConnectionUI {
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
@@ -281,7 +293,7 @@ impl ConnectionUI {
         let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
-        let Some(end) = free_end(ui, scene, canvas_origin, &geometry.ports, state.snap_end) else {
+        let Some(end) = free_end(ui, graph, canvas_origin, &geometry.ports, state.snap_end) else {
             return;
         };
         // Orient handles by kind: outputs grow rightward, inputs grow
@@ -293,7 +305,7 @@ impl ConnectionUI {
         };
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
-        let drag_ty = port_data_type(scene, start_port).unwrap_or_default();
+        let drag_ty = port_data_type(graph, start_port).unwrap_or_default();
         let color = port_color(ctx.theme, &drag_ty, start_port.kind, false);
         Wire::data(p0, p3).add(ui, ctx.theme.connection_width, port_gradient(color, color));
     }
@@ -307,8 +319,8 @@ impl ConnectionUI {
 /// module rather than [`ConnectionUI`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, scene) = (pass.theme, pass.scene);
-    for c in &scene.connections {
+    let (theme, graph) = (pass.theme, pass.graph);
+    for c in graph.connections() {
         let src_port = PortRef {
             node_id: c.src.node_id,
             kind: PortKind::Output,
@@ -342,8 +354,8 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         // `CurveBrush::Linear` along the curve parameter `t` and ignores
         // `angle` — we pass 0.0. Broken-state still wins as a flat color
         // so the alarm read doesn't get diluted by the gradient.
-        let src_ty = port_data_type(scene, src_port).unwrap_or_default();
-        let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
+        let src_ty = port_data_type(graph, src_port).unwrap_or_default();
+        let tgt_ty = port_data_type(graph, tgt_port).unwrap_or_default();
         let brush = if stroke.broken {
             CurveBrush::Solid(theme.colors.connection_broken)
         } else if !tgt_ty.compatible_with(&src_ty) {
@@ -404,14 +416,13 @@ fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &mut Ui) -> Opt
 
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
 /// dragged wire must never snap to it or start a bind from it.
-fn input_const_only(scene: &Scene, port: PortRef) -> bool {
+fn input_const_only(graph: GraphScene<'_>, port: PortRef) -> bool {
     if port.kind != PortKind::Input {
         return false;
     }
-    scene
-        .nodes
-        .get(&port.node_id)
-        .and_then(|n| scene.inputs(n.inputs).get(port.port_idx))
+    graph
+        .node(port.node_id)
+        .and_then(|n| graph.inputs(n.inputs).get(port.port_idx))
         .is_some_and(|i| i.const_only)
 }
 
@@ -424,13 +435,13 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
 fn scan_snap_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     start: PortRef,
 ) -> Option<PortRef> {
     let pointer = ui.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
     // snaps anywhere, so its release falls through to the set-const gesture.
-    if input_const_only(scene, start) {
+    if input_const_only(graph, start) {
         return None;
     }
     // A passthrough (graph input boundary wired straight to the output
@@ -438,27 +449,26 @@ fn scan_snap_target(
     // the worker — disallow it by never snapping one boundary node onto
     // the other. The only boundary→boundary link possible is exactly that
     // passthrough, so a blanket reject is precise.
-    let start_boundary = scene.nodes.get(&start.node_id).is_some_and(|n| n.boundary);
-    let candidates = scene
-        .nodes
-        .values()
+    let start_boundary = graph.node(start.node_id).is_some_and(|n| n.boundary);
+    let candidates = graph
+        .nodes()
         .filter(|n| n.id != start.node_id && !(start_boundary && n.boundary))
         .flat_map(|n| n.ports(start.kind.opposite()))
         // A const-only input is never a valid wire target.
-        .filter(|&port| !input_const_only(scene, port));
+        .filter(|&port| !input_const_only(graph, port));
     // Geometrically only one port sits under the pointer, so a port the
     // pointer is over but that `accepts_wire` rejects falls through to
     // `None` (drop) rather than snapping elsewhere.
     geometry
         .ports
         .first_containing(pointer, candidates)
-        .filter(|&port| accepts_wire(scene, start, port))
+        .filter(|&port| accepts_wire(graph, start, port))
 }
 
 /// Whether a wire dragged from `start` may land on `port` — the two
 /// rejections that outlive the geometric hit test in [`scan_snap_target`].
-fn accepts_wire(scene: &Scene, start: PortRef, port: PortRef) -> bool {
-    let compatible = match (port_data_type(scene, start), port_data_type(scene, port)) {
+fn accepts_wire(graph: GraphScene<'_>, start: PortRef, port: PortRef) -> bool {
+    let compatible = match (port_data_type(graph, start), port_data_type(graph, port)) {
         (Some(a), Some(b)) => a.compatible_with(&b),
         // Missing type info (port not in the scene this frame) — don't
         // block; let the intent layer decide.
@@ -468,14 +478,14 @@ fn accepts_wire(scene: &Scene, start: PortRef, port: PortRef) -> bool {
     // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
     // refuses to commit one, so the wire must never latch. `start.kind` fixes
     // which side is the producer (output) and which the consumer (input).
-    // `scene.connections` is the active graph's edge mirror, fed to the same
-    // scenarium check the intent layer uses.
+    // The pane's connection slice is that graph's edge mirror, fed to the
+    // same scenarium check the intent layer uses.
     let (producer, consumer) = match start.kind {
         PortKind::Output => (start.node_id, port.node_id),
         PortKind::Input => (port.node_id, start.node_id),
     };
-    let edges = scene
-        .connections
+    let edges = graph
+        .connections()
         .iter()
         .map(|c| (c.src.node_id, c.tgt.node_id));
     compatible && !closes_data_cycle(edges, producer, consumer)
@@ -484,16 +494,16 @@ fn accepts_wire(scene: &Scene, start: PortRef, port: PortRef) -> bool {
 /// Whether the pointer is over the canvas but not over any node body —
 /// the "released into empty space" condition that offers the new-node
 /// palette. Uses the same arranged-rect hit test as `const_drop`.
-fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
+fn dropped_on_empty_canvas(ui: &mut Ui, graph: GraphScene<'_>) -> bool {
     let Some(pointer) = ui.pointer_pos() else {
         return false;
     };
     let over_canvas = ui
-        .response_for(outer_canvas_widget_id())
+        .response_for(outer_canvas_widget_id(graph.target()))
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas
-        && !scene.nodes.values().any(|n| {
+        && !graph.nodes().any(|n| {
             ui.response_for(node_widget_id(n.id))
                 .rect
                 .is_some_and(|r| r.contains(pointer))
@@ -502,11 +512,11 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
 /// if the port isn't present (e.g. mid-rebuild).
-fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
-    let node = scene.nodes.get(&port.node_id)?;
+fn port_data_type(graph: GraphScene<'_>, port: PortRef) -> Option<DataType> {
+    let node = graph.node(port.node_id)?;
     let ty = match port.kind {
-        PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),
-        PortKind::Output => scene.outputs(node.outputs).get(port.port_idx)?.ty.clone(),
+        PortKind::Input => graph.inputs(node.inputs).get(port.port_idx)?.ty.clone(),
+        PortKind::Output => graph.outputs(node.outputs).get(port.port_idx)?.ty.clone(),
     };
     Some(ty)
 }
@@ -523,17 +533,19 @@ fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
 /// An endpoint that is a boundary node's trailing "+" placeholder first
 /// materializes the interface port it stands for (`Intent::AddBoundaryPort`)
 /// in the same batch, so add + bind undo as one entry.
-fn commit_connection(scene: &Scene, start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
+fn commit_connection(graph: GraphScene<'_>, start: PortRef, end: PortRef, out: &mut Intents) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
         _ => return, // unreachable — scan_snap_target enforces opposite kinds
     };
-    out.extend(add_boundary_port_intent(scene, output, input));
-    out.extend(add_boundary_port_intent(scene, input, output));
-    out.push(Intent::SetInput {
-        input: InputPort::new(input.node_id, input.port_idx),
-        to: Some(Binding::bind(output.node_id, output.port_idx)),
+    out.for_graph(graph.target(), |out| {
+        out.extend(add_boundary_port_intent(graph, output, input));
+        out.extend(add_boundary_port_intent(graph, input, output));
+        out.push(Intent::SetInput {
+            input: InputPort::new(input.node_id, input.port_idx),
+            to: Some(Binding::bind(output.node_id, output.port_idx)),
+        });
     });
 }
 
@@ -543,8 +555,12 @@ fn commit_connection(scene: &Scene, start: PortRef, end: PortRef, out: &mut Vec<
 /// and typed from `opposite` — the placeholder itself is untyped; the
 /// other endpoint carries the type (a consumer's declared input type, a
 /// producer's resolved output type). `None` for ordinary ports.
-fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> Option<Intent> {
-    let node = scene.nodes.get(&port.node_id)?;
+fn add_boundary_port_intent(
+    graph: GraphScene<'_>,
+    port: PortRef,
+    opposite: PortRef,
+) -> Option<Intent> {
+    let node = graph.node(port.node_id)?;
     if !node.boundary {
         return None;
     }
@@ -552,12 +568,12 @@ fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> 
     // *output* column is the graph's `Input` side and vice versa.
     let (count, side, prefix) = match port.kind {
         PortKind::Output => (
-            scene.outputs(node.outputs).len(),
+            graph.outputs(node.outputs).len(),
             BoundarySide::Input,
             "input",
         ),
         PortKind::Input => (
-            scene.inputs(node.inputs).len(),
+            graph.inputs(node.inputs).len(),
             BoundarySide::Output,
             "output",
         ),
@@ -566,11 +582,11 @@ fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> 
         return None; // an existing interface port, not the trailing placeholder
     }
     let taken: Vec<String> = match port.kind {
-        PortKind::Output => scene.outputs(node.outputs)[..port.port_idx]
+        PortKind::Output => graph.outputs(node.outputs)[..port.port_idx]
             .iter()
             .map(|output| String::from(&*output.name.borrow_str()))
             .collect(),
-        PortKind::Input => scene.inputs(node.inputs)[..port.port_idx]
+        PortKind::Input => graph.inputs(node.inputs)[..port.port_idx]
             .iter()
             .map(|input| String::from(&*input.name.borrow_str()))
             .collect(),
@@ -582,7 +598,7 @@ fn add_boundary_port_intent(scene: &Scene, port: PortRef, opposite: PortRef) -> 
     Some(Intent::AddBoundaryPort {
         side,
         name,
-        data_type: port_data_type(scene, opposite).unwrap_or_default(),
+        data_type: port_data_type(graph, opposite).unwrap_or_default(),
     })
 }
 

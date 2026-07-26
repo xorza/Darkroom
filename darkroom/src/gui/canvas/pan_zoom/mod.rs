@@ -9,10 +9,11 @@ use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
 use crate::core::document::{ItemRef, Viewport};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 
 /// Anchor-latched pan: the viewport pan captured at drag start, so the
 /// gesture applies `anchor + total_delta` each frame (immune to
@@ -128,16 +129,17 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 pub(super) fn emit_pan_zoom(
     pan_anchor: &mut PanAnchor,
     ui: &Ui,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     gesture: Option<CanvasGesture>,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
 ) {
-    let resp = ui.response_for(outer_canvas_widget_id());
-    let mut v = scene.viewport;
+    let viewport = graph.viewport();
+    let resp = ui.response_for(outer_canvas_widget_id(graph.target()));
+    let mut v = viewport;
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
     if gesture == Some(CanvasGesture::Pan) {
-        pan_anchor.latch(scene.viewport.pan);
+        pan_anchor.latch(viewport.pan);
     }
     pan_anchor.apply(resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
@@ -146,10 +148,11 @@ pub(super) fn emit_pan_zoom(
     // jitter). The `SetViewport` undo step is also `is_noop`-
     // filtered in `drain_intents`; this just skips the build on
     // idle frames.
-    let unchanged =
-        v.pan.approximately_eq(scene.viewport.pan) && v.zoom.approximately_eq(scene.viewport.zoom);
+    let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.push(Intent::SetViewport { to: v });
+        out.for_graph(graph.target(), |out| {
+            out.push(Intent::SetViewport { to: v })
+        });
     }
 }
 
@@ -216,27 +219,30 @@ pub(crate) enum ViewAction {
 pub(crate) fn view_action_intent(
     ui: &Ui,
     geometry: &CanvasGeometry,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     action: ViewAction,
 ) -> Option<Intent> {
-    let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
+    let vp = ui
+        .response_for(outer_canvas_widget_id(graph.target()))
+        .layout_rect?
+        .size;
     let pane = Vec2::new(vp.w, vp.h);
     let to = match action {
-        ViewAction::Reset => reset_target(geometry, scene, pane),
-        ViewAction::ShowAll => fit_target(node_bounds(geometry, scene, false)?, pane),
+        ViewAction::Reset => reset_target(geometry, graph, pane),
+        ViewAction::ShowAll => fit_target(node_bounds(geometry, graph, false)?, pane),
         ViewAction::ShowSelected => {
-            if scene.selected.is_empty() {
+            if graph.selected().is_empty() {
                 return None;
             }
-            fit_target(node_bounds(geometry, scene, true)?, pane)
+            fit_target(node_bounds(geometry, graph, true)?, pane)
         }
     };
     Some(Intent::SetViewport { to })
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
-fn reset_target(geometry: &CanvasGeometry, scene: &Scene, pane: Vec2) -> Viewport {
-    let pan = match node_bounds(geometry, scene, false) {
+fn reset_target(geometry: &CanvasGeometry, graph: GraphScene<'_>, pane: Vec2) -> Viewport {
+    let pan = match node_bounds(geometry, graph, false) {
         Some(b) => pane * 0.5 - b.center(),
         None => Vec2::ZERO,
     };
@@ -252,10 +258,14 @@ fn reset_target(geometry: &CanvasGeometry, scene: &Scene, pane: Vec2) -> Viewpor
 /// the fold is manual min/max (not `Rect::union`, which treats a
 /// zero-size rect as identity and would discard that point too).
 /// `None` when no node qualifies.
-fn node_bounds(geometry: &CanvasGeometry, scene: &Scene, selected_only: bool) -> Option<Rect> {
+fn node_bounds(
+    geometry: &CanvasGeometry,
+    graph: GraphScene<'_>,
+    selected_only: bool,
+) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
-    for n in scene.nodes.values() {
-        if selected_only && !scene.selected.contains(&ItemRef::Node(n.id)) {
+    for n in graph.nodes() {
+        if selected_only && !graph.is_selected(ItemRef::Node(n.id)) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {

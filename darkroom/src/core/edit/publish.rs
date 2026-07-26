@@ -80,7 +80,7 @@ pub(crate) fn graph_template_to_export<'a>(
 }
 
 fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
-    let target = document.active_target()?;
+    let target = document.focused_target()?;
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for key in &view.selected {

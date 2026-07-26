@@ -14,7 +14,7 @@ use palantir::{Color, CurveBrush, LineCap, Rect, Shape, Size, Ui};
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 use crate::gui::theme::Theme;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
@@ -126,7 +126,7 @@ impl Wire {
 #[derive(Debug)]
 pub(super) struct WirePass<'a, 'p> {
     pub(super) theme: &'a Theme,
-    pub(super) scene: &'a Scene,
+    pub(super) graph: GraphScene<'a>,
     pub(super) geometry: &'a CanvasGeometry,
     pub(super) cull: CullRegion,
     pub(super) probe: &'a mut BreakerProbe<'p>,

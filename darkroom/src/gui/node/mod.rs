@@ -8,6 +8,7 @@ mod value_editor;
 
 use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
@@ -20,7 +21,7 @@ use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::{ExecStatus, RunState};
-use crate::gui::scene::{Scene, SceneNode};
+use crate::gui::scene::{GraphScene, Scene, SceneNode, selection_holds};
 use crate::gui::theme::Theme;
 use glam::Vec2;
 use palantir::{
@@ -34,9 +35,9 @@ use scenarium::OutputPort;
 use std::collections::BTreeSet;
 
 /// Read-only context the node-draw chain threads top to bottom: the
-/// theme, the scene being rendered, and last frame's port geometry.
+/// theme, the graph pane being rendered, and last frame's port geometry.
 /// `Copy` (all shared refs), so it's passed by value — copying it while
-/// a `&rcx.scene.nodes` borrow is live is fine, which keeps
+/// a borrow of the scene's node pool is live is fine, which keeps
 /// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
 /// `actions`) and the breaker `probe` stay separate params.
 #[derive(Clone, Copy)]
@@ -45,12 +46,15 @@ pub(crate) struct RecordCtx<'a> {
     /// The runtime library, for resolving a port's registered type metadata
     /// (display name, enum variants) — `DataType` carries only the id.
     pub(super) library: &'a Library,
-    pub(super) scene: &'a Scene,
-    /// Effective selection to paint: the committed set (`scene.selected`)
-    /// or, mid-rubber-band, the live swept preview owned by `SelectionUI`.
-    /// Kept off `Scene` so the projection stays a read-only mirror — the
-    /// gesture no longer scribbles its preview into the committed field.
-    pub(super) selected: &'a BTreeSet<ItemRef>,
+    /// The one graph this record pass is drawing. Every other pane on
+    /// screen gets its own `RecordCtx`, so nothing here can reach across.
+    pub(super) graph: GraphScene<'a>,
+    /// Effective selection to paint, sorted: the pane's committed set
+    /// (`GraphScene::selected`) or, mid-rubber-band, the live swept preview
+    /// owned by `SelectionUI`. Kept off `Scene` so the projection stays a
+    /// read-only mirror — the gesture no longer scribbles its preview into
+    /// the committed field.
+    pub(super) selected: &'a [ItemRef],
     pub(super) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
@@ -58,6 +62,14 @@ pub(crate) struct RecordCtx<'a> {
     /// Live run results — the pin previews drawn interleaved with the
     /// node bodies read their pinned values from here.
     pub(super) run_state: &'a RunState,
+}
+
+impl RecordCtx<'_> {
+    /// Whether `key` paints selected this pass — a binary search, since
+    /// both the committed span and the rubber-band preview are sorted.
+    pub(super) fn is_selected(&self, key: ItemRef) -> bool {
+        selection_holds(self.selected, key)
+    }
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -101,7 +113,7 @@ impl NodeUI {
         cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         pin_ui: &PinUi,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         // Paint in `scene.z_order` (mirrored from `item_placements`) — later
         // draws sit on top, so the last item in the list is frontmost, and
@@ -124,7 +136,7 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for key in &rcx.scene.z_order {
+        for key in rcx.graph.z_order() {
             let id = match *key {
                 ItemRef::Node(id) => id,
                 ItemRef::Pin(port) => {
@@ -135,7 +147,7 @@ impl NodeUI {
                     continue;
                 }
             };
-            let Some(n) = rcx.scene.nodes.get(&id) else {
+            let Some(n) = rcx.graph.node(id) else {
                 continue;
             };
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
@@ -153,7 +165,7 @@ impl NodeUI {
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(rcx.scene);
+        self.drag.drop_if_owner_gone(rcx.graph.scene);
     }
 
     fn draw_one(
@@ -162,7 +174,7 @@ impl NodeUI {
         rcx: RecordCtx<'_>,
         node: &SceneNode,
         probe: &mut BreakerProbe<'_>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         let theme = rcx.theme;
 
@@ -180,7 +192,7 @@ impl NodeUI {
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = rcx.selected.contains(&ItemRef::Node(node.id));
+        let selected = rcx.is_selected(ItemRef::Node(node.id));
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes, a 4-tier decision: the
@@ -242,7 +254,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.scene, ItemRef::Node(node.id), out);
+            click_intents(shift_click, rcx.graph, ItemRef::Node(node.id), out);
         }
 
         // The header title doubles as a drag handle: its idle label
@@ -264,13 +276,14 @@ impl NodeUI {
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(rcx.scene, rcx.selected)
+                selected_group_positions(rcx.graph, rcx.selected)
             } else {
-                click_intents(false, rcx.scene, ItemRef::Node(node.id), out);
+                click_intents(false, rcx.graph, ItemRef::Node(node.id), out);
                 vec![(ItemRef::Node(node.id), node.pos)]
             };
             self.drag.latch(
                 ItemRef::Node(node.id),
+                node.owner,
                 start_positions,
                 if title_drag { title_wid } else { body_wid },
             );
@@ -283,7 +296,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Intents) {
         self.drag.advance(ui, scene, out);
     }
 }
@@ -370,24 +383,26 @@ pub(super) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body; also shared by the pin preview widget's own click.
-pub(super) fn click_intents(shift: bool, scene: &Scene, key: ItemRef, out: &mut Vec<Intent>) {
-    out.push(select_intent(shift, scene, key));
-    let deselecting = shift && scene.selected.contains(&key);
-    if !deselecting {
-        out.push(Intent::Raise { key });
-    }
+pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: ItemRef, out: &mut Intents) {
+    out.for_graph(graph.target(), |out| {
+        out.push(select_intent(shift, graph, key));
+        let deselecting = shift && graph.is_selected(key);
+        if !deselecting {
+            out.push(Intent::Raise { key });
+        }
+    });
 }
 
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, scene: &Scene, key: ItemRef) -> Intent {
+fn select_intent(shift: bool, graph: GraphScene<'_>, key: ItemRef) -> Intent {
     let mut to = if shift {
-        scene.selected.clone()
+        graph.selection()
     } else {
         BTreeSet::new()
     };
-    if shift && scene.selected.contains(&key) {
+    if shift && graph.is_selected(key) {
         to.remove(&key);
     } else {
         to.insert(key);
@@ -398,18 +413,25 @@ fn select_intent(shift: bool, scene: &Scene, key: ItemRef) -> Intent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui::scene::internals::scene_node_stub;
 
+    /// A one-pane scene holding `selected` as both its node set and its
+    /// committed selection — enough for the click-intent rules, which read
+    /// nothing else.
     fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> Scene {
-        Scene {
-            selected: selected.into_iter().map(ItemRef::Node).collect(),
-            ..Default::default()
-        }
+        let mut ui = Ui::default();
+        let ids: Vec<NodeId> = selected.into_iter().collect();
+        Scene::with_nodes(
+            ids.iter()
+                .map(|id| scene_node_stub(&mut ui, *id, Vec2::ZERO)),
+        )
+        .with_selection(ids.iter().copied().map(ItemRef::Node))
     }
 
     fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
-        let mut out = Vec::new();
-        click_intents(shift, scene, ItemRef::Node(id), &mut out);
-        out
+        let mut out = Intents::default();
+        click_intents(shift, scene.only_graph(), ItemRef::Node(id), &mut out);
+        out.drain().map(|(_, intent)| intent).collect()
     }
 
     #[test]
@@ -452,8 +474,10 @@ mod tests {
         // bodies — clicking it selects it *and* lifts it to the front.
         let port = scenarium::OutputPort::new(NodeId::unique(), 0);
         let key = ItemRef::Pin(port);
-        let mut out = Vec::new();
-        click_intents(false, &Scene::default(), key, &mut out);
+        let scene = scene_with_selection([]);
+        let mut out = Intents::default();
+        click_intents(false, scene.only_graph(), key, &mut out);
+        let out: Vec<Intent> = out.drain().map(|(_, intent)| intent).collect();
         assert_eq!(out.len(), 2);
         assert!(matches!(out[0], Intent::SetSelection { .. }));
         assert!(matches!(out[1], Intent::Raise { key: k } if k == key));

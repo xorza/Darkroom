@@ -37,7 +37,7 @@ use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
 use crate::gui::run_state::{ExecStatus, RunState};
-use crate::gui::scene::{InputBindingView, Scene, SceneNode};
+use crate::gui::scene::{GraphScene, InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
@@ -64,7 +64,7 @@ pub(crate) struct Inspectors {
 struct PanelDraw<'a> {
     theme: &'a Theme,
     library: &'a Library,
-    scene: &'a Scene,
+    graph: GraphScene<'a>,
     run_state: &'a RunState,
 }
 
@@ -128,18 +128,18 @@ impl Inspectors {
         ui: &mut Ui,
         theme: &Theme,
         library: &Library,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         run_state: &RunState,
     ) {
         let ctx = PanelDraw {
             theme,
             library,
-            scene,
+            graph,
             run_state,
         };
         for (&id, &mode) in &self.modes {
-            let Some(node) = scene.nodes.get(&id) else {
+            let Some(node) = graph.node(id) else {
                 continue;
             };
             // Boundary nodes (GraphInput/GraphOutput) are pure
@@ -171,7 +171,7 @@ impl Inspectors {
         pos: Vec2,
     ) {
         let theme = ctx.theme;
-        let scene = ctx.scene;
+        let graph = ctx.graph;
         let logs = ctx.run_state.logs(node.id);
         let errors = ctx.run_state.errors(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
@@ -254,7 +254,7 @@ impl Inspectors {
                     line(ui, node.description.clone(), muted_style(theme, ui));
                 }
 
-                let inputs = scene.inputs(node.inputs);
+                let inputs = graph.inputs(node.inputs);
                 if !inputs.is_empty() {
                     section(ui, theme, "Inputs");
                     for input in inputs {
@@ -270,7 +270,7 @@ impl Inspectors {
                     }
                 }
 
-                let outputs = scene.outputs(node.outputs);
+                let outputs = graph.outputs(node.outputs);
                 if !outputs.is_empty() {
                     section(ui, theme, "Outputs");
                     for output in outputs {
@@ -314,16 +314,20 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
 fn outside_action(ui: &Ui, scene: &Scene) -> bool {
-    let oc = ui.response_for(outer_canvas_widget_id());
-    // Any-button drag: left rubber-bands, middle pans, right scribbles
-    // the breaker — all of them count as "acted on the canvas".
-    let canvas_dragged =
-        oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
-    let canvas_acted = oc.left.clicked()
-        || canvas_dragged
-        || oc.scroll.lines != Vec2::ZERO
-        || oc.scroll.pixels != Vec2::ZERO
-        || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
+    // Any pane counts: an action on one canvas closes a transient panel
+    // opened on another, the same way it closes one on its own.
+    let canvas_acted = scene.graphs().any(|graph| {
+        let oc = ui.response_for(outer_canvas_widget_id(graph.target()));
+        // Any-button drag: left rubber-bands, middle pans, right scribbles
+        // the breaker — all of them count as "acted on the canvas".
+        let dragged =
+            oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
+        oc.left.clicked()
+            || dragged
+            || oc.scroll.lines != Vec2::ZERO
+            || oc.scroll.pixels != Vec2::ZERO
+            || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON
+    });
     let node_acted = scene.nodes.values().any(|n| {
         let r = ui.response_for(node_widget_id(n.id));
         r.left.clicked() || r.left.drag.started()

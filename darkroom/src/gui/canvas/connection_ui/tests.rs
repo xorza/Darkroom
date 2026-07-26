@@ -1,20 +1,31 @@
 use palantir::Ui;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
-use scenarium::{Binding, DataType, GraphDef, InputPort, Node, NodeId, NodeKind};
+use scenarium::{Binding, DataType, GraphDef, GraphId, InputPort, Node, NodeId, NodeKind};
 
-use crate::core::document::{BoundarySide, GraphView, PortKind, PortRef};
+use crate::core::document::{BoundarySide, GraphRef, GraphView, PortKind, PortRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::connection_ui::{ConnectionUI, DragMode, InFlight, commit_connection};
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{Scene, SceneSource};
+use crate::gui::scene::{GraphProjection, GraphScene, Scene, SceneSource};
 
 #[derive(Debug)]
 struct Fixture {
     scene: Scene,
+    target: GraphRef,
     boundary_in: NodeId,
     boundary_out: NodeId,
     mult: NodeId,
+}
+
+impl Fixture {
+    /// The fixture's sole projected pane.
+    fn graph(&self) -> GraphScene<'_> {
+        self.scene
+            .graph(self.target)
+            .expect("fixture pane projected")
+    }
 }
 
 /// Interior scene of a graph with authored inputs `[input0]` (wired to
@@ -33,18 +44,22 @@ fn fixture() -> Fixture {
         .set_input_binding(InputPort::new(mult, 0), Binding::bind(boundary_in, 0));
 
     let view = GraphView::for_graph(&graph.body);
+    let def_id = GraphId::unique();
     let mut scene = Scene::default();
     let mut ui = Ui::default();
     scene.rebuild(
         &mut ui,
-        SceneSource::Def(&graph),
-        &view,
         &library,
         &RunState::default(),
-        false,
+        [GraphProjection {
+            target: GraphRef::Local(def_id),
+            source: SceneSource::Def(&graph),
+            view: &view,
+        }],
     );
     Fixture {
         scene,
+        target: GraphRef::Local(def_id),
         boundary_in,
         boundary_out,
         mult,
@@ -59,6 +74,22 @@ fn port(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortRef {
     }
 }
 
+/// Commit `start` → `end` on the fixture's pane and return the intents it
+/// queued, checking they all landed on that pane's target.
+fn committed(fixture: &Fixture, start: PortRef, end: PortRef) -> Vec<Intent> {
+    let mut out = Intents::default();
+    commit_connection(fixture.graph(), start, end, &mut out);
+    out.drain()
+        .map(|(target, intent)| {
+            assert_eq!(
+                target, fixture.target,
+                "a wire commits against its own pane"
+            );
+            intent
+        })
+        .collect()
+}
+
 #[test]
 fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
     let fixture = fixture();
@@ -66,12 +97,10 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
     // GraphInput placeholder (output idx 1, past authored input0) →
     // mult.B: materialize a fresh input named past the taken "input0",
     // typed from the consumer, then bind.
-    let mut out = Vec::new();
-    commit_connection(
-        &fixture.scene,
+    let out = committed(
+        &fixture,
         port(fixture.boundary_in, PortKind::Output, 1),
         port(fixture.mult, PortKind::Input, 1),
-        &mut out,
     );
     assert_eq!(out.len(), 2, "add + bind, one batch");
     match &out[0] {
@@ -96,12 +125,10 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
 
     // mult.Prod → GraphOutput placeholder (input idx 0): symmetric,
     // typed from the producer's resolved output.
-    let mut out = Vec::new();
-    commit_connection(
-        &fixture.scene,
+    let out = committed(
+        &fixture,
         port(fixture.mult, PortKind::Output, 0),
         port(fixture.boundary_out, PortKind::Input, 0),
-        &mut out,
     );
     assert_eq!(out.len(), 2);
     match &out[0] {
@@ -119,12 +146,10 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
 
     // An existing interface port (input0, idx 0) is not a placeholder:
     // rewiring it emits only the binding.
-    let mut out = Vec::new();
-    commit_connection(
-        &fixture.scene,
+    let out = committed(
+        &fixture,
         port(fixture.boundary_in, PortKind::Output, 0),
         port(fixture.mult, PortKind::Input, 1),
-        &mut out,
     );
     assert_eq!(out.len(), 1, "no interface change for an existing port");
     assert!(matches!(&out[0], Intent::SetInput { .. }));
@@ -146,7 +171,7 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
         }),
         ..Default::default()
     };
-    let mut out = Vec::new();
+    let mut out = Intents::default();
     connections.apply(&mut ui, scene, &CanvasGeometry::default(), None, &mut out);
     assert!(out.is_empty(), "an untouched prepass emits nothing");
     connections.state

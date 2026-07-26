@@ -9,14 +9,13 @@
 //! to [`GroupDrag::latch`]. Everything after that is identical for both, so
 //! it lives here in [`GroupDrag::advance`] rather than being written twice.
 
-use std::collections::BTreeSet;
-
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
 
-use crate::core::document::ItemRef;
+use crate::core::document::{GraphRef, ItemRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
-use crate::gui::scene::Scene;
+use crate::gui::scene::{GraphScene, Scene, selection_holds};
 
 /// One in-flight group drag, or none.
 ///
@@ -40,6 +39,11 @@ struct Anchor {
     /// and its [`ItemRef::owner`] is the node [`GroupDrag::advance`] checks
     /// against the scene.
     grabbed: ItemRef,
+    /// The graph pane the drag latched on. Several are on screen, and the
+    /// gesture outlives the frame that started it, so the target travels
+    /// with the anchor rather than being re-derived from whatever pane the
+    /// pointer has since wandered over.
+    target: GraphRef,
     /// Every member moving with this drag — node bodies and pin previews
     /// mixed — and its position at drag start: the whole selection when the
     /// grabbed member was already selected, else just the grabbed one.
@@ -56,11 +60,13 @@ impl GroupDrag {
     pub(crate) fn latch(
         &mut self,
         grabbed: ItemRef,
+        target: GraphRef,
         start_positions: Vec<(ItemRef, Vec2)>,
         widget_id: WidgetId,
     ) {
         self.anchor = Some(Anchor {
             grabbed,
+            target,
             start_positions,
             widget_id,
         });
@@ -89,12 +95,13 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` (and is mirrored
     /// into `Scene`) before the pass that draws the moved items: they paint
     /// at the cursor in Pass A with no relayout retry.
-    pub(crate) fn advance(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) -> bool {
+    pub(crate) fn advance(&mut self, ui: &Ui, scene: &Scene, out: &mut Intents) -> bool {
         self.drop_if_owner_gone(scene);
-        // Copy the id out and drop the borrow, so the branches below can
+        // Copy the ids out and drop the borrow, so the branches below can
         // clear the slot without cloning `start_positions` — only the
         // success path reads it, and that path never clears.
-        let Some(widget_id) = self.anchor.as_ref().map(|a| a.widget_id) else {
+        let Some((widget_id, target)) = self.anchor.as_ref().map(|a| (a.widget_id, a.target))
+        else {
             return false;
         };
         let resp = ui.response_for(widget_id);
@@ -114,7 +121,8 @@ impl GroupDrag {
         };
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
-        out.push(self.anchor.as_ref().unwrap().resolve(delta));
+        let move_selection = self.anchor.as_ref().unwrap().resolve(delta);
+        out.for_graph(target, |out| out.push(move_selection));
         true
     }
 }
@@ -139,18 +147,18 @@ impl Anchor {
 /// shared by both callers, so the group moves the same way regardless of
 /// which kind of member's press started it.
 pub(crate) fn selected_group_positions(
-    scene: &Scene,
-    selected: &BTreeSet<ItemRef>,
+    graph: GraphScene<'_>,
+    selected: &[ItemRef],
 ) -> Vec<(ItemRef, Vec2)> {
-    let mut positions: Vec<(ItemRef, Vec2)> = scene
-        .nodes
-        .values()
-        .filter(|n| selected.contains(&ItemRef::Node(n.id)))
+    let holds = |key: ItemRef| selection_holds(selected, key);
+    let mut positions: Vec<(ItemRef, Vec2)> = graph
+        .nodes()
+        .filter(|n| holds(ItemRef::Node(n.id)))
         .map(|n| (ItemRef::Node(n.id), n.pos))
         .collect();
-    for pin in scene.pinned_outputs() {
+    for pin in graph.pinned_outputs() {
         let key = ItemRef::Pin(pin.port);
-        if selected.contains(&key) {
+        if holds(key) {
             positions.push((key, pin.pos));
         }
     }
@@ -171,9 +179,7 @@ mod tests {
     /// A scene holding just `id`, so a drag grabbing something on it passes
     /// the owner check.
     fn scene_with(ui: &mut Ui, id: NodeId) -> Scene {
-        let mut scene = Scene::default();
-        scene.nodes.insert(id, scene_node_stub(ui, id, Vec2::ZERO));
-        scene
+        Scene::with_nodes([scene_node_stub(ui, id, Vec2::ZERO)])
     }
 
     #[test]
@@ -187,6 +193,7 @@ mod tests {
         let other_pin = ItemRef::Pin(OutputPort::new(NodeId::unique(), 2));
         let anchor = Anchor {
             grabbed: ItemRef::Node(grabbed_node),
+            target: GraphRef::Main,
             start_positions: vec![
                 (ItemRef::Node(grabbed_node), Vec2::new(10.0, 20.0)),
                 (other_pin, Vec2::new(-5.0, 100.0)),
@@ -235,9 +242,9 @@ mod tests {
 
         let mut drag = GroupDrag::default();
         let gone = ItemRef::Pin(OutputPort::new(NodeId::unique(), 0));
-        drag.latch(gone, vec![(gone, Vec2::ZERO)], wid());
+        drag.latch(gone, GraphRef::Main, vec![(gone, Vec2::ZERO)], wid());
 
-        let mut out = Vec::new();
+        let mut out = Intents::default();
         assert!(!drag.advance(&ui, &scene, &mut out), "the drag is over");
         assert!(out.is_empty(), "a stale anchor emits nothing");
         assert!(drag.anchor.is_none(), "and drops itself");
@@ -254,10 +261,10 @@ mod tests {
 
         let mut drag = GroupDrag::default();
         let key = ItemRef::Node(id);
-        drag.latch(key, vec![(key, Vec2::new(4.0, 4.0))], wid());
+        drag.latch(key, GraphRef::Main, vec![(key, Vec2::new(4.0, 4.0))], wid());
         assert!(drag.anchor.is_some(), "latched");
 
-        let mut out = Vec::new();
+        let mut out = Intents::default();
         assert!(!drag.advance(&ui, &scene, &mut out));
         assert!(out.is_empty(), "a release commits nothing of its own");
         assert!(drag.anchor.is_none(), "the slot is free for the next press");

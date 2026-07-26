@@ -35,6 +35,7 @@ use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
 use crate::core::document::{Document, GraphRef, TabRef};
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, TabDrag, classify_drop};
@@ -75,7 +76,7 @@ pub(crate) struct DockContext<'a> {
 /// arrangement itself lives on the `Document`.
 #[derive(Debug, Default)]
 pub(crate) struct DockUi {
-    /// Armed by [`Self::scan`] off a movable chip's latched drag,
+    /// Armed by [`Self::scan`] off a chip's latched drag,
     /// resolved there into a [`DockOp::MoveTab`] on release (or
     /// cancelled by Esc), painted by [`Self::render`].
     tab_drag: Option<TabDrag>,
@@ -86,7 +87,7 @@ impl DockUi {
     /// over every strip: close clicks (which win over activation),
     /// activation clicks (a graph tab's inner rename label captures
     /// the click, so its response is polled too), drag arming on a
-    /// movable chip's latched drag — then the in-flight drag's
+    /// a chip's latched drag — then the in-flight drag's
     /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
     /// release resolve the pane under the pointer into a
     /// [`DockOp::MoveTab`].
@@ -107,7 +108,6 @@ impl DockUi {
                 actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
             }
             if self.tab_drag.is_none()
-                && strip::movable(tab)
                 && ui
                     .response_for(strip::tab_chip_wid(tab))
                     .left
@@ -158,8 +158,8 @@ impl DockUi {
         ui: &mut Ui,
         theme: &Theme,
         cx: DockContext<'_>,
-        out: &mut Vec<Intent>,
-        mut content: impl FnMut(&mut Ui, TabRef, &mut Vec<Intent>),
+        out: &mut Intents,
+        mut content: impl FnMut(&mut Ui, TabRef, &mut Intents),
     ) {
         render_node(
             ui,
@@ -180,13 +180,13 @@ impl DockUi {
 /// Recursive walk of the dock tree: a split renders as an palantir
 /// `Splitter` (ratio changes surface as `DockOp::SetRatio`), a
 /// group as its strip + the active tab's view.
-fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
+fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     ui: &mut Ui,
     theme: &Theme,
     cx: DockContext<'_>,
     idx: NodeIdx,
     path: DockPath,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
     content: &mut F,
 ) {
     match cx.doc.layout.node(idx) {
@@ -227,12 +227,12 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
 }
 
 /// One pane: the group's tab strip over its active tab's view.
-fn render_group<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
+fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     ui: &mut Ui,
     theme: &Theme,
     cx: DockContext<'_>,
     group: &TabGroup,
-    out: &mut Vec<Intent>,
+    out: &mut Intents,
     content: &mut F,
 ) {
     let labels = tab_labels(ui, cx, group);

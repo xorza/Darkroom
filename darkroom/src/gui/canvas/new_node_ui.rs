@@ -10,11 +10,12 @@ use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 
 /// A chosen palette entry and the state created atomically with it.
 #[derive(Debug)]
@@ -76,12 +77,12 @@ impl NewNodeUi {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         gesture: Option<CanvasGesture>,
         pending_source: Option<PortRef>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
-        let resp = ui.response_for(outer_canvas_widget_id());
+        let resp = ui.response_for(outer_canvas_widget_id(graph.target()));
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
@@ -89,9 +90,9 @@ impl NewNodeUi {
         if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = to_world(local, &scene.viewport);
+            self.world_pos = to_world(local, &graph.viewport());
             self.source = pending_source;
-            self.menu.open_at(rect.min + local);
+            self.menu.open_at(rect.min + local, graph.target());
             // Fresh open: empty the filter and focus the search field this
             // frame so the user can type straight away.
             self.query.clear();
@@ -112,25 +113,29 @@ impl NewNodeUi {
             .max(120.0);
         let scroll_cap = (max_height - SEARCH_ROW_ALLOWANCE).max(80.0);
         let query = &mut self.query;
-        let chosen = self
-            .menu
-            .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
-                palette_body(ui, popup, ctx, query, scroll_cap, just_opened)
-            });
+        let chosen = self.menu.show(
+            ui,
+            graph.target(),
+            "new_node_popup",
+            Some(max_height),
+            |ui, popup| palette_body(ui, popup, ctx, query, scroll_cap, just_opened),
+        );
 
         if let Some(ChosenNode {
             node_id,
             node,
-            graph,
+            graph: definition,
             bindings,
         }) = chosen
         {
-            out.push(Intent::AddNode {
-                pos: self.world_pos,
-                node_id,
-                node,
-                graph,
-                bindings,
+            out.for_graph(graph.target(), |out| {
+                out.push(Intent::AddNode {
+                    pos: self.world_pos,
+                    node_id,
+                    node,
+                    graph: definition,
+                    bindings,
+                })
             });
             // If a dropped connection opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the

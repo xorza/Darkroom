@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::{ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 
+use crate::core::document::GraphRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::outer_canvas_widget_id;
 
@@ -59,7 +60,14 @@ impl CanvasBackground {
     /// it sits beneath every connection and node. `pan`/`zoom` are the
     /// live viewport; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
-    pub(super) fn draw(&mut self, ui: &mut Ui, ctx: &AppContext<'_>, pan: Vec2, zoom: f32) {
+    pub(super) fn draw(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        graph: GraphRef,
+        pan: Vec2,
+        zoom: f32,
+    ) {
         let spacing = ctx.theme.canvas_dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
             return;
@@ -67,7 +75,7 @@ impl CanvasBackground {
         // Last frame's canvas size — the grid's repeat count. A 1-frame
         // stale count on window resize is invisible. Absent on frame 1.
         let Some(size) = ui
-            .response_for(outer_canvas_widget_id())
+            .response_for(outer_canvas_widget_id(graph))
             .layout_rect
             .map(|r| r.size)
         else {

@@ -4,7 +4,7 @@ use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 use scenarium::OutputPort;
 
 use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
@@ -52,13 +52,15 @@ impl MainWindow {
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
-        emit_graph_opens(ui, scene, actions);
+        for graph in scene.graphs() {
+            emit_graph_opens(ui, graph, actions);
+        }
         emit_pin_image_opens(ui, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
     /// already-settled active graph.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Intents) {
         self.graph_ui.prepass(ui, scene, out);
     }
 
@@ -69,7 +71,7 @@ impl MainWindow {
         scene: &Scene,
         prefs: &mut Preferences,
         doc: &Document,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) -> Option<AppCommand> {
         let mut command = None;
         // The menu bar rides its own chrome band; the dock fills the
@@ -105,19 +107,25 @@ impl MainWindow {
                         command = menu_bar::show(ui);
                     });
                 dock.render(ui, ctx.theme, dock_cx, out, |ui, tab, out| match tab {
-                    TabRef::Graph(_) => {
+                    TabRef::Graph(target) => {
+                        // A graph tab whose projection is missing means the
+                        // pane's graph died this frame; `reconcile_with_graph`
+                        // prunes the tab before the next one.
+                        let Some(graph) = scene.graph(target) else {
+                            return;
+                        };
                         // Overlay the run/cancel toggle on the canvas's
                         // top-left corner; it hit-tests above the canvas,
-                        // so a click on it never starts a pan. Graph tabs
-                        // live only in the primary group, so the single
-                        // canvas scope can't be recorded twice.
+                        // so a click on it never starts a pan. Every id
+                        // below is salted by `target`, so two graph panes
+                        // side by side never record the same widget twice.
                         Panel::zstack()
-                            .id_salt("graph_overlay")
+                            .id_salt(("graph_overlay", target))
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
-                                graph_ui.frame(ui, ctx, scene, out, &mut command);
+                                graph_ui.draw(ui, ctx, graph, out, &mut command);
                                 if let Some(c) =
-                                    graph_toolbar::show(ui, ctx, scene, &graph_ui.geometry, out)
+                                    graph_toolbar::show(ui, ctx, graph, &graph_ui.geometry, out)
                                 {
                                     command = Some(c);
                                 }

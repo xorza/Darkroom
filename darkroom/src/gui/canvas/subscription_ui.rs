@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::{CurveBrush, Ui};
 use scenarium::NodeId;
 
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
@@ -9,7 +10,7 @@ use crate::gui::canvas::free_end;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{Wire, WirePass};
 use crate::gui::node::port_color::event_color;
-use crate::gui::scene::{Scene, SceneNode};
+use crate::gui::scene::{GraphScene, Scene, SceneNode};
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -49,6 +50,17 @@ enum InFlight {
     },
 }
 
+impl InFlight {
+    /// The node at the drag's *fixed* end — whichever glyph the press
+    /// latched on. Its graph is the pane that owns the gesture.
+    fn anchor_node(self) -> NodeId {
+        match self {
+            InFlight::FromEmitter { emitter, .. } => emitter.node_id,
+            InFlight::FromSubscriber { subscriber, .. } => subscriber,
+        }
+    }
+}
+
 impl SubscriptionUI {
     /// Whether a subscription-wire gesture is in flight — feeds the shared
     /// wire-fade tier. (A method, not a `pub(super)` field: `InFlight` is
@@ -61,12 +73,16 @@ impl SubscriptionUI {
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
     /// a valid target. Esc cancels.
+    ///
+    /// Swept over the whole scene once per frame — one press, one wire —
+    /// but the snap scans and the commit run against the pane holding the
+    /// drag's fixed end, so a subscription can't span two graphs.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
@@ -91,19 +107,26 @@ impl SubscriptionUI {
         let Some(mut state) = self.state else {
             return;
         };
+        // The pane holding the drag's fixed end owns the gesture — its
+        // nodes are the only snap candidates, and its target is what the
+        // commit lands on. A pane closed mid-drag drops the wire.
+        let Some(graph) = scene.owner(state.anchor_node()) else {
+            self.state = None;
+            return;
+        };
         // Refresh the snapped opposite end, then read the source glyph's drag
         // state: `*_dragging` rolls up `drag_delta().is_some() ||
         // drag_started()`, so its transition to `false` is the release edge.
         let still_dragging = match &mut state {
             InFlight::FromEmitter { emitter, snap_sub } => {
-                *snap_sub = scan_sub_target(geometry, ui, scene, *emitter);
+                *snap_sub = scan_sub_target(geometry, ui, graph, *emitter);
                 geometry.events.dragging(*emitter)
             }
             InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter,
             } => {
-                *snap_emitter = scan_emitter_target(geometry, ui, scene, *subscriber);
+                *snap_emitter = scan_emitter_target(geometry, ui, graph, *subscriber);
                 geometry.subs.dragging(*subscriber)
             }
         };
@@ -121,11 +144,13 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter: Some(emitter),
-            } => out.push(Intent::SetSubscription {
-                emitter: emitter.node_id,
-                event_idx: emitter.event_idx,
-                subscriber,
-                subscribe: true,
+            } => out.for_graph(graph.target(), |out| {
+                out.push(Intent::SetSubscription {
+                    emitter: emitter.node_id,
+                    event_idx: emitter.event_idx,
+                    subscriber,
+                    subscribe: true,
+                })
             }),
             _ => {}
         }
@@ -161,7 +186,7 @@ impl SubscriptionUI {
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
@@ -171,7 +196,7 @@ impl SubscriptionUI {
                 let Some(p0) = geometry.events.center(emitter) else {
                     return;
                 };
-                let Some(p3) = free_end(ui, scene, canvas_origin, &geometry.subs, snap_sub) else {
+                let Some(p3) = free_end(ui, graph, canvas_origin, &geometry.subs, snap_sub) else {
                     return;
                 };
                 (p0, p3)
@@ -183,7 +208,7 @@ impl SubscriptionUI {
                 let Some(p3) = geometry.subs.center(subscriber) else {
                     return;
                 };
-                let Some(p0) = free_end(ui, scene, canvas_origin, &geometry.events, snap_emitter)
+                let Some(p0) = free_end(ui, graph, canvas_origin, &geometry.events, snap_emitter)
                 else {
                     return;
                 };
@@ -206,8 +231,8 @@ impl SubscriptionUI {
 /// [`crate::gui::canvas::connection_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUI`].
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, scene) = (pass.theme, pass.scene);
-    for s in &scene.subscriptions {
+    let (theme, graph) = (pass.theme, pass.graph);
+    for s in graph.subscriptions() {
         let emitter = EventRef {
             node_id: s.emitter,
             event_idx: s.event_idx,
@@ -262,13 +287,12 @@ fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeI
 fn scan_sub_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     emitter: EventRef,
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    let candidates = scene
-        .nodes
-        .values()
+    let candidates = graph
+        .nodes()
         .filter(|n| n.id != emitter.node_id && n.sink)
         .map(|n| n.id);
     geometry.subs.first_containing(pointer, candidates)
@@ -281,13 +305,12 @@ fn scan_sub_target(
 fn scan_emitter_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    scene: &Scene,
+    graph: GraphScene<'_>,
     subscriber: NodeId,
 ) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;
-    let candidates = scene
-        .nodes
-        .values()
+    let candidates = graph
+        .nodes()
         .filter(|n| n.id != subscriber)
         .flat_map(SceneNode::events);
     geometry.events.first_containing(pointer, candidates)

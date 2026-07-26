@@ -16,7 +16,7 @@ use scenarium::{Node, NodeKind};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
-use crate::core::document::dock::DockLayout;
+use crate::core::document::dock::{DockLayout, TabGroup};
 
 /// Initial placement of a fresh graph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
@@ -350,15 +350,37 @@ impl Document {
         })
     }
 
-    /// The graph on the canvas: the *primary* group's visible tab, when
-    /// it's a graph — `None` when that pane shows a non-graph view.
-    /// Independent of `layout.focused`: only the primary group hosts
-    /// canvases, and its graph stays visible (and editable) while focus
-    /// sits in another pane.
-    pub(crate) fn active_target(&self) -> Option<GraphRef> {
-        match self.layout.primary().active_tab() {
-            TabRef::Graph(target) => Some(target),
-            TabRef::Preferences | TabRef::ImageViewer(_) => None,
+    /// Every graph currently on a canvas: one per pane whose *visible*
+    /// tab is a graph, in pane order. What the scene projects, and what
+    /// the canvas prepass loops over. A graph open in two panes at once is
+    /// impossible — a tab lives in exactly one group — so these are
+    /// distinct.
+    pub(crate) fn visible_targets(&self) -> impl Iterator<Item = GraphRef> + '_ {
+        self.layout
+            .groups()
+            .filter_map(|group| match group.active_tab() {
+                TabRef::Graph(target) => Some(target),
+                TabRef::Preferences | TabRef::ImageViewer(_) => None,
+            })
+    }
+
+    /// The graph an edit raised *outside* any canvas belongs to — a menu
+    /// command, a keyboard chord, a script request. The focused pane's
+    /// graph when it shows one, else the first visible graph, else `None`
+    /// (no graph pane open at all).
+    ///
+    /// Edits raised *inside* a canvas don't come through here: they carry
+    /// their own target, since several graphs can be on screen and the
+    /// focused one need not be the one clicked.
+    pub(crate) fn focused_target(&self) -> Option<GraphRef> {
+        let focused = self
+            .layout
+            .groups()
+            .find(|group| group.id == self.layout.focused)
+            .map(TabGroup::active_tab);
+        match focused {
+            Some(TabRef::Graph(target)) => Some(target),
+            _ => self.visible_targets().next(),
         }
     }
 
@@ -1129,15 +1151,20 @@ mod tests {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let primary = doc.layout.primary().id;
-        // The canvas target follows the primary group's *visible* tab: a
+        // With one pane, the focused target is simply its visible tab: a
         // graph resolves, an activated non-graph tab means no canvas.
-        assert_eq!(doc.active_target(), Some(GraphRef::Main));
+        assert_eq!(doc.focused_target(), Some(GraphRef::Main));
+        assert_eq!(doc.visible_targets().collect::<Vec<_>>(), [GraphRef::Main]);
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         for tab in [TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))] {
             doc.layout.apply(DockOp::ActivateTab { tab });
-            assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
+            assert_eq!(
+                doc.focused_target(),
+                None,
+                "a layout of nothing but non-graph tabs has no target"
+            );
         }
 
         // Preferences always resolves; a viewer tab resolves while its
@@ -1152,7 +1179,66 @@ mod tests {
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
+        assert_eq!(
+            doc.visible_targets().count(),
+            0,
+            "no pane shows a graph, so nothing gets a canvas"
+        );
         doc.validate().unwrap();
+    }
+
+    #[test]
+    fn two_graph_panes_are_both_visible_and_focus_picks_the_edit_target() {
+        use crate::core::document::dock::{DockDrop, SplitSide};
+
+        // Split a local graph off into its own pane. Both panes now show a
+        // graph, so both get a canvas — and an edit with no pane of its own
+        // (a menu command, a keyboard chord) lands on whichever is focused.
+        let mut doc = Document::default();
+        let local = doc.create_graph(GraphRef::Main).unwrap();
+        let primary = doc.layout.primary().id;
+        let local_tab = TabRef::Graph(GraphRef::Local(local));
+        doc.layout.find_or_insert(local_tab, primary);
+        doc.layout.apply(DockOp::MoveTab {
+            tab: local_tab,
+            to: DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        });
+        doc.ensure_sub_view(local);
+        doc.validate().unwrap();
+
+        assert_eq!(
+            doc.visible_targets().collect::<Vec<_>>(),
+            [GraphRef::Main, GraphRef::Local(local)],
+            "both panes show a graph, in pane order"
+        );
+        assert_eq!(
+            doc.focused_target(),
+            Some(GraphRef::Local(local)),
+            "the split pane took focus"
+        );
+
+        // Focus back on the root pane; the other graph stays visible.
+        doc.layout.apply(DockOp::ActivateTab {
+            tab: TabRef::Graph(GraphRef::Main),
+        });
+        assert_eq!(doc.focused_target(), Some(GraphRef::Main));
+        assert_eq!(doc.visible_targets().count(), 2);
+
+        // A focused pane showing a *non*-graph falls back to the first
+        // visible graph rather than reporting none.
+        doc.layout.find_or_insert(TabRef::Preferences, primary);
+        doc.layout.apply(DockOp::ActivateTab {
+            tab: TabRef::Preferences,
+        });
+        assert_eq!(
+            doc.visible_targets().collect::<Vec<_>>(),
+            [GraphRef::Local(local)],
+            "the root pane now shows preferences"
+        );
+        assert_eq!(doc.focused_target(), Some(GraphRef::Local(local)));
     }
 
     #[test]

@@ -3,11 +3,13 @@ use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui
 use scenarium::NodeId;
 use scenarium::{InputPort, OutputPort, Subscription};
 
+use crate::core::document::GraphRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::Scene;
+use crate::gui::scene::GraphScene;
 
 /// Per-frame bundle threaded through node and connection rendering.
 /// Carries `canvas_origin` (subtracted from `layout_rect` to convert
@@ -117,6 +119,11 @@ const BEZIER_SAMPLES: usize = 16;
 /// way.
 #[derive(Debug)]
 pub(super) struct BreakerState {
+    /// The pane the scribble was started on — its world coordinates, its
+    /// canvas response, and the edit target every severing intent commits
+    /// against. Several graph panes run this controller each frame; only
+    /// this one advances or draws the gesture.
+    graph: GraphRef,
     points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
@@ -139,8 +146,9 @@ pub(super) struct BreakerState {
 }
 
 impl BreakerState {
-    pub(super) fn start(p: Vec2, button: PointerButton) -> Self {
+    pub(super) fn start(graph: GraphRef, p: Vec2, button: PointerButton) -> Self {
         Self {
+            graph,
             points: vec![p],
             length: 0.0,
             button,
@@ -285,18 +293,28 @@ impl BreakerUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        graph: GraphScene<'_>,
         gesture: Option<CanvasGesture>,
-        out: &mut Vec<Intent>,
+        out: &mut Intents,
     ) {
-        let resp = ui.response_for(outer_canvas_widget_id());
+        let target = graph.target();
+        // One scribble at a time, and it belongs to the pane it started
+        // on — every other pane leaves it alone.
+        if self.state.as_ref().is_some_and(|b| b.graph != target) {
+            return;
+        }
+        let resp = ui.response_for(outer_canvas_widget_id(target));
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
         if let Some(CanvasGesture::Breaker(button)) = gesture
             && self.state.is_none()
             && let Some(p) = resp.pointer_local
         {
-            self.state = Some(BreakerState::start(to_world(p, &scene.viewport), button));
+            self.state = Some(BreakerState::start(
+                target,
+                to_world(p, &graph.viewport()),
+                button,
+            ));
         }
         if self.state.is_some() && ui.escape_pressed() {
             self.state = None;
@@ -309,49 +327,52 @@ impl BreakerUI {
         ) {
             (Some(b), Some(_)) => {
                 if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, &scene.viewport));
+                    b.add_point(to_world(p, &graph.viewport()));
                 }
             }
             (Some(b), None) => {
-                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
-                for &node_id in &doomed_nodes {
-                    out.push(Intent::RemoveNode { node_id });
-                }
-                for addr in b.broken.drain(..) {
-                    if doomed_nodes.contains(&addr.node_id) {
-                        continue;
+                out.for_graph(target, |out| {
+                    let doomed_nodes = std::mem::take(&mut b.broken_nodes);
+                    for &node_id in &doomed_nodes {
+                        out.push(Intent::RemoveNode { node_id });
                     }
-                    out.push(Intent::SetInput {
-                        input: addr,
-                        to: None,
-                    });
-                }
-                // A removed node already drops its subscriptions (RemoveNode's
-                // undo step captures every edge touching it), so skip any
-                // whose emitter or subscriber is doomed to avoid redundant
-                // history.
-                for s in b.broken_subscriptions.drain(..) {
-                    if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
-                        continue;
+                    for addr in b.broken.drain(..) {
+                        if doomed_nodes.contains(&addr.node_id) {
+                            continue;
+                        }
+                        out.push(Intent::SetInput {
+                            input: addr,
+                            to: None,
+                        });
                     }
-                    out.push(Intent::SetSubscription {
-                        emitter: s.emitter,
-                        event_idx: s.event_idx,
-                        subscriber: s.subscriber,
-                        subscribe: false,
-                    });
-                }
-                // A removed node already drops its own pin state, so skip any
-                // pinned output on a doomed node.
-                for port in b.broken_pins.drain(..) {
-                    if doomed_nodes.contains(&port.node_id) {
-                        continue;
+                    // A removed node already drops its subscriptions
+                    // (RemoveNode's undo step captures every edge touching
+                    // it), so skip any whose emitter or subscriber is doomed
+                    // to avoid redundant history.
+                    for s in b.broken_subscriptions.drain(..) {
+                        if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber)
+                        {
+                            continue;
+                        }
+                        out.push(Intent::SetSubscription {
+                            emitter: s.emitter,
+                            event_idx: s.event_idx,
+                            subscriber: s.subscriber,
+                            subscribe: false,
+                        });
                     }
-                    out.push(Intent::SetOutputPinned {
-                        output: port,
-                        pinned: false,
-                    });
-                }
+                    // A removed node already drops its own pin state, so skip
+                    // any pinned output on a doomed node.
+                    for port in b.broken_pins.drain(..) {
+                        if doomed_nodes.contains(&port.node_id) {
+                            continue;
+                        }
+                        out.push(Intent::SetOutputPinned {
+                            output: port,
+                            pinned: false,
+                        });
+                    }
+                });
                 self.state = None;
             }
             _ => {}
@@ -375,8 +396,8 @@ impl BreakerUI {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
-    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
-        let Some(b) = self.state.as_ref() else {
+    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
+        let Some(b) = self.state.as_ref().filter(|b| b.graph == graph) else {
             return;
         };
         if b.points.len() < 2 {
@@ -421,7 +442,7 @@ mod tests {
         // mid-drag stayed marked even after the scribble moved away —
         // over-committing severs on release. `begin_frame` is now the one
         // place that clears all four.
-        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
         let node = NodeId::from_u128(1);
         b.broken.push(InputPort::new(node, 0));
         b.broken_nodes.push(node);
@@ -446,7 +467,11 @@ mod tests {
         // from — exercise it through that entry point too, not just the
         // underlying `BreakerState` method.
         let mut ui = BreakerUI {
-            state: Some(BreakerState::start(Vec2::ZERO, PointerButton::Right)),
+            state: Some(BreakerState::start(
+                GraphRef::Main,
+                Vec2::ZERO,
+                PointerButton::Right,
+            )),
         };
         ui.state
             .as_mut()
@@ -461,7 +486,7 @@ mod tests {
     fn add_point_skips_short_segments() {
         // Samples below MIN_POINT_DISTANCE are dropped — a slow drag
         // that crawls 1px/frame must not accumulate one point per frame.
-        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
         b.add_point(Vec2::new(1.0, 0.0));
         b.add_point(Vec2::new(2.0, 0.0));
         b.add_point(Vec2::new(3.0, 0.0));
@@ -477,7 +502,7 @@ mod tests {
         // pushing (3000, 0) has seg = 3000 > remaining = 2000, so t =
         // 2000/3000 and the appended point lands at exactly
         // (2000, 0) — the cap.
-        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
         b.add_point(Vec2::new(3000.0, 0.0));
         assert_eq!(b.points.len(), 2);
         assert!((b.points[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
@@ -494,7 +519,8 @@ mod tests {
         // (50, 0), nowhere near a cubic endpoint (which would be a
         // degenerate "touch at vertex" the strict-crossing test
         // intentionally rejects).
-        let mut b = BreakerState::start(Vec2::new(50.0, -10.0), PointerButton::Right);
+        let mut b =
+            BreakerState::start(GraphRef::Main, Vec2::new(50.0, -10.0), PointerButton::Right);
         b.add_point(Vec2::new(50.0, 10.0));
         assert!(b.intersects_cubic(
             Vec2::new(0.0, 0.0),
@@ -507,7 +533,7 @@ mod tests {
     #[test]
     fn intersects_cubic_misses_parallel_polyline() {
         // Breaker runs parallel to the wire well below it — no crossing.
-        let mut b = BreakerState::start(Vec2::new(0.0, 50.0), PointerButton::Right);
+        let mut b = BreakerState::start(GraphRef::Main, Vec2::new(0.0, 50.0), PointerButton::Right);
         b.add_point(Vec2::new(100.0, 50.0));
         assert!(!b.intersects_cubic(
             Vec2::new(0.0, 0.0),
@@ -520,7 +546,7 @@ mod tests {
     #[test]
     fn intersects_cubic_empty_breaker_is_false() {
         // Single-point breaker (no segments yet) can't intersect.
-        let b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
+        let b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
         assert!(!b.intersects_cubic(
             Vec2::ZERO,
             Vec2::new(1.0, 0.0),

@@ -17,6 +17,7 @@ use palantir::{
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::document::ItemRef;
+use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
@@ -142,7 +143,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -218,7 +219,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
@@ -421,7 +422,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 /// selects (the label would otherwise swallow the body's click). Same
 /// widget + style as the boundary-port rename in
 /// [`crate::gui::node::port_rename`].
-fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
     let ev = InlineRename::new(id, node.name.clone(), &rcx.theme.inline_rename)
@@ -432,7 +433,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.scene, ItemRef::Node(node.id), out);
+        click_intents(shift, rcx.graph, ItemRef::Node(node.id), out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameNode {

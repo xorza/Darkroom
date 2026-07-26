@@ -152,12 +152,6 @@ edit.
   one frame with the later pane silently winning. Making it uniform means
   choosing a cross-pane priority nobody has stated yet.
 
-- [ ] **`classify_canvas_gesture` is computed twice per frame from the same
-  response.** Once in `GraphUI::prepass`, once in `GraphUI::frame`. The module
-  doc says the classification is "resolved *once* per phase" so precedence lives
-  in one place; the two calls can only agree by coincidence of reading the same
-  unchanged state.
-
 - [ ] **One map is owned by two layers.** `MainWindow::image_viewers` is pruned
   by `Editor::sync_image_viewers` (reaching through `self.main_window`) and
   populated by the render closure inside `MainWindow::render`. More broadly
@@ -169,10 +163,8 @@ edit.
   sites.** `node/mod.rs`, `node/port_row/mod.rs`, `node/prepass.rs`,
   `canvas/connection_ui.rs`, `canvas/pin_ui.rs`, `gui/main_window.rs`,
   `core/document/mod.rs`. No `From` impl exists in either direction, so each
-  site restates `{ node_id, kind, port_idx }`. `pin_ui::emit_pin_image_opens` is
-  the degenerate case: `OutputPort::new(port.node_id, port.port_idx)` where
-  `port` is *already* an `OutputPort`. (`pin_ui` has since grown a local
-  `output_port_ref` helper for two of its own sites — worth promoting.)
+  site restates `{ node_id, kind, port_idx }`. (`pin_ui` has since grown a
+  local `output_port_ref` helper for two of its own sites — worth promoting.)
 
 - [ ] **`StatusLog::error` is a public field cleared by hand at seven sites
   while setting goes through a method.** `core/status.rs` exposes
@@ -292,13 +284,6 @@ edit.
   `draw_wires`, `scan_widget_drag_start`, `emit_pin_refresh_clicks`,
   `emit_pin_image_opens` and the rubber-band sweep all consume. The two paths
   can disagree about which pins exist.
-
-- [ ] **`emit_pin_refresh_clicks` panics on an invariant it re-derives
-  needlessly.** It does `scene.nodes.get(&pin.port.node_id).expect("pinned
-  output owner must exist in the scene")` inside a per-frame `find` closure —
-  but `pin.port` came from `pinned_outputs()`, which is *built by iterating*
-  `scene.nodes.values()`. The lookup cannot fail. It exists only because
-  `PinnedOutput` doesn't carry the node (or its `runnable()`).
 
 - [ ] **`connection_ui::port_data_type` clones a `DataType` on every call.**
   `draw` calls it twice per connection per frame and `accepts_wire` twice more

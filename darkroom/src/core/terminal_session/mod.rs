@@ -114,7 +114,7 @@ impl TerminalSession {
 /// drops silently; a script's payload is decoded straight into an [`Intent`],
 /// so one that could never have applied answers back instead.
 fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> Vec<String> {
-    let target = document.active_target().unwrap_or(GraphRef::Main);
+    let target = document.focused_target().unwrap_or(GraphRef::Main);
     intents
         .into_iter()
         .filter_map(|intent| match commit_intent(intent, document, target) {

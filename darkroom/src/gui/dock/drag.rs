@@ -13,7 +13,7 @@ use palantir::Rect;
 use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
 
-/// A tab mid-drag: armed when a movable chip's drag latches, cleared on
+/// A tab mid-drag: armed when a chip's drag latches, cleared on
 /// release or Esc. Holds the tab itself and nothing positional — the
 /// release edge is polled through `tab_chip_wid(tab)`, so an undo that
 /// rearranges the strip mid-drag can't strand the gesture on a slot the

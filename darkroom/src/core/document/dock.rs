@@ -18,12 +18,14 @@
 //! - the vec is canonical pre-order, fully reachable from slot 0;
 //! - exactly one group holds the `Main` graph tab (the *primary* group,
 //!   successor of the old "tabs[0] is Main" rule);
-//! - every graph tab lives in the primary group — the edit pipeline
-//!   renders one canvas (see the docking plan; lifting this is the
-//!   multi-canvas phase);
 //! - no group is empty, no tab appears twice, group ids are unique,
 //!   per-group `active` is in range, `focused` names a live group,
 //!   ratios stay in `RATIO_MIN..=RATIO_MAX`.
+//!
+//! Graph tabs are *not* pinned to the primary group: any pane can show
+//! any graph, and every pane showing one gets its own canvas (see
+//! `gui::canvas::GraphUI`). `Main` still can't be closed, which is what
+//! keeps the primary group — and so the tree — alive.
 
 use common::id_type;
 use serde::{Deserialize, Serialize};
@@ -64,8 +66,6 @@ pub(crate) enum DockValidationError {
     ActiveTabOutOfRange { group_id: TabGroupId },
     #[error("tab {tab:?} appears twice")]
     DuplicateTab { tab: TabRef },
-    #[error("graph tab {tab:?} lives outside the primary group")]
-    GraphTabOutsidePrimary { tab: TabRef },
     #[error("focused group {group_id:?} is missing")]
     MissingFocusedGroup { group_id: TabGroupId },
 }
@@ -395,16 +395,15 @@ impl DockLayout {
     /// An `Into` index addresses the target strip *as the caller saw
     /// it* (pre-move) — a reorder within one group lands exactly where
     /// the drop-zone math over the visible chips said, despite the
-    /// tab's own removal shifting the slots. Graph tabs are pinned to
-    /// the primary group and never move. The destination group (fresh
-    /// one for a split) takes the tab as its active and gains focus.
-    /// Degenerate moves — a split off a group that holds only this tab,
-    /// targeting itself — leave the layout unchanged (the snapshot diff
-    /// drops them).
+    /// tab's own removal shifting the slots. The destination group
+    /// (fresh one for a split) takes the tab as its active and gains
+    /// focus. Degenerate moves — a split off a group that holds only
+    /// this tab, targeting itself — leave the layout unchanged (the
+    /// snapshot diff drops them).
+    ///
+    /// Graph tabs move like any other: splitting one off is how two
+    /// graphs end up side by side.
     fn move_tab(&mut self, tab: TabRef, drop: DockDrop) {
-        if matches!(tab, TabRef::Graph(_)) {
-            return;
-        }
         let Some(source) = self.find_tab(tab) else {
             return;
         };
@@ -647,8 +646,7 @@ impl DockLayout {
 
         // Resolved by hand rather than via `primary()`, which `expect`s —
         // a corrupt layout may hold no Main tab at all.
-        let primary = self
-            .groups()
+        self.groups()
             .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
             .ok_or(DockValidationError::MissingMainTab)?;
         let mut seen = Vec::new();
@@ -671,9 +669,6 @@ impl DockLayout {
                     return Err(DockValidationError::DuplicateTab { tab: *tab });
                 }
                 seen.push(*tab);
-                if matches!(tab, TabRef::Graph(_)) && g.id != primary.id {
-                    return Err(DockValidationError::GraphTabOutsidePrimary { tab: *tab });
-                }
             }
         }
         if self.group(self.focused).is_none() {
@@ -724,6 +719,56 @@ mod tests {
         assert_eq!(l.primary().tabs, [main_tab()]);
         assert_eq!(l.focused, l.primary().id);
         assert_eq!(l.all_tabs().collect::<Vec<_>>(), [main_tab()]);
+    }
+
+    #[test]
+    fn a_graph_tab_splits_off_into_its_own_pane() {
+        use scenarium::GraphId;
+
+        // The multi-canvas rule: a graph tab is an ordinary tab, so
+        // dragging one onto a pane edge puts two graphs on screen at once.
+        let local = TabRef::Graph(GraphRef::Local(GraphId::from_u128(7)));
+        let mut l = DockLayout::default();
+        let primary = l.primary().id;
+        l.insert_tab(primary, local);
+
+        l.move_tab(
+            local,
+            DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        );
+        l.validate().unwrap();
+        let (_, first, second) = root_split(&l);
+        let (DockNode::Group(first), DockNode::Group(second)) = (first, second) else {
+            panic!("both children are groups");
+        };
+        assert_eq!(first.tabs, [main_tab()], "Main keeps the primary pane");
+        assert_eq!(second.tabs, [local], "the local graph took the new pane");
+        assert_eq!(l.focused, second.id);
+        // Both panes show a graph — the state the single-canvas rule made
+        // unrepresentable.
+        assert_eq!(
+            l.groups().map(|g| g.active_tab()).collect::<Vec<_>>(),
+            [main_tab(), local],
+        );
+
+        // Main itself moves too; only *closing* it is refused, which is
+        // what keeps a primary group (and so the tree) alive.
+        l.move_tab(
+            main_tab(),
+            DockDrop::Into {
+                group: second.id,
+                index: 0,
+            },
+        );
+        l.validate().unwrap();
+        assert!(
+            matches!(l.node(DockLayout::ROOT), DockNode::Group(_)),
+            "the emptied pane collapsed"
+        );
+        assert_eq!(l.primary().tabs, [main_tab(), local]);
     }
 
     #[test]
@@ -826,16 +871,6 @@ mod tests {
             },
         );
         assert_eq!(l, before, "lone-tab self-split is a no-op");
-
-        // Graph tabs are pinned to the primary group (phase-1 rule).
-        l.move_tab(
-            main_tab(),
-            DockDrop::Split {
-                group: lone,
-                side: SplitSide::Right,
-            },
-        );
-        assert_eq!(l, before, "graph tabs never move");
 
         // A vanished target group is a no-op, not a panic.
         l.move_tab(
@@ -1132,8 +1167,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_each_corruption() {
-        use scenarium::GraphId;
-
         // Base: a valid two-pane layout — [split, primary(Main, Prefs),
         // viewer-pane(viewer 1)] — corrupted one invariant at a time via
         // direct field access (no public op can produce these states).
@@ -1151,7 +1184,7 @@ mod tests {
         };
 
         type Corrupt = fn(&mut DockLayout);
-        let cases: [(&str, Corrupt, &str); 9] = [
+        let cases: [(&str, Corrupt, &str); 8] = [
             (
                 "duplicate group id",
                 |l| {
@@ -1230,17 +1263,6 @@ mod tests {
                     g.tabs.clear();
                 },
                 "is empty",
-            ),
-            (
-                "graph tab outside the primary group",
-                |l| {
-                    let DockNode::Group(g) = &mut l.nodes[2] else {
-                        panic!("slot 2 is the split-off viewer pane");
-                    };
-                    g.tabs
-                        .push(TabRef::Graph(GraphRef::Local(GraphId::from_u128(7))));
-                },
-                "outside the primary group",
             ),
         ];
         for (name, corrupt, expected) in cases {

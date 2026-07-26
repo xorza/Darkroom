@@ -1,6 +1,7 @@
 use scenarium::NodeId;
 
 use super::*;
+use crate::gui::scene::Scene;
 use crate::gui::scene::internals::scene_node_stub;
 
 #[test]
@@ -13,17 +14,12 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let mut scene = Scene::default();
     let mut ui = Ui::default();
-    scene
-        .nodes
-        .insert(a, scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)));
-    scene
-        .nodes
-        .insert(b, scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)));
-    scene
-        .nodes
-        .insert(c, scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)));
+    let scene = Scene::with_nodes([
+        scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)),
+        scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)),
+        scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)),
+    ]);
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));
     geometry.seed_node_size(b, Size::new(200.0, 100.0));
@@ -32,18 +28,19 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     // (1000+200, 500+100) = (1200, 600) → size (1250, 600). Without
     // the cache, b would count as a point and max.x would be 1000 —
     // its whole 200×100 body left outside the fit.
-    let all = node_bounds(&geometry, &scene, false).unwrap();
+    let all = node_bounds(&geometry, scene.only_graph(), false).unwrap();
     assert_eq!(all.min, Vec2::new(-50.0, 0.0));
     assert_eq!(all.size, Size::new(1250.0, 600.0));
 
     // selected_only filters to exactly the selected node's rect.
-    scene.selected.insert(ItemRef::Node(b));
-    let sel = node_bounds(&geometry, &scene, true).unwrap();
+    let scene = scene.with_selection([ItemRef::Node(b)]);
+    let sel = node_bounds(&geometry, scene.only_graph(), true).unwrap();
     assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty scene → nothing to frame.
-    assert!(node_bounds(&geometry, &Scene::default(), false).is_none());
+    let empty = Scene::with_nodes([]);
+    assert!(node_bounds(&geometry, empty.only_graph(), false).is_none());
 }
 
 #[test]
