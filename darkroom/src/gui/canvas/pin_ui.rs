@@ -31,8 +31,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use aperture::{CurveBrush, Rect, Ui};
 use glam::Vec2;
+use palantir::{CurveBrush, Rect, Ui};
 use scenarium::{NodeId, OutputPort};
 
 use crate::core::document::{ItemRef, PortKind, PortRef};
@@ -460,8 +460,8 @@ mod tests {
     use crate::gui::canvas::breaker::{BreakerState, cubic_point};
     use crate::gui::scene::SceneOutput;
     use crate::gui::scene::internals::scene_node_stub;
-    use aperture::PointerButton;
     use common::Span;
+    use palantir::PointerButton;
     use scenarium::DataType;
 
     /// A `BreakerProbe` wrapping `state`, at the origin — every test here

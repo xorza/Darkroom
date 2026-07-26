@@ -5,8 +5,8 @@
 //! helpers, unlike [`super`], which is grid orchestration and per-cell
 //! rendering.
 
-use aperture::{Color, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, Ui, WidgetId};
 use glam::Vec2;
+use palantir::{Color, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, Ui, WidgetId};
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};

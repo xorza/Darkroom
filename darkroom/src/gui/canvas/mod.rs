@@ -16,10 +16,10 @@ mod selection_ui;
 mod subscription_ui;
 pub(crate) mod wire;
 
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
-use glam::Vec2;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 
@@ -51,7 +51,7 @@ use crate::gui::scene::Scene;
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the
 /// `NodeUI` that renders every graph node, and the manual pan/zoom
-/// transform applied to the inner canvas. `frame` reads aperture's
+/// transform applied to the inner canvas. `frame` reads palantir's
 /// pointer-event stream (drag on the outer canvas → pan, wheel/pinch
 /// → zoom-about-cursor) and writes the result into [`Scene::pan`] /
 /// [`Scene::zoom`], which then drive the inner canvas's
@@ -322,7 +322,7 @@ impl GraphUI {
                         // Inner canvas's pre-transform origin. Shapes
                         // and child node panels recorded inside this
                         // closure share the inner canvas's transform
-                        // (aperture's `Panel::transform` applies to
+                        // (palantir's `Panel::transform` applies to
                         // the body: child subtrees AND direct
                         // shapes), so port `layout_rect`s and bezier
                         // endpoints stay aligned at every zoom.
@@ -438,7 +438,7 @@ enum CanvasGesture {
 }
 
 /// Resolve the bare-canvas gesture for this frame from the outer-canvas
-/// response + modifiers. Drag-starts are checked before clicks (aperture
+/// response + modifiers. Drag-starts are checked before clicks (palantir
 /// reports `clicked`/`secondary_clicked` only on a release that *didn't*
 /// drag, but the explicit ordering keeps the precedence obvious). `None`
 /// when nothing latched — an idle canvas, or a press a node/port captured.

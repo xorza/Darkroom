@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use aperture::ImageFilter;
 use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
+use palantir::ImageFilter;
 
 use crate::core::io::cwd_file;
 use crate::core::theme_pref::ThemeChoice;
@@ -171,9 +171,9 @@ impl Preferences {
 mod tests {
     use std::path::PathBuf;
 
-    use aperture::ImageFilter;
     use common::{SerdeFormat, deserialize, serialize};
     use glam::{IVec2, UVec2};
+    use palantir::ImageFilter;
 
     use crate::core::io::preferences::{
         MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,

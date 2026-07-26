@@ -8,7 +8,7 @@
 //!   activate/close clicks and drives the drag lifecycle off last
 //!   frame's responses, emitting `UiAction`s.
 //! - [`DockUi::render`] in the record — walks the split tree (splits as
-//!   aperture `Splitter`s whose ratio drags surface as
+//!   palantir `Splitter`s whose ratio drags surface as
 //!   `DockOp::SetRatio`, groups as strip-over-content panes) and,
 //!   mid-drag, paints the drop-zone highlight + ghost chip and holds
 //!   the grabbing cursor. The `content` closure renders the active
@@ -24,11 +24,11 @@ mod strip;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
     Splitter, Stroke, Text, Ui, WidgetId,
 };
-use glam::Vec2;
 use scenarium::OutputPort;
 
 use crate::core::document::dock::{
@@ -177,7 +177,7 @@ impl DockUi {
     }
 }
 
-/// Recursive walk of the dock tree: a split renders as an aperture
+/// Recursive walk of the dock tree: a split renders as an palantir
 /// `Splitter` (ratio changes surface as `DockOp::SetRatio`), a
 /// group as its strip + the active tab's view.
 fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(

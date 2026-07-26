@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use aperture::{Rect, Shape, Stroke, Ui};
 use glam::Vec2;
+use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;

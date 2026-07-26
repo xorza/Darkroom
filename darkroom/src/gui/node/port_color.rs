@@ -14,7 +14,7 @@
 //! other swatch); this module owns only the type → slot mapping and the
 //! hover emphasis.
 
-use aperture::Color;
+use palantir::Color;
 use scenarium::DataType;
 
 use crate::core::document::PortKind;

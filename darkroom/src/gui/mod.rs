@@ -21,18 +21,18 @@ pub(crate) mod theme;
 use crate::core::document::GraphRef;
 use crate::core::document::dock::DockOp;
 use crate::gui::app::App;
-use aperture::WindowToken;
+use palantir::WindowToken;
 
 /// darkroom is single-window; this is the token its one OS window is
 /// addressed by — passed to `WinitHost::builder`, handed back to
 /// `App::record`, and used for `HostHandle::request_repaint`.
 pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
 
-/// Aperture's `HostHandle` is generic over the app type (only its
+/// Palantir's `HostHandle` is generic over the app type (only its
 /// `run_on_main` uses it); darkroom has exactly one app, so alias it once
 /// here and let widget signatures stay `HostHandle` instead of repeating
 /// `<App>`.
-pub(crate) type HostHandle = aperture::HostHandle<App>;
+pub(crate) type HostHandle = palantir::HostHandle<App>;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
 /// clicks, a released tab drag) and applied by `App` in the navigation

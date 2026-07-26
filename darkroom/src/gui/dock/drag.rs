@@ -7,8 +7,8 @@
 //! decision-shaped lives here as rect math so it's testable without a
 //! `Ui`.
 
-use aperture::Rect;
 use glam::Vec2;
+use palantir::Rect;
 
 use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};

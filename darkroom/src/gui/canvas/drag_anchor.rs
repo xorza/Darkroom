@@ -11,8 +11,8 @@
 
 use std::collections::BTreeSet;
 
-use aperture::{Ui, WidgetId};
 use glam::Vec2;
+use palantir::{Ui, WidgetId};
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
@@ -112,7 +112,7 @@ impl GroupDrag {
             self.anchor = None;
             return false;
         };
-        // Aperture reports drag deltas in the widget's pre-transform frame,
+        // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
         out.push(self.anchor.as_ref().unwrap().resolve(delta));
         true
@@ -121,7 +121,7 @@ impl GroupDrag {
 
 impl Anchor {
     /// This frame's `Intent::MoveSelection`: every member's latch-time start
-    /// plus Aperture's pre-transform drag `offset`.
+    /// plus Palantir's pre-transform drag `offset`.
     fn resolve(&self, offset: Vec2) -> Intent {
         Intent::MoveSelection {
             grabbed: self.grabbed,

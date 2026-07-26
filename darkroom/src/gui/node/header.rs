@@ -9,11 +9,11 @@
 
 use std::f32::consts::FRAC_PI_4;
 
-use aperture::{
+use glam::Vec2;
+use palantir::{
     Align, Background, Color, Configure, Corners, FontFamily, FontWeight, Panel, Sense, Shape,
     Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Ui, VAlign, WidgetId,
 };
-use glam::Vec2;
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::document::ItemRef;

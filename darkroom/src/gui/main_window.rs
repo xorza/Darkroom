@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
+use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 use scenarium::OutputPort;
 
 use crate::core::document::{Document, TabRef};

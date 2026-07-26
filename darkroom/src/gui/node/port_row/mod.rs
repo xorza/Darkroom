@@ -10,7 +10,7 @@
 
 pub(super) mod glyph;
 
-use aperture::{
+use palantir::{
     Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Sense, Sizing, Spacing, Text,
     TextStyle, Track, Ui, VAlign, WidgetId,
 };
@@ -41,7 +41,7 @@ use crate::gui::theme::StaticValueEditorTheme;
 /// outputs (hug). The outputs sit in a
 /// *hug* column, not the fill, so the grid's content size includes them: a
 /// `fill` column contributes 0 to a hug-sized grid and would collapse,
-/// spilling the outputs out of the node (aperture
+/// spilling the outputs out of the node (palantir
 /// `grid_hug_grid_collapses_fill_tracks`). The fill spacer instead claims any
 /// width beyond the ports, pushing the outputs to the node's right edge.
 const COL_INPUT: u16 = 0;
@@ -73,7 +73,7 @@ pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     };
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
-    let row_height = theme.aperture_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
+    let row_height = theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
     let rows: Vec<Track> = vec![Track::fixed(row_height); n_rows];
     Grid::new()
         .id_salt("ports")

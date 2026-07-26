@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use aperture::Ui;
+use palantir::Ui;
 use scenarium::Binding;
 use scenarium::GraphLink;
 use scenarium::InputPort;

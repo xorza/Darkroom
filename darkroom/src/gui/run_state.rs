@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use aperture::Ui;
+use palantir::Ui;
 use scenarium::CompiledGraph;
 use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;

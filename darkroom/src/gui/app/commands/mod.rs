@@ -1,5 +1,5 @@
 //! [`AppCommand`] handling: file / graph / run / preferences / edit / shell
-//! side effects. Commands are produced by action input, which Aperture exposes
+//! side effects. Commands are produced by action input, which Palantir exposes
 //! only to the first record pass, so handlers can run directly after authoring.
 //!
 //! [`App::handle_command`] is a thin dispatcher — each top-level command group
@@ -8,7 +8,7 @@
 //! (they bridge `Workspace` / `Editor` / `Preferences` / dialogs), which is why
 //! they live on `App` rather than any one owner; the split is by concern.
 
-use aperture::Ui;
+use palantir::Ui;
 
 use crate::gui::app::App;
 

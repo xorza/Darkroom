@@ -2,10 +2,10 @@
 
 This file provides guidance to AI coding agents when working with code in this repository.
 
-`darkroom` is the node-graph editor, built on Aperture (the in-tree
-immediate-mode GUI lib at `../aperture`). Root `../AGENTS.md` holds the
-workspace-wide rules (workflow, Rust style, tooling); Aperture's own
-widget/id conventions live in `../aperture/AGENTS.md`. This file covers only
+`darkroom` is the node-graph editor, built on Palantir (the in-tree
+immediate-mode GUI lib at `../palantir`). Root `../AGENTS.md` holds the
+workspace-wide rules (workflow, Rust style, tooling); Palantir's own
+widget/id conventions live in `../palantir/AGENTS.md`. This file covers only
 what's specific to darkroom.
 
 ## Commands
@@ -15,7 +15,7 @@ cargo run -p darkroom                      # launch the editor (opens last doc)
 cargo test -p darkroom              # tests (mostly pure: zoom math, breaker geometry, serde round-trips)
 cargo test -p darkroom <substr>     # single test by name substring
 cargo clippy -p darkroom --all-targets -- -D warnings
-cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + aperture
+cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + palantir
 ```
 
 The `ayu_graphite_asset_in_sync` test regenerates `assets/ayu-graphite.toml`
@@ -28,11 +28,11 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
   `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
   resolves nodes against a `Library`, and runs the graph through `Worker`.
-- **`aperture`** — the GUI runtime. `App` implements once-only
-  `aperture::App::update` plus replayable `aperture::App::record`; `WinitHost`
+- **`palantir`** — the GUI runtime. `App` implements once-only
+  `palantir::App::update` plus replayable `palantir::App::record`; `WinitHost`
   (in `main.rs`) drives both. All widgets, input, layout, theming, texture
   upload come from here. Pre-1.0, breaks freely — coordinate changes with
-  aperture.
+  palantir.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, and shared utilities.
 - **`lens`** — application node libraries: filesystem watching, random values,
   image operations, and astro processing.
@@ -111,7 +111,7 @@ editor:
 3. **handle close request** (`handle_close_request`) — persist window state and
    raise the unsaved-changes prompt before the replayable phase.
 
-`App::record` may replay, but Aperture exposes action input only to the first
+`App::record` may replay, but Palantir exposes action input only to the first
 real pass. It runs `Editor::frame`, handles its action-derived `AppCommand`
 after authoring has released application borrows, submits dirty caches, and
 renders and resolves the exit dialog. Unconditional work stays in `update`.
@@ -147,10 +147,10 @@ One record pass:
 3. **sync_target** — if the active graph changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
 4. **rebuild #1 (pre-prepass)** — `rebuild_scene(ui, target)`,
-   **unconditional**, because `Scene` re-interns names into aperture's active
+   **unconditional**, because `Scene` re-interns names into palantir's active
    record-pass text arena and refreshes the graph projection. Clears
    `scene_dirty`.
-5. **edit prepass** — read aperture's *current* input state (drag deltas,
+5. **edit prepass** — read palantir's *current* input state (drag deltas,
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
    they apply *before* the record.
@@ -277,7 +277,7 @@ is always a single undo step.
 ### Render projection: `Scene` (`src/gui/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
 (`Scene::rebuild(ui, graph, view, library, run_state)` — see
-`Editor::rebuild_scene`). Names are `InternedStr` handles into aperture's
+`Editor::rebuild_scene`). Names are `InternedStr` handles into palantir's
 active text arena, so the rebuild both refreshes the projection and allows the
 previous arena to recycle. Port names, types, and input-binding snapshots are
 flattened into pooled `Vec`s sliced per node (zero per-node allocation in
@@ -353,7 +353,7 @@ kind looks like) and `menu_bar` (returns `MenuCommand`s). Everything
 pane-shaped lives in `gui/dock/` behind `DockUi`, integrated in exactly
 two calls: `scan` in the navigation phase (tab activate/close clicks +
 the drag-docking lifecycle, off last frame's responses) and `render` in
-the record (the recursive dock-tree walk — splits as aperture `Splitter`s
+the record (the recursive dock-tree walk — splits as palantir `Splitter`s
 whose ratio drags surface as `DockOp::SetRatio`, groups as
 strip-over-content panes — plus the drag's drop-zone highlight, ghost
 chip, and grabbing cursor). `dock/strip.rs` is the chip row (close
@@ -373,7 +373,7 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   nodes and wires intersecting the visible world rect are recorded (off-screen
   ones cost no measure/paint). Safe because every node-subtree widget id
   derives from the `NodeId`; a node whose subtree holds keyboard focus
-  (aperture's `Ui::focus_within`) is exempt so aperture's state sweep can't
+  (palantir's `Ui::focus_within`) is exempt so palantir's state sweep can't
   drop a mid-edit draft. Culled nodes keep their
   world extents via `CanvasGeometry::node_world_rect` (current position + a
   cross-frame size cache beside the port-offset cache), which also feeds the
@@ -458,8 +458,8 @@ layout dimensions (`NODE_MIN_WIDTH`, `PORT_SIZE`, `CANVAS_DOT_SPACING`, …) are
 palette-independent and shared. `Theme::from_preset(ThemePreset)` assembles
 either one through the shared `Theme::build`; `Theme::default()` is
 `Theme::dark()`. `Theme` bundles
-darkroom's own fields *and* the nested `aperture::Theme` (scalar fields first,
-the aperture table last — a TOML serialization ordering requirement), so it's a
+darkroom's own fields *and* the nested `palantir::Theme` (scalar fields first,
+the palantir table last — a TOML serialization ordering requirement), so it's a
 complete bundle serialized as TOML. The checked-in `assets/ayu-graphite.toml`
 is a reference/round-trip fixture kept in sync by a test, **not** a
 parallel source of truth.
@@ -477,5 +477,5 @@ in `core/theme_pref.rs`) written by the Preferences tab's Appearance radios.
 detection, falling back to dark) and the explicit choices straight through.
 `App::new` resolves it once at startup; a later edit re-resolves via
 `PrefsCommand::Changed` → `App::apply_preferences`, which rebuilds the `Theme`
-and pushes `aperture_theme` onto `ui.theme`.
+and pushes `palantir_theme` onto `ui.theme`.
 </content>

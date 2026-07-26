@@ -4,8 +4,8 @@
 //! [`crate::gui::canvas::GraphUI::frame`] resolves one [`CullRegion`] per
 //! frame and threads the same policy through every recorded canvas item.
 
-use aperture::{Rect, Size};
 use glam::Vec2;
+use palantir::{Rect, Size};
 
 use crate::core::document::Viewport;
 use crate::gui::canvas::to_world;

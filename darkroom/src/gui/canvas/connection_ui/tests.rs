@@ -1,4 +1,4 @@
-use aperture::Ui;
+use palantir::Ui;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::{Binding, DataType, GraphDef, InputPort, Node, NodeId, NodeKind};
 

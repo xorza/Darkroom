@@ -7,7 +7,7 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use aperture::Ui;
+use palantir::Ui;
 use scenarium::{Library, OutputPort};
 
 use crate::core::document::dock::DockOp;

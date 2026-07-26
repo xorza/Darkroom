@@ -207,9 +207,9 @@ edit.
   `run_available`/`boundary`/`missing`/`graph`/`sink`. Twenty fields, no rule
   for which side of the line a predicate belongs on.
 
-- [ ] **`core` still imports an Aperture type.** `core/io/preferences.rs` pulls
-  in `aperture::ImageFilter` and serializes it into the persisted preferences
-  schema, against `core/mod.rs`'s stated "No Aperture" boundary — and
+- [ ] **`core` still imports an Palantir type.** `core/io/preferences.rs` pulls
+  in `palantir::ImageFilter` and serializes it into the persisted preferences
+  schema, against `core/mod.rs`'s stated "No Palantir" boundary — and
   `TerminalSession::new` loads that schema on a headless start.
 
 - [ ] **`node_menu.rs` and `graph_menu.rs` are the same controller at two widget
