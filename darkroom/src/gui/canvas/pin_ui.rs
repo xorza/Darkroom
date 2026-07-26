@@ -476,6 +476,7 @@ mod tests {
     use crate::gui::scene::internals::scene_node_stub;
     use common::Span;
     use palantir::PointerButton;
+    use palantir::internals::UiHarness;
     use scenarium::DataType;
 
     /// A `BreakerProbe` wrapping `state`, at the origin — every test here
@@ -530,9 +531,9 @@ mod tests {
         // the resolver's own discipline: one recorded cut per crossed pin,
         // including when the scribble crosses *both* halves of the glyph and
         // the two hit tests both fire.
-        let mut ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let top_left = Vec2::new(300.0, 0.0);
-        let (scene, geometry, port) = pinned_fixture(&mut ui, top_left);
+        let (scene, geometry, port) = pinned_fixture(arena.ui(), top_left);
         let card = box_rect_at(top_left);
         // The bezier is flat along y = 0 from x = 0 to x = 300 (every
         // control point sits on that line); the card spans x 300..580.
@@ -569,7 +570,13 @@ mod tests {
             let mut pin_ui = PinUi::default();
             {
                 let mut probe = probe_for(&mut breaker);
-                pin_ui.resolve(&ui, scene.only_graph(), &geometry, &mut probe, no_cull());
+                pin_ui.resolve(
+                    arena.ui(),
+                    scene.only_graph(),
+                    &geometry,
+                    &mut probe,
+                    no_cull(),
+                );
             }
 
             let g = pin_ui.get(port).expect("an unculled pin resolves");
@@ -593,9 +600,9 @@ mod tests {
         // the scribble is always on-screen. Same fixture and same scribble
         // as the test above, so the cull region is the only thing that
         // differs between "cut" and "not cut".
-        let mut ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let top_left = Vec2::new(300.0, 0.0);
-        let (scene, geometry, port) = pinned_fixture(&mut ui, top_left);
+        let (scene, geometry, port) = pinned_fixture(arena.ui(), top_left);
         let wire = Wire::data(Vec2::ZERO, top_left);
         let mid = cubic_point(wire.p0, wire.p1, wire.p2, wire.p3, 0.53);
         let mut breaker = BreakerState::start(
@@ -616,7 +623,7 @@ mod tests {
         let mut pin_ui = PinUi::default();
         {
             let mut probe = probe_for(&mut breaker);
-            pin_ui.resolve(&ui, scene.only_graph(), &geometry, &mut probe, far);
+            pin_ui.resolve(arena.ui(), scene.only_graph(), &geometry, &mut probe, far);
         }
 
         assert!(

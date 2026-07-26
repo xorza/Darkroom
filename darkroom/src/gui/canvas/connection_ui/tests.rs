@@ -1,4 +1,4 @@
-use palantir::Ui;
+use palantir::internals::UiHarness;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::{Binding, DataType, GraphDef, GraphId, InputPort, Node, NodeId, NodeKind};
 
@@ -46,9 +46,9 @@ fn fixture() -> Fixture {
     let view = GraphView::for_graph(&graph.body);
     let def_id = GraphId::unique();
     let mut scene = Scene::default();
-    let mut ui = Ui::default();
+    let mut arena = UiHarness::arena();
     scene.rebuild(
-        &mut ui,
+        arena.ui(),
         &library,
         &RunState::default(),
         [GraphProjection {
@@ -162,7 +162,7 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
 /// of) — and the more exposed one: no button is held, so it can sit
 /// across an arbitrary number of undos.
 fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
-    let mut ui = Ui::default();
+    let mut arena = UiHarness::arena();
     let mut connections = ConnectionUI {
         state: Some(InFlight {
             start,
@@ -172,7 +172,13 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
         ..Default::default()
     };
     let mut out = Intents::default();
-    connections.apply(&mut ui, scene, &CanvasGeometry::default(), None, &mut out);
+    connections.apply(
+        arena.ui(),
+        scene,
+        &CanvasGeometry::default(),
+        None,
+        &mut out,
+    );
     assert!(out.is_empty(), "an untouched prepass emits nothing");
     connections.state
 }

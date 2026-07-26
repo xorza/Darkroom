@@ -226,6 +226,7 @@ fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::internals::UiHarness;
 
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
     use scenarium::StaticValue;
@@ -302,13 +303,13 @@ mod tests {
 
     #[test]
     fn ingest_formats_text_filters_unwanted_ports_and_replaces_by_authoring_port() {
-        let ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let mut store = PinnedOutputStore::default();
         let node = NodeId::unique();
         let first_port = OutputPort::new(node, 0);
         let document = demanding_document(first_port, true, false);
         store.ingest(
-            &ui,
+            arena.ui(),
             node,
             vec![
                 PinnedOutput {
@@ -326,7 +327,7 @@ mod tests {
         assert!(matches!(&store.entries[&first_port], StoredContent::Text(text) if text == "7"));
 
         store.ingest(
-            &ui,
+            arena.ui(),
             node,
             vec![PinnedOutput {
                 port_idx: 0,
@@ -340,13 +341,13 @@ mod tests {
 
     #[test]
     fn image_source_lives_only_until_full_texture_is_registered() {
-        let ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let mut store = PinnedOutputStore::default();
         let node = NodeId::unique();
         let first_port = OutputPort::new(node, 0);
         let pinned = demanding_document(first_port, true, false);
         store.ingest(
-            &ui,
+            arena.ui(),
             node,
             vec![PinnedOutput {
                 port_idx: 0,
@@ -364,7 +365,7 @@ mod tests {
         assert!(matches!(image.full, FullImage::Deferred(_)));
 
         let viewer = demanding_document(first_port, false, true);
-        store.reconcile(&ui, &viewer);
+        store.reconcile(arena.ui(), &viewer);
         let StoredContent::Image(image) = &store.entries[&first_port] else {
             panic!("viewer demand must retain the image resource");
         };
@@ -372,12 +373,12 @@ mod tests {
             matches!(&image.full, FullImage::Resident(handle) if handle.size() == UVec2::new(512, 256))
         );
 
-        store.reconcile(&ui, &pinned);
+        store.reconcile(arena.ui(), &pinned);
         assert!(
             store.entries.contains_key(&first_port),
             "a graph pin retains the preview after the viewer closes"
         );
-        store.reconcile(&ui, &Document::default());
+        store.reconcile(arena.ui(), &Document::default());
         assert!(
             store.entries.is_empty(),
             "no graph pin or viewer leaves presentation resources alive"
@@ -386,13 +387,13 @@ mod tests {
 
     #[test]
     fn the_reconcile_pass_runs_only_when_it_was_requested() {
-        let ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let mut store = PinnedOutputStore::default();
         let node = NodeId::unique();
         let port = OutputPort::new(node, 0);
         let pinned = demanding_document(port, true, false);
         store.ingest(
-            &ui,
+            arena.ui(),
             node,
             vec![PinnedOutput {
                 port_idx: 0,
@@ -402,21 +403,21 @@ mod tests {
         );
 
         // Spend the request `ingest` raised for its own value.
-        store.reconcile_if_needed(&ui, &pinned);
+        store.reconcile_if_needed(arena.ui(), &pinned);
         assert!(store.entries.contains_key(&port), "the pin retains it");
 
         // Against a document that retains nothing, the entry still survives
         // while nothing has asked for a pass — that's what makes the gate
         // load-bearing rather than decorative.
         let empty = Document::default();
-        store.reconcile_if_needed(&ui, &empty);
+        store.reconcile_if_needed(arena.ui(), &empty);
         assert!(
             store.entries.contains_key(&port),
             "an unrequested pass releases nothing"
         );
 
         store.request_reconcile();
-        store.reconcile_if_needed(&ui, &empty);
+        store.reconcile_if_needed(arena.ui(), &empty);
         assert!(
             store.entries.is_empty(),
             "a requested pass releases what the document stopped retaining"
@@ -425,7 +426,7 @@ mod tests {
 
     #[test]
     fn only_the_visible_viewer_tab_pays_for_a_full_texture() {
-        let ui = Ui::default();
+        let mut arena = UiHarness::arena();
         let mut store = PinnedOutputStore::default();
         let front = NodeId::unique();
         let back = NodeId::unique();
@@ -447,7 +448,7 @@ mod tests {
         });
         for (node, port) in [(front, front_port), (back, back_port)] {
             store.ingest(
-                &ui,
+                arena.ui(),
                 node,
                 vec![PinnedOutput {
                     port_idx: 0,
@@ -465,7 +466,7 @@ mod tests {
             }
         }
 
-        store.reconcile_if_needed(&ui, &document);
+        store.reconcile_if_needed(arena.ui(), &document);
         assert!(
             matches!(full(&store, front_port), FullImage::Resident(_)),
             "the visible tab's texture is uploaded"
@@ -480,7 +481,7 @@ mod tests {
             tab: TabRef::ImageViewer(back_port),
         });
         store.request_reconcile();
-        store.reconcile_if_needed(&ui, &document);
+        store.reconcile_if_needed(arena.ui(), &document);
         assert!(
             matches!(full(&store, back_port), FullImage::Resident(_)),
             "activation uploads the newly-visible tab"

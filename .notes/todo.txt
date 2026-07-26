@@ -35,3 +35,5 @@ expose test framework for palantir
 subgraphs have run buttons and widget collisions
 
 surface config before framecpu? do we skip cpu if invalid surface?
+
+[Pasted text #1 +5 lines] - lets remove all default cctors that are in test or internals gatst

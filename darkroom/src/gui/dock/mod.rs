@@ -375,6 +375,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
 mod tests {
     use super::*;
     use glam::UVec2;
+    use palantir::internals::UiHarness;
 
     /// Drive a real press + past-threshold drag over `tab`'s chip and
     /// report whether `DockUi::scan` arms off it.
@@ -387,8 +388,6 @@ mod tests {
     /// too (`Editor::frame` is called from `App::record`), and is the only
     /// place `response_for` resolves against a live cascade.
     fn drag_arms_on(doc: &Document, tab: TabRef) -> bool {
-        let surface = UVec2::new(600, 200);
-        let mut ui = Ui::for_test_at(surface);
         let theme = Theme::default();
         let viewer_labels = HashMap::new();
         let cx = DockContext {
@@ -397,29 +396,34 @@ mod tests {
             viewer_labels: &viewer_labels,
         };
         let mut dock = DockUi::default();
-        // Two frames to settle layout, then read the chip's arranged rect.
-        for _ in 0..2 {
-            ui.run_at(surface, |ui| {
-                dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
-            });
-        }
-        let origin = ui
-            .response_for(strip::tab_chip_wid(tab))
-            .rect
-            .expect("the chip measured")
-            .center();
+        // Real shaping: a chip's width follows its label, and the press
+        // is aimed at the chip's arranged center.
+        let mut h = UiHarness::with_text(UVec2::new(600, 200));
+        h.prime(2, |ui| {
+            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
+        });
 
-        ui.press_at(origin);
-        // Well past `DRAG_THRESHOLD`, so the capture latches a drag.
-        ui.move_to(origin + Vec2::new(40.0, 0.0));
+        let chip_id = strip::tab_chip_wid(tab);
+        let origin = h.center_of(chip_id);
+        // The regression was the press landing on the rename label rather
+        // than the chip; `hit_at` makes that a named failure instead of a
+        // bare `armed == false`.
+        assert!(
+            h.hit_at(origin).is_some(),
+            "nothing senses input at {origin:?}; collisions: {:?}",
+            h.collisions(),
+        );
 
-        let mut armed = false;
-        ui.run_at(surface, |ui| {
+        h.press_at(origin);
+        // `drag_to` asserts the travel crosses DRAG_THRESHOLD, so the
+        // capture is guaranteed to latch rather than silently not.
+        h.drag_to(origin + Vec2::new(40.0, 0.0));
+
+        h.frame_value(|ui| {
             dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
             dock.scan(ui, doc, &mut Vec::new());
-            armed = dock.tab_drag.is_some();
-        });
-        armed
+            dock.tab_drag.is_some()
+        })
     }
 
     #[test]
