@@ -125,6 +125,137 @@ fn dirties_document_splits_edits_from_navigation() {
     }
 }
 
+/// A true arm here costs a whole extra record pass, and the two steps most
+/// at risk — a node drag and a divider drag — emit one per *gesture frame*,
+/// so a spurious true doubles the editor pipeline for the length of the
+/// drag. The split under test: only a step that changes a widget's measured
+/// size, or introduces a node with no cached port offsets, may return true.
+#[test]
+fn invalidates_cached_geometry_splits_resizes_from_moves() {
+    use crate::core::document::TabRef;
+    use crate::core::document::dock::{DockDrop, DockPath, SplitSide};
+    use scenarium::{GraphId, StaticValue};
+
+    let mut dock_doc = Document::default();
+    let primary = dock_doc.layout.primary().id;
+    dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
+    // Split Preferences into its own pane, then keep the step: it is both a
+    // structural dock op for the table below and what gives `SetRatio` a
+    // real divider to name instead of a refused no-op.
+    let split = build_step(
+        Intent::Dock(DockOp::MoveTab {
+            tab: TabRef::Preferences,
+            to: DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        }),
+        &dock_doc,
+        GraphRef::Main,
+    )
+    .expect("splitting a second tab off the primary group");
+    apply_step(&split, &mut dock_doc, GraphRef::Main);
+    let dock_step = |op: DockOp| {
+        build_step(Intent::Dock(op), &dock_doc, GraphRef::Main).expect("a real dock op")
+    };
+    let node_id = NodeId::unique();
+    let port = InputPort::new(node_id, 0);
+    let cst = |v: f64| Some(Binding::Const(StaticValue::Float(v)));
+
+    // Nothing remeasures: a port center is `node.pos + cached offset`, and
+    // every one of these leaves that offset valid.
+    let moves = [
+        // The node drag. Emits one step per gesture frame, drains
+        // pre-record, and Pass A already arranges at the cursor.
+        UndoStep::Graph(GraphStep::MoveSelection {
+            grabbed: ItemRef::Node(node_id),
+            moves: vec![(ItemRef::Node(node_id), Vec2::ZERO, Vec2::new(5.0, 5.0))],
+        }),
+        UndoStep::Graph(GraphStep::SetViewport {
+            from: Viewport {
+                pan: Vec2::ZERO,
+                zoom: 1.0,
+            },
+            to: Viewport {
+                pan: Vec2::new(10.0, 20.0),
+                zoom: 2.0,
+            },
+        }),
+        UndoStep::Graph(GraphStep::SetSelection {
+            from: BTreeSet::new(),
+            to: BTreeSet::from([ItemRef::Node(node_id)]),
+        }),
+        // The divider drag: `Splitter` lays out at the live pointer ratio,
+        // so Pass A already drew what this step persists.
+        dock_step(DockOp::SetRatio {
+            split: DockPath::ROOT,
+            ratio: 0.7,
+        }),
+        // Panes reshape; no node's content does.
+        split,
+        // Focus back to the other pane — Preferences is the focused one
+        // after the split, so activating it again would be a no-op.
+        dock_step(DockOp::ActivateTab {
+            tab: TabRef::Graph(GraphRef::Main),
+        }),
+        // Value-only: the editor stays present at its `Fixed` size.
+        UndoStep::Graph(GraphStep::SetInput {
+            input: port,
+            from: cst(1.0),
+            to: cst(2.0),
+        }),
+    ];
+    for step in &moves {
+        assert!(
+            !step.is_noop(),
+            "a degenerate step would pin nothing: {step:?}"
+        );
+        assert!(
+            !step.invalidates_cached_geometry(),
+            "a move must not cost a second record pass: {step:?}",
+        );
+    }
+
+    // Each of these changes a measured size, or brings in a node that has
+    // never recorded — so the cached offsets wires anchor to are stale.
+    let resizes = [
+        UndoStep::Graph(GraphStep::RenameNode {
+            node_id,
+            from: "a".into(),
+            to: "a-much-longer-title".into(),
+        }),
+        // Adding the inline const editor resizes the node and shifts every
+        // port row below it.
+        UndoStep::Graph(GraphStep::SetInput {
+            input: port,
+            from: None,
+            to: cst(1.0),
+        }),
+        // ...and removing it is the connection commit, the case Pass B has
+        // always existed for.
+        UndoStep::Graph(GraphStep::SetInput {
+            input: port,
+            from: cst(1.0),
+            to: None,
+        }),
+        UndoStep::Doc(DocStep::RenameGraph {
+            id: GraphId::unique(),
+            from: "s".into(),
+            to: "t".into(),
+        }),
+    ];
+    for step in &resizes {
+        assert!(
+            !step.is_noop(),
+            "a degenerate step would pin nothing: {step:?}"
+        );
+        assert!(
+            step.invalidates_cached_geometry(),
+            "a resize strands the offset cache: {step:?}",
+        );
+    }
+}
+
 #[test]
 fn invalid_viewports_are_dropped_before_mutation() {
     let mut doc = Document::default();
@@ -444,7 +575,7 @@ fn set_node_property_commits_and_reverts() {
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
         }
         assert!(
-            !step.requires_relayout(),
+            !step.invalidates_cached_geometry(),
             "a node-property toggle does not remeasure"
         );
         assert!(
@@ -502,7 +633,10 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
         vec![ItemRef::Node(id), key],
         "a fresh pin's item lands at the top of the paint stack"
     );
-    assert!(!step.requires_relayout(), "a pin toggle does not remeasure");
+    assert!(
+        !step.invalidates_cached_geometry(),
+        "a pin toggle does not remeasure"
+    );
     assert!(step.dirties_document(), "a real graph edit worth saving");
     assert!(
         step.requires_reconcile(),
@@ -770,8 +904,8 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     .expect("first drag off the seeded default is a real change");
     assert_eq!(pin_pos(&doc, port), Some(Vec2::new(30.0, -12.0)));
     assert!(
-        !step.requires_relayout(),
-        "repositioning a decoration (no nodes in the group) does not remeasure"
+        !step.invalidates_cached_geometry(),
+        "repositioning strands no cached offset — only `pos` moved"
     );
     assert!(step.dirties_document(), "a real, persisted edit");
     assert_eq!(
@@ -904,7 +1038,7 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
         !step.dirties_document(),
         "a bare restack shouldn't nag on save"
     );
-    assert!(!step.requires_relayout());
+    assert!(!step.invalidates_cached_geometry());
     assert!(
         step.gesture_key().is_none(),
         "each raise is its own undo entry"

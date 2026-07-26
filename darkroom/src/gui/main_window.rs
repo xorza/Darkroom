@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::mem::take;
 
 use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 use scenarium::OutputPort;
@@ -28,7 +27,7 @@ use crate::gui::status_bar;
 /// [`DockUi`](crate::gui::dock::DockUi)'s; this file only says what
 /// each tab kind looks like (the `content` closure in [`Self::frame`]).
 /// Adding a new pane *kind* is a new arm there.
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
     /// One image-viewer navigation state per rendered viewer tab
@@ -36,7 +35,6 @@ pub(crate) struct MainWindow {
     /// centralized in the pinned-output store.
     pub(crate) image_viewers: HashMap<OutputPort, ImageViewer>,
     dock: DockUi,
-    first_frame: bool,
 }
 
 impl MainWindow {
@@ -150,9 +148,6 @@ impl MainWindow {
                 status_bar::show(ui, ctx);
             });
 
-        if take(&mut self.first_frame) {
-            ui.request_relayout();
-        }
         command
     }
 
@@ -162,16 +157,5 @@ impl MainWindow {
     /// cache so the newly-shown graph's connections render immediately.
     pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
-    }
-}
-
-impl Default for MainWindow {
-    fn default() -> Self {
-        Self {
-            graph_ui: GraphUI::default(),
-            image_viewers: HashMap::new(),
-            dock: DockUi::default(),
-            first_frame: true,
-        }
     }
 }

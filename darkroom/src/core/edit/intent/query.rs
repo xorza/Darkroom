@@ -5,7 +5,6 @@
 
 use scenarium::Binding;
 
-use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::{DocStep, GestureKey, GraphStep, UndoStep};
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -24,43 +23,68 @@ impl UndoStep {
         }
     }
 
-    /// Whether replaying this step changes anything the layout engine
-    /// reads (node positions, sizes, label text length, viewport
-    /// transform). When true, `App::record` calls `ui.request_relayout()`
-    /// after applying the batch so the next pass picks up the change.
-    /// UI-only state with no measure/arrange input (selection, cache
-    /// behavior, model-only bindings) returns false. Exhaustive on
-    /// purpose — a new variant must declare its layout effect.
-    pub(crate) fn requires_relayout(&self) -> bool {
+    /// Whether replaying this step — in either direction, since the same
+    /// predicate serves apply and revert — strands
+    /// [`CanvasGeometry`](crate::gui::canvas::geometry::CanvasGeometry)'s
+    /// cross-frame caches: a widget whose *measured size* changed, or a
+    /// node with no cached port offsets at all. Those caches are what
+    /// wires anchor to, so a true arm costs one `ui.request_relayout()` at
+    /// the end of `Editor::frame` and Pass B rebuilds them against Pass
+    /// A's arranged rects.
+    ///
+    /// A step that only *moves* or reorders is false even though it does
+    /// change what the layout engine reads: a port center resolves as
+    /// `node.pos + cached offset`, and a move touches only `pos`. Getting
+    /// that wrong is expensive rather than incorrect — a node drag emits
+    /// one of these per gesture frame, so a spurious true doubles the
+    /// whole editor pipeline for the length of the drag.
+    ///
+    /// Exhaustive on purpose — a new variant must declare whether it
+    /// strands the cache.
+    pub(crate) fn invalidates_cached_geometry(&self) -> bool {
         match self {
-        // A dock change reshapes panes/strips (and can swap which graph
-        // the scene renders); a port rename changes a label's width so
-        // the node remeasures; adding/removing an interface port resizes
-        // the boundary node and shifts wires — all relayout the canvas.
+        // A dock op reshapes panes, never a node: pane extent is not an
+        // input to node measure, so every cached offset survives. A ratio
+        // nudge is even less than that — `Splitter` lays out at the live
+        // pointer ratio and writes back only the arranged one, so Pass A
+        // already drew what this step is persisting. A dock op that swaps
+        // the active graph is covered by `Editor::sync_target`, which
+        // handles the never-yet-shown graph the cache can't have entries
+        // for.
+        UndoStep::Doc(DocStep::Dock { .. }) => false,
+        // A port rename changes a label's width so the node remeasures;
+        // adding/removing an interface port resizes the boundary node and
+        // shifts every wire hanging off it.
         UndoStep::Doc(
-            DocStep::Dock { .. }
-            | DocStep::RenameBoundaryPort { .. }
+            DocStep::RenameBoundaryPort { .. }
             | DocStep::AddBoundaryPort { .. }
             | DocStep::RemoveBoundaryPort { .. }
-            // Graph rename changes the tab-strip label's width.
+            // Graph rename changes the tab-strip label's width. Nothing on
+            // the canvas moves, but the strip's own chip rects are polled
+            // from last frame's responses by the drag-docking scan; a
+            // rename commit is rare enough to eat the pass rather than
+            // reason about that interaction.
             | DocStep::RenameGraph { .. },
         ) => true,
         UndoStep::Graph(g) => match g {
+            // A fresh node has no cached port offsets, so its wires have
+            // nothing to anchor to until it has recorded once. Removal is
+            // true for its *revert*, which puts that node back.
             GraphStep::AddNode { .. }
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
+            // A title width change remeasures the header, shifting every
+            // port row below it.
             | GraphStep::RenameNode { .. }
             // Forks an identical-interface graph, so the node doesn't
             // resize — but it's a structural edit and rare, so eat one
-            // relayout rather than reason about it staying in lockstep.
+            // pass rather than reason about it staying in lockstep.
             | GraphStep::DetachGraph { .. } => true,
-            // A pin-only drag repositions a decoration drawn past the
-            // node's own rect — no remeasure, same as a viewport pan. A
-            // node move (alone or as part of a mixed group drag) does need
-            // one.
-            GraphStep::MoveSelection { moves, .. } => moves
-                .iter()
-                .any(|(key, ..)| matches!(key, ItemRef::Node(_))),
+            // Nothing remeasures: every member keeps its size and its
+            // cached intra-node offsets, and `CanvasGeometry` recomputes
+            // centers from this frame's `pos`. The drag also drains
+            // pre-record, so Pass A already arranges at the cursor.
+            GraphStep::MoveSelection { .. } => false,
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
