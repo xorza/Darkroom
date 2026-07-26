@@ -68,6 +68,20 @@
     ],
   },
   {
+    "label": "run palantir frame bench fixture (visual)",
+    "command": "RUST_BACKTRACE=1 cargo",
+    "args": [
+      "run",
+      "--release",
+      "--manifest-path",
+      "palantir/Cargo.toml",
+      "--example",
+      "frame_visual",
+      "--features",
+      "internals,winit-host",
+    ],
+  },
+  {
     "label": "run palantir showcase with tracy",
     "command": "RUST_BACKTRACE=1 cargo",
     "args": [
