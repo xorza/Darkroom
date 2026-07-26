@@ -1,5 +1,5 @@
 use aperture::{
-    Color, CurveBrush, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui,
+    Color, CurveBrush, LinearGradient, PointerButton, PointerEvent, PointerWake, Stop, Ui,
 };
 use glam::Vec2;
 use scenarium::DataType;
@@ -204,7 +204,7 @@ impl ConnectionUI {
         // frames coming — without this it only redraws when some other
         // widget's hover change happens to wake a frame). `BUTTONS` delivers
         // the terminating press.
-        ui.subscribe_pointer(PointerSense::MOVE | PointerSense::BUTTONS);
+        ui.watch_pointer(PointerWake::MOVE | PointerWake::BUTTONS);
         let ended = ui.pointer_events().iter().find_map(|ev| match ev {
             PointerEvent::Down {
                 button: button @ (PointerButton::Left | PointerButton::Right),
