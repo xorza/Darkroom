@@ -111,7 +111,14 @@ fn zoom_about_holds_pivot_invariant() {
     let (mut pan, mut zoom) = (Vec2::new(40.0, 20.0), 1.5);
     let pivot = Vec2::new(200.0, 150.0);
     let world_before = (pivot - pan) / zoom;
-    zoom_about(&mut pan, &mut zoom, pivot, 1.3, MIN_ZOOM, MAX_ZOOM);
+    zoom_about(
+        &mut pan,
+        &mut zoom,
+        pivot,
+        1.3,
+        CANVAS_MIN_ZOOM,
+        CANVAS_MAX_ZOOM,
+    );
     let world_after = (pivot - pan) / zoom;
     let drift = (world_after - world_before).length();
     assert!(
@@ -130,7 +137,14 @@ fn zoom_about_with_scroll_factor_preserves_pivot() {
     let world_before = (pivot - pan) / zoom;
     // 2 notches up.
     let factor = scroll_to_zoom_factor(-36.0);
-    zoom_about(&mut pan, &mut zoom, pivot, factor, MIN_ZOOM, MAX_ZOOM);
+    zoom_about(
+        &mut pan,
+        &mut zoom,
+        pivot,
+        factor,
+        CANVAS_MIN_ZOOM,
+        CANVAS_MAX_ZOOM,
+    );
     let world_after = (pivot - pan) / zoom;
     let drift = (world_after - world_before).length();
     assert!(drift < 1e-4, "drift {drift}");
@@ -140,27 +154,41 @@ fn zoom_about_with_scroll_factor_preserves_pivot() {
 
 #[test]
 fn zoom_about_clamps_to_max() {
-    // Trying to zoom past `MAX_ZOOM` saturates without
+    // Trying to zoom past `CANVAS_MAX_ZOOM` saturates without
     // overshooting. Pivot invariance still holds at the clamped
-    // value (effective factor = MAX_ZOOM / zoom_before, not the
+    // value (effective factor = CANVAS_MAX_ZOOM / zoom_before, not the
     // requested factor).
-    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MAX_ZOOM * 0.9);
+    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), CANVAS_MAX_ZOOM * 0.9);
     let pivot = Vec2::new(100.0, 100.0);
-    zoom_about(&mut pan, &mut zoom, pivot, 5.0, MIN_ZOOM, MAX_ZOOM);
+    zoom_about(
+        &mut pan,
+        &mut zoom,
+        pivot,
+        5.0,
+        CANVAS_MIN_ZOOM,
+        CANVAS_MAX_ZOOM,
+    );
     assert!(
-        (zoom - MAX_ZOOM).abs() < 1e-5,
-        "expected saturation at MAX_ZOOM={MAX_ZOOM}, got {zoom}",
+        (zoom - CANVAS_MAX_ZOOM).abs() < 1e-5,
+        "expected saturation at CANVAS_MAX_ZOOM={CANVAS_MAX_ZOOM}, got {zoom}",
     );
 }
 
 #[test]
 fn zoom_about_clamps_to_min() {
-    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MIN_ZOOM * 1.1);
+    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), CANVAS_MIN_ZOOM * 1.1);
     let pivot = Vec2::new(100.0, 100.0);
-    zoom_about(&mut pan, &mut zoom, pivot, 0.01, MIN_ZOOM, MAX_ZOOM);
+    zoom_about(
+        &mut pan,
+        &mut zoom,
+        pivot,
+        0.01,
+        CANVAS_MIN_ZOOM,
+        CANVAS_MAX_ZOOM,
+    );
     assert!(
-        (zoom - MIN_ZOOM).abs() < 1e-5,
-        "expected saturation at MIN_ZOOM={MIN_ZOOM}, got {zoom}",
+        (zoom - CANVAS_MIN_ZOOM).abs() < 1e-5,
+        "expected saturation at CANVAS_MIN_ZOOM={CANVAS_MIN_ZOOM}, got {zoom}",
     );
 }
 
@@ -226,12 +254,12 @@ fn fit_target_degenerate_point_holds_scale_and_centers() {
 
 #[test]
 fn fit_target_clamps_to_min_zoom() {
-    // A bbox far larger than any reachable zoom saturates at MIN_ZOOM
+    // A bbox far larger than any reachable zoom saturates at CANVAS_MIN_ZOOM
     // rather than the (smaller) exact fit; still centered.
     let bounds = Rect::new(0.0, 0.0, 100_000.0, 100_000.0);
     let viewport = Vec2::new(800.0, 600.0);
     let t = fit_target(bounds, viewport);
-    assert!((t.zoom - MIN_ZOOM).abs() < 1e-6, "zoom {}", t.zoom);
+    assert!((t.zoom - CANVAS_MIN_ZOOM).abs() < 1e-6, "zoom {}", t.zoom);
     assert_centered(&t, bounds, viewport);
 }
 
@@ -247,8 +275,8 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
             &mut zoom,
             Vec2::new(50.0, 50.0),
             bad,
-            MIN_ZOOM,
-            MAX_ZOOM,
+            CANVAS_MIN_ZOOM,
+            CANVAS_MAX_ZOOM,
         );
         assert_eq!(pan, pan0, "pan moved on bad factor {bad}");
         assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");

@@ -230,7 +230,6 @@ impl GraphUI {
         out: &mut Intents,
         cmd: &mut Option<AppCommand>,
     ) {
-        let target = graph.target();
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
         // transform below reads the up-to-date viewport directly. The
@@ -238,8 +237,27 @@ impl GraphUI {
         // frame's press sees a `Some`.
         let gesture = self
             .gesture
-            .filter(|g| g.target == target)
+            .filter(|g| g.target == graph.target())
             .map(|g| g.gesture);
+        self.resolve_gestures(ui, ctx, graph, gesture, out, cmd);
+        self.bake_snap_hovers();
+        self.record_canvas(ui, ctx, graph, out);
+    }
+
+    /// The record pass's gesture half: run each controller's record-phase
+    /// `apply`, and settle which [`AppCommand`] (if any) this pane
+    /// contributes. Everything here reads last frame's responses and pushes
+    /// intents; nothing draws.
+    fn resolve_gestures(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        graph: GraphScene<'_>,
+        gesture: Option<CanvasGesture>,
+        out: &mut Intents,
+        cmd: &mut Option<AppCommand>,
+    ) {
+        let target = graph.target();
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
@@ -300,12 +318,16 @@ impl GraphUI {
         if cmd.is_none() {
             *cmd = menu_command.or_else(|| emit_chip_command(ui, graph));
         }
-        // Bake the snap target into `CanvasGeometry.hovered` so node_ui's
-        // port_row picks up the hover color via the same lookup it
-        // uses for ordinary mouse-over. `response.hovered` is
-        // suppressed on every widget except the drag-capture owner
-        // while a drag is live, so without this override the
-        // snapped-but-not-captured target stays at its idle color.
+    }
+
+    /// Bake each in-flight drag's snap target into `CanvasGeometry`'s hover
+    /// flags, so `port_row` picks the hover color up through the same lookup
+    /// it uses for an ordinary mouse-over.
+    ///
+    /// Needed because palantir suppresses `response.hovered` on every widget
+    /// except the drag-capture owner while a drag is live — without the
+    /// override, the snapped-but-not-captured target stays at its idle color.
+    fn bake_snap_hovers(&mut self) {
         if let Some(snap) = self.gestures.connection_ui.snap_port() {
             self.geometry.ports.set_hovered(snap);
         }
@@ -317,7 +339,20 @@ impl GraphUI {
         if let Some(emitter) = self.gestures.subscription_ui.snap_emitter() {
             self.geometry.events.set_hovered(emitter);
         }
+    }
 
+    /// The record pass's drawing half: the outer (pan-capture) canvas, the
+    /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
+    /// the wires, node bodies, pin cards, inspection panels, and in-flight
+    /// gesture previews.
+    fn record_canvas(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        graph: GraphScene<'_>,
+        out: &mut Intents,
+    ) {
+        let target = graph.target();
         let Self {
             background,
             geometry,
@@ -400,6 +435,19 @@ impl GraphUI {
                         // Painted first so it sits beneath the
                         // connections and node bodies.
                         selection_ui.draw(ui, ctx, target);
+                        // One bundle for everything this pane records: the
+                        // node bodies and pin cards below, and the inspection
+                        // panels after them. Built out here rather than inside
+                        // the probe scope so both passes read the same refs.
+                        let rcx = RecordCtx {
+                            theme: ctx.theme,
+                            library: ctx.library,
+                            graph,
+                            selected,
+                            geometry,
+                            inspectors,
+                            run_state: ctx.run_state,
+                        };
                         {
                             let mut probe = breaker_ui.probe(canvas_origin, target);
                             // One emphasis resolution for both wire families:
@@ -440,15 +488,6 @@ impl GraphUI {
                             connection_ui::draw(ui, &mut wires);
                             subscription_ui::draw(ui, &mut wires);
                             pin_ui.draw_wires(ui, &wires);
-                            let rcx = RecordCtx {
-                                theme: ctx.theme,
-                                library: ctx.library,
-                                graph,
-                                selected,
-                                geometry,
-                                inspectors,
-                                run_state: ctx.run_state,
-                            };
                             // Node bodies and pin preview cards paint
                             // interleaved, in `scene.z_order` — one shared
                             // paint stack, so either kind can sit above the
@@ -460,20 +499,23 @@ impl GraphUI {
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        inspectors.draw_panels(
-                            ui,
-                            ctx.theme,
-                            ctx.library,
-                            graph,
-                            geometry,
-                            ctx.run_state,
-                        );
+                        inspectors.draw_panels(ui, rcx);
                         breaker_ui.draw(ui, ctx, target);
                         connection_ui.draw_in_flight(ui, ctx, graph, geometry, canvas_origin);
                         subscription_ui.draw_in_flight(ui, ctx, graph, geometry, canvas_origin);
                     });
             });
     }
+}
+
+/// Whether the modifier reserving an output-port drag for pin creation is
+/// held. The one place that chord is decided: `PinUi` claims an output drag
+/// under it, and `ConnectionUI` drops the output column from its latch
+/// candidates under the same condition. Split across the two files, the
+/// disjointness was kept by hand — the same thing
+/// [`classify_canvas_gesture`] exists to avoid for the bare-canvas gestures.
+pub(super) fn pin_drag_modifier(ui: &mut Ui) -> bool {
+    ui.modifiers().ctrl
 }
 
 /// Which bare-canvas gesture a fresh press/click latches this frame.
@@ -551,7 +593,7 @@ fn classify_canvas_gesture(ui: &mut Ui, target: GraphRef) -> Option<CanvasGestur
 /// pick a path for — and naming `AppCommand` is the canvas's job, since it
 /// owns the command channel. So the translation lives here rather than in
 /// `node` or `pin_ui`. All four are pure reads over last frame's responses,
-/// which is why [`GraphUI::frame`] can skip the whole group once something
+/// which is why [`GraphUI::draw`] can skip the whole group once something
 /// else has claimed the frame.
 fn emit_chip_command(ui: &Ui, graph: GraphScene<'_>) -> Option<AppCommand> {
     if let Some(req) = emit_path_picks(ui, graph) {

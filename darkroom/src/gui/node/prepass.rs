@@ -62,7 +62,7 @@ fn clicked_chip(
 /// node UI surfaces only the domain fact (which node); the canvas translates
 /// it into the run command.
 pub(crate) fn emit_play_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
-    clicked_chip(ui, graph, SceneNode::runnable, play_badge_wid)
+    clicked_chip(ui, graph, |node| graph.runnable(node), play_badge_wid)
 }
 
 /// A click on a node's runtime-cache eviction chip. The canvas translates the

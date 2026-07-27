@@ -219,13 +219,22 @@ fn model_row(
     // read it (the field would snap back and nothing would save). Keying the
     // refresh on the external value sidesteps that race entirely — and gives
     // `status` its no-stat-per-frame revalidation point.
-    let canonical = path.display().to_string();
-    let field = ui.state_mut::<PathField>(id);
-    if field.seen != canonical {
-        field.text.replace_range(.., &canonical);
-        field.seen.replace_range(.., &canonical);
-        field.problem = path_problem(&canonical);
+    //
+    // Scoped so the borrow of `path` ends here: `to_string_lossy` is borrowed
+    // for a UTF-8 path (every path that round-trips through this field), so
+    // the common — unchanged — case compares in place rather than allocating
+    // a fresh `String` each frame only to find nothing moved. The committing
+    // branch below compares against the mirrored `seen` instead.
+    {
+        let canonical = path.to_string_lossy();
+        let field = ui.state_mut::<PathField>(id);
+        if field.seen != canonical {
+            field.text.replace_range(.., &canonical);
+            field.seen.replace_range(.., &canonical);
+            field.problem = path_problem(&canonical);
+        }
     }
+    let field = ui.state_mut::<PathField>(id);
     let problem = field.problem;
     let mut draft = std::mem::take(&mut field.text);
     Panel::vstack()
@@ -272,7 +281,11 @@ fn model_row(
                     }
                     let resp = edit.show(ui);
                     let commit = resp.submitted || resp.lost_focus;
-                    if commit && draft != canonical {
+                    // Against the mirror, not a re-read of `path`: `seen` was
+                    // just synced to it, and comparing there keeps `path`
+                    // unborrowed for the write on the next line.
+                    let field = ui.state_mut::<PathField>(id);
+                    if commit && draft != field.seen {
                         *path = PathBuf::from(draft.clone());
                         command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                     }

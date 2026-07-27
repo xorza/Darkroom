@@ -21,6 +21,22 @@ use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
 
+/// Offer `produce`'s command to the frame's single [`AppCommand`] slot, first
+/// claim winning.
+///
+/// Exactly one command leaves a frame. The menu bar records first, then every
+/// visible pane in dock order, and `GraphUI::draw` guards its own chip scans
+/// the same way — so without this, a later pane's toolbar silently overwrote
+/// the menu-bar pick, or one pane's overwrote its neighbour's. `produce` still
+/// runs when the slot is taken: these surfaces have to record every frame
+/// regardless, and only the command they'd have contributed is dropped.
+fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppCommand>) {
+    let produced = produce();
+    if slot.is_none() {
+        *slot = produced;
+    }
+}
+
 /// Top of darkroom's UI tree: the chrome (menu bar, status bar) around
 /// the dock, plus the per-view state the dock's panes render into. The
 /// pane *machinery* — strips, splits, drag-docking — is
@@ -81,11 +97,15 @@ impl MainWindow {
             graph_ui,
             image_viewers,
             dock,
-            ..
         } = self;
         // One recursive node search + one `String` per viewer tab for the
         // whole frame. Both readers — the strip chip and the pane header —
-        // take their label from here.
+        // take their label from here, rather than each re-running the search.
+        //
+        // Rebuilt every frame: a label depends on the producing node's name,
+        // and nothing signals a rename cheaply enough to cache against. The
+        // cost is proportional to *open viewer tabs*, which is normally zero,
+        // so it stays off the common path on its own.
         let viewer_labels: HashMap<OutputPort, String> = doc
             .viewer_outputs()
             .map(|port| (port, image_viewer::port_label(doc, port)))
@@ -125,17 +145,15 @@ impl MainWindow {
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
                                 graph_ui.draw(ui, ctx, graph, out, &mut command);
-                                if let Some(c) =
+                                claim(&mut command, || {
                                     graph_toolbar::show(ui, ctx, graph, &graph_ui.geometry, out)
-                                {
-                                    command = Some(c);
-                                }
+                                });
                             });
                     }
                     TabRef::Preferences => {
-                        if let Some(c) = preferences_view::show(ui, ctx.theme, prefs) {
-                            command = Some(c);
-                        }
+                        claim(&mut command, || {
+                            preferences_view::show(ui, ctx.theme, prefs)
+                        });
                     }
                     TabRef::ImageViewer(port) => {
                         let title = viewer_labels
@@ -148,9 +166,11 @@ impl MainWindow {
                             .or_insert_with(|| ImageViewer::new(port));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, ctx.theme, &mut prefs.viewer, title, source) {
-                            command = Some(AppCommand::Prefs(PrefsCommand::Changed));
-                        }
+                        claim(&mut command, || {
+                            viewer
+                                .show(ui, ctx.theme, &mut prefs.viewer, title, source)
+                                .then_some(AppCommand::Prefs(PrefsCommand::Changed))
+                        });
                     }
                 });
                 // Bottom chrome: the cache-memory readout, below the panes.

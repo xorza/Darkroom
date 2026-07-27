@@ -46,9 +46,11 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     );
 
     node.missing = false;
-    node.run_available = false;
+    let definition_pane = Scene::with_nodes([node]).without_run_target();
+    let pane = definition_pane.only_graph();
+    let node = pane.nodes().next().expect("the stub is projected");
     assert!(
-        !node.runnable(),
+        !pane.runnable(node),
         "a local definition pane runs nothing directly"
     );
     assert!(
@@ -67,23 +69,39 @@ fn a_graph_instance_runs_like_any_other_node_in_the_entry_graph() {
     let mut node = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
     node.graph = Some(GraphLink::Local(GraphId::unique()));
     assert!(
-        node.runnable(),
-        "an instance in the entry graph is runnable"
+        node.executable_kind(),
+        "an instance covers compiled work like a func does"
     );
 
-    node.run_available = false;
-    assert!(
-        !node.runnable(),
-        "the pane, not the node kind, is what withholds a run inside a definition"
-    );
-
-    node.run_available = true;
     node.boundary = true;
-    assert!(!node.runnable(), "a boundary node emits no compiled work");
+    assert!(
+        !node.executable_kind(),
+        "a boundary node emits no compiled work"
+    );
 
     node.boundary = false;
     node.missing = true;
-    assert!(!node.runnable(), "an unresolved stub resolves to nothing");
+    assert!(
+        !node.executable_kind(),
+        "an unresolved stub resolves to nothing"
+    );
+
+    // The pane is the other half: an executable node still isn't runnable
+    // inside a definition, which is no particular instance of itself.
+    let mut runnable = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
+    runnable.graph = Some(GraphLink::Local(GraphId::unique()));
+    let entry = Scene::with_nodes([runnable]);
+    let entry_pane = entry.only_graph();
+    assert!(entry_pane.runnable(entry_pane.nodes().next().unwrap()));
+
+    let mut interior = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
+    interior.graph = Some(GraphLink::Local(GraphId::unique()));
+    let definition = Scene::with_nodes([interior]).without_run_target();
+    let definition_pane = definition.only_graph();
+    assert!(
+        !definition_pane.runnable(definition_pane.nodes().next().unwrap()),
+        "the pane, not the node kind, is what withholds a run inside a definition"
+    );
 
     // An output-less composite reads as a sink, and disabling one disables
     // its whole interior — so the toggle belongs to it too.
@@ -194,11 +212,11 @@ fn boundary_nodes_mirror_graph_interface() {
         "boundary nodes are flagged so const affordances are suppressed"
     );
     assert!(
-        !input_node.runnable() && !output_node.runnable(),
+        !graph.runnable(input_node) && !graph.runnable(output_node),
         "boundary nodes offer no run affordance — they emit no compiled work"
     );
     assert!(
-        graph.nodes().all(|n| !n.run_available),
+        !graph.run_available(),
         "a local definition pane has no exact root execution identity"
     );
 
@@ -321,8 +339,8 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     );
 
     // Run availability follows the target, not the pane order.
-    assert!(main.nodes().all(|n| n.run_available));
-    assert!(nested.nodes().all(|n| !n.run_available));
+    assert!(main.run_available());
+    assert!(!nested.run_available());
 
     // A second rebuild with only the root drops the closed pane wholesale.
     rebuild_entry(&mut scene, arena.ui(), &library, &root, &root_view);
@@ -396,11 +414,11 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
     // Run seeding follows resolution: the resolved func can be run to,
     // the stubs (and any graph instance) can't.
     assert!(
-        known_node.disabled && known_node.runnable(),
+        known_node.disabled && projected.runnable(known_node),
         "a resolved disabled func can be targeted by a one-run override"
     );
     assert!(
-        !ghost_func_node.runnable() && !ghost_graph_node.runnable(),
+        !projected.runnable(ghost_func_node) && !projected.runnable(ghost_graph_node),
         "stubs offer no run affordance — they resolve to nothing"
     );
 
@@ -422,13 +440,9 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
             view: &view,
         }],
     );
+    let definition_pane = scene.graph(GraphRef::Local(def_id)).unwrap();
     assert!(
-        !scene
-            .graph(GraphRef::Local(def_id))
-            .unwrap()
-            .node(known_id)
-            .unwrap()
-            .runnable(),
+        !definition_pane.runnable(definition_pane.node(known_id).unwrap()),
         "a local-definition projection hides the run affordance from resolved functions"
     );
 }

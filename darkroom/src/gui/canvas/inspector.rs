@@ -10,7 +10,7 @@
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
 //! [`Inspectors::draw_panels`] records ordinary `Panel`s as direct
 //! children of the inner (transformed) canvas in
-//! [`crate::gui::canvas::GraphUI::frame`], positioned at the node's world
+//! [`crate::gui::canvas::GraphUI::draw`], positioned at the node's world
 //! coords — so they pan and scale with the node for free.
 //!
 //! Each node cycles independently `Closed → Open → Pinned → Closed` on
@@ -20,7 +20,7 @@
 //! group) so pinned panels survive tab switches — panels only render for
 //! nodes present in the current `Scene`, so off-tab ones disappear.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use glam::Vec2;
 use palantir::{
@@ -32,12 +32,11 @@ use scenarium::Library;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 
-use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
-use crate::gui::node::header::fmt_elapsed;
-use crate::gui::node::{exec_color, node_widget_id};
-use crate::gui::run_state::{ExecStatus, RunState};
-use crate::gui::scene::{GraphScene, InputBindingView, Scene, SceneNode};
+use crate::gui::format::fmt_elapsed;
+use crate::gui::node::{RecordCtx, exec_color, node_widget_id};
+use crate::gui::run_state::ExecStatus;
+use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
@@ -53,19 +52,14 @@ pub(crate) enum InspectMode {
 
 /// Open inspection panels, keyed by node. Survives tab switches; panels
 /// only paint for nodes in the current scene.
+///
+/// A `BTreeMap`, not a hash map: [`Self::draw_panels`] records straight off
+/// this iteration order, so with two panels overlapping, a hashed order would
+/// let the one on top change between frames. Node ids are `Ord`, so ordering
+/// costs nothing else here — the map is tiny and read once per frame.
 #[derive(Default, Debug)]
 pub(crate) struct Inspectors {
-    modes: HashMap<NodeId, InspectMode>,
-}
-
-/// Cross-cutting refs every inspector panel reads, bundled so `draw_one`
-/// takes a context rather than a fistful of loose arguments.
-#[derive(Debug)]
-struct PanelDraw<'a> {
-    theme: &'a Theme,
-    library: &'a Library,
-    graph: GraphScene<'a>,
-    run_state: &'a RunState,
+    modes: BTreeMap<NodeId, InspectMode>,
 }
 
 /// Fixed panel width in canvas (pre-transform) units.
@@ -122,22 +116,11 @@ impl Inspectors {
     /// Record a panel for every open inspector, positioned just right of
     /// its node in canvas-world coords. Call inside the inner-canvas
     /// closure, after the node bodies, so panels paint on top and win
-    /// hit-tests over the nodes beneath.
-    pub(super) fn draw_panels(
-        &self,
-        ui: &mut Ui,
-        theme: &Theme,
-        library: &Library,
-        graph: GraphScene<'_>,
-        geometry: &CanvasGeometry,
-        run_state: &RunState,
-    ) {
-        let ctx = PanelDraw {
-            theme,
-            library,
-            graph,
-            run_state,
-        };
+    /// hit-tests over the nodes beneath. Walks `modes` in node-id order, so
+    /// two overlapping panels keep a stable front-to-back relationship
+    /// instead of trading places between frames.
+    pub(super) fn draw_panels(&self, ui: &mut Ui, rcx: RecordCtx<'_>) {
+        let (theme, graph, geometry) = (rcx.theme, rcx.graph, rcx.geometry);
         for (&id, &mode) in &self.modes {
             let Some(node) = graph.node(id) else {
                 continue;
@@ -158,22 +141,22 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            self.draw_one(ui, &ctx, node, mode, pos);
+            self.draw_one(ui, rcx, node, mode, pos);
         }
     }
 
     fn draw_one(
         &self,
         ui: &mut Ui,
-        ctx: &PanelDraw,
+        rcx: RecordCtx<'_>,
         node: &SceneNode,
         mode: InspectMode,
         pos: Vec2,
     ) {
-        let theme = ctx.theme;
-        let graph = ctx.graph;
-        let logs = ctx.run_state.logs(node.id);
-        let errors = ctx.run_state.errors(node.id);
+        let theme = rcx.theme;
+        let graph = rcx.graph;
+        let logs = rcx.run_state.logs(node.id);
+        let errors = rcx.run_state.errors(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -262,7 +245,7 @@ impl Inspectors {
                         port_row(
                             ui,
                             theme,
-                            ctx.library,
+                            rcx.library,
                             &input.name,
                             &input.ty,
                             Some(val.as_str()),
@@ -274,7 +257,7 @@ impl Inspectors {
                 if !outputs.is_empty() {
                     section(ui, theme, "Outputs");
                     for output in outputs {
-                        port_row(ui, theme, ctx.library, &output.name, &output.ty, None);
+                        port_row(ui, theme, rcx.library, &output.name, &output.ty, None);
                     }
                 }
 

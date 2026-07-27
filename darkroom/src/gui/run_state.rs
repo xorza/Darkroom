@@ -264,6 +264,14 @@ impl RunState {
                 });
             }
         }
+        self.drop_empty_nodes();
+    }
+
+    /// Drop every node entry the last update left with nothing to show. The
+    /// one definition of "empty" — a node keeps its slot while it carries a
+    /// status, a log line, or retained RAM — so the two callers can't disagree
+    /// about what survives a fold.
+    fn drop_empty_nodes(&mut self) {
         self.nodes
             .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
     }
@@ -276,9 +284,10 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         self.pinned_outputs.entries.clear();
-        self.nodes.retain(|_, node| {
-            node.status != ExecStatus::None || !node.logs.is_empty() || node.ram.total() > 0
-        });
+        // Every node's RAM was just zeroed, so what survives here is exactly
+        // the nodes still carrying a status or a log — the run results the
+        // eviction deliberately leaves standing.
+        self.drop_empty_nodes();
     }
 
     /// Fold one flattened stat's `status` onto the node itself and every

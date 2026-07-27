@@ -178,7 +178,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, tips: bool, o
         let opts = CellOpts {
             rename: (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input),
             tips,
-            pinning: node.run_available,
+            pinning: rcx.graph.run_available(),
         };
         output_cell(ui, rcx, port, output, opts, out);
     }

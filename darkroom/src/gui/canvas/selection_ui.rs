@@ -28,13 +28,19 @@ pub(super) struct SelectionUI {
     /// `scene.selected` mid-drag — no dependency on the document staying
     /// untouched, and the additive base is fixed at latch.
     base: BTreeSet<ItemRef>,
-    /// The swept set while a band is active, with the pane it belongs to,
-    /// for that pane's node/pin draw to highlight live — sorted, like the
-    /// committed spans it stands in for. Owned here rather than written
-    /// into the projection so that stays a read-only mirror of
-    /// `Document`. `None` when no band is in flight (draw falls back to
-    /// the committed selection).
-    preview: Option<(GraphRef, Vec<ItemRef>)>,
+    /// The swept set while a band is active — sorted and deduped, like the
+    /// committed spans it stands in for, so the draw's membership test stays
+    /// a binary search. Owned here rather than written into the projection so
+    /// that stays a read-only mirror of `Document`.
+    ///
+    /// Refilled from scratch every frame of the drag and kept only to reuse
+    /// its allocation; [`Self::preview`] is what says whether its contents
+    /// mean anything.
+    swept: Vec<ItemRef>,
+    /// The pane a live band belongs to, and thus whose draw reads
+    /// [`Self::swept`]. `None` when no band is in flight — draw falls back to
+    /// the committed selection.
+    preview: Option<GraphRef>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -65,8 +71,7 @@ impl SelectionUI {
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
     pub(super) fn preview(&self, graph: GraphRef) -> Option<&[ItemRef]> {
-        let (owner, swept) = self.preview.as_ref()?;
-        (*owner == graph).then_some(swept.as_slice())
+        (self.preview? == graph).then_some(self.swept.as_slice())
     }
 
     /// Drive the gesture from the outer-canvas response: latch on an
@@ -128,7 +133,14 @@ impl SelectionUI {
             band.current = to_world(p, &graph.viewport());
         }
         let rect = band.rect();
-        let mut selected: BTreeSet<ItemRef> = self.base.clone();
+        // Swept straight into the reused preview buffer rather than through a
+        // fresh `BTreeSet` per frame: this runs every frame the band is held,
+        // and the readers want a sorted *slice* anyway. Sorting once at the
+        // end beats a tree insert per hit, and the buffer keeps its
+        // allocation across frames.
+        let swept = &mut self.swept;
+        swept.clear();
+        swept.extend(self.base.iter().copied());
         for n in graph.nodes() {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
@@ -137,33 +149,36 @@ impl SelectionUI {
                 continue;
             };
             if rect.intersects(body) {
-                selected.insert(ItemRef::Node(n.id));
+                swept.push(ItemRef::Node(n.id));
             }
         }
         for pin in graph.pinned_outputs() {
             if rect.intersects(pin_ui::pin_preview_rect(pin.pos)) {
-                selected.insert(ItemRef::Pin(pin.port));
+                swept.push(ItemRef::Pin(pin.port));
             }
         }
-        // `BTreeSet` iterates sorted, which is what the slice readers
-        // (`RecordCtx::is_selected`) binary-search.
-        let swept: Vec<ItemRef> = selected.iter().copied().collect();
-        // Still dragging → stash the updated corner + the swept preview
-        // (node draw reads it via `preview()` for live highlight) and
-        // wait. A `None` delta is the release edge that commits.
+        // Sorted + deduped, which is the invariant the slice readers
+        // (`RecordCtx::is_selected`) binary-search against — and what makes
+        // the extend-then-sort equivalent to the set it replaced, since a
+        // node already in `base` can also be swept.
+        swept.sort_unstable();
+        swept.dedup();
+        // Still dragging → stash the updated corner and leave the preview in
+        // place (node draw reads it via `preview()` for live highlight).
+        // A `None` delta is the release edge that commits.
         if resp.left.drag.delta().is_some() {
             self.band = Some(band);
-            self.preview = Some((target, swept));
+            self.preview = Some(target);
             return;
         }
-        // Keep the swept set as the preview for *this* (release) frame's
-        // draw so it paints the final selection; the `SetSelection` drains
+        // Only the committing frame pays for the owned set the intent
+        // carries. The preview stays up for *this* (release) frame's draw so
+        // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        out.for_graph(target, |out| {
-            out.push(Intent::SetSelection { to: selected })
-        });
-        self.preview = Some((target, swept));
+        let to: BTreeSet<ItemRef> = swept.iter().copied().collect();
+        out.for_graph(target, |out| out.push(Intent::SetSelection { to }));
+        self.preview = Some(target);
         self.band = None;
     }
 

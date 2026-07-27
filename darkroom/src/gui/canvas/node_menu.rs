@@ -90,7 +90,7 @@ impl NodeMenuUi {
                 let run_target = self
                     .target
                     .and_then(|id| graph.node(id))
-                    .filter(|n| n.runnable())
+                    .filter(|n| graph.runnable(n))
                     .map(|n| n.id);
                 if let Some(node_id) = run_target {
                     if MenuItem::new("Run to this node")

@@ -34,40 +34,46 @@ use scenarium::NodeId;
 use scenarium::OutputPort;
 use std::collections::BTreeSet;
 
-/// Read-only context the node-draw chain threads top to bottom: the
-/// theme, the graph pane being rendered, and last frame's port geometry.
-/// `Copy` (all shared refs), so it's passed by value — copying it while
-/// a borrow of the scene's node pool is live is fine, which keeps
-/// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
-/// `actions`) and the breaker `probe` stay separate params.
-#[derive(Clone, Copy)]
+/// Read-only context threaded top to bottom through everything one graph
+/// pane records: the theme, the pane being rendered, last frame's port
+/// geometry, and the run projections. `Copy` (all shared refs), so it's
+/// passed by value — copying it while a borrow of the scene's node pool is
+/// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
+/// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
+///
+/// `pub(crate)` fields: the node body's own subtree is the main reader, but
+/// the canvas-level draws that sit in the same pass and want the same refs —
+/// the pin cards ([`crate::gui::canvas::pin_ui`]) and the inspection panels
+/// ([`crate::gui::canvas::inspector`]) — take it too, rather than each
+/// growing its own near-identical bundle.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct RecordCtx<'a> {
-    pub(super) theme: &'a Theme,
+    pub(crate) theme: &'a Theme,
     /// The runtime library, for resolving a port's registered type metadata
     /// (display name, enum variants) — `DataType` carries only the id.
-    pub(super) library: &'a Library,
+    pub(crate) library: &'a Library,
     /// The one graph this record pass is drawing. Every other pane on
     /// screen gets its own `RecordCtx`, so nothing here can reach across.
-    pub(super) graph: GraphScene<'a>,
+    pub(crate) graph: GraphScene<'a>,
     /// Effective selection to paint, sorted: the pane's committed set
     /// (`GraphScene::selected`) or, mid-rubber-band, the live swept preview
     /// owned by `SelectionUI`. Kept off `Scene` so the projection stays a
     /// read-only mirror — the gesture no longer scribbles its preview into
     /// the committed field.
-    pub(super) selected: &'a [ItemRef],
-    pub(super) geometry: &'a CanvasGeometry,
+    pub(crate) selected: &'a [ItemRef],
+    pub(crate) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
-    pub(super) inspectors: &'a Inspectors,
+    pub(crate) inspectors: &'a Inspectors,
     /// Live run results — the pin previews drawn interleaved with the
     /// node bodies read their pinned values from here.
-    pub(super) run_state: &'a RunState,
+    pub(crate) run_state: &'a RunState,
 }
 
 impl RecordCtx<'_> {
     /// Whether `key` paints selected this pass — a binary search, since
     /// both the committed span and the rubber-band preview are sorted.
-    pub(super) fn is_selected(&self, key: ItemRef) -> bool {
+    pub(crate) fn is_selected(&self, key: ItemRef) -> bool {
         selection_holds(self.selected, key)
     }
 }
