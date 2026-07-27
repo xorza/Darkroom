@@ -146,12 +146,13 @@ scope to forget and no default target to absorb the mistake. Each site
 names its pane from what it already holds: `SceneNode::owner` in a node
 body, `GraphScene::target()` in a per-pane draw, the latched `GraphRef` in
 a gesture that outlives its frame; a whole-scene scan names each hit's
-owner as it goes. The two document-global intents (`Intent::Dock`,
-`Intent::RenameGraph`) go through `push_global` instead —
-`Intent::is_global` is exhaustive, so a new variant has to classify
-itself. `commit_batch` records a *run* of same-target intents as one undo
-entry and flushes on a target change — an undo entry never spans two
-graphs.
+owner as it goes. A mutation that owns no graph isn't an `Intent` at all
+— it's a `DocIntent` (`Dock`, `RenameGraph`), queued through
+`push_global`, so the queue is `Queued::Scoped { target, intent } |
+Queued::Global(DocIntent)` and neither kind can pass for the other.
+`commit_batch` records a *run* of same-target intents as one undo entry
+and flushes on a target change — an undo entry never spans two graphs —
+while a `DocIntent` shares an entry with nothing at all.
 
 One record pass:
 
@@ -159,7 +160,7 @@ One record pass:
 2. **navigate** — apply keyboard undo/redo (which can replay a dock-layout
    change), then surface tab activate/close + graph-open/new clicks off
    last frame's responses as `UiAction`s. Open mutates the layout directly;
-   activate/close queue undoable `Intent::Dock` ops. After this the visible
+   activate/close queue undoable `DocIntent::Dock` ops. After this the visible
    set of graphs is fixed for the rest of the frame.
 3. **sync_targets** — if the visible set changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
@@ -210,7 +211,7 @@ Everything else is editor view-state, split per graph:
   "Split right/down", capped at 4 nested splits).
   Splits are addressed by `DockPath` (turns from the root packed into one
   byte). Also persisted; every layout mutation is an undoable
-  `Intent::Dock`.
+  `DocIntent::Dock`.
 - **`EditScope` / `EditScopeRef`** — graph+view borrowed *together* for a
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
@@ -222,37 +223,44 @@ Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
 ### Intent / undo layer (`src/core/edit/intent/`, `src/core/edit/action_stack/`)
-- Every mutation is scoped to a `GraphRef` target. `Intent` = forward-only
-  "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
-  snapshot and folds both halves into one self-contained `UndoStep`;
-  `apply_step`/`revert_step` write the "to"/"from" halves against `target`.
-  `Intent::Dock` is graph-agnostic and special-cased ahead of the scope
-  lookup: `build_step` snapshots the whole `DockLayout` before/after the op
-  into one `DocStep::Dock { from, to }` (the tree is tiny), so every layout
-  mutation — activate, close, move/split, divider resize — is uniformly
-  reversible by assignment, and refused/degenerate ops fall out as `from ==
-  to` no-ops. Adding a variant touches ~6 spots — the doc comment lists them.
-- Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveSelection`,
+- **Two intent types, split by scope.** An `Intent` edits one graph and
+  always travels with a `GraphRef`: `build_step(intent, &doc, target)` reads
+  the pre-mutation snapshot and folds both halves into one self-contained
+  `UndoStep`; `commit_intent` builds → filters no-ops → applies. A
+  `DocIntent` edits the document as a whole and names no graph at all:
+  `build_doc_step(intent, &doc)` / `commit_doc_intent` take no target,
+  because there is none to take. Adding a variant touches ~6 spots — the doc
+  comment on `Intent` lists them.
+- Variants (`Intent`): `AddNode`, `AddLocalGraph`, `AddLocalGraphInstance`,
+  `DuplicateNodes`, `RemoveNode`, `MoveSelection`,
   `RenameNode`, `SetInput`, `SetSelection`, `Raise` (either kind of
   paint-stack item — node body or pin preview), `SetNodeProperty`
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
   `DetachGraph`, `SetViewport`, `RenameBoundaryPort`, `AddBoundaryPort`,
-  `RemoveBoundaryPort`, `RenameGraph`,
-  plus document-global `Dock(DockOp)` (`ActivateTab` / `CloseTab` /
+  `RemoveBoundaryPort`. The interface trio lowers to `DocStep`s but stays
+  scoped — each reads its `GraphId` off the target.
+- Variants (`DocIntent`): `Dock(DockOp)` (`ActivateTab` / `CloseTab` /
   `MoveTab` / `SetRatio` — activations coalesce as a switch burst, one
-  divider's drag coalesces per `DockPath`).
+  divider's drag coalesces per `DockPath`) and `RenameGraph`. A dock op is
+  recorded by snapshotting the whole `DockLayout` before/after (the tree is
+  tiny) into one `DocStep::Dock { from, to }`, so every layout mutation is
+  uniformly reversible by assignment and refused/degenerate ops fall out as
+  `from == to` no-ops. `DocIntent` has no serde derive: scripts drive graph
+  edits only, so nothing can decode one from a payload.
 - `DuplicateNodes` is assembled from the current selection by
   `intent::build_duplicate_intent` (free fn next to `build_step`, not a
   `Document` method — `Document` is the persisted model, intent
   construction lives in `edit/`).
 - `ActionStack` packs history into two flat byte buffers (bitcode), not a
-  `Vec<Vec<UndoStep>>`. Each batch records its `target` so undo/redo re-resolve
-  the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
+  `Vec<Vec<UndoStep>>`. Each batch records its `BatchScope` —
+  `Graph(target)` so undo/redo re-resolve the right graph+view, or
+  `Document` for an entry built from a `DocIntent`, which resolves nothing.
+  Consecutive same-`GestureKey` *and* same-scope steps
   coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
   UI layer to `Editor`: `ActivateTab`/`CloseTab` (group-keyed) become
-  undoable `Intent::Dock` ops. `OpenGraph`/`NewGraph`/`OpenImageViewer`
+  undoable `DocIntent::Dock` ops. `OpenGraph`/`NewGraph`/`OpenImageViewer`
   add the tab via `DockLayout::find_or_insert` (graph tabs into the primary
   group, others into the focused one) — that part isn't undoable — but
   focus the tab through the same recorded activation, so undo faithfully

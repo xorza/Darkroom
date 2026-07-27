@@ -330,7 +330,9 @@ impl GraphStep {
 }
 
 impl DocStep {
-    fn is_noop(&self) -> bool {
+    /// `pub(super)` for `commit_doc_intent`, which filters a step it never
+    /// wraps in an [`UndoStep`] until it survives.
+    pub(super) fn is_noop(&self) -> bool {
         match self {
             // Covers every degenerate dock op in one comparison: same-tab
             // activation, a refused close/move, an unchanged ratio.

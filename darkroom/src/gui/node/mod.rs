@@ -501,9 +501,16 @@ mod tests {
     }
 
     fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
+        use crate::core::edit::intent::sink::Queued;
+
         let mut out = Intents::default();
         click_intents(shift, scene.only_graph(), id, &mut out);
-        out.drain().map(|(_, intent)| intent).collect()
+        out.drain()
+            .map(|queued| match queued {
+                Queued::Scoped { intent, .. } => intent,
+                Queued::Global(intent) => panic!("a node click raises nothing global: {intent:?}"),
+            })
+            .collect()
     }
 
     #[test]

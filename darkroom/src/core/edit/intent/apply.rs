@@ -1,18 +1,20 @@
-//! Commit an [`Intent`] against a [`Document`] (build → no-op filter →
-//! write), and forward/backward-replay a stored [`UndoStep`]'s "to"/"from"
-//! half. [`commit_intent`], [`apply_step`], and [`revert_step`]
-//! are the entry points the rest of the crate drives the edit pipeline
-//! through. The `build_step` / `apply_step` halves stay public for
-//! undo-stack redo, which applies a *stored* step without rebuilding it.
+//! Commit an [`Intent`] or a [`DocIntent`] against a [`Document`] (build →
+//! no-op filter → write), and forward/backward-replay a stored
+//! [`UndoStep`]'s "to"/"from" half. [`commit_intent`],
+//! [`commit_doc_intent`], [`apply_step`], and [`revert_step`] are the entry
+//! points the rest of the crate drives the edit pipeline through. The
+//! `build_step` / `apply_step` halves stay public for undo-stack redo,
+//! which applies a *stored* step without rebuilding it.
 
 use scenarium::GraphLink;
 use scenarium::{FuncInput, FuncOutput};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
 use crate::core::document::{BoundarySide, Document, EditScope, GraphRef};
-use crate::core::edit::intent::build::build_step;
+use crate::core::edit::intent::build::{build_doc_step, build_step};
 use crate::core::edit::intent::types::{
-    DetachedBoundaryPort, DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
+    BatchScope, DetachedBoundaryPort, DocIntent, DocStep, GraphStep, Intent, NodeProperty, Refusal,
+    UndoStep,
 };
 
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
@@ -39,8 +41,26 @@ pub(crate) fn commit_intent(
     if step.is_noop() {
         return Err(Refusal::Quiet);
     }
-    apply_step(&step, doc, target);
+    apply_step(&step, doc, BatchScope::Graph(target));
     Ok(step)
+}
+
+/// [`commit_intent`] for a document-global intent: build, no-op-filter, and
+/// apply in one call, with no target anywhere in it.
+///
+/// The result is still an [`UndoStep`] — the undo stack stores one step
+/// type — but it is always the `Doc` arm, so the caller records it under
+/// [`BatchScope::Document`].
+pub(crate) fn commit_doc_intent(
+    intent: DocIntent,
+    doc: &mut Document,
+) -> Result<UndoStep, Refusal> {
+    let step = build_doc_step(intent, doc)?;
+    if step.is_noop() {
+        return Err(Refusal::Quiet);
+    }
+    apply_doc(&step, doc);
+    Ok(UndoStep::Doc(step))
 }
 
 /// Resolve the right graph+view for a scoped step, run `body`, and
@@ -55,10 +75,27 @@ fn with_scope(doc: &mut Document, target: GraphRef, body: impl FnOnce(&mut EditS
 /// Forward apply: write the step's "to" half to `doc`. Used by
 /// the initial commit (right after `build_step`) and by undo-stack
 /// redo (replaying a popped step).
-pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+///
+/// `scope` is the *entry's* scope, so it answers for every step in the
+/// batch at once — a `Doc` step ignores it, and a `Graph` step is only
+/// ever recorded in a graph-scoped entry (see [`graph_target`]).
+pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document, scope: BatchScope) {
     match step {
         UndoStep::Doc(step) => apply_doc(step, doc),
-        UndoStep::Graph(step) => with_scope(doc, target, |scope| apply_graph(step, scope)),
+        UndoStep::Graph(step) => {
+            with_scope(doc, graph_target(scope), |scope| apply_graph(step, scope))
+        }
+    }
+}
+
+/// The graph a [`GraphStep`] resolves against. Its entry is graph-scoped by
+/// construction — `commit_batch` records a document-global intent as an
+/// entry of its own — so a `Document` scope here means a batch was
+/// assembled against the wrong one, not that any input was bad.
+fn graph_target(scope: BatchScope) -> GraphRef {
+    match scope {
+        BatchScope::Graph(target) => target,
+        BatchScope::Document => panic!("a graph step was recorded in a document-global entry"),
     }
 }
 
@@ -251,10 +288,12 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
 /// Backward apply: write the step's "from" half to `doc`. Pairs
 /// with [`apply_step`]; calling one after the other restores the
 /// graph to its pre-commit state.
-pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document, scope: BatchScope) {
     match step {
         UndoStep::Doc(step) => revert_doc(step, doc),
-        UndoStep::Graph(step) => with_scope(doc, target, |scope| revert_graph(step, scope)),
+        UndoStep::Graph(step) => {
+            with_scope(doc, graph_target(scope), |scope| revert_graph(step, scope))
+        }
     }
 }
 

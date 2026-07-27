@@ -177,7 +177,7 @@ pub(crate) enum DockDrop {
 
 /// One dock-layout mutation, executed by [`DockLayout::apply`]. The
 /// single op vocabulary the whole pipeline speaks: the dock UI
-/// constructs one, `UiAction::Dock` transports it, `Intent::Dock`
+/// constructs one, `UiAction::Dock` transports it, `DocIntent::Dock`
 /// records it as a before/after snapshot, and `apply` runs it. Ops fed
 /// something that no longer exists no-op, and the snapshot diff drops
 /// them.

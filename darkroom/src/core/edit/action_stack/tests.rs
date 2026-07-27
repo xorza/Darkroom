@@ -3,10 +3,10 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::apply::apply_step;
+use crate::core::document::{Document, GraphRef, TabRef};
+use crate::core::edit::intent::apply::{apply_step, commit_doc_intent};
 use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::{DocIntent, Intent};
 use scenarium::testing::test_graph;
 use scenarium::{GraphDef, GraphId, GraphInterface, NodeSearch};
 
@@ -38,12 +38,10 @@ fn primary_active(doc: &Document) -> usize {
 /// the drain's no-op filter: a refused/degenerate op builds a
 /// `from == to` step, which is dropped — `false` back to the caller.
 fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockOp) -> bool {
-    let step = build_step(Intent::Dock(op), doc, GraphRef::Main).unwrap();
-    if step.is_noop() {
+    let Ok(step) = commit_doc_intent(DocIntent::Dock(op), doc) else {
         return false;
-    }
-    apply_step(&step, doc, GraphRef::Main);
-    stack.push_current(GraphRef::Main, &[step]);
+    };
+    stack.push_current(BatchScope::Document, &[step]);
     true
 }
 
@@ -119,8 +117,8 @@ fn switch_does_not_merge_across_an_intervening_edit() {
     let mut want = BTreeSet::new();
     want.insert(node_id);
     let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
-    apply_step(&sel, &mut doc, GraphRef::Main);
-    stack.push_current(GraphRef::Main, &[sel]);
+    apply_step(&sel, &mut doc, BatchScope::Graph(GraphRef::Main));
+    stack.push_current(BatchScope::Graph(GraphRef::Main), &[sel]);
 
     switch_to(&mut stack, &mut doc, 2);
     assert_eq!(primary_active(&doc), 2);
@@ -169,12 +167,11 @@ fn tab_ops_follow_their_tab_across_a_layout_change() {
 
     // Built while `b` sits at slot 2, applied after `a` left and `b` slid
     // down to slot 1.
-    let close_b = Intent::Dock(DockOp::CloseTab { tab: b });
+    let close_b = DocIntent::Dock(DockOp::CloseTab { tab: b });
     assert!(close_at(&mut stack, &mut doc, 1), "close a");
     assert_eq!(primary_tabs(&doc), [main, b], "b moved to slot 1");
 
-    let step = build_step(close_b, &doc, GraphRef::Main).unwrap();
-    apply_step(&step, &mut doc, GraphRef::Main);
+    commit_doc_intent(close_b, &mut doc).expect("closing an open tab applies");
     assert_eq!(
         primary_tabs(&doc),
         [main],
@@ -270,8 +267,8 @@ fn consecutive_moves_coalesce_keeping_first_from() {
             moves: vec![(key, to)],
         };
         let step = build_step(intent, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, GraphRef::Main);
-        stack.push_current(GraphRef::Main, &[step]);
+        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
+        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
     };
     drag_to(&mut stack, &mut doc, Vec2::new(10.0, 10.0));
     drag_to(&mut stack, &mut doc, Vec2::new(20.0, 20.0));
@@ -308,8 +305,8 @@ fn moves_of_different_nodes_do_not_coalesce() {
             moves: vec![(key, to)],
         };
         let step = build_step(intent, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, GraphRef::Main);
-        stack.push_current(GraphRef::Main, &[step]);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
     }
     // Different grabbed nodes ⇒ different `SelectionDrag` keys ⇒ two entries.
     assert!(stack.undo(&mut doc, &mut |_| {}));
@@ -339,10 +336,10 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let mut batch = Vec::new();
     for node_id in [a, b] {
         let step = build_step(Intent::RemoveNode { node_id }, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         batch.push(step);
     }
-    stack.push_current(GraphRef::Main, &batch);
+    stack.push_current(BatchScope::Graph(GraphRef::Main), &batch);
 
     assert!(doc.graph.find(a, NodeSearch::TopLevel).is_none());
     assert!(doc.graph.find(b, NodeSearch::TopLevel).is_none());
@@ -380,8 +377,8 @@ fn group_drag_moves_all_and_undoes_as_one() {
             moves: vec![(ka, a0 + off), (kb, b0 + off)],
         };
         let step = build_step(intent, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, GraphRef::Main);
-        stack.push_current(GraphRef::Main, &[step]);
+        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
+        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
     };
     drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
     drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
@@ -409,8 +406,8 @@ fn new_edit_discards_the_redo_tail() {
 
     let select = |stack: &mut ActionStack, doc: &mut Document, set: BTreeSet<_>| {
         let step = build_step(Intent::SetSelection { to: set }, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, GraphRef::Main);
-        stack.push_current(GraphRef::Main, &[step]);
+        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
+        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
     };
     let one: BTreeSet<_> = [node].into_iter().collect();
     select(&mut stack, &mut doc, one.clone()); // A: {} -> {node}
@@ -462,8 +459,8 @@ fn history_bounded_by_byte_budget() {
             BTreeSet::new()
         };
         let step = build_step(Intent::SetSelection { to }, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, GraphRef::Main);
-        stack.push_current(GraphRef::Main, &[step]);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
         // The *live* region stays within budget (entries are far
         // smaller than 256 B, so no single-entry overflow)...
         let live = stack.actions.len() - stack.head;
@@ -537,10 +534,10 @@ fn rename_boundary_port_applies_and_reverts() {
     )
     .expect("rename builds against a Local target");
 
-    apply_step(&step, &mut doc, target);
+    apply_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(interface(&doc, def_id).inputs[0].name, "alpha");
 
-    revert_step(&step, &mut doc, target);
+    revert_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(
         interface(&doc, def_id).inputs[0].name,
         "A",
@@ -566,7 +563,7 @@ fn rename_boundary_port_renames_outputs_side() {
         target,
     )
     .unwrap();
-    apply_step(&step, &mut doc, target);
+    apply_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(interface(&doc, def_id).outputs[0].name, "result");
 }
 
@@ -630,20 +627,20 @@ fn stale_rename_step_no_ops_instead_of_clobbering() {
         target,
     )
     .unwrap();
-    apply_step(&step, &mut doc, target);
+    apply_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(interface(&doc, def_id).inputs[1].name, "beta");
 
     // An out-of-band edit removes input 0, shifting "beta" to index 0.
     // The step's slot addressing is now stale: its idx (1) is out of
     // range, so undo no-ops instead of touching the wrong slot.
     interface_mut(&mut doc, def_id).inputs.remove(0);
-    revert_step(&step, &mut doc, target);
+    revert_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
 
     // Same guard by name: a slot at the recorded index but holding an
     // unexpected name is left alone.
     interface_mut(&mut doc, def_id).inputs.push(finput("other"));
-    revert_step(&step, &mut doc, target);
+    revert_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
     assert_eq!(interface(&doc, def_id).inputs[1].name, "other");
 }
@@ -672,7 +669,7 @@ fn add_boundary_port_applies_and_reverts_on_both_sides() {
             target,
         )
         .expect("add builds against a Local target");
-        apply_step(&step, &mut doc, target);
+        apply_step(&step, &mut doc, BatchScope::Graph(target));
         let interface = interface(&doc, def_id);
         match side {
             BoundarySide::Input => {
@@ -686,7 +683,7 @@ fn add_boundary_port_applies_and_reverts_on_both_sides() {
                 assert_eq!(interface.outputs[1].ty.declared(), DataType::Float);
             }
         }
-        revert_step(&step, &mut doc, target);
+        revert_step(&step, &mut doc, BatchScope::Graph(target));
     }
     // Both reverts leave the original one-in/one-out interface.
     assert_eq!(interface(&doc, def_id).inputs.len(), 1);
@@ -756,7 +753,7 @@ fn remove_boundary_port_round_trips_severed_wiring() {
         target,
     )
     .expect("remove builds against an existing slot");
-    apply_step(&step, &mut doc, target);
+    apply_step(&step, &mut doc, BatchScope::Graph(target));
 
     // "B" survives at index 0 on both sides of the boundary; the removed
     // slot's wiring is gone.
@@ -776,7 +773,7 @@ fn remove_boundary_port_round_trips_severed_wiring() {
     );
     assert_eq!(doc.graph.bindings.get(&InputPort::new(instance, 1)), None);
 
-    revert_step(&step, &mut doc, target);
+    revert_step(&step, &mut doc, BatchScope::Graph(target));
     assert_eq!(doc.graph, original, "undo restores the exact wiring");
 
     // A slot that doesn't exist drops the intent.

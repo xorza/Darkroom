@@ -1,6 +1,7 @@
 //! Read pre-mutation state from a [`Document`] and fold it with an
-//! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
-//! intent pipeline. Pure: never writes to the graph.
+//! [`Intent`] (or a [`DocIntent`]) into a complete step — the
+//! diff-capture half of the intent pipeline. Pure: never writes to the
+//! graph.
 
 use std::collections::HashSet;
 
@@ -10,7 +11,8 @@ use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
 use crate::core::document::dock::DockOp;
 use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef};
 use crate::core::edit::intent::types::{
-    DetachedBoundaryPort, DocStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
+    DetachedBoundaryPort, DocIntent, DocStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal,
+    UndoStep,
 };
 use crate::core::edit::intent::validate;
 
@@ -35,36 +37,6 @@ pub(crate) fn build_step(
     doc: &Document,
     target: GraphRef,
 ) -> Result<UndoStep, Refusal> {
-    // Document-global intents don't resolve a graph scope.
-    if let Intent::Dock(op) = intent {
-        let key = match op {
-            DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
-            DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
-            DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
-        };
-        let structural = matches!(op, DockOp::MoveTab { .. });
-        let from = doc.layout.clone();
-        let mut to = from.clone();
-        to.apply(op);
-        // Refused/degenerate ops leave `to == from`; the is_noop filter
-        // drops the step.
-        return Ok(UndoStep::Doc(DocStep::Dock {
-            from,
-            to,
-            key,
-            structural,
-        }));
-    }
-    if let Intent::RenameGraph { id, to } = intent {
-        let from = doc
-            .graph
-            .find_graph(id)
-            .ok_or(Refusal::Quiet)?
-            .interface
-            .name
-            .clone();
-        return Ok(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
-    }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
         // Boundary ports only exist in a graph interior; the graph is
         // the active `Local` target's. Drop the rename otherwise.
@@ -136,12 +108,10 @@ pub(crate) fn build_step(
     }
     let EditScopeRef { graph, view } = doc.scope(target).ok_or(Refusal::Quiet)?;
     let step = match intent {
-        Intent::Dock(_)
-        | Intent::RenameBoundaryPort { .. }
+        Intent::RenameBoundaryPort { .. }
         | Intent::AddBoundaryPort { .. }
-        | Intent::RemoveBoundaryPort { .. }
-        | Intent::RenameGraph { .. } => {
-            unreachable!("document-global intents handled above")
+        | Intent::RemoveBoundaryPort { .. } => {
+            unreachable!("interface edits are resolved against the interface above")
         }
         Intent::AddNode {
             pos,
@@ -400,6 +370,47 @@ pub(crate) fn build_step(
         }
     };
     Ok(UndoStep::Graph(step))
+}
+
+/// The [`build_step`] counterpart for the mutations no graph owns: fold
+/// `intent` with the document-wide state it overwrites into a complete
+/// [`DocStep`]. Takes no target, because there is none to take.
+///
+/// Same gate contract as `build_step` — an `Ok` is a proof that applying
+/// the step is sound — but the preconditions are thinner: a dock op is
+/// applied to a *copy* of the layout here and recorded as the
+/// before/after pair, so an op the layout refuses simply lands as
+/// `from == to` and drops out through the no-op filter.
+pub(crate) fn build_doc_step(intent: DocIntent, doc: &Document) -> Result<DocStep, Refusal> {
+    match intent {
+        DocIntent::Dock(op) => {
+            let key = match op {
+                DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
+                DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
+                DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
+            };
+            let structural = matches!(op, DockOp::MoveTab { .. });
+            let from = doc.layout.clone();
+            let mut to = from.clone();
+            to.apply(op);
+            Ok(DocStep::Dock {
+                from,
+                to,
+                key,
+                structural,
+            })
+        }
+        DocIntent::RenameGraph { id, to } => {
+            let from = doc
+                .graph
+                .find_graph(id)
+                .ok_or(Refusal::Quiet)?
+                .interface
+                .name
+                .clone();
+            Ok(DocStep::RenameGraph { id, from, to })
+        }
+    }
 }
 
 /// Instance the definition `graph_id` names, seeding the const defaults its

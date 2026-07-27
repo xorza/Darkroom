@@ -16,7 +16,7 @@ use scenarium::GraphId;
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::DocIntent;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{colored_text, muted_text};
@@ -303,7 +303,8 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                         .style(&label_style)
                         .show(ui);
                         if let Some(to) = ev.committed {
-                            s.out.push_global(Intent::RenameGraph { id: graph_id, to });
+                            s.out
+                                .push_global(DocIntent::RenameGraph { id: graph_id, to });
                         }
                     } else {
                         // Main / non-graph tab: plain label, activation handled
@@ -369,7 +370,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {
-                s.out.push_global(Intent::Dock(DockOp::MoveTab {
+                s.out.push_global(DocIntent::Dock(DockOp::MoveTab {
                     tab,
                     to: DockDrop::Split {
                         group: s.group,

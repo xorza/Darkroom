@@ -3,7 +3,7 @@ use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::{Binding, DataType, GraphDef, GraphId, InputPort, Node, NodeId, NodeKind};
 
 use crate::core::document::{BoundarySide, GraphRef, GraphView, PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
+use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::connection_ui::{ConnectionUI, DragMode, InFlight, commit_connection};
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -80,12 +80,15 @@ fn committed(fixture: &Fixture, start: PortRef, end: PortRef) -> Vec<Intent> {
     let mut out = Intents::default();
     commit_connection(fixture.graph(), start, end, &mut out);
     out.drain()
-        .map(|(target, intent)| {
-            assert_eq!(
-                target, fixture.target,
-                "a wire commits against its own pane"
-            );
-            intent
+        .map(|queued| match queued {
+            Queued::Scoped { target, intent } => {
+                assert_eq!(
+                    target, fixture.target,
+                    "a wire commits against its own pane"
+                );
+                intent
+            }
+            Queued::Global(intent) => panic!("a wire raises nothing global: {intent:?}"),
         })
         .collect()
 }

@@ -221,6 +221,7 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
 mod tests {
     use super::*;
     use crate::core::document::GraphView;
+    use crate::core::edit::intent::sink::Queued;
     use crate::core::edit::intent::types::Intent;
     use crate::gui::canvas::outer_canvas_widget_id;
     use crate::gui::run_state::RunState;
@@ -333,7 +334,10 @@ mod tests {
         assert!(
             matches!(
                 intents.drain().collect::<Vec<_>>()[..],
-                [(target, Intent::SetViewport { .. })] if target == local,
+                [Queued::Scoped {
+                    target,
+                    intent: Intent::SetViewport { .. },
+                }] if target == local,
             ),
             "the framing click must move its own pane's viewport",
         );
