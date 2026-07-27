@@ -105,7 +105,7 @@ impl NodeMenuUi {
                     {
                         chosen = Some(MenuChoice::Run(node_id));
                     }
-                    MenuItem::separator(ui);
+                    MenuItem::separator().show(ui);
                 }
                 if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
                     chosen = Some(MenuChoice::Action(NodeMenuAction::Duplicate));
@@ -117,7 +117,7 @@ impl NodeMenuUi {
                 {
                     chosen = Some(MenuChoice::Action(NodeMenuAction::DuplicateWithIncoming));
                 }
-                MenuItem::separator(ui);
+                MenuItem::separator().show(ui);
                 if MenuItem::new("Remove").show(ui, popup).left.clicked() {
                     chosen = Some(MenuChoice::Action(NodeMenuAction::Remove));
                 }
