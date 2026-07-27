@@ -23,6 +23,9 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 
 dark-light = { workspace = true }
+# The status bar's process-footprint readout (`gui/process_memory.rs`).
+# Already in the workspace graph via lumos.
+sysinfo = { workspace = true }
 rfd = { workspace = true }
 zip = { workspace = true }
 tokio = { workspace = true }

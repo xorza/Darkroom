@@ -117,6 +117,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
         library: &library,
         run_state: &run_state,
         status_error: None,
+        process_memory: 0,
     };
 
     let mut graph_ui = GraphUI::default();
@@ -285,6 +286,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             library: &library,
             run_state: &run_state,
             status_error: None,
+            process_memory: 0,
         };
         let mut intents = Intents::default();
         scene.rebuild(

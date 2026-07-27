@@ -559,6 +559,7 @@ mod tests {
             library: &library,
             run_state: &run_state,
             status_error: None,
+            process_memory: 0,
         };
         let palette = |local_defs| Palette {
             ctx: &ctx,
@@ -651,6 +652,7 @@ mod tests {
             library: &library,
             run_state: &run_state,
             status_error: None,
+            process_memory: 0,
         };
         let palette = |target| Palette {
             ctx: &ctx,

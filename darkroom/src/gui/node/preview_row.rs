@@ -124,7 +124,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
                 .gap(4.0)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes));
+                    labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes as u64));
                 });
         });
 }
