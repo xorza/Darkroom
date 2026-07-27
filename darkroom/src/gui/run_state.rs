@@ -285,6 +285,10 @@ impl RunState {
             node.ram = RamUsage::default();
         }
         self.pinned_outputs.entries.clear();
+        // A preview's value is a run result exactly like a pinned one, so it
+        // goes for the same reason: with the cache behind it evicted, what it
+        // shows can no longer be re-derived without another run.
+        self.pinned_outputs.previews.clear();
         // Every node's RAM was just zeroed, so what survives here is exactly
         // the nodes still carrying a status or a log — the run results the
         // eviction deliberately leaves standing.
@@ -558,6 +562,10 @@ mod tests {
             .pinned_outputs
             .entries
             .insert(remaining_port, StoredContent::Text("kept".into()));
+        state
+            .pinned_outputs
+            .previews
+            .insert(evicted_node, StoredContent::Text("shown".into()));
 
         state.clear_cache_projections();
 
@@ -568,6 +576,10 @@ mod tests {
         assert_eq!(state.nodes[&remaining_node].logs[0].message, "kept");
         assert!(!state.pinned_outputs.entries.contains_key(&evicted_port));
         assert!(!state.pinned_outputs.entries.contains_key(&remaining_port));
+        assert!(
+            state.pinned_outputs.previews.is_empty(),
+            "a preview's value is a run result too, and goes with the rest"
+        );
     }
 
     #[test]

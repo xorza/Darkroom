@@ -632,14 +632,16 @@ mod tests {
     /// on any particular func, so a future entry-only func is covered too.
     #[test]
     fn entry_only_funcs_are_offered_only_in_the_entry_pane() {
-        use scenarium::{Func, FuncId, Library};
+        use scenarium::{Func, FuncId, Library, async_lambda};
+
+        use crate::core::preview::preview_func;
 
         let mut library = Library::default();
-        library.add(crate::core::preview::preview_func(Default::default()));
+        library.add(preview_func(Default::default()));
         library.add(
             Func::new(FuncId::unique(), "Add")
                 .category("System")
-                .lambda(scenarium::async_lambda!(|_| { Ok(()) })),
+                .lambda(async_lambda!(|_| { Ok(()) })),
         );
 
         let theme = Theme::default();
