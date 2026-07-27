@@ -8,7 +8,6 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pin_ui;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
@@ -150,11 +149,6 @@ impl SelectionUI {
             };
             if rect.intersects(body) {
                 swept.push(ItemRef::Node(n.id));
-            }
-        }
-        for pin in graph.pinned_outputs() {
-            if rect.intersects(pin_ui::pin_preview_rect(pin.pos)) {
-                swept.push(ItemRef::Pin(pin.port));
             }
         }
         // Sorted + deduped, which is the invariant the slice readers

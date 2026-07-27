@@ -108,30 +108,26 @@ impl UndoStep {
             | GraphStep::SetNodeProperty { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
-            | GraphStep::SetSubscription { .. }
-            // Flips a port's outline paint only — no remeasure.
-            | GraphStep::SetOutputPinned { .. } => false,
+            | GraphStep::SetSubscription { .. } => false,
         },
     }
     }
 
-    /// Whether replaying this step can move the set of output ports whose
-    /// pushed values the UI must keep alive
-    /// ([`crate::core::document::Document::retained_output_ports`]) — a pin
-    /// appearing or vanishing, or a viewer tab opening, closing, or moving.
-    /// When true, `Editor::frame` runs the pinned-output store's reconcile
-    /// pass, which releases the textures nothing presents any more and
-    /// uploads the full-resolution one a freshly-shown viewer needs; when no
-    /// step in the frame asks for it, the pass is skipped. Exhaustive on
-    /// purpose — a new variant must declare whether it moves that set.
+    /// Whether replaying this step can move the set of preview nodes whose
+    /// published values the UI must keep alive — a preview node appearing or
+    /// vanishing, or a viewer tab opening, closing, or moving.
+    ///
+    /// When true, `Editor::frame` runs the preview store's reconcile pass,
+    /// which releases the textures nothing presents any more and uploads the
+    /// full-resolution one a freshly-shown viewer needs; when no step in the
+    /// frame asks for it, the pass is skipped. Exhaustive on purpose — a new
+    /// variant must declare whether it moves that set.
     pub(crate) fn requires_reconcile(&self) -> bool {
         match self {
             // The whole layout is swapped by assignment, so any dock op can
             // open, close, or relocate a viewer tab.
             UndoStep::Doc(DocStep::Dock { .. }) => true,
-            // No interface edit can touch a pin: `build_step` refuses to
-            // remove a boundary port whose slot is pinned (unpin first), and
-            // adding or renaming one pins nothing.
+            // An interface edit moves ports, never nodes.
             UndoStep::Doc(
                 DocStep::AddBoundaryPort { .. }
                 | DocStep::RemoveBoundaryPort { .. }
@@ -139,19 +135,14 @@ impl UndoStep {
                 | DocStep::RenameGraph { .. },
             ) => false,
             UndoStep::Graph(g) => match g {
-                GraphStep::SetOutputPinned { .. }
-                // Removal prunes the node's pins; undo restores them.
-                | GraphStep::RemoveNode { .. }
-                // Forks a definition, so the copy's interior pins join the set.
-                | GraphStep::DetachGraph { .. } => true,
-                // A node arriving with a fresh definition brings that
-                // definition's interior pins with it; a bare node — or one
-                // re-linking a definition already in the document — adds none.
-                GraphStep::AddNode { graph, .. } => graph.is_some(),
-                // Copies carry fresh ids and no definition payload, and
-                // duplication drops pin keys from the selection it clones, so
-                // neither side of this step holds a pin.
-                GraphStep::DuplicateNodes { .. }
+                // Any step that adds or removes nodes can add or remove a
+                // preview among them — including undo, which puts one back.
+                GraphStep::AddNode { .. }
+                | GraphStep::DuplicateNodes { .. }
+                | GraphStep::RemoveNode { .. } => true,
+                // A preview is entry-only, so a definition's interior never
+                // holds one and forking a definition cannot move the set.
+                GraphStep::DetachGraph { .. }
                 | GraphStep::MoveSelection { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
@@ -195,8 +186,7 @@ impl UndoStep {
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachGraph { .. }
-                | GraphStep::SetSubscription { .. }
-                | GraphStep::SetOutputPinned { .. },
+                | GraphStep::SetSubscription { .. },
             )
             | UndoStep::Doc(
                 DocStep::RenameBoundaryPort { .. }
@@ -232,8 +222,7 @@ impl UndoStep {
                 | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachGraph { .. }
-                | GraphStep::SetSubscription { .. }
-                | GraphStep::SetOutputPinned { .. },
+                | GraphStep::SetSubscription { .. },
             )
             | UndoStep::Doc(
                 DocStep::RenameBoundaryPort { .. }
@@ -331,7 +320,6 @@ impl GraphStep {
                 ..
             } => from_index == to_index,
             GraphStep::SetNodeProperty { from, to, .. } => from == to,
-            GraphStep::SetOutputPinned { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS

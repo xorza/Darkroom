@@ -10,8 +10,6 @@ pub(crate) mod inspector;
 mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
-pub(crate) mod pin_preview;
-pub(crate) mod pin_ui;
 mod selection_ui;
 mod subscription_ui;
 #[cfg(test)]
@@ -42,7 +40,6 @@ use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::pan_zoom::PanAnchor;
-use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
@@ -112,15 +109,12 @@ struct PaneGesture {
 }
 
 /// The resettable, one-gesture-lifetime controllers. Everything here is
-/// dropped on a tab switch, and nothing here carries meaning across frames —
-/// `PinUi`'s resolved-geometry map is refilled from scratch every frame and
-/// kept only to reuse its allocation, so a tab switch costs at most that.
+/// dropped on a tab switch, and nothing here carries meaning across frames.
 #[derive(Default, Debug)]
 struct Gestures {
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
-    pin_ui: PinUi,
     subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
     graph_menu: GraphMenuUi,
@@ -181,7 +175,6 @@ impl GraphUI {
     /// else is keyed by document-unique ids and sweeps them all at once,
     /// resolving each hit's edit target from `SceneNode::owner`.
     pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Intents) {
-        self.gestures.pin_ui.begin_frame();
         // Resolve the frame's bare-canvas gesture and park it (with its
         // pane) for `draw` to read back — the classification is one
         // response poll, and both phases must agree on the winner.
@@ -205,7 +198,6 @@ impl GraphUI {
             .apply(ui, scene, &self.geometry, resume, out);
         // Cmd+drag from an output port pins it — same pre-record timing as
         // the connection/subscription gestures above, for the same reasons.
-        self.gestures.pin_ui.apply(ui, scene, &self.geometry, out);
         // Subscription wires (emitter → subscriber) latch/commit here too,
         // for the same pre-record reasons; an emitter glyph and a data port
         // can't both latch (different widget-id spaces).
@@ -363,7 +355,6 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
-                    pin_ui,
                     subscription_ui,
                     new_node_ui: _,
                     graph_menu: _,
@@ -461,22 +452,13 @@ impl GraphUI {
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
-                            // A pin paints in two passes — its wire below,
-                            // its card up in the z-order walk — so its
-                            // geometry is resolved here, once, ahead of
-                            // both. That's also the breaker's single look
-                            // at every pin, keeping its one-hit-per-frame
-                            // rule intact. Must precede `wires`, which
-                            // takes the probe.
-                            pin_ui.resolve(ui, graph, geometry, &mut probe, cull);
-                            // All three wire renderers share these inputs, so
+                            // Both wire renderers share these inputs, so
                             // they're bundled once and reborrowed into each.
-                            // Subscription and pin wires sit under the node
-                            // bodies like data wires (drawn before
-                            // `draw_all`), and share the breaker probe so
-                            // they're all cuttable — one passing behind an
-                            // unrelated node goes under it rather than
-                            // drawing on top.
+                            // Subscription wires sit under the node bodies
+                            // like data wires (drawn before `draw_all`), and
+                            // share the breaker probe so they're all
+                            // cuttable — one passing behind an unrelated node
+                            // goes under it rather than drawing on top.
                             let mut wires = WirePass {
                                 rcx,
                                 cull,
@@ -485,13 +467,9 @@ impl GraphUI {
                             };
                             connection_ui::draw(ui, &mut wires);
                             subscription_ui::draw(ui, &mut wires);
-                            pin_ui.draw_wires(ui, &wires);
-                            // Node bodies and pin preview cards paint
-                            // interleaved, in `scene.z_order` — one shared
-                            // paint stack, so either kind can sit above the
-                            // other and clicking raises it. Only the pin
-                            // wire (above) shares the other wires' z-order.
-                            node_ui.draw_all(ui, rcx, cull, &mut probe, pin_ui, out);
+                            // Node bodies paint in `scene.z_order`, so a
+                            // clicked node raises above its neighbours.
+                            node_ui.draw_all(ui, rcx, cull, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes
@@ -584,13 +562,12 @@ fn classify_canvas_gesture(ui: &mut Ui, target: GraphRef) -> Option<CanvasGestur
 
 /// The one `AppCommand` a chip click in the recorded tree can produce this
 /// frame: an `FsPath` input's pick button, a node header's play or
-/// cache-eviction chip, or a pin card's refresh chip. First hit in that
-/// order wins.
+/// or cache-eviction chip. First hit in that order wins.
 ///
 /// Each scan surfaces only a domain fact — which node to run, which port to
 /// pick a path for — and naming `AppCommand` is the canvas's job, since it
 /// owns the command channel. So the translation lives here rather than in
-/// `node` or `pin_ui`. All four are pure reads over last frame's responses,
+/// `node`. All three are pure reads over last frame's responses,
 /// which is why [`GraphUI::draw`] can skip the whole group once something
 /// else has claimed the frame.
 fn emit_chip_command(ui: &Ui, graph: GraphScene<'_>) -> Option<AppCommand> {
@@ -604,12 +581,6 @@ fn emit_chip_command(ui: &Ui, graph: GraphScene<'_>) -> Option<AppCommand> {
     }
     if let Some(node_id) = emit_cache_evictions(ui, graph) {
         return Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
-    }
-    // A pin's own header refresh chip re-runs the node its output came from,
-    // refreshing the value the card is showing — same command, same
-    // translation point.
-    if let Some(node_id) = pin_ui::emit_pin_refresh_clicks(ui, graph) {
-        return Some(AppCommand::Run(RunCommand::Node(node_id)));
     }
     None
 }

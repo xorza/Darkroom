@@ -2,7 +2,7 @@ use crate::data::static_value::StaticValue;
 use crate::data::type_system::DataType;
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::wiring::BindingEntry;
-use crate::graph::{Binding, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, OutputPort};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, Node, NodeId, NodeKind};
 use crate::node::definition::{FuncId, FuncInput, FuncOutput};
 
 fn int_input(name: &str) -> FuncInput {
@@ -43,13 +43,6 @@ fn input_fixture() -> InputFixture {
             .body
             .set_input_binding(InputPort::new(consumer, idx), Binding::bind(boundary, idx));
     }
-    child
-        .body
-        .set_output_pinned(OutputPort::new(boundary, 1), true);
-    child
-        .body
-        .set_output_pinned(OutputPort::new(boundary, 2), true);
-
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();
     let instance_a = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
@@ -96,7 +89,6 @@ fn detach_and_attach_graph_input_round_trip() {
             binding: Binding::bind(boundary, 1),
         }]
     );
-    assert_eq!(detached.pins, vec![OutputPort::new(boundary, 1)]);
     // Both instances lose their slot-1 binding: A's 11 and B's 21.
     assert_eq!(detached.parent.len(), 2);
     assert!(
@@ -134,9 +126,6 @@ fn detach_and_attach_graph_input_round_trip() {
         child.body.bindings.get(&InputPort::new(consumer, 2)),
         Some(&Binding::bind(boundary, 1))
     );
-    // Pins: 1 dropped, 2 shifted to 1.
-    let pins: Vec<OutputPort> = child.body.pinned_outputs().collect();
-    assert_eq!(pins, vec![OutputPort::new(boundary, 1)]);
     // Instance A: 0 stays 10, old 2 (12) shifted to 1, slot 2 cleared;
     // instance B: fully unbound.
     assert_eq!(
@@ -232,8 +221,6 @@ fn output_fixture() -> OutputFixture {
     graph.insert_graph(graph_id, child);
     graph.set_input_binding(InputPort::new(consumer_a, 0), Binding::bind(instance, 1));
     graph.set_input_binding(InputPort::new(consumer_b, 0), Binding::bind(instance, 2));
-    graph.set_output_pinned(OutputPort::new(instance, 1), true);
-    graph.set_output_pinned(OutputPort::new(instance, 2), true);
     OutputFixture {
         graph,
         graph_id,
@@ -273,7 +260,6 @@ fn detach_and_attach_graph_output_round_trip() {
             binding: Binding::bind(producer, 0),
         }]
     );
-    assert_eq!(detached.pins, vec![OutputPort::new(instance, 1)]);
     assert_eq!(
         detached.parent,
         vec![BindingEntry {
@@ -308,9 +294,6 @@ fn detach_and_attach_graph_output_round_trip() {
         graph.bindings.get(&InputPort::new(consumer_b, 0)),
         Some(&Binding::bind(instance, 1))
     );
-    let pins: Vec<OutputPort> = graph.pinned_outputs().collect();
-    assert_eq!(pins, vec![OutputPort::new(instance, 1)]);
-
     graph.attach_graph_output(graph_id, detached);
     assert_eq!(
         graph, original,
@@ -329,16 +312,6 @@ fn attach_rejects_an_instance_binding_off_its_slot() {
 }
 
 #[test]
-#[should_panic(expected = "detached pin does not sit on the detached input slot")]
-fn attach_rejects_a_pin_off_its_slot() {
-    let fixture = input_fixture();
-    let mut graph = fixture.graph;
-    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
-    detached.pins.push(OutputPort::new(fixture.boundary, 5));
-    graph.attach_graph_input(fixture.graph_id, detached);
-}
-
-#[test]
 fn a_rejected_attach_leaves_the_graph_untouched() {
     // Every record check runs before the first mutation, so a malformed
     // record can't half-apply and strand the interface mid-shift.
@@ -346,7 +319,7 @@ fn a_rejected_attach_leaves_the_graph_untouched() {
     let mut graph = fixture.graph;
     let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
     let after_detach = graph.clone_verbatim();
-    detached.pins.push(OutputPort::new(fixture.boundary, 5));
+    detached.parent[0].port.port_idx = 0;
 
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         graph.attach_graph_input(fixture.graph_id, detached);
@@ -422,7 +395,7 @@ fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
     let original = graph.clone_verbatim();
 
     let detached = graph.detach_graph_input(graph_id, 0);
-    assert!(detached.interior.is_empty() && detached.pins.is_empty());
+    assert!(detached.interior.is_empty());
     assert_eq!(detached.parent.len(), 1);
     let child = graph.graphs.get(&graph_id).unwrap();
     assert_eq!(child.interface.inputs[0].name, "B");

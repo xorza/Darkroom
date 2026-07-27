@@ -1,9 +1,7 @@
 use hashbrown::HashMap;
 
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{
-    Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, OutputPort, Subscription,
-};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, Subscription};
 
 /// A remapped clone alongside the node mapping that produced it, so a caller
 /// holding ids into the original — a definition's exposed-event emitters —
@@ -68,11 +66,6 @@ impl Graph {
                 subscriber: remap(subscription.subscriber),
             })
             .collect();
-        let pinned_outputs = self
-            .pinned_outputs
-            .iter()
-            .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
-            .collect();
         let graphs = self
             .graphs
             .iter()
@@ -82,7 +75,6 @@ impl Graph {
             nodes,
             bindings,
             subscriptions,
-            pinned_outputs,
             graphs,
         };
         MappedClone { graph, node_ids }
@@ -99,7 +91,6 @@ impl Graph {
             nodes: self.nodes.clone(),
             bindings: self.bindings.clone(),
             subscriptions: self.subscriptions.clone(),
-            pinned_outputs: self.pinned_outputs.clone(),
             graphs: self
                 .graphs
                 .iter()

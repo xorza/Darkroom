@@ -9,12 +9,10 @@ use hashbrown::HashMap;
 use thiserror::Error;
 
 use crate::execution::flatten::Flattener;
-use crate::execution::identity::{
-    ExecutionIdentityError, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
-};
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
 use crate::execution::program::index::{NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
-use crate::graph::{Graph, NodeId, OutputPort};
+use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 use crate::node::definition::FuncBehavior;
 
@@ -117,24 +115,6 @@ impl CompiledGraph {
         self.flatten_map
             .attribution(e_node_id)
             .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
-    }
-
-    /// The authored output ports one delivered value stands for.
-    ///
-    /// A run delivers values addressed to the flat node that computed them,
-    /// which is the node the user pinned only for a leaf in the entry graph.
-    /// A graph instance's port is computed somewhere in its interior, under
-    /// an id the instance does not share; this maps that value back to the
-    /// port the document actually pins.
-    ///
-    /// Empty when nothing pinned this slot — a run root delivers every output
-    /// it has, including ports no one asked for — and empty for a port backed
-    /// by more than one occurrence, which has no single value to show.
-    pub fn pinned_ports(&self, e_node_id: ExecutionNodeId, port_idx: usize) -> &[OutputPort] {
-        self.flatten_map.pinned_ports(ExecutionOutputPort {
-            e_node_id,
-            port_idx,
-        })
     }
 
     /// Whether an authored node performs sink work — runs for its effect
@@ -303,9 +283,9 @@ pub(crate) mod internals {
     use std::sync::Arc;
 
     use crate::execution::compile::CompiledGraph;
-    use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort, FlattenMap};
+    use crate::execution::identity::{ExecutionNodeId, FlattenMap};
     use crate::execution::program::ExecutionProgram;
-    use crate::graph::{NodeId, OutputPort};
+    use crate::graph::NodeId;
 
     impl CompiledGraph {
         /// Every execution node an authored node covers, in ascending id
@@ -346,24 +326,6 @@ pub(crate) mod internals {
                 scope = self.flatten_map.push_scope(instance, scope);
             }
             self.flatten_map.set_leaf(e_node_id, scope, node_id);
-        }
-
-        /// Record that one flat slot computes the value `port` asks for —
-        /// what a real compile derives by resolving a pinned graph-instance
-        /// port through its interior.
-        pub fn insert_pinned_port(
-            &mut self,
-            e_node_id: ExecutionNodeId,
-            port_idx: usize,
-            port: OutputPort,
-        ) {
-            self.flatten_map.set_pinned_port(
-                ExecutionOutputPort {
-                    e_node_id,
-                    port_idx,
-                },
-                port,
-            );
         }
 
         pub fn build(self) -> Arc<CompiledGraph> {

@@ -5,7 +5,6 @@ use tokio::sync::oneshot;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::error::Error;
-use crate::execution::report::PinnedOutputs;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 use crate::worker::status::WorkerStatus;
@@ -30,7 +29,6 @@ pub enum WorkerReport {
     Cleared,
     Error(WorkerError),
     Status(Arc<WorkerStatus>),
-    PinnedOutputs(PinnedOutputs),
 }
 
 #[derive(Debug)]

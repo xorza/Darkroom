@@ -55,7 +55,7 @@ impl Fix {
     async fn resolve(
         &self,
         roots: &[ExecutionNodeId],
-        pinned: &[ExecutionNodeId],
+        seeded: &[ExecutionNodeId],
         missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
     ) -> ResolvedRun {
@@ -69,10 +69,10 @@ impl Fix {
         for root in roots {
             root_set.insert(nx(*root));
         }
-        let mut pinned_set = NodeSet::default();
-        pinned_set.reset(self.program.e_nodes.len());
-        for pin in pinned {
-            pinned_set.insert(nx(*pin));
+        let mut seeded_set = NodeSet::default();
+        seeded_set.reset(self.program.e_nodes.len());
+        for seed in seeded {
+            seeded_set.insert(nx(*seed));
         }
         let mut event_sources = NodeSet::default();
         event_sources.reset(self.program.e_nodes.len());
@@ -80,7 +80,7 @@ impl Fix {
             process_order: self.order.iter().map(|id| nx(*id)).collect(),
             verdicts,
             roots: root_set,
-            pinned: pinned_set,
+            seeded: seeded_set,
             event_sources,
         };
         let mut cache = RuntimeCache::default();
@@ -269,36 +269,28 @@ async fn missing_lambda_stops_liveness_before_its_producer() {
     );
 }
 
+/// A node seed demands every output it has, without any consumer reading them —
+/// the "run to this node" semantic, distinct from demand arriving through a
+/// binding.
 #[tokio::test]
-async fn graph_and_node_pins_seed_demand_without_readers() {
+async fn a_node_seed_demands_every_output_without_readers() {
     let mut fix = Fix::default();
-    let graph_pinned = fix.node(&[], 2);
-    let node_pinned = fix.node(&[], 2);
-    let output_idx = fix.program.output_idx(OutputAddr {
-        node_idx: nx(graph_pinned),
-        port_idx: 1,
-    });
-    fix.program.outputs[output_idx.idx()].pinned = true;
+    let unseeded = fix.node(&[], 2);
+    let seeded = fix.node(&[], 2);
 
     let run = fix
-        .resolve(
-            &[graph_pinned, node_pinned],
-            &[node_pinned],
-            &[],
-            Vec::new(),
-        )
+        .resolve(&[unseeded, seeded], &[seeded], &[], Vec::new())
         .await;
 
     assert_eq!(
         run.outputs
             .demand
-            .slice(fix.program.by_id(graph_pinned).outputs),
-        &[OutputDemand::Skip, OutputDemand::Produce]
+            .slice(fix.program.by_id(unseeded).outputs),
+        &[OutputDemand::Skip, OutputDemand::Skip],
+        "a root nobody reads and nobody seeded produces nothing"
     );
     assert_eq!(
-        run.outputs
-            .demand
-            .slice(fix.program.by_id(node_pinned).outputs),
+        run.outputs.demand.slice(fix.program.by_id(seeded).outputs),
         &[OutputDemand::Produce, OutputDemand::Produce]
     );
     assert!(run.outputs.readers.iter().all(|readers| *readers == 0));

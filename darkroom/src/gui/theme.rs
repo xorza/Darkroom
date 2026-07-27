@@ -685,12 +685,11 @@ impl PaletteColors {
     }
 }
 
-/// Result of [`Theme::card_border`]: the resolved outline color plus the
-/// width every selectable card draws it at.
+/// Result of [`Theme::card_border`]: the resolved outline color. The width is
+/// [`Theme::card_border_width`] — constant, so selecting never resizes a card.
 #[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
     pub(crate) color: Color,
-    pub(crate) width: f32,
 }
 
 impl Theme {
@@ -753,15 +752,12 @@ impl Theme {
         } else {
             self.colors.node_border
         };
-        CardBorder {
-            color,
-            width: self.card_border_width(),
-        }
+        CardBorder { color }
     }
 
     /// Inner corner radius for a header or footer strip that seats flush
-    /// against a card's own outer stroke — node bodies and pin-preview
-    /// widgets both round their header/footer band to this, not the raw
+    /// against a card's own outer stroke — a node body rounds its
+    /// header/footer band to this, not the raw
     /// `node_corner_radius`, else the strip's corner leaves a wedge of the
     /// card's plain fill showing between it and the (selection-lit) stroke.
     #[inline]

@@ -1,8 +1,8 @@
-//! Runtime presentation resources for worker-pushed outputs.
+//! Runtime presentation resources for the values preview nodes publish.
 //!
-//! The store is the sole owner of pinned preview and viewer textures. Image
-//! pushes upload a small preview immediately, retain their source only until
-//! a viewer first needs the full texture, then drop the source after that
+//! The store is the sole owner of preview-card and viewer textures. An image
+//! uploads a small thumbnail immediately, retains its source only until a
+//! viewer first needs the full texture, then drops the source after that
 //! upload. Non-image values are formatted on receipt and dropped immediately.
 
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
 use palantir::{Image as AptImage, ImageHandle, Ui};
-use scenarium::{DynamicValue, NodeId, OutputPort};
+use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
 
@@ -20,13 +20,10 @@ const PREVIEW_TEXTURE_DIM: u32 = 256;
 const FULL_TEXTURE_DIM: u32 = 8192;
 
 #[derive(Default, Debug)]
-pub(crate) struct PinnedOutputStore {
-    pub(crate) entries: HashMap<OutputPort, StoredContent>,
-    /// Preview nodes' values, keyed by the node that published rather than by
-    /// a producer port — a preview *is* the thing on screen, so its identity is
-    /// the widget's. Separate from `entries` only while the authored-pin path
-    /// still exists; it replaces that map outright once pins are gone.
-    pub(crate) previews: HashMap<NodeId, StoredContent>,
+pub(crate) struct PreviewStore {
+    /// Each preview node's current value, keyed by the node that published it —
+    /// a preview *is* the thing on screen, so its identity is the widget's.
+    pub(crate) entries: HashMap<NodeId, StoredContent>,
     /// Whether [`Self::reconcile`] has work to do: the document's retained
     /// set may have moved, or a fresh value landed that a viewer still needs
     /// uploaded at full resolution. The flag lives here rather than beside
@@ -40,16 +37,16 @@ pub(crate) struct PinnedOutputStore {
 #[derive(Debug)]
 pub(crate) enum StoredContent {
     Text(String),
-    Image(PinnedImage),
+    Image(PreviewImage),
     Error(String),
 }
 
 impl StoredContent {
     /// The image behind this value, or `None` for a formatted non-image and
     /// for a value that failed to prepare. The single downcast both readers —
-    /// the pin card and the image viewer — go through, so a new variant can't
+    /// the preview card and the image viewer — go through, so a new variant can't
     /// be handled by one and silently fall through the other.
-    pub(crate) fn image(&self) -> Option<&PinnedImage> {
+    pub(crate) fn image(&self) -> Option<&PreviewImage> {
         match self {
             StoredContent::Image(image) => Some(image),
             StoredContent::Text(_) | StoredContent::Error(_) => None,
@@ -69,7 +66,7 @@ impl StoredContent {
 }
 
 #[derive(Debug)]
-pub(crate) struct PinnedImage {
+pub(crate) struct PreviewImage {
     pub(crate) preview: ImageHandle,
     pub(crate) full: FullImage,
     pub(crate) native_size: UVec2,
@@ -91,36 +88,7 @@ struct PreparedImage {
     native_format: ColorFormat,
 }
 
-impl PinnedOutputStore {
-    /// Store one push's values against the authored ports they fill —
-    /// resolved by the caller, since only the compiled program knows which
-    /// port an interior slot is computing for.
-    pub(crate) fn ingest(
-        &mut self,
-        ui: &Ui,
-        values: Vec<(OutputPort, DynamicValue)>,
-        document: &Document,
-    ) {
-        if values.is_empty() {
-            return;
-        }
-        // Collected once for the whole push: the membership test recurses
-        // every nested graph, so asking per value re-walked the document
-        // once per pushed output.
-        let retained = document.retained_output_ports();
-        for (port, value) in values {
-            if !retained.contains(&port) {
-                continue;
-            }
-            // PortRef cannot identify a particular graph instance, so the
-            // latest push is the only value the UI can consistently present.
-            self.entries.insert(port, prepare_content(ui, value));
-            // A fresh image arrives preview-only; an open viewer needs the
-            // reconcile pass to upload its full-resolution texture.
-            self.needs_reconcile = true;
-        }
-    }
-
+impl PreviewStore {
     /// Store one preview node's freshly published value, replacing whatever it
     /// was showing.
     ///
@@ -128,7 +96,7 @@ impl PinnedOutputStore {
     /// arrives keyed by the node that published it, and a node that published
     /// exists. `reconcile` still drops it once that stops being true.
     pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {
-        self.previews.insert(node_id, prepare_content(ui, value));
+        self.entries.insert(node_id, prepare_content(ui, value));
         self.needs_reconcile = true;
     }
 
@@ -154,28 +122,23 @@ impl PinnedOutputStore {
         // Scoped to what the coming record pass draws: a full texture is up
         // to 8192² RGBA8, so uploading one for a viewer tab stacked behind
         // another in the same pane would cost hundreds of MB unseen.
-        for port in document.visible_viewer_outputs() {
-            self.materialize_full(ui, port);
+        for node_id in document.visible_viewer_nodes() {
+            self.materialize_full(ui, node_id);
         }
-        // Collected once: the pinned half recurses every nested graph, so
-        // calling it from the retain predicate cost one whole-document walk
-        // per stored entry.
-        let retained = document.retained_output_ports();
-        self.entries.retain(|port, _| retained.contains(port));
         // A preview's own node is its retention: delete the node and the value
         // it was showing has nothing left to draw it.
-        self.previews
+        self.entries
             .retain(|node_id, _| document.holds_preview_node(*node_id));
     }
 
-    fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
-        if let Some(StoredContent::Image(image)) = self.entries.get_mut(&port) {
+    fn materialize_full(&mut self, ui: &Ui, node_id: NodeId) {
+        if let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) {
             image.materialize_full(ui);
         }
     }
 }
 
-impl PinnedImage {
+impl PreviewImage {
     /// Upload the deferred source at full resolution and drop it, in place —
     /// a no-op once `full` is already `Resident` or `Failed`.
     ///
@@ -214,7 +177,7 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
         Ok(prepared) => match ui.register_image(prepared.raster) {
             Ok(preview) => {
                 let source_bytes = value.ram_usage().total();
-                StoredContent::Image(PinnedImage {
+                StoredContent::Image(PreviewImage {
                     preview,
                     full: FullImage::Deferred(value),
                     native_size: prepared.native_size,
@@ -228,7 +191,7 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
     }
 }
 
-/// The image behind a pinned value, or the message to show in its place.
+/// The image behind a published value, or the message to show in its place.
 fn as_image(value: &DynamicValue) -> Result<&LensImage, String> {
     value
         .as_custom::<LensImage>()
@@ -272,7 +235,7 @@ mod tests {
     use palantir::internals::UiHarness;
 
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
-    use scenarium::{Node, NodeId, NodeKind, SpecialNode, StaticValue};
+    use scenarium::{Node, NodeKind, SpecialNode, StaticValue};
 
     use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
@@ -285,19 +248,21 @@ mod tests {
         DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
     }
 
-    /// A document retaining `port` through a graph pin, an open viewer tab, or
-    /// both. The viewer tab is activated, as opening one always does — only a
-    /// group's visible tab draws, so only that one materializes.
-    fn demanding_document(port: OutputPort, pinned: bool, viewer: bool) -> Document {
+    /// A document holding one preview node, optionally with its viewer tab
+    /// open and active — only a group's visible tab draws, so only that one
+    /// materializes a full-resolution texture.
+    fn document_with_preview(viewer: bool) -> (Document, NodeId) {
         let mut document = Document::default();
-        document.graph.set_output_pinned(port, pinned);
+        let node = document
+            .graph
+            .add_func_node(&preview_func(Default::default()));
         if viewer {
             let primary = document.layout.primary().id;
-            let tab = TabRef::ImageViewer(port);
+            let tab = TabRef::ImageViewer(node);
             document.layout.find_or_insert(tab, primary);
             document.layout.apply(DockOp::ActivateTab { tab });
         }
-        document
+        (document, node)
     }
 
     #[test]
@@ -345,50 +310,21 @@ mod tests {
         assert_eq!(error, "value is not an image");
     }
 
+    /// An image's source is held only until a viewer needs it at full
+    /// resolution, then dropped — the card itself needs the thumbnail alone.
     #[test]
-    fn ingest_formats_text_filters_unwanted_ports_and_replaces_by_authoring_port() {
+    fn image_source_lives_only_until_the_full_texture_is_registered() {
         let mut arena = UiHarness::arena();
-        let mut store = PinnedOutputStore::default();
-        let node = NodeId::unique();
-        let first_port = OutputPort::new(node, 0);
-        let document = demanding_document(first_port, true, false);
-        store.ingest(
-            arena.ui(),
-            vec![
-                (first_port, DynamicValue::Static(StaticValue::Int(7))),
-                (
-                    OutputPort::new(node, 1),
-                    DynamicValue::Static(StaticValue::Int(9)),
-                ),
-            ],
-            &document,
-        );
-        assert_eq!(store.entries.len(), 1);
-        assert!(matches!(&store.entries[&first_port], StoredContent::Text(text) if text == "7"));
+        let mut store = PreviewStore::default();
+        let (card_only, node) = document_with_preview(false);
 
-        store.ingest(
+        store.ingest_preview(
             arena.ui(),
-            vec![(first_port, DynamicValue::Static(StaticValue::Int(8)))],
-            &document,
+            node,
+            image_value(512, 256, ColorFormat::RGBA_U8),
         );
-        assert_eq!(store.entries.len(), 1);
-        assert!(matches!(&store.entries[&first_port], StoredContent::Text(text) if text == "8"));
-    }
-
-    #[test]
-    fn image_source_lives_only_until_full_texture_is_registered() {
-        let mut arena = UiHarness::arena();
-        let mut store = PinnedOutputStore::default();
-        let node = NodeId::unique();
-        let first_port = OutputPort::new(node, 0);
-        let pinned = demanding_document(first_port, true, false);
-        store.ingest(
-            arena.ui(),
-            vec![(first_port, image_value(512, 256, ColorFormat::RGBA_U8))],
-            &pinned,
-        );
-        let StoredContent::Image(image) = &store.entries[&first_port] else {
-            panic!("image output must create an image resource");
+        let StoredContent::Image(image) = &store.entries[&node] else {
+            panic!("an image value must create an image resource");
         };
         assert_eq!(image.preview.size(), UVec2::new(256, 128));
         assert_eq!(image.native_size, UVec2::new(512, 256));
@@ -396,79 +332,72 @@ mod tests {
         assert_eq!(image.source_bytes, 512 * 256 * 4);
         assert!(matches!(image.full, FullImage::Deferred(_)));
 
-        let viewer = demanding_document(first_port, false, true);
+        let mut viewer = Document::default();
+        viewer.graph.insert(
+            node,
+            Node::new(NodeKind::Func(preview_func(Default::default()).id)),
+        );
+        let primary = viewer.layout.primary().id;
+        let tab = TabRef::ImageViewer(node);
+        viewer.layout.find_or_insert(tab, primary);
+        viewer.layout.apply(DockOp::ActivateTab { tab });
         store.reconcile(arena.ui(), &viewer);
-        let StoredContent::Image(image) = &store.entries[&first_port] else {
+        let StoredContent::Image(image) = &store.entries[&node] else {
             panic!("viewer demand must retain the image resource");
         };
         assert!(
             matches!(&image.full, FullImage::Resident(handle) if handle.size() == UVec2::new(512, 256))
         );
 
-        store.reconcile(arena.ui(), &pinned);
+        store.reconcile(arena.ui(), &card_only);
         assert!(
-            store.entries.contains_key(&first_port),
-            "a graph pin retains the preview after the viewer closes"
+            store.entries.contains_key(&node),
+            "the node retains its value after the viewer closes"
         );
         store.reconcile(arena.ui(), &Document::default());
         assert!(
             store.entries.is_empty(),
-            "no graph pin or viewer leaves presentation resources alive"
+            "no node leaves presentation resources alive"
         );
     }
 
-    /// A preview's own node is its retention: the value survives while the node
-    /// does, and goes when the node does. Nothing about pins or viewer tabs is
-    /// involved, and a fresh value still replaces the old one in place.
+    /// A preview's value lives exactly as long as its node: re-publishing
+    /// replaces in place, and deleting the node releases it.
     #[test]
     fn a_previews_value_lives_exactly_as_long_as_its_node() {
         let mut arena = UiHarness::arena();
-        let mut store = PinnedOutputStore::default();
-
-        let mut document = Document::default();
-        let preview = document
-            .graph
-            .add_func_node(&preview_func(Default::default()));
+        let mut store = PreviewStore::default();
+        let (mut document, node) = document_with_preview(false);
         let other = document
             .graph
             .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));
 
-        store.ingest_preview(
-            arena.ui(),
-            preview,
-            DynamicValue::Static(StaticValue::Int(7)),
-        );
-        // A value keyed to a node that is not a preview — the retain predicate
-        // has to reject it on the node's kind, not merely on the id existing.
+        store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(7)));
         store.ingest_preview(arena.ui(), other, DynamicValue::Static(StaticValue::Int(9)));
         assert!(
-            matches!(&store.previews[&preview], StoredContent::Text(t) if t == "7"),
+            matches!(&store.entries[&node], StoredContent::Text(t) if t == "7"),
             "the published value is formatted on receipt"
         );
 
-        store.ingest_preview(
-            arena.ui(),
-            preview,
-            DynamicValue::Static(StaticValue::Int(8)),
-        );
-        assert_eq!(store.previews.len(), 2, "a re-publish replaces in place");
-        assert!(matches!(&store.previews[&preview], StoredContent::Text(t) if t == "8"));
+        store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(8)));
+        assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
+        assert!(matches!(&store.entries[&node], StoredContent::Text(t) if t == "8"));
 
         store.reconcile_if_needed(arena.ui(), &document);
         assert!(
-            store.previews.contains_key(&preview),
+            store.entries.contains_key(&node),
             "a live preview node retains its value"
         );
         assert!(
-            !store.previews.contains_key(&other),
+            !store.entries.contains_key(&other),
             "a value keyed to a non-preview node is dropped"
         );
 
-        document.graph.detach_node(preview);
+        document.graph.detach_node(node);
         store.request_reconcile();
         store.reconcile_if_needed(arena.ui(), &document);
         assert!(
-            store.previews.is_empty(),
+            store.entries.is_empty(),
             "deleting the node releases what it was showing"
         );
     }
@@ -476,27 +405,21 @@ mod tests {
     #[test]
     fn the_reconcile_pass_runs_only_when_it_was_requested() {
         let mut arena = UiHarness::arena();
-        let mut store = PinnedOutputStore::default();
-        let node = NodeId::unique();
-        let port = OutputPort::new(node, 0);
-        let pinned = demanding_document(port, true, false);
-        store.ingest(
-            arena.ui(),
-            vec![(port, DynamicValue::Static(StaticValue::Int(7)))],
-            &pinned,
-        );
+        let mut store = PreviewStore::default();
+        let (document, node) = document_with_preview(false);
+        store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(7)));
 
-        // Spend the request `ingest` raised for its own value.
-        store.reconcile_if_needed(arena.ui(), &pinned);
-        assert!(store.entries.contains_key(&port), "the pin retains it");
+        // Spend the request `ingest_preview` raised for its own value.
+        store.reconcile_if_needed(arena.ui(), &document);
+        assert!(store.entries.contains_key(&node), "the node retains it");
 
-        // Against a document that retains nothing, the entry still survives
-        // while nothing has asked for a pass — that's what makes the gate
+        // Against a document holding nothing, the entry still survives while
+        // nothing has asked for a pass — that's what makes the gate
         // load-bearing rather than decorative.
         let empty = Document::default();
         store.reconcile_if_needed(arena.ui(), &empty);
         assert!(
-            store.entries.contains_key(&port),
+            store.entries.contains_key(&node),
             "an unrequested pass releases nothing"
         );
 
@@ -504,67 +427,7 @@ mod tests {
         store.reconcile_if_needed(arena.ui(), &empty);
         assert!(
             store.entries.is_empty(),
-            "a requested pass releases what the document stopped retaining"
-        );
-    }
-
-    #[test]
-    fn only_the_visible_viewer_tab_pays_for_a_full_texture() {
-        let mut arena = UiHarness::arena();
-        let mut store = PinnedOutputStore::default();
-        let front = NodeId::unique();
-        let back = NodeId::unique();
-        let front_port = OutputPort::new(front, 0);
-        let back_port = OutputPort::new(back, 0);
-
-        // Two viewer tabs stacked in one pane: `back_port` opens first, then
-        // `front_port` lands on top and becomes the group's visible tab.
-        let mut document = Document::default();
-        let primary = document.layout.primary().id;
-        for port in [back_port, front_port] {
-            document.graph.set_output_pinned(port, true);
-            document
-                .layout
-                .find_or_insert(TabRef::ImageViewer(port), primary);
-        }
-        document.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(front_port),
-        });
-        for port in [front_port, back_port] {
-            store.ingest(
-                arena.ui(),
-                vec![(port, image_value(512, 256, ColorFormat::RGBA_U8))],
-                &document,
-            );
-            assert!(store.entries.contains_key(&port));
-        }
-
-        fn full(store: &PinnedOutputStore, port: OutputPort) -> &FullImage {
-            match &store.entries[&port] {
-                StoredContent::Image(image) => &image.full,
-                other => panic!("expected an image resource, got {other:?}"),
-            }
-        }
-
-        store.reconcile_if_needed(arena.ui(), &document);
-        assert!(
-            matches!(full(&store, front_port), FullImage::Resident(_)),
-            "the visible tab's texture is uploaded"
-        );
-        assert!(
-            matches!(full(&store, back_port), FullImage::Deferred(_)),
-            "the tab behind it keeps only its preview — no full-resolution upload"
-        );
-
-        // Activating the back tab makes it the one that pays.
-        document.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(back_port),
-        });
-        store.request_reconcile();
-        store.reconcile_if_needed(arena.ui(), &document);
-        assert!(
-            matches!(full(&store, back_port), FullImage::Resident(_)),
-            "activation uploads the newly-visible tab"
+            "a requested pass releases what the document stopped holding"
         );
     }
 }

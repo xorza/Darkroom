@@ -14,26 +14,16 @@ use crate::core::edit::intent::types::Intent;
 /// land exactly on top of their originals.
 const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
-/// The `NodeId`s among `view`'s selection, dropping pin-preview keys (which
-/// carry no node identity). Shared by the Ctrl+D duplicate path
+/// The `NodeId`s in `view`'s selection. Shared by the Ctrl+D duplicate path
 /// ([`build_duplicate_intent`]) and the node context menu's duplicate action
-/// (`Editor::apply_node_menu_action`), which both need "just the selected
-/// nodes" from a selection that can also hold pinned-output keys.
+/// (`Editor::apply_node_menu_action`).
 pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
-    view.selected
-        .iter()
-        .filter_map(|k| match k {
-            ItemRef::Node(id) => Some(*id),
-            ItemRef::Pin(_) => None,
-        })
-        .collect()
+    view.selected.iter().map(|ItemRef::Node(id)| *id).collect()
 }
 
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
 /// Thin wrapper over [`build_duplicate_intent_for`] with the selected node
-/// bodies (pinned-output previews carry no node identity to clone, so
-/// they're filtered out) and incoming (external) wires dropped — the Ctrl+D
-/// path.
+/// bodies and incoming (external) wires dropped — the Ctrl+D path.
 pub(crate) fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
     let EditScopeRef { view, .. } = doc.scope(target)?;
     let node_ids = selected_node_ids(view);
@@ -139,21 +129,12 @@ pub(crate) fn build_duplicate_intent_for(
     })
 }
 
-/// The intents that remove every member of `selected`: a node key becomes
-/// `RemoveNode`, a pin key becomes an unpin (`SetOutputPinned { pinned:
-/// false }`) — deleting a preview widget just unpins its port rather than
-/// touching the node it lives on. Shared by the Delete/Backspace shortcut
-/// and the node context menu's "Remove".
+/// The intents that remove every member of `selected`. Shared by the
+/// Delete/Backspace shortcut and the node context menu's "Remove".
 pub(crate) fn remove_selection_intents(selected: &BTreeSet<ItemRef>) -> Vec<Intent> {
     selected
         .iter()
-        .map(|key| match *key {
-            ItemRef::Node(node_id) => Intent::RemoveNode { node_id },
-            ItemRef::Pin(port) => Intent::SetOutputPinned {
-                output: port,
-                pinned: false,
-            },
-        })
+        .map(|&ItemRef::Node(node_id)| Intent::RemoveNode { node_id })
         .collect()
 }
 

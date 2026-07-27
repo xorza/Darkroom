@@ -362,7 +362,6 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 #[test]
 fn group_drag_moves_all_and_undoes_as_one() {
     use glam::Vec2;
-    use scenarium::OutputPort;
 
     let mut doc: Document = test_graph().into();
     let a = doc.graph.iter().next().unwrap().id;
@@ -370,23 +369,14 @@ fn group_drag_moves_all_and_undoes_as_one() {
     let (ka, kb) = (ItemRef::Node(a), ItemRef::Node(b));
     let a0 = doc.main_view.item_placements[&ka];
     let b0 = doc.main_view.item_placements[&kb];
-    // A pinned-output preview joins the group too — a mixed node+pin drag,
-    // like grabbing a node that's multi-selected alongside a pin.
-    let port = OutputPort::new(a, 0);
-    let pin = ItemRef::Pin(port);
-    let pin0 = Vec2::new(100.0, -50.0);
-    doc.graph.set_output_pinned(port, true);
-    doc.main_view
-        .item_placements
-        .insert(ItemRef::Pin(port), pin0);
     let mut stack = ActionStack::new(1 << 20);
 
-    // Two frames of a group drag (grabbed = a), each frame moving a, b,
-    // and the pin by the running offset. Same grabbed ⇒ one coalesced entry.
+    // Two frames of a group drag (grabbed = a), each frame moving both nodes
+    // by the running offset. Same grabbed ⇒ one coalesced entry.
     let drag = |stack: &mut ActionStack, doc: &mut Document, off: Vec2| {
         let intent = Intent::MoveSelection {
             grabbed: ka,
-            moves: vec![(ka, a0 + off), (kb, b0 + off), (pin, pin0 + off)],
+            moves: vec![(ka, a0 + off), (kb, b0 + off)],
         };
         let step = build_step(intent, doc, GraphRef::Main).unwrap();
         apply_step(&step, doc, GraphRef::Main);
@@ -395,17 +385,15 @@ fn group_drag_moves_all_and_undoes_as_one() {
     drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
     drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
 
-    // All three ended at origin + last offset.
+    // Both ended at origin + last offset.
     let item_pos = |doc: &Document, key: &ItemRef| -> Vec2 { doc.main_view.item_placements[key] };
     assert_eq!(item_pos(&doc, &ka), a0 + Vec2::new(25.0, 5.0));
     assert_eq!(item_pos(&doc, &kb), b0 + Vec2::new(25.0, 5.0));
-    assert_eq!(item_pos(&doc, &pin), pin0 + Vec2::new(25.0, 5.0));
 
-    // One undo restores ALL THREE to their pre-drag positions (first `from`).
+    // One undo restores both to their pre-drag positions (first `from`).
     assert!(stack.undo(&mut doc, &mut |_| {}));
     assert_eq!(item_pos(&doc, &ka), a0);
     assert_eq!(item_pos(&doc, &kb), b0);
-    assert_eq!(item_pos(&doc, &pin), pin0);
     assert!(
         !stack.undo(&mut doc, &mut |_| {}),
         "the group drag collapsed to exactly one entry"
@@ -796,24 +784,6 @@ fn remove_boundary_port_round_trips_severed_wiring() {
             Intent::RemoveBoundaryPort {
                 side: BoundarySide::Input,
                 idx: 9,
-            },
-            &doc,
-            target,
-        )
-        .is_err()
-    );
-    // A pinned boundary output refuses removal (unpin first).
-    doc.graph
-        .graphs
-        .get_mut(&def_id)
-        .unwrap()
-        .body
-        .set_output_pinned(scenarium::OutputPort::new(boundary, 0), true);
-    assert!(
-        build_step(
-            Intent::RemoveBoundaryPort {
-                side: BoundarySide::Input,
-                idx: 0,
             },
             &doc,
             target,

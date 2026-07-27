@@ -162,13 +162,6 @@ impl App {
                     }
                     self.editor.run_state.apply_worker_status(&status);
                 }
-                WorkerReport::PinnedOutputs(outputs) => {
-                    self.editor.run_state.ingest_pinned_outputs(
-                        ui,
-                        outputs,
-                        &self.workspace.open.document,
-                    );
-                }
             }
         }
         // After the reports, so a value published during this run lands against

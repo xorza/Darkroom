@@ -61,8 +61,6 @@ pub enum GraphValidationError {
         event_idx: usize,
         subscriber: NodeId,
     },
-    #[error("pinned output on missing node {node_id:?}")]
-    PinnedOutputMissingNode { node_id: NodeId },
     #[error("exposed event {name:?} names missing emitter {emitter:?}")]
     ExposedEventMissingEmitter { name: String, emitter: NodeId },
     #[error("local graph has a nil id")]

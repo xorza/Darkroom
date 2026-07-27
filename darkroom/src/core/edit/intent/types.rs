@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{Binding, CacheMode, DataType, InputPort, Node, NodeId, OutputPort, Subscription};
+use scenarium::{Binding, CacheMode, DataType, InputPort, Node, NodeId, Subscription};
 use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, GraphDef, GraphId};
 use serde::{Deserialize, Serialize};
 
@@ -241,17 +241,6 @@ pub(crate) enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
-    /// Pin (`pinned = true`) or unpin (`false`) an output port, keeping it
-    /// computed and read even with no in-graph consumer (e.g. a GUI
-    /// inspector reading it live). Idempotent — a no-op when the flag
-    /// already matches. Cmd(/Ctrl)+click on an output port circle, or its
-    /// context-menu toggle — but also reachable from a script's generic
-    /// `apply()` (see `core::script::register_mutations`), so `build_step`
-    /// resolves `node_id` rather than trusting it.
-    SetOutputPinned {
-        output: OutputPort,
-        pinned: bool,
-    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -379,24 +368,6 @@ pub(crate) enum GraphStep {
         subscriber: NodeId,
         from: bool,
         to: bool,
-    },
-    /// Mark or clear whether an output port is pinned. `from`/`to` are the
-    /// pinned-state booleans — exact inverses, one step type backs the toggle.
-    /// `was_selected` is whether the pin's preview widget was selected
-    /// *before* this edit — unpinning drops its selection membership (the
-    /// widget disappears with it), so a revert back to `pinned` restores it,
-    /// mirroring `RemoveNode`'s `selected`.
-    SetOutputPinned {
-        output: OutputPort,
-        from: bool,
-        to: bool,
-        was_selected: bool,
-        /// The widget's paint-stack slot + position before an unpin
-        /// (`Some` iff `from` is pinned), so reverting the unpin restores
-        /// the item exactly where it sat. A pin apply inserts a fresh
-        /// item at the top instead (the caller's seed `MoveSelection`
-        /// places it).
-        prior_slot: Option<(usize, Vec2)>,
     },
 }
 

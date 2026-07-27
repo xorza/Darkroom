@@ -500,7 +500,6 @@ mod cache_persistence {
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-        graph.set_output_pinned(OutputPort::new(mult_id, 0), true);
 
         // First run: everything computes; `mult` is stored to disk.
         let mut engine = disk_engine(&dir);
@@ -551,24 +550,19 @@ mod cache_persistence {
                 .any(|n| n.e_node_id == root_execution_node(mult_id)),
             "mult did not recompute"
         );
-        let pinned = reporter.expect_pinned();
-        assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
-        assert_eq!(pinned.values.len(), 1);
-        assert_eq!(pinned.values[0].port_idx, 0);
-        assert_eq!(pinned.values[0].value.as_i64(), Some(49));
         assert!(
             !stats
                 .node_ram
                 .iter()
                 .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
-            "a full run does not retain the Disk node after delivering its pin"
+            "a full run does not retain the Disk node after the run"
         );
         let executed_allocation = stats.executed_nodes.as_ptr();
         let executed_capacity = stats.executed_nodes.capacity();
         assert!(executed_capacity > 0);
 
-        // Refreshing that preview targets `mult` directly. Delivery hydrates the disk hit,
-        // but targeting must not turn it into an implicit RAM cache.
+        // A targeted run on `mult` hydrates the disk hit, but targeting must not
+        // turn it into an implicit RAM cache.
         let mut reporter = CollectingReporter::default();
         engine
             .execute(
@@ -588,13 +582,10 @@ mod cache_persistence {
                 .node_ram
                 .iter()
                 .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
-            "targeted refresh releases the hydrated Disk value after delivery"
+            "a targeted run releases the hydrated Disk value"
         );
         assert_eq!(stats.executed_nodes.as_ptr(), executed_allocation);
         assert_eq!(stats.executed_nodes.capacity(), executed_capacity);
-        let pinned = reporter.expect_pinned();
-        assert_eq!(pinned.e_node_id, root_execution_node(mult_id));
-        assert_eq!(pinned.values[0].value.as_i64(), Some(49));
 
         // Changing one input to a const makes `mult` miss, while its other input
         // still needs `get_a`, so the cut keeps the source alive and it runs.
@@ -3553,14 +3544,6 @@ mod composite_behavior {
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
         assert_eq!(stats.executed_nodes.len(), 1);
 
-        let mut pushed = Vec::new();
-        for outputs in &reporter.pinned {
-            assert_eq!(outputs.values[0].value.as_i64(), Some(11));
-            pushed.push(outputs.e_node_id);
-        }
-        pushed.sort();
-        let expected = vec![first_e_node_id];
-        assert_eq!(pushed, expected);
         assert!(
             graph
                 .find(inner_id, NodeSearch::Recursive)
@@ -4345,11 +4328,10 @@ mod stats {
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
         // sum's required input 0 bound to an output get_a doesn't have,
-        // plus a subscription to an event it doesn't emit and a pin on the
-        // vanished output — the drift a changed library leaves behind.
+        // plus a subscription to an event it doesn't emit — the drift a changed
+        // library leaves behind.
         graph.set_input_binding(InputPort::new(sum_id, 0), Binding::bind(get_a_id, 9));
         graph.subscribe(get_a_id, 9, sum_id);
-        graph.set_output_pinned(OutputPort::new(get_a_id, 9), true);
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph
@@ -4882,72 +4864,6 @@ mod output_demand {
         assert_eq!(
             *seen_demand.lock().await,
             vec![OutputDemand::Produce, OutputDemand::Skip]
-        );
-
-        Ok(())
-    }
-
-    /// A pinned output (e.g. a GUI inspector reading a port live) makes an
-    /// otherwise-unconsumed output `Produce` too — same "split" fixture as
-    /// `unused_output_marked_skip`, output 1 still has no in-graph consumer, but
-    /// is now flagged pinned.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn pinned_output_is_needed_with_no_consumer() -> TestResult {
-        let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_demand_l = seen_demand.clone();
-
-        let mut library = Library::default();
-        library.add(
-            Func::new(SPLIT_FUNC, "split")
-                .output(FuncOutput::new("a", DataType::Int))
-                .output(FuncOutput::new("b", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { demand, outputs, .. }| { seen = seen_demand_l.clone() } => {
-                        seen.lock().await.extend_from_slice(demand);
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
-                        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
-                        Ok(())
-                    }
-                )),
-        );
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .sink()
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(|_| { Ok(()) })),
-        );
-
-        let split_id = NodeId::unique();
-        let sink_id = NodeId::unique();
-        let mut graph = Graph::default();
-        graph.insert(split_id, node(&library, "split"));
-        graph.insert(sink_id, node(&library, "sink"));
-        // Output 0 has a real consumer; output 1 has none, but is pinned.
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
-        graph.set_output_pinned(OutputPort::new(split_id, 1), true);
-        graph.validate_debug();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        let split = execution_node_id(&eg, &graph, &library, "split").unwrap();
-        assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
-        assert_eq!(
-            eg.node_output_demand(split)[1],
-            OutputDemand::Produce,
-            "the planner demands a pinned port even with no in-graph consumer"
-        );
-        assert_eq!(
-            eg.node_output_readers(split),
-            &[1, 0],
-            "the pinned output does not create a synthetic binding reader"
-        );
-
-        // The lambda computes both outputs instead of skipping the unconsumed one.
-        assert_eq!(
-            *seen_demand.lock().await,
-            vec![OutputDemand::Produce, OutputDemand::Produce]
         );
 
         Ok(())
@@ -6121,7 +6037,6 @@ mod compile_regressions {
             .unwrap()
             .id;
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(str_id, 0));
-        graph.set_output_pinned(OutputPort::new(str_id, 0), true);
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
@@ -6139,14 +6054,6 @@ mod compile_regressions {
                 .data_type,
             DataType::String,
             "make_str reads its own type, not its neighbor's"
-        );
-        assert!(
-            !engine.compiled.program.outputs[engine.compiled.program.by_id(make_int).outputs][0]
-                .pinned
-        );
-        assert!(
-            engine.compiled.program.outputs[engine.compiled.program.by_id(make_str).outputs][0]
-                .pinned
         );
     }
 

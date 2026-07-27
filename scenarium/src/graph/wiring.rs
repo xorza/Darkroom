@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch, OutputPort, Subscription};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch, Subscription};
 
 fn binding_touches(port: InputPort, binding: &Binding, node_id: NodeId) -> bool {
     port.node_id == node_id || matches!(binding, Binding::Bind(src) if src.node_id == node_id)
@@ -47,7 +47,6 @@ pub struct DetachedNode {
     pub node: Node,
     pub bindings: Vec<BindingEntry>,
     pub subscriptions: Vec<Subscription>,
-    pub pinned_outputs: Vec<OutputPort>,
 }
 
 impl DetachedNode {
@@ -82,18 +81,6 @@ impl DetachedNode {
                 .all(|subscriptions| subscriptions[0] < subscriptions[1]),
             "detached subscriptions must be unique and ordered"
         );
-        assert!(
-            self.pinned_outputs
-                .iter()
-                .all(|port| port.node_id == self.node_id),
-            "detached pins must belong to the detached node"
-        );
-        assert!(
-            self.pinned_outputs
-                .windows(2)
-                .all(|ports| ports[0] < ports[1]),
-            "detached pins must be unique and ordered"
-        );
     }
 }
 
@@ -116,12 +103,6 @@ impl Graph {
                 .copied()
                 .filter(|subscription| subscription_touches(subscription, node_id))
                 .collect(),
-            pinned_outputs: self
-                .pinned_outputs
-                .iter()
-                .copied()
-                .filter(|port| port.node_id == node_id)
-                .collect(),
         })
     }
 
@@ -135,7 +116,6 @@ impl Graph {
             .retain(|port, binding| !binding_touches(*port, binding, node_id));
         self.subscriptions
             .retain(|subscription| !subscription_touches(subscription, node_id));
-        self.pinned_outputs.retain(|port| port.node_id != node_id);
         detached
     }
 
@@ -159,20 +139,12 @@ impl Graph {
                 .all(|subscription| !self.subscriptions.contains(subscription)),
             "cannot attach over subscriptions created after detachment"
         );
-        assert!(
-            detached
-                .pinned_outputs
-                .iter()
-                .all(|port| !self.pinned_outputs.contains(port)),
-            "cannot attach over pins created after detachment"
-        );
 
         let DetachedNode {
             node_id,
             node,
             bindings,
             subscriptions,
-            pinned_outputs,
         } = detached;
         self.insert(node_id, node);
         self.bindings.extend(
@@ -181,7 +153,6 @@ impl Graph {
                 .map(|entry| (entry.port, entry.binding)),
         );
         self.subscriptions.extend(subscriptions);
-        self.pinned_outputs.extend(pinned_outputs);
     }
 
     pub fn set_input_binding(&mut self, port: InputPort, binding: impl Into<Option<Binding>>) {
@@ -232,22 +203,6 @@ impl Graph {
 
     pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
-    }
-
-    pub fn set_output_pinned(&mut self, port: OutputPort, pinned: bool) {
-        if pinned {
-            self.pinned_outputs.insert(port);
-        } else {
-            self.pinned_outputs.remove(&port);
-        }
-    }
-
-    pub fn is_output_pinned(&self, port: OutputPort) -> bool {
-        self.pinned_outputs.contains(&port)
-    }
-
-    pub fn pinned_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
-        self.pinned_outputs.iter().copied()
     }
 
     pub fn subscribers(

@@ -159,10 +159,7 @@ fn boundary_nodes_mirror_graph_interface() {
     let expected_node_order = view
         .item_placements
         .keys()
-        .filter_map(|item| match item {
-            ItemRef::Node(node_id) => Some(*node_id),
-            ItemRef::Pin(_) => None,
-        })
+        .map(|ItemRef::Node(node_id)| *node_id)
         .collect::<Vec<_>>();
     assert_eq!(
         graph.nodes().map(|n| n.id).collect::<Vec<_>>(),
@@ -482,65 +479,6 @@ fn func_events_project_in_order_alongside_outputs() {
         output_names,
         ["Delta", "Frame #"],
         "data outputs are unaffected by events"
-    );
-}
-
-#[test]
-fn pinned_output_projects_per_output_port_and_shares_the_z_order() {
-    use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
-
-    // "frame event" has two data outputs (Delta, Frame #); pin only the
-    // second and confirm the flag lands on the right pooled entry, not
-    // both or neither.
-    let library = worker_events_library();
-    let mut graph = Graph::default();
-    let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
-    let node_id = graph.add(node);
-    let port = OutputPort::new(node_id, 1);
-    graph.set_output_pinned(port, true);
-
-    let mut view = GraphView::for_graph(&graph);
-    let pin_key = ItemRef::Pin(port);
-    *view.item_placements.get_mut(&pin_key).unwrap() = Vec2::new(320.0, -40.0);
-    let mut scene = Scene::default();
-    let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let projected = scene.graph(GraphRef::Main).unwrap();
-
-    let n = projected.node(node_id).unwrap();
-    let pins: Vec<Option<Vec2>> = projected
-        .outputs(n.outputs)
-        .iter()
-        .map(|o| o.pin_position)
-        .collect();
-    assert_eq!(
-        pins,
-        [None, Some(Vec2::new(320.0, -40.0))],
-        "only the pinned port carries a position, projected from its item"
-    );
-    // The surfaced pin carries the node it hangs off, so a pin scan can
-    // reach its run affordance and its owning graph without a second lookup.
-    let pinned: Vec<_> = projected.pinned_outputs().collect();
-    assert_eq!(pinned.len(), 1);
-    assert_eq!(pinned[0].port, port);
-    assert_eq!(pinned[0].node.id, node_id);
-    assert_eq!(pinned[0].node.owner, GraphRef::Main);
-
-    // The shared paint stack mirrors `item_placements` order — node then
-    // pin here (`for_graph` seeds pins after nodes)...
-    assert_eq!(
-        projected.z_order(),
-        [ItemRef::Node(node_id), pin_key],
-        "z_order interleaves node bodies and pin previews in item order"
-    );
-
-    // ...and a reorder (pin buried beneath the node) projects verbatim.
-    view.move_item_to_index(&pin_key, 0);
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    assert_eq!(
-        scene.graph(GraphRef::Main).unwrap().z_order(),
-        [pin_key, ItemRef::Node(node_id)],
-        "restacking the view items restacks the projected z_order"
     );
 }
 

@@ -261,22 +261,4 @@ pub(crate) mod internals {
             self.node_sizes.insert(id, size);
         }
     }
-
-    impl<K: Eq + Hash + Copy> PortLayer<K> {
-        /// Seed one glyph's resolved center, standing in for a past frame's
-        /// record of it. Enough for the consumers that read nothing but
-        /// [`Self::center`] — wire anchoring and pin resolution.
-        pub(crate) fn seed_center(&mut self, key: K, center: Vec2) {
-            self.live.insert(
-                key,
-                PortInfo {
-                    layout_center: Some(center),
-                    screen_rect: None,
-                    hovered: false,
-                    drag_started: false,
-                    dragging: false,
-                },
-            );
-        }
-    }
 }

@@ -257,8 +257,7 @@ fn completed_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionO
             WorkerReport::Installed(_)
             | WorkerReport::Cleared
             | WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Status(_)
-            | WorkerReport::PinnedOutputs(_) => None,
+            | WorkerReport::Status(_) => None,
         };
         if let Some(result) = result {
             tx.try_send(result).ok();
@@ -297,9 +296,7 @@ async fn next_completed_run(rx: &mut mpsc::Receiver<WorkerReport>) -> CompletedR
                     result: Err(error),
                 };
             }
-            WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Status(_)
-            | WorkerReport::PinnedOutputs(_) => {}
+            WorkerReport::Error(WorkerError::CacheEviction { .. }) | WorkerReport::Status(_) => {}
         }
     }
 }
@@ -735,12 +732,6 @@ async fn worker_streams_node_patches_before_completion() {
                     }
                 }
             }
-            WorkerReport::PinnedOutputs(_) => {
-                assert!(
-                    installed.is_some(),
-                    "PinnedOutputs arrived before Installed"
-                );
-            }
             WorkerReport::Status(status)
                 if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
             {
@@ -1097,8 +1088,7 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
             WorkerReport::Installed(_)
             | WorkerReport::Cleared
             | WorkerReport::Error(WorkerError::Execution { .. })
-            | WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::PinnedOutputs(_) => {}
+            | WorkerReport::Error(WorkerError::CacheEviction { .. }) => {}
         }
     }
     assert_eq!(

@@ -1,5 +1,5 @@
 //! Last graph run's centralized runtime state: per-node execution outcomes
-//! and logs, plus the latest worker-pushed values for pinned outputs. One
+//! and logs, plus the latest value each preview node published. One
 //! [`RunState`] per [`Editor`], updated as worker reports arrive.
 //!
 //! Execution dissolves graphs and remaps interior node ids, so a run's
@@ -35,16 +35,13 @@ use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
-use scenarium::OutputPort;
-use scenarium::PinnedOutputs;
 use scenarium::RamUsage;
 use scenarium::RunError;
 use scenarium::WorkerActivity;
 use scenarium::WorkerStatus;
 use scenarium::WorkerStatusKind;
 
-use crate::core::document::Document;
-use crate::gui::pinned_output::PinnedOutputStore;
+use crate::gui::preview_store::PreviewStore;
 
 fn attributed_nodes(
     compiled: &CompiledGraph,
@@ -127,7 +124,7 @@ pub(crate) struct NodeLog {
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
-    pub(crate) pinned_outputs: PinnedOutputStore,
+    pub(crate) previews: PreviewStore,
     /// The program acknowledged by the worker's ordered report stream. Every
     /// subsequent flat progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
@@ -284,11 +281,9 @@ impl RunState {
         for node in self.nodes.values_mut() {
             node.ram = RamUsage::default();
         }
-        self.pinned_outputs.entries.clear();
-        // A preview's value is a run result exactly like a pinned one, so it
-        // goes for the same reason: with the cache behind it evicted, what it
-        // shows can no longer be re-derived without another run.
-        self.pinned_outputs.previews.clear();
+        // A preview's value is a run result: with the cache behind it evicted,
+        // what it shows can no longer be re-derived without another run.
+        self.previews.entries.clear();
         // Every node's RAM was just zeroed, so what survives here is exactly
         // the nodes still carrying a status or a log — the run results the
         // eviction deliberately leaves standing.
@@ -329,61 +324,10 @@ impl RunState {
         }
     }
 
-    /// Route one flat node's delivered values to the authored ports they fill.
-    ///
-    /// A value arrives addressed to the node that *computed* it, which is the
-    /// node the user pinned only for a leaf in the entry graph. Two things can
-    /// claim it:
-    ///
-    /// - **Something pinned it.** `pinned_ports` resolves that through the
-    ///   compiled program, so a graph instance's port finds the interior slot
-    ///   backing it. Ports backed by several occurrences resolve to nothing —
-    ///   one preview widget cannot show a value per instance.
-    /// - **Nothing did, and it came off a top-level node.** A run root
-    ///   delivers every output it has, pinned or not; that is what fills a
-    ///   viewer tab whose pin has since been removed. An interior node's
-    ///   unrequested outputs have no addressable port and are dropped.
-    pub(crate) fn ingest_pinned_outputs(
-        &mut self,
-        ui: &Ui,
-        pushed: PinnedOutputs,
-        document: &Document,
-    ) {
-        let compiled = Arc::clone(
-            self.compiled
-                .as_ref()
-                .expect("worker pushed outputs before installing a compiled graph"),
-        );
-        let mut attribution = attributed_nodes(&compiled, pushed.e_node_id);
-        let leaf = attribution
-            .next()
-            .expect("execution attribution must start with its authored leaf");
-        let top_level = attribution.next().is_none();
-
-        let mut values = Vec::with_capacity(pushed.values.len());
-        for output in pushed.values {
-            let requested = compiled.pinned_ports(pushed.e_node_id, output.port_idx);
-            let Some((last, rest)) = requested.split_last() else {
-                if top_level {
-                    values.push((OutputPort::new(leaf, output.port_idx), output.value));
-                }
-                continue;
-            };
-            // One slot answering two authored ports is an instance port
-            // pinned over its own pinned interior producer — rare, so the
-            // clones it costs are too.
-            for port in rest {
-                values.push((*port, output.value.clone()));
-            }
-            values.push((*last, output.value));
-        }
-        self.pinned_outputs.ingest(ui, values, document);
-    }
-
     /// Store what preview nodes published this frame, against the authored
     /// nodes that published them.
     ///
-    /// Unlike a pinned push, there is nothing to resolve: a preview is
+    /// Nothing to resolve, unlike the old pinned push: a preview is
     /// entry-only, so its execution id attributes to exactly one authored node
     /// and that node is the widget. A value whose id belongs to an earlier
     /// compile is dropped — the node it named may not exist any more, and a
@@ -410,16 +354,14 @@ impl RunState {
             let Some(node_id) = attribution.next() else {
                 continue;
             };
-            self.pinned_outputs.ingest_preview(ui, node_id, value);
+            self.previews.ingest_preview(ui, node_id, value);
         }
     }
 
-    /// Drop everything visible from a failed run: no glow, logs, or pinned
-    /// values.
+    /// Drop everything visible from a failed run: no glow, logs, or values.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
-        self.pinned_outputs.entries.clear();
-        self.pinned_outputs.previews.clear();
+        self.previews.entries.clear();
     }
 }
 
@@ -444,14 +386,12 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palantir::internals::UiHarness;
 
     use scenarium::CompiledGraphBuilder;
     use scenarium::FuncId;
-    use scenarium::{DynamicValue, LogEntry, LogLevel, NodeStatus};
-    use scenarium::{OutputPort, PinnedOutput, StaticValue};
+    use scenarium::{LogEntry, LogLevel, NodeStatus};
 
-    use crate::gui::pinned_output::StoredContent;
+    use crate::gui::preview_store::StoredContent;
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
@@ -552,20 +492,14 @@ mod tests {
             });
         state.nodes.entry(remaining_node).or_default().ram = RamUsage { cpu: 13, gpu: 0 };
         state.cache_ram = RamUsage { cpu: 24, gpu: 0 };
-        let evicted_port = OutputPort::new(evicted_node, 0);
-        let remaining_port = OutputPort::new(remaining_node, 0);
         state
-            .pinned_outputs
-            .entries
-            .insert(evicted_port, StoredContent::Text("old".into()));
-        state
-            .pinned_outputs
-            .entries
-            .insert(remaining_port, StoredContent::Text("kept".into()));
-        state
-            .pinned_outputs
             .previews
+            .entries
             .insert(evicted_node, StoredContent::Text("shown".into()));
+        state
+            .previews
+            .entries
+            .insert(remaining_node, StoredContent::Text("kept".into()));
 
         state.clear_cache_projections();
 
@@ -574,10 +508,8 @@ mod tests {
         assert_eq!(state.ram(remaining_node), RamUsage::default());
         assert_eq!(state.status(evicted_node), ExecStatus::Cached);
         assert_eq!(state.nodes[&remaining_node].logs[0].message, "kept");
-        assert!(!state.pinned_outputs.entries.contains_key(&evicted_port));
-        assert!(!state.pinned_outputs.entries.contains_key(&remaining_port));
         assert!(
-            state.pinned_outputs.previews.is_empty(),
+            state.previews.entries.is_empty(),
             "a preview's value is a run result too, and goes with the rest"
         );
     }
@@ -633,146 +565,6 @@ mod tests {
         assert_eq!(rs.status(inst_b), ExecStatus::Executed(3.0));
     }
 
-    /// A published preview value lands on the node that published it, and only
-    /// when a compile can vouch for the id. Nothing to resolve here the way a
-    /// pinned push has: a preview is entry-only, so its execution id attributes
-    /// to exactly one authored node and that node is the widget.
-    #[test]
-    fn a_published_preview_lands_on_its_own_node_once_a_compile_vouches_for_it() {
-        let node = nid(1);
-        let e_node_id = eid(1);
-        let mut arena = UiHarness::arena();
-
-        // Before any install there is nothing to attribute against, so the
-        // value is dropped rather than guessed at.
-        let mut run_state = RunState::default();
-        run_state.ingest_previews(
-            arena.ui(),
-            vec![(e_node_id, DynamicValue::Static(StaticValue::Int(7)))],
-        );
-        assert!(run_state.pinned_outputs.previews.is_empty());
-
-        let mut builder = CompiledGraphBuilder::new();
-        builder.insert_leaf(e_node_id, [], node);
-        run_state.compiled = Some(builder.build());
-        // An id from some other compile has no attribution; it must not panic
-        // the drain, because a re-install can outrace a value already in flight.
-        run_state.ingest_previews(
-            arena.ui(),
-            vec![
-                (e_node_id, DynamicValue::Static(StaticValue::Int(7))),
-                (eid(99), DynamicValue::Static(StaticValue::Int(8))),
-            ],
-        );
-        assert_eq!(run_state.pinned_outputs.previews.len(), 1);
-        assert!(matches!(
-            &run_state.pinned_outputs.previews[&node],
-            StoredContent::Text(text) if text == "7"
-        ));
-    }
-
-    #[test]
-    fn a_pinned_instance_port_is_filled_by_the_interior_slot_backing_it() {
-        // A graph instance dissolves at compile time, so the value for its
-        // port arrives addressed to an interior node the user never pinned.
-        // The compiled program says which authored port that slot answers.
-        let interior = nid(1);
-        let instance = nid(10);
-        let backing = eid(101);
-        let instance_port = OutputPort::new(instance, 0);
-
-        let mut builder = CompiledGraphBuilder::new();
-        builder.insert_leaf(backing, [instance], interior);
-        builder.insert_pinned_port(backing, 0, instance_port);
-        let mut run_state = RunState {
-            compiled: Some(builder.build()),
-            ..Default::default()
-        };
-
-        let mut document = Document::default();
-        document.graph.set_output_pinned(instance_port, true);
-        let mut arena = UiHarness::arena();
-        run_state.ingest_pinned_outputs(
-            arena.ui(),
-            PinnedOutputs {
-                e_node_id: backing,
-                values: vec![PinnedOutput {
-                    port_idx: 0,
-                    value: DynamicValue::Static(StaticValue::Int(7)),
-                }],
-            },
-            &document,
-        );
-
-        assert!(matches!(
-            &run_state.pinned_outputs.entries[&instance_port],
-            StoredContent::Text(text) if text == "7"
-        ));
-        assert!(
-            !run_state
-                .pinned_outputs
-                .entries
-                .contains_key(&OutputPort::new(interior, 0)),
-            "the value lands on the port that was pinned, not on the node that computed it"
-        );
-    }
-
-    #[test]
-    fn unrequested_outputs_fill_only_a_top_level_nodes_own_ports() {
-        // A run root delivers every output it has, pinned or not. Those are
-        // addressable only when the node is in the entry graph — an interior
-        // node's port names one occurrence among possibly many, and the
-        // preview widget cannot say which.
-        let interior = nid(1);
-        let (instance_a, instance_b) = (nid(10), nid(20));
-        let (nested_a, nested_b) = (eid(101), eid(102));
-        let top_level = nid(2);
-        let top_level_occurrence = eid(103);
-        let mut run_state = run_state([
-            (nested_a, vec![instance_a], interior),
-            (nested_b, vec![instance_b], interior),
-            (top_level_occurrence, vec![], top_level),
-        ]);
-        let mut document = Document::default();
-        let nested_port = OutputPort::new(interior, 0);
-        let top_level_port = OutputPort::new(top_level, 0);
-        document.graph.set_output_pinned(nested_port, true);
-        document.graph.set_output_pinned(top_level_port, true);
-        let mut arena = UiHarness::arena();
-
-        let mut push = |run_state: &mut RunState, e_node_id, value| {
-            run_state.ingest_pinned_outputs(
-                arena.ui(),
-                PinnedOutputs {
-                    e_node_id,
-                    values: vec![PinnedOutput {
-                        port_idx: 0,
-                        value: DynamicValue::Static(StaticValue::Int(value)),
-                    }],
-                },
-                &document,
-            );
-        };
-
-        push(&mut run_state, nested_a, 7);
-        push(&mut run_state, nested_b, 8);
-        assert!(
-            !run_state.pinned_outputs.entries.contains_key(&nested_port),
-            "neither occurrence claims the shared port"
-        );
-
-        // The entry graph has exactly one occurrence per node, so an
-        // unrequested output there names one port and fills it.
-        push(&mut run_state, top_level_occurrence, 9);
-        assert!(matches!(
-            &run_state.pinned_outputs.entries[&top_level_port],
-            StoredContent::Text(text) if text == "9"
-        ));
-        assert_eq!(run_state.pinned_outputs.entries.len(), 1);
-    }
-
-    /// A node nested two levels deep accumulates onto *both* enclosing
-    /// instances — the outer instance's total includes nested cost.
     #[test]
     fn outer_instance_total_includes_nested() {
         let interior = nid(1);

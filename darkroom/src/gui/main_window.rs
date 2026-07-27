@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
-use scenarium::OutputPort;
+use scenarium::NodeId;
 
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
@@ -11,12 +11,12 @@ use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
-use crate::gui::canvas::pin_ui::emit_pin_image_opens;
 use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::prepass::emit_graph_opens;
+use crate::gui::node::preview_row::emit_preview_image_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
@@ -49,7 +49,7 @@ pub(crate) struct MainWindow {
     /// One image-viewer navigation state per rendered viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
     /// centralized in the pinned-output store.
-    pub(crate) image_viewers: HashMap<OutputPort, ImageViewer>,
+    pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
     dock: DockUi,
 }
 
@@ -68,10 +68,10 @@ impl MainWindow {
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
+        emit_preview_image_opens(ui, scene, actions);
         for graph in scene.graphs() {
             emit_graph_opens(ui, graph, actions);
         }
-        emit_pin_image_opens(ui, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -106,9 +106,9 @@ impl MainWindow {
         // and nothing signals a rename cheaply enough to cache against. The
         // cost is proportional to *open viewer tabs*, which is normally zero,
         // so it stays off the common path on its own.
-        let viewer_labels: HashMap<OutputPort, String> = doc
-            .viewer_outputs()
-            .map(|port| (port, image_viewer::port_label(doc, port)))
+        let viewer_labels: HashMap<NodeId, String> = doc
+            .viewer_nodes()
+            .map(|node_id| (node_id, image_viewer::node_label(doc, node_id)))
             .collect();
         let dock_cx = DockContext {
             doc,
@@ -155,15 +155,15 @@ impl MainWindow {
                             preferences_view::show(ui, ctx.theme, prefs)
                         });
                     }
-                    TabRef::ImageViewer(port) => {
+                    TabRef::ImageViewer(node_id) => {
                         let title = viewer_labels
-                            .get(&port)
+                            .get(&node_id)
                             .map(String::as_str)
                             .unwrap_or("image");
-                        let source = ctx.run_state.pinned_outputs.entries.get(&port);
+                        let source = ctx.run_state.previews.entries.get(&node_id);
                         let viewer = image_viewers
-                            .entry(port)
-                            .or_insert_with(|| ImageViewer::new(port));
+                            .entry(node_id)
+                            .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
                         claim(&mut command, || {

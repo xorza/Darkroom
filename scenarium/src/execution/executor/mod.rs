@@ -281,7 +281,6 @@ impl ExecutionFrame<'_, '_> {
     /// The tail both reuse paths share, once the value is readable.
     fn deliver_reused(&mut self, node_idx: NodeIdx) {
         self.node_outcomes[node_idx] = NodeOutcome::Reused;
-        self.emit_pinned_values(node_idx);
         self.release_drained_outputs(node_idx);
     }
 
@@ -390,8 +389,6 @@ impl ExecutionFrame<'_, '_> {
         if self.plan.event_sources.contains(node_idx) {
             self.collect_event_triggers(node_idx, &event_state);
         }
-        // Deliver before later consumers can release values; host delivery is not a reader.
-        self.emit_pinned_values(node_idx);
         // Persist this node's cache the moment it finishes (durable as the run progresses),
         // not at the end of the whole run. The snapshot is taken synchronously inside
         // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
