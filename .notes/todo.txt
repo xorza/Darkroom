@@ -12,7 +12,7 @@ auto chosen reference frame for stacking and manually specified
 
 visual node groups
 
-audit allocations overshoot , see where reserve_exxact would be better
+audit allocations overshoot , see where reserve_exact would be better
 
 invert removed retain logic to optimize
 
@@ -24,7 +24,7 @@ save caches on cache click
 
 subgraph to newnodeui
 
-what is resourcestamps  simplify
+resourcestamps  simplify
 
 contextmenu for boundary nodes
 
