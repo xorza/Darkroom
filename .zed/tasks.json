@@ -27,11 +27,12 @@
     "args": ["run", "--release", "-p", "darkroom"],
   },
   {
-    "label": "run darkroom release with tracy",
+    "label": "run darkroom release-max with tracy",
     "command": "cargo",
     "args": [
       "run",
-      "--release",
+      "--profile",
+      "release-max",
       "-p",
       "darkroom",
       "--features",
@@ -82,11 +83,27 @@
     ],
   },
   {
+    "label": "run palantir frame bench fixture (visual) with tracy",
+    "command": "RUST_BACKTRACE=1 cargo",
+    "args": [
+      "run",
+      "--profile",
+      "release-max",
+      "--manifest-path",
+      "palantir/Cargo.toml",
+      "--example",
+      "frame_visual",
+      "--features",
+      "internals,winit-host,profile-with-tracy",
+    ],
+  },
+  {
     "label": "run palantir showcase with tracy",
     "command": "RUST_BACKTRACE=1 cargo",
     "args": [
       "run",
-      "--release",
+      "--profile",
+      "release-max",
       "--manifest-path",
       "palantir/Cargo.toml",
       "--bin",
