@@ -11,8 +11,8 @@
 pub(super) mod glyph;
 
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Sense, Sizing, Spacing, Text,
-    TextStyle, Track, Ui, VAlign, WidgetId,
+    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
+    Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::Binding;
 use scenarium::InputPort;
@@ -29,9 +29,9 @@ use crate::gui::EventRef;
 use crate::gui::canvas::pin_ui;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
-use crate::gui::node::port_row::glyph::{PortDecoration, circle_frame, event_glyph, port_diameter};
+use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, node_hovered, set_input, set_output_pinned};
+use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input, set_output_pinned};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::StaticValueEditorTheme;
@@ -47,7 +47,11 @@ use crate::gui::theme::StaticValueEditorTheme;
 /// width beyond the ports, pushing the outputs to the node's right edge.
 const COL_INPUT: u16 = 0;
 const COL_VALUE: u16 = 1;
-const COL_OUTPUT: u16 = 3;
+/// Claims the width beyond the ports. Nothing is placed in it — it exists so
+/// the outputs sit at the node's right edge — but it is named so the jump
+/// from [`COL_VALUE`] to [`COL_OUTPUT`] reads as deliberate.
+const COL_SPACER: u16 = 2;
+const COL_OUTPUT: u16 = COL_SPACER + 1;
 
 /// Port row height as a multiple of the body font size. The value editors
 /// fill this height (so a chip, dropdown, and text field are all the same
@@ -67,7 +71,12 @@ pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     // Pointer-over-node surfaces the (otherwise invisible) const-editor
     // chips at half strength — the edit affordance appears exactly when the
     // pointer is in the neighborhood, and geometry never changes.
-    let sve = if node_hovered(ui, node.id) {
+    //
+    // It also gates the port tooltips: their text is built per port per
+    // frame, and no port can be showing one while the pointer is elsewhere,
+    // so only the node under it pays for them.
+    let hovered = node_hovered(ui, node.id);
+    let sve = if hovered {
         &theme.static_value_editor_revealed
     } else {
         &theme.static_value_editor
@@ -94,9 +103,34 @@ pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
             theme.port_col_pad_top,
         ))
         .show(ui, |ui| {
-            input_cells(ui, rcx, node, sve, out);
-            output_cells(ui, rcx, node, out);
+            input_cells(ui, rcx, node, sve, hovered, out);
+            output_cells(ui, rcx, node, hovered, out);
         });
+}
+
+/// The per-cell decisions [`ports_row`] settles once for the whole node.
+#[derive(Clone, Copy, Debug)]
+struct CellOpts {
+    /// Which interface side this port renames, when it is a renameable
+    /// boundary port — `None` for an ordinary port and for the trailing "+"
+    /// placeholder.
+    rename: Option<BoundarySide>,
+    /// Build the hover tooltip. Only the node under the pointer does.
+    tips: bool,
+    /// Offer pinning this output. Outputs only; a definition pane resolves no
+    /// single occurrence to pin.
+    pinning: bool,
+}
+
+/// A port's hover tooltip, built only for the node under the pointer —
+/// see [`ports_row`]. Empty otherwise, which
+/// [`tooltip_after`](crate::gui::widgets::support::tooltip_after) and
+/// [`port_label`] both treat as "no tooltip".
+fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -> String {
+    if !wanted {
+        return String::new();
+    }
+    port_tip(description, type_label(rcx.library, ty))
 }
 
 fn input_cells(
@@ -104,6 +138,7 @@ fn input_cells(
     rcx: RecordCtx<'_>,
     node: &SceneNode,
     sve: &StaticValueEditorTheme,
+    tips: bool,
     out: &mut Intents,
 ) {
     let inputs = rcx.graph.inputs(node.inputs);
@@ -118,15 +153,19 @@ fn input_cells(
         };
         // A `GraphOutput` boundary node's input ports are the graph's
         // *outputs* — renameable, except the trailing "+" placeholder.
-        let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
-        input_label_cell(ui, rcx, port, node, input, rename, out);
+        let opts = CellOpts {
+            rename: (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output),
+            tips,
+            pinning: false,
+        };
+        input_label_cell(ui, rcx, port, node, input, opts, out);
         if allow_const {
             value_cell(ui, rcx, sve, port, input, out);
         }
     }
 }
 
-fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, tips: bool, out: &mut Intents) {
     let outputs = rcx.graph.outputs(node.outputs);
     for (i, output) in outputs.iter().enumerate() {
         let port = PortRef {
@@ -136,58 +175,78 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Int
         };
         // A `GraphInput` boundary node's output ports are the graph's
         // *inputs* — renameable, except the trailing "+" placeholder.
-        let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
-        output_cell(ui, rcx, port, output, rename, node.run_available, out);
+        let opts = CellOpts {
+            rename: (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input),
+            tips,
+            pinning: node.run_available,
+        };
+        output_cell(ui, rcx, port, output, opts, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
     for (i, event) in rcx.graph.events(node.events).iter().enumerate() {
-        event_cell(ui, rcx, node.id, i, outputs.len() + i, event);
+        event_cell(ui, rcx, node.id, i, outputs.len() + i, event, tips);
     }
 }
 
-/// Stable widget id for one port circle. Derived from
-/// `(node_id, kind, port_idx)` so prepass can look up
-/// `response_for(port_circle_wid(..))` without threading the cache —
-/// every port's id is reconstructible from its domain coordinates.
 pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
-    WidgetId::from_hash((
-        "graph.node.port_circle",
-        port.node_id,
-        port.kind as u8,
-        port.port_idx,
-    ))
+    port_wid("port_circle", port)
 }
 
-/// Stable widget id for an input port's inline const editor (text field,
-/// checkbox, or file-pick button). Reconstructible from domain coords so
-/// the path-pick scan can poll the button's click without threading state.
+/// An input port's inline const editor (text field, checkbox, or file-pick
+/// button).
 pub(super) fn const_editor_wid(input: InputPort) -> WidgetId {
-    WidgetId::from_hash(("graph.node.const_editor", input.node_id, input.port_idx))
+    port_wid("const_editor", input_ref(input))
 }
 
-/// Stable widget id for an input port's cell (circle + label). The prepass
-/// polls it for a double-click on the label area (the circle has its own
-/// `port_circle_wid`) to toggle the input's binding.
+/// An input port's cell (circle + label). The prepass polls it for a
+/// double-click on the *label* area — the circle has its own
+/// [`port_circle_wid`] and consumes hits over its own rect.
 pub(super) fn input_cell_wid(port: PortRef) -> WidgetId {
-    WidgetId::from_hash(("graph.node.input_cell", port.node_id, port.port_idx))
+    port_wid("input_cell", port)
 }
 
-/// Opens `menu_id`'s context menu when either the cell or its port circle
-/// was secondary-clicked this frame — shared by the input and output
-/// cells. The circle senses its own `Sense::CLICK` and consumes hits over
-/// its rect, so the cell's own click alone misses a right-click landed on
-/// the circle (no bubbling); checking both closes that gap.
-fn open_port_context_menu(
-    ui: &mut Ui,
-    menu_id: WidgetId,
-    cell_secondary: bool,
-    circle_secondary: bool,
-) {
-    if (cell_secondary || circle_secondary)
+fn input_ref(input: InputPort) -> PortRef {
+    PortRef {
+        node_id: input.node_id,
+        kind: PortKind::Input,
+        port_idx: input.port_idx,
+    }
+}
+
+/// Open `menu_id`'s context menu when the cell or its port circle was
+/// secondary-clicked this frame — shared by the input and output cells.
+///
+/// `cell_secondary` is read by the caller before this runs: the cell's
+/// `Response` borrows `ui`, and this needs `ui` mutably. The circle senses
+/// its own `Sense::CLICK` and consumes hits over its rect, so the cell's
+/// click alone misses a right-click landed on the circle (no bubbling);
+/// checking both closes that gap.
+fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, circle: WidgetId) {
+    if (cell_secondary || ui.response_for(circle).right.clicked())
         && let Some(p) = ui.pointer_pos()
     {
         ContextMenu::open(ui, menu_id, p);
+    }
+}
+
+/// The "Remove port" item both cells end their menu with: interface ports
+/// are authored, so removal is this explicit action, never a side effect of
+/// unwiring. Renders nothing on a port that isn't a renameable boundary one.
+fn remove_port_item(
+    ui: &mut Ui,
+    popup: &PopupHandle,
+    port: PortRef,
+    rename: Option<BoundarySide>,
+    out: &mut Intents,
+) {
+    if let Some(side) = rename
+        && MenuItem::new("Remove port").show(ui, popup).left.clicked()
+    {
+        out.push(Intent::RemoveBoundaryPort {
+            side,
+            idx: port.port_idx,
+        });
     }
 }
 
@@ -201,15 +260,12 @@ fn input_label_cell(
     port: PortRef,
     node: &SceneNode,
     input: &SceneInput,
-    rename: Option<BoundarySide>,
+    opts: CellOpts,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
     let allow_const = !node.boundary;
-    let tip = port_tip(
-        &input.description.borrow_str(),
-        type_label(rcx.library, &input.ty),
-    );
+    let tip = tip_for(rcx, opts.tips, &input.description.borrow_str(), &input.ty);
     // Flag a required input's port only once a run actually failed on it (the
     // node is `MissingInputs`) — not on every unbound edit — so the port keeps
     // its data-type color while editing instead of flipping as you bind/unbind.
@@ -234,11 +290,7 @@ fn input_label_cell(
     let diameter = port_diameter(theme.port_size, input.required);
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
-    let decoration = if input.required {
-        PortDecoration::None
-    } else {
-        PortDecoration::Outline(theme.colors.node_fill)
-    };
+    let outline = (!input.required).then_some(theme.colors.node_fill);
     let radius = diameter * 0.5;
     let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
@@ -257,15 +309,13 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, wid, diameter, fill, decoration, margin, &tip);
+                circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
             }
-            port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
+            port_label(ui, rcx, port, input.name.clone(), &tip, opts.rename, out);
         });
     // Open on right-click anywhere on the cell — circle or label.
-    let menu_id = cell.response.id;
-    let cell_secondary = cell.response.right.clicked();
-    let circle_state = ui.response_for(wid);
-    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.right.clicked());
+    let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
+    open_port_context_menu(ui, menu_id, cell_secondary, wid);
     // Double-click on the circle or label toggles the binding (clear, or seed
     // the default const when unbound) — handled in `emit_port_dblclicks`
     // (prepass), since adding/removing a `Const` resizes the node and the
@@ -293,16 +343,7 @@ fn input_label_cell(
             {
                 out.push(set_input(port, None));
             }
-            // Interface ports are authored — removal is this explicit
-            // action, never a side effect of unwiring.
-            if let Some(side) = rename
-                && MenuItem::new("Remove port").show(ui, popup).left.clicked()
-            {
-                out.push(Intent::RemoveBoundaryPort {
-                    side,
-                    idx: port.port_idx,
-                });
-            }
+            remove_port_item(ui, popup, port, opts.rename, out);
         });
 }
 
@@ -359,8 +400,7 @@ fn output_cell(
     rcx: RecordCtx<'_>,
     port: PortRef,
     output: &SceneOutput,
-    rename: Option<BoundarySide>,
-    pinning_available: bool,
+    opts: CellOpts,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
@@ -370,10 +410,7 @@ fn output_cell(
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
-    let tip = port_tip(
-        &output.description.borrow_str(),
-        type_label(rcx.library, &output.ty),
-    );
+    let tip = tip_for(rcx, opts.tips, &output.description.borrow_str(), &output.ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -385,13 +422,13 @@ fn output_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
+            port_label(ui, rcx, port, output.name.clone(), &tip, opts.rename, out);
             circle_frame(
                 ui,
                 wid,
                 theme.port_size,
                 fill,
-                PortDecoration::None,
+                None,
                 Spacing::new(0.0, 0.0, -overhang, 0.0),
                 &tip,
             );
@@ -401,20 +438,19 @@ fn output_cell(
 
     // Right-click anywhere on the cell (circle or label) opens the same
     // toggle as a menu item — mirrors the input side's binding menu.
-    let menu_id = cell.response.id;
-    let cell_secondary = cell.response.right.clicked();
-    let circle_state = ui.response_for(wid);
+    //
     // Creating a pin is a Cmd+drag from the circle, repositioning one is a
     // plain drag off its satellite (see `PinUi`) — neither is a click, so
     // the menu item below and the drag are the only ways to pin/unpin.
-    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.right.clicked());
+    let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
+    open_port_context_menu(ui, menu_id, cell_secondary, wid);
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             let pinned = output.pin_position.is_some();
             let label = if pinned { "Unpin output" } else { "Pin output" };
             if MenuItem::new(label)
-                .enabled(pinned || pinning_available)
+                .enabled(pinned || opts.pinning)
                 .show(ui, popup)
                 .left
                 .clicked()
@@ -433,16 +469,7 @@ fn output_cell(
                     ));
                 }
             }
-            // Interface ports are authored — removal is this explicit
-            // action, never a side effect of unwiring.
-            if let Some(side) = rename
-                && MenuItem::new("Remove port").show(ui, popup).left.clicked()
-            {
-                out.push(Intent::RemoveBoundaryPort {
-                    side,
-                    idx: port.port_idx,
-                });
-            }
+            remove_port_item(ui, popup, port, opts.rename, out);
         });
 }
 
@@ -457,13 +484,18 @@ fn event_cell(
     event_idx: usize,
     row: usize,
     event: &SceneEvent,
+    tips: bool,
 ) {
     let theme = rcx.theme;
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
     let fill = event_color(theme, rcx.geometry.events.is_hovered(ev));
-    let tip = format!("event: {}", &*event.name.borrow_str());
+    let tip = if tips {
+        format!("event: {}", &*event.name.borrow_str())
+    } else {
+        String::new()
+    };
     Panel::hstack()
         .id_salt(("event", event_idx))
         .grid_cell((row as u16, COL_OUTPUT))
@@ -490,12 +522,10 @@ fn event_cell(
         });
 }
 
-/// Stable widget id for an event port glyph. A separate id space from data
-/// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs. `pub(crate)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
-/// from domain coords (`EventRef`) to poll the drag.
+/// An event port glyph. A separate id space from data ports
+/// ([`port_circle_wid`]) because events are indexed independently of outputs.
 pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
-    WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
+    WidgetId::from_hash(("graph.node", "event_glyph", node_id, event_idx))
 }
 
 /// A port's hover tooltip: its `description` (when the func declares one) above a

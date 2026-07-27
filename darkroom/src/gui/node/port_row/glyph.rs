@@ -44,70 +44,67 @@ pub(super) fn port_diameter(base: f32, enlarged: bool) -> f32 {
     }
 }
 
-/// A port circle's extra decoration — currently just an input's muted ring
-/// (an output's pinned satellite is a canvas-level decoration instead — see
-/// `crate::gui::canvas::pin_ui`). A flag rather than a bare `Option<Color>`
-/// so a future second decoration doesn't need restructuring.
-#[derive(Debug)]
-pub(super) enum PortDecoration {
-    None,
-    Outline(Color),
+/// The frame both port glyphs paint into: a `PORT_HIT_SCALE`-grown sensing
+/// box with the growth folded back out of `margin`, `draw` painting the
+/// glyph into the `base`-sized square at `inset`, and the tooltip recorded
+/// after the panel's borrow ends.
+///
+/// Explicit `id(wid)` so the cross-frame id stays stable: the prepass
+/// computes the same id and reads its response, the record paints with it —
+/// no drift even if the parent structure shifts. `CLICK | DRAG` so the glyph
+/// (a) intercepts the press before it falls through to the node body's
+/// `Sense::DRAG`, and (b) can latch a wire drag.
+fn glyph_frame(
+    ui: &mut Ui,
+    wid: WidgetId,
+    base: f32,
+    margin: Spacing,
+    tip: &str,
+    draw: impl FnOnce(&mut Ui, f32),
+) {
+    let GrownHitBox {
+        hit,
+        inset,
+        margin: hit_margin,
+    } = grown_hit_box(base, margin);
+    let glyph = Panel::zstack()
+        .id(wid)
+        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
+        .margin(hit_margin)
+        .sense(Sense::CLICK | Sense::DRAG)
+        .show(ui, |ui| draw(ui, inset));
+    let snapshot = glyph.response.snapshot();
+    tooltip_after(ui, &snapshot, tip.to_owned());
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn circle_frame(
     ui: &mut Ui,
     wid: WidgetId,
     diameter: f32,
     fill: Color,
-    decoration: PortDecoration,
+    outline: Option<Color>,
     margin: Spacing,
     tip: &str,
 ) {
-    let port = diameter;
-    let GrownHitBox {
-        hit,
-        inset,
-        margin: hit_margin,
-    } = grown_hit_box(port, margin);
-    let radius = port * 0.5;
-
-    // Explicit `id(wid)` so the cross-frame id stays stable: prepass
-    // computes the same `port_circle_wid` and reads its response,
-    // record paints with the same id — no drift even if the parent
-    // structure shifts. CLICK | DRAG so the port (a) intercepts the
-    // press before it falls through to the node body's `Sense::DRAG`,
-    // and (b) can latch a connection drag.
-    let circle = Panel::zstack()
-        .id(wid)
-        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
-        .margin(hit_margin)
-        .sense(Sense::CLICK | Sense::DRAG)
-        .show(ui, |ui| {
-            let rect = Rect::new(inset, inset, port, port);
-            // Decoration paints *before* the fill: the ring (an annulus
-            // strictly outside the fill's radius) doesn't overlap it either
-            // way.
-            match decoration {
-                PortDecoration::None => {}
-                PortDecoration::Outline(color) => {
-                    // A stroke paints its own rect's *inner*-edge annulus, so
-                    // drawing it on `rect` itself would eat into the fill.
-                    // Inflate first: the ring's inner edge then lands exactly
-                    // on the fill's outer edge instead of inside it.
-                    stroked_rect(
-                        ui,
-                        rect.inflated(PORT_OUTLINE_WIDTH),
-                        radius + PORT_OUTLINE_WIDTH,
-                        color,
-                        PORT_OUTLINE_WIDTH,
-                    );
-                }
-            }
-            filled_rect(ui, rect, radius, fill);
-        });
-    let snapshot = circle.response.snapshot();
-    tooltip_after(ui, &snapshot, tip.to_owned());
+    let radius = diameter * 0.5;
+    glyph_frame(ui, wid, diameter, margin, tip, |ui, inset| {
+        let rect = Rect::new(inset, inset, diameter, diameter);
+        // The ring paints *before* the fill — an annulus strictly outside
+        // the fill's radius, so they don't overlap either way. A stroke
+        // paints its own rect's *inner*-edge annulus, so drawing it on
+        // `rect` would eat into the fill; inflating first lands the ring's
+        // inner edge exactly on the fill's outer edge.
+        if let Some(color) = outline {
+            stroked_rect(
+                ui,
+                rect.inflated(PORT_OUTLINE_WIDTH),
+                radius + PORT_OUTLINE_WIDTH,
+                color,
+                PORT_OUTLINE_WIDTH,
+            );
+        }
+        filled_rect(ui, rect, radius, fill);
+    });
 }
 
 /// Paints an event port glyph: a right-pointing triangle (a port dot rotated
@@ -127,37 +124,23 @@ pub(super) fn event_glyph(
     tip: &str,
 ) {
     let port = theme.port_size;
-    let GrownHitBox {
-        hit,
-        inset,
-        margin: hit_margin,
-    } = grown_hit_box(port, margin);
-    let glyph = Panel::zstack()
-        .id(wid)
-        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
-        .margin(hit_margin)
-        .sense(Sense::CLICK | Sense::DRAG)
-        .show(ui, |ui| {
-            // Right-pointing isosceles triangle filling the port box (offset
-            // by `inset` to center in the grown hit box): the apex points
-            // outward (away from the node body), matching the emit
-            // direction. SDF-antialiased via the triangle primitive. Vertices
-            // are inset by the corner radius: the SDF rounds by *dilating*
-            // (`sdf - radius`), so the rounded result grows back out to the
-            // port box instead of past it.
-            let r = EVENT_TRIANGLE_RADIUS;
-            ui.add_shape(
-                Shape::triangle(
-                    Vec2::new(inset + r, inset + r),
-                    Vec2::new(inset + r, inset + port - r),
-                    Vec2::new(inset + port - r, inset + port * 0.5),
-                )
-                .radius(r)
-                .fill(fill),
-            );
-        });
-    let snapshot = glyph.response.snapshot();
-    tooltip_after(ui, &snapshot, tip.to_owned());
+    glyph_frame(ui, wid, port, margin, tip, |ui, inset| {
+        // Right-pointing isosceles triangle filling the port box: the apex
+        // points outward (away from the node body), matching the emit
+        // direction. Vertices are inset by the corner radius — the SDF
+        // rounds by *dilating* (`sdf - radius`), so the rounded result grows
+        // back out to the port box instead of past it.
+        let r = EVENT_TRIANGLE_RADIUS;
+        ui.add_shape(
+            Shape::triangle(
+                Vec2::new(inset + r, inset + r),
+                Vec2::new(inset + r, inset + port - r),
+                Vec2::new(inset + port - r, inset + port * 0.5),
+            )
+            .radius(r)
+            .fill(fill),
+        );
+    });
 }
 
 /// A glyph's `PORT_HIT_SCALE`-grown sensing box, from [`grown_hit_box`].

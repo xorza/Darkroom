@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use palantir::Ui;
+use palantir::{Ui, WidgetId};
 use scenarium::Binding;
 use scenarium::GraphLink;
 use scenarium::InputPort;
@@ -21,7 +21,7 @@ use crate::gui::UiAction;
 use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
-use crate::gui::scene::{GraphScene, InputBindingView};
+use crate::gui::scene::{GraphScene, InputBindingView, SceneNode};
 
 /// Prepass scan: surface an `OpenGraph` for any graph node whose `G`
 /// chip was clicked (read from last frame's response). Detecting the
@@ -41,31 +41,39 @@ pub(crate) fn emit_graph_opens(ui: &Ui, graph: GraphScene<'_>, actions: &mut Vec
     }
 }
 
-/// Scan for a click on a node's header play chip (read from last frame's
-/// response), returning the node to run to. First hit wins — one run per
-/// frame. The node UI surfaces only the domain fact (which node); the
-/// canvas translates it into the run command. The `runnable` guard matches
-/// where the chip draws, so a stale response can't seed an unrunnable node.
-pub(crate) fn emit_play_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
+/// The node whose header chip `wid` was clicked this frame, among those
+/// `drawn` accepts. First hit wins — one per frame.
+///
+/// The `drawn` guard mirrors where the chip actually draws, so a stale
+/// response can't act on a node that no longer offers the affordance.
+fn clicked_chip(
+    ui: &Ui,
+    graph: GraphScene<'_>,
+    drawn: impl Fn(&SceneNode) -> bool,
+    wid: fn(NodeId) -> WidgetId,
+) -> Option<NodeId> {
     graph
         .nodes()
-        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).left.clicked())
-        .map(|n| n.id)
+        .find(|node| drawn(node) && ui.response_for(wid(node.id)).left.clicked())
+        .map(|node| node.id)
 }
 
-/// Scan for a click on a node's runtime-cache eviction chip. The canvas
-/// translates the returned authored node into a worker command.
+/// A click on a node's header play chip, returning the node to run to. The
+/// node UI surfaces only the domain fact (which node); the canvas translates
+/// it into the run command.
+pub(crate) fn emit_play_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
+    clicked_chip(ui, graph, SceneNode::runnable, play_badge_wid)
+}
+
+/// A click on a node's runtime-cache eviction chip. The canvas translates the
+/// returned authored node into a worker command.
 pub(crate) fn emit_cache_evictions(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
-    graph
-        .nodes()
-        .find(|node| {
-            node.can_evict_cache
-                && ui
-                    .response_for(cache_eviction_badge_wid(node.id))
-                    .left
-                    .clicked()
-        })
-        .map(|node| node.id)
+    clicked_chip(
+        ui,
+        graph,
+        |node| node.can_evict_cache,
+        cache_eviction_badge_wid,
+    )
 }
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the

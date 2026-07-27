@@ -22,7 +22,7 @@ use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
-use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
+use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid, node_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
@@ -134,7 +134,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
 /// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
 pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
+    node_wid("subscription_glyph", node_id)
 }
 
 /// The header bar: the node title (left) and the descriptive cluster (right) —
@@ -283,20 +283,22 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // Only runnable sinks can be disabled from Darkroom, so running a
             // disabled node can still evaluate its ordinary upstream cone.
             if node.can_disable() {
-                let disable_toggled = Badge::control(
-                    "D",
-                    theme.colors.text_muted,
-                    node.disabled,
-                    disable_badge_wid(node.id),
-                    "Disable — exclude this sink from graph runs",
-                )
-                .show(ui);
-                if disable_toggled {
-                    out.push(Intent::SetNodeProperty {
-                        node_id: node.id,
+                property_chip(
+                    ui,
+                    theme,
+                    node,
+                    PropertyChip {
+                        glyph: "D",
+                        // Never takes an accent: disabling is a suppression,
+                        // not a stored value the way a cache bit is.
+                        on_color: theme.colors.text_muted,
+                        on: node.disabled,
+                        tag: "disable_badge",
+                        tip: "Disable — exclude this sink from graph runs",
                         to: NodeProperty::Disabled(!node.disabled),
-                    });
-                }
+                    },
+                    out,
+                );
             }
             if node.can_evict_cache {
                 Badge::control(
@@ -324,46 +326,77 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             if node.cache_controls {
                 let ram = node.cache.caches_in_ram();
                 let disk = node.cache.persists_to_disk();
-                let ram_color = if ram {
-                    theme.colors.badge_cache
-                } else {
-                    theme.colors.text_muted
-                };
-                if Badge::control(
-                    "R",
-                    ram_color,
-                    ram,
-                    ram_badge_wid(node.id),
-                    "RuntimeCache in RAM — keep the output resident, reused across runs this session",
-                )
-                .show(ui)
-                {
-                    out.push(Intent::SetNodeProperty {
-                        node_id: node.id,
+                // The two bits are the same chip twice — only which one the
+                // click flips differs.
+                for chip in [
+                    PropertyChip {
+                        glyph: "R",
+                        on_color: theme.colors.badge_cache,
+                        on: ram,
+                        tag: "ram_badge",
+                        tip: "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
-                    });
-                }
-                let disk_color = if disk {
-                    theme.colors.badge_cache
-                } else {
-                    theme.colors.text_muted
-                };
-                if Badge::control(
-                    "↓",
-                    disk_color,
-                    disk,
-                    disk_badge_wid(node.id),
-                    "RuntimeCache to disk — persist the output across runs and reopens",
-                )
-                .show(ui)
-                {
-                    out.push(Intent::SetNodeProperty {
-                        node_id: node.id,
+                    },
+                    PropertyChip {
+                        glyph: "↓",
+                        on_color: theme.colors.badge_cache,
+                        on: disk,
+                        tag: "disk_badge",
+                        tip: "RuntimeCache to disk — persist the output across runs and reopens",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, !disk)),
-                    });
+                    },
+                ] {
+                    property_chip(ui, theme, node, chip, out);
                 }
             }
         });
+}
+
+/// One control chip that writes a node property when clicked — the disable
+/// toggle and the two cache bits, which differ only in glyph, tag, tip, and
+/// which property the click sets.
+///
+/// Quiet at rest: the chip inks muted grey until its state is *on*, when it
+/// takes `on_color`. So an idle node's controls stay monochrome and only an
+/// active setting carries color — the type-coloured ports and the status
+/// glow keep the stage.
+#[derive(Debug)]
+struct PropertyChip {
+    glyph: &'static str,
+    on_color: Color,
+    on: bool,
+    tag: &'static str,
+    tip: &'static str,
+    /// What a click sets — already carries the flipped value.
+    to: NodeProperty,
+}
+
+fn property_chip(
+    ui: &mut Ui,
+    theme: &Theme,
+    node: &SceneNode,
+    chip: PropertyChip,
+    out: &mut Intents,
+) {
+    let color = if chip.on {
+        chip.on_color
+    } else {
+        theme.colors.text_muted
+    };
+    if Badge::control(
+        chip.glyph,
+        color,
+        chip.on,
+        node_wid(chip.tag, node.id),
+        chip.tip,
+    )
+    .show(ui)
+    {
+        out.push(Intent::SetNodeProperty {
+            node_id: node.id,
+            to: chip.to,
+        });
+    }
 }
 
 /// The header's play chip: run the graph up to this node and keep its
@@ -443,35 +476,21 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     }
 }
 
-/// Stable id for a node's clickable run-to-node play chip. `pub(super)` so
-/// the canvas-level scan ([`crate::gui::node::prepass::emit_play_clicks`]) can poll
-/// the click from last frame's response.
+/// The run-to-node play chip. `pub(super)` so the prepass scan
+/// ([`crate::gui::node::prepass::emit_play_clicks`]) can poll the click from
+/// last frame's response.
 pub(super) fn play_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.play_badge", node_id))
-}
-
-/// Stable id for a node's clickable enable/disable chip.
-fn disable_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.disable_badge", node_id))
-}
-
-/// Stable id for a node's clickable RAM-cache chip.
-fn ram_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.ram_badge", node_id))
-}
-
-/// Stable id for a node's clickable disk-cache chip.
-fn disk_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.disk_badge", node_id))
+    node_wid("play_badge", node_id)
 }
 
 pub(super) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.cache_eviction_badge", node_id))
+    node_wid("cache_eviction_badge", node_id)
 }
 
-/// Stable id for a graph node's clickable open-in-tab chip.
+/// The open-in-tab chip. `pub(crate)` for the same reason as
+/// [`play_badge_wid`] — the open is read a frame ahead, in the prepass.
 pub(crate) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.graph_badge", node_id))
+    node_wid("graph_badge", node_id)
 }
 
 /// Which visual family a chip belongs to, plus the per-family data — split in
@@ -565,52 +584,51 @@ impl Badge {
             tip,
             kind,
         } = self;
-        // Background + width diverge by family — the glyph always inks in the
-        // chip's own color. A marker is a flat tinted pill hugging its glyph; a
-        // control is a bordered square whose "on" state deepens the tint (never
-        // a solid swatch — that weight belongs to live status, not config).
-        let (background, width) = match kind {
-            BadgeKind::Marker { .. } => (
-                Background::rounded(
+        // The two families diverge on every axis but the glyph's ink, so one
+        // match settles all of them: a marker is a flat tinted pill hugging
+        // its glyph, sensing only `HOVER` so a click falls through to select
+        // the node; a control is a fixed bordered square that captures the
+        // click and whose "on" state deepens the tint (never a solid swatch —
+        // that weight belongs to live status, not config).
+        let panel = Panel::zstack()
+            .size((
+                match kind {
+                    BadgeKind::Marker { .. } => Sizing::HUG,
+                    BadgeKind::Control { .. } => Sizing::fixed(BADGE_SIZE),
+                },
+                Sizing::fixed(BADGE_SIZE),
+            ))
+            .child_align(Align::CENTER);
+        let panel = match kind {
+            BadgeKind::Marker { salt } => panel
+                .background(Background::rounded(
                     color.with_alpha(CHIP_TINT_ALPHA),
                     Corners::all(BADGE_SIZE * 0.5),
-                ),
-                Sizing::HUG,
-            ),
+                ))
+                .id_salt(salt)
+                .sense(Sense::HOVER)
+                .padding(Spacing::xy(5.0, 0.0)),
             BadgeKind::Control { wid, filled } => {
-                let mut bg = Background {
-                    stroke: Stroke::solid(color, 1.0),
-                    corners: Corners::all(3.0),
-                    ..Default::default()
-                };
                 // Last-frame hover (`response_for`) lifts the fill so the chip
                 // reads as pressable — the same trick the tab-strip chips use.
-                let hovered = ui.response_for(wid).hovered;
-                let alpha = match (filled, hovered) {
+                let alpha = match (filled, ui.response_for(wid).hovered) {
                     (true, true) => CHIP_ON_HOVER_ALPHA,
                     (true, false) => CHIP_ON_ALPHA,
                     (false, true) => CHIP_TINT_ALPHA,
                     (false, false) => 0.0,
                 };
+                let mut background = Background {
+                    stroke: Stroke::solid(color, 1.0),
+                    corners: Corners::all(3.0),
+                    ..Default::default()
+                };
+                // Left at the default (no fill at all) rather than a
+                // fully-transparent one, so a resting chip paints no quad.
                 if alpha > 0.0 {
-                    bg.fill = color.with_alpha(alpha).into();
+                    background.fill = color.with_alpha(alpha).into();
                 }
-                (bg, Sizing::fixed(BADGE_SIZE))
+                panel.background(background).id(wid).sense(Sense::CLICK)
             }
-        };
-        let mut panel = Panel::zstack()
-            .size((width, Sizing::fixed(BADGE_SIZE)))
-            .child_align(Align::CENTER)
-            .background(background);
-        // A marker hugs its glyph into a pill (horizontal padding) and senses
-        // only `HOVER`, so a click falls through to select the node; a control
-        // captures the click.
-        panel = match kind {
-            BadgeKind::Marker { salt } => panel
-                .id_salt(salt)
-                .sense(Sense::HOVER)
-                .padding(Spacing::xy(5.0, 0.0)),
-            BadgeKind::Control { wid, .. } => panel.id(wid).sense(Sense::CLICK),
         };
         let chip = panel.show(ui, |ui| match glyph {
             BadgeGlyph::Char(glyph) => {

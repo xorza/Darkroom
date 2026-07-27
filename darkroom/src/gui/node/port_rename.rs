@@ -12,23 +12,17 @@ use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
-use crate::gui::node::{RecordCtx, click_intents};
+use crate::gui::node::{RecordCtx, click_intents, port_wid};
 use crate::gui::widgets::inline_rename::InlineRename;
 
 /// Character cap for a boundary-port name in the inline rename editor.
 const PORT_NAME_MAX_CHARS: usize = 24;
 
-/// Stable id for a port's rename editor — and for the sensing label
-/// panel shown when idle, so the same `WidgetId` is recorded every frame
-/// across the label⇄editor swap (palantir drops state rows for ids it
-/// doesn't see).
+/// A port's rename editor *and* the sensing label shown when idle, so the
+/// same id is recorded every frame across the label⇄editor swap (palantir
+/// drops state rows for ids it doesn't see).
 fn port_rename_wid(port: PortRef) -> WidgetId {
-    WidgetId::from_hash((
-        "graph.node.port_rename",
-        port.node_id,
-        port.kind as u8,
-        port.port_idx,
-    ))
+    port_wid("port_rename", port)
 }
 
 /// A port label. When `rename` is `Some`, double-clicking swaps the
