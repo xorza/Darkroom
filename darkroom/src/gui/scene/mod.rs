@@ -500,7 +500,13 @@ impl Scene {
                     outputs: ports.outputs,
                     events: ports.events,
                     graph: node_interface.graph,
-                    sink: node_interface.sink,
+                    // The compiled program is the authority here: a composite
+                    // dissolves, so whether it performs sink work is a fact
+                    // about its interior, not about its own port arity. With
+                    // nothing compiled to fold — before the first run, or a
+                    // definition no instance reaches — the interface's own
+                    // reading stands.
+                    sink: run_state.is_sink(id).unwrap_or(node_interface.sink),
                     disabled: node.disabled,
                     cache: node.cache,
                     cache_controls,
@@ -915,9 +921,10 @@ impl<'a> NodeInterface<'a> {
                         NodeKind::Graph(link) => Some(link),
                         _ => None,
                     },
-                    // A composite's sink-ness is derived at flatten time,
-                    // not stored separately; treat "no exposed outputs" as
-                    // the visible sink signal.
+                    // A composite has no declaration of its own to read, so
+                    // "exposes no outputs" stands in until a compiled program
+                    // can answer for its interior (`Scene::project` folds
+                    // `CompiledGraph::is_sink` over this).
                     sink: ports
                         .func
                         .map_or_else(|| ports.outputs.is_empty(), |func| func.sink),

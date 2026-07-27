@@ -177,7 +177,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                     "badge_sink",
                     "■",
                     theme.colors.badge_sink,
-                    "Sink — no downstream consumers",
+                    "Sink — runs for its effect, not for a value",
                 )
                 .show(ui);
             }

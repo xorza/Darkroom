@@ -142,6 +142,13 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
     }
 
+    /// Whether `id` performs sink work, per the installed program. `None`
+    /// before the first compile, or when the node covers no compiled work —
+    /// see [`CompiledGraph::is_sink`].
+    pub(crate) fn is_sink(&self, id: NodeId) -> Option<bool> {
+        self.compiled.as_ref()?.is_sink(id)
+    }
+
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
         self.nodes
             .get(&id)
@@ -358,6 +365,24 @@ impl RunState {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.pinned_outputs.entries.clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use std::sync::Arc;
+
+    use scenarium::CompiledGraph;
+
+    use crate::gui::run_state::RunState;
+
+    /// A run state holding nothing but an installed program — what the scene
+    /// needs to fold compiled facts (`is_sink`) onto its nodes.
+    pub(crate) fn with_compiled(compiled: Arc<CompiledGraph>) -> RunState {
+        RunState {
+            compiled: Some(compiled),
+            ..Default::default()
+        }
     }
 }
 

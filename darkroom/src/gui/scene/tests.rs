@@ -557,6 +557,71 @@ fn subscriptions_project_from_graph() {
 }
 
 #[test]
+fn a_composites_sink_flag_comes_from_its_interior_once_compiled() {
+    use scenarium::testing::{TestFuncHooks, test_func_lib};
+    use scenarium::{Binding, Compiler, FuncOutput};
+    use std::sync::Arc;
+
+    // A composite that exposes an output *and* wraps a sink. Port arity says
+    // "not a sink" — which is all the editor can tell on its own, and it is
+    // wrong: the interior sink is what a sinks run reaches, what disabling
+    // the instance suppresses, and what an event subscription would drive.
+    let library = test_func_lib(TestFuncHooks::default());
+    let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
+    let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
+    let source = nested.body.add(library.by_name("get_b").unwrap().into());
+    let printer = nested.body.add(library.by_name("Print").unwrap().into());
+    nested
+        .body
+        .set_input_binding(InputPort::new(printer, 0), Binding::bind(source, 0));
+    nested
+        .body
+        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(source, 0));
+
+    let nested_id = GraphId::unique();
+    let mut graph = Graph::default();
+    let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+    graph.insert_graph(nested_id, nested);
+    let view = GraphView::for_graph(&graph);
+
+    // Nothing compiled yet: the projection keeps the port-arity reading, so
+    // the node still draws before the first run instead of losing markers.
+    let mut scene = Scene::default();
+    let mut arena = UiHarness::arena();
+    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
+    assert!(
+        !scene
+            .graph(GraphRef::Main)
+            .unwrap()
+            .node(instance)
+            .unwrap()
+            .sink,
+        "with no program to fold, an instance with outputs reads as a non-sink"
+    );
+
+    // Compiled, the interior answers instead.
+    let run_state = crate::gui::run_state::internals::with_compiled(Arc::new(
+        Compiler::default().compile(&graph, &library).unwrap(),
+    ));
+    scene.rebuild(
+        arena.ui(),
+        &library,
+        &run_state,
+        [GraphProjection {
+            target: GraphRef::Main,
+            source: SceneSource::Entry(&graph),
+            view: &view,
+        }],
+    );
+    let node = scene.graph(GraphRef::Main).unwrap().node(instance).unwrap();
+    assert!(node.sink, "the interior sink makes the instance one");
+    assert!(
+        node.can_disable(),
+        "which is what puts the disable toggle on it"
+    );
+}
+
+#[test]
 fn local_defs_project_per_pane_ordered_by_id() {
     // The palette instances a `GraphLink::Local`, which resolves only
     // against the graph that *holds* the definition — so each pane must see

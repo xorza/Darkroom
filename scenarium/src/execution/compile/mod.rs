@@ -98,6 +98,26 @@ impl CompiledGraph {
             .collect()
     }
 
+    /// Whether an authored node performs sink work — runs for its effect
+    /// rather than for a value some consumer reads.
+    ///
+    /// A func is one when its declaration says so. A graph instance is one
+    /// when anything inside it is: a sinks run reaches that interior sink
+    /// either way, and disabling or subscribing the instance is what governs
+    /// it. Having outputs of its own does not stop a composite being a sink,
+    /// the way a portless func signals it.
+    ///
+    /// `None` when the node covers no compiled work — a boundary node, a
+    /// definition no instance reaches, or a program that hasn't been built
+    /// yet. There is nothing to fold, so the caller keeps whatever it can
+    /// derive from the authoring graph alone.
+    pub fn is_sink(&self, node_id: NodeId) -> Option<bool> {
+        let footprint = self.footprint(|covered| covered == node_id);
+        let mut occurrences = footprint.iter().peekable();
+        occurrences.peek()?;
+        Some(occurrences.any(|node_idx| self.program.e_nodes[node_idx].sink))
+    }
+
     /// The execution nodes a "run this node" seeds: those producing what the
     /// node exposes, plus any sink it contains.
     ///
