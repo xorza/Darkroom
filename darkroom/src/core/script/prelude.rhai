@@ -54,11 +54,10 @@ fn move_node(node_id, x, y) {
     apply(host::make_move_node(node_id, x, y));
 }
 
-// Replace the selection with exactly `node_id`. A selection member is
-// tagged by kind (`Node`/`Pin` — see `crate::core::document::ItemRef`);
-// this helper only ever selects a node body.
+// Replace the selection with exactly `node_id`. A selection is a plain set
+// of node ids.
 fn select_node(node_id) {
-    apply(#{ SetSelection: #{ to: [#{ Node: node_id }] } });
+    apply(#{ SetSelection: #{ to: [node_id] } });
 }
 
 // Clear the selection.

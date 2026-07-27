@@ -156,11 +156,7 @@ fn boundary_nodes_mirror_graph_interface() {
     let graph = scene.graph(GraphRef::Local(def_id)).expect("projected");
 
     assert_eq!(graph.nodes().count(), 2, "both boundary nodes render");
-    let expected_node_order = view
-        .item_placements
-        .keys()
-        .map(|ItemRef::Node(node_id)| *node_id)
-        .collect::<Vec<_>>();
+    let expected_node_order = view.item_placements.keys().copied().collect::<Vec<_>>();
     assert_eq!(
         graph.nodes().map(|n| n.id).collect::<Vec<_>>(),
         expected_node_order,
@@ -255,14 +251,14 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
         pan: Vec2::new(11.0, 22.0),
         zoom: 2.0,
     };
-    root_view.selected.insert(ItemRef::Node(root_b));
+    root_view.selected.insert(root_b);
     let def = root.find_graph(def_id).unwrap();
     let mut def_view = GraphView::for_graph(&def.body);
     def_view.viewport = Viewport {
         pan: Vec2::new(-5.0, 0.0),
         zoom: 0.5,
     };
-    def_view.selected.insert(ItemRef::Node(fixture.input));
+    def_view.selected.insert(fixture.input);
 
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
@@ -320,11 +316,11 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     // Viewport, selection, and wiring stay per pane.
     assert_eq!(main.viewport().zoom, 2.0);
     assert_eq!(nested.viewport().zoom, 0.5);
-    assert_eq!(main.selected(), [ItemRef::Node(root_b)]);
-    assert_eq!(nested.selected(), [ItemRef::Node(fixture.input)]);
-    assert!(main.is_selected(ItemRef::Node(root_b)));
+    assert_eq!(main.selected(), [root_b]);
+    assert_eq!(nested.selected(), [fixture.input]);
+    assert!(main.is_selected(root_b));
     assert!(
-        !main.is_selected(ItemRef::Node(fixture.input)),
+        !main.is_selected(fixture.input),
         "the other pane's selection is not this pane's"
     );
     assert_eq!(main.connections().len(), 1, "root's one wire");

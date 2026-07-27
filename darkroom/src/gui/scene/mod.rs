@@ -14,7 +14,7 @@ use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, Static
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::{GraphId, GraphLink};
 
-use crate::core::document::{GraphRef, GraphView, ItemRef, PortKind, PortRef, Viewport};
+use crate::core::document::{GraphRef, GraphView, PortKind, PortRef, Viewport};
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -40,7 +40,7 @@ pub(crate) struct Scene {
     /// Each graph's paint stack, mirrored from its `GraphView::item_placements`
     /// order: later entries drawn in front. The canvas draw pass iterates its
     /// own graph's slice; everything else looks items up through `nodes`.
-    z_order: Vec<ItemRef>,
+    z_order: Vec<NodeId>,
     /// Keyed node projections in relative paint order, **spanning every
     /// projected graph**. Node ids are unique across the whole document
     /// (upheld by `Graph::clone_mapped` at every copy boundary and enforced
@@ -65,7 +65,7 @@ pub(crate) struct Scene {
     /// `Scene`: the in-progress rubber-band preview lives on `SelectionUI`
     /// (read back via `SelectionUI::preview`) and the canvas unions the two
     /// when drawing, so the gesture never writes into this projection.
-    selected: Vec<ItemRef>,
+    selected: Vec<NodeId>,
     /// One flat pool of [`SceneInput`] across every node of every graph,
     /// sliced by the single `SceneNode::inputs` span. A struct-per-port (not
     /// parallel columns) so the per-port fields can't desync.
@@ -486,7 +486,7 @@ impl Scene {
         let nodes_start = self.nodes.len();
 
         for (key, position) in &view.item_placements {
-            let ItemRef::Node(id) = *key;
+            let id = *key;
             let Some(node) = graph.find(id, NodeSearch::TopLevel) else {
                 continue;
             };
@@ -699,7 +699,7 @@ impl<'a> GraphScene<'a> {
     }
 
     /// Whether `node` can seed a "run to this node" — drives the header play
-    /// chip, a pin card's refresh chip, and the context-menu item. Both halves
+    /// chip and the context-menu item. Both halves
     /// have to hold: the pane resolves to one occurrence, and the node itself
     /// covers compiled work. Disabled nodes remain valid because a targeted
     /// run overrides that flag temporarily.
@@ -732,9 +732,9 @@ impl<'a> GraphScene<'a> {
         self.node(node_id).is_some()
     }
 
-    /// This graph's paint stack: node bodies and pinned-output previews
+    /// This graph's paint stack: node bodies
     /// interleaved, later entries in front.
-    pub(crate) fn z_order(self) -> &'a [ItemRef] {
+    pub(crate) fn z_order(self) -> &'a [NodeId] {
         slice_pool(&self.scene.z_order, self.graph.z_order)
     }
 
@@ -752,19 +752,19 @@ impl<'a> GraphScene<'a> {
     }
 
     /// This graph's committed selection, sorted.
-    pub(crate) fn selected(self) -> &'a [ItemRef] {
+    pub(crate) fn selected(self) -> &'a [NodeId] {
         slice_pool(&self.scene.selected, self.graph.selected)
     }
 
     /// Whether `key` is in this graph's committed selection — a binary
     /// search, since the span is kept sorted.
-    pub(crate) fn is_selected(self, key: ItemRef) -> bool {
+    pub(crate) fn is_selected(self, key: NodeId) -> bool {
         selection_holds(self.selected(), key)
     }
 
     /// The committed selection as the owned set an `Intent::SetSelection`
     /// carries.
-    pub(crate) fn selection(self) -> BTreeSet<ItemRef> {
+    pub(crate) fn selection(self) -> BTreeSet<NodeId> {
         self.selected().iter().copied().collect()
     }
 
@@ -812,7 +812,7 @@ struct NodePortSpans {
 /// membership a binary search instead of a set lookup, so it's asserted in
 /// one place here rather than assumed independently at each of the three
 /// call sites.
-pub(crate) fn selection_holds(selected: &[ItemRef], key: ItemRef) -> bool {
+pub(crate) fn selection_holds(selected: &[NodeId], key: NodeId) -> bool {
     debug_assert!(
         selected.is_sorted(),
         "selection slices are kept sorted so membership can binary-search"
@@ -1140,7 +1140,7 @@ pub(crate) mod internals {
         pub(crate) fn with_nodes(nodes: impl IntoIterator<Item = SceneNode>) -> Self {
             let mut scene = Scene::default();
             for node in nodes {
-                scene.z_order.push(ItemRef::Node(node.id));
+                scene.z_order.push(node.id);
                 scene.nodes.insert(node.id, node);
             }
             scene.reseal();
@@ -1148,10 +1148,7 @@ pub(crate) mod internals {
         }
 
         /// Give the sole graph a committed selection.
-        pub(crate) fn with_selection(
-            mut self,
-            selected: impl IntoIterator<Item = ItemRef>,
-        ) -> Self {
+        pub(crate) fn with_selection(mut self, selected: impl IntoIterator<Item = NodeId>) -> Self {
             self.selected.extend(selected);
             self.selected.sort();
             self.selected.dedup();

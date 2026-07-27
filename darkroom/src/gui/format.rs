@@ -1,6 +1,6 @@
 //! Small display formatters shared across the GUI chrome. Every reader of a
 //! magnitude — the status bar, a node's memory footer and run-time label, the
-//! inspector's status line, a pin card's info strip — formats through here, so
+//! inspector's status line, a preview card's info strip — formats through here, so
 //! the same number never renders two ways.
 
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale that keeps

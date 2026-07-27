@@ -9,7 +9,7 @@ use scenarium::GraphLink;
 use scenarium::{FuncInput, FuncOutput};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
-use crate::core::document::{BoundarySide, Document, EditScope, GraphRef, ItemRef};
+use crate::core::document::{BoundarySide, Document, EditScope, GraphRef};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{
     DetachedBoundaryPort, DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
@@ -139,10 +139,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
             }
-            scope
-                .view
-                .item_placements
-                .insert(ItemRef::Node(*node_id), *pos);
+            scope.view.item_placements.insert(*node_id, *pos);
         }
         GraphStep::DuplicateNodes {
             nodes,
@@ -153,10 +150,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             for (pos, node_id, node) in nodes {
                 scope.graph.insert(*node_id, node.clone());
-                scope
-                    .view
-                    .item_placements
-                    .insert(ItemRef::Node(*node_id), *pos);
+                scope.view.item_placements.insert(*node_id, *pos);
             }
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());

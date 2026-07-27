@@ -20,7 +20,7 @@ use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, GraphDef,
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
-use crate::core::document::{BoundarySide, ItemRef, Viewport};
+use crate::core::document::{BoundarySide, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -131,16 +131,16 @@ pub(crate) enum Intent {
     RemoveNode {
         node_id: NodeId,
     },
-    /// Drag-move one or more selected items — node bodies and/or
-    /// pinned-output preview widgets — in canvas-world coordinates. A
+    /// Drag-move one or more selected node bodies in canvas-world
+    /// coordinates. A
     /// multi-select drag moves the whole group as a single undo entry; a
     /// plain drag carries just the one grabbed item. `grabbed` is whichever
     /// member the pointer latched — it keys the drag gesture so consecutive
     /// frames coalesce.
     MoveSelection {
-        grabbed: ItemRef,
+        grabbed: NodeId,
         /// `(item, target position)` per moved member, both kinds mixed.
-        moves: Vec<(ItemRef, Vec2)>,
+        moves: Vec<(NodeId, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -154,7 +154,7 @@ pub(crate) enum Intent {
     /// and Esc-deselect all funnel through this — the caller computes
     /// the desired final set and the undo layer captures the prior one.
     SetSelection {
-        to: BTreeSet<ItemRef>,
+        to: BTreeSet<NodeId>,
     },
     /// Lift an item — a node body or a pinned output's preview widget —
     /// to the top of its graph's paint stack: the end of `item_placements`,
@@ -164,7 +164,7 @@ pub(crate) enum Intent {
     /// tab switches and walks with undo/redo — unlike the transient
     /// selection-recency stack it replaced.
     Raise {
-        key: ItemRef,
+        key: NodeId,
     },
     /// Set one scalar property of a node — its `disabled` flag or its cache
     /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: a
@@ -289,30 +289,26 @@ pub(crate) enum GraphStep {
         nodes: Vec<(Vec2, NodeId, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
-        from_selection: BTreeSet<ItemRef>,
-        to_selection: BTreeSet<ItemRef>,
+        from_selection: BTreeSet<NodeId>,
+        to_selection: BTreeSet<NodeId>,
     },
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
         detached: DetachedNode,
-        /// The node's own view item and every pinned output's, each with
-        /// the paint-stack slot it occupied, in ascending slot order —
-        /// undo restores positions, pins, *and* stacking exactly
-        /// (re-inserting in ascending order reproduces the original
-        /// interleaving).
-        item_placements: Vec<(usize, ItemRef, Vec2)>,
-        /// The selection members that lived on this node (its own key +
-        /// any pinned-output keys) — removal prunes them, undo re-adds.
-        selected: Vec<ItemRef>,
+        /// The node's view item with the paint-stack slot it occupied —
+        /// undo restores position *and* stacking exactly.
+        item_placements: Vec<(usize, NodeId, Vec2)>,
+        /// This node's selection membership — removal prunes it, undo re-adds.
+        selected: Vec<NodeId>,
     },
     MoveSelection {
-        grabbed: ItemRef,
+        grabbed: NodeId,
         /// `(item, from, to)` per moved member, both kinds mixed. An item
         /// missing at build time (node vanished or port unpinned
         /// mid-drag) is dropped, so this can be shorter than the intent's
         /// `moves`.
-        moves: Vec<(ItemRef, Vec2, Vec2)>,
+        moves: Vec<(NodeId, Vec2, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -325,8 +321,8 @@ pub(crate) enum GraphStep {
         to: Option<Binding>,
     },
     SetSelection {
-        from: BTreeSet<ItemRef>,
-        to: BTreeSet<ItemRef>,
+        from: BTreeSet<NodeId>,
+        to: BTreeSet<NodeId>,
     },
     /// Reorder within `item_placements` to raise an item (node body or pin
     /// preview) to the top of the paint stack. `from_index`/`to_index` are
@@ -334,7 +330,7 @@ pub(crate) enum GraphStep {
     /// and revert slides it back — a stable reorder that leaves every
     /// other item's relative order intact.
     Raise {
-        key: ItemRef,
+        key: NodeId,
         from_index: usize,
         to_index: usize,
     },
@@ -442,10 +438,9 @@ pub(crate) enum DetachedBoundaryPort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum GestureKey {
     Viewport,
-    /// A group drag, keyed by whichever item the pointer latched — a node
-    /// body or a pin preview widget — so two different grabbed items never
-    /// coalesce.
-    SelectionDrag(ItemRef),
+    /// A group drag, keyed by whichever node the pointer latched, so two
+    /// different grabbed nodes never coalesce.
+    SelectionDrag(NodeId),
     TabSwitch,
     /// One divider's drag, keyed by the split's packed root path, so
     /// two different dividers never coalesce.

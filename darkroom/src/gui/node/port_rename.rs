@@ -8,7 +8,6 @@
 use palantir::{Configure, HAlign, InternedStr, Sense, Text, TextStyle, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
-use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
@@ -73,7 +72,7 @@ pub(super) fn port_label(
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
-        click_intents(shift, rcx.graph, ItemRef::Node(port.node_id), out);
+        click_intents(shift, rcx.graph, port.node_id, out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameBoundaryPort {

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use glam::Vec2;
 use scenarium::{Graph as CoreGraph, NodeId};
 
-use crate::core::document::{GraphView, ItemRef};
+use crate::core::document::GraphView;
 
 const AUTO_LAYOUT_COL_SPACING: f32 = 220.0;
 const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
@@ -39,7 +39,7 @@ impl GraphView {
 
         let mut row_in_col: HashMap<u32, u32> = HashMap::new();
         for (key, position) in &mut self.item_placements {
-            let ItemRef::Node(id) = *key;
+            let id = *key;
             let d = depth.get(&id).copied().unwrap_or(0);
             let row = row_in_col.entry(d).or_insert(0);
             *position = AUTO_LAYOUT_ORIGIN
@@ -80,10 +80,10 @@ mod tests {
         let mut view = GraphView::for_graph(&graph);
         view.auto_layout(&graph);
 
-        let pos = |key: ItemRef| *view.item_placements.get(&key).unwrap();
-        let source_pos = pos(ItemRef::Node(source_id));
-        let middle_pos = pos(ItemRef::Node(middle_id));
-        let downstream_pos = pos(ItemRef::Node(downstream_id));
+        let pos = |key: NodeId| *view.item_placements.get(&key).unwrap();
+        let source_pos = pos(source_id);
+        let middle_pos = pos(middle_id);
+        let downstream_pos = pos(downstream_id);
         assert_eq!(
             source_pos, AUTO_LAYOUT_ORIGIN,
             "source node in column 0, row 0"

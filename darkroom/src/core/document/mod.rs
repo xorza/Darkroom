@@ -109,37 +109,6 @@ pub(crate) enum BoundarySide {
     Output,
 }
 
-/// One canvas item's identity: a node body or a pinned output's floating
-/// preview widget — the [`GraphRef`]/[`PortRef`]/[`TabRef`] sibling for
-/// the things that occupy canvas space. The two kinds share every
-/// item-level mechanism: one selection set (`GraphView::selected` stays a
-/// single `BTreeSet` — click to select, Shift-click to toggle,
-/// rubber-band sweeps both kinds in), one paint stack
-/// (`GraphView::item_placements`, keyed by this — `Intent::Raise` lifts either
-/// kind), and one group-drag path (`Intent::MoveSelection`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub(crate) enum ItemRef {
-    Node(NodeId),
-}
-
-impl ItemRef {
-    /// The node this key lives on — what a liveness check (a mid-drag delete,
-    /// a selection prune) tests.
-    pub(crate) fn owner(self) -> NodeId {
-        match self {
-            ItemRef::Node(id) => id,
-        }
-    }
-
-    /// Whether this key names something that lives on `node_id` — the node
-    /// itself, or one of its pinned outputs. Used to prune a node's
-    /// selection membership and view items (both forms) when it's removed
-    /// from the graph.
-    pub(crate) fn belongs_to(self, node_id: NodeId) -> bool {
-        self.owner() == node_id
-    }
-}
-
 /// A graph's camera: pan offset (canvas-local px) + zoom factor. One
 /// value shared by the persisted per-graph [`GraphView`], the per-frame
 /// `Scene` projection, and the `SetViewport` edit, so the three can't
@@ -179,25 +148,15 @@ impl Default for Viewport {
 /// note that used to live on `Document`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct GraphView {
-    /// Node bodies and pinned-output preview widgets in one list — the
-    /// canvas's **paint stack**: the order is the shared z-order (later
-    /// items draw in front), so a preview can sit above or below any
-    /// node independently, and `Intent::Raise` lifts either kind to the
-    /// top. Exactly one `Node` item per graph node, exactly one `Pin`
-    /// item per *currently pinned* output (unpinning removes the item;
-    /// undo restores it, slot included) — enforced by [`Self::validate`].
-    ///
-    /// A pin's position is absolute rather than port-relative: the
-    /// widget sits where it was put and does *not* follow its node when
-    /// that node is moved — only its wire re-routes, like a connection
-    /// to another node would.
+    /// Every node body's position, in the canvas's **paint stack** order:
+    /// later items draw in front, and `Intent::Raise` lifts one to the top.
+    /// Exactly one entry per graph node — enforced by [`Self::validate`].
     #[serde(with = "crate::core::document::serde")]
-    pub(crate) item_placements: IndexMap<ItemRef, Vec2>,
+    pub(crate) item_placements: IndexMap<NodeId, Vec2>,
     pub(crate) viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
-    /// (no spurious undo entries from reordering). Holds both node bodies
-    /// and pinned-output preview widgets — see [`ItemRef`].
-    pub(crate) selected: BTreeSet<ItemRef>,
+    /// (no spurious undo entries from reordering).
+    pub(crate) selected: BTreeSet<NodeId>,
 }
 
 impl PartialEq for GraphView {
@@ -215,12 +174,11 @@ impl Eq for GraphView {}
 
 impl GraphView {
     /// A fresh view seeded with a zero-positioned item for every node in
-    /// `graph` and every pinned output (callers usually `auto_layout`
-    /// right after, which places both kinds).
+    /// `graph` (callers usually `auto_layout` right after, which places them).
     pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
         let mut item_placements = IndexMap::with_capacity(graph.len());
         for node in graph.iter() {
-            item_placements.insert(ItemRef::Node(node.id), Vec2::ZERO);
+            item_placements.insert(node.id, Vec2::ZERO);
         }
         Self {
             item_placements,
@@ -228,7 +186,7 @@ impl GraphView {
         }
     }
 
-    pub(crate) fn move_item_to_index(&mut self, key: &ItemRef, target_index: usize) {
+    pub(crate) fn move_item_to_index(&mut self, key: &NodeId, target_index: usize) {
         let from = self
             .item_placements
             .get_index_of(key)
@@ -255,15 +213,12 @@ pub(crate) struct EditScopeRef<'a> {
 }
 
 impl EditScope<'_> {
-    /// Drop a node from both the graph and its view (its own item, its
-    /// pinned outputs' items, and any selection membership). Mirrors the
-    /// old `Document::remove_node`.
+    /// Drop a node from both the graph and its view (its item and any
+    /// selection membership). Mirrors the old `Document::remove_node`.
     pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
-        self.view
-            .item_placements
-            .retain(|key, _| !key.belongs_to(*node_id));
+        self.view.item_placements.retain(|key, _| *key != *node_id);
         let detached = self.graph.detach_node(*node_id);
-        self.view.selected.retain(|k| !k.belongs_to(*node_id));
+        self.view.selected.retain(|k| *k != *node_id);
         detached
     }
 }
@@ -509,16 +464,12 @@ impl Document {
             let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * sibling_count as f32;
             scope.graph.insert_graph(id, graph);
             let inst_id = scope.graph.add(inst);
-            scope
-                .view
-                .item_placements
-                .insert(ItemRef::Node(inst_id), inst_pos);
+            scope.view.item_placements.insert(inst_id, inst_pos);
 
             let mut view = GraphView::default();
-            view.item_placements
-                .insert(ItemRef::Node(input_id), AUTO_LAYOUT_ORIGIN);
+            view.item_placements.insert(input_id, AUTO_LAYOUT_ORIGIN);
             view.item_placements.insert(
-                ItemRef::Node(output_id),
+                output_id,
                 AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
             );
             view
@@ -767,9 +718,7 @@ mod tests {
             GraphLink::Local(local_id),
         );
         let node_id = doc.graph.add(node);
-        doc.main_view
-            .item_placements
-            .insert(ItemRef::Node(node_id), Vec2::ZERO);
+        doc.main_view.item_placements.insert(node_id, Vec2::ZERO);
 
         let step = build_step(Intent::DetachGraph { node_id }, &doc, GraphRef::Main)
             .expect("detach builds");
@@ -816,7 +765,7 @@ mod tests {
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = doc.graph.add(node);
-        doc.main_view.item_placements.insert(ItemRef::Node(id), pos);
+        doc.main_view.item_placements.insert(id, pos);
         id
     }
 
@@ -897,16 +846,8 @@ mod tests {
             .unwrap()
             .id;
         let view = doc.local_views.get(&id).expect("view seeded on create");
-        let ip = view
-            .item_placements
-            .get(&ItemRef::Node(input_id))
-            .copied()
-            .unwrap();
-        let op = view
-            .item_placements
-            .get(&ItemRef::Node(output_id))
-            .copied()
-            .unwrap();
+        let ip = view.item_placements.get(&input_id).copied().unwrap();
+        let op = view.item_placements.get(&output_id).copied().unwrap();
         assert!(op.x > ip.x, "output boundary sits right of input");
         assert_eq!(ip.y, op.y, "boundaries are level");
 
@@ -917,10 +858,7 @@ mod tests {
             .find(|n| matches!(n.kind, NodeKind::Graph(GraphLink::Local(sid)) if sid == id))
             .expect("instance added to main graph");
         assert!(
-            doc.main_view
-                .item_placements
-                .get(&ItemRef::Node(inst.id))
-                .is_some(),
+            doc.main_view.item_placements.get(&inst.id).is_some(),
             "instance has a main view item"
         );
 
@@ -1407,7 +1345,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "view item to move must exist")]
     fn moving_missing_view_item_panics() {
-        GraphView::default().move_item_to_index(&ItemRef::Node(NodeId::unique()), 0);
+        GraphView::default().move_item_to_index(&NodeId::unique(), 0);
     }
 
     fn build_test_doc() -> Document {

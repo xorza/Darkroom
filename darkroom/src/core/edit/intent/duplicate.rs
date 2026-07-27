@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use glam::Vec2;
 use scenarium::{Binding, InputPort, NodeId, NodeSearch, Subscription};
 
-use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView, ItemRef};
+use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView};
 use crate::core::edit::intent::types::Intent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
@@ -18,7 +18,7 @@ const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 /// ([`build_duplicate_intent`]) and the node context menu's duplicate action
 /// (`Editor::apply_node_menu_action`).
 pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
-    view.selected.iter().map(|ItemRef::Node(id)| *id).collect()
+    view.selected.iter().copied().collect()
 }
 
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
@@ -69,7 +69,7 @@ pub(crate) fn build_duplicate_intent_for(
         let clone = node.clone();
         let pos = *view
             .item_placements
-            .get(&ItemRef::Node(*old_id))
+            .get(old_id)
             .expect("view holds a position for every graph node")
             + DUPLICATE_OFFSET;
         nodes.push((pos, new_id, clone));
@@ -131,10 +131,10 @@ pub(crate) fn build_duplicate_intent_for(
 
 /// The intents that remove every member of `selected`. Shared by the
 /// Delete/Backspace shortcut and the node context menu's "Remove".
-pub(crate) fn remove_selection_intents(selected: &BTreeSet<ItemRef>) -> Vec<Intent> {
+pub(crate) fn remove_selection_intents(selected: &BTreeSet<NodeId>) -> Vec<Intent> {
     selected
         .iter()
-        .map(|&ItemRef::Node(node_id)| Intent::RemoveNode { node_id })
+        .map(|&node_id| Intent::RemoveNode { node_id })
         .collect()
 }
 

@@ -7,7 +7,6 @@ pub(super) mod prepass;
 pub(crate) mod preview_row;
 mod value_editor;
 
-use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
@@ -59,7 +58,7 @@ pub(crate) struct RecordCtx<'a> {
     /// owned by `SelectionUI`. Kept off `Scene` so the projection stays a
     /// read-only mirror — the gesture no longer scribbles its preview into
     /// the committed field.
-    pub(crate) selected: &'a [ItemRef],
+    pub(crate) selected: &'a [NodeId],
     pub(crate) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
@@ -72,7 +71,7 @@ pub(crate) struct RecordCtx<'a> {
 impl RecordCtx<'_> {
     /// Whether `key` paints selected this pass — a binary search, since
     /// both the committed span and the rubber-band preview are sorted.
-    pub(crate) fn is_selected(&self, key: ItemRef) -> bool {
+    pub(crate) fn is_selected(&self, key: NodeId) -> bool {
         selection_holds(self.selected, key)
     }
 }
@@ -147,7 +146,7 @@ impl NodeUI {
         // commits.
         let mut focus_kept = None;
         for key in rcx.graph.z_order() {
-            let ItemRef::Node(id) = *key;
+            let id = *key;
             let Some(n) = rcx.graph.node(id) else {
                 continue;
             };
@@ -193,14 +192,13 @@ impl NodeUI {
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = rcx.is_selected(ItemRef::Node(node.id));
+        let selected = rcx.is_selected(node.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes, a 4-tier decision: the
         // breaker alarm wins, then the missing-stub color, then
         // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
         // can't recur here since it's already handled, but the helper still
-        // carries the shape node body and pin preview share).
         let border_width = theme.card_border_width();
         let border = if node.missing && !broken {
             // A stub for a node whose func is gone from the library: paint it
@@ -269,7 +267,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.graph, ItemRef::Node(node.id), out);
+            click_intents(shift_click, rcx.graph, node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
@@ -287,11 +285,11 @@ impl NodeUI {
             let start_positions = if selected {
                 selected_group_positions(rcx.graph, rcx.selected)
             } else {
-                click_intents(false, rcx.graph, ItemRef::Node(node.id), out);
-                vec![(ItemRef::Node(node.id), node.pos)]
+                click_intents(false, rcx.graph, node.id, out);
+                vec![(node.id, node.pos)]
             };
             self.drag
-                .latch(ItemRef::Node(node.id), node.owner, start_positions, handle);
+                .latch(node.id, node.owner, start_positions, handle);
         }
     }
 
@@ -418,7 +416,7 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
-pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: ItemRef, out: &mut Intents) {
+pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: NodeId, out: &mut Intents) {
     out.for_graph(graph.target(), |out| {
         out.push(select_intent(shift, graph, key));
         let deselecting = shift && graph.is_selected(key);
@@ -431,7 +429,7 @@ pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: ItemRef, ou
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, graph: GraphScene<'_>, key: ItemRef) -> Intent {
+fn select_intent(shift: bool, graph: GraphScene<'_>, key: NodeId) -> Intent {
     let mut to = if shift {
         graph.selection()
     } else {
@@ -462,7 +460,7 @@ mod tests {
             ids.iter()
                 .map(|id| scene_node_stub(arena.ui(), *id, Vec2::ZERO)),
         )
-        .with_selection(ids.iter().copied().map(ItemRef::Node))
+        .with_selection(ids.iter().copied())
     }
 
     #[test]
@@ -505,7 +503,7 @@ mod tests {
 
     fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
         let mut out = Intents::default();
-        click_intents(shift, scene.only_graph(), ItemRef::Node(id), &mut out);
+        click_intents(shift, scene.only_graph(), id, &mut out);
         out.drain().map(|(_, intent)| intent).collect()
     }
 
@@ -518,13 +516,13 @@ mod tests {
         let out = click(false, &scene_with_selection([]), a);
         assert_eq!(out.len(), 2);
         assert!(matches!(out[0], Intent::SetSelection { .. }));
-        assert!(matches!(out[1], Intent::Raise { key } if key == ItemRef::Node(a)));
+        assert!(matches!(out[1], Intent::Raise { key } if key == a));
 
         // Plain click on an already-selected node still raises it.
         let out = click(false, &scene_with_selection([a]), a);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::Raise { key } if *key == ItemRef::Node(a))),
+                .any(|i| matches!(i, Intent::Raise { key } if *key == a)),
             "a plain click always lifts its node to the front"
         );
 
@@ -532,7 +530,7 @@ mod tests {
         let out = click(true, &scene_with_selection([a]), b);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::Raise { key } if *key == ItemRef::Node(b))),
+                .any(|i| matches!(i, Intent::Raise { key } if *key == b)),
             "shift-adding a node raises it"
         );
 

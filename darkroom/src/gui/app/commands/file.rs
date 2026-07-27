@@ -53,7 +53,7 @@ impl App {
     /// empty undo history (restoring the old doc via Cmd-Z would replay
     /// nodes from intent history that no longer matches the live tree),
     /// dropped gesture state, forced scene rebuild, and cleared run results —
-    /// pinned-output textures included. The explicit reconcile request is the
+    /// preview textures included. The explicit reconcile request is the
     /// belt: the store's release pass is gated on being asked, so a future
     /// `Editor` that survives the swap would otherwise keep the previous
     /// document's textures alive, keyed by node ids that no longer exist.

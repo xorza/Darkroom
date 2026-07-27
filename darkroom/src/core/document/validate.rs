@@ -3,20 +3,20 @@
 use scenarium::{Graph as CoreGraph, GraphId, GraphValidationError, NodeId};
 
 use crate::core::document::dock::DockValidationError;
-use crate::core::document::{Document, GraphView, ItemRef, TabRef, tab_alive};
+use crate::core::document::{Document, GraphView, TabRef, tab_alive};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GraphViewValidationError {
     #[error("graph viewport must have finite pan and positive finite zoom")]
     InvalidViewport,
     #[error("view item {item:?} position must be finite")]
-    NonFinitePosition { item: ItemRef },
+    NonFinitePosition { item: NodeId },
     #[error("view node items must match graph nodes")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },
     #[error("selected item {item:?} has no view item")]
-    MissingSelectedItem { item: ItemRef },
+    MissingSelectedItem { item: NodeId },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,15 +57,13 @@ impl GraphView {
             if !position.is_finite() {
                 return Err(GraphViewValidationError::NonFinitePosition { item: *key });
             }
-            match key {
-                ItemRef::Node(_) => node_items += 1,
-            }
+            node_items += 1;
         }
         if node_items != graph.len() {
             return Err(GraphViewValidationError::NodeCount);
         }
         for node in graph.iter() {
-            if !self.item_placements.contains_key(&ItemRef::Node(node.id)) {
+            if !self.item_placements.contains_key(&node.id) {
                 return Err(GraphViewValidationError::MissingNode { node_id: node.id });
             }
         }

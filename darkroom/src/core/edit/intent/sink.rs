@@ -79,13 +79,10 @@ impl Extend<Intent> for Intents {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::ItemRef;
     use scenarium::{GraphId, NodeId};
 
     fn raise() -> Intent {
-        Intent::Raise {
-            key: ItemRef::Node(NodeId::nil()),
-        }
+        Intent::Raise { key: NodeId::nil() }
     }
 
     #[test]

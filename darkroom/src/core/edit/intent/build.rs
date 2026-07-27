@@ -8,7 +8,7 @@ use glam::Vec2;
 use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
+use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef};
 use crate::core::edit::intent::types::{
     DetachedBoundaryPort, DocStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
 };
@@ -228,10 +228,7 @@ pub(crate) fn build_step(
                     "subscription subscriber",
                 )?;
             }
-            let to_selection = nodes
-                .iter()
-                .map(|(_, node_id, _)| ItemRef::Node(*node_id))
-                .collect();
+            let to_selection = nodes.iter().map(|(_, node_id, _)| *node_id).collect();
             GraphStep::DuplicateNodes {
                 nodes,
                 bindings,
@@ -249,13 +246,13 @@ pub(crate) fn build_step(
                 .item_placements
                 .iter()
                 .enumerate()
-                .filter(|(_, (key, _))| key.belongs_to(node_id))
+                .filter(|(_, (key, _))| **key == node_id)
                 .map(|(slot, (&key, &position))| (slot, key, position))
                 .collect();
             let selected = view
                 .selected
                 .iter()
-                .filter(|key| key.belongs_to(node_id))
+                .filter(|key| **key == node_id)
                 .copied()
                 .collect();
             GraphStep::RemoveNode {

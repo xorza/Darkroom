@@ -375,8 +375,7 @@ impl Editor {
 
     /// Resolve a node context-menu pick against `target`'s live selection
     /// (right-click already selected the clicked node). Duplicate variants
-    /// reuse the Ctrl+D builder (pinned-output previews carry no node
-    /// identity to clone, so they're filtered out); Remove mirrors the
+    /// reuse the Ctrl+D builder; Remove mirrors the
     /// Delete-key path — one intent per selected member, batched into a
     /// single undo entry by the post-record drain.
     fn apply_node_menu_action(
@@ -619,7 +618,7 @@ mod tests {
     use scenarium::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
     use crate::core::document::open_document::OpenDocument;
-    use crate::core::document::{Document, GraphRef, ItemRef, TabRef};
+    use crate::core::document::{Document, GraphRef, TabRef};
     use crate::core::edit::intent::types::Intent;
     use crate::gui::UiAction;
     use crate::gui::app::editor::Editor;
@@ -672,7 +671,7 @@ mod tests {
             .document
             .main_view
             .item_placements
-            .insert(ItemRef::Node(id), Vec2::ZERO);
+            .insert(id, Vec2::ZERO);
         test.editor.apply_edit(
             &mut test.open,
             Intent::RenameNode {
@@ -688,12 +687,12 @@ mod tests {
         test.editor.apply_edit(
             &mut test.open,
             Intent::SetSelection {
-                to: BTreeSet::from([ItemRef::Node(id)]),
+                to: BTreeSet::from([id]),
             },
         );
         assert_eq!(
             test.open.document.main_view.selected,
-            BTreeSet::from([ItemRef::Node(id)]),
+            BTreeSet::from([id]),
             "the selection edit did apply",
         );
         assert!(
@@ -724,7 +723,7 @@ mod tests {
                     .document
                     .main_view
                     .item_placements
-                    .insert(ItemRef::Node(id), Vec2::ZERO);
+                    .insert(id, Vec2::ZERO);
                 id
             })
             .collect();

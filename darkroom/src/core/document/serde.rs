@@ -2,11 +2,10 @@ use ::serde::de::Error as SerdeError;
 use ::serde::{Deserialize, Deserializer, Serializer};
 use glam::Vec2;
 use indexmap::IndexMap;
-
-use crate::core::document::ItemRef;
+use scenarium::NodeId;
 
 pub(super) fn serialize<S>(
-    placements: &IndexMap<ItemRef, Vec2>,
+    placements: &IndexMap<NodeId, Vec2>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -15,11 +14,11 @@ where
     serializer.collect_seq(placements.iter())
 }
 
-pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<IndexMap<ItemRef, Vec2>, D::Error>
+pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<IndexMap<NodeId, Vec2>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let entries = Vec::<(ItemRef, Vec2)>::deserialize(deserializer)?;
+    let entries = Vec::<(NodeId, Vec2)>::deserialize(deserializer)?;
     let mut placements = IndexMap::with_capacity(entries.len());
     for (key, position) in entries {
         if placements.insert(key, position).is_some() {
@@ -35,19 +34,18 @@ mod tests {
     use indexmap::IndexMap;
     use scenarium::NodeId;
 
-    use crate::core::document::ItemRef;
     use glam::Vec2;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct Fixture {
         #[serde(with = "crate::core::document::serde")]
-        placements: IndexMap<ItemRef, Vec2>,
+        placements: IndexMap<NodeId, Vec2>,
     }
 
     #[test]
     fn duplicate_item_keys_are_rejected() {
         let mut placements = IndexMap::new();
-        placements.insert(ItemRef::Node(NodeId::unique()), Vec2::new(1.0, 2.0));
+        placements.insert(NodeId::unique(), Vec2::new(1.0, 2.0));
         let mut encoded = serde_json::to_value(Fixture { placements }).unwrap();
         let entries = encoded["placements"].as_array_mut().unwrap();
         let duplicate = entries[0].clone();

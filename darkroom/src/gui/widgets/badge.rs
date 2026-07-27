@@ -1,4 +1,4 @@
-//! The indicator chip shared by the node headers and the pin cards: a small
+//! The indicator chip the node headers use: a small
 //! square or pill carrying one glyph, in one of two visual families so a
 //! toggle can't be mistaken for a fact.
 //!
@@ -92,9 +92,7 @@ enum BadgeGlyph {
 /// [`BadgeKind`]). Build one with [`Badge::control`] /
 /// [`Badge::control_drawn`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
-/// frame (always `false` for a marker). `pub(crate)` so
-/// [`crate::gui::canvas::pin_preview`]'s refresh chip can reuse the same
-/// framing rather than re-deriving the chip look.
+/// frame (always `false` for a marker).
 #[derive(Debug)]
 pub(crate) struct Badge {
     glyph: BadgeGlyph,
@@ -121,7 +119,7 @@ impl Badge {
     }
 
     /// A "go" chip: a vector-glyph control that runs something rather than
-    /// configuring it — a node header's play chip and a pin card's refresh
+    /// configuring it — a node header's play chip and its refresh
     /// chip. Quiet at rest (muted ink like every other idle control) and
     /// swinging whole — border, glyph, hover fill — to the palette's success
     /// green when hovered, pointing at the outcome the click delivers.

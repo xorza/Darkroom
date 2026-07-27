@@ -9,7 +9,6 @@ use scenarium::FuncId;
 use scenarium::{Func, Node, NodeId};
 use serde::Serialize;
 
-use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
 use crate::core::runtime_library::PublishedLibrary;
 
@@ -307,7 +306,7 @@ fn register_host_helpers(engine: &mut Engine, library: PublishedLibrary) {
             let node_id: NodeId = id
                 .parse()
                 .map_err(|e| format!("invalid node id {id:?}: {e}"))?;
-            let key = ItemRef::Node(node_id);
+            let key = node_id;
             let action = Intent::MoveSelection {
                 grabbed: key,
                 moves: vec![(key, Vec2::new(x as f32, y as f32))],

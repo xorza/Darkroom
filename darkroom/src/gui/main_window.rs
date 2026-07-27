@@ -48,7 +48,7 @@ pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
     /// One image-viewer navigation state per rendered viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
-    /// centralized in the pinned-output store.
+    /// centralized in the preview store.
     pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
     dock: DockUi,
 }

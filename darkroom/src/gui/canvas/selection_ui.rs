@@ -1,9 +1,10 @@
+use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
-use crate::core::document::{GraphRef, ItemRef};
+use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
@@ -12,7 +13,7 @@ use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; intersecting nodes *and* pinned-output preview
+/// sweeps a rectangle; intersecting nodes
 /// widgets highlight live as it moves and the set is committed on
 /// release. Holding Shift at drag-start *extends* the current selection
 /// instead of replacing it. Cmd+LMB is the breaker and RMB opens the
@@ -26,7 +27,7 @@ pub(super) struct SelectionUI {
     /// The swept set unions onto this each frame, so we never re-read
     /// `scene.selected` mid-drag — no dependency on the document staying
     /// untouched, and the additive base is fixed at latch.
-    base: BTreeSet<ItemRef>,
+    base: BTreeSet<NodeId>,
     /// The swept set while a band is active — sorted and deduped, like the
     /// committed spans it stands in for, so the draw's membership test stays
     /// a binary search. Owned here rather than written into the projection so
@@ -35,7 +36,7 @@ pub(super) struct SelectionUI {
     /// Refilled from scratch every frame of the drag and kept only to reuse
     /// its allocation; [`Self::preview`] is what says whether its contents
     /// mean anything.
-    swept: Vec<ItemRef>,
+    swept: Vec<NodeId>,
     /// The pane a live band belongs to, and thus whose draw reads
     /// [`Self::swept`]. `None` when no band is in flight — draw falls back to
     /// the committed selection.
@@ -69,7 +70,7 @@ impl SelectionUI {
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
-    pub(super) fn preview(&self, graph: GraphRef) -> Option<&[ItemRef]> {
+    pub(super) fn preview(&self, graph: GraphRef) -> Option<&[NodeId]> {
         (self.preview? == graph).then_some(self.swept.as_slice())
     }
 
@@ -148,7 +149,7 @@ impl SelectionUI {
                 continue;
             };
             if rect.intersects(body) {
-                swept.push(ItemRef::Node(n.id));
+                swept.push(n.id);
             }
         }
         // Sorted + deduped, which is the invariant the slice readers
@@ -170,7 +171,7 @@ impl SelectionUI {
         // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        let to: BTreeSet<ItemRef> = swept.iter().copied().collect();
+        let to: BTreeSet<NodeId> = swept.iter().copied().collect();
         out.for_graph(target, |out| out.push(Intent::SetSelection { to }));
         self.preview = Some(target);
         self.band = None;
