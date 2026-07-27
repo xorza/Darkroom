@@ -65,6 +65,7 @@ impl AnchoredMenu {
         let chrome = ctx.panel.clone();
         let padding = ctx.padding;
         let min_width = ctx.min_width;
+        let gap = ctx.gap;
         let mut pick = None;
         let mut popup = Popup::anchored_to(anchor)
             .click_outside(ClickOutside::Dismiss)
@@ -72,7 +73,8 @@ impl AnchoredMenu {
             .id_salt(id_salt)
             .size((Sizing::HUG, Sizing::HUG))
             .min_size((min_width, 0.0))
-            .padding(padding);
+            .padding(padding)
+            .gap(gap);
         if let Some(h) = max_height {
             popup = popup.max_size((f32::INFINITY, h));
         }

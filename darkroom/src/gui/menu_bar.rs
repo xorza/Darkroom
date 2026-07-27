@@ -70,11 +70,11 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
         if MenuItem::new("Save As…").show(ui, popup).left.clicked() {
             command = Some(AppCommand::File(FileCommand::SaveAs));
         }
-        MenuItem::separator(ui);
+        MenuItem::separator().show(ui);
         if MenuItem::new("Preferences").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Shell(ShellCommand::OpenPreferences));
         }
-        MenuItem::separator(ui);
+        MenuItem::separator().show(ui);
         if MenuItem::new("Quit").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Shell(ShellCommand::Quit));
         }

@@ -785,7 +785,7 @@ weight = "Regular"
 [palantir_theme.context_menu]
 padding = 4.0
 min_width = 160.0
-separator = "#aaaaa82e"
+gap = 0.0
 
 [palantir_theme.context_menu.panel]
 corners = 4.0
@@ -807,6 +807,7 @@ inset = false
 [palantir_theme.context_menu.item]
 shortcut = "#aaaaa8"
 padding = [8.0, 5.0]
+gap = 16.0
 
 [palantir_theme.context_menu.item.normal.text]
 font_size_px = 13.0
@@ -847,6 +848,11 @@ color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
+
+[palantir_theme.context_menu.separator]
+color = "#aaaaa82e"
+thickness = 1.0
+margin = [0.0, 4.0]
 
 [palantir_theme.modal]
 backdrop = "#00000080"
