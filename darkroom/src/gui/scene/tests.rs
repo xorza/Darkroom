@@ -49,12 +49,47 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     node.run_available = false;
     assert!(
         !node.runnable(),
-        "a local definition tab has no exact root execution identity"
+        "a local definition pane runs nothing directly"
     );
     assert!(
         node.can_disable(),
         "run availability does not hide the authoring disable toggle"
     );
+}
+
+#[test]
+fn a_graph_instance_runs_like_any_other_node_in_the_entry_graph() {
+    // A composite dissolves into its interior rather than vanishing, so it
+    // covers compiled work and seeds a run like a func does
+    // (`CompiledGraph::run_targets`). Only wiring — a boundary node — and an
+    // unresolved stub cover nothing.
+    let mut arena = UiHarness::arena();
+    let mut node = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
+    node.graph = Some(GraphLink::Local(GraphId::unique()));
+    assert!(
+        node.runnable(),
+        "an instance in the entry graph is runnable"
+    );
+
+    node.run_available = false;
+    assert!(
+        !node.runnable(),
+        "the pane, not the node kind, is what withholds a run inside a definition"
+    );
+
+    node.run_available = true;
+    node.boundary = true;
+    assert!(!node.runnable(), "a boundary node emits no compiled work");
+
+    node.boundary = false;
+    node.missing = true;
+    assert!(!node.runnable(), "an unresolved stub resolves to nothing");
+
+    // An output-less composite reads as a sink, and disabling one disables
+    // its whole interior — so the toggle belongs to it too.
+    node.missing = false;
+    node.sink = true;
+    assert!(node.can_disable());
 }
 
 #[derive(Debug)]

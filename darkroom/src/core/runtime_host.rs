@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::DiskStore;
-use scenarium::{CompiledGraph, Compiler, ExecutionNodeId, WorkerExited, WorkerReport};
+use scenarium::{CompiledGraph, Compiler, WorkerExited, WorkerReport};
 use scenarium::{Graph, GraphDef, NodeId};
 
 use crate::core::document::{Document, GraphRef};
@@ -169,20 +169,30 @@ impl RuntimeHost {
         true
     }
 
-    /// Compile `graph` and evaluate the root execution node for authored
-    /// `node_id`, delivering its outputs for the preview fetch ("run to this node").
-    /// The explicit node seed overrides disabled occurrences during planning.
-    /// `false` means the compile failed — it is reported to [`Self::status`]
-    /// and nothing reaches the worker. Results arrive via
-    /// [`Self::drain_worker`].
+    /// Compile `graph` and evaluate what authored `node_id` covers, delivering
+    /// its outputs for the preview fetch ("run to this node"). A func node
+    /// resolves to itself; a graph instance resolves to the interior producers
+    /// behind its output ports plus its interior sinks
+    /// ([`CompiledGraph::run_targets`]). The explicit node seeds override
+    /// disabled occurrences during planning.
+    ///
+    /// `false` means nothing reached the worker — either the compile failed
+    /// (reported to [`Self::status`]) or the node has no execution footprint
+    /// at all, which is a boundary node or one the program dropped. Results
+    /// arrive via [`Self::drain_worker`].
     pub(crate) fn run_node(&mut self, graph: &Graph, node_id: NodeId) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        let e_node_id = ExecutionNodeId::from_authoring(&[node_id]);
+        let targets = compiled.run_targets(node_id);
+        if targets.is_empty() {
+            self.status
+                .error("nothing to run: this node has no compiled work".to_owned());
+            return false;
+        }
         self.dispatch(|worker| {
             worker.install(compiled)?;
-            worker.run_node(e_node_id)
+            worker.run_nodes(targets)
         });
         true
     }

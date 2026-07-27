@@ -91,10 +91,12 @@ impl WorkerBridge {
         })
     }
 
-    /// Execute one exact node in the installed program and deliver its outputs.
-    pub(crate) fn run_node(&self, e_node_id: ExecutionNodeId) -> Result<(), WorkerExited> {
+    /// Execute these exact nodes in the installed program and deliver their
+    /// outputs. One authored node can cover several — a graph instance seeds
+    /// the interior producers behind its outputs plus its interior sinks.
+    pub(crate) fn run_nodes(&self, e_node_ids: Vec<ExecutionNodeId>) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![e_node_id]),
+            seeds: RunSeeds::nodes(e_node_ids),
         })
     }
 
