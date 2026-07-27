@@ -789,7 +789,6 @@ mod tests {
             pos: Vec2::ZERO,
             node_id,
             node: Node::new(NodeKind::Func(FuncId::unique())),
-            graph: None,
             bindings: vec![],
         };
         test.editor.intents.for_graph(GraphRef::Main, |out| {

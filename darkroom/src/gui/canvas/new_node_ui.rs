@@ -8,7 +8,7 @@ use palantir::{
 use scenarium::NodeId;
 use scenarium::{Binding, InputPort, Node, NodeKind};
 use scenarium::{Func, NodePorts};
-use scenarium::{GraphDef, GraphId, GraphLink};
+use scenarium::{GraphDef, GraphId};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
@@ -19,23 +19,25 @@ use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
-/// A chosen palette entry, as the intent it raises.
-///
-/// A local definition is picked by id alone: it is already in the graph, so
-/// unlike every other row there is no node, definition, or binding for the
-/// palette to build — `build_step` reads them off the definition the id
-/// names.
+/// A chosen palette entry, as the intent it raises. One variant per add
+/// intent: the rows that bring a definition and the rows that reuse one
+/// carry different payloads, and only the first kind builds a node here —
+/// for the others `build_step` reads the definition out of the document.
 #[derive(Debug)]
 enum ChosenNode {
-    /// A func, special node, or library graph: the node and the state
-    /// created atomically with it.
+    /// A func or a built-in special node.
     New {
         node_id: NodeId,
         node: Node,
-        graph: Option<(GraphId, Box<GraphDef>)>,
         bindings: Vec<(InputPort, Binding)>,
     },
-    /// One of the open graph's own local definitions.
+    /// A library graph, localized: the copy travels with the pick.
+    LocalGraph {
+        node_id: NodeId,
+        graph_id: GraphId,
+        def: Box<GraphDef>,
+    },
+    /// One of the open graph's own local definitions, by id.
     LocalInstance { node_id: NodeId, graph_id: GraphId },
 }
 
@@ -191,14 +193,22 @@ impl NewNodeUi {
                     ChosenNode::New {
                         node_id,
                         node,
-                        graph: definition,
                         bindings,
                     } => Intent::AddNode {
                         pos,
                         node_id,
                         node,
-                        graph: definition,
                         bindings,
+                    },
+                    ChosenNode::LocalGraph {
+                        node_id,
+                        graph_id,
+                        def,
+                    } => Intent::AddLocalGraph {
+                        pos,
+                        node_id,
+                        graph_id,
+                        def,
                     },
                     ChosenNode::LocalInstance { node_id, graph_id } => {
                         Intent::AddLocalGraphInstance {
@@ -430,15 +440,14 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
         ChosenNode::New {
             node_id,
             node,
-            graph: None,
             bindings,
         }
     })
 }
 
-/// One palette row for a shared graph: on click, an instance node plus an
-/// editable `Local` copy of the graph that records its library `origin`, so the
-/// instance localizes rather than staying linked to the library entry.
+/// One palette row for a shared graph: on click, an editable `Local` copy of
+/// the graph recording its library `origin`, so the instance localizes rather
+/// than staying linked to the library entry.
 fn graph_entry(
     ui: &mut Ui,
     popup: &PopupHandle,
@@ -453,17 +462,12 @@ fn graph_entry(
     {
         return None;
     }
-    let local_id = GraphId::unique();
     let mut local = graph.clone_mapped();
     local.interface.origin = Some(shared_id);
-    let node_id = NodeId::unique();
-    let node = Node::graph_instance(&local, GraphLink::Local(local_id));
-    let bindings = local.ports().default_bindings(node_id).collect();
-    Some(ChosenNode::New {
-        node_id,
-        node,
-        graph: Some((local_id, Box::new(local))),
-        bindings,
+    Some(ChosenNode::LocalGraph {
+        node_id: NodeId::unique(),
+        graph_id: GraphId::unique(),
+        def: Box::new(local),
     })
 }
 
@@ -502,7 +506,6 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     Some(ChosenNode::New {
         node_id,
         node,
-        graph: None,
         bindings,
     })
 }

@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 
-use scenarium::{Binding, Graph, GraphDef, GraphId, GraphLink, Node, NodeKind};
+use glam::Vec2;
+use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef, ItemRef};
@@ -154,30 +155,48 @@ pub(crate) fn build_step(
         Intent::AddNode {
             pos,
             node_id,
-            mut node,
-            graph: nested_graph,
+            node,
             bindings,
         } => {
             let mut added = HashSet::new();
             validate::fresh_node_id(doc, node_id, &mut added)?;
             validate::finite_position(pos, "AddNode")?;
-            if let Some((graph_id, definition)) = &nested_graph {
-                validate::fresh_local_graph(doc, *graph_id, definition)?;
-            }
-            let nested_graph = reuse_local_graph(graph, &mut node, nested_graph);
-            validate::insertable_kind(
-                graph,
-                target,
-                &node,
-                nested_graph.as_ref().map(|(id, _)| *id),
-            )?;
+            validate::insertable_kind(graph, target, &node)?;
             validate::insertable_bindings(graph, &added, &bindings)?;
             GraphStep::AddNode {
                 pos,
                 node_id,
                 node,
-                graph: nested_graph,
+                graph: None,
                 bindings,
+            }
+        }
+        Intent::AddLocalGraph {
+            pos,
+            node_id,
+            graph_id,
+            def,
+        } => {
+            let mut added = HashSet::new();
+            validate::fresh_node_id(doc, node_id, &mut added)?;
+            validate::finite_position(pos, "AddLocalGraph")?;
+            validate::fresh_local_graph(doc, graph_id, &def)?;
+            // A second instance of one library entry shares the copy this
+            // graph already holds rather than forking another — at which
+            // point there is no definition to add and this *is* an instance.
+            match def
+                .interface
+                .origin
+                .and_then(|origin| local_graph_from(graph, origin))
+            {
+                Some(existing) => instance_local_graph(graph, pos, node_id, existing)?,
+                None => GraphStep::AddNode {
+                    pos,
+                    node_id,
+                    node: Node::graph_instance(&def, GraphLink::Local(graph_id)),
+                    bindings: def.ports().default_bindings(node_id).collect(),
+                    graph: Some((graph_id, def)),
+                },
             }
         }
         Intent::AddLocalGraphInstance {
@@ -188,21 +207,7 @@ pub(crate) fn build_step(
             let mut added = HashSet::new();
             validate::fresh_node_id(doc, node_id, &mut added)?;
             validate::finite_position(pos, "AddLocalGraphInstance")?;
-            // Only the target graph's *own* definitions resolve through a
-            // `GraphLink::Local` raised over it — the same rule
-            // `validate::insertable_kind` enforces for `AddNode`.
-            let Some(definition) = graph.graphs.get(&graph_id) else {
-                return Err(Refusal::Invalid(format!(
-                    "cannot instance local graph {graph_id:?}, which the target graph doesn't hold"
-                )));
-            };
-            GraphStep::AddNode {
-                pos,
-                node_id,
-                node: Node::graph_instance(definition, GraphLink::Local(graph_id)),
-                graph: None,
-                bindings: definition.ports().default_bindings(node_id).collect(),
-            }
+            instance_local_graph(graph, pos, node_id, graph_id)?
         }
         Intent::DuplicateNodes {
             nodes,
@@ -214,8 +219,8 @@ pub(crate) fn build_step(
                 validate::fresh_node_id(doc, *node_id, &mut added)?;
                 validate::finite_position(*pos, "DuplicateNodes")?;
                 // A clone shares its original's local definition rather
-                // than bringing one, so there's never a pending graph.
-                validate::insertable_kind(graph, target, node, None)?;
+                // than bringing one, so the link always resolves already.
+                validate::insertable_kind(graph, target, node)?;
             }
             validate::insertable_bindings(graph, &added, &bindings)?;
             for subscription in &subscriptions {
@@ -426,25 +431,38 @@ pub(crate) fn build_step(
     Ok(UndoStep::Graph(step))
 }
 
-/// Reuse an existing local copy when it has the same shared origin.
-fn reuse_local_graph(
+/// Instance the definition `graph_id` names, seeding the const defaults its
+/// interface declares. The one place a bare instance is built, so reusing an
+/// existing copy and picking one out of the palette cannot drift apart.
+///
+/// Only the target graph's *own* definitions resolve through a
+/// `GraphLink::Local` raised over it — the same rule
+/// [`validate::insertable_kind`] enforces for a caller-built node.
+fn instance_local_graph(
     graph: &Graph,
-    node: &mut Node,
-    pending: Option<(GraphId, Box<GraphDef>)>,
-) -> Option<(GraphId, Box<GraphDef>)> {
-    let (graph_id, pending) = pending?;
-    let Some(origin) = pending.interface.origin else {
-        return Some((graph_id, pending));
+    pos: Vec2,
+    node_id: NodeId,
+    graph_id: GraphId,
+) -> Result<GraphStep, Refusal> {
+    let Some(definition) = graph.graphs.get(&graph_id) else {
+        return Err(Refusal::Invalid(format!(
+            "cannot instance local graph {graph_id:?}, which the target graph doesn't hold"
+        )));
     };
-    match graph
+    Ok(GraphStep::AddNode {
+        pos,
+        node_id,
+        node: Node::graph_instance(definition, GraphLink::Local(graph_id)),
+        graph: None,
+        bindings: definition.ports().default_bindings(node_id).collect(),
+    })
+}
+
+/// This graph's own copy of the library entry `origin`, if it holds one.
+fn local_graph_from(graph: &Graph, origin: GraphId) -> Option<GraphId> {
+    graph
         .graphs
         .iter()
-        .find(|(_, existing)| existing.interface.origin == Some(origin))
-    {
-        Some((existing_id, _)) => {
-            node.kind = NodeKind::Graph(GraphLink::Local(*existing_id));
-            None
-        }
-        None => Some((graph_id, pending)),
-    }
+        .find(|(_, def)| def.interface.origin == Some(origin))
+        .map(|(id, _)| *id)
 }

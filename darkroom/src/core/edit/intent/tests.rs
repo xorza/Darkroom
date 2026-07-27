@@ -1208,7 +1208,6 @@ fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Intent {
         pos,
         node_id,
         node,
-        graph: None,
         bindings: vec![],
     }
 }
@@ -1310,7 +1309,6 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
                 pos: Vec2::ZERO,
                 node_id: NodeId::unique(),
                 node: func_node(),
-                graph: None,
                 bindings: vec![(InputPort::new(ghost, 0), Binding::bind(live, 0))],
             },
         ),
@@ -1374,6 +1372,33 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
                 graph_id: GraphId::unique(),
             },
         ),
+        (
+            "AddLocalGraph with a nil graph id",
+            Intent::AddLocalGraph {
+                pos: Vec2::ZERO,
+                node_id: NodeId::unique(),
+                graph_id: GraphId::nil(),
+                def: Box::new(GraphDef::new("nil")),
+            },
+        ),
+        (
+            "AddLocalGraph over a live node id",
+            Intent::AddLocalGraph {
+                pos: Vec2::ZERO,
+                node_id: live,
+                graph_id: GraphId::unique(),
+                def: Box::new(GraphDef::new("collides")),
+            },
+        ),
+        (
+            "AddLocalGraph at a non-finite position",
+            Intent::AddLocalGraph {
+                pos: nan,
+                node_id: NodeId::unique(),
+                graph_id: GraphId::unique(),
+                def: Box::new(GraphDef::new("nan")),
+            },
+        ),
     ];
     for (what, intent) in cases {
         assert_invalid(&mut doc, GraphRef::Main, intent, what);
@@ -1383,19 +1408,16 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     // document already holds — `Graph::validate` rejects a duplicate.
     let taken = GraphId::unique();
     doc.graph.insert_graph(taken, GraphDef::new("S"));
-    let mut instance = func_node();
-    instance.kind = NodeKind::Graph(GraphLink::Local(taken));
     assert_invalid(
         &mut doc,
         GraphRef::Main,
-        Intent::AddNode {
+        Intent::AddLocalGraph {
             pos: Vec2::ZERO,
             node_id: NodeId::unique(),
-            node: instance,
-            graph: Some((taken, Box::new(GraphDef::new("clash")))),
-            bindings: vec![],
+            graph_id: taken,
+            def: Box::new(GraphDef::new("clash")),
         },
-        "AddNode bringing a definition under an id already in use",
+        "AddLocalGraph bringing a definition under an id already in use",
     );
 
     // The entry graph has no interface, so a boundary node there is

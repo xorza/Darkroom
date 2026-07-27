@@ -648,22 +648,20 @@ mod tests {
 
         // Instancing a library graph localizes it: a `Local` def copy
         // (recording its `origin`) is added alongside the instance node, as
-        // one undoable `AddNode`.
+        // one undoable `AddLocalGraph`.
         let lib_id = GraphId::unique();
         let mut local = leaf_graph("Lib").clone_mapped();
         local.interface.origin = Some(lib_id);
         let local_id = GraphId::unique();
-        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
 
         let mut doc = Document::default();
         let step = build_step(
-            Intent::AddNode {
+            Intent::AddLocalGraph {
                 pos: Vec2::ZERO,
                 node_id,
-                node,
-                graph: Some((local_id, Box::new(local))),
-                bindings: vec![],
+                graph_id: local_id,
+                def: Box::new(local),
             },
             &doc,
             GraphRef::Main,
@@ -698,24 +696,26 @@ mod tests {
 
     /// Localize one library instance into `doc`'s root graph and return
     /// `(node_id, local_def_id)`. `origin` tags the copy's library
-    /// lineage so a later instance can dedup against it.
+    /// lineage so a later instance can dedup against it. The one interface
+    /// input carries a default, so the seeded bindings are observable.
     fn add_library_instance(doc: &mut Document, lib_id: GraphId) -> (NodeId, GraphId) {
         use crate::core::edit::intent::apply::apply_step;
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
+        use scenarium::{DataType, FuncInput, StaticValue};
 
-        let mut local = leaf_graph("Lib").clone_mapped();
+        let mut local = leaf_graph("Lib")
+            .input(FuncInput::optional("gain", DataType::Float).default(StaticValue::Float(1.5)))
+            .clone_mapped();
         local.interface.origin = Some(lib_id);
         let local_id = GraphId::unique();
-        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
         let step = build_step(
-            Intent::AddNode {
+            Intent::AddLocalGraph {
                 pos: Vec2::ZERO,
                 node_id,
-                node,
-                graph: Some((local_id, Box::new(local))),
-                bindings: vec![],
+                graph_id: local_id,
+                def: Box::new(local),
             },
             doc,
             GraphRef::Main,
@@ -727,13 +727,15 @@ mod tests {
 
     #[test]
     fn second_instance_reuses_existing_local_def() {
+        use scenarium::{Binding, InputPort, StaticValue};
+
         // Two instances of the same library graph dropped into one
         // graph must share a single local graph: the first materializes the
         // localized copy, the second re-points at it (no duplicate def).
         let lib_id = GraphId::unique();
         let mut doc = Document::default();
 
-        let (_node_a, def_a_id) = add_library_instance(&mut doc, lib_id);
+        let (node_a, def_a_id) = add_library_instance(&mut doc, lib_id);
         assert_eq!(doc.graph.graphs.len(), 1, "first instance adds the def");
 
         let (node_b, def_b_id) = add_library_instance(&mut doc, lib_id);
@@ -751,6 +753,16 @@ mod tests {
             NodeKind::Graph(GraphLink::Local(def_a_id)),
             "second instance points at the first instance's local graph"
         );
+        // Reuse routes through the same instancing path as a bare
+        // `AddLocalGraphInstance`, so the second node's defaults come off the
+        // definition that was *kept*, not the copy that was dropped.
+        for node_id in [node_a, node_b] {
+            assert_eq!(
+                doc.graph.bindings.get(&InputPort::new(node_id, 0)),
+                Some(&Binding::Const(StaticValue::Float(1.5))),
+                "both instances seed the interface default"
+            );
+        }
     }
 
     #[test]
@@ -982,7 +994,6 @@ mod tests {
                 pos: Vec2::ZERO,
                 node_id,
                 node: Node::new(NodeKind::Func(FuncId::unique())),
-                graph: None,
                 bindings: vec![],
             },
             &doc,
@@ -1352,16 +1363,14 @@ mod tests {
         let mut local = leaf_graph("Lib").clone_mapped();
         local.interface.origin = Some(GraphId::unique());
         let local_id = GraphId::unique();
-        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
 
         let mut doc = Document::default();
         let step = build_step(
-            Intent::AddNode {
+            Intent::AddLocalGraph {
                 pos: Vec2::ZERO,
                 node_id: NodeId::unique(),
-                node,
-                graph: Some((local_id, Box::new(local))),
-                bindings: vec![],
+                graph_id: local_id,
+                def: Box::new(local),
             },
             &doc,
             GraphRef::Main,
