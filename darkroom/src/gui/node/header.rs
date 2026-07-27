@@ -20,6 +20,7 @@ use crate::core::document::ItemRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
+use crate::gui::format::fmt_elapsed;
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid, node_wid};
@@ -38,7 +39,8 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 const BADGE_SIZE: f32 = 18.0;
 const BADGE_FONT: f32 = 12.0;
 
-/// Width floor for the run-time label, ~7 mono glyphs at [`BADGE_FONT`].
+/// Width floor for the run-time label, ~7 mono glyphs at [`BADGE_FONT`]. The
+/// range this covers is pinned by `format::tests`.
 ///
 /// The node is `Hug` above a min width, so anything that changes the
 /// header's measured width moves the node's right edge — and with it the
@@ -63,18 +65,6 @@ const CHIP_TINT_ALPHA: f32 = 0.20;
 /// solid saturated fills are reserved for live status (the exec glows).
 const CHIP_ON_ALPHA: f32 = 0.35;
 const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
-
-/// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
-/// that keeps 2–3 significant digits.
-pub(crate) fn fmt_elapsed(secs: f64) -> String {
-    if secs >= 1.0 {
-        format!("{secs:.2}s")
-    } else if secs >= 1e-3 {
-        format!("{:.1}ms", secs * 1e3)
-    } else {
-        format!("{:.0}µs", secs * 1e6)
-    }
-}
 
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
@@ -162,7 +152,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             // one control that *does* something with the node's output
             // rather than configuring it. Only on nodes that resolve as a
             // run seed.
-            if node.runnable() {
+            if rcx.graph.runnable(node) {
                 play_chip(ui, theme, node);
             }
             title(ui, rcx, node, out);
@@ -411,22 +401,12 @@ fn property_chip(
 /// [`play_badge_wid`] and translated into the run command there (node
 /// code never names `AppCommand`).
 fn play_chip(ui: &mut Ui, theme: &Theme, node: &SceneNode) {
-    let wid = play_badge_wid(node.id);
-    // The whole chip — border, glyph, hover fill — swings to the "go"
-    // glow together, so the hover-dependent color is picked out here
-    // rather than by `Badge`'s fixed-color scheme.
-    let hovered = ui.response_for(wid).hovered;
-    let color = if hovered {
-        theme.colors.exec_executed_glow
-    } else {
-        theme.colors.text_muted
-    };
     let tooltip = if node.disabled {
         "Run to this node once — temporarily override its disabled flag"
     } else {
         "Run to this node — execute its upstream cone and keep the output for preview"
     };
-    Badge::control_drawn(draw_play_triangle, color, false, wid, tooltip).show(ui);
+    Badge::go(play_badge_wid(node.id), tooltip, draw_play_triangle).show(ui, theme);
 }
 
 /// Play triangle about the chip center, nudged right — a play mark's
@@ -509,6 +489,37 @@ enum BadgeKind {
     Marker { salt: &'static str },
 }
 
+/// A "go" chip awaiting the theme it resolves its hover colour from — see
+/// [`Badge::go`]. Built by the call site (which knows the id, tip, and
+/// glyph), coloured and recorded by [`Self::show`].
+#[derive(Debug)]
+pub(crate) struct GoBadge {
+    wid: WidgetId,
+    tip: &'static str,
+    draw: fn(&mut Ui, Color),
+}
+
+impl GoBadge {
+    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) {
+        // Last frame's hover, like every other chip's fill lift.
+        let color = if ui.response_for(self.wid).hovered {
+            theme.colors.exec_executed_glow
+        } else {
+            theme.colors.text_muted
+        };
+        Badge {
+            glyph: BadgeGlyph::Drawn(self.draw),
+            color,
+            tip: self.tip,
+            kind: BadgeKind::Control {
+                wid: self.wid,
+                filled: false,
+            },
+        }
+        .show(ui);
+    }
+}
+
 /// A chip's icon: a bold font character (the common case) or a caller-
 /// drawn vector glyph painted into the `BADGE_SIZE` box in the chip's
 /// ink (the play triangle). A plain `fn` pointer keeps `Badge`
@@ -551,23 +562,21 @@ impl Badge {
         }
     }
 
-    /// [`Self::control`] with a vector glyph instead of a font character.
-    fn control_drawn(
-        draw: fn(&mut Ui, Color),
-        color: Color,
-        filled: bool,
-        wid: WidgetId,
-        tip: &'static str,
-    ) -> Self {
-        Badge {
-            glyph: BadgeGlyph::Drawn(draw),
-            color,
-            tip,
-            kind: BadgeKind::Control { wid, filled },
-        }
+    /// A "go" chip: a vector-glyph control that runs something rather than
+    /// configuring it — a node header's play chip and a pin card's refresh
+    /// chip. Quiet at rest (muted ink like every other idle control) and
+    /// swinging whole — border, glyph, hover fill — to the palette's success
+    /// green when hovered, pointing at the outcome the click delivers.
+    ///
+    /// The colour is resolved by [`Self::show_go`] rather than passed in,
+    /// because it depends on last frame's hover: written out at each call
+    /// site, the two chips were the same four lines twice.
+    pub(crate) fn go(wid: WidgetId, tip: &'static str, draw: fn(&mut Ui, Color)) -> GoBadge {
+        GoBadge { wid, tip, draw }
     }
 
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
+    #[allow(clippy::self_named_constructors)]
     fn marker(salt: &'static str, glyph: &'static str, color: Color, tip: &'static str) -> Self {
         Badge {
             glyph: BadgeGlyph::Char(glyph),
@@ -649,42 +658,5 @@ impl Badge {
         let clicked = chip.response.left.clicked();
         tooltip_after(ui, &snapshot, tip);
         clicked
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::gui::node::header::fmt_elapsed;
-
-    /// `RUN_TIME_MIN_WIDTH` reserves ~7 mono glyphs so a running node's
-    /// label measures the same across every digit-count change, which is
-    /// what stops its outgoing wires twitching mid-run. That only holds
-    /// while `fmt_elapsed` stays inside 7 characters — widen it and the
-    /// floor silently stops covering the common range.
-    #[test]
-    fn fmt_elapsed_stays_within_the_reserved_width() {
-        // Both sides of every unit switch, plus the digit-count steps
-        // within seconds, which is where a live timer spends its time.
-        let cases = [
-            (0.0, "0µs"),
-            (9.99e-7, "1µs"),
-            (999.4e-6, "999µs"),
-            (1e-3, "1.0ms"),
-            (999.94e-3, "999.9ms"),
-            (1.0, "1.00s"),
-            (9.994, "9.99s"),
-            (10.0, "10.00s"),
-            (99.999, "100.00s"),
-            (999.994, "999.99s"),
-        ];
-        for (secs, expected) in cases {
-            let got = fmt_elapsed(secs);
-            assert_eq!(got, expected, "fmt_elapsed({secs})");
-            assert!(
-                got.chars().count() <= 7,
-                "{got:?} is {} chars — past what RUN_TIME_MIN_WIDTH reserves",
-                got.chars().count(),
-            );
-        }
     }
 }

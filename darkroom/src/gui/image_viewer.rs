@@ -16,8 +16,6 @@ use std::fmt::Write as _;
 
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
-#[cfg(test)]
-use palantir::Image as AptImage;
 use palantir::{
     Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
     Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
@@ -34,10 +32,14 @@ use crate::gui::widgets::toolbar::{
     BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
 };
 
-/// Viewer zoom bounds — far wider than the canvas's: out to overview a
-/// texture-capped 8k frame in a small pane, in for pixel peeping.
-const MIN_ZOOM: f32 = 0.02;
-const MAX_ZOOM: f32 = 32.0;
+/// Viewer zoom bounds — far wider than the canvas's
+/// (`pan_zoom::CANVAS_MIN_ZOOM`/`CANVAS_MAX_ZOOM`): out to overview a
+/// texture-capped 8k frame in a small pane, in for pixel peeping. Named apart
+/// from the canvas pair because both are passed into the same shared
+/// `fold_scroll_zoom` / `zoom_about`, where an unqualified `MIN_ZOOM` at the
+/// call site wouldn't say which surface's range is in play.
+const VIEWER_MIN_ZOOM: f32 = 0.02;
+const VIEWER_MAX_ZOOM: f32 = 32.0;
 
 /// On-screen side of one checkerboard square, logical px. Screen-fixed
 /// (doesn't pan/zoom with the image) — it's a transparency reference,
@@ -127,32 +129,46 @@ impl ImageViewer {
         source: Option<&StoredContent>,
     ) -> bool {
         let (shown, message) = match source {
-            Some(StoredContent::Image(image)) => match &image.full {
-                FullImage::Resident(handle) => (
-                    Some(ShownImage {
-                        handle,
-                        native_size: image.native_size,
-                        native_format: image.native_format,
-                    }),
+            // A stored image still has to clear the viewer's own bar: only the
+            // full-resolution upload is worth showing here, where the pin
+            // card is happy with the thumbnail.
+            Some(value) => match value.image() {
+                Some(image) => match &image.full {
+                    FullImage::Resident(handle) => (
+                        Some(ShownImage {
+                            handle,
+                            native_size: image.native_size,
+                            native_format: image.native_format,
+                        }),
+                        None,
+                    ),
+                    FullImage::Failed(message) => (None, Some(message.as_str())),
+                    FullImage::Deferred(_) => {
+                        // This pane is its group's visible tab, so the reconcile
+                        // pass covered it — unless something changed which tab is
+                        // visible, or pushed a value, without asking the store to
+                        // reconcile (`UndoStep::requires_reconcile` and the
+                        // non-undoable tab-open path are the signal sites).
+                        debug_assert!(
+                            false,
+                            "visible image viewer source was not materialized: \
+                             a reconcile request is missing"
+                        );
+                        (None, Some("image is being prepared"))
+                    }
+                },
+                // No image to show. A failure reports its own reason; a
+                // perfectly good non-image value doesn't get one, because
+                // "7" is not what a viewer tab is for — the pin card
+                // renders that.
+                None => (
                     None,
+                    Some(match value {
+                        StoredContent::Error(message) => message.as_str(),
+                        _ => "pinned output has no image value",
+                    }),
                 ),
-                FullImage::Failed(message) => (None, Some(message.as_str())),
-                FullImage::Deferred(_) => {
-                    // This pane is its group's visible tab, so the reconcile
-                    // pass covered it — unless something changed which tab is
-                    // visible, or pushed a value, without asking the store to
-                    // reconcile (`UndoStep::requires_reconcile` and the
-                    // non-undoable tab-open path are the signal sites).
-                    debug_assert!(
-                        false,
-                        "visible image viewer source was not materialized: \
-                         a reconcile request is missing"
-                    );
-                    (None, Some("image is being prepared"))
-                }
             },
-            Some(StoredContent::Error(message)) => (None, Some(message.as_str())),
-            Some(StoredContent::Text(_)) => (None, Some("pinned output has no image value")),
             None => (None, None),
         };
         self.sync_source(shown.map(|image| image.handle.size()));
@@ -379,7 +395,7 @@ impl ImageViewer {
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
         self.pan_anchor.apply((), drag, &mut v.pan);
-        fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
+        fold_scroll_zoom(&mut v, ui, &resp, VIEWER_MIN_ZOOM, VIEWER_MAX_ZOOM);
         self.view = Some(v);
     }
 }
@@ -499,8 +515,8 @@ fn zoom_about_pane_center(mut v: Viewport, zoom: f32, pane: Vec2) -> Viewport {
         &mut v.zoom,
         pane * 0.5,
         factor,
-        MIN_ZOOM,
-        MAX_ZOOM,
+        VIEWER_MIN_ZOOM,
+        VIEWER_MAX_ZOOM,
     );
     v
 }
@@ -554,7 +570,13 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
     let d = s * 0.54;
     let o = (s - d) * 0.5;
     let rect = Rect::new(o, o, d, d);
+    // One arm per mode, so the match stays exhaustive over the enum itself
+    // rather than over a flat-fill subset plus a wildcard that has to
+    // re-reject the one mode it already handled.
     match mode {
+        ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.colors.canvas_bg),
+        ViewerBackground::Black => filled_rect(ui, rect, 2.0, Color::BLACK),
+        ViewerBackground::White => filled_rect(ui, rect, 2.0, Color::WHITE),
         ViewerBackground::Checker => {
             let light = Color::rgb_u8(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8);
             let dark = Color::rgb_u8(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8);
@@ -564,15 +586,6 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
             for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
                 filled_rect(ui, cell, 0.0, light);
             }
-        }
-        _ => {
-            let fill = match mode {
-                ViewerBackground::Theme => theme.colors.canvas_bg,
-                ViewerBackground::Black => Color::BLACK,
-                ViewerBackground::White => Color::WHITE,
-                ViewerBackground::Checker => unreachable!(),
-            };
-            filled_rect(ui, rect, 2.0, fill);
         }
     }
     // Ring on top so the checker quads can't cover it.
@@ -611,6 +624,7 @@ fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir::Image as AptImage;
     use scenarium::NodeId;
     use scenarium::{FuncId, GraphDef, GraphId, Node, NodeKind};
 

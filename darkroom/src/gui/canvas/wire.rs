@@ -120,7 +120,7 @@ impl Wire {
 
 /// The per-frame inputs all three wire renderers need, bundled so each
 /// `draw` takes one argument instead of six ([`crate::gui::node::RecordCtx`]
-/// is the same pattern). Built once in [`crate::gui::canvas::GraphUI::frame`]
+/// is the same pattern). Built once in [`crate::gui::canvas::GraphUI::draw`]
 /// and passed by `&mut`, so the breaker probe reborrows into each renderer
 /// in turn.
 #[derive(Debug)]

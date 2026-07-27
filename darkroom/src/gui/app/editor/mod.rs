@@ -31,11 +31,12 @@ use crate::gui::theme::Theme;
 
 use crate::gui::app::AppContext;
 
+#[cfg(test)]
+pub(crate) mod harness;
+
 /// Keyboard chords → intents/commands. A child module so it can drive the
 /// pipeline through `Editor`'s private fields (undo stack, intent buffer,
 /// dirty flags) without widening their visibility.
-#[cfg(test)]
-pub(crate) mod harness;
 mod shortcuts;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds

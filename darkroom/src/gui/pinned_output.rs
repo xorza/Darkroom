@@ -6,7 +6,7 @@
 //! upload. Non-image values are formatted on receipt and dropped immediately.
 
 use std::collections::HashMap;
-use std::mem::{replace, take};
+use std::mem::take;
 
 use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
@@ -37,6 +37,30 @@ pub(crate) enum StoredContent {
     Text(String),
     Image(PinnedImage),
     Error(String),
+}
+
+impl StoredContent {
+    /// The image behind this value, or `None` for a formatted non-image and
+    /// for a value that failed to prepare. The single downcast both readers —
+    /// the pin card and the image viewer — go through, so a new variant can't
+    /// be handled by one and silently fall through the other.
+    pub(crate) fn image(&self) -> Option<&PinnedImage> {
+        match self {
+            StoredContent::Image(image) => Some(image),
+            StoredContent::Text(_) | StoredContent::Error(_) => None,
+        }
+    }
+
+    /// The text this value shows *in place of* an image: the formatted value
+    /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
+    /// answered — the two are complementary, so a caller that renders the
+    /// image never also has a message to show.
+    pub(crate) fn message(&self) -> Option<&str> {
+        match self {
+            StoredContent::Text(text) | StoredContent::Error(text) => Some(text.as_str()),
+            StoredContent::Image(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -125,35 +149,33 @@ impl PinnedOutputStore {
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
-        let Some(slot) = self.entries.get_mut(&port) else {
-            return;
-        };
-        // `PinnedImage::materialize_full` consumes its receiver, so swap an
-        // empty placeholder in to take ownership — the entry never moves, and
-        // removing plus re-inserting cost two lookups and a possible rehash.
-        let content = replace(slot, StoredContent::Text(String::new()));
-        *slot = match content {
-            StoredContent::Image(image) => StoredContent::Image(image.materialize_full(ui)),
-            content => content,
-        };
+        if let Some(StoredContent::Image(image)) = self.entries.get_mut(&port) {
+            image.materialize_full(ui);
+        }
     }
 }
 
 impl PinnedImage {
-    fn materialize_full(self, ui: &Ui) -> Self {
-        let full = match self.full {
-            FullImage::Deferred(value) => {
-                match as_image(&value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
-                    Ok(prepared) => match ui.register_image(prepared.raster) {
-                        Ok(handle) => FullImage::Resident(handle),
-                        Err(error) => FullImage::Failed(error.to_string()),
-                    },
-                    Err(message) => FullImage::Failed(message),
-                }
-            }
-            full => full,
+    /// Upload the deferred source at full resolution and drop it, in place —
+    /// a no-op once `full` is already `Resident` or `Failed`.
+    ///
+    /// The new `full` is built into a local before it's assigned, so the read
+    /// of the deferred value is finished by then. That's what lets this take
+    /// `&mut self`: no placeholder variant has to be parked in the slot while
+    /// the old value is owned, and no frame can observe the entry mid-swap.
+    fn materialize_full(&mut self, ui: &Ui) {
+        let FullImage::Deferred(value) = &self.full else {
+            return;
         };
-        Self { full, ..self }
+        let resolved =
+            match as_image(value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
+                Ok(prepared) => match ui.register_image(prepared.raster) {
+                    Ok(handle) => FullImage::Resident(handle),
+                    Err(error) => FullImage::Failed(error.to_string()),
+                },
+                Err(message) => FullImage::Failed(message),
+            };
+        self.full = resolved;
     }
 }
 

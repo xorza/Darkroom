@@ -129,6 +129,16 @@ pub(crate) struct SceneGraph {
     /// definitions — the ones a `GraphLink::Local` raised over this pane can
     /// resolve (`validate::insertable_kind` accepts no others).
     local_defs: Span,
+    /// Whether a run raised over this pane resolves to one occurrence. False
+    /// in a definition pane, which is no particular instance of that
+    /// definition — so a run there has no single occurrence to target and a
+    /// pin there delivers nothing.
+    ///
+    /// A fact about the *pane*, so it lives here rather than being copied
+    /// onto each of its nodes; readers reach it through
+    /// [`GraphScene::runnable`], which is always called with the pane in hand
+    /// anyway.
+    run_available: bool,
 }
 
 /// One graph to project this record pass: which target it is, where its
@@ -299,11 +309,6 @@ pub(crate) struct SceneNode {
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
     pub(crate) missing: bool,
-    /// Whether a run raised over this node's pane resolves to one occurrence
-    /// — mirrored from [`SceneGraph::run_available`] so the header scan can
-    /// gate the play chip without resolving the owning pane. False in a
-    /// definition pane, which is no particular instance of that definition.
-    pub(crate) run_available: bool,
 }
 
 impl SceneNode {
@@ -344,15 +349,8 @@ impl SceneNode {
     /// Deliberately an authoring-side fact, not a lookup in a compiled
     /// program: the palette and the header record every frame, including
     /// before the first compile, so an affordance can't wait on one.
-    fn executable_kind(&self) -> bool {
+    pub(crate) fn executable_kind(&self) -> bool {
         !self.boundary && !self.missing
-    }
-
-    /// Whether this node can seed a "run to this node" — drives the header
-    /// play chip and the context-menu item. Disabled nodes remain valid
-    /// because a targeted run overrides that flag temporarily.
-    pub(crate) fn runnable(&self) -> bool {
-        self.run_available && self.executable_kind()
     }
 
     /// Whether Darkroom exposes the disable toggle for this node. Limiting it
@@ -418,17 +416,7 @@ impl Scene {
         run_state: &RunState,
         projections: impl IntoIterator<Item = GraphProjection<'a>>,
     ) {
-        self.graphs.clear();
-        self.z_order.clear();
-        self.nodes.clear();
-        self.connections.clear();
-        self.subscriptions.clear();
-        self.selected.clear();
-        self.inputs.clear();
-        self.outputs.clear();
-        self.events.clear();
-        self.value_variants_pool.clear();
-        self.local_defs.clear();
+        self.clear_pools();
 
         // One handle for the empty string, cloned wherever a port declares no
         // description or a node carries no authored name — see
@@ -438,6 +426,40 @@ impl Scene {
             let graph = self.project(ui, library, run_state, projection, &empty);
             self.graphs.insert(projection.target, graph);
         }
+    }
+
+    /// Empty every pool, keeping its capacity, so the projection can be
+    /// refilled from scratch.
+    ///
+    /// Destructured rather than a run of `self.x.clear()` lines: a pool added
+    /// to [`Scene`] without a matching clear here would carry last frame's
+    /// contents into the next pass's spans, and the `let` without `..` turns
+    /// that from a silent bug into a compile error naming the missing field.
+    fn clear_pools(&mut self) {
+        let Self {
+            graphs,
+            z_order,
+            nodes,
+            connections,
+            subscriptions,
+            selected,
+            inputs,
+            outputs,
+            events,
+            value_variants_pool,
+            local_defs,
+        } = self;
+        graphs.clear();
+        z_order.clear();
+        nodes.clear();
+        connections.clear();
+        subscriptions.clear();
+        selected.clear();
+        inputs.clear();
+        outputs.clear();
+        events.clear();
+        value_variants_pool.clear();
+        local_defs.clear();
     }
 
     /// Project one graph's nodes, wiring, and view state onto the end of
@@ -524,7 +546,6 @@ impl Scene {
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
                     missing: node_interface.missing,
-                    run_available,
                 },
             );
             // A repeat would silently overwrite the earlier graph's entry and
@@ -563,6 +584,7 @@ impl Scene {
             subscriptions,
             selected,
             local_defs: span_since(local_defs_start, self.local_defs.len()),
+            run_available,
         }
     }
 
@@ -690,6 +712,25 @@ impl<'a> GraphScene<'a> {
 
     pub(crate) fn viewport(self) -> Viewport {
         self.graph.viewport
+    }
+
+    /// Whether a run raised over this pane resolves to one occurrence — see
+    /// [`SceneGraph::run_available`]. Gates the affordances that need a
+    /// single target: the pin toggle and the pin-creation drag.
+    pub(crate) fn run_available(self) -> bool {
+        self.graph.run_available
+    }
+
+    /// Whether `node` can seed a "run to this node" — drives the header play
+    /// chip, a pin card's refresh chip, and the context-menu item. Both halves
+    /// have to hold: the pane resolves to one occurrence, and the node itself
+    /// covers compiled work. Disabled nodes remain valid because a targeted
+    /// run overrides that flag temporarily.
+    ///
+    /// A method on the pane, not the node: "is a run targetable here" is a
+    /// fact about the pane, and every caller already has one in hand.
+    pub(crate) fn runnable(self, node: &SceneNode) -> bool {
+        self.run_available() && node.executable_kind()
     }
 
     /// This graph's nodes, in relative paint order.
@@ -1153,7 +1194,6 @@ pub(crate) mod internals {
             exec_status: ExecStatus::None,
             ram: RamUsage::default(),
             missing: false,
-            run_available: true,
         }
     }
 
@@ -1209,9 +1249,26 @@ pub(crate) mod internals {
             self
         }
 
+        /// Mark the sole graph as a definition pane: no single occurrence for
+        /// a run to target, so [`GraphScene::runnable`] answers `false`
+        /// whatever the node is. Order-independent like the other builders —
+        /// [`Self::reseal`] carries the flag forward.
+        pub(crate) fn without_run_target(mut self) -> Self {
+            self.reseal();
+            let graph = self.graphs.get_mut(&GraphRef::Main).expect("resealed");
+            graph.run_available = false;
+            self
+        }
+
         /// Re-derive the sole graph's spans over whatever the pools now
         /// hold, so the builder methods can be chained in any order.
         fn reseal(&mut self) {
+            // A resealed graph keeps whatever run availability it was given;
+            // a fresh one stands in for the root pane, where a run resolves.
+            let run_available = self
+                .graphs
+                .get(&GraphRef::Main)
+                .is_none_or(|graph| graph.run_available);
             self.graphs.insert(
                 GraphRef::Main,
                 SceneGraph {
@@ -1223,6 +1280,7 @@ pub(crate) mod internals {
                     subscriptions: Span::default(),
                     selected: Span::new(0, self.selected.len() as u32),
                     local_defs: Span::new(0, self.local_defs.len() as u32),
+                    run_available,
                 },
             );
         }

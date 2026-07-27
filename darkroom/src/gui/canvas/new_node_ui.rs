@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use glam::Vec2;
@@ -318,7 +319,12 @@ impl<'a> Palette<'a> {
                 if entries.is_empty() {
                     return None;
                 }
-                entries.sort_by_cached_key(|entry| entry.name().to_lowercase());
+                // Case-insensitive by comparison, not by key: the palette
+                // re-sorts every frame it's up, and `sort_by_cached_key` with
+                // a `to_lowercase()` key allocated one `String` per library
+                // entry per frame to answer a question `char`-wise folding
+                // answers in place.
+                entries.sort_by(|a, b| lowercase_cmp(a.name(), b.name()));
                 Some(PaletteColumn { category, entries })
             })
             .collect();
@@ -354,6 +360,17 @@ impl PaletteColumn<'_> {
             });
         chosen
     }
+}
+
+/// Case-insensitive ordering of two palette row names, without materializing
+/// a folded copy of either. Falls back to the raw order for names that fold
+/// to the same thing, so the sort stays total.
+fn lowercase_cmp(a: &str, b: &str) -> Ordering {
+    let folded = a
+        .chars()
+        .flat_map(char::to_lowercase)
+        .cmp(b.chars().flat_map(char::to_lowercase));
+    folded.then_with(|| a.cmp(b))
 }
 
 /// Case-insensitive substring match used by the palette search. An empty

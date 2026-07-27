@@ -43,9 +43,10 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::{GroupDrag, selected_group_positions};
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::pin_drag_modifier;
 use crate::gui::canvas::pin_preview::{
-    self, PREVIEW_HEIGHT, PREVIEW_WIDTH, pin_preview_wid, preview_image_wid, preview_title,
-    refresh_badge_wid,
+    self, PREVIEW_HEIGHT, PREVIEW_WIDTH, PinCard, pin_preview_wid, preview_image_wid,
+    preview_title, refresh_badge_wid,
 };
 use crate::gui::canvas::wire::{Wire, WirePass};
 use crate::gui::node::port_color::port_color;
@@ -100,7 +101,7 @@ pub(super) fn emit_pin_refresh_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<
     graph
         .pinned_outputs()
         .find(|pin| {
-            pin.node.runnable() && ui.response_for(refresh_badge_wid(pin.port)).left.clicked()
+            graph.runnable(pin.node) && ui.response_for(refresh_badge_wid(pin.port)).left.clicked()
         })
         .map(|pin| pin.port.node_id)
 }
@@ -171,12 +172,20 @@ impl PinUi {
         if self.drag.advance(ui, scene, out) {
             return;
         }
-        if ui.modifiers().ctrl
+        if pin_drag_modifier(ui)
             && let Some(port_ref) = scan_port_drag_start(geometry, scene)
             && let Some(graph) = scene.owner(port_ref.node_id)
+            && graph.run_available()
+            // One lookup, gating the whole creation. A port that hasn't
+            // measured has no position to seed and no anchor to latch, and
+            // pinning it anyway would strand a card at the canvas origin with
+            // no drag holding it — so the pin isn't created at all, and the
+            // next frame's press (by which time the port has measured) makes
+            // it properly.
+            && let Some(port_center) = geometry.ports.center(port_ref)
         {
-            let widget_id = port_circle_wid(port_ref);
             let port = OutputPort::new(port_ref.node_id, port_ref.port_idx);
+            let key = ItemRef::Pin(port);
             out.for_graph(graph.target(), |out| {
                 out.push(set_output_pinned(port_ref, true));
                 // A brand-new pin isn't part of any selection yet — it drags
@@ -187,15 +196,14 @@ impl PinUi {
                 // at the canvas origin before the drag below places it. Its
                 // view item lands at the top of the paint stack, so no raise
                 // is needed.
-                if let Some(port_center) = geometry.ports.center(port_ref) {
-                    out.push(seed_pin_position_intent(port, port_center));
-                }
+                out.push(seed_pin_position_intent(port, port_center));
             });
-            if let Some(port_center) = geometry.ports.center(port_ref) {
-                let key = ItemRef::Pin(port);
-                self.drag
-                    .latch(key, graph.target(), vec![(key, port_center)], widget_id);
-            }
+            self.drag.latch(
+                key,
+                graph.target(),
+                vec![(key, port_center)],
+                port_circle_wid(port_ref),
+            );
         } else if let Some((port, start_position)) = scan_widget_drag_start(ui, scene)
             && let Some(graph) = scene.owner(port.node_id)
         {
@@ -362,15 +370,13 @@ impl PinUi {
         let is_selected = rcx.is_selected(ItemRef::Pin(port));
         let border = theme.card_border(g.broken, is_selected);
         let value = rcx.run_state.pinned_outputs.entries.get(&port);
-        let image = value.and_then(|value| match value {
-            StoredContent::Image(image) => Some(image),
-            StoredContent::Text(_) | StoredContent::Error(_) => None,
-        });
-        let text = image.is_none().then_some(match value {
-            Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
-            Some(StoredContent::Image(_)) => "image preview unavailable",
-            None => "not yet run",
-        });
+        let image = value.and_then(StoredContent::image);
+        // Complementary by construction (see `StoredContent::message`), so the
+        // card shows an image or a line of text, never both and never neither.
+        let text = match value {
+            Some(value) => value.message(),
+            None => Some("not yet run"),
+        };
         let title = {
             let node_name = n.name.borrow_str();
             let output_name = output.name.borrow_str();
@@ -379,14 +385,16 @@ impl PinUi {
         let response = pin_preview::draw_widget(
             ui,
             theme,
-            port,
-            top_left,
-            &title,
-            border.color,
-            border.width,
-            image,
-            text,
-            n.runnable(),
+            PinCard {
+                port,
+                top_left,
+                title: &title,
+                border: border.color,
+                border_width: border.width,
+                image,
+                text,
+                runnable: graph.runnable(n),
+            },
         );
         // Click without drag → select + raise, exactly like a node body
         // click (plain replaces the selection, Shift toggles this
@@ -434,12 +442,11 @@ fn pin_targeted(probe: &BreakerProbe<'_>, wire: &Wire, card: Rect) -> bool {
 }
 
 /// First output port whose circle's drag started this frame, or `None`.
+/// Unfiltered by pane: only one press exists, so the caller resolves the
+/// winner's owning pane once and checks `run_available` there rather than
+/// paying a pane lookup per candidate node.
 fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
-    let keys = scene
-        .nodes
-        .values()
-        .filter(|node| node.run_available)
-        .flat_map(|n| n.ports(PortKind::Output));
+    let keys = scene.nodes.values().flat_map(|n| n.ports(PortKind::Output));
     geometry.ports.first_drag_started(keys)
 }
 

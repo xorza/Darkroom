@@ -77,7 +77,7 @@ impl GraphMenuUi {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 enum MenuChoice {
     Publish,
     Detach,

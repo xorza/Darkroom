@@ -79,21 +79,54 @@ pub(super) fn preview_image_wid(port: OutputPort) -> WidgetId {
 /// canvas level via [`refresh_badge_wid`] and translated into the run
 /// command there (this file never names `AppCommand`).
 fn refresh_chip(ui: &mut Ui, theme: &Theme, port: OutputPort) {
-    let wid = refresh_badge_wid(port);
-    let hovered = ui.response_for(wid).hovered;
-    let color = if hovered {
-        theme.colors.exec_executed_glow
-    } else {
-        theme.colors.text_muted
-    };
-    Badge::control(
-        "\u{21bb}",
-        color,
-        false,
-        wid,
+    Badge::go(
+        refresh_badge_wid(port),
         "Refresh — re-run to this node and update the preview",
+        draw_refresh_arrow,
     )
-    .show(ui);
+    .show(ui, theme);
+}
+
+/// The `↻` glyph, drawn as text so it keeps the font's own shape while the
+/// chip around it stays a [`Badge::go`] control like the node header's play
+/// chip.
+fn draw_refresh_arrow(ui: &mut Ui, color: Color) {
+    Text::new("\u{21bb}")
+        .style(&TextStyle {
+            color,
+            font_size_px: 12.0,
+            weight: FontWeight::Bold,
+            ..ui.theme.text.clone()
+        })
+        .show(ui);
+}
+
+/// Everything one pinned-output card paints from, resolved by
+/// [`super::pin_ui::PinUi::draw_pin`] out of the scene, the breaker, and the
+/// pinned-output store.
+///
+/// A struct rather than ten positional parameters: `border`/`border_width`
+/// and `image`/`text` are pairs that only make sense together, and two
+/// adjacent `Option<&str>`-ish arguments transpose without a type error.
+#[derive(Debug)]
+pub(super) struct PinCard<'a> {
+    pub(super) port: OutputPort,
+    /// The card's top-left corner in canvas-world coords — also where its
+    /// wire lands and its port-circle glyph peeks out.
+    pub(super) top_left: Vec2,
+    pub(super) title: &'a str,
+    /// The card's own outline: neutral, broken-red, or the selection halo —
+    /// never the port's data-type accent, which lives on the glyph.
+    pub(super) border: Color,
+    pub(super) border_width: f32,
+    /// The thumbnail to letterbox, or `None` for a value with no image.
+    pub(super) image: Option<&'a PinnedImage>,
+    /// The line to centre in the content area instead — complementary to
+    /// `image` (see `StoredContent::message`).
+    pub(super) text: Option<&'a str>,
+    /// Whether the owning node resolves as a run seed; gates the refresh chip
+    /// exactly as the node header gates its play chip.
+    pub(super) runnable: bool,
 }
 
 /// Paint one pinned output's preview widget: a header bar (the title) over
@@ -104,19 +137,17 @@ fn refresh_chip(ui: &mut Ui, theme: &Theme, port: OutputPort) {
 /// [`super::pin_ui`] paints separately. Senses `CLICK | DRAG` so it doubles
 /// as the reposition drag's grab target and the selection click target
 /// ([`pin_preview_wid`]).
-#[allow(clippy::too_many_arguments)]
-pub(super) fn draw_widget<'ui>(
-    ui: &'ui mut Ui,
-    theme: &Theme,
-    port: OutputPort,
-    top_left: Vec2,
-    title: &str,
-    border: Color,
-    border_width: f32,
-    image: Option<&PinnedImage>,
-    text: Option<&str>,
-    runnable: bool,
-) -> Response<'ui> {
+pub(super) fn draw_widget<'ui>(ui: &'ui mut Ui, theme: &Theme, card: PinCard<'_>) -> Response<'ui> {
+    let PinCard {
+        port,
+        top_left,
+        title,
+        border,
+        border_width,
+        image,
+        text,
+        runnable,
+    } = card;
     // Inner corners follow the border stroke's inner edge, like a real
     // node's header does relative to its own (wider) body stroke — see
     // `Theme::card_inner_radius`.

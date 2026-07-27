@@ -114,8 +114,13 @@ pub(crate) fn fold_scroll_zoom(
 /// multiply in; clamped each frame so pathological gestures can't
 /// drive it to 0 (which would make the inverse transform explode) or
 /// to a value so large that the world coordinates underflow.
-const MIN_ZOOM: f32 = 0.1;
-const MAX_ZOOM: f32 = 5.0;
+///
+/// Named apart from the image viewer's own (far wider)
+/// `VIEWER_MIN_ZOOM`/`VIEWER_MAX_ZOOM` because both pairs are passed into the
+/// shared [`fold_scroll_zoom`] / [`zoom_about`], where an unqualified
+/// `MIN_ZOOM` at the call site wouldn't say which surface's range is in play.
+const CANVAS_MIN_ZOOM: f32 = 0.1;
+const CANVAS_MAX_ZOOM: f32 = 5.0;
 
 /// Per-pixel base for converting wheel / touchpad scroll into a
 /// multiplicative zoom factor. Tuned so a single classic wheel notch
@@ -164,7 +169,7 @@ pub(super) fn emit_pan_zoom(
         pan_anchor.latch(target, viewport.pan);
     }
     pan_anchor.apply(target, resp.middle.drag.delta(), &mut v.pan);
-    fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
+    fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
     // jitter). The `SetViewport` undo step is also `is_noop`-
@@ -306,7 +311,7 @@ fn node_bounds(
 /// Fit `bounds` (world coords) centered in a `viewport`-sized pane,
 /// leaving [`FIT_MARGIN`] on every side. The scale is the tighter of the
 /// two per-axis fits, never magnified past 1:1 (a lone small node
-/// shouldn't balloon), and clamped to `[MIN_ZOOM, MAX_ZOOM]`. Placing the
+/// shouldn't balloon), and clamped to `[CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM]`. Placing the
 /// bbox center at the viewport center uses the same `outer_local = pan +
 /// scale * world` mapping the inner-canvas transform applies.
 fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
@@ -324,7 +329,7 @@ fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
     } else {
         f32::INFINITY
     };
-    let zoom = sx.min(sy).min(1.0).clamp(MIN_ZOOM, MAX_ZOOM);
+    let zoom = sx.min(sy).min(1.0).clamp(CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
     let pan = pane * 0.5 - bounds.center() * zoom;
     Viewport { pan, zoom }
 }

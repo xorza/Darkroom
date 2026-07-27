@@ -4,34 +4,17 @@ use palantir::{
 
 use crate::core::theme_pref::ThemeChoice;
 
-// Layout dimensions don't change between dark and light — they're factored
-// out so both palettes pull the same numbers and a tweak hits both at once.
+// Layout dimensions are palette-independent — dark and light pull the same
+// numbers. Each one's value lives on `Theme::DIMENSIONS` (its field carries
+// the doc comment); only the few read by more than one builder earn a name
+// here.
 
-const CANVAS_DOT_SPACING: f32 = 18.0;
-const CANVAS_DOT_RADIUS: f32 = 0.6;
-const CONNECTION_WIDTH: f32 = 2.0;
-const BREAKER_STROKE_WIDTH: f32 = 2.0;
-const NODE_BORDER_WIDTH: f32 = 1.0;
-const NODE_CORNER_RADIUS: f32 = 6.0;
-const NODE_MIN_WIDTH: f32 = 160.0;
-const NODE_MIN_HEIGHT: f32 = 10.0;
-const TAB_CORNER_RADIUS: f32 = 6.0;
-const PORT_SIZE: f32 = 13.0;
-const PORT_COL_PAD_TOP: f32 = 6.0;
-const PORT_COL_PAD_X: f32 = 8.0;
-const PORT_GAP: f32 = 6.0;
-const PORT_COLS_GAP: f32 = 12.0;
-/// Gap between a node's edge (or a port circle) and a floating widget's near
-/// edge — shared by the pin-preview card (from the port circle) and the
-/// inspector panel (from the node's right edge), so every floating overlay
-/// keeps the same clearance.
-const FLOATING_WIDGET_GAP: f32 = 16.0;
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out.
+/// stretching the node out. Read by both [`Theme::DIMENSIONS`] and
+/// [`StaticValueEditorTheme::from_palette`], which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
-const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
 const MENU_FONT_SIZE: f32 = 13.0;
 
 // One named-const mod per built-in preset, so any builder (`Theme::dark`,
@@ -846,22 +829,26 @@ impl Theme {
         let chrome_fill = colors.chrome_fill;
         Self {
             preset,
-            canvas_dot_spacing: CANVAS_DOT_SPACING,
-            canvas_dot_radius: CANVAS_DOT_RADIUS,
-            connection_width: CONNECTION_WIDTH,
-            breaker_stroke_width: BREAKER_STROKE_WIDTH,
-            node_border_width: NODE_BORDER_WIDTH,
-            node_corner_radius: NODE_CORNER_RADIUS,
-            node_min_width: NODE_MIN_WIDTH,
-            node_min_height: NODE_MIN_HEIGHT,
-            tab_corner_radius: TAB_CORNER_RADIUS,
-            port_size: PORT_SIZE,
-            port_col_pad_top: PORT_COL_PAD_TOP,
-            port_col_pad_x: PORT_COL_PAD_X,
-            port_gap: PORT_GAP,
-            port_cols_gap: PORT_COLS_GAP,
-            floating_widget_gap: FLOATING_WIDGET_GAP,
-            new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
+            // Layout dimensions, authored here — the one place each is
+            // valued. Their meaning lives on the field's own doc comment, so
+            // a module-level `const` per dimension would only add a third
+            // site to keep in step.
+            canvas_dot_spacing: 18.0,
+            canvas_dot_radius: 0.6,
+            connection_width: 2.0,
+            breaker_stroke_width: 2.0,
+            node_border_width: 1.0,
+            node_corner_radius: 6.0,
+            node_min_width: 160.0,
+            node_min_height: 10.0,
+            tab_corner_radius: 6.0,
+            port_size: 13.0,
+            port_col_pad_top: 6.0,
+            port_col_pad_x: 8.0,
+            port_gap: 6.0,
+            port_cols_gap: 12.0,
+            floating_widget_gap: 16.0,
+            new_node_popup_max_height: 400.0,
             colors,
             type_colors,
             static_value_editor: StaticValueEditorTheme::from_palette(p),
