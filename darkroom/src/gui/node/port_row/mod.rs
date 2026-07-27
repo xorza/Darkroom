@@ -488,14 +488,18 @@ fn add_preview_item(
         .ports
         .center(port)
         .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-    out.extend(add_preview_intents(func, port, pos));
+    out.extend(add_preview_intents(func, port, pos, NodeId::unique()));
 }
 
 /// The two intents that spawn a preview already reading `port`. Emitted
 /// together so one undo removes node *and* wire — the same shape
 /// `connection_ui::commit_connection` uses for a boundary port.
-fn add_preview_intents(func: &Func, port: PortRef, pos: Vec2) -> [Intent; 2] {
-    let node_id = NodeId::unique();
+pub(crate) fn add_preview_intents(
+    func: &Func,
+    port: PortRef,
+    pos: Vec2,
+    node_id: NodeId,
+) -> [Intent; 2] {
     [
         Intent::AddNode {
             pos,
@@ -620,7 +624,8 @@ mod tests {
         };
         let center = Vec2::new(100.0, 40.0);
 
-        let [add, bind] = add_preview_intents(&func, port, center + PREVIEW_SPAWN_OFFSET);
+        let node_id = NodeId::unique();
+        let [add, bind] = add_preview_intents(&func, port, center + PREVIEW_SPAWN_OFFSET, node_id);
 
         let Intent::AddNode {
             pos, node_id, node, ..

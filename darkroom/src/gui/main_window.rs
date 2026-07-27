@@ -1,3 +1,4 @@
+use scenarium::Library;
 use std::collections::HashMap;
 
 use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
@@ -76,8 +77,14 @@ impl MainWindow {
 
     /// Edit-phase prepass: input-derived graph mutations for the
     /// already-settled active graph.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Intents) {
-        self.graph_ui.prepass(ui, scene, out);
+    pub(crate) fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        library: &Library,
+        out: &mut Intents,
+    ) {
+        self.graph_ui.prepass(ui, scene, library, out);
     }
 
     pub(crate) fn frame(
