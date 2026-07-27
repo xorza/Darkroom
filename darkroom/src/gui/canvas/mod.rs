@@ -609,7 +609,7 @@ fn free_end<K: Eq + Hash + Copy>(
 /// Stable id for one pane's outer (pan-capture) canvas. Keyed by the graph
 /// it shows, so two panes side by side hit-test independently and a
 /// gesture polled by target reaches the right canvas.
-fn outer_canvas_widget_id(target: GraphRef) -> WidgetId {
+pub(crate) fn outer_canvas_widget_id(target: GraphRef) -> WidgetId {
     WidgetId::from_hash(("graph.canvas.outer", target))
 }
 

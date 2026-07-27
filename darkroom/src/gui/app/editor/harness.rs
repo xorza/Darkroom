@@ -97,9 +97,40 @@ impl EditorHarness {
 
 #[cfg(test)]
 mod tests {
+    use glam::Vec2;
+    use palantir::PointerButton;
+
     use super::EditorHarness;
+    use crate::core::document::dock::{DockDrop, DockOp, SplitSide};
     use crate::core::document::{Document, GraphRef, TabRef};
+    use crate::gui::canvas::outer_canvas_widget_id;
     use crate::gui::dock::strip;
+
+    /// Two graph panes side by side, both settled — the fixture every
+    /// pane-scoping case needs.
+    fn two_panes() -> (EditorHarness, GraphRef, GraphRef) {
+        let mut h = EditorHarness::new(Document::default());
+        let local = h
+            .open
+            .document
+            .create_graph(GraphRef::Main)
+            .expect("a local graph");
+        let right = GraphRef::Local(local);
+        let primary = h.open.document.layout.primary().id;
+        h.open
+            .document
+            .layout
+            .find_or_insert(TabRef::Graph(right), primary);
+        h.open.document.layout.apply(DockOp::MoveTab {
+            tab: TabRef::Graph(right),
+            to: DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        });
+        h.prime(2);
+        (h, GraphRef::Main, right)
+    }
 
     /// The whole pipeline in one case: the editor records a real dock
     /// strip, the chip lands where the hit-test says it does, and a
@@ -150,6 +181,55 @@ mod tests {
             h.document().layout.primary().active_tab(),
             subgraph,
             "clicking a chip activates its tab",
+        );
+    }
+
+    /// A pan moves the pane the pointer is over and leaves its
+    /// neighbour alone.
+    ///
+    /// This pins the *outcome*, not either mechanism. Two independent
+    /// guards produce it — `emit_pan_zoom` reads each pane's own
+    /// `outer_canvas_widget_id` response, and `PanAnchor::apply` refuses
+    /// a delta whose key is not the pane that latched. Mutating either
+    /// one alone still passes, because the other covers it; mutating
+    /// both fails here. That redundancy is worth knowing about: a future
+    /// simplification that removes one guard will not be caught by this
+    /// test, and `pan_zoom`'s own tests cover `PanAnchor::apply` with a
+    /// hand-passed key rather than through a real pointer.
+    #[test]
+    fn a_pan_moves_only_the_pane_under_the_pointer() {
+        let (mut h, left, right) = two_panes();
+
+        let pan_of = |h: &EditorHarness, g: GraphRef| {
+            h.document().view(g).expect("an open view").viewport.pan
+        };
+        let (left_before, right_before) = (pan_of(&h, left), pan_of(&h, right));
+
+        // Guard against the fixture going inert: if the split did not
+        // produce two live panes, "the neighbour did not move" passes
+        // while pinning nothing.
+        assert!(
+            h.ui.rect(outer_canvas_widget_id(left)).is_some()
+                && h.ui.rect(outer_canvas_widget_id(right)).is_some(),
+            "both panes must have arranged canvases",
+        );
+
+        // Middle-drag is `CanvasGesture::Pan`; aim at the left pane's
+        // own outer canvas so the hit-test decides which pane wins.
+        let origin = h.ui.center_of(outer_canvas_widget_id(left));
+        h.ui.press_button_at(PointerButton::Middle, origin);
+        h.ui.drag_to(origin + Vec2::new(40.0, 25.0));
+        let _ = h.frame();
+
+        assert_ne!(
+            pan_of(&h, left),
+            left_before,
+            "the pane under the pointer must pan",
+        );
+        assert_eq!(
+            pan_of(&h, right),
+            right_before,
+            "the neighbouring pane must not be dragged along",
         );
     }
 }
