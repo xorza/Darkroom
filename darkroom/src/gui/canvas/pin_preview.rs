@@ -24,9 +24,9 @@ use palantir::{
 use scenarium::OutputPort;
 
 use crate::gui::format::fmt_bytes;
-use crate::gui::node::header::Badge;
 use crate::gui::pinned_output::PinnedImage;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::badge::Badge;
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, footer_background,
     header_background, labeled_value, mono_text, sized_text,
