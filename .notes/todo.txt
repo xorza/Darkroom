@@ -31,3 +31,5 @@ contextmenu for boundary nodes
 imageview to load only when active, until then save to disk
 
 previews of subgraphs in maingraph dont works and no run or refresh button
+
+special node instead of pinned output
