@@ -69,11 +69,12 @@ impl PreviewDrag {
         };
 
         let node_id = NodeId::unique();
-        out.for_graph(graph.target(), |out| {
-            // Start it *at* the port so it visually grows out of the circle;
-            // the drag below carries it from there.
-            out.extend(add_preview_intents(func, port, center, node_id));
-        });
+        // Start it *at* the port so it visually grows out of the circle;
+        // the drag below carries it from there.
+        out.extend(
+            graph.target(),
+            add_preview_intents(func, port, center, node_id),
+        );
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.

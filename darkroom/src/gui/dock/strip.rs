@@ -303,7 +303,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                         .style(&label_style)
                         .show(ui);
                         if let Some(to) = ev.committed {
-                            s.out.push(Intent::RenameGraph { id: graph_id, to });
+                            s.out.push_global(Intent::RenameGraph { id: graph_id, to });
                         }
                     } else {
                         // Main / non-graph tab: plain label, activation handled
@@ -369,7 +369,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {
-                s.out.push(Intent::Dock(DockOp::MoveTab {
+                s.out.push_global(Intent::Dock(DockOp::MoveTab {
                     tab,
                     to: DockDrop::Split {
                         group: s.group,

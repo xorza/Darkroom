@@ -73,11 +73,12 @@ impl NodeMenuUi {
                 && let Some(p) = ui.pointer_pos()
             {
                 if !graph.is_selected(n.id) {
-                    out.for_graph(graph.target(), |out| {
-                        out.push(Intent::SetSelection {
+                    out.push(
+                        graph.target(),
+                        Intent::SetSelection {
                             to: BTreeSet::from([n.id]),
-                        })
-                    });
+                        },
+                    );
                 }
                 self.target = Some(n.id);
                 self.menu.open_at(p, graph.target());

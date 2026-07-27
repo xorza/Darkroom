@@ -190,7 +190,7 @@ impl ConnectionUI {
         if let Some(end) = snap_end {
             commit_connection(graph, start, end, out);
         } else if let Some(intent) = self.const_drop(ui, graph, start) {
-            out.for_graph(graph.target(), |out| out.push(intent));
+            out.push(graph.target(), intent);
         } else if dropped_on_empty_canvas(ui, graph) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
@@ -547,14 +547,16 @@ fn commit_connection(graph: GraphScene<'_>, start: PortRef, end: PortRef, out: &
         (PortKind::Output, PortKind::Input) => (end, start),
         _ => return, // unreachable — scan_snap_target enforces opposite kinds
     };
-    out.for_graph(graph.target(), |out| {
-        out.extend(add_boundary_port_intent(graph, output, input));
-        out.extend(add_boundary_port_intent(graph, input, output));
-        out.push(Intent::SetInput {
+    let target = graph.target();
+    out.extend(target, add_boundary_port_intent(graph, output, input));
+    out.extend(target, add_boundary_port_intent(graph, input, output));
+    out.push(
+        target,
+        Intent::SetInput {
             input: InputPort::new(input.node_id, input.port_idx),
             to: Some(Binding::bind(output.node_id, output.port_idx)),
-        });
-    });
+        },
+    );
 }
 
 /// When `port` is a boundary node's trailing placeholder, the

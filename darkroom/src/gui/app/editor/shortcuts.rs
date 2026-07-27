@@ -95,28 +95,33 @@ impl Editor {
         let has_selection = !view.selected.is_empty();
         let pan = view.viewport.pan;
         let document = &open.document;
-        self.intents.for_graph(target, |out| {
-            if escape && has_selection {
-                out.push(Intent::SetSelection {
+        let out = &mut self.intents;
+        if escape && has_selection {
+            out.push(
+                target,
+                Intent::SetSelection {
                     to: BTreeSet::new(),
-                });
-            }
-            if reset_zoom {
-                out.push(Intent::SetViewport {
+                },
+            );
+        }
+        if reset_zoom {
+            out.push(
+                target,
+                Intent::SetViewport {
                     to: Viewport { pan, zoom: 1.0 },
-                });
-            }
-            if duplicate && let Some(intent) = build_duplicate_intent(document, target) {
-                out.push(intent);
-            }
-            // Delete/Backspace removes the whole selection — one
-            // `RemoveNode` each. `drain_intents` batches a frame's intents into a single
-            // undo entry, so it's one Cmd-Z (mirrors the breaker's
-            // multi-delete).
-            if delete {
-                out.extend(remove_selection_intents(&view.selected));
-            }
-        });
+                },
+            );
+        }
+        if duplicate && let Some(intent) = build_duplicate_intent(document, target) {
+            out.push(target, intent);
+        }
+        // Delete/Backspace removes the whole selection — one
+        // `RemoveNode` each. `drain_intents` batches a frame's intents into a single
+        // undo entry, so it's one Cmd-Z (mirrors the breaker's
+        // multi-delete).
+        if delete {
+            out.extend(target, remove_selection_intents(&view.selected));
+        }
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `AppCommand`.

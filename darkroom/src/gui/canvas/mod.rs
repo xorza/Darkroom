@@ -274,11 +274,12 @@ impl GraphUI {
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
         if gesture == Some(CanvasGesture::Deselect) && !graph.selected().is_empty() {
-            out.for_graph(target, |out| {
-                out.push(Intent::SetSelection {
+            out.push(
+                target,
+                Intent::SetSelection {
                     to: BTreeSet::new(),
-                })
-            });
+                },
+            );
         }
         // `CanvasGeometry` was already rebuilt in `prepass` against every
         // visible graph's scene — `App` rebuilds the scene *before* prepass

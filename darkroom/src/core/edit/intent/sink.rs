@@ -7,47 +7,44 @@ use crate::core::edit::intent::types::Intent;
 /// A frame's queued [`Intent`]s paired with their edit targets.
 ///
 /// Several graph panes can be on screen at once, so an intent only means
-/// something alongside the graph it applies to. Rather than widen every
-/// widget signature with a `GraphRef`, the sink carries a *current* target:
-/// [`Self::for_graph`] sets it for the duration of a closure and everything
-/// pushed inside inherits it. A per-pane draw wraps its whole subtree in one
-/// call; a whole-scene scan — which resolves its own target from the node it
-/// hit — wraps each push instead.
+/// something alongside the graph it applies to — which is why the target is
+/// an argument of every push rather than state on the sink. Each site names
+/// the pane it belongs to from what it already holds: `SceneNode::owner` in
+/// a node body, [`GraphScene::target`](crate::gui::scene::GraphScene::target)
+/// in a per-pane draw, the latched `GraphRef` in a gesture that outlives its
+/// frame. A whole-scene scan names each hit's owner as it goes.
 ///
-/// Document-global intents (`Intent::Dock`, `Intent::RenameGraph`) are
-/// peeled off ahead of the scope lookup in `build_step`, so whichever target
-/// happens to be current when one is pushed makes no difference.
-#[derive(Debug)]
+/// Nothing is ambient, so there is no wrapper to forget and no default
+/// target to absorb the mistake: a push that can't name a graph doesn't
+/// compile.
+#[derive(Debug, Default)]
 pub(crate) struct Intents {
     items: Vec<(GraphRef, Intent)>,
-    /// Target for the pushes that follow. `Main` until a
-    /// [`Self::for_graph`] scope says otherwise, which is also the only
-    /// sensible target for a document-global intent raised outside any pane
-    /// (a menu-bar command, a keyboard chord with no canvas focused).
-    target: GraphRef,
-}
-
-impl Default for Intents {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            target: GraphRef::Main,
-        }
-    }
 }
 
 impl Intents {
-    /// Queue `intent` against the current target.
-    pub(crate) fn push(&mut self, intent: Intent) {
-        self.items.push((self.target, intent));
+    /// Queue `intent` against `target`.
+    pub(crate) fn push(&mut self, target: GraphRef, intent: Intent) {
+        self.items.push((target, intent));
     }
 
-    /// Run `body` with `target` as the current one, restoring the previous
-    /// target afterwards so nested scopes compose.
-    pub(crate) fn for_graph(&mut self, target: GraphRef, body: impl FnOnce(&mut Self)) {
-        let previous = std::mem::replace(&mut self.target, target);
-        body(self);
-        self.target = previous;
+    /// Queue every intent `iter` yields against `target`.
+    pub(crate) fn extend(&mut self, target: GraphRef, iter: impl IntoIterator<Item = Intent>) {
+        self.items
+            .extend(iter.into_iter().map(|intent| (target, intent)));
+    }
+
+    /// Queue a document-global intent — one no graph owns, raised from
+    /// chrome that is not a canvas (a tab strip, a menu command, a keyboard
+    /// chord). `build_step` peels these off ahead of the scope lookup, so
+    /// the target they queue under is never read; `Main` keeps the queue one
+    /// uniform shape.
+    pub(crate) fn push_global(&mut self, intent: Intent) {
+        debug_assert!(
+            intent.is_global(),
+            "{intent:?} commits against a graph — push it against one",
+        );
+        self.items.push((GraphRef::Main, intent));
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -62,17 +59,6 @@ impl Intents {
 
     pub(crate) fn clear(&mut self) {
         self.items.clear();
-        self.target = GraphRef::Main;
-    }
-}
-
-/// So the many `out.extend(..)` sites that yield bare `Intent`s keep
-/// working — each item lands on the current target like a `push`.
-impl Extend<Intent> for Intents {
-    fn extend<T: IntoIterator<Item = Intent>>(&mut self, iter: T) {
-        let target = self.target;
-        self.items
-            .extend(iter.into_iter().map(|intent| (target, intent)));
     }
 }
 
@@ -86,43 +72,32 @@ mod tests {
     }
 
     #[test]
-    fn pushes_inherit_the_enclosing_scope_and_scopes_nest() {
+    fn every_intent_keeps_the_target_it_was_pushed_against() {
         let a = GraphRef::Local(GraphId::from_u128(1));
         let b = GraphRef::Local(GraphId::from_u128(2));
         let mut out = Intents::default();
 
-        // Outside any scope everything lands on `Main`.
-        out.push(raise());
-        out.for_graph(a, |out| {
-            out.push(raise());
-            // A nested scope wins while it's open...
-            out.for_graph(b, |out| out.extend([raise(), raise()]));
-            // ...and the outer target is restored on the way out.
-            out.push(raise());
+        out.push(a, raise());
+        // A whole batch lands on the one target it was extended against,
+        // interleaving freely with pushes naming another.
+        out.extend(b, [raise(), raise()]);
+        out.push(a, raise());
+        // Document-global intents queue without naming a graph.
+        out.push_global(Intent::RenameGraph {
+            id: GraphId::from_u128(3),
+            to: "renamed".into(),
         });
-        out.push(raise());
 
         assert_eq!(
             out.drain().map(|(target, _)| target).collect::<Vec<_>>(),
-            [GraphRef::Main, a, b, b, a, GraphRef::Main],
+            [a, b, b, a, GraphRef::Main],
         );
         assert!(out.is_empty(), "draining empties the buffer");
     }
 
     #[test]
-    fn clear_resets_the_current_target() {
-        // A scope left open by an early return must not leak into the next
-        // frame's pushes — `clear` runs at the top of every frame.
-        let mut out = Intents {
-            target: GraphRef::Local(GraphId::from_u128(3)),
-            ..Default::default()
-        };
-        out.push(raise());
-        out.clear();
-        out.push(raise());
-        assert_eq!(
-            out.drain().map(|(target, _)| target).collect::<Vec<_>>(),
-            [GraphRef::Main],
-        );
+    #[should_panic(expected = "commits against a graph")]
+    fn a_graph_scoped_intent_cannot_slip_through_the_global_door() {
+        Intents::default().push_global(raise());
     }
 }

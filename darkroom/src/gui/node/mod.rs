@@ -417,13 +417,12 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
 pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: NodeId, out: &mut Intents) {
-    out.for_graph(graph.target(), |out| {
-        out.push(select_intent(shift, graph, key));
-        let deselecting = shift && graph.is_selected(key);
-        if !deselecting {
-            out.push(Intent::Raise { key });
-        }
-    });
+    let target = graph.target();
+    out.push(target, select_intent(shift, graph, key));
+    let deselecting = shift && graph.is_selected(key);
+    if !deselecting {
+        out.push(target, Intent::Raise { key });
+    }
 }
 
 /// The `SetSelection` a click on `key` produces: plain click selects only

@@ -130,32 +130,26 @@ pub(crate) fn show(
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill(ui, ctx.theme, framing, |ui| {
                 if Chip::new(reset_view_wid(target), "Reset view").show(ui, ctx.theme, draw_reset) {
-                    out.extend(pan_zoom::view_action_intent(
-                        ui,
-                        geometry,
-                        graph,
-                        ViewAction::Reset,
-                    ));
+                    out.extend(
+                        target,
+                        pan_zoom::view_action_intent(ui, geometry, graph, ViewAction::Reset),
+                    );
                 }
                 if Chip::new(show_all_wid(target), "Show all").show(ui, ctx.theme, draw_show_all) {
-                    out.extend(pan_zoom::view_action_intent(
-                        ui,
-                        geometry,
-                        graph,
-                        ViewAction::ShowAll,
-                    ));
+                    out.extend(
+                        target,
+                        pan_zoom::view_action_intent(ui, geometry, graph, ViewAction::ShowAll),
+                    );
                 }
                 if Chip::new(show_selected_wid(target), "Show selected").show(
                     ui,
                     ctx.theme,
                     draw_show_selected,
                 ) {
-                    out.extend(pan_zoom::view_action_intent(
-                        ui,
-                        geometry,
-                        graph,
-                        ViewAction::ShowSelected,
-                    ));
+                    out.extend(
+                        target,
+                        pan_zoom::view_action_intent(ui, geometry, graph, ViewAction::ShowSelected),
+                    );
                 }
             });
         });
@@ -227,6 +221,8 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
 mod tests {
     use super::*;
     use crate::core::document::GraphView;
+    use crate::core::edit::intent::types::Intent;
+    use crate::gui::canvas::outer_canvas_widget_id;
     use crate::gui::run_state::RunState;
     use crate::gui::scene::{GraphProjection, Scene, SceneSource};
     use crate::gui::theme::Theme;
@@ -237,8 +233,11 @@ mod tests {
     /// Run and the event loop compile the *document root*, so a subgraph
     /// pane offering them would silently act on another graph — the run
     /// pill belongs to the main pane alone. The framing pill is genuinely
-    /// per-pane and must survive on both. Drawn as two panes in one frame,
-    /// which is the arrangement that surfaced the bug.
+    /// per-pane and must survive on both, and must frame *its own* pane:
+    /// a `SetViewport` is valid against any graph, so a mistargeted one
+    /// doesn't fail — it pans the other pane's camera and records an undo
+    /// entry there. Drawn as two panes in one frame, which is the
+    /// arrangement that surfaced both bugs.
     #[test]
     fn the_run_pill_is_main_only_while_framing_is_per_pane() {
         let root = Graph::default();
@@ -260,7 +259,7 @@ mod tests {
         let mut scene = Scene::default();
         let mut harness = UiHarness::new(UVec2::splat(800));
 
-        harness.frame(|ui| {
+        let mut draw = |ui: &mut Ui| {
             scene.rebuild(
                 ui,
                 &library,
@@ -280,10 +279,19 @@ mod tests {
             );
             for target in [GraphRef::Main, local] {
                 let graph = scene.graph(target).expect("projected");
-                let command = show(ui, &ctx, graph, &geometry, &mut intents);
-                assert!(command.is_none(), "nothing was clicked");
+                // The framing actions size their fit against the pane's outer
+                // canvas, which `GraphUI::draw` records around this toolbar;
+                // stand in for it so a click resolves to an intent.
+                Panel::canvas()
+                    .id(outer_canvas_widget_id(target))
+                    .size((Sizing::FILL, Sizing::FILL))
+                    .show(ui, |ui| {
+                        let command = show(ui, &ctx, graph, &geometry, &mut intents);
+                        assert!(command.is_none(), "no run/cancel chip was clicked");
+                    });
             }
-        });
+        };
+        harness.frame(&mut draw);
 
         assert!(
             harness.rect(run_button_wid(GraphRef::Main)).is_some(),
@@ -314,5 +322,20 @@ mod tests {
                 );
             }
         }
+
+        // And it frames that pane, not the root: click the subgraph pane's
+        // "Reset view" and read what the sink queued. Reset rather than the
+        // two fitting actions, which need content to fit and these panes are
+        // empty.
+        harness.click_on(reset_view_wid(local));
+        // By value: the last frame, and the one that releases `intents`.
+        harness.frame(draw);
+        assert!(
+            matches!(
+                intents.drain().collect::<Vec<_>>()[..],
+                [(target, Intent::SetViewport { .. })] if target == local,
+            ),
+            "the framing click must move its own pane's viewport",
+        );
     }
 }

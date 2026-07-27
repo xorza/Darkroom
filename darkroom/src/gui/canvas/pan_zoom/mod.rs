@@ -177,7 +177,7 @@ pub(super) fn emit_pan_zoom(
     // idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.for_graph(target, |out| out.push(Intent::SetViewport { to: v }));
+        out.push(target, Intent::SetViewport { to: v });
     }
 }
 

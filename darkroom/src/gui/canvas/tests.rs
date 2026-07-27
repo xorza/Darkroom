@@ -2,17 +2,19 @@ use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::{
-    Binding, DataType, Func, FuncId, FuncInput, FuncOutput, Graph, GraphDef, GraphId, InputPort,
-    Library, Node, NodeKind, testing,
+    Binding, CacheMode, DataType, Func, FuncId, FuncInput, FuncOutput, Graph, GraphDef, GraphId,
+    InputPort, Library, Node, NodeKind, testing,
 };
 
-use crate::core::document::{GraphRef, GraphView};
+use crate::core::document::{GraphRef, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
+use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::inspector::{inspect_badge_wid, inspect_panel_wid};
 use crate::gui::graph_toolbar;
-use crate::gui::node::node_widget_id;
+use crate::gui::node::port_row::port_circle_wid;
+use crate::gui::node::{node_wid, node_widget_id};
 use crate::gui::run_state::RunState;
 use crate::gui::scene::{GraphProjection, Scene, SceneSource};
 use crate::gui::theme::Theme;
@@ -39,7 +41,8 @@ fn spread(view: &mut GraphView) {
     }
 }
 
-/// Two graph panes drawn in one frame must not record a widget id twice.
+/// Two graph panes drawn in one frame must not record a widget id twice,
+/// and every intent either raises must name the pane it came from.
 ///
 /// Every pane runs the *same* draw code, so anything keyed by a constant
 /// rather than by the pane (`GraphRef`) or by a document-unique domain id
@@ -48,8 +51,15 @@ fn spread(view: &mut GraphView) {
 /// over one scroll offset / text cursor / animation row. Palantir reports
 /// explicit-id collisions through `Forest.collisions`, which is what this
 /// asserts on: a root pane and a local-definition pane, side by side.
+///
+/// The target half is the same hazard one layer down: nothing in a node-body
+/// signature says which graph it edits, so a site reaching for the wrong
+/// `GraphRef` commits into the *other* pane's graph — silently dropped where
+/// the payload names a node the target doesn't hold, silently applied where
+/// it doesn't (`SetViewport`). Both halves are checked here because both need
+/// two panes on screen to show up at all.
 #[test]
-fn two_graph_panes_record_no_duplicate_widget_ids() {
+fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     let library = one_func_library();
     let probe = library.by_name("probe").expect("just added");
 
@@ -61,14 +71,19 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     root.set_input_binding(InputPort::new(downstream, 0), Binding::bind(upstream, 0));
 
     // Local-definition pane: boundary nodes, which draw the port-rename
-    // widgets the root pane never records.
+    // widgets the root pane never records, plus a func node — the boundary
+    // pair carries none of the header chips the record-phase intents come
+    // from, and its input is wired so a double-click has a binding to clear.
     let mut def = GraphDef::new("Adder")
         .inputs([FuncInput::optional("a", DataType::Int)])
         .output(FuncOutput::new("sum", DataType::Int));
     let def_in = def.body.add(Node::new(NodeKind::GraphInput));
     let def_out = def.body.add(Node::new(NodeKind::GraphOutput));
+    let def_func = def.body.add_func_node(probe);
     def.body
         .set_input_binding(InputPort::new(def_out, 0), Binding::bind(def_in, 0));
+    def.body
+        .set_input_binding(InputPort::new(def_func, 0), Binding::bind(def_in, 0));
 
     let local = GraphRef::Local(GraphId::unique());
     let mut root_view = GraphView::for_graph(&root);
@@ -91,7 +106,9 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     let mut command = None;
     let mut harness = UiHarness::new(UVec2::new(1600, 900));
 
-    let mut draw = |ui: &mut Ui| {
+    // Returns what the frame queued, so the target assertions below read the
+    // same sink the real pipeline drains.
+    let mut draw = |ui: &mut Ui| -> Vec<(GraphRef, Intent)> {
         scene.rebuild(
             ui,
             &library,
@@ -127,6 +144,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
                         });
                 }
             });
+        intents.drain().collect()
     };
 
     // Two frames: the first fills `CanvasGeometry` and the response cache
@@ -134,7 +152,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     // full. A collision on any frame fails the assert below.
     let mut seen_collisions = Vec::new();
     for _ in 0..2 {
-        harness.frame(&mut draw);
+        harness.frame_value(&mut draw);
         seen_collisions.extend(harness.collisions());
     }
 
@@ -144,7 +162,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     // own — it stays single-pane only because `GraphScene::node` filters
     // on `owner`. Exercise it rather than trusting the read.
     harness.click_on(inspect_badge_wid(upstream));
-    harness.frame(&mut draw);
+    harness.frame_value(&mut draw);
     seen_collisions.extend(harness.collisions());
     assert!(
         harness.rect(inspect_panel_wid(upstream)).is_some(),
@@ -162,6 +180,48 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     assert!(
         seen_collisions.is_empty(),
         "two panes recorded the same widget id: {seen_collisions:?}"
+    );
+
+    // Record phase: a header chip on the definition pane's node. The target
+    // has to come off `SceneNode::owner` — the widget has no other way to
+    // know which of the two graphs it is drawing.
+    harness.click_on(node_wid("ram_badge", def_func));
+    let emitted = harness.frame_value(&mut draw);
+    assert!(
+        matches!(
+            emitted[..],
+            [(
+                target,
+                Intent::SetNodeProperty {
+                    node_id,
+                    to: NodeProperty::RuntimeCache(CacheMode::Ram),
+                },
+            )] if target == local && node_id == def_func,
+        ),
+        "the cache chip must flip the RAM bit of the node it sits on, in its \
+         own pane: {emitted:?}"
+    );
+
+    // Prepass phase: a port double-click on the same node clears its binding.
+    // Scanned per pane rather than per node, so it reads its target off the
+    // `GraphScene` being swept.
+    let port = PortRef {
+        node_id: def_func,
+        kind: PortKind::Input,
+        port_idx: 0,
+    };
+    harness.click_on(port_circle_wid(port));
+    harness.frame_value(&mut draw);
+    harness.click_on(port_circle_wid(port));
+    let emitted = harness.frame_value(&mut draw);
+    assert!(
+        matches!(
+            emitted[..],
+            [(target, Intent::SetInput { input, to: None })]
+                if target == local && input == InputPort::new(def_func, 0),
+        ),
+        "the double-click must clear the binding of the port it landed on, in \
+         its own pane: {emitted:?}"
     );
 }
 

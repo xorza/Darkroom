@@ -389,18 +389,20 @@ impl Editor {
             return;
         };
         let document = &open.document;
-        self.intents.for_graph(target, |out| match action {
+        match action {
             NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
                 let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
                 let node_ids = selected_node_ids(view);
                 if let Some(intent) =
                     build_duplicate_intent_for(document, target, &node_ids, incoming)
                 {
-                    out.push(intent);
+                    self.intents.push(target, intent);
                 }
             }
-            NodeMenuAction::Remove => out.extend(remove_selection_intents(&view.selected)),
-        });
+            NodeMenuAction::Remove => self
+                .intents
+                .extend(target, remove_selection_intents(&view.selected)),
+        }
     }
 
     /// Settle which graph is active for this frame, from inputs all
@@ -514,7 +516,7 @@ impl Editor {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(open, target),
-                UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
+                UiAction::Dock(op) => self.intents.push_global(Intent::Dock(op)),
                 UiAction::FocusPane(group) => {
                     open.document.layout.focus(group);
                 }
@@ -561,7 +563,7 @@ impl Editor {
 
     /// Queue the recorded focus/activation half of an open.
     fn push_activate(&mut self, tab: TabRef) {
-        self.intents.push(activate_intent(tab));
+        self.intents.push_global(activate_intent(tab));
     }
 
     /// Open `target`'s tab in the focused group and focus it — the same
@@ -827,12 +829,8 @@ mod tests {
             node: Node::new(NodeKind::Func(FuncId::unique())),
             bindings: vec![],
         };
-        test.editor.intents.for_graph(GraphRef::Main, |out| {
-            out.push(add(root_node));
-        });
-        test.editor.intents.for_graph(nested, |out| {
-            out.push(add(local_node));
-        });
+        test.editor.intents.push(GraphRef::Main, add(root_node));
+        test.editor.intents.push(nested, add(local_node));
         test.editor.drain_intents(&mut test.open);
 
         let doc = &test.open.document;
@@ -988,14 +986,15 @@ mod tests {
         // pane — the exact order that makes a recorded focus entry bury the
         // edit one Ctrl+Z deeper.
         let node = NodeId::unique();
-        test.editor.intents.for_graph(GraphRef::Main, |out| {
-            out.push(Intent::AddNode {
+        test.editor.intents.push(
+            GraphRef::Main,
+            Intent::AddNode {
                 pos: Vec2::ZERO,
                 node_id: node,
                 node: Node::new(NodeKind::Func(FuncId::unique())),
                 bindings: vec![],
-            });
-        });
+            },
+        );
         test.editor.drain_intents(&mut test.open);
         test.editor.actions.push(UiAction::FocusPane(primary));
         test.editor.apply_view_actions(&mut test.open);

@@ -370,10 +370,13 @@ fn property_chip(
     )
     .show(ui)
     {
-        out.push(Intent::SetNodeProperty {
-            node_id: node.id,
-            to: chip.to,
-        });
+        out.push(
+            node.owner,
+            Intent::SetNodeProperty {
+                node_id: node.id,
+                to: chip.to,
+            },
+        );
     }
 }
 
@@ -437,10 +440,13 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
         click_intents(shift, rcx.graph, node.id, out);
     }
     if let Some(to) = ev.committed {
-        out.push(Intent::RenameNode {
-            node_id: node.id,
-            to,
-        });
+        out.push(
+            node.owner,
+            Intent::RenameNode {
+                node_id: node.id,
+                to,
+            },
+        );
     }
 }
 

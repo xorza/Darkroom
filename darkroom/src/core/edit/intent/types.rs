@@ -79,7 +79,9 @@ pub(crate) enum Refusal {
 ///      compile until you do),
 ///   6. update `UndoStep::gesture_key` (also in
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in
-///      undo history.
+///      undo history,
+///   7. classify it in [`Intent::is_global`] (exhaustive — it won't compile
+///      until you do).
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Intent {
     /// Add one node that links state the document already resolves — a func,
@@ -241,6 +243,36 @@ pub(crate) enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
+}
+
+impl Intent {
+    /// Whether this variant commits against the whole document rather than
+    /// one graph — the two `build_step` resolves without a scope lookup, and
+    /// so the only two [`Intents::push_global`](crate::core::edit::intent::sink::Intents::push_global)
+    /// accepts. Everything else names the graph it edits, including the
+    /// boundary-port intents, which read their `GraphId` off the target.
+    pub(crate) fn is_global(&self) -> bool {
+        match self {
+            Self::Dock(_) | Self::RenameGraph { .. } => true,
+            Self::AddNode { .. }
+            | Self::AddLocalGraph { .. }
+            | Self::AddLocalGraphInstance { .. }
+            | Self::DuplicateNodes { .. }
+            | Self::RemoveNode { .. }
+            | Self::MoveSelection { .. }
+            | Self::RenameNode { .. }
+            | Self::SetInput { .. }
+            | Self::SetSelection { .. }
+            | Self::Raise { .. }
+            | Self::SetNodeProperty { .. }
+            | Self::DetachGraph { .. }
+            | Self::SetViewport { .. }
+            | Self::RenameBoundaryPort { .. }
+            | Self::AddBoundaryPort { .. }
+            | Self::RemoveBoundaryPort { .. }
+            | Self::SetSubscription { .. } => false,
+        }
+    }
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both

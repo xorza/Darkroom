@@ -75,10 +75,13 @@ pub(super) fn port_label(
         click_intents(shift, rcx.graph, port.node_id, out);
     }
     if let Some(to) = ev.committed {
-        out.push(Intent::RenameBoundaryPort {
-            side,
-            idx: port.port_idx,
-            to,
-        });
+        out.push(
+            rcx.graph.target(),
+            Intent::RenameBoundaryPort {
+                side,
+                idx: port.port_idx,
+                to,
+            },
+        );
     }
 }

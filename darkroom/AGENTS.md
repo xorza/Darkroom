@@ -139,13 +139,19 @@ workspace's `OpenDocument`:
 
 **Several graph panes can be open at once**, so an intent only means
 something alongside the graph it applies to. `Intents`
-(`core/edit/intent/sink.rs`) queues `(GraphRef, Intent)` pairs behind a
-*current target*: `Intents::for_graph(target, |out| …)` sets it for a
-scope and every `push`/`extend` inside inherits it. A per-pane draw wraps
-its whole subtree in one call; a whole-scene scan resolves each hit's
-target from `SceneNode::owner` and wraps that push. `commit_batch` records
-a *run* of same-target intents as one undo entry and flushes on a target
-change — an undo entry never spans two graphs.
+(`core/edit/intent/sink.rs`) queues `(GraphRef, Intent)` pairs, and the
+target is an *argument* of every push — `out.push(target, intent)` /
+`out.extend(target, intents)` — never sink state, so there is no ambient
+scope to forget and no default target to absorb the mistake. Each site
+names its pane from what it already holds: `SceneNode::owner` in a node
+body, `GraphScene::target()` in a per-pane draw, the latched `GraphRef` in
+a gesture that outlives its frame; a whole-scene scan names each hit's
+owner as it goes. The two document-global intents (`Intent::Dock`,
+`Intent::RenameGraph`) go through `push_global` instead —
+`Intent::is_global` is exhaustive, so a new variant has to classify
+itself. `commit_batch` records a *run* of same-target intents as one undo
+entry and flushes on a target change — an undo entry never spans two
+graphs.
 
 One record pass:
 

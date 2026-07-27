@@ -320,37 +320,40 @@ impl BreakerUI {
                 }
             }
             (Some(b), None) => {
-                out.for_graph(target, |out| {
-                    let doomed_nodes = std::mem::take(&mut b.broken_nodes);
-                    for &node_id in &doomed_nodes {
-                        out.push(Intent::RemoveNode { node_id });
+                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
+                for &node_id in &doomed_nodes {
+                    out.push(target, Intent::RemoveNode { node_id });
+                }
+                for addr in b.broken.drain(..) {
+                    if doomed_nodes.contains(&addr.node_id) {
+                        continue;
                     }
-                    for addr in b.broken.drain(..) {
-                        if doomed_nodes.contains(&addr.node_id) {
-                            continue;
-                        }
-                        out.push(Intent::SetInput {
+                    out.push(
+                        target,
+                        Intent::SetInput {
                             input: addr,
                             to: None,
-                        });
+                        },
+                    );
+                }
+                // A removed node already drops its subscriptions
+                // (RemoveNode's undo step captures every edge touching
+                // it), so skip any whose emitter or subscriber is doomed
+                // to avoid redundant history.
+                for s in b.broken_subscriptions.drain(..) {
+                    if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
+                        continue;
                     }
-                    // A removed node already drops its subscriptions
-                    // (RemoveNode's undo step captures every edge touching
-                    // it), so skip any whose emitter or subscriber is doomed
-                    // to avoid redundant history.
-                    for s in b.broken_subscriptions.drain(..) {
-                        if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber)
-                        {
-                            continue;
-                        }
-                        out.push(Intent::SetSubscription {
+                    out.push(
+                        target,
+                        Intent::SetSubscription {
                             emitter: s.emitter,
                             event_idx: s.event_idx,
                             subscriber: s.subscriber,
                             subscribe: false,
-                        });
-                    }
-                });
+                        },
+                    );
+                }
                 self.state = None;
             }
             _ => {}
