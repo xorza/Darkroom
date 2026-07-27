@@ -187,12 +187,12 @@ impl ExecutionProgram {
 
     /// The outputs-pool index of one flat output port. Every producer exists:
     /// flatten only names slots it emitted.
-    pub(crate) fn output_slot(&self, port: ExecutionOutputPort) -> usize {
+    pub(crate) fn output_slot(&self, port: ExecutionOutputPort) -> OutputIdx {
         let node_idx = *self
             .e_node_index
             .get(&port.e_node_id)
             .expect("flatten only names producers it emitted");
-        self[node_idx].outputs.start as usize + port.port_idx
+        OutputIdx(self[node_idx].outputs.start + port.port_idx as u32)
     }
 
     /// Adopt the flattened node set, assigning dense indices in id order so the

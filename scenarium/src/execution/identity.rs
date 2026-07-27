@@ -8,7 +8,7 @@
 //! `OutputAddr`) lives in `program/index.rs` under bare names — those types
 //! never leave the execution internals, so they need no prefix.
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -181,53 +181,35 @@ impl FlattenMap {
         &self,
         e_node_ids: impl IntoIterator<Item = ExecutionNodeId>,
     ) -> Result<(), FlattenMapValidationError> {
-        let expected: HashSet<_> = e_node_ids.into_iter().collect();
-        if self.leaves.len() != expected.len() {
-            return Err(FlattenMapValidationError::LeafCount);
-        }
-        for e_node_id in expected {
+        let mut seen = 0;
+        for e_node_id in e_node_ids {
             if !self.leaves.contains_key(&e_node_id) {
                 return Err(FlattenMapValidationError::MissingLeaf { e_node_id });
             }
+            seen += 1;
+        }
+        // Every id had a leaf, so a count mismatch means leaves the program
+        // has no node for. Ids are unique (`ExecutionProgram::push` rejects a
+        // repeat), so counting them is the same as collecting them.
+        if self.leaves.len() != seen {
+            return Err(FlattenMapValidationError::LeafCount);
         }
         Ok(())
     }
 
-    pub(crate) fn attribution(&self, e_node_id: ExecutionNodeId) -> Option<Attribution<'_>> {
+    /// The authored leaf behind one execution id, then each enclosing graph
+    /// instance, innermost first.
+    pub(crate) fn attribution(
+        &self,
+        e_node_id: ExecutionNodeId,
+    ) -> Option<impl Iterator<Item = NodeId> + '_> {
         let leaf = self.leaves.get(&e_node_id)?;
-        Some(Attribution {
-            map: self,
-            interior: Some(leaf.node_id),
-            scope: Some(leaf.scope),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct Attribution<'a> {
-    map: &'a FlattenMap,
-    interior: Option<NodeId>,
-    scope: Option<u32>,
-}
-
-impl Iterator for Attribution<'_> {
-    type Item = NodeId;
-
-    fn next(&mut self) -> Option<NodeId> {
-        if let Some(id) = self.interior.take() {
-            return Some(id);
-        }
-        let scope = self.map.scopes[self.scope? as usize];
-        match scope.instance {
-            Some(instance) => {
-                self.scope = Some(scope.parent);
-                Some(instance)
-            }
-            None => {
-                self.scope = None;
-                None
-            }
-        }
+        let scope = |scope: u32| self.scopes[scope as usize];
+        // The parent chain is walked to the root, which carries no instance
+        // and so ends the `map_while` — the only thing that terminates it.
+        let enclosing = std::iter::successors(Some(leaf.scope), move |&at| Some(scope(at).parent))
+            .map_while(move |at| scope(at).instance);
+        Some(std::iter::once(leaf.node_id).chain(enclosing))
     }
 }
 

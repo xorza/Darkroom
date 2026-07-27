@@ -455,10 +455,7 @@ fn validation_returns_compiled_and_installed_mismatches() {
             ..Default::default()
         },
     );
-    let compiled = CompiledGraph {
-        program,
-        flatten_map: builder.build(),
-    };
+    let compiled = CompiledGraph::indexed(program, builder.build());
 
     assert_eq!(
         compiled

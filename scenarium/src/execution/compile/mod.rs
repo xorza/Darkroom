@@ -5,7 +5,7 @@
 //! compile is never sent, so the worker's install is infallible and a running
 //! event loop is never disturbed by a bad edit.
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use thiserror::Error;
 
 use crate::execution::flatten::Flattener;
@@ -39,9 +39,75 @@ pub struct CompileError {
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
     pub(crate) flatten_map: FlattenMap,
+    /// Authored node → every execution node covering it, ascending.
+    ///
+    /// The inverse of [`FlattenMap::attribution`], and the direction every
+    /// question a host asks runs in: what does running this node mean, what
+    /// does evicting it reach, is it a sink. Attribution answers one node at a
+    /// time, so deriving this on demand costs a walk of the whole program per
+    /// question — and the editor asks two per node per frame. Inverting once
+    /// here is the same single pass, paid at compile.
+    footprints: HashMap<NodeId, Vec<NodeIdx>>,
+    /// Data edges reversed: which nodes read each node's outputs. A pure
+    /// function of the program, so it is built with the program rather than
+    /// rebuilt by each caller that needs it.
+    consumers: HashMap<NodeIdx, Vec<NodeIdx>>,
 }
 
 impl CompiledGraph {
+    /// Pair a program with its flatten map and index the two relations every
+    /// query needs. The only way to build one — the indices are not optional
+    /// state, and nothing may observe a `CompiledGraph` without them.
+    fn indexed(program: ExecutionProgram, flatten_map: FlattenMap) -> Self {
+        let mut footprints: HashMap<NodeId, Vec<NodeIdx>> = HashMap::new();
+        // Ascending index order, so every footprint lands sorted and
+        // `run_targets` can binary-search it.
+        for (node_idx, e_node_id) in program.e_node_ids.iter_indexed() {
+            let attribution = flatten_map
+                .attribution(*e_node_id)
+                .expect("every execution node has authored attribution");
+            for authored in attribution {
+                footprints.entry(authored).or_default().push(node_idx);
+            }
+        }
+        let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
+            for input in &program.inputs[e_node.inputs] {
+                if let ExecutionBinding::Bind(address) = &input.binding {
+                    consumers
+                        .entry(address.node_idx)
+                        .or_default()
+                        .push(node_idx);
+                }
+            }
+        }
+        Self {
+            program,
+            flatten_map,
+            footprints,
+            consumers,
+        }
+    }
+
+    /// Every execution node an authored node covers — its *footprint* —
+    /// ascending, empty when it covers no compiled work.
+    ///
+    /// A leaf in the entry graph covers itself; a leaf inside a definition
+    /// covers one occurrence per instance of that definition; a graph instance
+    /// covers its whole flattened interior. This is the only way from an
+    /// authored id to execution ids: a composite dissolves at flatten time and
+    /// has no id of its own, so *deriving* one
+    /// ([`ExecutionNodeId::from_authoring`]) answers for a top-level leaf and
+    /// nothing else.
+    fn footprint(&self, node_id: NodeId) -> &[NodeIdx] {
+        self.footprints.get(&node_id).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// The nodes reading `node_idx`'s outputs. Empty when nothing does.
+    fn consumers_of(&self, node_idx: NodeIdx) -> &[NodeIdx] {
+        self.consumers.get(&node_idx).map_or(&[][..], Vec::as_slice)
+    }
+
     /// Attribute one flat execution id to its authored node followed by every
     /// enclosing graph instance, innermost first.
     pub fn attribution(
@@ -105,10 +171,15 @@ impl CompiledGraph {
         node_id: NodeId,
         holds: impl Fn(&ExecutionNode) -> bool,
     ) -> Option<bool> {
-        let footprint = self.footprint(|covered| covered == node_id);
-        let mut occurrences = footprint.iter().peekable();
-        occurrences.peek()?;
-        Some(occurrences.any(|node_idx| holds(&self.program.e_nodes[node_idx])))
+        let footprint = self.footprint(node_id);
+        if footprint.is_empty() {
+            return None;
+        }
+        Some(
+            footprint
+                .iter()
+                .any(|&node_idx| holds(&self.program.e_nodes[node_idx])),
+        )
     }
 
     /// The execution nodes a "run this node" seeds: those producing what the
@@ -125,18 +196,18 @@ impl CompiledGraph {
     /// Empty when the node has no footprint at all: a boundary node, or one
     /// absent from this program.
     pub fn run_targets(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
-        let program = &self.program;
-        let footprint = self.footprint(|covered| covered == node_id);
-        let consumers = self.consumers();
+        let footprint = self.footprint(node_id);
+        // Footprints are built in index order, so membership is a search.
+        let inside = |node_idx: &NodeIdx| footprint.binary_search(node_idx).is_ok();
         footprint
             .iter()
-            .filter(|&node_idx| {
-                program.e_nodes[node_idx].sink
-                    || consumers
-                        .get(&node_idx)
-                        .is_none_or(|of| of.iter().any(|idx| !footprint.contains(*idx)))
+            .filter(|&&node_idx| {
+                let readers = self.consumers_of(node_idx);
+                self.program.e_nodes[node_idx].sink
+                    || readers.is_empty()
+                    || !readers.iter().all(inside)
             })
-            .map(|node_idx| program.e_node_ids[node_idx])
+            .map(|&node_idx| self.program.e_node_ids[node_idx])
             .collect()
     }
 
@@ -146,13 +217,22 @@ impl CompiledGraph {
         &self,
         authored_node_ids: &[NodeId],
     ) -> Vec<ExecutionNodeId> {
-        let program = &self.program;
-        let selected: HashSet<NodeId> = authored_node_ids.iter().copied().collect();
-        let mut in_closure = self.footprint(|covered| selected.contains(&covered));
-        let mut pending: Vec<NodeIdx> = in_closure.iter().collect();
-        let consumers = self.consumers();
+        let mut in_closure = NodeSet::default();
+        in_closure.reset(self.program.e_nodes.len());
+        let mut pending: Vec<NodeIdx> = authored_node_ids
+            .iter()
+            .flat_map(|node_id| self.footprint(*node_id))
+            .copied()
+            .filter(|&node_idx| {
+                // Two authored ids can name overlapping footprints — an
+                // instance and something inside it — so the seeds dedup too.
+                let fresh = !in_closure.contains(node_idx);
+                in_closure.insert(node_idx);
+                fresh
+            })
+            .collect();
         while let Some(node_idx) = pending.pop() {
-            for &consumer_idx in consumers.get(&node_idx).into_iter().flatten() {
+            for &consumer_idx in self.consumers_of(node_idx) {
                 if !in_closure.contains(consumer_idx) {
                     in_closure.insert(consumer_idx);
                     pending.push(consumer_idx);
@@ -162,64 +242,13 @@ impl CompiledGraph {
 
         let closure: Vec<ExecutionNodeId> = in_closure
             .iter()
-            .map(|node_idx| program.e_node_ids[node_idx])
+            .map(|node_idx| self.program.e_node_ids[node_idx])
             .collect();
         debug_assert!(
             closure.is_sorted(),
             "dense indices are assigned in id order, so an ascending index walk yields ascending ids"
         );
         closure
-    }
-
-    /// Every execution node whose attribution names an authored node `covers`
-    /// accepts — an authored node's *footprint*, and the one relation behind
-    /// [`Self::run_targets`], [`Self::any_occurrence`], and
-    /// [`Self::data_consumer_closure`]. Each of those is this filtered a
-    /// different way; none of them needs to know a node's kind.
-    ///
-    /// A leaf in the entry graph covers itself; a leaf inside a definition
-    /// covers one occurrence per instance of that definition; a graph
-    /// instance covers its whole flattened interior. It is the inverse of
-    /// [`Self::attribution`], and the only way from an authored id to
-    /// execution ids: a composite dissolves at flatten time and has no id of
-    /// its own, so *deriving* one ([`ExecutionNodeId::from_authoring`])
-    /// answers for a top-level leaf and nothing else.
-    ///
-    /// Attribution yields the authored leaf followed by each enclosing
-    /// instance, so testing every element is what makes a graph instance
-    /// match its whole interior without the caller naming a node kind.
-    fn footprint(&self, covers: impl Fn(NodeId) -> bool) -> NodeSet {
-        let program = &self.program;
-        let mut footprint = NodeSet::default();
-        footprint.reset(program.e_nodes.len());
-        for (node_idx, e_node_id) in program.e_node_ids.iter_indexed() {
-            if self
-                .flatten_map
-                .attribution(*e_node_id)
-                .expect("every execution node has authored attribution")
-                .any(&covers)
-            {
-                footprint.insert(node_idx);
-            }
-        }
-        footprint
-    }
-
-    /// Data-consumer edges, reversed: which nodes read each node's outputs.
-    fn consumers(&self) -> HashMap<NodeIdx, Vec<NodeIdx>> {
-        let program = &self.program;
-        let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
-        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            for input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(address) = &input.binding {
-                    consumers
-                        .entry(address.node_idx)
-                        .or_default()
-                        .push(node_idx);
-                }
-            }
-        }
-        consumers
     }
 }
 
@@ -263,10 +292,7 @@ impl Compiler {
         // Resolve types here so runtime digesting does not retain the function library.
         program.resolve_output_types(library);
 
-        let compiled = CompiledGraph {
-            program,
-            flatten_map,
-        };
+        let compiled = CompiledGraph::indexed(program, flatten_map);
         compiled.validate_debug(library);
         Ok(compiled)
     }
@@ -290,10 +316,9 @@ pub(crate) mod internals {
         /// so this exists to test the relation those four share once rather
         /// than four times through their filters.
         pub fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
-            let program = &self.program;
-            self.footprint(|covered| covered == node_id)
+            self.footprint(node_id)
                 .iter()
-                .map(|node_idx| program.e_node_ids[node_idx])
+                .map(|&node_idx| self.program.e_node_ids[node_idx])
                 .collect()
         }
     }
@@ -342,10 +367,10 @@ pub(crate) mod internals {
         }
 
         pub fn build(self) -> Arc<CompiledGraph> {
-            Arc::new(CompiledGraph {
-                program: ExecutionProgram::default(),
-                flatten_map: self.flatten_map,
-            })
+            Arc::new(CompiledGraph::indexed(
+                ExecutionProgram::default(),
+                self.flatten_map,
+            ))
         }
     }
 

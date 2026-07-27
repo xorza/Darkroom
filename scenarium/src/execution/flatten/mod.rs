@@ -12,7 +12,6 @@
 //!
 //! See `README.md` Part A §5.
 
-use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 
 use crate::execution::identity::{
@@ -130,23 +129,20 @@ impl Flattener {
     /// Skipping those also stops the run computing and shipping values that
     /// were only going to be discarded on arrival.
     fn apply_pins(program: &mut ExecutionProgram, flatten: &mut FlattenMap, pins: &[PendingPin]) {
-        let mut sources: HashMap<OutputPort, Option<ExecutionOutputPort>> = HashMap::new();
+        // Count the distinct slots per authored port; one means addressable.
+        // Duplicates are ordinary — the same port is recorded once per
+        // occurrence, and one occurrence can be reached twice.
+        let mut slots: HashMap<OutputPort, Vec<ExecutionOutputPort>> = HashMap::new();
         for pin in pins {
-            match sources.entry(pin.authored) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Some(pin.source));
-                }
-                Entry::Occupied(mut entry) => {
-                    if *entry.get() != Some(pin.source) {
-                        entry.insert(None);
-                    }
-                }
+            let seen = slots.entry(pin.authored).or_default();
+            if !seen.contains(&pin.source) {
+                seen.push(pin.source);
             }
         }
-        for (authored, source) in sources {
-            let Some(source) = source else { continue };
+        for (authored, sources) in slots {
+            let [source] = sources[..] else { continue };
             let slot = program.output_slot(source);
-            program.outputs[slot].pinned = true;
+            program.outputs[slot.idx()].pinned = true;
             flatten.set_pinned_port(source, authored);
         }
     }
@@ -267,18 +263,9 @@ impl<'a> Run<'a> {
                     self.scope_stack.pop();
                     self.pop_level();
                     // The instance is gone from the program, but its output
-                    // ports are still what the document pins. Resolve each
-                    // through the interior it just emitted so the value comes
-                    // back addressed to the port the user actually pinned.
-                    for port_idx in 0..nested.interface.outputs.len() {
-                        let authored = OutputPort::new(node.id, port_idx);
-                        if !graph.is_output_pinned(authored) {
-                            continue;
-                        }
-                        if let FlatBinding::Bind(source) = self.resolve(authored) {
-                            self.pins.push(PendingPin { authored, source });
-                        }
-                    }
+                    // ports are still what the document pins — `record_pins`
+                    // resolves each through the interior just emitted.
+                    self.record_pins(graph, node.id, nested.interface.outputs.len());
                     if let Some(id) = shared_id {
                         self.seen_shared.remove(&id);
                     }
@@ -292,21 +279,7 @@ impl<'a> Run<'a> {
             let outputs = self
                 .outputs
                 .append((0..func.outputs.len()).map(|_| ExecutionOutput::default()));
-            // Recorded rather than marked: whether this slot delivers depends
-            // on how many occurrences share the authored port, which only the
-            // finished walk knows (see `Flattener::apply_pins`).
-            for port_idx in 0..func.outputs.len() {
-                let authored = OutputPort::new(node.id, port_idx);
-                if graph.is_output_pinned(authored) {
-                    self.pins.push(PendingPin {
-                        authored,
-                        source: ExecutionOutputPort {
-                            e_node_id,
-                            port_idx,
-                        },
-                    });
-                }
-            }
+            self.record_pins(graph, node.id, func.outputs.len());
             let events = self
                 .events
                 .append(func.events.iter().map(|func_event| ExecutionEvent {
@@ -371,6 +344,28 @@ impl<'a> Run<'a> {
 
         if !ancestor_disabled {
             self.collect_subscriptions(graph);
+        }
+    }
+
+    /// Record every pinned output port of `node_id`, paired with the flat slot
+    /// that computes it.
+    ///
+    /// One path for both node kinds: [`Self::resolve`] answers a leaf's own
+    /// port with the leaf itself, and a graph instance's port with whatever
+    /// its interior wires to the `GraphOutput` boundary. A port that resolves
+    /// to no producer — an unwired boundary — records nothing.
+    ///
+    /// Recorded rather than marked, because whether a slot delivers depends on
+    /// how many occurrences share the authored port, which only the finished
+    /// walk knows (see [`Flattener::apply_pins`]).
+    fn record_pins(&mut self, graph: &'a Graph, node_id: NodeId, outputs: usize) {
+        for port_idx in 0..outputs {
+            let authored = OutputPort::new(node_id, port_idx);
+            if graph.is_output_pinned(authored)
+                && let FlatBinding::Bind(source) = self.resolve(authored)
+            {
+                self.pins.push(PendingPin { authored, source });
+            }
         }
     }
 
