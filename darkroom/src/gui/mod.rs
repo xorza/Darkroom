@@ -19,7 +19,7 @@ pub(crate) mod status_bar;
 pub(crate) mod theme;
 
 use crate::core::document::GraphRef;
-use crate::core::document::dock::DockOp;
+use crate::core::document::dock::{DockOp, TabGroupId};
 use crate::gui::app::App;
 use palantir::WindowToken;
 
@@ -53,6 +53,10 @@ pub(crate) enum UiAction {
     NewGraph,
     /// Show this pinned output's full runtime image in its viewer tab.
     OpenImageViewer(NodeId),
+    /// Move dock focus onto this pane, because a press landed inside it.
+    /// The one navigation request that is *not* undoable — see
+    /// [`DockLayout::focus`](crate::core::document::dock::DockLayout::focus).
+    FocusPane(TabGroupId),
 }
 
 /// One event (emitter) port's identity. Events are indexed independently

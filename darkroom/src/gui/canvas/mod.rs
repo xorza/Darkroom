@@ -145,10 +145,11 @@ impl GraphUI {
         self.inspectors.close_unpinned();
     }
 
-    /// Take the node context-menu action picked this frame, if any. The
-    /// `Editor` resolves it against the live selection (it owns the
-    /// `Document` needed to build the duplicate / removal intents).
-    pub(crate) fn take_node_menu_action(&mut self) -> Option<NodeMenuAction> {
+    /// Take the node context-menu action picked this frame, if any, with the
+    /// pane it was picked in. The `Editor` resolves it against that pane's
+    /// live selection (it owns the `Document` needed to build the duplicate /
+    /// removal intents).
+    pub(crate) fn take_node_menu_action(&mut self) -> Option<(NodeMenuAction, GraphRef)> {
         self.gestures.node_menu.take_action()
     }
 

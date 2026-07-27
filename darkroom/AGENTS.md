@@ -383,8 +383,9 @@ Top level is the chrome: `MainWindow` (menu-bar band + status bar around
 the dock; its one real job is the `content` closure saying what each tab
 kind looks like) and `menu_bar` (returns `MenuCommand`s). Everything
 pane-shaped lives in `gui/dock/` behind `DockUi`, integrated in exactly
-two calls: `scan` in the navigation phase (tab activate/close clicks +
-the drag-docking lifecycle, off last frame's responses) and `render` in
+two calls: `scan` in the navigation phase (focus-follows-press into a pane,
+tab activate/close clicks + the drag-docking lifecycle, off last frame's
+responses) and `render` in
 the record (the recursive dock-tree walk — splits as palantir `Splitter`s
 whose ratio drags surface as `DockOp::SetRatio`, groups as
 strip-over-content panes — plus the drag's drop-zone highlight, ghost

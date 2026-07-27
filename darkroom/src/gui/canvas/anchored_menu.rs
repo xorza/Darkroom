@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Spacing, Ui};
+use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 
 use crate::core::document::GraphRef;
 
@@ -11,9 +11,10 @@ use crate::core::document::GraphRef;
 /// pick-time.
 ///
 /// Centralizes what those three controllers used to each re-implement: the
-/// Esc-to-close guard, the identical `Popup` chrome (context-menu
-/// background, hug sizing, 6 px padding, click-outside dismiss), and the
-/// "a pick or an outside dismiss closes the menu" resolution.
+/// Esc-to-close guard, the identical `Popup` chrome (the `context_menu`
+/// theme slot's panel, padding, and width floor, hug sizing,
+/// click-outside dismiss), and the "a pick or an outside dismiss closes
+/// the menu" resolution.
 ///
 /// **One pane records it.** Every visible graph pane runs its own scan +
 /// `show` pass, so without the `graph` latch an open popup would be
@@ -55,14 +56,23 @@ impl AnchoredMenu {
         let anchor = self.anchor?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate `escape_pressed` here.
-        let chrome = ui.theme.context_menu.panel.clone();
+        //
+        // Chrome, padding, and the width floor all come off the same theme
+        // slot `ContextMenu::show` reads, so a canvas menu and a menu-bar
+        // menu are the same object; these popups only opt out of
+        // `ContextMenu` for its per-trigger open lifecycle, not its look.
+        let ctx = &ui.theme.context_menu;
+        let chrome = ctx.panel.clone();
+        let padding = ctx.padding;
+        let min_width = ctx.min_width;
         let mut pick = None;
         let mut popup = Popup::anchored_to(anchor)
             .click_outside(ClickOutside::Dismiss)
             .background(chrome)
             .id_salt(id_salt)
             .size((Sizing::HUG, Sizing::HUG))
-            .padding(Spacing::all(6.0));
+            .min_size((min_width, 0.0))
+            .padding(padding);
         if let Some(h) = max_height {
             popup = popup.max_size((f32::INFINITY, h));
         }

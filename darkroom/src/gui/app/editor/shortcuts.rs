@@ -17,6 +17,7 @@ use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::app::editor::{Editor, StepSignals};
+use crate::gui::dock;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -43,12 +44,14 @@ impl Editor {
     /// chord subscribed, and palantir's keyboard wake-gate only delivers
     /// an off-focus press when its chord was subscribed last frame
     /// (subscriptions clear each frame). Focus only gates the *action*:
-    /// while a widget holds focus, Ctrl+Z must undo that widget's text,
-    /// so the graph-level handling stands down.
+    /// while a text widget holds focus, Ctrl+Z must undo that widget's
+    /// text, so the graph-level handling stands down. A focused *pane*
+    /// doesn't count — panes are focusable purely to route dock focus
+    /// (`dock::typing_focus_held`).
     pub(super) fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
-        if ui.focused_id().is_some() {
+        if dock::typing_focus_held(ui, &open.document) {
             return;
         }
         // Folded into a value first: the replay callback runs while
@@ -80,7 +83,7 @@ impl Editor {
         // palantir's wake-gate even on a focused frame.
         let delete = ui.key_pressed(Shortcut::key(Key::Delete))
             || ui.key_pressed(Shortcut::key(Key::Backspace));
-        if ui.focused_id().is_some() {
+        if dock::typing_focus_held(ui, &open.document) {
             return;
         }
         let Some(target) = open.document.focused_target() else {

@@ -307,6 +307,34 @@ impl DockLayout {
         self.groups().find(|g| g.id == id)
     }
 
+    /// Move focus onto `group`.
+    ///
+    /// Panics on a group that isn't in the tree. Like [`Self::find_or_insert`]
+    /// and unlike the intent-fed ops, this is a direct call whose caller read
+    /// a live group id in the same call chain — `gui::dock::scan_focus`
+    /// resolves it from `groups()` and `Editor::apply_view_actions` applies it
+    /// before anything structural can land — so a dead id is a logic error,
+    /// not tolerable staleness. Storing one would strand `focused` and fail
+    /// [`Self::validate`] at the next save.
+    ///
+    /// **The one layout mutation deliberately outside the undo record.**
+    /// Every *deliberate* navigation — a tab chip, an open, a move — still
+    /// goes through a recorded [`DockOp`]; this is the incidental half,
+    /// where focus follows the pointer into a pane
+    /// (`gui::dock::scan_focus`). Recording it would be both noise (an undo
+    /// entry per click into another pane) and a trap: keyboard focus is
+    /// sticky, so an undo restoring the old focus would be re-applied by
+    /// the very next scan — in the same frame, since `Editor::navigate`
+    /// runs undo, scan, and drain in that order — silently discarding the
+    /// redo tail.
+    pub(crate) fn focus(&mut self, group: TabGroupId) {
+        assert!(
+            self.group(group).is_some(),
+            "focus target group {group:?} is not in the tree"
+        );
+        self.focused = group;
+    }
+
     fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
         self.nodes.iter_mut().find_map(|n| match n {
             DockNode::Group(g) if g.id == id => Some(g),
@@ -769,6 +797,46 @@ mod tests {
             "the emptied pane collapsed"
         );
         assert_eq!(l.primary().tabs, [main_tab(), local]);
+    }
+
+    /// Pointer-driven focus moves `focused` and nothing else — no pane
+    /// switches tabs.
+    #[test]
+    fn focus_moves_only_the_focused_group() {
+        let mut l = seeded();
+        let primary = l.primary().id;
+        l.move_tab(
+            viewer(1),
+            DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        );
+        let split_off = l.focused;
+        assert_ne!(split_off, primary, "the new pane took focus");
+        let actives: Vec<TabRef> = l.groups().map(TabGroup::active_tab).collect();
+
+        l.focus(primary);
+        l.validate().unwrap();
+        assert_eq!(l.focused, primary, "focus moved to the pressed pane");
+        assert_eq!(
+            l.groups().map(TabGroup::active_tab).collect::<Vec<_>>(),
+            actives,
+            "focus alone moved — no pane switched tabs"
+        );
+
+        l.focus(primary);
+        assert_eq!(l.focused, primary, "re-focusing the same pane is inert");
+        l.validate().unwrap();
+    }
+
+    /// Focusing a group that isn't in the tree is a caller bug, not a stale
+    /// address to absorb: it would strand `focused` and fail validation at
+    /// the next save, long after the code that fabricated it.
+    #[test]
+    #[should_panic(expected = "is not in the tree")]
+    fn focusing_a_group_outside_the_tree_panics() {
+        DockLayout::default().focus(TabGroupId::unique());
     }
 
     #[test]
