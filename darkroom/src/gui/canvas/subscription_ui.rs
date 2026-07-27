@@ -146,14 +146,15 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter: Some(emitter),
-            } => out.for_graph(graph.target(), |out| {
-                out.push(Intent::SetSubscription {
+            } => out.push(
+                graph.target(),
+                Intent::SetSubscription {
                     emitter: emitter.node_id,
                     event_idx: emitter.event_idx,
                     subscriber,
                     subscribe: true,
-                })
-            }),
+                },
+            ),
             _ => {}
         }
         self.state = None;

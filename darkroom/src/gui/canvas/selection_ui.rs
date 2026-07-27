@@ -172,7 +172,7 @@ impl SelectionUI {
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
         let to: BTreeSet<NodeId> = swept.iter().copied().collect();
-        out.for_graph(target, |out| out.push(Intent::SetSelection { to }));
+        out.push(target, Intent::SetSelection { to });
         self.preview = Some(target);
         self.band = None;
     }

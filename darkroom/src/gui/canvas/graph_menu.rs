@@ -68,9 +68,7 @@ impl GraphMenuUi {
                 node_id,
             })),
             MenuChoice::Detach => {
-                out.for_graph(graph.target(), |out| {
-                    out.push(Intent::DetachGraph { node_id })
-                });
+                out.push(graph.target(), Intent::DetachGraph { node_id });
                 None
             }
         }

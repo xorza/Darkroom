@@ -178,7 +178,7 @@ impl NewNodeUi {
         );
 
         if let Some(intent) = chosen {
-            out.for_graph(graph.target(), |out| out.push(intent));
+            out.push(graph.target(), intent);
             // If a dropped connection opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the
             // exact port to land it, rather than it auto-attaching.

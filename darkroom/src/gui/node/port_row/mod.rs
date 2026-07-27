@@ -245,6 +245,7 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 fn remove_port_item(
     ui: &mut Ui,
     popup: &PopupHandle,
+    target: GraphRef,
     port: PortRef,
     rename: Option<BoundarySide>,
     out: &mut Intents,
@@ -252,10 +253,13 @@ fn remove_port_item(
     if let Some(side) = rename
         && MenuItem::new("Remove port").show(ui, popup).left.clicked()
     {
-        out.push(Intent::RemoveBoundaryPort {
-            side,
-            idx: port.port_idx,
-        });
+        out.push(
+            target,
+            Intent::RemoveBoundaryPort {
+                side,
+                idx: port.port_idx,
+            },
+        );
     }
 }
 
@@ -342,7 +346,7 @@ fn input_label_cell(
                 .clicked()
                 && let Some(value) = input.default.clone()
             {
-                out.push(set_input(port, Binding::Const(value)));
+                out.push(rcx.graph.target(), set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .enabled(!matches!(input.binding, InputBindingView::None))
@@ -350,9 +354,9 @@ fn input_label_cell(
                 .left
                 .clicked()
             {
-                out.push(set_input(port, None));
+                out.push(rcx.graph.target(), set_input(port, None));
             }
-            remove_port_item(ui, popup, port, opts.rename, out);
+            remove_port_item(ui, popup, rcx.graph.target(), port, opts.rename, out);
         });
 }
 
@@ -394,7 +398,10 @@ fn value_cell(
             )
         });
     if let Some(new_value) = edited.inner {
-        out.push(set_input(port, Binding::Const(new_value)));
+        out.push(
+            rcx.graph.target(),
+            set_input(port, Binding::Const(new_value)),
+        );
     }
 }
 
@@ -451,7 +458,7 @@ fn output_cell(
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             add_preview_item(ui, popup, rcx, port, out);
-            remove_port_item(ui, popup, port, opts.rename, out);
+            remove_port_item(ui, popup, rcx.graph.target(), port, opts.rename, out);
         });
 }
 
@@ -488,7 +495,10 @@ fn add_preview_item(
         .ports
         .center(port)
         .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-    out.extend(add_preview_intents(func, port, pos, NodeId::unique()));
+    out.extend(
+        rcx.graph.target(),
+        add_preview_intents(func, port, pos, NodeId::unique()),
+    );
 }
 
 /// The two intents that spawn a preview already reading `port`. Emitted

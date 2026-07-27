@@ -123,6 +123,7 @@ pub(crate) fn emit_path_picks(ui: &Ui, graph: GraphScene<'_>) -> Option<PathPick
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
 pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Intents) {
+    let target = graph.target();
     for node in graph.nodes() {
         // Boundary ports route the interface — no const affordance, so an
         // unbound one has nothing to seed (its label double-click renames).
@@ -144,11 +145,11 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Inte
                 // option variant, both already folded into `SceneInput::default`).
                 InputBindingView::None => {
                     if can_set && let Some(default) = &input.default {
-                        out.push(set_input(port, Binding::Const(default.clone())));
+                        out.push(target, set_input(port, Binding::Const(default.clone())));
                     }
                 }
                 // Already bound → clear it.
-                _ => out.push(set_input(port, None)),
+                _ => out.push(target, set_input(port, None)),
             }
         }
         for port in node.ports(PortKind::Output) {
@@ -156,14 +157,17 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Inte
                 // An output may feed many inputs — clear each consumer.
                 for c in graph.connections() {
                     if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
-                        out.push(set_input(
-                            PortRef {
-                                node_id: c.tgt.node_id,
-                                kind: PortKind::Input,
-                                port_idx: c.tgt.port_idx,
-                            },
-                            None,
-                        ));
+                        out.push(
+                            target,
+                            set_input(
+                                PortRef {
+                                    node_id: c.tgt.node_id,
+                                    kind: PortKind::Input,
+                                    port_idx: c.tgt.port_idx,
+                                },
+                                None,
+                            ),
+                        );
                     }
                 }
             }

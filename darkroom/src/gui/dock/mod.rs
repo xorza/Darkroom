@@ -222,7 +222,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
             // compare for the same reason `pan_zoom::emit_pan_zoom` uses
             // one — an exact `!=` emits on sub-epsilon jitter.
             if !live_ratio.approximately_eq(ratio) {
-                out.push(Intent::Dock(DockOp::SetRatio {
+                out.push_global(Intent::Dock(DockOp::SetRatio {
                     split: path,
                     ratio: live_ratio,
                 }));

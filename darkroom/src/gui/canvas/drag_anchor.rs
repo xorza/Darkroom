@@ -120,7 +120,7 @@ impl GroupDrag {
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
         let move_selection = self.anchor.as_ref().unwrap().resolve(delta);
-        out.for_graph(target, |out| out.push(move_selection));
+        out.push(target, move_selection);
         true
     }
 }
