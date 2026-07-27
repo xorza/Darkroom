@@ -49,10 +49,14 @@ pub(crate) enum NodeProperty {
 ///
 /// [`Invalid`](Self::Invalid) means the payload could never have applied —
 /// a nil or colliding identity, a non-finite position, a link to state the
-/// document doesn't hold. No widget can build one, because widgets read the
-/// identities they emit out of the live document; a script decoded straight
-/// into an `Intent` can (see `core::script::register_mutations`), so the
-/// reason travels back to its caller instead of vanishing.
+/// document doesn't hold. It exists for the one caller whose payload is
+/// untrusted: a script's, deserialized straight into an `Intent` by
+/// `core::script::engine::decode_action`, so the reason travels back to it
+/// instead of vanishing. No *widget* can build one — they read the
+/// identities they emit out of the live document, so the worst they manage
+/// is stale, which refuses [`Quiet`](Self::Quiet)ly — and the GUI commit
+/// path asserts exactly that (`Editor::commit_widget_batch`, whose return
+/// type has no room for a refusal in the first place).
 #[derive(Debug)]
 pub(crate) enum Refusal {
     Quiet,

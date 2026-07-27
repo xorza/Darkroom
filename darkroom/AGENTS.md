@@ -150,7 +150,7 @@ owner as it goes. A mutation that owns no graph isn't an `Intent` at all
 — it's a `DocIntent` (`Dock`, `RenameGraph`), queued through
 `push_global`, so the queue is `Queued::Scoped { target, intent } |
 Queued::Global(DocIntent)` and neither kind can pass for the other.
-`commit_batch` records a *run* of same-target intents as one undo entry
+`commit_queued` records a *run* of same-target intents as one undo entry
 and flushes on a target change — an undo entry never spans two graphs —
 while a `DocIntent` shares an entry with nothing at all.
 

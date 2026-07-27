@@ -45,28 +45,17 @@ mod shortcuts;
 /// undone away, but the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
-/// What one `Editor::commit_batch` did: whether anything applied, plus the
-/// reason for each intent the edit layer refused as malformed. `rejected`
-/// stays empty for every widget-sourced batch — widgets read the identities
-/// they emit out of the live document, so the worst they produce is a stale
-/// reference, which refuses quietly.
+/// What one `Editor::commit_queued` did: whether anything applied, plus the
+/// reason for each intent the edit layer refused as malformed.
+///
+/// Only [`Editor::commit_queued`] builds one, and only its two trust-split
+/// wrappers read it — [`Editor::commit_widget_batch`], which asserts
+/// `rejected` is empty, and [`Editor::commit_script_batch`], which hands
+/// it back to the script that asked.
 #[derive(Debug)]
 struct BatchOutcome {
     applied: bool,
     rejected: Vec<String>,
-}
-
-impl BatchOutcome {
-    /// Log the malformed intents this batch dropped. The widget-sourced
-    /// paths use this: a rejection there is our own bug, with no user
-    /// action to suggest, so the structured log is the whole record. The
-    /// script path instead hands `rejected` to `StatusLog`, so the remote
-    /// client learns its request was refused.
-    fn warn_rejected(&self) {
-        for reason in &self.rejected {
-            tracing::warn!(target: "darkroom::edit", "rejected intent: {reason}");
-        }
-    }
 }
 
 /// What applying one or more [`UndoStep`]s obliges the frame to do, folded
@@ -170,29 +159,58 @@ impl Editor {
     /// drain.
     pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
         let target = open.document.focused_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, [Queued::Scoped { target, intent }])
-            .warn_rejected();
+        self.commit_widget_batch(open, [Queued::Scoped { target, intent }]);
     }
 
-    /// Apply a batch of externally-sourced `intents` (e.g. from a script)
-    /// against the active target as a single undo entry — the multi-intent
-    /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
-    /// script inbound queue before the frame; the unconditional pre-prepass
-    /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
+    /// Commit a batch the GUI itself built, reporting whether anything
+    /// applied. The trust half of the pipeline that [`Self::commit_script_batch`]
+    /// is the other side of, and the reason the two can't be confused: this
+    /// return type has nowhere to put a refusal.
+    ///
+    /// Nothing raised here can legitimately be malformed. Widgets read every
+    /// identity they emit out of the live document, so the worst they build
+    /// is stale — which refuses [`Refusal::Quiet`]ly and is dropped — and the
+    /// data that *is* untrusted never reaches an `Intent` unchecked: an
+    /// imported template and the graph-library file are both validated at
+    /// their own boundary (`io::graph_template::load`, `io::graph_library`'s
+    /// load-and-quarantine). So a [`Refusal::Invalid`] here is our own bug,
+    /// and it fails loudly in every build rather than going to a log nobody
+    /// reads.
+    fn commit_widget_batch(
+        &mut self,
+        open: &mut OpenDocument,
+        queued: impl IntoIterator<Item = Queued>,
+    ) -> bool {
+        let outcome = self.commit_queued(open, queued);
+        assert!(
+            outcome.rejected.is_empty(),
+            "a widget built a malformed intent: {:?}",
+            outcome.rejected,
+        );
+        outcome.applied
+    }
+
+    /// Commit a batch a *script* built, against the active target and as a
+    /// single undo entry — the untrusted half that
+    /// [`Self::commit_widget_batch`] is the other side of. Used by `App`
+    /// when draining the script inbound queue before the frame; the
+    /// unconditional pre-prepass rebuild folds the edits in, so
+    /// `scene_dirty` needn't be set here.
     ///
     /// Returns the reason for each intent the edit layer refused as
-    /// malformed, for the caller to surface. A script's payload is decoded
-    /// straight into an [`Intent`], so a bad one has to answer back rather
-    /// than vanish the way a stale widget intent does. Scripts drive graph
-    /// edits only — a [`DocIntent`] has no decoded form, so nothing here
-    /// can rearrange the dock.
-    pub(super) fn apply_external_intents(
+    /// malformed, for the caller to answer the script with. The payload is
+    /// deserialized straight into an [`Intent`]
+    /// (`script::engine::decode_action`), so a bad one has to report rather
+    /// than crash the editor the way the same payload from a widget would.
+    /// Scripts drive graph edits only — a [`DocIntent`] has no decoded
+    /// form, so nothing here can rearrange the dock.
+    pub(super) fn commit_script_batch(
         &mut self,
         open: &mut OpenDocument,
         intents: Vec<Intent>,
     ) -> Vec<String> {
         let target = open.document.focused_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(
+        self.commit_queued(
             open,
             intents
                 .into_iter()
@@ -202,11 +220,11 @@ impl Editor {
     }
 
     /// Build, apply, and record `queued` — each item against whatever it
-    /// names — accumulating the frame's relayout/reconcile signals. Shared
-    /// core of [`Self::apply_edit`], [`Self::apply_doc_edit`],
-    /// [`Self::apply_external_intents`], and [`Self::drain_intents`]: no-op
-    /// and stale intents (anchor node already gone) are dropped per-intent,
-    /// and an empty batch records nothing.
+    /// names — accumulating the frame's relayout/reconcile signals. The
+    /// trust-agnostic core both [`Self::commit_widget_batch`] and
+    /// [`Self::commit_script_batch`] wrap, and the only place that reads a
+    /// [`BatchOutcome`] whole: no-op and stale intents (anchor node already
+    /// gone) are dropped per-intent, and an empty batch records nothing.
     ///
     /// A *run* of scoped intents sharing a target becomes one undo entry, so
     /// a gesture that emits N of them is still one Ctrl+Z. A change of
@@ -220,7 +238,7 @@ impl Editor {
     /// reachable by gesture coalescing — a tab-switch burst and a divider's
     /// drag frames collapse in the stack, which a mixed multi-step entry
     /// would forfeit.
-    fn commit_batch(
+    fn commit_queued(
         &mut self,
         open: &mut OpenDocument,
         queued: impl IntoIterator<Item = Queued>,
@@ -523,13 +541,11 @@ impl Editor {
         if self.intents.is_empty() {
             return;
         }
-        // Move the scratch buffer out so it can drive `commit_batch` (which
+        // Move the scratch buffer out so it can drive the commit (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
-        let outcome = self.commit_batch(open, scratch.drain());
-        outcome.warn_rejected();
-        if outcome.applied {
+        if self.commit_widget_batch(open, scratch.drain()) {
             self.scene_dirty = true;
         }
         self.intents = scratch;
@@ -632,8 +648,7 @@ impl Editor {
         open.document
             .layout
             .find_or_insert(TabRef::Preferences, group);
-        self.commit_batch(open, [Queued::Global(activate_intent(TabRef::Preferences))])
-            .warn_rejected();
+        self.commit_widget_batch(open, [Queued::Global(activate_intent(TabRef::Preferences))]);
     }
 }
 
@@ -692,6 +707,46 @@ mod tests {
                 .action_stack
                 .redo(&mut self.open.document, &mut |_| {})
         }
+    }
+
+    /// A malformed intent — one no `build_step` precondition can accept.
+    fn nil_id_add() -> Intent {
+        Intent::AddNode {
+            pos: Vec2::ZERO,
+            node_id: NodeId::nil(),
+            node: Node::new(NodeKind::Func(FuncId::unique())),
+            bindings: vec![],
+        }
+    }
+
+    #[test]
+    fn a_scripts_malformed_intent_is_refused_and_reported_back() {
+        // A script's payload is deserialized straight into an `Intent`, so
+        // this is untrusted input, not a bug in our code: refuse it, hand
+        // the reason back for the caller to answer the script with, and
+        // leave the document alone.
+        let mut test = TestEditor::new(Document::default());
+        let rejected = test
+            .editor
+            .commit_script_batch(&mut test.open, vec![nil_id_add()]);
+
+        assert_eq!(rejected.len(), 1, "the one bad intent answered back");
+        assert!(
+            rejected[0].contains("nil"),
+            "the reason names what was wrong: {rejected:?}",
+        );
+        assert_eq!(test.open.document.graph.len(), 0, "nothing was written");
+        assert!(!test.undo(), "and nothing was recorded to undo");
+    }
+
+    /// The same payload from the GUI side is our own bug, so it fails loudly
+    /// instead of being reported — in every build, since that is the only
+    /// way a defect no user action can explain gets noticed.
+    #[test]
+    #[should_panic(expected = "a widget built a malformed intent")]
+    fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
+        let mut test = TestEditor::new(Document::default());
+        test.editor.apply_edit(&mut test.open, nil_id_add());
     }
 
     #[test]

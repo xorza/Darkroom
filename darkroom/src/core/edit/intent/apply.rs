@@ -89,7 +89,7 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document, scope: BatchScope)
 }
 
 /// The graph a [`GraphStep`] resolves against. Its entry is graph-scoped by
-/// construction — `commit_batch` records a document-global intent as an
+/// construction — `commit_queued` records a document-global intent as an
 /// entry of its own — so a `Document` scope here means a batch was
 /// assembled against the wrong one, not that any input was bad.
 fn graph_target(scope: BatchScope) -> GraphRef {
