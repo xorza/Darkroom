@@ -24,6 +24,12 @@ use crate::core::document::dock::{DockLayout, TabGroup};
 /// unconnected nodes in one column).
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
+/// Palette category a graph created in the editor starts in. A
+/// [`GraphInterface`](scenarium::GraphInterface) with no category lands in
+/// a nameless palette column, and nothing in the editor can set one
+/// afterwards, so a fresh graph names its own.
+pub(crate) const NEW_GRAPH_CATEGORY: &str = "Document";
+
 /// Which graph an editor tab is pointed at. `Main` is the document root;
 /// `Local(id)` addresses a local graph *anywhere* in the document's nested
 /// graph tree — graph ids are document-unique (upheld by
@@ -512,7 +518,8 @@ impl Document {
         let view = {
             let scope = self.scope_mut(target)?;
             let sibling_count = scope.graph.graphs.len();
-            let mut graph = CoreGraphDef::new(format!("graph {}", sibling_count + 1));
+            let mut graph = CoreGraphDef::new(format!("graph {}", sibling_count + 1))
+                .category(NEW_GRAPH_CATEGORY);
             let input_id = graph.body.add(Node::new(NodeKind::GraphInput));
             let output_id = graph.body.add(Node::new(NodeKind::GraphOutput));
             let inst = Node::graph_instance(&graph, GraphLink::Local(id));
@@ -877,6 +884,9 @@ mod tests {
         );
         let interface = &def.interface;
         assert!(interface.inputs.is_empty() && interface.outputs.is_empty());
+        // A category, so the palette has a named column to list it under —
+        // nothing in the editor can set one after the fact.
+        assert_eq!(interface.category, NEW_GRAPH_CATEGORY);
 
         // Boundary nodes are placed input-left / output-right, level.
         let input_id = def

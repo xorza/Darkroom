@@ -522,6 +522,82 @@ fn subscriptions_project_from_graph() {
 }
 
 #[test]
+fn local_defs_project_per_pane_ordered_by_id() {
+    // The palette instances a `GraphLink::Local`, which resolves only
+    // against the graph that *holds* the definition — so each pane must see
+    // its own `graphs` map and no one else's.
+    let library = Library::default();
+    let origin = GraphId::unique();
+    let mut nested = GraphDef::new("Inner").category("Nested");
+    let buried = GraphId::unique();
+    nested.body.insert_graph(buried, GraphDef::new("Buried"));
+
+    let mut published = GraphDef::new("Published").category("Document");
+    published.interface.origin = Some(origin);
+
+    let mut graph = Graph::default();
+    let (first, second) = (GraphId::unique(), GraphId::unique());
+    graph.insert_graph(first, published);
+    graph.insert_graph(second, nested);
+
+    let view = GraphView::for_graph(&graph);
+    let nested_view = GraphView::default();
+    let mut scene = Scene::default();
+    let mut arena = UiHarness::arena();
+    let ui = arena.ui();
+    scene.rebuild(
+        ui,
+        &library,
+        &RunState::default(),
+        [
+            GraphProjection {
+                target: GraphRef::Main,
+                source: SceneSource::Entry(&graph),
+                view: &view,
+            },
+            GraphProjection {
+                target: GraphRef::Local(second),
+                source: SceneSource::Def(&graph.graphs[&second]),
+                view: &nested_view,
+            },
+        ],
+    );
+
+    let root = scene.graph(GraphRef::Main).unwrap().local_defs();
+    assert_eq!(root.len(), 2, "root sees its own two definitions only");
+    // Ordered by id, not by `HashMap` iteration order.
+    let (lo, hi) = if first < second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!([root[0].id, root[1].id], [lo, hi]);
+    let published = root.iter().find(|def| def.id == first).unwrap();
+    assert_eq!(&*published.name.borrow_str(), "Published");
+    assert_eq!(&*published.category.borrow_str(), "Document");
+    assert_eq!(
+        published.origin,
+        Some(origin),
+        "lineage rides along so the palette can drop the library's own row"
+    );
+    let nested = root.iter().find(|def| def.id == second).unwrap();
+    assert_eq!(&*nested.category.borrow_str(), "Nested");
+    assert_eq!(nested.origin, None);
+
+    // The nested pane sees only what *it* holds — its parent's siblings are
+    // not instanceable from inside it.
+    let inner = scene.graph(GraphRef::Local(second)).unwrap().local_defs();
+    assert_eq!(inner.len(), 1);
+    assert_eq!(inner[0].id, buried);
+    assert_eq!(&*inner[0].name.borrow_str(), "Buried");
+    assert_eq!(
+        &*inner[0].category.borrow_str(),
+        "",
+        "a definition with no category interns to the empty handle"
+    );
+}
+
+#[test]
 fn cache_mode_projects_verbatim_per_node() {
     use scenarium::math_library;
 

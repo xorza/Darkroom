@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::FuncId;
 use scenarium::StaticValue;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
+use scenarium::{DataType, FuncId, FuncInput};
 use scenarium::{GraphDef, GraphId, GraphLink, Subscription};
 
 use crate::core::document::dock::DockOp;
@@ -1342,6 +1342,38 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
                 subscribe: true,
             },
         ),
+        (
+            "AddLocalGraphInstance naming a graph the target doesn't hold",
+            Intent::AddLocalGraphInstance {
+                pos: Vec2::ZERO,
+                node_id: NodeId::unique(),
+                graph_id: GraphId::unique(),
+            },
+        ),
+        (
+            "AddLocalGraphInstance with a nil graph id",
+            Intent::AddLocalGraphInstance {
+                pos: Vec2::ZERO,
+                node_id: NodeId::unique(),
+                graph_id: GraphId::nil(),
+            },
+        ),
+        (
+            "AddLocalGraphInstance over a live node id",
+            Intent::AddLocalGraphInstance {
+                pos: Vec2::ZERO,
+                node_id: live,
+                graph_id: GraphId::unique(),
+            },
+        ),
+        (
+            "AddLocalGraphInstance at a non-finite position",
+            Intent::AddLocalGraphInstance {
+                pos: nan,
+                node_id: NodeId::unique(),
+                graph_id: GraphId::unique(),
+            },
+        ),
     ];
     for (what, intent) in cases {
         assert_invalid(&mut doc, GraphRef::Main, intent, what);
@@ -1403,6 +1435,85 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             Node::new(NodeKind::GraphInput),
         ),
         "AddNode adding a second boundary input",
+    );
+}
+
+#[test]
+fn instancing_a_local_graph_reads_its_definition_out_of_the_target() {
+    // The palette hands over an id and nothing else, so this is where the
+    // node's name and its interface's const defaults come from. Two ports:
+    // one defaulted, one not, so the seeded bindings are a filter and not
+    // "one per input".
+    let mut doc = Document::default();
+    let graph_id = GraphId::unique();
+    doc.graph.insert_graph(
+        graph_id,
+        GraphDef::new("Blur")
+            .input(FuncInput::optional("radius", DataType::Float).default(StaticValue::Float(2.5)))
+            .input(FuncInput::required("image", DataType::Float)),
+    );
+
+    let node_id = NodeId::unique();
+    let instance = |node_id| Intent::AddLocalGraphInstance {
+        pos: Vec2::new(12.0, 34.0),
+        node_id,
+        graph_id,
+    };
+    commit_intent(instance(node_id), &mut doc, GraphRef::Main).expect("instancing commits");
+
+    let node = doc
+        .graph
+        .find(node_id, NodeSearch::TopLevel)
+        .expect("instance node added");
+    assert_eq!(node.kind, NodeKind::Graph(GraphLink::Local(graph_id)));
+    assert_eq!(node.name, "Blur", "the node is named after the definition");
+    assert_eq!(
+        doc.graph.graphs.len(),
+        1,
+        "the definition was already there — instancing copies nothing"
+    );
+    assert_eq!(
+        doc.main_view.item_placements[&ItemRef::Node(node_id)],
+        Vec2::new(12.0, 34.0)
+    );
+    assert_eq!(
+        doc.graph.bindings.get(&InputPort::new(node_id, 0)),
+        Some(&Binding::Const(StaticValue::Float(2.5))),
+        "the defaulted interface input is seeded"
+    );
+    assert_eq!(
+        doc.graph.bindings.get(&InputPort::new(node_id, 1)),
+        None,
+        "an input with no default stays unbound"
+    );
+
+    // A second instance shares the one definition rather than forking it.
+    let second = NodeId::unique();
+    commit_intent(instance(second), &mut doc, GraphRef::Main).expect("a second instance commits");
+    assert_eq!(doc.graph.graphs.len(), 1);
+    assert_eq!(
+        doc.graph.find(second, NodeSearch::TopLevel).unwrap().kind,
+        NodeKind::Graph(GraphLink::Local(graph_id))
+    );
+    doc.validate().expect("document valid after instancing");
+
+    // A `Local` link resolves only against the graph that holds the
+    // definition, so a sibling scope cannot instance it — the definition
+    // above lives in root, and this target is a different graph's interior.
+    let (mut nested_doc, nested_target, _) = doc_with_local_graph();
+    let outsider = GraphId::unique();
+    nested_doc
+        .graph
+        .insert_graph(outsider, GraphDef::new("Elsewhere"));
+    assert_invalid(
+        &mut nested_doc,
+        nested_target,
+        Intent::AddLocalGraphInstance {
+            pos: Vec2::ZERO,
+            node_id: NodeId::unique(),
+            graph_id: outsider,
+        },
+        "AddLocalGraphInstance naming a definition held by another graph",
     );
 }
 

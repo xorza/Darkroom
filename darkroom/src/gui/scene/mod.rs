@@ -5,7 +5,6 @@ use common::Span;
 use glam::Vec2;
 use indexmap::IndexMap;
 use palantir::{InternedStr, Ui};
-use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
@@ -13,6 +12,7 @@ use scenarium::{
 };
 use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, StaticValue};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::{GraphId, GraphLink};
 
 use crate::core::document::{GraphRef, GraphView, ItemRef, PortKind, PortRef, Viewport};
 use crate::gui::EventRef;
@@ -81,6 +81,27 @@ pub(crate) struct Scene {
     /// One flat pool of every input's picker options, sliced per input by
     /// [`SceneInput::value_variants`].
     value_variants_pool: Vec<ValueVariant>,
+    /// Each graph's own local definitions, sliced by
+    /// [`SceneGraph::local_defs`]. Only the palette reads these — a pane's
+    /// defs are what its "add node" popup can instance without materializing
+    /// a copy.
+    local_defs: Vec<SceneLocalDef>,
+}
+
+/// One local [`GraphDef`] held by a projected graph — enough to list it in
+/// the palette and raise the intent that instances it, no more. The
+/// definition itself stays in the document: `build_step` resolves the id
+/// against it, so the projection never carries an interface.
+#[derive(Debug)]
+pub(crate) struct SceneLocalDef {
+    pub(crate) id: GraphId,
+    pub(crate) name: InternedStr,
+    pub(crate) category: InternedStr,
+    /// Library entry this definition was copied from, if any. The palette
+    /// drops the library's own row for it: clicking either one instances
+    /// *this* definition (`build::reuse_local_graph`), so two rows would
+    /// offer one outcome under one name.
+    pub(crate) origin: Option<GraphId>,
 }
 
 /// One projected graph: `Span`s into [`Scene`]'s pools plus the small
@@ -104,6 +125,10 @@ pub(crate) struct SceneGraph {
     connections: Span,
     subscriptions: Span,
     selected: Span,
+    /// Slice of [`Scene::local_defs`] holding this graph's own local
+    /// definitions — the ones a `GraphLink::Local` raised over this pane can
+    /// resolve (`validate::insertable_kind` accepts no others).
+    local_defs: Span,
 }
 
 /// One graph to project this record pass: which target it is, where its
@@ -388,6 +413,7 @@ impl Scene {
         self.outputs.clear();
         self.events.clear();
         self.value_variants_pool.clear();
+        self.local_defs.clear();
 
         // One handle for the empty string, cloned wherever a port declares no
         // description or a node carries no authored name — see
@@ -493,6 +519,18 @@ impl Scene {
             graph.edges().map(|(tgt, src)| SceneConnection { src, tgt }),
         );
         let subscriptions = extend_pool(&mut self.subscriptions, graph.subscriptions());
+        let local_defs_start = self.local_defs.len();
+        self.local_defs
+            .extend(graph.graphs.iter().map(|(id, def)| SceneLocalDef {
+                id: *id,
+                name: intern_or_empty(ui, empty, &def.interface.name),
+                category: intern_or_empty(ui, empty, &def.interface.category),
+                origin: def.interface.origin,
+            }));
+        // `Graph::graphs` is a `HashMap`. Its order reaches the palette, whose
+        // own sort is by name and stable, so two same-named defs would swap
+        // rows between frames unless the span itself is ordered.
+        self.local_defs[local_defs_start..].sort_unstable_by_key(|def| def.id);
         SceneGraph {
             target,
             viewport: view.viewport,
@@ -501,6 +539,7 @@ impl Scene {
             connections,
             subscriptions,
             selected,
+            local_defs: span_since(local_defs_start, self.local_defs.len()),
         }
     }
 
@@ -664,6 +703,11 @@ impl<'a> GraphScene<'a> {
 
     pub(crate) fn subscriptions(self) -> &'a [Subscription] {
         slice_pool(&self.scene.subscriptions, self.graph.subscriptions)
+    }
+
+    /// This graph's own local definitions, ordered by id.
+    pub(crate) fn local_defs(self) -> &'a [SceneLocalDef] {
+        slice_pool(&self.scene.local_defs, self.graph.local_defs)
     }
 
     /// This graph's committed selection, sorted.
@@ -1152,6 +1196,7 @@ pub(crate) mod internals {
                     connections: Span::default(),
                     subscriptions: Span::default(),
                     selected: Span::new(0, self.selected.len() as u32),
+                    local_defs: Span::new(0, self.local_defs.len() as u32),
                 },
             );
         }

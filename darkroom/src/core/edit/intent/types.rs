@@ -98,6 +98,19 @@ pub(crate) enum Intent {
         /// removes node + seeds together.
         bindings: Vec<(InputPort, Binding)>,
     },
+    /// Instance a local definition the target graph already holds — the
+    /// palette's row for one of its own nested graphs.
+    ///
+    /// Carries only the id: `build_step` reads the definition out of the
+    /// document to name the node and seed its interface defaults, so the
+    /// payload can't disagree with the definition it links. Lowers to the
+    /// same [`GraphStep::AddNode`] as every other palette pick, with no
+    /// definition alongside — this one is already in the graph.
+    AddLocalGraphInstance {
+        pos: Vec2,
+        node_id: NodeId,
+        graph_id: GraphId,
+    },
     /// Paste a set of pre-cloned nodes (fresh ids, offset positions) plus
     /// the connections *among* them, and select the copies. The caller
     /// (Ctrl+D duplicate) builds the clones + remapped wiring; `build_step`
