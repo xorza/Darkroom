@@ -185,7 +185,7 @@ impl App {
                 ScriptMessage::Apply(intents) => {
                     let rejected = self
                         .editor
-                        .apply_external_intents(&mut self.workspace.open, intents);
+                        .commit_script_batch(&mut self.workspace.open, intents);
                     for reason in rejected {
                         self.workspace
                             .runtime

@@ -89,7 +89,7 @@ impl ActionStack {
             return;
         }
         // What lets `apply_step` demand a target for every `GraphStep` it
-        // replays: `commit_batch` records a document-global intent as an
+        // replays: `commit_queued` records a document-global intent as an
         // entry of its own, so nothing graph-scoped can ride along.
         debug_assert!(
             scope != BatchScope::Document || steps.iter().all(|s| matches!(s, UndoStep::Doc(_))),
