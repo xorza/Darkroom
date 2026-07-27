@@ -236,21 +236,21 @@ impl SubscriptionUI {
 /// [`crate::gui::canvas::connection_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUI`].
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph) = (pass.theme, pass.graph);
+    let (theme, graph, geometry) = (pass.rcx.theme, pass.rcx.graph, pass.rcx.geometry);
     for s in graph.subscriptions() {
         let emitter = EventRef {
             node_id: s.emitter,
             event_idx: s.event_idx,
         };
         let (Some(p0), Some(p3)) = (
-            pass.geometry.events.center(emitter),
-            pass.geometry.subs.center(s.subscriber),
+            geometry.events.center(emitter),
+            geometry.subs.center(s.subscriber),
         ) else {
             continue;
         };
         let wire = Wire::event(p0, p3);
         let endpoint_hover =
-            pass.geometry.events.is_hovered(emitter) || pass.geometry.subs.is_hovered(s.subscriber);
+            geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
         let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
             continue;
         };

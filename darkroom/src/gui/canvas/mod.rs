@@ -478,9 +478,7 @@ impl GraphUI {
                             // unrelated node goes under it rather than
                             // drawing on top.
                             let mut wires = WirePass {
-                                theme: ctx.theme,
-                                graph,
-                                geometry,
+                                rcx,
                                 cull,
                                 probe: &mut probe,
                                 emphasis: &emphasis,

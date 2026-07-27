@@ -328,7 +328,7 @@ impl ConnectionUI {
 /// module rather than [`ConnectionUI`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph) = (pass.theme, pass.graph);
+    let (theme, graph, geometry) = (pass.rcx.theme, pass.rcx.graph, pass.rcx.geometry);
     for c in graph.connections() {
         let src_port = PortRef {
             node_id: c.src.node_id,
@@ -341,14 +341,14 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
             port_idx: c.tgt.port_idx,
         };
         let (Some(p0), Some(p3)) = (
-            pass.geometry.ports.center(src_port),
-            pass.geometry.ports.center(tgt_port),
+            geometry.ports.center(src_port),
+            geometry.ports.center(tgt_port),
         ) else {
             continue;
         };
         let wire = Wire::data(p0, p3);
         let endpoint_hover =
-            pass.geometry.ports.is_hovered(src_port) || pass.geometry.ports.is_hovered(tgt_port);
+            geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
         let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
             continue;
         };
