@@ -25,7 +25,6 @@ fn apply_intents_adds_node() {
         pos: Vec2::new(10.0, 20.0),
         node_id: id,
         node,
-        graph: None,
         bindings: vec![],
     };
 
@@ -47,7 +46,6 @@ fn apply_add_node_seeds_initial_bindings() {
         pos: Vec2::ZERO,
         node_id: id,
         node,
-        graph: None,
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
     };
 
@@ -87,7 +85,6 @@ fn apply_intents_drops_stale_intents_silently_but_reports_malformed_ones() {
             pos: Vec2::ZERO,
             node_id: live,
             node: Node::new(NodeKind::Func(FuncId::unique())),
-            graph: None,
             bindings: vec![],
         }],
     );
@@ -129,7 +126,6 @@ fn apply_intents_batches_multiple() {
                 pos: Vec2::new(i as f32 * 100.0, 0.0),
                 node_id: NodeId::unique(),
                 node,
-                graph: None,
                 bindings: vec![],
             }
         })

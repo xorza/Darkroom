@@ -82,15 +82,15 @@ pub(crate) enum Refusal {
 ///      undo history.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Intent {
+    /// Add one node that links state the document already resolves — a func,
+    /// a built-in special, or a graph instance whose definition is in place.
+    /// Bringing a definition along is [`Self::AddLocalGraph`]'s job.
     AddNode {
         /// Where the node lands on the canvas; its view item is created
         /// alongside it, at the top of the paint stack.
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        /// Local graph to add alongside a new `Graph(Local(_))` instance.
-        /// `None` for nodes that do not materialize a nested graph.
-        graph: Option<(GraphId, Box<GraphDef>)>,
         /// Initial input bindings to seed alongside the node — the caller
         /// fills these with each input's func-declared default
         /// (`Binding::Const`) so a fresh node lands ready to run instead of
@@ -98,14 +98,20 @@ pub(crate) enum Intent {
         /// removes node + seeds together.
         bindings: Vec<(InputPort, Binding)>,
     },
+    /// Add a local definition *and* the first instance of it — the palette's
+    /// row for a library graph, which localizes on instance.
+    ///
+    /// The two halves are one intent because they are one undo entry: a
+    /// revert that left the definition behind would leave an orphan the
+    /// palette still lists.
+    AddLocalGraph {
+        pos: Vec2,
+        node_id: NodeId,
+        graph_id: GraphId,
+        def: Box<GraphDef>,
+    },
     /// Instance a local definition the target graph already holds — the
     /// palette's row for one of its own nested graphs.
-    ///
-    /// Carries only the id: `build_step` reads the definition out of the
-    /// document to name the node and seed its interface defaults, so the
-    /// payload can't disagree with the definition it links. Lowers to the
-    /// same [`GraphStep::AddNode`] as every other palette pick, with no
-    /// definition alongside — this one is already in the graph.
     AddLocalGraphInstance {
         pos: Vec2,
         node_id: NodeId,
@@ -271,6 +277,13 @@ pub(crate) enum UndoStep {
 pub(crate) enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo removes the node by id and its new nested graph.
+    ///
+    /// The one undo representation behind all three add intents
+    /// ([`Intent::AddNode`], [`Intent::AddLocalGraph`],
+    /// [`Intent::AddLocalGraphInstance`]): they differ in what the *caller*
+    /// may say and what `build_step` must resolve, not in what applying and
+    /// reverting do. `graph` is `Some` only for the one that materializes a
+    /// definition.
     AddNode {
         pos: Vec2,
         node_id: NodeId,

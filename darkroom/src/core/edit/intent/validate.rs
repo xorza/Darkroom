@@ -115,15 +115,12 @@ fn fresh_interior_ids(doc: &Document, body: &Graph) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// A newly inserted node's kind has to name state the document actually
-/// holds. `pending` is the local definition arriving in the same step, if
-/// any — it counts as present, since apply inserts it first.
-pub(super) fn insertable_kind(
-    graph: &Graph,
-    target: GraphRef,
-    node: &Node,
-    pending: Option<GraphId>,
-) -> Result<(), Refusal> {
+/// A newly inserted node's kind has to name state the document already
+/// holds. A definition arriving in the same step is
+/// [`Intent::AddLocalGraph`](crate::core::edit::intent::types::Intent::AddLocalGraph)'s
+/// business, and `build_step` builds that node itself rather than validating
+/// a caller's.
+pub(super) fn insertable_kind(graph: &Graph, target: GraphRef, node: &Node) -> Result<(), Refusal> {
     match &node.kind {
         NodeKind::Func(func_id) => {
             if func_id.is_nil() {
@@ -135,7 +132,6 @@ pub(super) fn insertable_kind(
                 return Err(Refusal::Invalid("new node has a nil graph id".to_owned()));
             }
             if let GraphLink::Local(graph_id) = link
-                && pending != Some(*graph_id)
                 && !graph.graphs.contains_key(graph_id)
             {
                 return Err(Refusal::Invalid(format!(

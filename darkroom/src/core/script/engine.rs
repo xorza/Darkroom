@@ -261,7 +261,7 @@ fn register_introspection(engine: &mut Engine, library: PublishedLibrary) {
 ///   [`scenarium::Library`] and
 ///   shapes a node from it (`From<&Func> for Node`), positioned at
 ///   `(x, y)`. Wrapped by `create_node` in `prelude.rhai`. Func nodes
-///   only (`graph: None`); graph instancing isn't scriptable yet.
+///   only; graph instancing isn't scriptable yet.
 /// - `make_move_node(node_id, x, y)` — an `Intent::MoveSelection` for the
 ///   one node (no pins). Wrapped by `move_node`.
 ///
@@ -290,7 +290,6 @@ fn register_host_helpers(engine: &mut Engine, library: PublishedLibrary) {
                 pos: Vec2::new(x as f32, y as f32),
                 node_id: NodeId::unique(),
                 node,
-                graph: None,
                 // Script-created nodes set their inputs explicitly; no
                 // default-seeding (that's the interactive-palette path).
                 bindings: vec![],
