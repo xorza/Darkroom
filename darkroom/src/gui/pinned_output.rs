@@ -272,10 +272,11 @@ mod tests {
     use palantir::internals::UiHarness;
 
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
-    use scenarium::{NodeId, StaticValue};
+    use scenarium::{Node, NodeId, NodeKind, SpecialNode, StaticValue};
 
     use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
+    use crate::core::preview::preview_func;
 
     fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
         let desc = ImageDesc::new(width, height, format);
@@ -427,12 +428,10 @@ mod tests {
         let mut document = Document::default();
         let preview = document
             .graph
-            .add_func_node(&crate::core::preview::preview_func(Default::default()));
+            .add_func_node(&preview_func(Default::default()));
         let other = document
             .graph
-            .add(scenarium::Node::new(scenarium::NodeKind::Special(
-                scenarium::SpecialNode::RunSinks,
-            )));
+            .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));
 
         store.ingest_preview(
             arena.ui(),

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
-    DataType, DynamicValue, ExecutionNodeId, Func, FuncInput, Invocation, async_lambda,
+    DataType, DynamicValue, ExecutionNodeId, Func, FuncId, FuncInput, Invocation, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -87,7 +87,7 @@ pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
 
 /// Whether `func_id` is the preview func — what the scene projection asks to
 /// decide a node draws a value card instead of the usual body.
-pub(crate) fn is_preview(func_id: scenarium::FuncId) -> bool {
+pub(crate) fn is_preview(func_id: FuncId) -> bool {
     func_id == PREVIEW_FUNC_ID.into()
 }
 
