@@ -254,6 +254,7 @@ mod tests {
             library: &library,
             run_state: &run_state,
             status_error: None,
+            process_memory: 0,
         };
         let geometry = CanvasGeometry::default();
         let mut intents = Intents::default();

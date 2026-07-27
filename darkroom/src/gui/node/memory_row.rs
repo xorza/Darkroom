@@ -67,7 +67,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             dot_cell(ui, hue);
-            labeled_value(ui, theme, label, fmt_bytes(bytes));
+            labeled_value(ui, theme, label, fmt_bytes(bytes as u64));
         });
 }
 

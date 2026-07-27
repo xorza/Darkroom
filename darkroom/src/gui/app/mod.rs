@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use palantir::Ui;
 use scenarium::{Library, WorkerError, WorkerReport, WorkerStatusKind};
@@ -11,6 +11,7 @@ use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::process_memory::ProcessMemory;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -34,6 +35,20 @@ pub(crate) struct AppContext<'a> {
     /// [`StatusLog::error`](crate::core::status::StatusLog) slot), shown in
     /// the status bar until a subsequent success clears it.
     pub(crate) status_error: Option<&'a str>,
+    /// This process's resident bytes (see
+    /// [`ProcessMemory`](crate::gui::process_memory::ProcessMemory)),
+    /// rendered as the status bar's `MEM` clause.
+    pub(crate) process_memory: u64,
+}
+
+/// The two status-bar inputs `App` owns and `Editor` only forwards into
+/// [`AppContext`]. Bundled so threading a second one doesn't push
+/// [`Editor::frame`](crate::gui::app::editor::Editor::frame) past the
+/// argument count clippy allows.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StatusInputs<'a> {
+    pub(crate) error: Option<&'a str>,
+    pub(crate) process_memory: u64,
 }
 
 /// GUI policy around the shared [`Workspace`] and the [`Editor`] that borrows
@@ -55,6 +70,12 @@ pub(crate) struct App {
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
     confirm_discard: Option<PendingAction>,
+    /// Throttled sampler behind the status bar's `MEM` clause. Lives on
+    /// `App` rather than `Editor` because it measures the process, not the
+    /// document. Sampled where it is consumed rather than in `update`:
+    /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
+    /// second record pass repeats the reading the first one drew.
+    process_memory: ProcessMemory,
 }
 
 /// A transition that replaces or discards the open document. Held while
@@ -108,6 +129,7 @@ impl App {
             host_handle: handle,
             preferences,
             confirm_discard: None,
+            process_memory: ProcessMemory::new(),
         };
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
@@ -369,7 +391,10 @@ impl palantir::App for App {
             &library,
             &self.theme,
             &mut self.preferences,
-            self.workspace.runtime.status.error.as_deref(),
+            StatusInputs {
+                error: self.workspace.runtime.status.error.as_deref(),
+                process_memory: self.process_memory.sample(Instant::now()),
+            },
         );
 
         if let Some(command) = command {

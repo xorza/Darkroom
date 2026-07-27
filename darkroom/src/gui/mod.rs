@@ -13,6 +13,7 @@ use scenarium::NodeId;
 
 pub(crate) mod app;
 pub(crate) mod format;
+pub(crate) mod process_memory;
 pub(crate) mod run_state;
 pub(crate) mod scene;
 pub(crate) mod status_bar;

@@ -30,7 +30,7 @@ use crate::gui::run_state::RunState;
 use crate::gui::scene::{GraphProjection, Scene, SceneSource};
 use crate::gui::theme::Theme;
 
-use crate::gui::app::AppContext;
+use crate::gui::app::{AppContext, StatusInputs};
 
 #[cfg(test)]
 pub(crate) mod harness;
@@ -325,7 +325,7 @@ impl Editor {
         library: &Library,
         theme: &Theme,
         preferences: &mut Preferences,
-        status_error: Option<&str>,
+        status: StatusInputs<'_>,
     ) -> Option<AppCommand> {
         self.intents.clear();
         self.actions.clear();
@@ -381,7 +381,8 @@ impl Editor {
             theme,
             library,
             run_state: &self.run_state,
-            status_error,
+            status_error: status.error,
+            process_memory: status.process_memory,
         };
         let command = self
             .main_window

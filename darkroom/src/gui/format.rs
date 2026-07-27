@@ -24,7 +24,7 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
 /// [`fmt_elapsed`]: bare `B` under 1 KB, then `KB`/`MB`/`GB` carrying
 /// 1–2 decimals. Used by the window status bar and each node body's memory
 /// readout, so both render identical figures.
-pub(crate) fn fmt_bytes(bytes: usize) -> String {
+pub(crate) fn fmt_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * KB;
     const GB: f64 = KB * KB * KB;

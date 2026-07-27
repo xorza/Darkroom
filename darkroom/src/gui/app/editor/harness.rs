@@ -24,6 +24,7 @@ use scenarium::Library;
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
+use crate::gui::app::StatusInputs;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::editor::Editor;
 use crate::gui::theme::Theme;
@@ -42,6 +43,10 @@ pub(crate) struct EditorHarness {
     pub(crate) library: Library,
     pub(crate) theme: Theme,
     pub(crate) preferences: Preferences,
+    /// Footprint handed to the status bar. `0` — the default — is the
+    /// no-reading path, so a test asserting on geometry isn't reading a
+    /// figure that moves between runs; set it to pin the `MEM` clause.
+    pub(crate) process_memory: u64,
 }
 
 impl EditorHarness {
@@ -58,6 +63,7 @@ impl EditorHarness {
             library: Library::default(),
             theme: Theme::default(),
             preferences: Preferences::default(),
+            process_memory: 0,
         }
     }
 
@@ -73,10 +79,22 @@ impl EditorHarness {
             library,
             theme,
             preferences,
+            process_memory,
         } = self;
         let theme = &*theme;
+        let process_memory = *process_memory;
         ui.frame_value(|recorder: &mut Ui| {
-            editor.frame(open, recorder, library, theme, preferences, None)
+            editor.frame(
+                open,
+                recorder,
+                library,
+                theme,
+                preferences,
+                StatusInputs {
+                    error: None,
+                    process_memory,
+                },
+            )
         })
     }
 
@@ -105,6 +123,7 @@ mod tests {
     use crate::core::document::{Document, GraphRef, TabRef};
     use crate::gui::canvas::outer_canvas_widget_id;
     use crate::gui::dock::strip;
+    use crate::gui::status_bar::status_bar_id;
 
     /// Two graph panes side by side, both settled — the fixture every
     /// pane-scoping case needs.
@@ -130,6 +149,38 @@ mod tests {
         });
         h.prime(2);
         (h, GraphRef::Main, right)
+    }
+
+    /// The bar used to collapse when it had nothing to say; the process
+    /// footprint gives it something on every frame, so it is recorded on
+    /// an untouched document — and stays recorded when no reading is
+    /// available, rather than reappearing as the figure lands.
+    #[test]
+    fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
+        let mut h = EditorHarness::new(Document::default());
+        h.prime(2);
+        let without =
+            h.ui.rect(status_bar_id())
+                .expect("status bar records with no reading and an empty cache");
+
+        h.process_memory = 3 * 1024 * 1024;
+        h.prime(2);
+        let with = h.ui.rect(status_bar_id()).expect("status bar records");
+
+        // The strip is a real row either way — a collapsed one would
+        // arrange to zero height and read as "no bar".
+        for (rect, what) in [(without, "no reading"), (with, "3 MB reading")] {
+            assert!(rect.size.h > 0.0, "{what}: bar arranged to zero height");
+            assert!(rect.size.w > 0.0, "{what}: bar arranged to zero width");
+        }
+        // With a reading the bar hugs a line of text; without one it is
+        // padding alone, so it is strictly shorter. Both are still rows.
+        assert!(
+            with.size.h > without.size.h,
+            "a reading adds its label's line to the bar: {} vs {}",
+            with.size.h,
+            without.size.h,
+        );
     }
 
     /// The whole pipeline in one case: the editor records a real dock
