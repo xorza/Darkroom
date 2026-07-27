@@ -58,6 +58,55 @@ impl CompiledGraph {
             .ok_or(ExecutionIdentityError::NodeNotFound { e_node_id })
     }
 
+    /// Every execution node an authored node covers — its *footprint*.
+    ///
+    /// A leaf in the entry graph covers itself; a leaf inside a definition
+    /// covers one occurrence per instance of that definition; a graph
+    /// instance covers its whole flattened interior. The inverse of
+    /// [`Self::attribution`], and the only supported way to go from an
+    /// authored id to execution ids: a composite dissolves at flatten time
+    /// and has no execution id of its own, so *deriving* one
+    /// ([`ExecutionNodeId::from_authoring`]) answers only for a top-level
+    /// leaf, while this answers for every authored node.
+    ///
+    /// Ascending id order, like [`Self::data_consumer_closure`].
+    pub fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
+        let program = &self.program;
+        self.footprint(|covered| covered == node_id)
+            .iter()
+            .map(|node_idx| program.e_node_ids[node_idx])
+            .collect()
+    }
+
+    /// The execution nodes a "run this node" seeds: those producing what the
+    /// node exposes, plus any sink it contains.
+    ///
+    /// Stated without naming a node kind — an occurrence qualifies when it
+    /// is a sink, or when its value leaves the footprint (something outside
+    /// consumes it, or nothing does). For a leaf that is the node itself,
+    /// exactly as before; for a graph instance it is the interior producers
+    /// behind its output ports plus its interior sinks, and *not* the
+    /// interior wiring between them — that still runs, as their upstream
+    /// cone.
+    ///
+    /// Empty when the node has no footprint at all: a boundary node, or one
+    /// absent from this program.
+    pub fn run_targets(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
+        let program = &self.program;
+        let footprint = self.footprint(|covered| covered == node_id);
+        let consumers = self.consumers();
+        footprint
+            .iter()
+            .filter(|&node_idx| {
+                program.e_nodes[node_idx].sink
+                    || consumers
+                        .get(&node_idx)
+                        .is_none_or(|of| of.iter().any(|idx| !footprint.contains(*idx)))
+            })
+            .map(|node_idx| program.e_node_ids[node_idx])
+            .collect()
+    }
+
     /// Resolve authored nodes or graph instances to their flattened occurrences,
     /// then return their reflexive transitive closure over data-consumer edges.
     pub(crate) fn data_consumer_closure(
@@ -66,32 +115,9 @@ impl CompiledGraph {
     ) -> Vec<ExecutionNodeId> {
         let program = &self.program;
         let selected: HashSet<NodeId> = authored_node_ids.iter().copied().collect();
-        let mut in_closure = NodeSet::default();
-        in_closure.reset(program.e_nodes.len());
-        let mut pending: Vec<NodeIdx> = Vec::new();
-        for (node_idx, e_node_id) in program.e_node_ids.iter_indexed() {
-            if self
-                .flatten_map
-                .attribution(*e_node_id)
-                .expect("every execution node has authored attribution")
-                .any(|node_id| selected.contains(&node_id))
-            {
-                in_closure.insert(node_idx);
-                pending.push(node_idx);
-            }
-        }
-
-        let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
-        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            for input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(address) = &input.binding {
-                    consumers
-                        .entry(address.node_idx)
-                        .or_default()
-                        .push(node_idx);
-                }
-            }
-        }
+        let mut in_closure = self.footprint(|covered| selected.contains(&covered));
+        let mut pending: Vec<NodeIdx> = in_closure.iter().collect();
+        let consumers = self.consumers();
         while let Some(node_idx) = pending.pop() {
             for &consumer_idx in consumers.get(&node_idx).into_iter().flatten() {
                 if !in_closure.contains(consumer_idx) {
@@ -110,6 +136,47 @@ impl CompiledGraph {
             "dense indices are assigned in id order, so an ascending index walk yields ascending ids"
         );
         closure
+    }
+
+    /// Every execution node whose attribution names an authored node `covers`
+    /// accepts — the shared walk behind [`Self::occurrences`],
+    /// [`Self::run_targets`], and [`Self::data_consumer_closure`].
+    ///
+    /// Attribution yields the authored leaf followed by each enclosing
+    /// instance, so testing every element is what makes a graph instance
+    /// match its whole interior without the caller naming a node kind.
+    fn footprint(&self, covers: impl Fn(NodeId) -> bool) -> NodeSet {
+        let program = &self.program;
+        let mut footprint = NodeSet::default();
+        footprint.reset(program.e_nodes.len());
+        for (node_idx, e_node_id) in program.e_node_ids.iter_indexed() {
+            if self
+                .flatten_map
+                .attribution(*e_node_id)
+                .expect("every execution node has authored attribution")
+                .any(&covers)
+            {
+                footprint.insert(node_idx);
+            }
+        }
+        footprint
+    }
+
+    /// Data-consumer edges, reversed: which nodes read each node's outputs.
+    fn consumers(&self) -> HashMap<NodeIdx, Vec<NodeIdx>> {
+        let program = &self.program;
+        let mut consumers: HashMap<NodeIdx, Vec<NodeIdx>> = HashMap::new();
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
+            for input in &program.inputs[e_node.inputs] {
+                if let ExecutionBinding::Bind(address) = &input.binding {
+                    consumers
+                        .entry(address.node_idx)
+                        .or_default()
+                        .push(node_idx);
+                }
+            }
+        }
+        consumers
     }
 }
 
@@ -393,6 +460,119 @@ mod tests {
             both,
             "editing a shared definition evicts every flattened occurrence"
         );
+    }
+
+    /// A composite whose interior distinguishes all three run-target cases:
+    /// `relay` backs the instance's one output, `printer` is an interior
+    /// sink, and `source` feeds only the other two.
+    struct NestedFixture {
+        library: Library,
+        graph: Graph,
+        instance: NodeId,
+        boundary: NodeId,
+        source: NodeId,
+        relay: NodeId,
+        printer: NodeId,
+        consumer: NodeId,
+    }
+
+    fn nested_fixture() -> NestedFixture {
+        use crate::data::type_system::DataType;
+        use crate::graph::{Binding, InputPort, Node, NodeKind};
+        use crate::node::definition::FuncOutput;
+
+        let library = test_func_lib(TestFuncHooks::default());
+        let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
+        let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
+        let source = nested.body.add(library.by_name("get_b").unwrap().into());
+        let relay = nested.body.add(library.by_name("sum").unwrap().into());
+        let printer = nested.body.add(library.by_name("Print").unwrap().into());
+        nested
+            .body
+            .set_input_binding(InputPort::new(relay, 0), Binding::bind(source, 0));
+        nested
+            .body
+            .set_input_binding(InputPort::new(printer, 0), Binding::bind(source, 0));
+        nested
+            .body
+            .set_input_binding(InputPort::new(boundary, 0), Binding::bind(relay, 0));
+
+        let nested_id = GraphId::unique();
+        let mut graph = Graph::default();
+        let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        let consumer = graph.add(library.by_name("Print").unwrap().into());
+        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(instance, 0));
+        graph.insert_graph(nested_id, nested);
+
+        NestedFixture {
+            library,
+            graph,
+            instance,
+            boundary,
+            source,
+            relay,
+            printer,
+            consumer,
+        }
+    }
+
+    #[test]
+    fn an_authored_nodes_footprint_covers_a_leaf_or_a_whole_interior() {
+        let f = nested_fixture();
+        let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+        let interior = |node_id| ExecutionNodeId::from_authoring(&[f.instance, node_id]);
+
+        // A leaf in the entry graph covers exactly itself, and its execution
+        // id is the authored one.
+        assert_eq!(
+            compiled.occurrences(f.consumer),
+            vec![ExecutionNodeId::from_authoring(&[f.consumer])]
+        );
+        // A leaf inside the definition covers its one occurrence.
+        assert_eq!(compiled.occurrences(f.relay), vec![interior(f.relay)]);
+
+        // The instance covers its whole interior — and nothing outside it.
+        let mut whole_interior = vec![interior(f.source), interior(f.relay), interior(f.printer)];
+        whole_interior.sort_unstable();
+        assert_eq!(compiled.occurrences(f.instance), whole_interior);
+
+        // Boundary nodes are wiring: flatten resolves through them and emits
+        // nothing, so they cover no execution work at all. Same for a node
+        // this program never saw.
+        assert!(compiled.occurrences(f.boundary).is_empty());
+        assert!(compiled.occurrences(NodeId::unique()).is_empty());
+    }
+
+    #[test]
+    fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
+        let f = nested_fixture();
+        let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+        let interior = |node_id| ExecutionNodeId::from_authoring(&[f.instance, node_id]);
+
+        // A leaf seeds itself, whether its value leaves (`consumer` reads the
+        // instance) or it is a sink with no value at all.
+        assert_eq!(
+            compiled.run_targets(f.consumer),
+            vec![ExecutionNodeId::from_authoring(&[f.consumer])]
+        );
+        assert_eq!(compiled.run_targets(f.relay), vec![interior(f.relay)]);
+        assert_eq!(compiled.run_targets(f.source), vec![interior(f.source)]);
+
+        // The instance seeds the producer behind its output port plus its
+        // interior sink — but not `source`, whose value never leaves the
+        // footprint. It still runs, as their upstream cone.
+        let mut exposed = vec![interior(f.relay), interior(f.printer)];
+        exposed.sort_unstable();
+        assert_eq!(compiled.run_targets(f.instance), exposed);
+        assert!(
+            !compiled
+                .run_targets(f.instance)
+                .contains(&interior(f.source)),
+            "a purely interior producer is a dependency, not a target"
+        );
+
+        // Nothing to seed for a node with no footprint.
+        assert!(compiled.run_targets(f.boundary).is_empty());
     }
 
     #[test]

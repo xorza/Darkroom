@@ -327,15 +327,24 @@ impl SceneNode {
         })
     }
 
+    /// Whether this node covers any compiled work at all. A boundary node is
+    /// wiring — flatten resolves *through* it and emits nothing — and a
+    /// `missing` stub resolves to nothing. Everything else does, graph
+    /// instances included: a composite dissolves into its interior rather
+    /// than vanishing, which is what
+    /// [`CompiledGraph::run_targets`](scenarium::CompiledGraph::run_targets)
+    /// resolves it to.
+    ///
+    /// Deliberately an authoring-side fact, not a lookup in a compiled
+    /// program: the palette and the header record every frame, including
+    /// before the first compile, so an affordance can't wait on one.
     fn executable_kind(&self) -> bool {
-        !self.boundary && !self.missing && self.graph.is_none()
+        !self.boundary && !self.missing
     }
 
     /// Whether this node can seed a "run to this node" — drives the header
-    /// play chip and the context-menu item. Disabled func nodes remain valid
-    /// because a targeted run overrides that flag temporarily. An instance/
-    /// boundary node has no execution identity, and a `missing` stub resolves to
-    /// nothing.
+    /// play chip and the context-menu item. Disabled nodes remain valid
+    /// because a targeted run overrides that flag temporarily.
     pub(crate) fn runnable(&self) -> bool {
         self.run_available && self.executable_kind()
     }
