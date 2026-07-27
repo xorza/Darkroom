@@ -87,6 +87,16 @@ impl ContextManager {
         self.cancel.clone()
     }
 
+    /// The node this lambda is running as — the same attribution [`Self::log`]
+    /// stamps its lines with. `None` outside a node invoke.
+    ///
+    /// For a lambda whose effect belongs to one authored node rather than to its
+    /// return value: it is the only thing in [`Invocation`](crate::Invocation)
+    /// that says *which* node is calling.
+    pub fn current_node(&self) -> Option<ExecutionNodeId> {
+        self.current_node
+    }
+
     /// Emit a log line attributed to the node currently executing, and
     /// mirror it to `tracing` at the matching level so headless runs
     /// still surface output. No-op when called outside a node invoke

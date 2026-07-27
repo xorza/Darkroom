@@ -87,4 +87,6 @@ pub enum GraphValidationError {
     },
     #[error("entry graph cannot contain interface boundary nodes")]
     EntryBoundaryNodes,
+    #[error("node {node_id:?} uses entry-only func {func_id:?} inside a graph definition")]
+    EntryOnlyFunc { node_id: NodeId, func_id: FuncId },
 }

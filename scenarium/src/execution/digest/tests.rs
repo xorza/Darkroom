@@ -76,7 +76,7 @@ impl Prog {
             .outputs
             .append(types.iter().cloned().map(|data_type| ExecutionOutput {
                 data_type,
-                pinned: false,
+                ..Default::default()
             }));
         let e_node_id = e_node_id(idx);
         self.program.push(

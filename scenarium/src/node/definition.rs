@@ -254,6 +254,21 @@ pub struct Func {
     /// `false` (the default) means a normal node that offers the toggle.
     pub uncacheable: bool,
 
+    /// This func may only appear in the execution entry graph, never inside a
+    /// graph definition's body. Rejected by
+    /// [`Graph::validate_for_execution`](crate::Graph::validate_for_execution)
+    /// wherever else it appears (see
+    /// [`GraphValidationError::EntryOnlyFunc`](crate::GraphValidationError::EntryOnlyFunc)).
+    /// Library-gated like the other per-func checks — a validate with no library
+    /// cannot resolve the declaration to read this flag — so the rule binds at
+    /// compile, which is the only path to actually running.
+    ///
+    /// For funcs whose effect is tied to one on-screen thing: a definition
+    /// instanced twice runs its body twice, so such a node would have several
+    /// live occurrences behind one identity. `false` (the default) means a
+    /// normal func, placeable anywhere.
+    pub entry_only: bool,
+
     /// The [`CacheMode`] a freshly created node of this func copies into its
     /// `cache`. Defaults to [`CacheMode::None`] (no caching); raise it with the
     /// [`default_cache_mode`](Func::default_cache_mode) builder for funcs worth
@@ -307,6 +322,12 @@ impl Func {
     /// that cache their output themselves. See [`Func::uncacheable`].
     pub fn uncacheable(mut self) -> Self {
         self.uncacheable = true;
+        self
+    }
+
+    /// Restrict this func to the entry graph. See [`Func::entry_only`].
+    pub fn entry_only(mut self) -> Self {
+        self.entry_only = true;
         self
     }
 
