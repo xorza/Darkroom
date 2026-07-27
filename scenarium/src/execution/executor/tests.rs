@@ -567,6 +567,43 @@ async fn pinned_delivery_does_not_create_a_reader() {
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
 }
 
+/// A lambda can name the execution node it is running as — the hook a host-side
+/// sink (an editor value view, a per-node logger) needs to attribute what it
+/// receives. Set per invoke, so two nodes sharing one lambda still report
+/// distinct identities, and cleared once the run is over.
+#[tokio::test]
+async fn a_lambda_reads_the_execution_node_it_is_running_as() {
+    use std::sync::Mutex;
+
+    let seen: Arc<Mutex<Vec<Option<ExecutionNodeId>>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut p = Prog::default();
+    let probe_seen = Arc::clone(&seen);
+    let first = async_lambda!(
+        move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe_seen) } => {
+            seen.lock().unwrap().push(ctx.current_node());
+            outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+            Ok(())
+        }
+    );
+    let probe_seen = Arc::clone(&seen);
+    let second = async_lambda!(
+        move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe_seen) } => {
+            seen.lock().unwrap().push(ctx.current_node());
+            outputs[0] = DynamicValue::Static(StaticValue::Int(2));
+            Ok(())
+        }
+    );
+    let a = p.node(&[], 1, first);
+    let b = p.node(&[], 1, second);
+
+    let plan = straight_run(&p.program);
+    let (_cache, _stats) = run(&p.program, &plan).await;
+
+    // Index order is id order, and `Prog` mints ascending ids, so `a` runs first.
+    assert_eq!(*seen.lock().unwrap(), vec![Some(a), Some(b)]);
+    assert_ne!(a, b, "the two nodes are distinguishable at all");
+}
+
 /// A pinned (node-seeded preview) root demands its output but does not override
 /// `CacheMode::None` retention.
 #[tokio::test]

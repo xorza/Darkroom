@@ -56,10 +56,15 @@ impl<'a> GraphChecker<'a> {
                 });
             }
         }
-        self.validate_graph(&def.body)
+        // A definition body is never the entry, however it was reached.
+        self.validate_graph(&def.body, false)
     }
 
-    fn validate_graph(&mut self, graph: &Graph) -> ValidationResult<()> {
+    /// `entry` marks the execution entry graph — the one place a
+    /// [`Preview`](crate::node::special::SpecialNode::Preview) node may live.
+    /// Passed rather than derived from `depth`: [`GraphDef::validate`] enters at
+    /// depth 0 for the definition's own body.
+    fn validate_graph(&mut self, graph: &Graph, entry: bool) -> ValidationResult<()> {
         if self.depth > MAX_NESTING_DEPTH {
             return Err(GraphValidationError::NestingTooDeep {
                 max: MAX_NESTING_DEPTH,
@@ -79,14 +84,20 @@ impl<'a> GraphChecker<'a> {
                     if func_id.is_nil() {
                         return Err(GraphValidationError::NilFuncId { node_id: *node_id });
                     }
-                    if self
-                        .library
-                        .is_some_and(|library| library.by_id(*func_id).is_none())
-                    {
-                        return Err(GraphValidationError::MissingFunc {
-                            node_id: *node_id,
-                            func_id: *func_id,
-                        });
+                    match self.library.map(|library| library.by_id(*func_id)) {
+                        Some(None) => {
+                            return Err(GraphValidationError::MissingFunc {
+                                node_id: *node_id,
+                                func_id: *func_id,
+                            });
+                        }
+                        Some(Some(func)) if func.entry_only && !entry => {
+                            return Err(GraphValidationError::EntryOnlyFunc {
+                                node_id: *node_id,
+                                func_id: *func_id,
+                            });
+                        }
+                        _ => {}
                     }
                 }
                 NodeKind::Graph(link) => {
@@ -110,7 +121,15 @@ impl<'a> GraphChecker<'a> {
                         }
                     }
                 }
-                NodeKind::Special(_) => {}
+                NodeKind::Special(special) => {
+                    let func = special.func();
+                    if func.entry_only && !entry {
+                        return Err(GraphValidationError::EntryOnlyFunc {
+                            node_id: *node_id,
+                            func_id: func.id,
+                        });
+                    }
+                }
                 NodeKind::GraphInput => {
                     boundary_inputs += 1;
                 }
@@ -243,7 +262,7 @@ impl GraphDef {
 impl Graph {
     /// Validate this graph and its complete local graph tree.
     pub fn validate(&self) -> ValidationResult<()> {
-        GraphChecker::new(None).validate_graph(self)
+        GraphChecker::new(None).validate_graph(self, true)
     }
 
     /// Debug-only assert form of [`Self::validate`].
@@ -261,7 +280,7 @@ impl Graph {
         if self.nodes.values().any(|node| node.kind.is_boundary()) {
             return Err(GraphValidationError::EntryBoundaryNodes);
         }
-        GraphChecker::new(Some(library)).validate_graph(self)
+        GraphChecker::new(Some(library)).validate_graph(self, true)
     }
 
     /// Debug-only assert form of [`Self::validate_for_execution`].

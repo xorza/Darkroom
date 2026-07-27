@@ -204,6 +204,90 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     assert!(error.contains("at most one GraphInput"));
 }
 
+/// An `entry_only` func is legal at the top level and nowhere below it: a
+/// definition instanced twice runs its body twice, which is exactly what such a
+/// func declares it cannot survive. Local and shared bodies are both rejected,
+/// and `GraphDef::validate` rejects a body on its own — a definition is never an
+/// entry however it is reached.
+#[test]
+fn entry_only_funcs_are_rejected_inside_every_definition_body() {
+    let entry_only = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "watcher")
+            .entry_only()
+            .input(FuncInput::optional("v", DataType::Any)),
+    );
+    let ordinary = testing::with_stub_lambda(Func::new(FuncId::unique(), "plain"));
+    let mut library = Library::default();
+    library.add(entry_only.clone());
+    library.add(ordinary.clone());
+
+    // At the top level it validates like any other func.
+    let mut graph = Graph::default();
+    graph.add_func_node(&entry_only);
+    assert!(graph.validate_for_execution(&library).is_ok());
+
+    // Inside a local definition — rejected, naming the offending node and func.
+    let local_id = GraphId::unique();
+    let mut local = GraphDef::new("local");
+    let inner = local.body.add_func_node(&entry_only);
+    let mut graph = Graph::default();
+    graph.add_graph_node(&local, GraphLink::Local(local_id));
+    graph.insert_graph(local_id, local);
+    let error = graph.validate_for_execution(&library).unwrap_err();
+    let GraphValidationError::LocalGraph { name, source } = &error else {
+        panic!("a local body reports through LocalGraph: {error:?}");
+    };
+    assert_eq!(name, "local");
+    assert!(
+        matches!(
+            **source,
+            GraphValidationError::EntryOnlyFunc { node_id, func_id }
+                if node_id == inner && func_id == entry_only.id
+        ),
+        "it names the offending node and func: {source:?}"
+    );
+
+    // Inside a shared definition — same verdict through the other descent.
+    let shared_id = GraphId::unique();
+    let mut shared = GraphDef::new("shared");
+    let inner = shared.body.add_func_node(&entry_only);
+    let mut graph = Graph::default();
+    graph.add_graph_node(&shared, GraphLink::Shared(shared_id));
+    let mut library = library;
+    library.register_graph(shared_id, shared);
+    let error = graph.validate_for_execution(&library).unwrap_err();
+    let GraphValidationError::SharedGraph { name, source } = &error else {
+        panic!("a shared body reports through SharedGraph: {error:?}");
+    };
+    assert_eq!(name, "shared");
+    assert!(
+        matches!(
+            **source,
+            GraphValidationError::EntryOnlyFunc { node_id, func_id }
+                if node_id == inner && func_id == entry_only.id
+        ),
+        "the other descent reaches the same verdict: {source:?}"
+    );
+
+    // Library-gated, like `MissingFunc` and the const-only binding check: a
+    // library-less validate cannot resolve the func, so it cannot see the flag.
+    // Compilation always validates against one, so the invariant still holds
+    // wherever a graph can actually run.
+    let mut standalone = GraphDef::new("standalone");
+    standalone.body.add_func_node(&entry_only);
+    assert!(standalone.validate().is_ok());
+
+    // An ordinary func in the same slot is fine, so the rule is the flag's
+    // doing rather than "definitions reject funcs".
+    let plain_id = GraphId::unique();
+    let mut local = GraphDef::new("plain");
+    local.body.add_func_node(&ordinary);
+    let mut graph = Graph::default();
+    graph.add_graph_node(&local, GraphLink::Local(plain_id));
+    graph.insert_graph(plain_id, local);
+    assert!(graph.validate_for_execution(&library).is_ok());
+}
+
 #[test]
 fn cache_mode_bits_and_from_bits_round_trip() {
     // The two storage bits, hand-tabulated per mode, plus `from_bits` as their inverse.
