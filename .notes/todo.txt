@@ -30,7 +30,7 @@ contextmenu for boundary nodes
 
 imageview to load only when active, until then save to disk
 
-uitest harness internals/test
+uitest harness internals/test cfg
 
 theme for context menus
 

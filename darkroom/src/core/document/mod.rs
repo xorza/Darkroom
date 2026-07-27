@@ -237,7 +237,7 @@ pub(crate) struct Document {
     local_views: HashMap<GraphId, GraphView>,
     /// The pane arrangement: open tabs grouped into split panes, plus
     /// the focused group. Persisted + undoable like the rest of the view
-    /// state (every layout mutation is an undoable `Intent::Dock`).
+    /// state (every layout mutation is an undoable `DocIntent::Dock`).
     #[serde(default)]
     pub(crate) layout: DockLayout,
 }
@@ -578,7 +578,7 @@ mod tests {
     fn add_node_with_def_round_trips() {
         use crate::core::edit::intent::apply::{apply_step, revert_step};
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::Intent;
+        use crate::core::edit::intent::types::{BatchScope, Intent};
 
         // Instancing a library graph localizes it: a `Local` def copy
         // (recording its `origin`) is added alongside the instance node, as
@@ -602,7 +602,7 @@ mod tests {
         )
         .expect("add builds");
 
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(
             doc.graph.graphs.get(&local_id).is_some(),
             "local graph added alongside the instance"
@@ -617,7 +617,7 @@ mod tests {
             "instance node added"
         );
 
-        revert_step(&step, &mut doc, GraphRef::Main);
+        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(
             doc.graph.graphs.get(&local_id).is_none(),
             "undo removes the def"
@@ -635,7 +635,7 @@ mod tests {
     fn add_library_instance(doc: &mut Document, lib_id: GraphId) -> (NodeId, GraphId) {
         use crate::core::edit::intent::apply::apply_step;
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::Intent;
+        use crate::core::edit::intent::types::{BatchScope, Intent};
         use scenarium::{DataType, FuncInput, StaticValue};
 
         let mut local = leaf_graph("Lib")
@@ -655,7 +655,7 @@ mod tests {
             GraphRef::Main,
         )
         .expect("add builds");
-        apply_step(&step, doc, GraphRef::Main);
+        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
         (node_id, local_id)
     }
 
@@ -703,7 +703,7 @@ mod tests {
     fn detach_forks_standalone_copy_and_repoints_node() {
         use crate::core::edit::intent::apply::{apply_step, revert_step};
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::Intent;
+        use crate::core::edit::intent::types::{BatchScope, Intent};
 
         // A node on a library-linked local graph. Detach must fork a fresh
         // standalone copy (origin cleared), add it, and repoint the node.
@@ -722,7 +722,7 @@ mod tests {
 
         let step = build_step(Intent::DetachGraph { node_id }, &doc, GraphRef::Main)
             .expect("detach builds");
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
 
         assert_eq!(doc.graph.graphs.len(), 2, "fork adds a second local graph");
         let NodeKind::Graph(GraphLink::Local(new_id)) =
@@ -737,7 +737,7 @@ mod tests {
             "detach clears the library lineage"
         );
 
-        revert_step(&step, &mut doc, GraphRef::Main);
+        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert_eq!(doc.graph.graphs.len(), 1, "undo drops the fork");
         let NodeKind::Graph(GraphLink::Local(restored)) =
             doc.graph.find(node_id, NodeSearch::TopLevel).unwrap().kind
@@ -773,7 +773,7 @@ mod tests {
     fn set_disabled_round_trips_through_undo() {
         use crate::core::edit::intent::apply::{apply_step, revert_step};
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{Intent, NodeProperty};
+        use crate::core::edit::intent::types::{BatchScope, Intent, NodeProperty};
 
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
@@ -791,13 +791,13 @@ mod tests {
             GraphRef::Main,
         )
         .expect("builds");
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(
             doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
             "apply disables"
         );
 
-        revert_step(&step, &mut doc, GraphRef::Main);
+        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(
             !doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
             "revert re-enables (restores the captured `from`)"
@@ -870,9 +870,9 @@ mod tests {
 
     #[test]
     fn nested_graph_defs_resolve_and_edit_at_depth() {
-        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::apply::{apply_step, commit_doc_intent, revert_step};
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::Intent;
+        use crate::core::edit::intent::types::{BatchScope, DocIntent, Intent};
         use scenarium::{Binding, DataType, InputPort, StaticValue};
 
         let mut doc = Document::default();
@@ -921,7 +921,11 @@ mod tests {
             GraphRef::Local(inner),
         )
         .expect("add builds against the nested target");
-        apply_step(&add_node, &mut doc, GraphRef::Local(inner));
+        apply_step(
+            &add_node,
+            &mut doc,
+            BatchScope::Graph(GraphRef::Local(inner)),
+        );
         assert!(
             doc.graph
                 .graphs
@@ -950,7 +954,11 @@ mod tests {
             GraphRef::Local(inner),
         )
         .expect("boundary add builds at depth");
-        apply_step(&add_port, &mut doc, GraphRef::Local(inner));
+        apply_step(
+            &add_port,
+            &mut doc,
+            BatchScope::Graph(GraphRef::Local(inner)),
+        );
         let input_count =
             |doc: &Document| doc.graph.find_graph(inner).unwrap().interface.inputs.len();
         assert_eq!(input_count(&doc), 1);
@@ -971,7 +979,11 @@ mod tests {
             GraphRef::Local(inner),
         )
         .expect("boundary remove builds via the parent");
-        apply_step(&remove_port, &mut doc, GraphRef::Local(inner));
+        apply_step(
+            &remove_port,
+            &mut doc,
+            BatchScope::Graph(GraphRef::Local(inner)),
+        );
         assert_eq!(input_count(&doc), 0, "slot removed from the nested def");
         assert!(
             !doc.graph
@@ -982,7 +994,11 @@ mod tests {
                 .contains_key(&inst_port),
             "the parent's instance binding was severed"
         );
-        revert_step(&remove_port, &mut doc, GraphRef::Local(inner));
+        revert_step(
+            &remove_port,
+            &mut doc,
+            BatchScope::Graph(GraphRef::Local(inner)),
+        );
         assert_eq!(input_count(&doc), 1, "undo re-attaches the slot");
         assert_eq!(
             doc.graph
@@ -996,16 +1012,14 @@ mod tests {
         );
 
         // A rename doc-step writes through to the nested def too.
-        let rename = build_step(
-            Intent::RenameGraph {
+        commit_doc_intent(
+            DocIntent::RenameGraph {
                 id: inner,
                 to: "deep".into(),
             },
-            &doc,
-            GraphRef::Main,
+            &mut doc,
         )
-        .expect("rename builds at depth");
-        apply_step(&rename, &mut doc, GraphRef::Main);
+        .expect("rename applies at depth");
         assert_eq!(doc.graph.find_graph(inner).unwrap().interface.name, "deep");
         doc.validate()
             .expect("document still validates after edits");
@@ -1242,7 +1256,7 @@ mod tests {
     fn undo_prunes_the_view_of_a_graph_it_removed() {
         use crate::core::edit::intent::apply::{apply_step, revert_step};
         use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::Intent;
+        use crate::core::edit::intent::types::{BatchScope, Intent};
 
         // A `local_views` entry is seeded lazily on first open, *outside*
         // the undo record, so undoing the edit that created its graph
@@ -1265,12 +1279,12 @@ mod tests {
             GraphRef::Main,
         )
         .expect("add builds");
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(doc.ensure_sub_view(local_id), "the user opens the graph");
         doc.validate()
             .expect("an open graph plus its view is valid");
 
-        revert_step(&step, &mut doc, GraphRef::Main);
+        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(
             doc.validate().is_err(),
             "undo takes the graph but strands its view"
@@ -1284,7 +1298,7 @@ mod tests {
         );
 
         // The same pass leaves a live graph's view alone.
-        apply_step(&step, &mut doc, GraphRef::Main);
+        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         assert!(doc.ensure_sub_view(local_id), "redo, reopen");
         doc.reconcile_with_graph();
         assert!(

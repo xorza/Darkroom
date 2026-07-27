@@ -15,12 +15,12 @@ use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::apply::commit_intent;
+use crate::core::edit::intent::apply::{commit_doc_intent, commit_intent};
 use crate::core::edit::intent::duplicate::{
     build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
-use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::{Intent, Refusal, UndoStep};
+use crate::core::edit::intent::sink::{Intents, Queued};
+use crate::core::edit::intent::types::{BatchScope, DocIntent, Intent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
@@ -125,12 +125,13 @@ pub(crate) struct Editor {
     /// frame. A plain side-effect field like `scene_dirty`, rather than a
     /// `bool` threaded back through every helper's return.
     needs_relayout: bool,
-    /// Per-frame scratch buffer of pending mutations, each paired with
-    /// the graph it commits against (several can be on screen). Cleared
-    /// at the top of every `frame`, filled by prepass/record/shortcut
-    /// handling, and fully drained before `frame` returns — it carries
-    /// no state across frames. Kept as a field only to reuse the
-    /// allocation; not part of the observable state.
+    /// Per-frame scratch buffer of pending mutations: a graph edit paired
+    /// with the graph it commits against (several can be on screen), or a
+    /// document-global one, which names none. Cleared at the top of every
+    /// `frame`, filled by prepass/record/shortcut handling, and fully
+    /// drained before `frame` returns — it carries no state across frames.
+    /// Kept as a field only to reuse the allocation; not part of the
+    /// observable state.
     intents: Intents,
     /// Per-frame scratch buffer of view-state requests (open/activate/
     /// close tab) raised during record. Drained each frame; carries no
@@ -169,7 +170,8 @@ impl Editor {
     /// drain.
     pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: Intent) {
         let target = open.document.focused_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, [(target, intent)]).warn_rejected();
+        self.commit_batch(open, [Queued::Scoped { target, intent }])
+            .warn_rejected();
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -181,66 +183,94 @@ impl Editor {
     /// Returns the reason for each intent the edit layer refused as
     /// malformed, for the caller to surface. A script's payload is decoded
     /// straight into an [`Intent`], so a bad one has to answer back rather
-    /// than vanish the way a stale widget intent does.
+    /// than vanish the way a stale widget intent does. Scripts drive graph
+    /// edits only — a [`DocIntent`] has no decoded form, so nothing here
+    /// can rearrange the dock.
     pub(super) fn apply_external_intents(
         &mut self,
         open: &mut OpenDocument,
         intents: Vec<Intent>,
     ) -> Vec<String> {
         let target = open.document.focused_target().unwrap_or(GraphRef::Main);
-        self.commit_batch(open, intents.into_iter().map(|intent| (target, intent)))
-            .rejected
+        self.commit_batch(
+            open,
+            intents
+                .into_iter()
+                .map(|intent| Queued::Scoped { target, intent }),
+        )
+        .rejected
     }
 
-    /// Build, apply, and record `intents` — each against the graph it
+    /// Build, apply, and record `queued` — each item against whatever it
     /// names — accumulating the frame's relayout/reconcile signals. Shared
-    /// core of [`Self::apply_edit`], [`Self::apply_external_intents`], and
-    /// [`Self::drain_intents`]: no-op and stale intents (anchor node already
-    /// gone) are dropped per-intent, and an empty batch records nothing.
+    /// core of [`Self::apply_edit`], [`Self::apply_doc_edit`],
+    /// [`Self::apply_external_intents`], and [`Self::drain_intents`]: no-op
+    /// and stale intents (anchor node already gone) are dropped per-intent,
+    /// and an empty batch records nothing.
     ///
-    /// A *run* of intents sharing a target becomes one undo entry, so a
-    /// gesture that emits N of them is still one Ctrl+Z. A change of target
-    /// mid-stream flushes first — an entry records against exactly one
-    /// graph, and undoing across two panes at once would be a lie about
+    /// A *run* of scoped intents sharing a target becomes one undo entry, so
+    /// a gesture that emits N of them is still one Ctrl+Z. A change of
+    /// target mid-stream flushes first — an entry records against exactly
+    /// one graph, and undoing across two panes at once would be a lie about
     /// what the user did.
+    ///
+    /// A document-global intent shares an entry with nothing: it resolves no
+    /// graph, so there is no run for it to belong to, and it closes the one
+    /// in progress. Staying a single-step entry is also what keeps it
+    /// reachable by gesture coalescing — a tab-switch burst and a divider's
+    /// drag frames collapse in the stack, which a mixed multi-step entry
+    /// would forfeit.
     fn commit_batch(
         &mut self,
         open: &mut OpenDocument,
-        intents: impl IntoIterator<Item = (GraphRef, Intent)>,
+        queued: impl IntoIterator<Item = Queued>,
     ) -> BatchOutcome {
         let mut batch = Vec::new();
-        let mut batch_target = None;
+        let mut open_scope = None;
         let mut applied = false;
         let mut rejected = Vec::new();
         let mut signals = StepSignals::default();
-        for (target, intent) in intents {
-            if batch_target != Some(target) {
-                applied |= self.flush_batch(batch_target, &mut batch);
-                batch_target = Some(target);
-            }
-            match commit_intent(intent, &mut open.document, target) {
-                Ok(step) => {
-                    signals.fold(&step);
-                    batch.push(step);
+        for item in queued {
+            let (scope, built) = match item {
+                Queued::Scoped { target, intent } => (
+                    BatchScope::Graph(target),
+                    commit_intent(intent, &mut open.document, target),
+                ),
+                Queued::Global(intent) => (
+                    BatchScope::Document,
+                    commit_doc_intent(intent, &mut open.document),
+                ),
+            };
+            let step = match built {
+                Ok(step) => step,
+                Err(Refusal::Quiet) => continue,
+                Err(Refusal::Invalid(reason)) => {
+                    rejected.push(reason);
+                    continue;
                 }
-                Err(Refusal::Quiet) => {}
-                Err(Refusal::Invalid(reason)) => rejected.push(reason),
+            };
+            if open_scope != Some(scope) || scope == BatchScope::Document {
+                applied |= self.flush_batch(open_scope, &mut batch);
+                open_scope = Some(scope);
             }
+            signals.fold(&step);
+            batch.push(step);
         }
-        applied |= self.flush_batch(batch_target, &mut batch);
+        applied |= self.flush_batch(open_scope, &mut batch);
         self.absorb_signals(signals);
         BatchOutcome { applied, rejected }
     }
 
-    /// Record the accumulated run as one undo entry against its target and
-    /// empty it, reporting whether anything was there. `target` is `None`
-    /// only before the first intent, when `batch` is necessarily empty.
-    fn flush_batch(&mut self, target: Option<GraphRef>, batch: &mut Vec<UndoStep>) -> bool {
+    /// Record the accumulated run as one undo entry against its scope and
+    /// empty it, reporting whether anything was there. `scope` is `None`
+    /// only before the first committed step, when `batch` is necessarily
+    /// empty.
+    fn flush_batch(&mut self, scope: Option<BatchScope>, batch: &mut Vec<UndoStep>) -> bool {
         if batch.is_empty() {
             return false;
         }
-        let target = target.expect("a non-empty batch was opened by some intent's target");
-        self.action_stack.push_current(target, batch);
+        let scope = scope.expect("a non-empty batch was opened by some step's scope");
+        self.action_stack.push_current(scope, batch);
         batch.clear();
         true
     }
@@ -356,8 +386,8 @@ impl Editor {
         }
 
         // Post-record drain — graph edits the record surfaced (node select,
-        // cache toggle, const edit) plus tab-strip renames. Each carries its
-        // own target; the graph-agnostic ones (dock ops, renames) ignore it.
+        // cache toggle, const edit), each carrying its own target, plus the
+        // tab strip's document-global ones (dock ops, graph renames).
         self.drain_intents(open);
 
         // Sole consumption point for the frame's accumulated signal (edits,
@@ -420,8 +450,7 @@ impl Editor {
         self.main_window
             .scan_navigation(ui, &open.document, &self.scene, &mut self.actions);
         // Open mutates the layout directly; activate/close queue
-        // undoable `Intent::Dock` ops — drain them (dock steps are
-        // graph-agnostic, so whichever target they carry doesn't matter).
+        // undoable `DocIntent::Dock` ops — drain them.
         self.apply_view_actions(open);
         self.drain_intents(open);
         // A closed/deleted target can't be active; fall back to Main.
@@ -508,7 +537,7 @@ impl Editor {
 
     /// Apply the record pass's view-state requests. Adding a tab to a
     /// strip is the only non-undoable part of opening; the focus change it
-    /// implies, plus activate and close, are queued as `Intent::Dock` ops
+    /// implies, plus activate and close, are queued as `DocIntent::Dock` ops
     /// so they join the undo history (their relayout is decided later,
     /// when they drain). `FocusPane` is the one exception — pointer-driven
     /// focus writes straight through (see `DockLayout::focus`).
@@ -516,7 +545,7 @@ impl Editor {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(open, target),
-                UiAction::Dock(op) => self.intents.push_global(Intent::Dock(op)),
+                UiAction::Dock(op) => self.intents.push_global(DocIntent::Dock(op)),
                 UiAction::FocusPane(group) => {
                     open.document.layout.focus(group);
                 }
@@ -603,13 +632,14 @@ impl Editor {
         open.document
             .layout
             .find_or_insert(TabRef::Preferences, group);
-        self.apply_edit(open, activate_intent(TabRef::Preferences));
+        self.commit_batch(open, [Queued::Global(activate_intent(TabRef::Preferences))])
+            .warn_rejected();
     }
 }
 
 /// The recorded focus/activation half of opening `tab`.
-fn activate_intent(tab: TabRef) -> Intent {
-    Intent::Dock(DockOp::ActivateTab { tab })
+fn activate_intent(tab: TabRef) -> DocIntent {
+    DocIntent::Dock(DockOp::ActivateTab { tab })
 }
 
 #[cfg(test)]
@@ -624,7 +654,7 @@ mod tests {
 
     use crate::core::document::open_document::OpenDocument;
     use crate::core::document::{Document, GraphRef, TabRef};
-    use crate::core::edit::intent::types::Intent;
+    use crate::core::edit::intent::types::{DocIntent, Intent};
     use crate::gui::UiAction;
     use crate::gui::app::editor::Editor;
     use crate::gui::image_viewer::ImageViewer;
@@ -879,6 +909,94 @@ mod tests {
                 .find(root_node, NodeSearch::TopLevel)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_document_global_intent_records_as_an_entry_of_its_own() {
+        // A `DocIntent` resolves no graph, so it can neither join a graph's
+        // entry nor let one continue across it. Three intents in one drain —
+        // edit, dock op, edit, all raised while the same pane is focused —
+        // must therefore become three entries that undo one at a time.
+        use crate::core::document::dock::DockOp;
+
+        let mut test = TestEditor::new(Document::default());
+        let local = test.open.document.create_graph(GraphRef::Main).unwrap();
+        let subgraph = TabRef::Graph(GraphRef::Local(local));
+        let primary = test.open.document.layout.primary().id;
+        test.open.document.layout.find_or_insert(subgraph, primary);
+        let main_tab = test.open.document.layout.primary().active_tab();
+
+        let first = NodeId::unique();
+        let second = NodeId::unique();
+        let add = |node_id| Intent::AddNode {
+            pos: Vec2::ZERO,
+            node_id,
+            node: Node::new(NodeKind::Func(FuncId::unique())),
+            bindings: vec![],
+        };
+        let activate = |tab| DocIntent::Dock(DockOp::ActivateTab { tab });
+        test.editor.intents.push(GraphRef::Main, add(first));
+        test.editor.intents.push_global(activate(subgraph));
+        test.editor.intents.push(GraphRef::Main, add(second));
+        test.editor.drain_intents(&mut test.open);
+
+        let active = |test: &TestEditor| test.open.document.layout.primary().active_tab();
+        let holds = |test: &TestEditor, id| {
+            test.open
+                .document
+                .graph
+                .find(id, NodeSearch::TopLevel)
+                .is_some()
+        };
+        assert_eq!(active(&test), subgraph, "the dock op applied");
+        assert!(
+            holds(&test, first) && holds(&test, second),
+            "both edits did"
+        );
+
+        assert!(test.undo(), "the last entry is the second add alone");
+        assert!(
+            holds(&test, first) && !holds(&test, second),
+            "the add after the dock op didn't drag the one before it back",
+        );
+        assert_eq!(active(&test), subgraph, "and left the dock op standing");
+
+        assert!(test.undo(), "the middle entry is the dock op alone");
+        assert_eq!(active(&test), main_tab, "the activation reverted");
+        assert!(holds(&test, first), "without touching the edit under it");
+
+        assert!(test.undo(), "the first entry is the first add");
+        assert!(!holds(&test, first));
+
+        // Consecutive globals stay one entry *each*, which is what keeps a
+        // tab-switch burst collapsing to one Ctrl+Z: a single-step entry
+        // carries its gesture key, so the two queued together below merge
+        // with each other, and the next drain's folds into the result.
+        // Batched into one entry instead they would lose the key — a
+        // multi-step entry never coalesces — and the burst would undo in
+        // pieces.
+        let more: Vec<TabRef> = (0..2)
+            .map(|_| {
+                let id = test.open.document.create_graph(GraphRef::Main).unwrap();
+                let tab = TabRef::Graph(GraphRef::Local(id));
+                test.open.document.layout.find_or_insert(tab, primary);
+                tab
+            })
+            .collect();
+        test.editor.intents.push_global(activate(subgraph));
+        test.editor.intents.push_global(activate(more[0]));
+        test.editor.drain_intents(&mut test.open);
+        test.editor.intents.push_global(activate(more[1]));
+        test.editor.drain_intents(&mut test.open);
+        assert_eq!(active(&test), more[1], "the burst's last switch stands");
+
+        assert!(test.undo(), "the whole burst is one entry");
+        assert_eq!(
+            active(&test),
+            main_tab,
+            "one undo reverts every switch in it, across both drains",
+        );
+        assert!(!test.undo(), "and nothing else was recorded");
     }
 
     /// A node context-menu pick acts on the pane the menu was raised in —

@@ -8,12 +8,12 @@ use scenarium::{GraphDef, GraphId, GraphLink, Subscription};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, GraphRef, Viewport};
-use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
-use crate::core::edit::intent::build::build_step;
+use crate::core::edit::intent::apply::{apply_step, commit_doc_intent, commit_intent, revert_step};
+use crate::core::edit::intent::build::{build_doc_step, build_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
 use crate::core::edit::intent::types::{
-    DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
+    BatchScope, DocIntent, DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
 };
 
 /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
@@ -37,7 +37,7 @@ fn dirties_document_splits_edits_from_navigation() {
     let mut dock_doc = Document::default();
     let primary = dock_doc.layout.primary().id;
     dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
-    let dock_step = |op: DockOp| build_step(Intent::Dock(op), &dock_doc, GraphRef::Main);
+    let dock_step = |op: DockOp| build_doc_step(DocIntent::Dock(op), &dock_doc).map(UndoStep::Doc);
 
     // Navigation-only steps: camera, selection, tab focus — the user
     // doesn't "save" these, so they must not flip the unsaved flag.
@@ -118,21 +118,19 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     // Split Preferences into its own pane, then keep the step: it is both a
     // structural dock op for the table below and what gives `SetRatio` a
     // real divider to name instead of a refused no-op.
-    let split = build_step(
-        Intent::Dock(DockOp::MoveTab {
+    let split = commit_doc_intent(
+        DocIntent::Dock(DockOp::MoveTab {
             tab: TabRef::Preferences,
             to: DockDrop::Split {
                 group: primary,
                 side: SplitSide::Right,
             },
         }),
-        &dock_doc,
-        GraphRef::Main,
+        &mut dock_doc,
     )
     .expect("splitting a second tab off the primary group");
-    apply_step(&split, &mut dock_doc, GraphRef::Main);
     let dock_step = |op: DockOp| {
-        build_step(Intent::Dock(op), &dock_doc, GraphRef::Main).expect("a real dock op")
+        UndoStep::Doc(build_doc_step(DocIntent::Dock(op), &dock_doc).expect("a real dock op"))
     };
     let node_id = NodeId::unique();
     let port = InputPort::new(node_id, 0);
@@ -322,9 +320,9 @@ fn subscribe_unsubscribe_commit_and_undo() {
     );
 
     // Undo removes it; redo restores it.
-    revert_step(&step, &mut doc, GraphRef::Main);
+    revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
-    apply_step(&step, &mut doc, GraphRef::Main);
+    apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
@@ -335,12 +333,12 @@ fn subscribe_unsubscribe_commit_and_undo() {
     )
     .expect("unsubscribe commits");
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
-    revert_step(&step, &mut doc, GraphRef::Main);
+    revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // Redo the unsubscribe (apply writes the `to = unsubscribed` half),
     // then unsubscribing the now-absent edge is a no-op.
-    apply_step(&step, &mut doc, GraphRef::Main);
+    apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
     assert!(
         commit_intent(
@@ -506,7 +504,7 @@ fn set_node_property_commits_and_reverts() {
             step.gesture_key().is_none(),
             "each toggle is its own undo entry"
         );
-        revert_step(&step, &mut doc, GraphRef::Main);
+        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
         let node = doc.graph.find(id, NodeSearch::TopLevel).unwrap();
         assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
         assert!(!node.disabled, "revert restores the disable flag");
@@ -563,14 +561,15 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
         }),
         // Any dock op is a whole-layout swap, so it can open, close, or
         // relocate a viewer tab.
-        build_step(
-            Intent::Dock(DockOp::CloseTab {
-                tab: TabRef::ImageViewer(node),
-            }),
-            &doc,
-            GraphRef::Main,
-        )
-        .expect("closing an open viewer tab builds"),
+        UndoStep::Doc(
+            build_doc_step(
+                DocIntent::Dock(DockOp::CloseTab {
+                    tab: TabRef::ImageViewer(node),
+                }),
+                &doc,
+            )
+            .expect("closing an open viewer tab builds"),
+        ),
     ];
     for step in &movers {
         assert!(

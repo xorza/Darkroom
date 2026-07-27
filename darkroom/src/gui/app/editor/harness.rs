@@ -135,7 +135,7 @@ mod tests {
     /// The whole pipeline in one case: the editor records a real dock
     /// strip, the chip lands where the hit-test says it does, and a
     /// press on it routes through `DockUi::scan` into an undoable
-    /// `Intent::Dock` that switches the active tab.
+    /// `DocIntent::Dock` that switches the active tab.
     ///
     /// Every step here is what `TestEditor` cannot reach — it calls
     /// `apply_edit` directly and never records, so nothing between the

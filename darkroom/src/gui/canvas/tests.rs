@@ -7,7 +7,7 @@ use scenarium::{
 };
 
 use crate::core::document::{GraphRef, GraphView, PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
+use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
@@ -39,6 +39,25 @@ fn spread(view: &mut GraphView) {
     for (i, pos) in view.item_placements.values_mut().enumerate() {
         *pos = Vec2::new(40.0 + i as f32 * 220.0, 40.0);
     }
+}
+
+/// The intent behind each queued item, checking on the way that every one
+/// named `target`. Both assertions belong to every canvas test: a widget
+/// edits the pane it drew from, and none of them can reach the dock.
+fn scoped_intents(queued: &[Queued], target: GraphRef) -> Vec<&Intent> {
+    queued
+        .iter()
+        .map(|item| match item {
+            Queued::Scoped {
+                target: named,
+                intent,
+            } => {
+                assert_eq!(*named, target, "a canvas widget edits its own pane");
+                intent
+            }
+            Queued::Global(intent) => panic!("a canvas widget raised {intent:?}"),
+        })
+        .collect()
 }
 
 /// Two graph panes drawn in one frame must not record a widget id twice,
@@ -108,7 +127,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
 
     // Returns what the frame queued, so the target assertions below read the
     // same sink the real pipeline drains.
-    let mut draw = |ui: &mut Ui| -> Vec<(GraphRef, Intent)> {
+    let mut draw = |ui: &mut Ui| -> Vec<Queued> {
         scene.rebuild(
             ui,
             &library,
@@ -187,19 +206,16 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     // know which of the two graphs it is drawing.
     harness.click_on(node_wid("ram_badge", def_func));
     let emitted = harness.frame_value(&mut draw);
+    let intents = scoped_intents(&emitted, local);
     assert!(
         matches!(
-            emitted[..],
-            [(
-                target,
-                Intent::SetNodeProperty {
-                    node_id,
-                    to: NodeProperty::RuntimeCache(CacheMode::Ram),
-                },
-            )] if target == local && node_id == def_func,
+            intents[..],
+            [Intent::SetNodeProperty {
+                node_id,
+                to: NodeProperty::RuntimeCache(CacheMode::Ram),
+            }] if *node_id == def_func,
         ),
-        "the cache chip must flip the RAM bit of the node it sits on, in its \
-         own pane: {emitted:?}"
+        "the cache chip must flip the RAM bit of the node it sits on: {intents:?}"
     );
 
     // Prepass phase: a port double-click on the same node clears its binding.
@@ -214,14 +230,13 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     harness.frame_value(&mut draw);
     harness.click_on(port_circle_wid(port));
     let emitted = harness.frame_value(&mut draw);
+    let intents = scoped_intents(&emitted, local);
     assert!(
         matches!(
-            emitted[..],
-            [(target, Intent::SetInput { input, to: None })]
-                if target == local && input == InputPort::new(def_func, 0),
+            intents[..],
+            [Intent::SetInput { input, to: None }] if *input == InputPort::new(def_func, 0),
         ),
-        "the double-click must clear the binding of the port it landed on, in \
-         its own pane: {emitted:?}"
+        "the double-click must clear the binding of the port it landed on: {intents:?}"
     );
 }
 
@@ -324,25 +339,23 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     harness.set_modifiers(Modifiers::default());
     harness.release_button(PointerButton::Left);
 
+    // The helper carries the pane assertion: the spawn is raised against the
+    // port's own pane, not whichever one happens to be focused.
+    let spawned = scoped_intents(&spawned, GraphRef::Main);
     let adds: Vec<_> = spawned
         .iter()
-        .filter(|(_, intent)| matches!(intent, Intent::AddNode { .. }))
+        .filter(|intent| matches!(intent, Intent::AddNode { .. }))
         .collect();
     assert_eq!(adds.len(), 1, "one preview spawned: {spawned:?}");
-    let (target, Intent::AddNode { node_id, node, .. }) = adds[0] else {
+    let Intent::AddNode { node_id, node, .. } = adds[0] else {
         unreachable!("filtered to AddNode");
     };
-    assert_eq!(
-        *target,
-        GraphRef::Main,
-        "raised against the port's own pane"
-    );
     assert!(
         matches!(node.kind, NodeKind::Func(id) if crate::core::preview::is_preview(id)),
         "the spawned node is a preview"
     );
     assert!(
-        spawned.iter().any(|(_, intent)| matches!(
+        spawned.iter().any(|intent| matches!(
             intent,
             Intent::SetInput { input, to: Some(Binding::Bind(src)) }
                 if input.node_id == *node_id

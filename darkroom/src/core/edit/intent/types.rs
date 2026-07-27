@@ -1,6 +1,6 @@
-//! The [`Intent`] / [`UndoStep`] / [`GraphStep`] / [`DocStep`] /
-//! [`GestureKey`] type model, plus the [`Refusal`] a commit answers with
-//! when no step comes out of it.
+//! The [`Intent`] / [`DocIntent`] / [`UndoStep`] / [`GraphStep`] /
+//! [`DocStep`] / [`BatchScope`] / [`GestureKey`] type model, plus the
+//! [`Refusal`] a commit answers with when no step comes out of it.
 //!
 //! An [`Intent`] is "what the caller wants the graph to look like
 //! after"; it carries no history. To make the change reversible, we
@@ -11,6 +11,12 @@
 //! apply). Type-level enforcement means an `UndoStep` can never be
 //! constructed inconsistently — there's no `(Intent::A, Snapshot::B)`
 //! mismatch to worry about at runtime.
+//!
+//! The same split runs the other way, by *scope*: an [`Intent`] always
+//! edits one graph and is therefore always accompanied by a `GraphRef`,
+//! while a [`DocIntent`] edits the document as a whole and names no graph
+//! at all. Neither can be mistaken for the other, so no code path has to
+//! carry a target it will not read, or ignore one it was handed.
 
 use std::collections::BTreeSet;
 
@@ -20,7 +26,7 @@ use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, GraphDef,
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
-use crate::core::document::{BoundarySide, Viewport};
+use crate::core::document::{BoundarySide, GraphRef, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -53,15 +59,23 @@ pub(crate) enum Refusal {
     Invalid(String),
 }
 
-/// What the caller wants to change. Forward-only — no `from` fields.
-/// Each variant says "set X to Y"; the consumer captures the previous
-/// Y at commit time via
+/// What the caller wants to change **in one graph**. Forward-only — no
+/// `from` fields. Each variant says "set X to Y"; the consumer captures
+/// the previous Y at commit time via
 /// [`build_step`](crate::core::edit::intent::build::build_step).
+///
+/// Every variant here is meaningless without the graph it applies to, so
+/// one always travels beside it — as a `GraphRef` argument on the commit
+/// path, and as [`Queued::Scoped`](crate::core::edit::intent::sink::Queued)
+/// in the frame's queue. A mutation with no graph to name is a
+/// [`DocIntent`] instead.
 ///
 /// **Adding a variant** — touch these spots:
 ///   1. add the variant here on `Intent`,
-///   2. add the matching variant on [`GraphStep`] (graph-scoped, edited
-///      through an `EditScope`) or [`DocStep`] (document-global), carrying
+///   2. add the matching variant on [`GraphStep`] (edited through the
+///      target's `EditScope`) or [`DocStep`] (writes state that sits
+///      outside any one graph body — the dock layout, or a graph's
+///      interface — so it resolves no scope), carrying
 ///      both the forward "to" and backward "from" payloads (or just
 ///      forward fields for pure-creation intents),
 ///   3. add an arm to
@@ -79,9 +93,7 @@ pub(crate) enum Refusal {
 ///      compile until you do),
 ///   6. update `UndoStep::gesture_key` (also in
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in
-///      undo history,
-///   7. classify it in [`Intent::is_global`] (exhaustive — it won't compile
-///      until you do).
+///      undo history.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Intent {
     /// Add one node that links state the document already resolves — a func,
@@ -190,11 +202,6 @@ pub(crate) enum Intent {
     SetViewport {
         to: Viewport,
     },
-    /// Mutate the dock layout (activate/close a tab, move one between
-    /// panes, resize a split). Document-global; `build_step` snapshots
-    /// the whole layout before/after (it's tiny), so every dock op is
-    /// one uniform, trivially reversible step.
-    Dock(DockOp),
     /// Rename a subgraph definition's interface port. Scoped to the
     /// active `Local` target — `build_step` reads the `GraphId` from
     /// the drain `target`, so the intent only carries the side + index +
@@ -223,14 +230,6 @@ pub(crate) enum Intent {
         side: BoundarySide,
         idx: usize,
     },
-    /// Rename a local graph's subgraph definition.
-    /// Document-global (not scoped to any one graph) so it works
-    /// regardless of which tab is active. Drives the tab-strip's
-    /// double-click-to-rename label.
-    RenameGraph {
-        id: GraphId,
-        to: String,
-    },
     /// Add (`subscribe = true`) or remove (`false`) an event subscription:
     /// `subscriber` ← `emitter`'s event `event_idx`. An event wire dropped on,
     /// or severed from, a subscription pin. Idempotent — a no-op when the
@@ -245,34 +244,52 @@ pub(crate) enum Intent {
     },
 }
 
-impl Intent {
-    /// Whether this variant commits against the whole document rather than
-    /// one graph — the two `build_step` resolves without a scope lookup, and
-    /// so the only two [`Intents::push_global`](crate::core::edit::intent::sink::Intents::push_global)
-    /// accepts. Everything else names the graph it edits, including the
-    /// boundary-port intents, which read their `GraphId` off the target.
-    pub(crate) fn is_global(&self) -> bool {
-        match self {
-            Self::Dock(_) | Self::RenameGraph { .. } => true,
-            Self::AddNode { .. }
-            | Self::AddLocalGraph { .. }
-            | Self::AddLocalGraphInstance { .. }
-            | Self::DuplicateNodes { .. }
-            | Self::RemoveNode { .. }
-            | Self::MoveSelection { .. }
-            | Self::RenameNode { .. }
-            | Self::SetInput { .. }
-            | Self::SetSelection { .. }
-            | Self::Raise { .. }
-            | Self::SetNodeProperty { .. }
-            | Self::DetachGraph { .. }
-            | Self::SetViewport { .. }
-            | Self::RenameBoundaryPort { .. }
-            | Self::AddBoundaryPort { .. }
-            | Self::RemoveBoundaryPort { .. }
-            | Self::SetSubscription { .. } => false,
-        }
-    }
+/// What the caller wants to change **about the document as a whole** —
+/// the mutations no single graph owns, and so the ones no `GraphRef`
+/// describes.
+///
+/// Kept apart from [`Intent`] rather than sharing the enum with a target
+/// nobody reads: these commit through
+/// [`build_doc_step`](crate::core::edit::intent::build::build_doc_step),
+/// which takes a `&Document` and nothing else, and the pipeline carries
+/// them as [`Queued::Global`](crate::core::edit::intent::sink::Queued) with
+/// no target beside them. The boundary-port intents are *not* here — they
+/// produce [`DocStep`]s but read their `GraphId` off the graph they were
+/// raised in, so they stay scoped.
+///
+/// Not serde: scripts drive graph edits only (`Intent`), so nothing
+/// decodes a `DocIntent` from a payload.
+///
+/// **Adding a variant**: a matching [`DocStep`], an arm in `build_doc_step`
+/// and in each `apply_doc` / `revert_doc`, plus the exhaustive `DocStep`
+/// predicates in [`crate::core::edit::intent::query`].
+#[derive(Debug)]
+pub(crate) enum DocIntent {
+    /// Mutate the dock layout (activate/close a tab, move one between
+    /// panes, resize a split). `build_doc_step` snapshots the whole layout
+    /// before/after (it's tiny), so every dock op is one uniform, trivially
+    /// reversible step.
+    Dock(DockOp),
+    /// Rename a local graph's subgraph definition — it works regardless of
+    /// which tab is active, since the `GraphId` names the definition
+    /// outright. Drives the tab-strip's double-click-to-rename label.
+    RenameGraph { id: GraphId, to: String },
+}
+
+/// What one undo entry's steps resolve against, recorded per batch by
+/// [`ActionStack::push_current`](crate::core::edit::action_stack::ActionStack::push_current)
+/// and read back on undo/redo — the step-level echo of the
+/// [`Intent`] / [`DocIntent`] split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchScope {
+    /// Built from [`Intent`]s against one graph: every [`GraphStep`] in the
+    /// entry writes through that graph's `EditScope`. A [`DocStep`] sharing
+    /// the entry (a boundary-port edit) carries its own `GraphId` and
+    /// ignores this.
+    Graph(GraphRef),
+    /// Built from a [`DocIntent`]: the entry holds document-global steps
+    /// only, and nothing in it resolves a graph.
+    Document,
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both

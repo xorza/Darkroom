@@ -38,7 +38,7 @@ pub(crate) type HostHandle = palantir::HostHandle<App>;
 /// clicks, a released tab drag) and applied by `App` in the navigation
 /// phase. Decoupled from `Intent` so the UI layer doesn't need to know
 /// which requests are undoable: the editor wraps `Dock` ops into the
-/// undoable `Intent::Dock`. `OpenGraph` adds the tab to a strip directly
+/// undoable `DocIntent::Dock`. `OpenGraph` adds the tab to a strip directly
 /// (that part isn't undoable) but focuses it through the same recorded
 /// activation, so undo faithfully reverses focus.
 #[derive(Clone, Copy, Debug, PartialEq)]
