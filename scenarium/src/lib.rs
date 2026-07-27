@@ -50,7 +50,7 @@ pub use node::lambda::{
 pub use node::special::{SPECIAL_NODES, SpecialNode};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]
-pub use runtime::context::internals::insert_context;
+pub use runtime::context::internals::{insert_context, set_current_node};
 pub use runtime::context::{ContextManager, ContextStore, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;

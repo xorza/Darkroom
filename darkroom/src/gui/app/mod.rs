@@ -171,6 +171,10 @@ impl App {
                 }
             }
         }
+        // After the reports, so a value published during this run lands against
+        // the compile the stream just acknowledged rather than the previous one.
+        let previews = self.workspace.runtime.drain_previews();
+        self.editor.run_state.ingest_previews(ui, previews);
     }
 
     /// Drain the script executor's inbound queue and act on each message:

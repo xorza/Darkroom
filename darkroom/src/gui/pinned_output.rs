@@ -12,7 +12,7 @@ use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
 use palantir::{Image as AptImage, ImageHandle, Ui};
-use scenarium::{DynamicValue, OutputPort};
+use scenarium::{DynamicValue, NodeId, OutputPort};
 
 use crate::core::document::Document;
 
@@ -22,6 +22,11 @@ const FULL_TEXTURE_DIM: u32 = 8192;
 #[derive(Default, Debug)]
 pub(crate) struct PinnedOutputStore {
     pub(crate) entries: HashMap<OutputPort, StoredContent>,
+    /// Preview nodes' values, keyed by the node that published rather than by
+    /// a producer port — a preview *is* the thing on screen, so its identity is
+    /// the widget's. Separate from `entries` only while the authored-pin path
+    /// still exists; it replaces that map outright once pins are gone.
+    pub(crate) previews: HashMap<NodeId, StoredContent>,
     /// Whether [`Self::reconcile`] has work to do: the document's retained
     /// set may have moved, or a fresh value landed that a viewer still needs
     /// uploaded at full resolution. The flag lives here rather than beside
@@ -116,6 +121,17 @@ impl PinnedOutputStore {
         }
     }
 
+    /// Store one preview node's freshly published value, replacing whatever it
+    /// was showing.
+    ///
+    /// No retention filter on the way in, unlike [`Self::ingest`]: a value
+    /// arrives keyed by the node that published it, and a node that published
+    /// exists. `reconcile` still drops it once that stops being true.
+    pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {
+        self.previews.insert(node_id, prepare_content(ui, value));
+        self.needs_reconcile = true;
+    }
+
     /// Ask for a reconcile pass on the next frame. Raised by every edit whose
     /// step [`crate::core::edit::intent::types::UndoStep::requires_reconcile`]
     /// and by the non-undoable half of opening a viewer tab.
@@ -146,6 +162,10 @@ impl PinnedOutputStore {
         // per stored entry.
         let retained = document.retained_output_ports();
         self.entries.retain(|port, _| retained.contains(port));
+        // A preview's own node is its retention: delete the node and the value
+        // it was showing has nothing left to draw it.
+        self.previews
+            .retain(|node_id, _| document.holds_preview_node(*node_id));
     }
 
     fn materialize_full(&mut self, ui: &Ui, port: OutputPort) {
@@ -393,6 +413,64 @@ mod tests {
         assert!(
             store.entries.is_empty(),
             "no graph pin or viewer leaves presentation resources alive"
+        );
+    }
+
+    /// A preview's own node is its retention: the value survives while the node
+    /// does, and goes when the node does. Nothing about pins or viewer tabs is
+    /// involved, and a fresh value still replaces the old one in place.
+    #[test]
+    fn a_previews_value_lives_exactly_as_long_as_its_node() {
+        let mut arena = UiHarness::arena();
+        let mut store = PinnedOutputStore::default();
+
+        let mut document = Document::default();
+        let preview = document
+            .graph
+            .add_func_node(&crate::core::preview::preview_func(Default::default()));
+        let other = document
+            .graph
+            .add(scenarium::Node::new(scenarium::NodeKind::Special(
+                scenarium::SpecialNode::RunSinks,
+            )));
+
+        store.ingest_preview(
+            arena.ui(),
+            preview,
+            DynamicValue::Static(StaticValue::Int(7)),
+        );
+        // A value keyed to a node that is not a preview — the retain predicate
+        // has to reject it on the node's kind, not merely on the id existing.
+        store.ingest_preview(arena.ui(), other, DynamicValue::Static(StaticValue::Int(9)));
+        assert!(
+            matches!(&store.previews[&preview], StoredContent::Text(t) if t == "7"),
+            "the published value is formatted on receipt"
+        );
+
+        store.ingest_preview(
+            arena.ui(),
+            preview,
+            DynamicValue::Static(StaticValue::Int(8)),
+        );
+        assert_eq!(store.previews.len(), 2, "a re-publish replaces in place");
+        assert!(matches!(&store.previews[&preview], StoredContent::Text(t) if t == "8"));
+
+        store.reconcile_if_needed(arena.ui(), &document);
+        assert!(
+            store.previews.contains_key(&preview),
+            "a live preview node retains its value"
+        );
+        assert!(
+            !store.previews.contains_key(&other),
+            "a value keyed to a non-preview node is dropped"
+        );
+
+        document.graph.detach_node(preview);
+        store.request_reconcile();
+        store.reconcile_if_needed(arena.ui(), &document);
+        assert!(
+            store.previews.is_empty(),
+            "deleting the node releases what it was showing"
         );
     }
 

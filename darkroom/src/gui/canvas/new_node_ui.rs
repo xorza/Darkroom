@@ -12,7 +12,7 @@ use scenarium::{GraphDef, GraphId};
 use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
-use crate::core::document::PortRef;
+use crate::core::document::{GraphRef, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
@@ -154,6 +154,7 @@ impl NewNodeUi {
             .min(surface.size.h - 16.0)
             .max(120.0);
         let scroll_cap = (max_height - SEARCH_ROW_ALLOWANCE).max(80.0);
+        let target = graph.target();
         let query = &mut self.query;
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
@@ -169,6 +170,7 @@ impl NewNodeUi {
                 let palette = Palette {
                     ctx,
                     pos,
+                    target,
                     local_defs: local_def_rows(graph),
                 };
                 palette_body(ui, popup, &palette, query, scroll_cap, just_opened)
@@ -263,6 +265,9 @@ struct Palette<'a> {
     /// World position the open captured — every intent a row raises places
     /// its node here.
     pos: Vec2,
+    /// The pane the chosen node lands in — `Main` is the execution entry, so
+    /// it's what decides whether entry-only funcs are offered.
+    target: GraphRef,
     local_defs: Vec<LocalDefRow>,
 }
 
@@ -278,9 +283,15 @@ impl<'a> Palette<'a> {
     /// row for a graph this document already copied is left out — see
     /// [`LocalDefRow::origin`].
     fn entries(&'a self) -> impl Iterator<Item = PaletteEntry<'a>> {
+        // An entry-only func in a definition body is a compile error
+        // (`GraphValidationError::EntryOnlyFunc`), so don't offer one where it
+        // could only ever break the document. Stated against the flag rather
+        // than against any particular func, so a future one is covered too.
+        let entry = self.target == GraphRef::Main;
         self.ctx
             .library
             .funcs()
+            .filter(move |func| entry || !func.entry_only)
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))
             .chain(
@@ -552,6 +563,7 @@ mod tests {
         let palette = |local_defs| Palette {
             ctx: &ctx,
             pos: Vec2::ZERO,
+            target: GraphRef::Main,
             local_defs,
         };
 
@@ -611,6 +623,56 @@ mod tests {
             column(&palette(vec![copy]).columns(""), "Document").as_deref(),
             Some(["Published", "Untouched"].as_slice()),
             "one row per definition, not two under the same name"
+        );
+    }
+
+    /// An entry-only func is offered in the entry pane and withheld everywhere
+    /// else, because placing one inside a definition body is a compile error
+    /// (`GraphValidationError::EntryOnlyFunc`). Gated on the flag rather than
+    /// on any particular func, so a future entry-only func is covered too.
+    #[test]
+    fn entry_only_funcs_are_offered_only_in_the_entry_pane() {
+        use scenarium::{Func, FuncId, Library};
+
+        let mut library = Library::default();
+        library.add(crate::core::preview::preview_func(Default::default()));
+        library.add(
+            Func::new(FuncId::unique(), "Add")
+                .category("System")
+                .lambda(scenarium::async_lambda!(|_| { Ok(()) })),
+        );
+
+        let theme = Theme::default();
+        let run_state = RunState::default();
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+        };
+        let palette = |target| Palette {
+            ctx: &ctx,
+            pos: Vec2::ZERO,
+            target,
+            local_defs: Vec::new(),
+        };
+
+        // "Run on Event" is the `RunSinks` special node, which shares this
+        // category and is placeable anywhere — so it stays in both listings and
+        // shows the filter is the flag's doing, not the category's.
+        assert_eq!(
+            column(&palette(GraphRef::Main).columns(""), "System").as_deref(),
+            Some(["Add", "Preview", "Run on Event"].as_slice()),
+            "the entry pane lists it"
+        );
+        assert_eq!(
+            column(
+                &palette(GraphRef::Local(GraphId::unique())).columns(""),
+                "System"
+            )
+            .as_deref(),
+            Some(["Add", "Run on Event"].as_slice()),
+            "a definition pane withholds it while keeping everything placeable"
         );
     }
 }

@@ -17,6 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::{DockLayout, TabGroup};
+use crate::core::preview;
 
 /// Initial placement of a fresh graph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
@@ -412,6 +413,21 @@ impl Document {
         let mut retained = self.pinned_outputs();
         retained.extend(self.viewer_outputs());
         retained
+    }
+
+    /// Whether `node_id` is a live preview node in the entry graph — what
+    /// retains the value it published.
+    ///
+    /// Top-level only, because [`Func::entry_only`] is what makes a preview's
+    /// identity answer for exactly one on-screen card; a node id found deeper
+    /// would not be one.
+    pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
+        self.graph
+            .find(node_id, NodeSearch::TopLevel)
+            .is_some_and(|node| match node.kind {
+                NodeKind::Func(func_id) => preview::is_preview(func_id),
+                _ => false,
+            })
     }
 
     /// Every open viewer tab's port, visible or not — the retention half:

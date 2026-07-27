@@ -4,6 +4,7 @@ pub(super) mod port_color;
 mod port_rename;
 pub(super) mod port_row;
 pub(super) mod prepass;
+mod preview_row;
 mod value_editor;
 
 use crate::core::document::ItemRef;
@@ -244,7 +245,13 @@ impl NodeUI {
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
-            .min_size((theme.node_min_width, theme.node_min_height))
+            // A preview needs room for a thumbnail; every other node keeps the
+            // theme's own floor.
+            .min_size(if node.preview {
+                (preview_row::PREVIEW_MIN_WIDTH, theme.node_min_height)
+            } else {
+                (theme.node_min_width, theme.node_min_height)
+            })
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
             .background(
@@ -259,7 +266,13 @@ impl NodeUI {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
                 ports_row(ui, rcx, node, row_tracks, out);
-                memory_row(ui, rcx, node);
+                // A preview has no output, so it has no cached value for the
+                // memory readout to report — its value takes that slot instead.
+                if node.preview {
+                    preview_row::preview_row(ui, rcx, node);
+                } else {
+                    memory_row(ui, rcx, node);
+                }
             });
         // Pull the body response's click flag into a local so its `&Ui`
         // borrow ends before the handle scan below. (`Response` is a lazy
