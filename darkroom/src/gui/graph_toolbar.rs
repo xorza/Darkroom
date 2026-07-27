@@ -1,11 +1,13 @@
 //! The floating toolbar pinned to the graph view's top-left corner: a
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
-//! chrome pill, with three view-framing buttons (reset view, show all, show
-//! selected) stacked beneath on a second pill. The frosted pills keep the
-//! toolbar legible over both the canvas and any node under it; the buttons are
-//! opaque chips raised off the pill. All carry hover tooltips; the toggles
-//! paint "toggled" while their action is in flight and map to an [`AppCommand`],
-//! while the framing buttons emit an `Intent::SetViewport` directly.
+//! chrome pill — drawn only on the main graph's pane, since both act on the
+//! whole document — with three view-framing buttons (reset view, show all,
+//! show selected) stacked beneath on a second pill that every pane carries.
+//! The frosted pills keep the toolbar legible over both the canvas and any
+//! node under it; the buttons are opaque chips raised off the pill. All carry
+//! hover tooltips; the toggles paint "toggled" while their action is in flight
+//! and map to an [`AppCommand`], while the framing buttons emit an
+//! `Intent::SetViewport` directly.
 
 use glam::Vec2;
 use palantir::{
@@ -47,7 +49,8 @@ fn show_selected_wid(graph: GraphRef) -> WidgetId {
 }
 
 /// Draw the toolbar over the graph view's top-left corner. Returns the
-/// [`AppCommand`] a run/events click implies; view-framing clicks push an
+/// [`AppCommand`] a run/events click implies — always `None` off the main
+/// pane, which draws no run pill; view-framing clicks push an
 /// `Intent::SetViewport` onto `out` instead. It hit-tests above the canvas
 /// (drawn after it), so a click on a button never starts a pan.
 pub(crate) fn show(
@@ -68,50 +71,56 @@ pub(crate) fn show(
         .gap(BUTTON_GAP)
         .show(ui, |ui| {
             // Top row: run/cancel + event-loop toggles, side by side on their
-            // own chrome pill.
-            pill(
-                ui,
-                ctx.theme,
-                Panel::hstack().id_salt(("graph_toolbar_run", target)),
-                |ui| {
-                    // Run / cancel: toggled while a one-shot run is in flight.
-                    let running = ctx.run_state.activity.is_executing();
-                    let run_tip = if running { "Cancel run" } else { "Run" };
-                    // Run is the one primary action in the cluster — it alone
-                    // idles with the accent glyph; the event-loop toggle sits
-                    // muted beside it like the framing buttons below.
-                    if Chip::new(run_button_wid(target), run_tip)
-                        .toggled(running)
-                        .idle_glyph(ctx.theme.colors.exec_executed_glow)
-                        .toggled_fill(ctx.theme.colors.exec_running_glow)
-                        .show(ui, ctx.theme, draw_play)
-                    {
-                        command = Some(if running {
-                            AppCommand::Run(RunCommand::Cancel)
+            // own chrome pill. Both compile and run the document root rather
+            // than the pane they were clicked from, so a subgraph pane must
+            // not offer them — its button would silently act on another graph.
+            if target == GraphRef::Main {
+                pill(
+                    ui,
+                    ctx.theme,
+                    Panel::hstack().id_salt(("graph_toolbar_run", target)),
+                    |ui| {
+                        // Run / cancel: toggled while a one-shot run is in
+                        // flight.
+                        let running = ctx.run_state.activity.is_executing();
+                        let run_tip = if running { "Cancel run" } else { "Run" };
+                        // Run is the one primary action in the cluster — it
+                        // alone idles with the accent glyph; the event-loop
+                        // toggle sits muted beside it like the framing
+                        // buttons below.
+                        if Chip::new(run_button_wid(target), run_tip)
+                            .toggled(running)
+                            .idle_glyph(ctx.theme.colors.exec_executed_glow)
+                            .toggled_fill(ctx.theme.colors.exec_running_glow)
+                            .show(ui, ctx.theme, draw_play)
+                        {
+                            command = Some(if running {
+                                AppCommand::Run(RunCommand::Cancel)
+                            } else {
+                                AppCommand::Run(RunCommand::Once)
+                            });
+                        }
+                        // Event loop start / stop: toggled while the loop runs.
+                        let event_loop_active = ctx.run_state.activity.event_loop_active();
+                        let events_tip = if event_loop_active {
+                            "Stop events"
                         } else {
-                            AppCommand::Run(RunCommand::Once)
-                        });
-                    }
-                    // Event loop start / stop: toggled while the loop runs.
-                    let event_loop_active = ctx.run_state.activity.event_loop_active();
-                    let events_tip = if event_loop_active {
-                        "Stop events"
-                    } else {
-                        "Start events"
-                    };
-                    if Chip::new(events_button_wid(target), events_tip)
-                        .toggled(event_loop_active)
-                        .toggled_fill(ctx.theme.colors.exec_running_glow)
-                        .show(ui, ctx.theme, draw_play_bar)
-                    {
-                        command = Some(if event_loop_active {
-                            AppCommand::Run(RunCommand::StopEvents)
-                        } else {
-                            AppCommand::Run(RunCommand::StartEvents)
-                        });
-                    }
-                },
-            );
+                            "Start events"
+                        };
+                        if Chip::new(events_button_wid(target), events_tip)
+                            .toggled(event_loop_active)
+                            .toggled_fill(ctx.theme.colors.exec_running_glow)
+                            .show(ui, ctx.theme, draw_play_bar)
+                        {
+                            command = Some(if event_loop_active {
+                                AppCommand::Run(RunCommand::StopEvents)
+                            } else {
+                                AppCommand::Run(RunCommand::StartEvents)
+                            });
+                        }
+                    },
+                );
+            }
             // View-framing actions, stacked under the run row on their own
             // chrome pill. Each emits a `SetViewport` intent (undoable), so they
             // ride the same path as a manual pan/zoom rather than mutating the
@@ -212,4 +221,98 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
     filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::document::GraphView;
+    use crate::gui::run_state::RunState;
+    use crate::gui::scene::{GraphProjection, Scene, SceneSource};
+    use crate::gui::theme::Theme;
+    use glam::UVec2;
+    use palantir::internals::UiHarness;
+    use scenarium::{Graph, GraphDef, GraphId, Library};
+
+    /// Run and the event loop compile the *document root*, so a subgraph
+    /// pane offering them would silently act on another graph — the run
+    /// pill belongs to the main pane alone. The framing pill is genuinely
+    /// per-pane and must survive on both. Drawn as two panes in one frame,
+    /// which is the arrangement that surfaced the bug.
+    #[test]
+    fn the_run_pill_is_main_only_while_framing_is_per_pane() {
+        let root = Graph::default();
+        let def = GraphDef::new("Adder");
+        let local = GraphRef::Local(GraphId::unique());
+        let root_view = GraphView::for_graph(&root);
+        let def_view = GraphView::for_graph(&def.body);
+        let theme = Theme::default();
+        let library = Library::default();
+        let run_state = RunState::default();
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+        };
+        let geometry = CanvasGeometry::default();
+        let mut intents = Intents::default();
+        let mut scene = Scene::default();
+        let mut harness = UiHarness::new(UVec2::splat(800));
+
+        harness.frame(|ui| {
+            scene.rebuild(
+                ui,
+                &library,
+                &run_state,
+                [
+                    GraphProjection {
+                        target: GraphRef::Main,
+                        source: SceneSource::Entry(&root),
+                        view: &root_view,
+                    },
+                    GraphProjection {
+                        target: local,
+                        source: SceneSource::Def(&def),
+                        view: &def_view,
+                    },
+                ],
+            );
+            for target in [GraphRef::Main, local] {
+                let graph = scene.graph(target).expect("projected");
+                let command = show(ui, &ctx, graph, &geometry, &mut intents);
+                assert!(command.is_none(), "nothing was clicked");
+            }
+        });
+
+        assert!(
+            harness.rect(run_button_wid(GraphRef::Main)).is_some(),
+            "the main pane keeps its run toggle"
+        );
+        assert!(
+            harness.rect(events_button_wid(GraphRef::Main)).is_some(),
+            "the main pane keeps its event-loop toggle"
+        );
+        assert!(
+            harness.rect(run_button_wid(local)).is_none(),
+            "a subgraph pane draws no run toggle"
+        );
+        assert!(
+            harness.rect(events_button_wid(local)).is_none(),
+            "a subgraph pane draws no event-loop toggle"
+        );
+        for target in [GraphRef::Main, local] {
+            for (wid, what) in [
+                (reset_view_wid(target), "reset view"),
+                (show_all_wid(target), "show all"),
+                (show_selected_wid(target), "show selected"),
+            ] {
+                assert!(
+                    harness.rect(wid).is_some(),
+                    "{what} frames the pane it was clicked on, so every pane \
+                     carries it — missing on {target:?}"
+                );
+            }
+        }
+    }
 }
