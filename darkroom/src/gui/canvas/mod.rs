@@ -335,7 +335,7 @@ impl GraphUI {
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
     /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
-    /// the wires, node bodies, pin cards, inspection panels, and in-flight
+    /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
     fn record_canvas(
         &mut self,
@@ -427,7 +427,7 @@ impl GraphUI {
                         // connections and node bodies.
                         selection_ui.draw(ui, ctx, target);
                         // One bundle for everything this pane records: the
-                        // node bodies and pin cards below, and the inspection
+                        // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
                         // the probe scope so both passes read the same refs.
                         let rcx = RecordCtx {

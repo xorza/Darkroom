@@ -28,7 +28,7 @@ pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) library: &'a Library,
     /// Last run's centralized runtime state: per-node status/logs and the
-    /// latest pinned-output values read by previews and viewers.
+    /// latest published values read by preview cards and viewers.
     pub(crate) run_state: &'a RunState,
     /// The last failed action's message (the engine's
     /// [`StatusLog::error`](crate::core::status::StatusLog) slot), shown in
@@ -122,9 +122,9 @@ impl App {
     /// Consume worker results posted since the last frame. A completed run
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
-    /// surfaces in the status bar. A pinned output's live push lands in the
-    /// centralized pinned-output store, which uploads its small image preview;
-    /// visible previews and viewers read the new value during the frame
+    /// surfaces in the status bar. A preview node's published value lands in
+    /// the centralized preview store, which uploads its small thumbnail;
+    /// visible cards and viewers read the new value during the frame
     /// already scheduled by the worker's wake callback. Drained before the
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {

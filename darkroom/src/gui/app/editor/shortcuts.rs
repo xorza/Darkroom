@@ -106,9 +106,8 @@ impl Editor {
             if duplicate && let Some(intent) = build_duplicate_intent(document, target) {
                 out.push(intent);
             }
-            // Delete/Backspace removes the whole selection: a selected node
-            // becomes `RemoveNode`, a selected pin preview just unpins its
-            // port. `drain_intents` batches a frame's intents into a single
+            // Delete/Backspace removes the whole selection — one
+            // `RemoveNode` each. `drain_intents` batches a frame's intents into a single
             // undo entry, so it's one Cmd-Z (mirrors the breaker's
             // multi-delete).
             if delete {

@@ -7,7 +7,7 @@ use scenarium::{DataType, FuncId, FuncInput};
 use scenarium::{GraphDef, GraphId, GraphLink, Subscription};
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, GraphRef, ItemRef, Viewport};
+use crate::core::document::{Document, GraphRef, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
@@ -21,7 +21,7 @@ use crate::core::edit::intent::types::{
 fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = doc.graph.add(node);
-    doc.main_view.item_placements.insert(ItemRef::Node(id), pos);
+    doc.main_view.item_placements.insert(id, pos);
     id
 }
 
@@ -44,7 +44,7 @@ fn dirties_document_splits_edits_from_navigation() {
     let navigation = [
         UndoStep::Graph(GraphStep::SetSelection {
             from: BTreeSet::new(),
-            to: BTreeSet::from([ItemRef::Node(NodeId::unique())]),
+            to: BTreeSet::from([NodeId::unique()]),
         }),
         UndoStep::Graph(GraphStep::SetViewport {
             from: Viewport {
@@ -87,12 +87,8 @@ fn dirties_document_splits_edits_from_navigation() {
         })
         .unwrap(),
         UndoStep::Graph(GraphStep::MoveSelection {
-            grabbed: ItemRef::Node(NodeId::unique()),
-            moves: vec![(
-                ItemRef::Node(NodeId::unique()),
-                Vec2::ZERO,
-                Vec2::new(5.0, 5.0),
-            )],
+            grabbed: NodeId::unique(),
+            moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
         }),
         UndoStep::Doc(DocStep::RenameGraph {
             id: GraphId::unique(),
@@ -148,8 +144,8 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         // The node drag. Emits one step per gesture frame, drains
         // pre-record, and Pass A already arranges at the cursor.
         UndoStep::Graph(GraphStep::MoveSelection {
-            grabbed: ItemRef::Node(node_id),
-            moves: vec![(ItemRef::Node(node_id), Vec2::ZERO, Vec2::new(5.0, 5.0))],
+            grabbed: node_id,
+            moves: vec![(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0))],
         }),
         UndoStep::Graph(GraphStep::SetViewport {
             from: Viewport {
@@ -163,7 +159,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         }),
         UndoStep::Graph(GraphStep::SetSelection {
             from: BTreeSet::new(),
-            to: BTreeSet::from([ItemRef::Node(node_id)]),
+            to: BTreeSet::from([node_id]),
         }),
         // The divider drag: `Splitter` lays out at the live pointer ratio,
         // so Pass A already drew what this step persists.
@@ -375,7 +371,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     doc.graph
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
     let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
-    doc.main_view.selected = node_ids.iter().copied().map(ItemRef::Node).collect();
+    doc.main_view.selected = node_ids.iter().copied().collect();
 
     let Some(Intent::DuplicateNodes {
         nodes,
@@ -389,10 +385,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(nodes.len(), 2, "both selected nodes cloned");
     assert!(subscriptions.is_empty());
     // Fresh ids, offset positions.
-    let new_ids: BTreeSet<ItemRef> = nodes
-        .iter()
-        .map(|(_, node_id, _)| ItemRef::Node(*node_id))
-        .collect();
+    let new_ids: BTreeSet<NodeId> = nodes.iter().map(|(_, node_id, _)| *node_id).collect();
     assert!(
         new_ids.is_disjoint(&doc.main_view.selected),
         "clones get fresh ids"
@@ -566,7 +559,7 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
             bindings: Vec::new(),
             subscriptions: Vec::new(),
             from_selection: BTreeSet::new(),
-            to_selection: BTreeSet::from([ItemRef::Node(node)]),
+            to_selection: BTreeSet::from([node]),
         }),
         // Any dock op is a whole-layout swap, so it can open, close, or
         // relocate a viewer tab.
@@ -596,11 +589,11 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
             graph: Box::new(GraphDef::new("fork")),
         }),
         UndoStep::Graph(GraphStep::MoveSelection {
-            grabbed: ItemRef::Node(node),
-            moves: vec![(ItemRef::Node(node), Vec2::ZERO, Vec2::new(9.0, 9.0))],
+            grabbed: node,
+            moves: vec![(node, Vec2::ZERO, Vec2::new(9.0, 9.0))],
         }),
         UndoStep::Graph(GraphStep::Raise {
-            key: ItemRef::Node(node),
+            key: node,
             from_index: 0,
             to_index: 1,
         }),
@@ -616,7 +609,7 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
         }),
         UndoStep::Graph(GraphStep::SetSelection {
             from: BTreeSet::new(),
-            to: BTreeSet::from([ItemRef::Node(node)]),
+            to: BTreeSet::from([node]),
         }),
         UndoStep::Graph(GraphStep::SetNodeProperty {
             node_id: node,
@@ -819,9 +812,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     let instance = doc
         .graph
         .add(Node::new(NodeKind::Graph(GraphLink::Local(nested_id))));
-    doc.main_view
-        .item_placements
-        .insert(ItemRef::Node(instance), Vec2::ZERO);
+    doc.main_view.item_placements.insert(instance, Vec2::ZERO);
     assert_invalid(
         &mut doc,
         GraphRef::Main,
@@ -882,8 +873,8 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         (
             "MoveSelection to a non-finite position",
             Intent::MoveSelection {
-                grabbed: ItemRef::Node(live),
-                moves: vec![(ItemRef::Node(live), nan)],
+                grabbed: live,
+                moves: vec![(live, nan)],
             },
         ),
         (
@@ -1050,7 +1041,7 @@ fn instancing_a_local_graph_reads_its_definition_out_of_the_target() {
         "the definition was already there — instancing copies nothing"
     );
     assert_eq!(
-        doc.main_view.item_placements[&ItemRef::Node(node_id)],
+        doc.main_view.item_placements[&node_id],
         Vec2::new(12.0, 34.0)
     );
     assert_eq!(
@@ -1122,12 +1113,7 @@ fn stale_references_still_refuse_quietly() {
             },
         ),
         ("DetachGraph", Intent::DetachGraph { node_id: gone }),
-        (
-            "Raise",
-            Intent::Raise {
-                key: ItemRef::Node(gone),
-            },
-        ),
+        ("Raise", Intent::Raise { key: gone }),
         (
             "SetInput onto a vanished node",
             Intent::SetInput {
@@ -1160,8 +1146,8 @@ fn stale_references_still_refuse_quietly() {
             // the empty batch is a no-op, not an error.
             "MoveSelection of an item whose node vanished",
             Intent::MoveSelection {
-                grabbed: ItemRef::Node(gone),
-                moves: vec![(ItemRef::Node(gone), Vec2::ZERO)],
+                grabbed: gone,
+                moves: vec![(gone, Vec2::ZERO)],
             },
         ),
     ];
@@ -1185,9 +1171,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
 
     let step = commit_intent(
         Intent::SetSelection {
-            to: [ItemRef::Node(live), ItemRef::Node(gone)]
-                .into_iter()
-                .collect(),
+            to: [live, gone].into_iter().collect(),
         },
         &mut doc,
         GraphRef::Main,
@@ -1198,18 +1182,15 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     };
     assert_eq!(
         to,
-        &[ItemRef::Node(live)].into_iter().collect::<BTreeSet<_>>(),
+        &[live].into_iter().collect::<BTreeSet<_>>(),
         "the vanished member is dropped, the live one kept"
     );
     assert_eq!(doc.main_view.selected, *to);
 
     let step = commit_intent(
         Intent::MoveSelection {
-            grabbed: ItemRef::Node(live),
-            moves: vec![
-                (ItemRef::Node(live), Vec2::new(5.0, 6.0)),
-                (ItemRef::Node(gone), Vec2::new(7.0, 8.0)),
-            ],
+            grabbed: live,
+            moves: vec![(live, Vec2::new(5.0, 6.0)), (gone, Vec2::new(7.0, 8.0))],
         },
         &mut doc,
         GraphRef::Main,
@@ -1220,7 +1201,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     };
     assert_eq!(
         moves,
-        &[(ItemRef::Node(live), Vec2::ZERO, Vec2::new(5.0, 6.0))],
+        &[(live, Vec2::ZERO, Vec2::new(5.0, 6.0))],
         "only the surviving member is recorded"
     );
     doc.validate().expect("document stays valid");

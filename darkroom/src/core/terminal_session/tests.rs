@@ -8,8 +8,6 @@ use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::intent::types::Intent;
 use crate::core::terminal_session::apply_intents;
 
-use crate::core::document::ItemRef;
-
 fn empty_document() -> Document {
     OpenDocument::default().document
 }
@@ -76,9 +74,7 @@ fn apply_intents_drops_stale_intents_silently_but_reports_malformed_ones() {
     // script is the only thing that can build one, and it needs to learn
     // its request was refused rather than watch it vanish.
     let live = doc.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    doc.main_view
-        .item_placements
-        .insert(ItemRef::Node(live), Vec2::ZERO);
+    doc.main_view.item_placements.insert(live, Vec2::ZERO);
     let reported = apply_intents(
         &mut doc,
         vec![Intent::AddNode {
@@ -103,17 +99,15 @@ fn apply_intents_selects_existing_node() {
     let mut doc = empty_document();
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = doc.graph.add(node);
-    doc.main_view
-        .item_placements
-        .insert(ItemRef::Node(id), Vec2::ZERO);
+    doc.main_view.item_placements.insert(id, Vec2::ZERO);
 
     apply_intents(
         &mut doc,
         vec![Intent::SetSelection {
-            to: [ItemRef::Node(id)].into_iter().collect(),
+            to: [id].into_iter().collect(),
         }],
     );
-    assert!(doc.main_view.selected.contains(&ItemRef::Node(id)));
+    assert!(doc.main_view.selected.contains(&id));
 }
 
 #[test]

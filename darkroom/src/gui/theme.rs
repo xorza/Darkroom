@@ -766,7 +766,7 @@ impl Theme {
     }
 
     /// Ambient elevation shadow shared by every floating card — node
-    /// bodies, pin previews, inspector panels — so they all read as the
+    /// bodies, inspector panels — so they all read as the
     /// same kind of surface. Only the blur scales with how high a surface
     /// sits; color and offset are fixed.
     #[inline]

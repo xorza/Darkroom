@@ -4,8 +4,7 @@
 //! cached output — it has no output at all — so there is nothing for that
 //! readout to report, and the value is the only thing worth the space.
 //!
-//! Unlike the pinned-output card ([`crate::gui::canvas::pin_preview`]) this is
-//! not a floating widget with wiring of its own: it is a row inside a normal
+//! Not a floating widget with wiring of its own: it is a row inside a normal
 //! node body, so selection, dragging, the breaker, and the input wire all come
 //! from the node machinery unchanged.
 

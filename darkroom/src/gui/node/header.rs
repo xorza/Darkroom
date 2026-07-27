@@ -2,7 +2,7 @@
 //! `G` graph-open, `D` sink-disable, `↻` evict, `R`/`↓` cache, `i` inspect,
 //! and the `■`/`~` markers — and what each one means is this module's
 //! business; how a chip *looks* belongs to
-//! [`Badge`](crate::gui::widgets::badge::Badge), which the pin cards share.
+//! [`Badge`](crate::gui::widgets::badge::Badge).
 //!
 //! The markers ride in the [`header`] band beside the title; the run-time
 //! label (left) and the interactive controls (right) share the [`status_row`]
@@ -18,7 +18,6 @@ use palantir::{
 };
 use scenarium::{CacheMode, NodeId};
 
-use crate::core::document::ItemRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
@@ -435,7 +434,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.graph, ItemRef::Node(node.id), out);
+        click_intents(shift, rcx.graph, node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameNode {

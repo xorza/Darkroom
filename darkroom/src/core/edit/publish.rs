@@ -4,7 +4,7 @@ use scenarium::Library;
 use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
-use crate::core::document::{Document, GraphRef, ItemRef};
+use crate::core::document::{Document, GraphRef};
 
 /// A publication read out of the document but not yet committed anywhere.
 /// Resolving and committing are separate so the library file is written
@@ -84,7 +84,7 @@ fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for key in &view.selected {
-            let ItemRef::Node(nid) = key;
+            let nid = key;
             if let Some(node) = graph.find(*nid, NodeSearch::TopLevel)
                 && let NodeKind::Graph(link) = node.kind
             {

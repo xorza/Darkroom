@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use palantir::{MenuItem, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::ItemRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
@@ -68,10 +67,10 @@ impl NodeMenuUi {
                 && ui.response_for(node_widget_id(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {
-                if !graph.is_selected(ItemRef::Node(n.id)) {
+                if !graph.is_selected(n.id) {
                     out.for_graph(graph.target(), |out| {
                         out.push(Intent::SetSelection {
-                            to: BTreeSet::from([ItemRef::Node(n.id)]),
+                            to: BTreeSet::from([n.id]),
                         })
                     });
                 }

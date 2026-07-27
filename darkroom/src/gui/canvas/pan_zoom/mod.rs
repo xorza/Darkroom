@@ -8,7 +8,7 @@ use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
-use crate::core::document::{GraphRef, ItemRef, Viewport};
+use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -290,7 +290,7 @@ fn node_bounds(
 ) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in graph.nodes() {
-        if selected_only && !graph.is_selected(ItemRef::Node(n.id)) {
+        if selected_only && !graph.is_selected(n.id) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {

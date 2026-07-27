@@ -1,6 +1,6 @@
 //! Full-resolution viewers for pinned ports' runtime images, one editor tab
 //! per port ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
-//! borrows its port's registered texture from the centralized pinned-output
+//! borrows its node's registered texture from the centralized preview
 //! store and keeps only navigation state. Opening or restoring a tab therefore
 //! shows an already-received value without an editor-driven notification path.
 //!
@@ -160,7 +160,7 @@ impl ImageViewer {
                 },
                 // No image to show. A failure reports its own reason; a
                 // perfectly good non-image value doesn't get one, because
-                // "7" is not what a viewer tab is for — the pin card
+                // "7" is not what a viewer tab is for — the preview card
                 // renders that.
                 None => (
                     None,
