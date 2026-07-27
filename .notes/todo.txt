@@ -22,8 +22,6 @@ Darkroom currently recompiles on every run, so each new compile still needs inst
 
 save caches on cache click
 
-subgraph to newnodeui
-
 resourcestamps  simplify
 
 contextmenu for boundary nodes
@@ -31,9 +29,5 @@ contextmenu for boundary nodes
 imageview to load only when active, until then save to disk
 
 uitest harness internals/test cfg
-
-theme for context menus
-
-right click doent not discard context menu
 
 1. The general answer — what Win32/GTK/Qt/Cocoa do — is key routing: the event goes to the focus owner first, and app-level chords only see what focus didn't consume. Palantir has no bubbling; chords are polled globally with key_pressed and focus is a manual gate. That's a real project, not a fix for this.
