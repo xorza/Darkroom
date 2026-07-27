@@ -575,7 +575,7 @@ async fn pinned_delivery_does_not_create_a_reader() {
 async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     use std::sync::Mutex;
 
-    let seen: Arc<Mutex<Vec<Option<ExecutionNodeId>>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen: Arc<Mutex<Vec<ExecutionNodeId>>> = Arc::new(Mutex::new(Vec::new()));
     let mut p = Prog::default();
     let probe_seen = Arc::clone(&seen);
     let first = async_lambda!(
@@ -600,7 +600,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     let (_cache, _stats) = run(&p.program, &plan).await;
 
     // Index order is id order, and `Prog` mints ascending ids, so `a` runs first.
-    assert_eq!(*seen.lock().unwrap(), vec![Some(a), Some(b)]);
+    assert_eq!(*seen.lock().unwrap(), vec![a, b]);
     assert_ne!(a, b, "the two nodes are distinguishable at all");
 }
 

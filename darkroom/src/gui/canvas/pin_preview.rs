@@ -245,7 +245,7 @@ pub(super) fn draw_widget<'ui>(ui: &'ui mut Ui, theme: &Theme, card: PinCard<'_>
 /// layout + bit depth), and original source size — styled like a node body's
 /// memory footer ([`crate::gui::node::memory_row`]), so every read-only fact
 /// strip in the app reads as the same kind of thing.
-fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &PinnedImage) {
+pub(crate) fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &PinnedImage) {
     Panel::hstack()
         .id_salt("info")
         .size((Sizing::FILL, Sizing::HUG))

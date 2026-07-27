@@ -10,7 +10,7 @@ pub(crate) mod inspector;
 mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
-mod pin_preview;
+pub(crate) mod pin_preview;
 pub(crate) mod pin_ui;
 mod selection_ui;
 mod subscription_ui;

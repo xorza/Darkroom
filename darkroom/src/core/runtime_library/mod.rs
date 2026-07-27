@@ -11,6 +11,7 @@ use crate::core::edit::publish;
 use crate::core::graph_library::GraphLibrary;
 use crate::core::io::graph_library as graph_library_io;
 use crate::core::io::graph_library::{GraphLibraryLoadError, GraphLibrarySaveError};
+use crate::core::preview::{self, PreviewSink};
 
 #[derive(Clone, Debug)]
 pub(crate) struct PublishedLibrary {
@@ -38,6 +39,10 @@ pub(crate) struct RuntimeLibrary {
     pub(crate) published: PublishedLibrary,
     graph_library: GraphLibrary,
     model_paths: MlModelPaths,
+    /// Where the preview func's lambda publishes. Created once and captured by
+    /// every recomposed snapshot, so the values in flight survive a
+    /// graph-library edit rebuilding the registry underneath them.
+    pub(crate) previews: Arc<PreviewSink>,
 }
 
 /// What a graph-library edit did. There is no "changed but unsaved" state:
@@ -63,11 +68,13 @@ impl RuntimeLibrary {
     }
 
     fn with_graph_library(model_paths: &MlModelPaths, graph_library: GraphLibrary) -> Self {
-        let current = Arc::new(compose(model_paths, &graph_library));
+        let previews = Arc::new(PreviewSink::default());
+        let current = Arc::new(compose(model_paths, &graph_library, &previews));
         Self {
             published: PublishedLibrary::new(current.clone()),
             graph_library,
             model_paths: model_paths.clone(),
+            previews,
         }
     }
 
@@ -123,13 +130,22 @@ impl RuntimeLibrary {
     }
 
     fn recompose(&mut self) {
-        let current = Arc::new(compose(&self.model_paths, &self.graph_library));
+        let current = Arc::new(compose(
+            &self.model_paths,
+            &self.graph_library,
+            &self.previews,
+        ));
         self.published.replace(current);
     }
 }
 
-fn compose(model_paths: &MlModelPaths, graph_library: &GraphLibrary) -> ScenariumLibrary {
+fn compose(
+    model_paths: &MlModelPaths,
+    graph_library: &GraphLibrary,
+    previews: &Arc<PreviewSink>,
+) -> ScenariumLibrary {
     let mut library = ScenariumLibrary::default();
+    library.add(preview::preview_func(Arc::clone(previews)));
     library.merge(math_library());
     library.merge(system_library());
     library.merge(worker_events_library());

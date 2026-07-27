@@ -15,6 +15,7 @@ use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::{GraphId, GraphLink};
 
 use crate::core::document::{GraphRef, GraphView, ItemRef, PortKind, PortRef, Viewport};
+use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::run_state::{ExecStatus, RunState};
 
@@ -300,6 +301,11 @@ pub(crate) struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub(crate) exec_status: ExecStatus,
+    /// A preview node: its body shows the value wired into it instead of the
+    /// usual output ports and memory readout. Resolved from the func id, so a
+    /// document whose library lost the func degrades to an ordinary missing
+    /// stub rather than an empty card.
+    pub(crate) preview: bool,
     /// RAM this node's cached output currently holds (system vs GPU), mirrored
     /// from `run_state`. Non-zero only for nodes that retain a value; drives the
     /// node body's memory readout, hidden when zero.
@@ -546,6 +552,8 @@ impl Scene {
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
                     missing: node_interface.missing,
+                    preview: !node_interface.missing
+                        && matches!(node.kind, NodeKind::Func(func_id) if preview::is_preview(func_id)),
                 },
             );
             // A repeat would silently overwrite the earlier graph's entry and
@@ -1194,6 +1202,7 @@ pub(crate) mod internals {
             exec_status: ExecStatus::None,
             ram: RamUsage::default(),
             missing: false,
+            preview: false,
         }
     }
 

@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::DiskStore;
-use scenarium::{CompiledGraph, Compiler, WorkerExited, WorkerReport};
+use scenarium::{
+    CompiledGraph, Compiler, DynamicValue, ExecutionNodeId, WorkerExited, WorkerReport,
+};
 use scenarium::{Graph, GraphDef, NodeId};
 
 use crate::core::document::{Document, GraphRef};
@@ -258,6 +260,17 @@ impl RuntimeHost {
     /// anyway.
     pub(crate) fn drain_worker(&self) -> Vec<WorkerReport> {
         self.worker.drain().collect()
+    }
+
+    /// Non-blocking drain of every preview value the worker's lambdas published
+    /// since the last frame. Empty on an idle frame.
+    ///
+    /// Separate from [`Self::drain_worker`] because it does not travel the
+    /// report stream: a preview node's lambda writes it directly. Ordering
+    /// against the reports does not matter — a value is only ever the *latest*
+    /// for its node, never a step in a sequence.
+    pub(crate) fn drain_previews(&self) -> Vec<(ExecutionNodeId, DynamicValue)> {
+        self.library.previews.drain()
     }
 
     /// Non-blocking drain of everything scripts have pushed since the last

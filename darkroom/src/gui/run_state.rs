@@ -30,6 +30,7 @@ use std::time::Instant;
 
 use palantir::Ui;
 use scenarium::CompiledGraph;
+use scenarium::DynamicValue;
 use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
@@ -375,11 +376,46 @@ impl RunState {
         self.pinned_outputs.ingest(ui, values, document);
     }
 
+    /// Store what preview nodes published this frame, against the authored
+    /// nodes that published them.
+    ///
+    /// Unlike a pinned push, there is nothing to resolve: a preview is
+    /// entry-only, so its execution id attributes to exactly one authored node
+    /// and that node is the widget. A value whose id belongs to an earlier
+    /// compile is dropped — the node it named may not exist any more, and a
+    /// preview only ever shows the current run's value anyway.
+    ///
+    /// Stores only. `Editor::frame` runs the store's one reconcile pass, which
+    /// is what releases a value whose node is gone and uploads a full-resolution
+    /// texture for an open viewer.
+    pub(crate) fn ingest_previews(
+        &mut self,
+        ui: &Ui,
+        published: Vec<(ExecutionNodeId, DynamicValue)>,
+    ) {
+        if published.is_empty() {
+            return;
+        }
+        let Some(compiled) = self.compiled.clone() else {
+            return;
+        };
+        for (e_node_id, value) in published {
+            let Ok(mut attribution) = compiled.attribution(e_node_id) else {
+                continue;
+            };
+            let Some(node_id) = attribution.next() else {
+                continue;
+            };
+            self.pinned_outputs.ingest_preview(ui, node_id, value);
+        }
+    }
+
     /// Drop everything visible from a failed run: no glow, logs, or pinned
     /// values.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.pinned_outputs.entries.clear();
+        self.pinned_outputs.previews.clear();
     }
 }
 
@@ -583,6 +619,44 @@ mod tests {
         // Each instance node carries only its own run.
         assert_eq!(rs.status(inst_a), ExecStatus::Executed(2.0));
         assert_eq!(rs.status(inst_b), ExecStatus::Executed(3.0));
+    }
+
+    /// A published preview value lands on the node that published it, and only
+    /// when a compile can vouch for the id. Nothing to resolve here the way a
+    /// pinned push has: a preview is entry-only, so its execution id attributes
+    /// to exactly one authored node and that node is the widget.
+    #[test]
+    fn a_published_preview_lands_on_its_own_node_once_a_compile_vouches_for_it() {
+        let node = nid(1);
+        let e_node_id = eid(1);
+        let mut arena = UiHarness::arena();
+
+        // Before any install there is nothing to attribute against, so the
+        // value is dropped rather than guessed at.
+        let mut run_state = RunState::default();
+        run_state.ingest_previews(
+            arena.ui(),
+            vec![(e_node_id, DynamicValue::Static(StaticValue::Int(7)))],
+        );
+        assert!(run_state.pinned_outputs.previews.is_empty());
+
+        let mut builder = CompiledGraphBuilder::new();
+        builder.insert_leaf(e_node_id, [], node);
+        run_state.compiled = Some(builder.build());
+        // An id from some other compile has no attribution; it must not panic
+        // the drain, because a re-install can outrace a value already in flight.
+        run_state.ingest_previews(
+            arena.ui(),
+            vec![
+                (e_node_id, DynamicValue::Static(StaticValue::Int(7))),
+                (eid(99), DynamicValue::Static(StaticValue::Int(8))),
+            ],
+        );
+        assert_eq!(run_state.pinned_outputs.previews.len(), 1);
+        assert!(matches!(
+            &run_state.pinned_outputs.previews[&node],
+            StoredContent::Text(text) if text == "7"
+        ));
     }
 
     #[test]

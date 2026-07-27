@@ -88,13 +88,24 @@ impl ContextManager {
     }
 
     /// The node this lambda is running as — the same attribution [`Self::log`]
-    /// stamps its lines with. `None` outside a node invoke.
+    /// stamps its lines with. For a lambda whose effect belongs to one authored
+    /// node rather than to its return value: the only thing in
+    /// [`Invocation`](crate::Invocation) that says *which* node is calling.
     ///
-    /// For a lambda whose effect belongs to one authored node rather than to its
-    /// return value: it is the only thing in [`Invocation`](crate::Invocation)
-    /// that says *which* node is calling.
-    pub fn current_node(&self) -> Option<ExecutionNodeId> {
+    /// Infallible because a lambda is the only place this is reachable, and the
+    /// executor stamps the node immediately before every invoke — clearing it
+    /// only once the whole run loop is done. Panicking here rather than handing
+    /// back an `Option` keeps that invariant stated once, instead of every
+    /// lambda re-deciding what an impossible `None` should mean.
+    ///
+    /// [`Self::log`] reads the field directly for the opposite reason: it is
+    /// *also* callable from outside a run, and a dropped log line is harmless.
+    ///
+    /// # Panics
+    /// Outside a node invoke — on a hand-built manager, or after a run.
+    pub fn current_node(&self) -> ExecutionNodeId {
         self.current_node
+            .expect("current_node is only readable inside a lambda invoke")
     }
 
     /// Emit a log line attributed to the node currently executing, and
@@ -134,13 +145,20 @@ impl ContextManager {
 pub(crate) mod internals {
     use std::any::{Any, TypeId};
 
-    use crate::runtime::context::ContextStore;
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::runtime::context::{ContextManager, ContextStore};
 
     pub fn insert_context<T>(contexts: &mut ContextStore, value: T)
     where
         T: Any + Send + Sync,
     {
         contexts.store.insert(TypeId::of::<T>(), Box::new(value));
+    }
+
+    /// Stand in for the executor's per-invoke attribution, so a lambda that
+    /// reads [`ContextManager::current_node`] can be tested without a run.
+    pub fn set_current_node(ctx: &mut ContextManager, e_node_id: ExecutionNodeId) {
+        ctx.current_node = Some(e_node_id);
     }
 }
 
