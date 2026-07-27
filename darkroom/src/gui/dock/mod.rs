@@ -4,9 +4,10 @@
 //! which stays the caller's. [`DockUi`] is the whole integration
 //! surface, two calls wide:
 //!
-//! - [`DockUi::scan`] in the navigation phase — surfaces tab
-//!   activate/close clicks and drives the drag lifecycle off last
-//!   frame's responses, emitting `UiAction`s.
+//! - [`DockUi::scan`] in the navigation phase — moves focus to the pane
+//!   the pointer pressed in, surfaces tab activate/close clicks, and
+//!   drives the drag lifecycle off last frame's responses, emitting
+//!   `UiAction`s.
 //! - [`DockUi::render`] in the record — walks the split tree (splits as
 //!   palantir `Splitter`s whose ratio drags surface as
 //!   `DockOp::SetRatio`, groups as strip-over-content panes) and,
@@ -95,20 +96,25 @@ pub(crate) struct DockUi {
 }
 
 impl DockUi {
-    /// Navigation-phase scan over last frame's chip responses, one pass
-    /// over every strip: close clicks (which win over activation),
-    /// activation clicks (a graph tab's inner rename label captures
-    /// the click, so its response is polled too), drag arming off
-    /// whichever of the tab's [`strip::drag_handles`] latched — then the
-    /// in-flight drag's lifecycle: cancel on Esc (or the tab vanishing
-    /// under it), and on release resolve the pane under the pointer into
-    /// a [`DockOp::MoveTab`].
+    /// Navigation-phase scan: [`scan_focus`] first (focus follows a press
+    /// into a pane), then one pass over every strip's last-frame chip
+    /// responses — close clicks (which win over activation), activation
+    /// clicks (a graph tab's inner rename label captures the click, so its
+    /// response is polled too), drag arming off whichever of the tab's
+    /// [`strip::drag_handles`] latched — then the in-flight drag's
+    /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
+    /// release resolve the pane under the pointer into a
+    /// [`DockOp::MoveTab`].
     ///
     /// Scanning in the *prepass* (not as record-time pushes) is
     /// load-bearing: the navigation phase settles the new arrangement
     /// before this frame's record, so a switch — or a committed drop —
     /// draws the same frame it lands.
     pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, actions: &mut Vec<UiAction>) {
+        // Ahead of the chip pass: a read-only focus query, and one that only
+        // ever moves `focused`, so it composes with an activation from the
+        // same scan rather than racing it.
+        scan_focus(ui, doc, actions);
         for tab in doc.layout.all_tabs() {
             if strip::closable(tab) && ui.response_for(strip::tab_close_wid(tab)).left.clicked() {
                 actions.push(UiAction::Dock(DockOp::CloseTab { tab }));
@@ -237,10 +243,65 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
     Panel::vstack()
         .id(pane_wid(group.id))
         .size((Sizing::FILL, Sizing::FILL))
+        // Focusable so a press anywhere in the pane that misses every inner
+        // focusable lands here — what [`scan_focus`] reads to move dock
+        // focus. Never a keyboard target in its own right.
+        .focusable(true)
         .show(ui, |ui| {
             strip::show(ui, cx.theme, group, &labels, out);
             content(ui, group.active_tab(), out);
         });
+}
+
+/// Dock focus follows keyboard focus into a pane: whichever pane holds it
+/// becomes the focused group.
+///
+/// [`DockUi::scan`]'s chip pass only covers presses on a *strip*. A press in
+/// a pane's **content** — a node body, bare canvas, an image viewer —
+/// reaches no dock widget at all, so without this the focus stays wherever
+/// the last chip click left it while the user works in another pane, and
+/// everything scoped to [`Document::focused_target`] (Delete, Ctrl+D, Esc,
+/// the Run and node-menu commands) acts on a graph that isn't under the
+/// cursor.
+///
+/// Panes are recorded `focusable`, so palantir's own left-press focus
+/// hit-test does the routing: a press that misses every focusable inside a
+/// pane lands on the pane container, and a press that lands on a `TextEdit`
+/// in there focuses the field while [`Ui::focus_within`] still answers for
+/// the pane. Both are the same question — "which pane did the user reach
+/// into" — and asking it this way inherits occlusion, clipping, layers, and
+/// left-button-only for free. A press outside every pane (the menu bar, the
+/// status bar) focuses nothing and leaves the dock focus alone.
+///
+/// Surfaces [`UiAction::FocusPane`], not a recorded `DockOp` — see
+/// [`DockLayout::focus`] for why this one mutation stays out of the undo
+/// record.
+fn scan_focus(ui: &Ui, doc: &Document, actions: &mut Vec<UiAction>) {
+    if let Some(group) = doc
+        .layout
+        .groups()
+        .find(|g| g.id != doc.layout.focused && ui.focus_within(pane_wid(g.id)))
+    {
+        actions.push(UiAction::FocusPane(group.id));
+    }
+}
+
+/// Whether keyboard focus sits on a widget that owns typing — anything
+/// focused that isn't one of the pane containers.
+///
+/// Panes are focusable so [`scan_focus`] can route dock focus, which leaves
+/// [`Ui::focused_id`] `Some` nearly always. A keyboard chord that must stand
+/// down for a text field (undo, Delete) asks this instead of `focused_id()`,
+/// which would otherwise read as "a field is being edited" whenever any pane
+/// is focused — i.e. always.
+///
+/// Reads "not a pane ⇒ typing" because the pane container is darkroom's only
+/// non-text `focusable`. Marking some other widget focusable without teaching
+/// this predicate about it would silently disable those chords while it holds
+/// focus.
+pub(crate) fn typing_focus_held(ui: &Ui, doc: &Document) -> bool {
+    ui.focused_id()
+        .is_some_and(|id| !doc.layout.groups().any(|g| pane_wid(g.id) == id))
 }
 
 /// The drop the pointer currently indicates: the pane whose rect
@@ -374,6 +435,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::dock::{DockDrop, SplitSide};
     use glam::UVec2;
     use palantir::internals::UiHarness;
 
@@ -449,5 +511,97 @@ mod tests {
         // Main has a plain label and always worked; pinned so a future
         // change can't fix one and break the other.
         assert!(drag_arms_on(&doc, TabRef::Graph(GraphRef::Main)));
+    }
+
+    /// A press in a pane's *content* — no dock widget of its own — moves
+    /// dock focus onto that pane, so every `focused_target`-scoped edit
+    /// (Delete, Ctrl+D, the node menu) acts on the graph under the cursor.
+    ///
+    /// Driven through the real hit-test because that is the whole
+    /// mechanism: the pane container is recorded `focusable`, and palantir's
+    /// left-press focus hit-test is what attributes the press to it. Reading
+    /// `focus_within` in isolation would pin nothing.
+    #[test]
+    fn a_press_in_a_pane_moves_dock_focus_onto_it() {
+        // Two panes: Main in the primary, a subgraph split off to the right
+        // — which takes focus, exactly the saved state a reopened
+        // multi-pane document lands in.
+        let mut doc = Document::default();
+        let local = doc.create_graph(GraphRef::Main).unwrap();
+        let primary = doc.layout.primary().id;
+        let subgraph = TabRef::Graph(GraphRef::Local(local));
+        doc.layout.find_or_insert(subgraph, primary);
+        doc.layout.apply(DockOp::MoveTab {
+            tab: subgraph,
+            to: DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        });
+        let split_off = doc.layout.focused;
+        assert_ne!(split_off, primary, "the split pane starts focused");
+
+        // `doc` is a parameter rather than a capture: the second half
+        // mutates the layout between scans.
+        fn context<'a>(
+            doc: &'a Document,
+            theme: &'a Theme,
+            viewer_labels: &'a HashMap<NodeId, String>,
+        ) -> DockContext<'a> {
+            DockContext {
+                doc,
+                theme,
+                viewer_labels,
+            }
+        }
+        let theme = Theme::default();
+        let labels = HashMap::new();
+        let mut dock = DockUi::default();
+        let mut h = UiHarness::with_text(UVec2::new(800, 400));
+        h.prime(2, |ui| {
+            let cx = context(&doc, &theme, &labels);
+            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
+        });
+
+        let scanned = |h: &mut UiHarness, dock: &mut DockUi, doc: &Document| {
+            h.frame_value(|ui| {
+                let cx = context(doc, &theme, &labels);
+                dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
+                let mut actions = Vec::new();
+                dock.scan(ui, doc, &mut actions);
+                (actions, typing_focus_held(ui, doc))
+            })
+        };
+
+        // Press into the unfocused pane's body. Its content records nothing,
+        // so this is a press that reaches no dock widget at all — the case
+        // the chip scan can't see. By position rather than `press_on`: a
+        // pane senses nothing (it is focusable only), so there is no pointer
+        // target at its center to aim at.
+        h.press_at(h.center_of(pane_wid(primary)));
+        let (actions, typing) = scanned(&mut h, &mut dock, &doc);
+        assert_eq!(
+            actions,
+            vec![UiAction::FocusPane(primary)],
+            "the press resolves to exactly one focus request, on the pane it \
+             landed in"
+        );
+        assert!(
+            !typing,
+            "a focused pane is not a text field — the Delete/undo chords \
+             must stay live"
+        );
+
+        // Apply it, as `apply_view_actions` would, and the same press now
+        // resolves to nothing: clicking around inside the focused pane
+        // costs nothing per frame.
+        doc.layout.focus(primary);
+        assert_eq!(doc.layout.focused, primary);
+        h.press_at(h.center_of(pane_wid(primary)));
+        let (actions, _) = scanned(&mut h, &mut dock, &doc);
+        assert!(
+            actions.is_empty(),
+            "a press in the already-focused pane changes nothing: {actions:?}"
+        );
     }
 }

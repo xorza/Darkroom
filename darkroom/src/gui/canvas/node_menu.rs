@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use palantir::{MenuItem, Ui};
 use scenarium::NodeId;
 
+use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
@@ -21,7 +22,11 @@ use crate::gui::scene::GraphScene;
 #[derive(Default, Debug)]
 pub(super) struct NodeMenuUi {
     menu: AnchoredMenu,
-    action: Option<NodeMenuAction>,
+    /// The pick and the pane it was made in. The pane travels with it
+    /// because the `Editor` resolves the action against *that* graph's
+    /// selection — reading the focused target instead would act on another
+    /// pane whenever the menu and the focus disagree.
+    action: Option<(NodeMenuAction, GraphRef)>,
     /// Node whose body opened the menu — the "Run to this node" target,
     /// which is the clicked node regardless of the selection. Set at open,
     /// read at pick (same latch as the graph menu's).
@@ -120,17 +125,19 @@ impl NodeMenuUi {
         match pick {
             Some(MenuChoice::Run(node_id)) => Some(AppCommand::Run(RunCommand::Node(node_id))),
             Some(MenuChoice::Action(action)) => {
-                self.action = Some(action);
+                // `AnchoredMenu::show` answers `Some` only for the pane that
+                // opened the menu, so this is that pane.
+                self.action = Some((action, graph.target()));
                 None
             }
             None => None,
         }
     }
 
-    /// Take the structural action picked since the last call, if any. The
-    /// `Editor` drains this each frame and resolves it against the live
-    /// selection.
-    pub(super) fn take_action(&mut self) -> Option<NodeMenuAction> {
+    /// Take the structural action picked since the last call, with the pane
+    /// it was picked in. The `Editor` drains this each frame and resolves it
+    /// against that pane's live selection.
+    pub(super) fn take_action(&mut self) -> Option<(NodeMenuAction, GraphRef)> {
         self.action.take()
     }
 }

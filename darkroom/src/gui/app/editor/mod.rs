@@ -351,9 +351,7 @@ impl Editor {
         // available to build the duplicate / removal intents against the
         // live selection (the canvas gesture only sees the read-only Scene).
         // Pushed before the post-record drain so it lands this frame.
-        if let Some(action) = self.main_window.graph_ui.take_node_menu_action()
-            && let Some(target) = open.document.focused_target()
-        {
+        if let Some((action, target)) = self.main_window.graph_ui.take_node_menu_action() {
             self.apply_node_menu_action(open, action, target);
         }
 
@@ -375,10 +373,12 @@ impl Editor {
     }
 
     /// Resolve a node context-menu pick against `target`'s live selection
-    /// (right-click already selected the clicked node). Duplicate variants
-    /// reuse the Ctrl+D builder; Remove mirrors the
-    /// Delete-key path — one intent per selected member, batched into a
-    /// single undo entry by the post-record drain.
+    /// (right-click already selected the clicked node). `target` is the pane
+    /// the menu was opened in, carried on the pick — the selection it reads
+    /// and the intents it queues must name the same graph. Duplicate
+    /// variants reuse the Ctrl+D builder; Remove mirrors the Delete-key path
+    /// — one intent per selected member, batched into a single undo entry by
+    /// the post-record drain.
     fn apply_node_menu_action(
         &mut self,
         open: &OpenDocument,
@@ -388,21 +388,19 @@ impl Editor {
         let Some(view) = open.document.view(target) else {
             return;
         };
-        match action {
+        let document = &open.document;
+        self.intents.for_graph(target, |out| match action {
             NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
                 let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
                 let node_ids = selected_node_ids(view);
                 if let Some(intent) =
-                    build_duplicate_intent_for(&open.document, target, &node_ids, incoming)
+                    build_duplicate_intent_for(document, target, &node_ids, incoming)
                 {
-                    self.intents.push(intent);
+                    out.push(intent);
                 }
             }
-            NodeMenuAction::Remove => {
-                self.intents
-                    .extend(remove_selection_intents(&view.selected));
-            }
-        }
+            NodeMenuAction::Remove => out.extend(remove_selection_intents(&view.selected)),
+        });
     }
 
     /// Settle which graph is active for this frame, from inputs all
@@ -510,12 +508,16 @@ impl Editor {
     /// strip is the only non-undoable part of opening; the focus change it
     /// implies, plus activate and close, are queued as `Intent::Dock` ops
     /// so they join the undo history (their relayout is decided later,
-    /// when they drain).
+    /// when they drain). `FocusPane` is the one exception — pointer-driven
+    /// focus writes straight through (see `DockLayout::focus`).
     fn apply_view_actions(&mut self, open: &mut OpenDocument) {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(open, target),
                 UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
+                UiAction::FocusPane(group) => {
+                    open.document.layout.focus(group);
+                }
                 UiAction::NewGraph => {
                     // Creating the graph + instance isn't undoable (no undo
                     // history references the fresh graph, so the stack stays
@@ -878,6 +880,149 @@ mod tests {
                 .graph
                 .find(root_node, NodeSearch::TopLevel)
                 .is_none()
+        );
+    }
+
+    /// A node context-menu pick acts on the pane the menu was raised in —
+    /// both halves: the selection it reads and the graph it queues against.
+    /// Reading `focused_target()` instead removed nothing, because the
+    /// focused pane's selection is empty; queuing without that pane's scope
+    /// aimed the removal at `Main`, which refuses a node it doesn't hold.
+    #[test]
+    fn a_node_menu_pick_acts_on_its_own_pane_not_the_focused_one() {
+        use crate::gui::canvas::node_menu::NodeMenuAction;
+
+        let mut test = TestEditor::new(Document::default());
+        let local = test.open.document.create_graph(GraphRef::Main).unwrap();
+        let nested = GraphRef::Local(local);
+
+        // One selected node per pane, so acting on the wrong one is visible
+        // rather than a silent no-op.
+        let seed = |test: &mut TestEditor, target| {
+            let scope = test.open.document.scope_mut(target).unwrap();
+            let id = scope.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+            scope.view.item_placements.insert(id, Vec2::ZERO);
+            scope.view.selected = BTreeSet::from([id]);
+            id
+        };
+        let root_node = seed(&mut test, GraphRef::Main);
+        let local_node = seed(&mut test, nested);
+
+        // Focus sits on the nested pane while the menu is raised over the
+        // root one.
+        test.open_graph(nested);
+        assert_eq!(test.open.document.focused_target(), Some(nested));
+        test.editor
+            .apply_node_menu_action(&test.open, NodeMenuAction::Remove, GraphRef::Main);
+        test.editor.drain_intents(&mut test.open);
+        assert!(
+            test.open
+                .document
+                .graph
+                .find(root_node, NodeSearch::TopLevel)
+                .is_none(),
+            "the menu's own pane lost its selected node"
+        );
+        assert!(
+            test.open
+                .document
+                .graph
+                .find_graph(local)
+                .unwrap()
+                .body
+                .find(local_node, NodeSearch::TopLevel)
+                .is_some(),
+            "the focused pane's selection was untouched"
+        );
+
+        // And the other way round: focus on Main, menu raised in the nested
+        // pane. The intents must be queued against that pane too — aimed at
+        // `Main` they'd name a node it doesn't hold and be refused.
+        test.open_graph(GraphRef::Main);
+        assert_eq!(test.open.document.focused_target(), Some(GraphRef::Main));
+        test.editor
+            .apply_node_menu_action(&test.open, NodeMenuAction::Remove, nested);
+        test.editor.drain_intents(&mut test.open);
+        assert!(
+            test.open
+                .document
+                .graph
+                .find_graph(local)
+                .unwrap()
+                .body
+                .find(local_node, NodeSearch::TopLevel)
+                .is_none(),
+            "the nested pane's selected node was removed"
+        );
+    }
+
+    /// Focus that merely follows a press into a pane is applied straight to
+    /// the layout, never recorded.
+    ///
+    /// Recording it would spring a trap, because `navigate` runs undo, the
+    /// dock scan, and the drain in that order within one frame: keyboard
+    /// focus is sticky, so an undo restoring the old focus would be
+    /// re-applied by the very next scan — the undo would appear to do
+    /// nothing *and* `push_current` would discard the redo tail. It would
+    /// also mean an undo entry per click into another pane.
+    #[test]
+    fn pointer_driven_pane_focus_stays_out_of_the_undo_history() {
+        use crate::core::document::dock::{DockDrop, DockOp, SplitSide};
+
+        let mut test = TestEditor::new(Document::default());
+        let local = test.open.document.create_graph(GraphRef::Main).unwrap();
+        let layout = &mut test.open.document.layout;
+        let primary = layout.primary().id;
+        let subgraph = TabRef::Graph(GraphRef::Local(local));
+        layout.find_or_insert(subgraph, primary);
+        layout.apply(DockOp::MoveTab {
+            tab: subgraph,
+            to: DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        });
+        assert_ne!(layout.focused, primary, "the split pane starts focused");
+
+        // One real edit, then a pointer-driven focus change onto the other
+        // pane — the exact order that makes a recorded focus entry bury the
+        // edit one Ctrl+Z deeper.
+        let node = NodeId::unique();
+        test.editor.intents.for_graph(GraphRef::Main, |out| {
+            out.push(Intent::AddNode {
+                pos: Vec2::ZERO,
+                node_id: node,
+                node: Node::new(NodeKind::Func(FuncId::unique())),
+                bindings: vec![],
+            });
+        });
+        test.editor.drain_intents(&mut test.open);
+        test.editor.actions.push(UiAction::FocusPane(primary));
+        test.editor.apply_view_actions(&mut test.open);
+        test.editor.drain_intents(&mut test.open);
+        assert_eq!(
+            test.open.document.layout.focused, primary,
+            "the press moved dock focus"
+        );
+
+        // The first undo reaches the *edit*, not a focus entry.
+        assert!(test.undo());
+        assert!(
+            test.open
+                .document
+                .graph
+                .find(node, NodeSearch::TopLevel)
+                .is_none(),
+            "one Ctrl+Z undoes the edit — no focus entry in front of it"
+        );
+        assert!(!test.undo(), "and nothing else was recorded");
+        assert!(test.redo(), "the redo tail survived");
+        assert!(
+            test.open
+                .document
+                .graph
+                .find(node, NodeSearch::TopLevel)
+                .is_some()
         );
     }
 

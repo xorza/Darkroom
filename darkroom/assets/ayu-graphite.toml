@@ -788,7 +788,7 @@ min_width = 160.0
 separator = "#aaaaa82e"
 
 [palantir_theme.context_menu.panel]
-corners = 6.0
+corners = 4.0
 
 [palantir_theme.context_menu.panel.fill]
 Solid = "#343434"
@@ -797,9 +797,16 @@ Solid = "#343434"
 color = "#aaaaa838"
 width = 1.0
 
+[palantir_theme.context_menu.panel.shadow]
+color = "#00000080"
+offset = [0.0, 3.0]
+blur = 6.0
+spread = 0.0
+inset = false
+
 [palantir_theme.context_menu.item]
 shortcut = "#aaaaa8"
-padding = [10.0, 6.0]
+padding = [8.0, 5.0]
 
 [palantir_theme.context_menu.item.normal.text]
 font_size_px = 13.0
@@ -809,7 +816,7 @@ family = "Sans"
 weight = "Regular"
 
 [palantir_theme.context_menu.item.hovered.background]
-corners = 4.0
+corners = 3.0
 
 [palantir_theme.context_menu.item.hovered.background.fill]
 Solid = "#3e3e3e"
@@ -822,7 +829,7 @@ family = "Sans"
 weight = "Regular"
 
 [palantir_theme.context_menu.item.active.background]
-corners = 4.0
+corners = 3.0
 
 [palantir_theme.context_menu.item.active.background.fill]
 Solid = "#3e3e3e"

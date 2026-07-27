@@ -31,3 +31,7 @@ contextmenu for boundary nodes
 imageview to load only when active, until then save to disk
 
 uitest harness internals/test
+
+theme for context menus
+
+right click doent not discard context menu
