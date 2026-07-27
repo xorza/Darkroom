@@ -291,7 +291,7 @@ impl PinUi {
     /// [`Self::resolve`] already recorded whatever this pass crossed, and
     /// this half only paints the result.
     pub(super) fn draw_wires(&self, ui: &mut Ui, pass: &WirePass<'_, '_>) {
-        let (theme, graph, geometry) = (pass.theme, pass.graph, pass.geometry);
+        let (theme, graph, geometry) = (pass.rcx.theme, pass.rcx.graph, pass.rcx.geometry);
         // Iterating the scene rather than `self.pins` keeps the paint order
         // deterministic; the map is a lookup, not a sequence.
         for pin in graph.pinned_outputs() {

@@ -13,9 +13,7 @@ use palantir::{Color, CurveBrush, LineCap, Rect, Shape, Size, Ui};
 
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::scene::GraphScene;
-use crate::gui::theme::Theme;
+use crate::gui::node::RecordCtx;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
@@ -119,15 +117,21 @@ impl Wire {
 }
 
 /// The per-frame inputs all three wire renderers need, bundled so each
-/// `draw` takes one argument instead of six ([`crate::gui::node::RecordCtx`]
-/// is the same pattern). Built once in [`crate::gui::canvas::GraphUI::draw`]
-/// and passed by `&mut`, so the breaker probe reborrows into each renderer
-/// in turn.
+/// `draw` takes one argument instead of six. Built once in
+/// [`crate::gui::canvas::GraphUI::record_canvas`] and passed by `&mut`, so
+/// the breaker probe reborrows into each renderer in turn.
+///
+/// The pane-wide half is [`RecordCtx`] itself, not a re-declaration of its
+/// fields: the wires record in the same pass as the node bodies they run
+/// between, off the same theme, pane, and geometry, and `WirePass` was built
+/// two lines from a live `RecordCtx`. What's left here is what only a wire
+/// pass has — the cull region, the breaker probe it marks hits against, and
+/// this frame's emphasis tier.
 #[derive(Debug)]
 pub(super) struct WirePass<'a, 'p> {
-    pub(super) theme: &'a Theme,
-    pub(super) graph: GraphScene<'a>,
-    pub(super) geometry: &'a CanvasGeometry,
+    /// Shared with the node-body and pin-card draws — `Copy`, so it rides
+    /// along by value.
+    pub(super) rcx: RecordCtx<'a>,
     pub(super) cull: CullRegion,
     pub(super) probe: &'a mut BreakerProbe<'p>,
     pub(super) emphasis: &'a WireEmphasis,
@@ -151,7 +155,7 @@ impl WirePass<'_, '_> {
         let broken = self.probe.crosses_wire(wire);
         Some(
             self.emphasis
-                .stroke(self.theme.connection_width, broken, endpoint_hover),
+                .stroke(self.rcx.theme.connection_width, broken, endpoint_hover),
         )
     }
 }
