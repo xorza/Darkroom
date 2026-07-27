@@ -429,7 +429,7 @@ pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
 }
 
 /// Stable id for a node's floating inspection panel.
-fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
+pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.inspect_panel", node_id))
 }
 
