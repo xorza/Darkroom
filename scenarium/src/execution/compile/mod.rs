@@ -42,14 +42,6 @@ pub struct CompiledGraph {
 }
 
 impl CompiledGraph {
-    /// Return the authored leaf node that produced one execution node.
-    pub fn leaf(&self, e_node_id: ExecutionNodeId) -> Result<NodeId, ExecutionIdentityError> {
-        Ok(self
-            .attribution(e_node_id)?
-            .next()
-            .expect("execution attribution must start with its authored leaf"))
-    }
-
     /// Attribute one flat execution id to its authored node followed by every
     /// enclosing graph instance, innermost first.
     pub fn attribution(
@@ -77,26 +69,6 @@ impl CompiledGraph {
             e_node_id,
             port_idx,
         })
-    }
-
-    /// Every execution node an authored node covers — its *footprint*.
-    ///
-    /// A leaf in the entry graph covers itself; a leaf inside a definition
-    /// covers one occurrence per instance of that definition; a graph
-    /// instance covers its whole flattened interior. The inverse of
-    /// [`Self::attribution`], and the only supported way to go from an
-    /// authored id to execution ids: a composite dissolves at flatten time
-    /// and has no execution id of its own, so *deriving* one
-    /// ([`ExecutionNodeId::from_authoring`]) answers only for a top-level
-    /// leaf, while this answers for every authored node.
-    ///
-    /// Ascending id order, like [`Self::data_consumer_closure`].
-    pub fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
-        let program = &self.program;
-        self.footprint(|covered| covered == node_id)
-            .iter()
-            .map(|node_idx| program.e_node_ids[node_idx])
-            .collect()
     }
 
     /// Whether an authored node performs sink work — runs for its effect
@@ -200,8 +172,18 @@ impl CompiledGraph {
     }
 
     /// Every execution node whose attribution names an authored node `covers`
-    /// accepts — the shared walk behind [`Self::occurrences`],
-    /// [`Self::run_targets`], and [`Self::data_consumer_closure`].
+    /// accepts — an authored node's *footprint*, and the one relation behind
+    /// [`Self::run_targets`], [`Self::any_occurrence`], and
+    /// [`Self::data_consumer_closure`]. Each of those is this filtered a
+    /// different way; none of them needs to know a node's kind.
+    ///
+    /// A leaf in the entry graph covers itself; a leaf inside a definition
+    /// covers one occurrence per instance of that definition; a graph
+    /// instance covers its whole flattened interior. It is the inverse of
+    /// [`Self::attribution`], and the only way from an authored id to
+    /// execution ids: a composite dissolves at flatten time and has no id of
+    /// its own, so *deriving* one ([`ExecutionNodeId::from_authoring`])
+    /// answers for a top-level leaf and nothing else.
     ///
     /// Attribution yields the authored leaf followed by each enclosing
     /// instance, so testing every element is what makes a graph instance
@@ -298,6 +280,23 @@ pub(crate) mod internals {
     use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort, FlattenMap};
     use crate::execution::program::ExecutionProgram;
     use crate::graph::{NodeId, OutputPort};
+
+    impl CompiledGraph {
+        /// Every execution node an authored node covers, in ascending id
+        /// order — [`CompiledGraph::footprint`] spelled out.
+        ///
+        /// Production never needs the set itself, only the questions asked of
+        /// it (`run_targets`, `is_sink`, `is_impure`, `data_consumer_closure`),
+        /// so this exists to test the relation those four share once rather
+        /// than four times through their filters.
+        pub fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
+            let program = &self.program;
+            self.footprint(|covered| covered == node_id)
+                .iter()
+                .map(|node_idx| program.e_node_ids[node_idx])
+                .collect()
+        }
+    }
 
     #[derive(Debug)]
     pub struct CompiledGraphBuilder {

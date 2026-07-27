@@ -99,7 +99,7 @@ pub(crate) struct SceneLocalDef {
     pub(crate) category: InternedStr,
     /// Library entry this definition was copied from, if any. The palette
     /// drops the library's own row for it: clicking either one instances
-    /// *this* definition (`build::reuse_local_graph`), so two rows would
+    /// *this* definition (`build::local_graph_from`), so two rows would
     /// offer one outcome under one name.
     pub(crate) origin: Option<GraphId>,
 }
@@ -299,9 +299,10 @@ pub(crate) struct SceneNode {
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
     pub(crate) missing: bool,
-    /// Whether this node's graph has an exact identity in the root compiled
-    /// program — mirrored from [`SceneGraph::run_available`] so the header
-    /// scan can gate the play chip without resolving the owning pane.
+    /// Whether a run raised over this node's pane resolves to one occurrence
+    /// — mirrored from [`SceneGraph::run_available`] so the header scan can
+    /// gate the play chip without resolving the owning pane. False in a
+    /// definition pane, which is no particular instance of that definition.
     pub(crate) run_available: bool,
 }
 
@@ -455,8 +456,10 @@ impl Scene {
             view,
         } = projection;
         let (graph, interface) = (source.graph(), source.interface());
-        // Only the document root has an exact occurrence in the compiled
-        // program; a local definition pane lacks an enclosing instance path.
+        // A definition pane is no particular instance of that definition, so
+        // a node there has an occurrence per instance and a run raised over
+        // the pane has no single one to target. Same reason a pin there
+        // delivers nothing — see `CompiledGraph::pinned_ports`.
         let run_available = target == GraphRef::Main;
 
         // `GraphView::selected` is a `BTreeSet`, so this lands sorted —
