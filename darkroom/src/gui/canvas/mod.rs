@@ -196,11 +196,10 @@ impl GraphUI {
         self.gestures
             .connection_ui
             .apply(ui, scene, &self.geometry, resume, out);
-        // Cmd+drag from an output port pins it — same pre-record timing as
-        // the connection/subscription gestures above, for the same reasons.
-        // Subscription wires (emitter → subscriber) latch/commit here too,
-        // for the same pre-record reasons; an emitter glyph and a data port
-        // can't both latch (different widget-id spaces).
+        // Subscription wires (emitter → subscriber) latch/commit here, for
+        // the same pre-record reasons as the connection gesture above; an
+        // emitter glyph and a data port can't both latch (different widget-id
+        // spaces).
         self.gestures
             .subscription_ui
             .apply(ui, scene, &self.geometry, out);
