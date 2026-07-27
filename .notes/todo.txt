@@ -31,3 +31,7 @@ imageview to load only when active, until then save to disk
 uitest harness internals/test cfg
 
 1. The general answer — what Win32/GTK/Qt/Cocoa do — is key routing: the event goes to the focus owner first, and app-level chords only see what focus didn't consume. Palantir has no bubbling; chords are polled globally with key_pressed and focus is a manual gate. That's a real project, not a fix for this.
+pub(crate) fn typing_focus_held(ui: &Ui, doc: &Document) -> bool {
+    ui.focused_id()
+        .is_some_and(|id| !doc.layout.groups().any(|g| pane_wid(g.id) == id))
+}
