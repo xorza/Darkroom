@@ -294,6 +294,59 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
     assert!(compiled.run_targets(f.boundary).is_empty());
 }
 
+#[test]
+fn sink_work_folds_over_a_nodes_footprint_rather_than_its_port_arity() {
+    let f = nested_fixture();
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+
+    // A func answers from its own declaration, either way.
+    assert_eq!(compiled.is_sink(f.consumer), Some(true));
+    assert_eq!(compiled.is_sink(f.printer), Some(true));
+    assert_eq!(compiled.is_sink(f.relay), Some(false));
+
+    // The instance exposes an output *and* contains a sink. Port arity says
+    // "not a sink"; its interior says otherwise, and the interior is what a
+    // sinks run reaches and what disabling the instance governs.
+    assert!(
+        !f.graph
+            .find_graph(f.nested_id)
+            .unwrap()
+            .interface
+            .outputs
+            .is_empty(),
+        "the fixture instance exposes an output, or this proves nothing"
+    );
+    assert_eq!(compiled.is_sink(f.instance), Some(true));
+
+    // Nothing to fold: boundary nodes emit no work, and neither does a node
+    // this program never saw. The caller keeps its own reading.
+    assert_eq!(compiled.is_sink(f.boundary), None);
+    assert_eq!(compiled.is_sink(NodeId::unique()), None);
+
+    // A composite holding no sink is not one.
+    let sinkless = {
+        use crate::graph::{Binding, InputPort};
+        use crate::node::definition::FuncOutput;
+
+        let mut nested =
+            GraphDef::new("Sinkless").output(FuncOutput::new("out", crate::DataType::Int));
+        let boundary = nested
+            .body
+            .add(crate::graph::Node::new(crate::graph::NodeKind::GraphOutput));
+        let source = nested.body.add(f.library.by_name("get_b").unwrap().into());
+        nested
+            .body
+            .set_input_binding(InputPort::new(boundary, 0), Binding::bind(source, 0));
+        let nested_id = GraphId::unique();
+        let mut graph = Graph::default();
+        let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+        graph.insert_graph(nested_id, nested);
+        let compiled = Compiler::default().compile(&graph, &f.library).unwrap();
+        compiled.is_sink(instance)
+    };
+    assert_eq!(sinkless, Some(false));
+}
+
 /// Whether one flat output slot is marked for delivery.
 fn slot_pinned(compiled: &CompiledGraph, e_node_id: ExecutionNodeId, port_idx: usize) -> bool {
     let outputs = compiled.program.by_id(e_node_id).outputs;
