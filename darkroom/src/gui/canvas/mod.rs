@@ -14,6 +14,8 @@ mod pin_preview;
 pub(crate) mod pin_ui;
 mod selection_ui;
 mod subscription_ui;
+#[cfg(test)]
+mod tests;
 pub(crate) mod wire;
 
 use glam::Vec2;
