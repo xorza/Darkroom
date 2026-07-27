@@ -186,7 +186,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                     "badge_impure",
                     "~",
                     theme.colors.badge_impure,
-                    "Impure — recomputes every run, never cached",
+                    "Impure — holds work that recomputes every run, never cached",
                 )
                 .show(ui);
             }

@@ -295,18 +295,22 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
 }
 
 #[test]
-fn sink_work_folds_over_a_nodes_footprint_rather_than_its_port_arity() {
+fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     let f = nested_fixture();
     let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
 
-    // A func answers from its own declaration, either way.
+    // A func answers from its own declaration. `Print` is a sink and, like
+    // every func that doesn't declare `.pure()`, impure; `sum` is neither.
     assert_eq!(compiled.is_sink(f.consumer), Some(true));
-    assert_eq!(compiled.is_sink(f.printer), Some(true));
+    assert_eq!(compiled.is_impure(f.consumer), Some(true));
     assert_eq!(compiled.is_sink(f.relay), Some(false));
+    assert_eq!(compiled.is_impure(f.relay), Some(false));
 
-    // The instance exposes an output *and* contains a sink. Port arity says
-    // "not a sink"; its interior says otherwise, and the interior is what a
-    // sinks run reaches and what disabling the instance governs.
+    // The instance exposes an output *and* wraps `Print`. Nothing about its
+    // own shape says either fact: port arity says "not a sink", and it has no
+    // declaration at all to be impure by. Its interior says both — and the
+    // interior is what a sinks run reaches, what disabling it suppresses, and
+    // what stops its result being reusable.
     assert!(
         !f.graph
             .find_graph(f.nested_id)
@@ -317,22 +321,24 @@ fn sink_work_folds_over_a_nodes_footprint_rather_than_its_port_arity() {
         "the fixture instance exposes an output, or this proves nothing"
     );
     assert_eq!(compiled.is_sink(f.instance), Some(true));
+    assert_eq!(compiled.is_impure(f.instance), Some(true));
 
     // Nothing to fold: boundary nodes emit no work, and neither does a node
     // this program never saw. The caller keeps its own reading.
     assert_eq!(compiled.is_sink(f.boundary), None);
+    assert_eq!(compiled.is_impure(f.boundary), None);
     assert_eq!(compiled.is_sink(NodeId::unique()), None);
+    assert_eq!(compiled.is_impure(NodeId::unique()), None);
 
-    // A composite holding no sink is not one.
-    let sinkless = {
-        use crate::graph::{Binding, InputPort};
+    // A composite wrapping neither is neither — the fold reports what is
+    // there, it doesn't assume composites are special.
+    let plain = {
+        use crate::data::type_system::DataType;
+        use crate::graph::{Binding, InputPort, Node, NodeKind};
         use crate::node::definition::FuncOutput;
 
-        let mut nested =
-            GraphDef::new("Sinkless").output(FuncOutput::new("out", crate::DataType::Int));
-        let boundary = nested
-            .body
-            .add(crate::graph::Node::new(crate::graph::NodeKind::GraphOutput));
+        let mut nested = GraphDef::new("Plain").output(FuncOutput::new("out", DataType::Int));
+        let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
         let source = nested.body.add(f.library.by_name("get_b").unwrap().into());
         nested
             .body
@@ -342,9 +348,9 @@ fn sink_work_folds_over_a_nodes_footprint_rather_than_its_port_arity() {
         let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
         graph.insert_graph(nested_id, nested);
         let compiled = Compiler::default().compile(&graph, &f.library).unwrap();
-        compiled.is_sink(instance)
+        (compiled.is_sink(instance), compiled.is_impure(instance))
     };
-    assert_eq!(sinkless, Some(false));
+    assert_eq!(plain, (Some(false), Some(false)));
 }
 
 /// Whether one flat output slot is marked for delivery.

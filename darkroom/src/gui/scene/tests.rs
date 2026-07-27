@@ -557,7 +557,7 @@ fn subscriptions_project_from_graph() {
 }
 
 #[test]
-fn a_composites_sink_flag_comes_from_its_interior_once_compiled() {
+fn a_composites_marker_flags_come_from_its_interior_once_compiled() {
     use scenarium::testing::{TestFuncHooks, test_func_lib};
     use scenarium::{Binding, Compiler, FuncOutput};
     use std::sync::Arc;
@@ -589,14 +589,14 @@ fn a_composites_sink_flag_comes_from_its_interior_once_compiled() {
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
     rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
+    let node = scene.graph(GraphRef::Main).unwrap().node(instance).unwrap();
     assert!(
-        !scene
-            .graph(GraphRef::Main)
-            .unwrap()
-            .node(instance)
-            .unwrap()
-            .sink,
+        !node.sink,
         "with no program to fold, an instance with outputs reads as a non-sink"
+    );
+    assert!(
+        !node.impure,
+        "and as pure — a composite has no declaration of its own to read"
     );
 
     // Compiled, the interior answers instead.
@@ -619,6 +619,15 @@ fn a_composites_sink_flag_comes_from_its_interior_once_compiled() {
         node.can_disable(),
         "which is what puts the disable toggle on it"
     );
+    assert!(
+        node.impure,
+        "and the interior `Print` — impure, like any func not declaring `.pure()` — \
+         makes the instance's result unreusable"
+    );
+    // The storage chips were never the impure marker's business for a
+    // composite: they are absent because its storage is the interior's, and
+    // eviction stays offered either way.
+    assert!(!node.cache_controls && node.can_evict_cache);
 }
 
 #[test]
