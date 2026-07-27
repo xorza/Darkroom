@@ -34,6 +34,8 @@ use crate::gui::app::AppContext;
 /// Keyboard chords → intents/commands. A child module so it can drive the
 /// pipeline through `Editor`'s private fields (undo stack, intent buffer,
 /// dirty flags) without widening their visibility.
+#[cfg(test)]
+pub(crate) mod harness;
 mod shortcuts;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
@@ -143,7 +145,7 @@ pub(crate) struct Editor {
 
 impl Editor {
     /// Build fresh GUI editing state for an open document.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             dirty: false,
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
@@ -266,7 +268,7 @@ impl Editor {
     /// graph), because input that switches tabs/opens graphs comes from
     /// *last* frame's click responses and must resolve before anything
     /// edits or records.
-    pub(super) fn frame(
+    pub(crate) fn frame(
         &mut self,
         open: &mut OpenDocument,
         ui: &mut Ui,

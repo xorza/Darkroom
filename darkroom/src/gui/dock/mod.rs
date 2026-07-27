@@ -19,7 +19,7 @@
 //! pure pointer→drop-zone math).
 
 mod drag;
-mod strip;
+pub(crate) mod strip;
 
 use std::borrow::Cow;
 use std::collections::HashMap;

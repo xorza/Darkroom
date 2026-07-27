@@ -83,7 +83,7 @@ pub(super) fn drag_handles(tab: TabRef) -> impl Iterator<Item = WidgetId> {
 /// response. Keyed on the tab, not its strip slot: the prepass reads
 /// *last* frame's response, and undo can have rearranged the strip since,
 /// so a slot-keyed id would hand one chip's click to another tab.
-pub(super) fn tab_chip_wid(tab: TabRef) -> WidgetId {
+pub(crate) fn tab_chip_wid(tab: TabRef) -> WidgetId {
     WidgetId::from_hash(("dock.tab", tab))
 }
 
