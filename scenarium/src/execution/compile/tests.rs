@@ -185,6 +185,7 @@ fn data_consumer_closure_targets_one_instance_or_every_shared_definition_occurre
 struct NestedFixture {
     library: Library,
     graph: Graph,
+    nested_id: GraphId,
     instance: NodeId,
     boundary: NodeId,
     source: NodeId,
@@ -224,6 +225,7 @@ fn nested_fixture() -> NestedFixture {
     NestedFixture {
         library,
         graph,
+        nested_id,
         instance,
         boundary,
         source,
@@ -290,6 +292,93 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
 
     // Nothing to seed for a node with no footprint.
     assert!(compiled.run_targets(f.boundary).is_empty());
+}
+
+/// Whether one flat output slot is marked for delivery.
+fn slot_pinned(compiled: &CompiledGraph, e_node_id: ExecutionNodeId, port_idx: usize) -> bool {
+    let outputs = compiled.program.by_id(e_node_id).outputs;
+    compiled.program.outputs[outputs][port_idx].pinned
+}
+
+#[test]
+fn a_pinned_instance_port_delivers_from_the_interior_slot_backing_it() {
+    use crate::graph::OutputPort;
+
+    let mut f = nested_fixture();
+    let instance_port = OutputPort::new(f.instance, 0);
+    f.graph.set_output_pinned(instance_port, true);
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+    let backing = ExecutionNodeId::from_authoring(&[f.instance, f.relay]);
+
+    // The instance is gone from the program, so the slot marked is the
+    // interior producer wired to its `GraphOutput` — and the value it
+    // delivers is addressed back to the port the document actually pins.
+    assert!(slot_pinned(&compiled, backing, 0));
+    assert_eq!(compiled.pinned_ports(backing, 0), [instance_port]);
+    assert!(
+        compiled
+            .pinned_ports(ExecutionNodeId::from_authoring(&[f.instance, f.source]), 0)
+            .is_empty(),
+        "an unpinned interior producer delivers nothing"
+    );
+
+    // Pinning the interior producer's own port as well leaves one slot
+    // answering both authored ports — the value fills each preview.
+    let relay_port = OutputPort::new(f.relay, 0);
+    f.graph
+        .find_graph_mut(f.nested_id)
+        .unwrap()
+        .body
+        .set_output_pinned(relay_port, true);
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+    let mut both = compiled.pinned_ports(backing, 0).to_vec();
+    both.sort_unstable();
+    let mut expected = vec![instance_port, relay_port];
+    expected.sort_unstable();
+    assert_eq!(both, expected);
+}
+
+#[test]
+fn a_port_backed_by_several_occurrences_delivers_nothing() {
+    use crate::graph::OutputPort;
+
+    // One preview widget per authored port, but a definition instanced twice
+    // computes its interior twice — so there is no single value to show, and
+    // the run should not compute one only for it to be discarded.
+    let mut f = nested_fixture();
+    let def = f.graph.graphs.remove(&f.nested_id).expect("the definition");
+    let second = f.graph.add_graph_node(&def, GraphLink::Local(f.nested_id));
+    f.graph.insert_graph(f.nested_id, def);
+    f.graph
+        .find_graph_mut(f.nested_id)
+        .unwrap()
+        .body
+        .set_output_pinned(OutputPort::new(f.relay, 0), true);
+
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+    for instance in [f.instance, second] {
+        let backing = ExecutionNodeId::from_authoring(&[instance, f.relay]);
+        assert!(
+            !slot_pinned(&compiled, backing, 0),
+            "an ambiguous pin marks no slot"
+        );
+        assert!(compiled.pinned_ports(backing, 0).is_empty());
+    }
+
+    // The instance's *own* port is still unambiguous — one per instance.
+    let instance_port = OutputPort::new(f.instance, 0);
+    f.graph.set_output_pinned(instance_port, true);
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+    assert_eq!(
+        compiled.pinned_ports(ExecutionNodeId::from_authoring(&[f.instance, f.relay]), 0),
+        [instance_port]
+    );
+    assert!(
+        compiled
+            .pinned_ports(ExecutionNodeId::from_authoring(&[second, f.relay]), 0)
+            .is_empty(),
+        "the other instance's slot answers no pinned port"
+    );
 }
 
 #[test]
