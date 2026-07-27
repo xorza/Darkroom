@@ -13,9 +13,10 @@ use crate::execution::identity::{
     ExecutionIdentityError, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
 };
 use crate::execution::program::index::{NodeIdx, NodeSet};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 use crate::graph::{Graph, NodeId, OutputPort};
 use crate::library::Library;
+use crate::node::definition::FuncBehavior;
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -106,16 +107,36 @@ impl CompiledGraph {
     /// either way, and disabling or subscribing the instance is what governs
     /// it. Having outputs of its own does not stop a composite being a sink,
     /// the way a portless func signals it.
+    pub fn is_sink(&self, node_id: NodeId) -> Option<bool> {
+        self.any_occurrence(node_id, |e_node| e_node.sink)
+    }
+
+    /// Whether an authored node holds work that recomputes every run.
+    ///
+    /// An impure node has no content digest, so nothing keys a cache on it.
+    /// A graph instance inherits that from its interior: one impure node in
+    /// there is enough for the instance to stop being reusable as a whole,
+    /// even though its pure upstream still caches.
+    pub fn is_impure(&self, node_id: NodeId) -> Option<bool> {
+        self.any_occurrence(node_id, |e_node| e_node.behavior == FuncBehavior::Impure)
+    }
+
+    /// Fold a per-node fact over an authored node's footprint: whether any
+    /// occurrence satisfies `holds`.
     ///
     /// `None` when the node covers no compiled work — a boundary node, a
     /// definition no instance reaches, or a program that hasn't been built
     /// yet. There is nothing to fold, so the caller keeps whatever it can
     /// derive from the authoring graph alone.
-    pub fn is_sink(&self, node_id: NodeId) -> Option<bool> {
+    fn any_occurrence(
+        &self,
+        node_id: NodeId,
+        holds: impl Fn(&ExecutionNode) -> bool,
+    ) -> Option<bool> {
         let footprint = self.footprint(|covered| covered == node_id);
         let mut occurrences = footprint.iter().peekable();
         occurrences.peek()?;
-        Some(occurrences.any(|node_idx| self.program.e_nodes[node_idx].sink))
+        Some(occurrences.any(|node_idx| holds(&self.program.e_nodes[node_idx])))
     }
 
     /// The execution nodes a "run this node" seeds: those producing what the

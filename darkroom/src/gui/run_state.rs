@@ -149,6 +149,12 @@ impl RunState {
         self.compiled.as_ref()?.is_sink(id)
     }
 
+    /// Whether `id` holds work that recomputes every run, per the installed
+    /// program. `None` on the same terms as [`Self::is_sink`].
+    pub(crate) fn is_impure(&self, id: NodeId) -> Option<bool> {
+        self.compiled.as_ref()?.is_impure(id)
+    }
+
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
         self.nodes
             .get(&id)

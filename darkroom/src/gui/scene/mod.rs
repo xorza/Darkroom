@@ -270,10 +270,15 @@ pub(crate) struct SceneNode {
     /// instance evicts its flattened interior; a func needs a reproducible
     /// output. Boundary and impure nodes have no reusable output to evict.
     pub(crate) can_evict_cache: bool,
-    /// The node's func is `Impure`. An impure node has no content digest, so no
-    /// cache mode is ever honored (folded into the cache controls); the header also
-    /// paints the `~` marker off this flag to say *why* it has no cache controls.
-    /// `false` for composites and boundary nodes.
+    /// The node holds work that recomputes every run. An impure node has no
+    /// content digest, so no cache mode is ever honored (folded into the cache
+    /// controls); the header paints the `~` marker off this flag.
+    ///
+    /// A composite inherits it from its interior — one impure node in there is
+    /// enough — so the marker reads "this isn't reusable", not "this is why
+    /// there are no storage chips". A composite has no chips for its own
+    /// reason ([`NodeInterface::cache_controls`]: its storage is the
+    /// interior's business), impure or not.
     pub(crate) impure: bool,
     /// A `GraphInput`/`GraphOutput` interface boundary node. Its
     /// ports route the graph interface rather than carry literal
@@ -511,7 +516,7 @@ impl Scene {
                     cache: node.cache,
                     cache_controls,
                     can_evict_cache,
-                    impure: node_interface.impure,
+                    impure: run_state.is_impure(id).unwrap_or(node_interface.impure),
                     boundary,
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
@@ -929,8 +934,10 @@ impl<'a> NodeInterface<'a> {
                         .func
                         .map_or_else(|| ports.outputs.is_empty(), |func| func.sink),
                     uncacheable: ports.func.is_some_and(|func| func.uncacheable),
-                    // Aggregate purity of a composite isn't known here, so the
-                    // cache chips stay available for it (unlike a func).
+                    // A composite has no declaration to read, and its interior's
+                    // aggregate purity isn't knowable here — `Scene::project`
+                    // folds `CompiledGraph::is_impure` over this once a program
+                    // exists.
                     impure: ports
                         .func
                         .is_some_and(|func| func.behavior == FuncBehavior::Impure),
