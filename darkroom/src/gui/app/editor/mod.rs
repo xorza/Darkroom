@@ -314,7 +314,8 @@ impl Editor {
             // connection commit) drained *before* the record so Pass A sees
             // the settled doc. It reads everything off `Scene`, and each
             // intent it raises carries the pane it came from.
-            self.main_window.prepass(ui, &self.scene, &mut self.intents);
+            self.main_window
+                .prepass(ui, &self.scene, library, &mut self.intents);
             self.drain_intents(open);
             self.apply_canvas_shortcuts(ui, open);
         }

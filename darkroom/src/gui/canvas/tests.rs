@@ -109,7 +109,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
                 },
             ],
         );
-        graph_ui.prepass(ui, &scene, &mut intents);
+        graph_ui.prepass(ui, &scene, &Library::default(), &mut intents);
         // Mirrors `main_window`'s per-pane content closure: each pane's
         // subtree under its own `("graph_overlay", target)` parent.
         Panel::hstack()
@@ -162,5 +162,133 @@ fn two_graph_panes_record_no_duplicate_widget_ids() {
     assert!(
         seen_collisions.is_empty(),
         "two panes recorded the same widget id: {seen_collisions:?}"
+    );
+}
+
+/// Ctrl+drag off an output port spawns a preview node already reading it, as
+/// one batch — the one-gesture counterpart to the port menu's "Add preview".
+///
+/// Drives the real chord through the harness rather than calling the gesture
+/// directly: the whole point of the modifier is that `ConnectionUI` and
+/// `PreviewDrag` can't both claim the same press, and only a real press
+/// exercises that.
+#[test]
+fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
+    use palantir::{Modifiers, PointerButton};
+
+    use crate::core::document::{PortKind, PortRef};
+    use crate::core::edit::intent::types::Intent;
+    use crate::core::preview::{PreviewSink, preview_func};
+    use crate::gui::node::port_row::port_circle_wid;
+
+    let mut library = one_func_library();
+    library.add(preview_func(std::sync::Arc::<PreviewSink>::default()));
+    let probe = library.by_name("probe").expect("just added").clone();
+
+    let mut root = Graph::default();
+    let producer = root.add_func_node(&probe);
+    let mut view = GraphView::for_graph(&root);
+    spread(&mut view);
+
+    let mut harness = UiHarness::new(UVec2::new(1200, 800));
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut graph_ui = GraphUI::default();
+    let mut scene = Scene::default();
+    let out_port = PortRef {
+        node_id: producer,
+        kind: PortKind::Output,
+        port_idx: 0,
+    };
+
+    // One frame to record the node so its output circle has a widget id and
+    // `CanvasGeometry` a measured center; the gesture refuses an unmeasured
+    // port outright.
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+        };
+        let mut intents = Intents::default();
+        scene.rebuild(
+            ui,
+            &library,
+            &run_state,
+            [GraphProjection {
+                target: GraphRef::Main,
+                source: SceneSource::Entry(&root),
+                view: &view,
+            }],
+        );
+        graph_ui.prepass(ui, scene, &library, &mut intents);
+        let graph = scene.graph(GraphRef::Main).expect("projected");
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+            });
+        intents.drain().collect::<Vec<_>>()
+    };
+
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+
+    // Ctrl held, press on the output circle, then drag: the press frame is
+    // where `PreviewDrag` latches.
+    harness.set_modifiers(Modifiers {
+        ctrl: true,
+        ..Default::default()
+    });
+    let circle = port_circle_wid(out_port);
+    harness.press_on(circle);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    // `first_drag_started` polls the *drag* edge, not the press, so the
+    // pointer has to actually move past palantir's threshold.
+    let from = harness
+        .ui()
+        .response_for(circle)
+        .layout_rect
+        .expect("recorded")
+        .center();
+    harness.drag_to(from + Vec2::new(90.0, 40.0));
+    let spawned = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    harness.set_modifiers(Modifiers::default());
+    harness.release_button(PointerButton::Left);
+
+    let adds: Vec<_> = spawned
+        .iter()
+        .filter(|(_, intent)| matches!(intent, Intent::AddNode { .. }))
+        .collect();
+    assert_eq!(adds.len(), 1, "one preview spawned: {spawned:?}");
+    let (target, Intent::AddNode { node_id, node, .. }) = adds[0] else {
+        unreachable!("filtered to AddNode");
+    };
+    assert_eq!(
+        *target,
+        GraphRef::Main,
+        "raised against the port's own pane"
+    );
+    assert!(
+        matches!(node.kind, NodeKind::Func(id) if crate::core::preview::is_preview(id)),
+        "the spawned node is a preview"
+    );
+    assert!(
+        spawned.iter().any(|(_, intent)| matches!(
+            intent,
+            Intent::SetInput { input, to: Some(Binding::Bind(src)) }
+                if input.node_id == *node_id
+                    && src.node_id == producer
+                    && src.port_idx == 0
+        )),
+        "and it is already reading the port the drag came off: {spawned:?}"
     );
 }

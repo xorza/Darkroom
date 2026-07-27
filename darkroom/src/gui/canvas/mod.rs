@@ -10,6 +10,7 @@ pub(crate) mod inspector;
 mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
+mod preview_drag;
 mod selection_ui;
 mod subscription_ui;
 #[cfg(test)]
@@ -20,6 +21,7 @@ use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
+use scenarium::Library;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 
@@ -40,6 +42,7 @@ use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::pan_zoom::PanAnchor;
+use crate::gui::canvas::preview_drag::PreviewDrag;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
@@ -115,6 +118,7 @@ struct Gestures {
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
+    preview_drag: PreviewDrag,
     subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
     graph_menu: GraphMenuUi,
@@ -174,7 +178,13 @@ impl GraphUI {
     /// pane's outer-canvas response — loops the visible panes; everything
     /// else is keyed by document-unique ids and sweeps them all at once,
     /// resolving each hit's edit target from `SceneNode::owner`.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Intents) {
+    pub(crate) fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        library: &Library,
+        out: &mut Intents,
+    ) {
         // Resolve the frame's bare-canvas gesture and park it (with its
         // pane) for `draw` to read back — the classification is one
         // response poll, and both phases must agree on the winner.
@@ -190,6 +200,13 @@ impl GraphUI {
         }
         self.gestures.node_ui.prepass(ui, scene, out);
         self.geometry.rebuild(ui, scene);
+        // Both port-drag claimants sit *after* the rebuild so they read this
+        // frame's drag edges and centers, and `preview_drag_modifier` keeps
+        // them disjoint: the preview spawn takes the output column under the
+        // chord, the wire gesture takes it otherwise.
+        self.gestures
+            .preview_drag
+            .apply(ui, scene, &self.geometry, library, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         let resume = self.gestures.new_node_ui.take_resume_floating();
@@ -354,6 +371,7 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
+                    preview_drag: _,
                     subscription_ui,
                     new_node_ui: _,
                     graph_menu: _,
@@ -483,13 +501,12 @@ impl GraphUI {
     }
 }
 
-/// Whether the modifier reserving an output-port drag for pin creation is
-/// held. The one place that chord is decided: `PinUi` claims an output drag
-/// under it, and `ConnectionUI` drops the output column from its latch
-/// candidates under the same condition. Split across the two files, the
-/// disjointness was kept by hand — the same thing
-/// [`classify_canvas_gesture`] exists to avoid for the bare-canvas gestures.
-pub(super) fn pin_drag_modifier(ui: &mut Ui) -> bool {
+/// Whether the modifier reserving an output-port drag for spawning a preview
+/// is held. The one place that chord is decided: [`PreviewDrag`] claims an
+/// output drag under it, and `ConnectionUI` drops the output column from its
+/// latch candidates under the same condition — stated once so the two cannot
+/// drift into both claiming, or neither.
+pub(super) fn preview_drag_modifier(ui: &mut Ui) -> bool {
     ui.modifiers().ctrl
 }
 

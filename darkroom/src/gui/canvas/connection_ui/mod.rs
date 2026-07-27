@@ -11,7 +11,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{Wire, WirePass};
-use crate::gui::canvas::{free_end, outer_canvas_widget_id, pin_drag_modifier};
+use crate::gui::canvas::{free_end, outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{GraphScene, InputBindingView, Scene};
@@ -406,11 +406,11 @@ fn port_gradient(start: Color, end: Color) -> CurveBrush {
 /// First port whose response shows `drag_started` this frame, or `None`.
 /// Iterates inputs first then outputs per node so the topmost recorded
 /// port wins ties (matches paint order). Skips output ports while
-/// [`pin_drag_modifier`] is held — that chord is reserved for `PinUi`'s
-/// pin-creation drag (see `pin_ui.rs`), so the two controllers never both
-/// latch the same press.
+/// [`preview_drag_modifier`] is held — that chord is reserved for the
+/// preview-spawn drag (see `preview_drag.rs`), so the two controllers never
+/// both latch the same press.
 fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &mut Ui) -> Option<PortRef> {
-    let kinds: &[PortKind] = if pin_drag_modifier(ui) {
+    let kinds: &[PortKind] = if preview_drag_modifier(ui) {
         &[PortKind::Input]
     } else {
         &[PortKind::Input, PortKind::Output]
