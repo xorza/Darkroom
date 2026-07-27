@@ -12,7 +12,7 @@ use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
 use palantir::{Image as AptImage, ImageHandle, Ui};
-use scenarium::{DynamicValue, NodeId, OutputPort, PinnedOutput};
+use scenarium::{DynamicValue, OutputPort};
 
 use crate::core::document::Document;
 
@@ -63,11 +63,13 @@ struct PreparedImage {
 }
 
 impl PinnedOutputStore {
+    /// Store one push's values against the authored ports they fill —
+    /// resolved by the caller, since only the compiled program knows which
+    /// port an interior slot is computing for.
     pub(crate) fn ingest(
         &mut self,
         ui: &Ui,
-        node_id: NodeId,
-        values: Vec<PinnedOutput>,
+        values: Vec<(OutputPort, DynamicValue)>,
         document: &Document,
     ) {
         if values.is_empty() {
@@ -77,14 +79,13 @@ impl PinnedOutputStore {
         // every nested graph, so asking per value re-walked the document
         // once per pushed output.
         let retained = document.retained_output_ports();
-        for output in values {
-            let port = OutputPort::new(node_id, output.port_idx);
+        for (port, value) in values {
             if !retained.contains(&port) {
                 continue;
             }
             // PortRef cannot identify a particular graph instance, so the
             // latest push is the only value the UI can consistently present.
-            self.entries.insert(port, prepare_content(ui, output.value));
+            self.entries.insert(port, prepare_content(ui, value));
             // A fresh image arrives preview-only; an open viewer needs the
             // reconcile pass to upload its full-resolution texture.
             self.needs_reconcile = true;
@@ -229,7 +230,7 @@ mod tests {
     use palantir::internals::UiHarness;
 
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
-    use scenarium::StaticValue;
+    use scenarium::{NodeId, StaticValue};
 
     use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
@@ -310,16 +311,12 @@ mod tests {
         let document = demanding_document(first_port, true, false);
         store.ingest(
             arena.ui(),
-            node,
             vec![
-                PinnedOutput {
-                    port_idx: 0,
-                    value: DynamicValue::Static(StaticValue::Int(7)),
-                },
-                PinnedOutput {
-                    port_idx: 1,
-                    value: DynamicValue::Static(StaticValue::Int(9)),
-                },
+                (first_port, DynamicValue::Static(StaticValue::Int(7))),
+                (
+                    OutputPort::new(node, 1),
+                    DynamicValue::Static(StaticValue::Int(9)),
+                ),
             ],
             &document,
         );
@@ -328,11 +325,7 @@ mod tests {
 
         store.ingest(
             arena.ui(),
-            node,
-            vec![PinnedOutput {
-                port_idx: 0,
-                value: DynamicValue::Static(StaticValue::Int(8)),
-            }],
+            vec![(first_port, DynamicValue::Static(StaticValue::Int(8)))],
             &document,
         );
         assert_eq!(store.entries.len(), 1);
@@ -348,11 +341,7 @@ mod tests {
         let pinned = demanding_document(first_port, true, false);
         store.ingest(
             arena.ui(),
-            node,
-            vec![PinnedOutput {
-                port_idx: 0,
-                value: image_value(512, 256, ColorFormat::RGBA_U8),
-            }],
+            vec![(first_port, image_value(512, 256, ColorFormat::RGBA_U8))],
             &pinned,
         );
         let StoredContent::Image(image) = &store.entries[&first_port] else {
@@ -394,11 +383,7 @@ mod tests {
         let pinned = demanding_document(port, true, false);
         store.ingest(
             arena.ui(),
-            node,
-            vec![PinnedOutput {
-                port_idx: 0,
-                value: DynamicValue::Static(StaticValue::Int(7)),
-            }],
+            vec![(port, DynamicValue::Static(StaticValue::Int(7)))],
             &pinned,
         );
 
@@ -446,14 +431,10 @@ mod tests {
         document.layout.apply(DockOp::ActivateTab {
             tab: TabRef::ImageViewer(front_port),
         });
-        for (node, port) in [(front, front_port), (back, back_port)] {
+        for port in [front_port, back_port] {
             store.ingest(
                 arena.ui(),
-                node,
-                vec![PinnedOutput {
-                    port_idx: 0,
-                    value: image_value(512, 256, ColorFormat::RGBA_U8),
-                }],
+                vec![(port, image_value(512, 256, ColorFormat::RGBA_U8))],
                 &document,
             );
             assert!(store.entries.contains_key(&port));

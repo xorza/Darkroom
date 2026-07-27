@@ -34,6 +34,7 @@ use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
+use scenarium::OutputPort;
 use scenarium::PinnedOutputs;
 use scenarium::RamUsage;
 use scenarium::RunError;
@@ -301,19 +302,20 @@ impl RunState {
         }
     }
 
-    /// Store one occurrence's pinned values, but only for a node in the
-    /// entry graph.
+    /// Route one flat node's delivered values to the authored ports they fill.
     ///
-    /// The store is keyed by authored `OutputPort` and there is exactly one
-    /// preview widget per port, while a node inside a graph definition runs
-    /// once *per instance* — so several occurrences would land on one slot
-    /// and the value shown would be whichever finished last. A definition
-    /// tab isn't any one instance, so there's no principled winner to pick;
-    /// until the store and the widgets can address an occurrence, nested
-    /// pins deliver nothing rather than something arbitrary.
+    /// A value arrives addressed to the node that *computed* it, which is the
+    /// node the user pinned only for a leaf in the entry graph. Two things can
+    /// claim it:
     ///
-    /// `attribution` yields the authored leaf followed by each enclosing
-    /// instance, so a lone element *is* the "top-level occurrence" test.
+    /// - **Something pinned it.** `pinned_ports` resolves that through the
+    ///   compiled program, so a graph instance's port finds the interior slot
+    ///   backing it. Ports backed by several occurrences resolve to nothing —
+    ///   one preview widget cannot show a value per instance.
+    /// - **Nothing did, and it came off a top-level node.** A run root
+    ///   delivers every output it has, pinned or not; that is what fills a
+    ///   viewer tab whose pin has since been removed. An interior node's
+    ///   unrequested outputs have no addressable port and are dropped.
     pub(crate) fn ingest_pinned_outputs(
         &mut self,
         ui: &Ui,
@@ -326,14 +328,29 @@ impl RunState {
                 .expect("worker pushed outputs before installing a compiled graph"),
         );
         let mut attribution = attributed_nodes(&compiled, pushed.e_node_id);
-        let node_id = attribution
+        let leaf = attribution
             .next()
             .expect("execution attribution must start with its authored leaf");
-        if attribution.next().is_some() {
-            return;
+        let top_level = attribution.next().is_none();
+
+        let mut values = Vec::with_capacity(pushed.values.len());
+        for output in pushed.values {
+            let requested = compiled.pinned_ports(pushed.e_node_id, output.port_idx);
+            let Some((last, rest)) = requested.split_last() else {
+                if top_level {
+                    values.push((OutputPort::new(leaf, output.port_idx), output.value));
+                }
+                continue;
+            };
+            // One slot answering two authored ports is an instance port
+            // pinned over its own pinned interior producer — rare, so the
+            // clones it costs are too.
+            for port in rest {
+                values.push((*port, output.value.clone()));
+            }
+            values.push((*last, output.value));
         }
-        self.pinned_outputs
-            .ingest(ui, node_id, pushed.values, document);
+        self.pinned_outputs.ingest(ui, values, document);
     }
 
     /// Drop everything visible from a failed run: no glow, logs, or pinned
@@ -529,12 +546,57 @@ mod tests {
     }
 
     #[test]
-    fn pinned_outputs_are_delivered_only_for_entry_graph_nodes() {
-        // The store is keyed by authored `OutputPort` and there's one
-        // preview widget per port, but a node inside a definition runs once
-        // per instance. Delivering those would make the shown value a race
-        // between occurrences, so they deliver nothing until the store can
-        // address an occurrence.
+    fn a_pinned_instance_port_is_filled_by_the_interior_slot_backing_it() {
+        // A graph instance dissolves at compile time, so the value for its
+        // port arrives addressed to an interior node the user never pinned.
+        // The compiled program says which authored port that slot answers.
+        let interior = nid(1);
+        let instance = nid(10);
+        let backing = eid(101);
+        let instance_port = OutputPort::new(instance, 0);
+
+        let mut builder = CompiledGraphBuilder::new();
+        builder.insert_leaf(backing, [instance], interior);
+        builder.insert_pinned_port(backing, 0, instance_port);
+        let mut run_state = RunState {
+            compiled: Some(builder.build()),
+            ..Default::default()
+        };
+
+        let mut document = Document::default();
+        document.graph.set_output_pinned(instance_port, true);
+        let mut arena = UiHarness::arena();
+        run_state.ingest_pinned_outputs(
+            arena.ui(),
+            PinnedOutputs {
+                e_node_id: backing,
+                values: vec![PinnedOutput {
+                    port_idx: 0,
+                    value: DynamicValue::Static(StaticValue::Int(7)),
+                }],
+            },
+            &document,
+        );
+
+        assert!(matches!(
+            &run_state.pinned_outputs.entries[&instance_port],
+            StoredContent::Text(text) if text == "7"
+        ));
+        assert!(
+            !run_state
+                .pinned_outputs
+                .entries
+                .contains_key(&OutputPort::new(interior, 0)),
+            "the value lands on the port that was pinned, not on the node that computed it"
+        );
+    }
+
+    #[test]
+    fn unrequested_outputs_fill_only_a_top_level_nodes_own_ports() {
+        // A run root delivers every output it has, pinned or not. Those are
+        // addressable only when the node is in the entry graph — an interior
+        // node's port names one occurrence among possibly many, and the
+        // preview widget cannot say which.
         let interior = nid(1);
         let (instance_a, instance_b) = (nid(10), nid(20));
         let (nested_a, nested_b) = (eid(101), eid(102));
@@ -570,11 +632,11 @@ mod tests {
         push(&mut run_state, nested_b, 8);
         assert!(
             !run_state.pinned_outputs.entries.contains_key(&nested_port),
-            "neither instance claims the shared slot"
+            "neither occurrence claims the shared port"
         );
 
-        // The entry graph has exactly one occurrence per node, so its pins
-        // are unambiguous and still deliver.
+        // The entry graph has exactly one occurrence per node, so an
+        // unrequested output there names one port and fills it.
         push(&mut run_state, top_level_occurrence, 9);
         assert!(matches!(
             &run_state.pinned_outputs.entries[&top_level_port],

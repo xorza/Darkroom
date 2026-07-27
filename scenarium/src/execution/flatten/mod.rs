@@ -12,7 +12,8 @@
 //!
 //! See `README.md` Part A §5.
 
-use hashbrown::HashSet;
+use hashbrown::hash_map::Entry;
+use hashbrown::{HashMap, HashSet};
 
 use crate::execution::identity::{
     ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
@@ -20,7 +21,7 @@ use crate::execution::identity::{
 use crate::execution::program::pool::Pool;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
-    ExecutionProgram, PendingBind, PendingSubscription,
+    ExecutionProgram, PendingBind, PendingPin, PendingSubscription,
 };
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies};
@@ -49,6 +50,12 @@ pub(crate) struct Flattener {
     /// [`OutputAddr`](crate::execution::program::index::OutputAddr)es after
     /// adoption for the same reason. Reused across builds.
     pending_binds: Vec<PendingBind>,
+    /// Pinned authored output ports paired with the slot backing each,
+    /// applied after adoption for the same reason. One authored port can
+    /// appear several times — once per occurrence — which is exactly what
+    /// [`build`](Self::build) needs to tell an addressable pin from an
+    /// ambiguous one. Reused across builds.
+    pins: Vec<PendingPin>,
     /// Flat nodes in emit order. Nothing in the walk looks one up, so this is a
     /// plain vector; [`build`](Self::build) sorts it by id and drains it into
     /// the program. Reused across builds.
@@ -71,6 +78,7 @@ impl Flattener {
         self.seen_shared.clear();
         self.subs.clear();
         self.pending_binds.clear();
+        self.pins.clear();
         self.e_nodes.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
@@ -91,6 +99,7 @@ impl Flattener {
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 pending_binds: &mut self.pending_binds,
+                pins: &mut self.pins,
                 e_nodes: &mut self.e_nodes,
                 inputs: &mut program.inputs,
                 outputs: &mut program.outputs,
@@ -104,6 +113,42 @@ impl Flattener {
         // compiled program ever pays. Draining leaves every buffer's allocation
         // here for the next build.
         program.adopt_flattened(self.e_nodes.drain(..), &self.pending_binds, &self.subs);
+        Self::apply_pins(program, flatten, &self.pins);
+    }
+
+    /// Mark the slots the document's pins ask for, and record which authored
+    /// port each one answers.
+    ///
+    /// A port backed by more than one slot is dropped: a node inside a
+    /// definition runs once per instance, and one preview widget cannot show
+    /// several values — whichever finished last would win, arbitrarily. This
+    /// is the whole rule, and it needs no notion of node kind or depth. A
+    /// leaf in the entry graph and a top-level graph instance both have
+    /// exactly one slot, so both deliver; anything under a definition
+    /// instanced twice has two, so neither does.
+    ///
+    /// Skipping those also stops the run computing and shipping values that
+    /// were only going to be discarded on arrival.
+    fn apply_pins(program: &mut ExecutionProgram, flatten: &mut FlattenMap, pins: &[PendingPin]) {
+        let mut sources: HashMap<OutputPort, Option<ExecutionOutputPort>> = HashMap::new();
+        for pin in pins {
+            match sources.entry(pin.authored) {
+                Entry::Vacant(entry) => {
+                    entry.insert(Some(pin.source));
+                }
+                Entry::Occupied(mut entry) => {
+                    if *entry.get() != Some(pin.source) {
+                        entry.insert(None);
+                    }
+                }
+            }
+        }
+        for (authored, source) in sources {
+            let Some(source) = source else { continue };
+            let slot = program.output_slot(source);
+            program.outputs[slot].pinned = true;
+            flatten.set_pinned_port(source, authored);
+        }
     }
 }
 
@@ -137,6 +182,7 @@ struct Run<'a> {
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<PendingSubscription>,
     pending_binds: &'a mut Vec<PendingBind>,
+    pins: &'a mut Vec<PendingPin>,
     e_nodes: &'a mut Vec<(ExecutionNodeId, ExecutionNode)>,
     /// The inputs pool being built this update.
     inputs: &'a mut Pool<ExecutionInput>,
@@ -220,6 +266,19 @@ impl<'a> Run<'a> {
                     self.emit(disabled);
                     self.scope_stack.pop();
                     self.pop_level();
+                    // The instance is gone from the program, but its output
+                    // ports are still what the document pins. Resolve each
+                    // through the interior it just emitted so the value comes
+                    // back addressed to the port the user actually pinned.
+                    for port_idx in 0..nested.interface.outputs.len() {
+                        let authored = OutputPort::new(node.id, port_idx);
+                        if !graph.is_output_pinned(authored) {
+                            continue;
+                        }
+                        if let FlatBinding::Bind(source) = self.resolve(authored) {
+                            self.pins.push(PendingPin { authored, source });
+                        }
+                    }
                     if let Some(id) = shared_id {
                         self.seen_shared.remove(&id);
                     }
@@ -230,12 +289,24 @@ impl<'a> Run<'a> {
 
             let e_node_id = self.execution_node_id(node.id);
 
-            let outputs =
-                self.outputs
-                    .append((0..func.outputs.len()).map(|port_idx| ExecutionOutput {
-                        pinned: graph.is_output_pinned(OutputPort::new(node.id, port_idx)),
-                        ..Default::default()
-                    }));
+            let outputs = self
+                .outputs
+                .append((0..func.outputs.len()).map(|_| ExecutionOutput::default()));
+            // Recorded rather than marked: whether this slot delivers depends
+            // on how many occurrences share the authored port, which only the
+            // finished walk knows (see `Flattener::apply_pins`).
+            for port_idx in 0..func.outputs.len() {
+                let authored = OutputPort::new(node.id, port_idx);
+                if graph.is_output_pinned(authored) {
+                    self.pins.push(PendingPin {
+                        authored,
+                        source: ExecutionOutputPort {
+                            e_node_id,
+                            port_idx,
+                        },
+                    });
+                }
+            }
             let events = self
                 .events
                 .append(func.events.iter().map(|func_event| ExecutionEvent {

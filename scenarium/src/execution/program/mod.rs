@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::pool::{Pool, PoolRange};
-use crate::graph::CacheMode;
+use crate::graph::{CacheMode, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{FuncBehavior, FuncId, OutputType};
 use crate::node::event::EventLambda;
@@ -56,6 +56,18 @@ pub(crate) struct ExecutionOutput {
 pub(crate) struct PendingBind {
     pub(crate) input_idx: u32,
     pub(crate) producer: ExecutionOutputPort,
+}
+
+/// An authored output port the document pinned, and the flat slot flatten
+/// resolved it to — the [`PendingBind`] counterpart for pins, deferred for the
+/// same reason (the slot's producer can be emitted later in the walk).
+///
+/// For a leaf the two sides name the same node; for a graph instance the
+/// source is somewhere in its interior.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PendingPin {
+    pub(crate) authored: OutputPort,
+    pub(crate) source: ExecutionOutputPort,
 }
 
 /// A resolved event edge awaiting wiring — the [`PendingBind`] counterpart for
@@ -171,6 +183,16 @@ impl ExecutionProgram {
         self.adopt_nodes(e_nodes);
         self.intern_bindings(binds);
         self.apply_subscriptions(subs);
+    }
+
+    /// The outputs-pool index of one flat output port. Every producer exists:
+    /// flatten only names slots it emitted.
+    pub(crate) fn output_slot(&self, port: ExecutionOutputPort) -> usize {
+        let node_idx = *self
+            .e_node_index
+            .get(&port.e_node_id)
+            .expect("flatten only names producers it emitted");
+        self[node_idx].outputs.start as usize + port.port_idx
     }
 
     /// Adopt the flattened node set, assigning dense indices in id order so the
