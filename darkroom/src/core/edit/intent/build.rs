@@ -180,6 +180,30 @@ pub(crate) fn build_step(
                 bindings,
             }
         }
+        Intent::AddLocalGraphInstance {
+            pos,
+            node_id,
+            graph_id,
+        } => {
+            let mut added = HashSet::new();
+            validate::fresh_node_id(doc, node_id, &mut added)?;
+            validate::finite_position(pos, "AddLocalGraphInstance")?;
+            // Only the target graph's *own* definitions resolve through a
+            // `GraphLink::Local` raised over it — the same rule
+            // `validate::insertable_kind` enforces for `AddNode`.
+            let Some(definition) = graph.graphs.get(&graph_id) else {
+                return Err(Refusal::Invalid(format!(
+                    "cannot instance local graph {graph_id:?}, which the target graph doesn't hold"
+                )));
+            };
+            GraphStep::AddNode {
+                pos,
+                node_id,
+                node: Node::graph_instance(definition, GraphLink::Local(graph_id)),
+                graph: None,
+                bindings: definition.ports().default_bindings(node_id).collect(),
+            }
+        }
         Intent::DuplicateNodes {
             nodes,
             bindings,
