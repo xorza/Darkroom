@@ -70,16 +70,8 @@ pub(super) fn show(
             .iter()
             .position(|o| &o.value == value)
             .unwrap_or(0);
-        let mut idx = before;
-        ComboBox::new(&mut idx, &names)
-            .id(id)
-            .style(&theme.drag_value.chip)
-            .size((Sizing::FILL, Sizing::FILL))
-            .min_size((width, 0.0))
-            .show(ui);
-        return (idx != before)
-            .then(|| value_variants.get(idx).map(|o| o.value.clone()))
-            .flatten();
+        let picked = combo_pick(ui, theme, id, width, &names, before)?;
+        return value_variants.get(picked).map(|o| o.value.clone());
     }
     // The widget follows the *declared* port type, not the stored literal's
     // kind: a coerced or library-drifted literal still gets the declared
@@ -96,19 +88,19 @@ pub(super) fn show(
         DataType::Any => any_smart_edit(ui, editor, id, value, width),
         DataType::Int => {
             let Some(current) = value.as_i64() else {
-                return read_only_label(ui, editor, id, value, width);
+                return read_only_label(ui, theme, id, value);
             };
             int_edit(ui, theme, id, current, width)
         }
         DataType::Float => {
             let Some(current) = value.as_f64() else {
-                return read_only_label(ui, editor, id, value, width);
+                return read_only_label(ui, theme, id, value);
             };
             float_edit(ui, theme, id, current, width)
         }
         DataType::Bool => {
             let Some(current) = value.as_bool() else {
-                return read_only_label(ui, editor, id, value, width);
+                return read_only_label(ui, theme, id, value);
             };
             let mut draft = current;
             Checkbox::new(&mut draft).id(id).show(ui);
@@ -116,7 +108,7 @@ pub(super) fn show(
         }
         DataType::String => {
             let Some(current) = value.as_string() else {
-                return read_only_label(ui, editor, id, value, width);
+                return read_only_label(ui, theme, id, value);
             };
             let edit = buffered_text_edit(ui, editor, id, &current, |s| (*s).to_owned(), width);
             (edit.committed && edit.text != current).then_some(StaticValue::String(edit.text))
@@ -128,7 +120,7 @@ pub(super) fn show(
             let label = match value {
                 StaticValue::FsPath(path) => single_path_preview(path, config.mode),
                 StaticValue::FsPaths(paths) => multi_path_preview(paths),
-                _ => return read_only_label(ui, editor, id, value, width),
+                _ => return read_only_label(ui, theme, id, value),
             };
             // The blocking dialog runs after authoring, so this button only records its click.
             Button::new()
@@ -148,27 +140,40 @@ pub(super) fn show(
             // populate the menu, so fall back to a read-only label. A drifted
             // non-`Enum` literal seeds the first variant; any pick repairs it.
             let Some(variants) = library.enum_variants(*type_id) else {
-                return read_only_label(ui, editor, id, value, width);
+                return read_only_label(ui, theme, id, value);
             };
             let current = value.as_enum().unwrap_or_default();
             let options: Vec<&str> = variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
-            let mut idx = before;
-            ComboBox::new(&mut idx, &options)
-                .id(id)
-                .style(&theme.drag_value.chip)
-                .size((Sizing::FILL, Sizing::FILL))
-                .min_size((width, 0.0))
-                .show(ui);
-            if idx != before {
-                options.get(idx).map(|v| StaticValue::Enum((*v).to_owned()))
-            } else {
-                None
-            }
+            let picked = combo_pick(ui, theme, id, width, &options, before)?;
+            options
+                .get(picked)
+                .map(|v| StaticValue::Enum((*v).to_owned()))
         }
         // No literal form (pick-or-wire ports carry variants, handled above).
-        DataType::Custom(_) => read_only_label(ui, editor, id, value, width),
+        DataType::Custom(_) => read_only_label(ui, theme, id, value),
     }
+}
+
+/// A dropdown over `options`, returning the newly picked index — `None` when
+/// the selection is unchanged. Both pickers (the value-variant override and
+/// the `Enum` port) are this widget over different option lists.
+fn combo_pick(
+    ui: &mut Ui,
+    theme: &StaticValueEditorTheme,
+    id: WidgetId,
+    width: f32,
+    options: &[&str],
+    before: usize,
+) -> Option<usize> {
+    let mut idx = before;
+    ComboBox::new(&mut idx, options)
+        .id(id)
+        .style(&theme.drag_value.chip)
+        .size((Sizing::FILL, Sizing::FILL))
+        .min_size((width, 0.0))
+        .show(ui);
+    (idx != before).then_some(idx)
 }
 
 /// Editor for an untyped (`Any`) port: one text field that reinterprets what
@@ -234,16 +239,15 @@ fn parse_any(text: &str) -> StaticValue {
 /// through to the surrounding row. Always returns `None`.
 fn read_only_label(
     ui: &mut Ui,
-    editor: &TextEditTheme,
+    theme: &StaticValueEditorTheme,
     id: WidgetId,
     value: &StaticValue,
-    width: f32,
 ) -> Option<StaticValue> {
     let mut buf = value.to_value_string();
     TextEdit::new(&mut buf)
         .id(id)
-        .style(editor)
-        .size((Sizing::fixed(width), Sizing::FILL))
+        .style(&theme.drag_value.editor)
+        .size((Sizing::fixed(theme.width), Sizing::FILL))
         .show(ui);
     None
 }

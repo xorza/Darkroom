@@ -321,12 +321,30 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     }
 }
 
-/// Stable widget id for the node's outer body panel. Derived from
-/// the domain `NodeId` so `response_for` can probe last-frame's
-/// arranged rect (used by the connection breaker's body-hit test)
-/// without needing the panel's response to round-trip first.
+/// A node-keyed widget id. Every id in a node's subtree is reconstructible
+/// from its domain coordinates, so a scan can `response_for` last frame's
+/// state for any of them without threading a cache — which is what lets the
+/// prepass read clicks before the record.
+pub(super) fn node_wid(tag: &'static str, node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node", tag, node_id))
+}
+
+/// A port-keyed widget id — [`node_wid`] for the per-port widgets, keyed by
+/// side and index as well.
+pub(super) fn port_wid(tag: &'static str, port: PortRef) -> WidgetId {
+    WidgetId::from_hash((
+        "graph.node",
+        tag,
+        port.node_id,
+        port.kind as u8,
+        port.port_idx,
+    ))
+}
+
+/// The node's outer body panel — probed by the connection breaker for last
+/// frame's arranged rect, before the panel's own response round-trips.
 pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.body", node_id))
+    node_wid("body", node_id)
 }
 
 /// Every widget whose drag moves `node_id`'s body, in the order
@@ -363,12 +381,11 @@ fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
 }
 
-/// Stable id for a node's inline title-rename editor (and its idle
-/// label), so the same id is recorded across the label⇄editor swap.
-/// Polled here to drag the node by its title (the idle label senses
-/// `DRAG`) and by [`header::title`] to render the field.
+/// A node's inline title-rename editor *and* its idle label, so the same id
+/// is recorded across the label⇄editor swap. Polled here to drag the node by
+/// its title (the idle label senses `DRAG`).
 fn node_rename_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.title_rename", node_id))
+    node_wid("title_rename", node_id)
 }
 
 pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent {
