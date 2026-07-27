@@ -103,11 +103,9 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     let output_ranges = [
         program.outputs.append([ExecutionOutput {
             data_type: DataType::Int,
-            ..Default::default()
         }]),
         program.outputs.append([ExecutionOutput {
             data_type: DataType::Int,
-            ..Default::default()
         }]),
     ];
     for ((e_node_id, inputs), outputs) in [first, second]
@@ -132,8 +130,8 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     roots.reset(program.e_nodes.len());
     roots.insert(NodeIdx(0));
     roots.insert(NodeIdx(1));
-    let mut pinned = NodeSet::default();
-    pinned.reset(program.e_nodes.len());
+    let mut seeded = NodeSet::default();
+    seeded.reset(program.e_nodes.len());
     let mut event_sources = NodeSet::default();
     event_sources.reset(program.e_nodes.len());
     ConstPathFixture {
@@ -142,7 +140,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
             process_order: vec![NodeIdx(0), NodeIdx(1)],
             verdicts,
             roots,
-            pinned,
+            seeded,
             event_sources,
         },
         first,

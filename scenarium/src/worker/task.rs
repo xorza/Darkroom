@@ -10,7 +10,7 @@ use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::report::{PinnedOutputs, RunProgress, RunReporter};
+use crate::execution::report::{RunProgress, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::event_loop::{
@@ -359,10 +359,6 @@ where
         let mut patch = self.status.patch();
         patch.push(progress);
         (self.callback)(WorkerReport::Status(patch.finish()));
-    }
-
-    fn pinned(&mut self, outputs: PinnedOutputs) {
-        (self.callback)(WorkerReport::PinnedOutputs(outputs));
     }
 }
 

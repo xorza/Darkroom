@@ -1,5 +1,5 @@
-//! How values move through one run: a node's inputs in, its pinned outputs out to the host,
-//! and the last-read releases in between. The state they act on is
+//! How values move through one run: a node's inputs in and the last-read releases that
+//! follow. The state they act on is
 //! [`ExecutionFrame`](crate::execution::executor::ExecutionFrame), whose loop steps live
 //! beside it in the parent module.
 
@@ -7,7 +7,6 @@ use crate::DynamicValue;
 use crate::execution::executor::ExecutionFrame;
 use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::report::{PinnedOutput, PinnedOutputs};
 use crate::execution::resolve::ResolvedRun;
 
 #[derive(Default, Debug)]
@@ -43,32 +42,6 @@ impl RemainingOutputReads {
 }
 
 impl ExecutionFrame<'_, '_> {
-    pub(super) fn emit_pinned_values(&mut self, node_idx: NodeIdx) {
-        let outputs = self.program[node_idx].outputs;
-        let pinned_root = self.plan.pinned.contains(node_idx);
-        let values: Vec<_> = self.program.outputs[outputs]
-            .iter()
-            .enumerate()
-            .filter(|(_, output)| pinned_root || output.pinned)
-            .map(|(port_idx, _)| {
-                let address = OutputAddr {
-                    node_idx,
-                    port_idx: port_idx as u32,
-                };
-                let value = self
-                    .cache
-                    .read_output_port(self.program, address, false)
-                    .expect("a node's pinned output must be resident when delivered");
-                PinnedOutput { port_idx, value }
-            })
-            .collect();
-        if values.is_empty() {
-            return;
-        }
-        let e_node_id = self.program.e_node_ids[node_idx];
-        self.reporter.pinned(PinnedOutputs { e_node_id, values });
-    }
-
     pub(super) fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
         for input in &self.program.inputs[self.program[node_idx].inputs] {

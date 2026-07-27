@@ -196,14 +196,6 @@ impl<'a> GraphChecker<'a> {
             }
         }
 
-        for port in &graph.pinned_outputs {
-            if !graph.nodes.contains_key(&port.node_id) {
-                return Err(GraphValidationError::PinnedOutputMissingNode {
-                    node_id: port.node_id,
-                });
-            }
-        }
-
         for (graph_id, nested) in &graph.graphs {
             if graph_id.is_nil() {
                 return Err(GraphValidationError::NilLocalGraphId);

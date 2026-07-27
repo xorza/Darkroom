@@ -151,17 +151,11 @@ pub(crate) fn selected_group_positions(
     selected: &[ItemRef],
 ) -> Vec<(ItemRef, Vec2)> {
     let holds = |key: ItemRef| selection_holds(selected, key);
-    let mut positions: Vec<(ItemRef, Vec2)> = graph
+    let positions: Vec<(ItemRef, Vec2)> = graph
         .nodes()
         .filter(|n| holds(ItemRef::Node(n.id)))
         .map(|n| (ItemRef::Node(n.id), n.pos))
         .collect();
-    for pin in graph.pinned_outputs() {
-        let key = ItemRef::Pin(pin.port);
-        if holds(key) {
-            positions.push((key, pin.pos));
-        }
-    }
     positions
 }
 
@@ -169,7 +163,7 @@ pub(crate) fn selected_group_positions(
 mod tests {
     use super::*;
     use palantir::internals::UiHarness;
-    use scenarium::{NodeId, OutputPort};
+    use scenarium::NodeId;
 
     use crate::gui::scene::internals::scene_node_stub;
 
@@ -191,7 +185,7 @@ mod tests {
         // latch (rather than integrating frame to frame) is what keeps a
         // dropped or coalesced frame from accumulating drift.
         let grabbed_node = NodeId::unique();
-        let other_pin = ItemRef::Pin(OutputPort::new(NodeId::unique(), 2));
+        let other_pin = ItemRef::Node(NodeId::unique());
         let anchor = Anchor {
             grabbed: ItemRef::Node(grabbed_node),
             target: GraphRef::Main,
@@ -242,7 +236,7 @@ mod tests {
         let scene = scene_with(arena.ui(), survivor);
 
         let mut drag = GroupDrag::default();
-        let gone = ItemRef::Pin(OutputPort::new(NodeId::unique(), 0));
+        let gone = ItemRef::Node(NodeId::unique());
         drag.latch(gone, GraphRef::Main, vec![(gone, Vec2::ZERO)], wid());
 
         let mut out = Intents::default();

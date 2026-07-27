@@ -71,13 +71,12 @@ impl Prog {
                 binding: binding.clone(),
             }));
         let idx = self.program.e_nodes.len();
-        let outputs = self
-            .program
-            .outputs
-            .append(types.iter().cloned().map(|data_type| ExecutionOutput {
-                data_type,
-                ..Default::default()
-            }));
+        let outputs = self.program.outputs.append(
+            types
+                .iter()
+                .cloned()
+                .map(|data_type| ExecutionOutput { data_type }),
+        );
         let e_node_id = e_node_id(idx);
         self.program.push(
             e_node_id,

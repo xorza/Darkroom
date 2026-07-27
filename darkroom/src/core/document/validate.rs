@@ -1,6 +1,6 @@
 //! Structural validation for documents and their per-graph editor views.
 
-use scenarium::{Graph as CoreGraph, GraphId, GraphValidationError, NodeId, OutputPort};
+use scenarium::{Graph as CoreGraph, GraphId, GraphValidationError, NodeId};
 
 use crate::core::document::dock::DockValidationError;
 use crate::core::document::{Document, GraphView, ItemRef, TabRef, tab_alive};
@@ -11,14 +11,10 @@ pub(crate) enum GraphViewValidationError {
     InvalidViewport,
     #[error("view item {item:?} position must be finite")]
     NonFinitePosition { item: ItemRef },
-    #[error("view item references output {port:?}, which isn't pinned")]
-    UnpinnedOutput { port: OutputPort },
     #[error("view node items must match graph nodes")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },
-    #[error("pinned output {port:?} must have a view item")]
-    MissingPinnedOutput { port: OutputPort },
     #[error("selected item {item:?} has no view item")]
     MissingSelectedItem { item: ItemRef },
 }
@@ -63,10 +59,6 @@ impl GraphView {
             }
             match key {
                 ItemRef::Node(_) => node_items += 1,
-                ItemRef::Pin(port) if !graph.is_output_pinned(*port) => {
-                    return Err(GraphViewValidationError::UnpinnedOutput { port: *port });
-                }
-                ItemRef::Pin(_) => {}
             }
         }
         if node_items != graph.len() {
@@ -75,11 +67,6 @@ impl GraphView {
         for node in graph.iter() {
             if !self.item_placements.contains_key(&ItemRef::Node(node.id)) {
                 return Err(GraphViewValidationError::MissingNode { node_id: node.id });
-            }
-        }
-        for port in graph.pinned_outputs() {
-            if !self.item_placements.contains_key(&ItemRef::Pin(port)) {
-                return Err(GraphViewValidationError::MissingPinnedOutput { port });
             }
         }
         for key in &self.selected {

@@ -76,12 +76,11 @@ pub(crate) struct ExecutionPlan {
     /// the resolver seeds liveness from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Resolver`](crate::execution::resolve::Resolver)).
     pub(crate) roots: NodeSet,
-    /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
-    /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
-    /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
+    /// The node-seeded roots ("run to this node") — a subset of `roots`, carrying a
+    /// per-run seed with
     /// no persisted counterpart. Every output is demanded from the lambda and delivered
     /// to the host, while the node's cache mode remains the sole RAM-retention policy.
-    pub(crate) pinned: NodeSet,
+    pub(crate) seeded: NodeSet,
     /// Event-owning roots that must execute successfully to initialize the shared
     /// state their event lambdas consume. Unlike ordinary roots, these bypass cache
     /// reuse for the event-loop bootstrap run.
@@ -94,7 +93,7 @@ impl ExecutionPlan {
         self.verdicts
             .reset(program.e_nodes.len(), NodeVerdict::default());
         self.roots.reset(program.e_nodes.len());
-        self.pinned.reset(program.e_nodes.len());
+        self.seeded.reset(program.e_nodes.len());
         self.event_sources.reset(program.e_nodes.len());
     }
 }
@@ -205,8 +204,8 @@ impl Planner {
 
             let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
-            // seed is pinned before this walk and overrides disable for this run.
-            if e_node.disabled && !plan.pinned.contains(node_idx) {
+            // seed is recorded before this walk and overrides disable for this run.
+            if e_node.disabled && !plan.seeded.contains(node_idx) {
                 self.color[node_idx] = Color::Black;
                 plan.verdicts[node_idx] = NodeVerdict::Disabled;
                 continue;
@@ -240,17 +239,17 @@ fn collect_roots(
     plan: &mut ExecutionPlan,
 ) -> Result<()> {
     let program = &compiled.program;
-    // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
+    // `plan.reset` already cleared `roots`/`seeded`; this only pushes into them.
 
-    // Node seeds (on-demand preview): each exact execution node is a root and pinned so
-    // every output is computed and delivered. `pinned` also records the one-run disabled
+    // Node seeds ("run to this node"): each exact execution node is a root and seeded so
+    // every output is computed. `seeded` also records the one-run disabled
     // override. An id absent from the installed program is inconsistent caller state.
     for &e_node_id in &seeds.e_node_ids {
         let Some(&node_idx) = program.e_node_index.get(&e_node_id) else {
             return Err(Error::NodeSeedNotFound { e_node_id });
         };
         plan.roots.insert(node_idx);
-        plan.pinned.insert(node_idx);
+        plan.seeded.insert(node_idx);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it

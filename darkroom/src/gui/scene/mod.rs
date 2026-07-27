@@ -38,10 +38,8 @@ pub(crate) struct Scene {
     /// Every field below is a pool this slices into.
     graphs: IndexMap<GraphRef, SceneGraph>,
     /// Each graph's paint stack, mirrored from its `GraphView::item_placements`
-    /// order: node bodies and pinned-output previews interleaved, later
-    /// entries drawn in front. The canvas draw pass iterates its own graph's
-    /// slice and dispatches on the key kind; everything else looks items up
-    /// through `nodes`.
+    /// order: later entries drawn in front. The canvas draw pass iterates its
+    /// own graph's slice; everything else looks items up through `nodes`.
     z_order: Vec<ItemRef>,
     /// Keyed node projections in relative paint order, **spanning every
     /// projected graph**. Node ids are unique across the whole document
@@ -59,9 +57,8 @@ pub(crate) struct Scene {
     /// `Subscription` is a plain `Copy` id-bundle with no render-only fields,
     /// so it's mirrored verbatim (unlike `SceneConnection`, which flattens).
     subscriptions: Vec<Subscription>,
-    /// Currently-selected nodes and pinned-output previews, mirrored from
-    /// each `GraphView` each rebuild so `node_ui`/`pin_ui` can pick a
-    /// different paint without taking a `&Document`. Sorted within each
+    /// Currently-selected nodes, mirrored from each `GraphView` each rebuild
+    /// so `node_ui` can pick a different paint without taking a `&Document`. Sorted within each
     /// graph's span (`GraphView::selected` is a `BTreeSet`, so extending
     /// preserves it), which is what makes [`GraphScene::is_selected`] a
     /// binary search rather than a set lookup. Read-only, like the rest of
@@ -132,8 +129,7 @@ pub(crate) struct SceneGraph {
     local_defs: Span,
     /// Whether a run raised over this pane resolves to one occurrence. False
     /// in a definition pane, which is no particular instance of that
-    /// definition — so a run there has no single occurrence to target and a
-    /// pin there delivers nothing.
+    /// definition — so a run there has no single occurrence to target.
     ///
     /// A fact about the *pane*, so it lives here rather than being copied
     /// onto each of its nodes; readers reach it through
@@ -223,13 +219,6 @@ pub(crate) struct SceneOutput {
     /// port declares none.
     pub(crate) description: InternedStr,
     pub(crate) ty: DataType,
-    /// The pinned preview widget's top-left corner in absolute
-    /// canvas-world coordinates — `Some` iff this output is pinned
-    /// (kept computed and read even with no in-graph consumer — see
-    /// [`scenarium::Graph::is_output_pinned`]). Mirrors the port's
-    /// `GraphView::item_placements` entry, which exists exactly while pinned,
-    /// so pinned-ness and position can't desync.
-    pub(crate) pin_position: Option<Vec2>,
 }
 
 /// One event (emitter) port in the per-frame projection. Events carry no data
@@ -497,15 +486,7 @@ impl Scene {
         let nodes_start = self.nodes.len();
 
         for (key, position) in &view.item_placements {
-            let id = match *key {
-                ItemRef::Node(id) => id,
-                ItemRef::Pin(_) => {
-                    // A pin's card draws from its owner's `SceneOutput`;
-                    // only its slot in the shared paint order lives here.
-                    self.z_order.push(*key);
-                    continue;
-                }
-            };
+            let ItemRef::Node(id) = *key;
             let Some(node) = graph.find(id, NodeSearch::TopLevel) else {
                 continue;
             };
@@ -608,7 +589,7 @@ impl Scene {
         node_interface: &NodeInterface<'_>,
         empty: &InternedStr,
     ) -> NodePortSpans {
-        let (graph, view) = (projection.source.graph(), projection.view);
+        let graph = projection.source.graph();
         // One `SceneInput` per input port. Each input's value_variants are
         // flattened into the shared pool, the input recording its span
         // (empty for the common no-options case) — so this one can't go
@@ -658,10 +639,6 @@ impl Scene {
                         }
                         OutputType::Fixed(dt) => dt.clone(),
                     },
-                    pin_position: view
-                        .item_placements
-                        .get(&ItemRef::Pin(OutputPort::new(id, i)))
-                        .copied(),
                 }),
         );
         let events = match node_interface.events {
@@ -700,14 +677,6 @@ impl Scene {
     /// back into the graph whose edit target the intent belongs to.
     pub(crate) fn owner(&self, node_id: NodeId) -> Option<GraphScene<'_>> {
         self.graph(self.nodes.get(&node_id)?.owner)
-    }
-
-    /// Every pinned output on screen, across every pane — what the
-    /// gesture controllers sweep, since a drag is arbitrated once for the
-    /// whole window rather than per canvas. Per-pane draws take
-    /// [`GraphScene::pinned_outputs`] instead.
-    pub(crate) fn pinned_outputs(&self) -> impl Iterator<Item = PinnedOutput<'_>> {
-        self.graphs().flat_map(GraphScene::pinned_outputs)
     }
 }
 
@@ -799,36 +768,6 @@ impl<'a> GraphScene<'a> {
         self.selected().iter().copied().collect()
     }
 
-    /// Every pinned output in this graph, **in paint order** — the one
-    /// iteration the pin scans (drag/click polls, wire draw, rubber-band
-    /// sweep) share.
-    ///
-    /// Driven off the paint stack rather than by re-scanning every node's
-    /// outputs for a set `pin_position`: the stack holds exactly one
-    /// `Pin` item per pinned output (`GraphView::validate` enforces that,
-    /// and it is where `pin_position` is projected from in the first
-    /// place), so this is O(pins) on a graph where almost nothing is
-    /// pinned instead of O(nodes × ports). It also hands `draw_wires` the
-    /// paint order it wants for free.
-    pub(crate) fn pinned_outputs(self) -> impl Iterator<Item = PinnedOutput<'a>> {
-        self.z_order().iter().filter_map(move |item| {
-            let ItemRef::Pin(port) = *item else {
-                return None;
-            };
-            // A pin outlives neither its node nor its port: a node dropped
-            // from the projection, or one rendered as a portless `missing`
-            // stub, leaves the item with nothing to draw.
-            let node = self.node(port.node_id)?;
-            let output = self.outputs(node.outputs).get(port.port_idx)?;
-            Some(PinnedOutput {
-                port,
-                pos: output.pin_position?,
-                output,
-                node,
-            })
-        })
-    }
-
     /// A node's input ports, sliced by its `inputs` span. The per-port
     /// pools are shared across every pane and addressed only by span, so
     /// these four take no account of which graph `self` is — they sit here
@@ -853,19 +792,6 @@ impl<'a> GraphScene<'a> {
     pub(crate) fn value_variants(self, span: Span) -> &'a [ValueVariant] {
         slice_pool(&self.scene.value_variants_pool, span)
     }
-}
-
-/// One pinned output surfaced by [`GraphScene::pinned_outputs`]: its port,
-/// its preview widget's top-left corner (the unwrapped
-/// [`SceneOutput::pin_position`]), the projected output, and the node it
-/// hangs off — which is where the card's run affordance and its owning
-/// graph come from.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PinnedOutput<'a> {
-    pub(crate) port: OutputPort,
-    pub(crate) pos: Vec2,
-    pub(crate) output: &'a SceneOutput,
-    pub(crate) node: &'a SceneNode,
 }
 
 /// Where one node's ports landed in the three per-port pools — the result
@@ -1229,31 +1155,6 @@ pub(crate) mod internals {
             self.selected.extend(selected);
             self.selected.sort();
             self.selected.dedup();
-            self.reseal();
-            self
-        }
-
-        /// Fill the shared output pool the nodes' `outputs` spans slice,
-        /// giving every pinned one its paint-stack item — the same 1:1
-        /// pairing `GraphView::validate` enforces on a real document, and
-        /// what [`GraphScene::pinned_outputs`] iterates.
-        pub(crate) fn with_outputs(
-            mut self,
-            outputs: impl IntoIterator<Item = SceneOutput>,
-        ) -> Self {
-            self.outputs.extend(outputs);
-            let pinned: Vec<ItemRef> = self
-                .nodes
-                .values()
-                .flat_map(|node| {
-                    slice_pool(&self.outputs, node.outputs)
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, output)| output.pin_position.is_some())
-                        .map(|(i, _)| ItemRef::Pin(OutputPort::new(node.id, i)))
-                })
-                .collect();
-            self.z_order.extend(pinned);
             self.reseal();
             self
         }

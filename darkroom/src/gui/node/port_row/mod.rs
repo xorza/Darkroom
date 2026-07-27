@@ -18,7 +18,6 @@ use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::OutputPort;
 use scenarium::{DataType, FsPathMode};
 
 use crate::core::document::BoundarySide;
@@ -26,12 +25,11 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
-use crate::gui::canvas::pin_ui;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input, set_output_pinned};
+use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::StaticValueEditorTheme;
@@ -131,9 +129,6 @@ struct CellOpts {
     rename: Option<BoundarySide>,
     /// Build the hover tooltip. Only the node under the pointer does.
     tips: bool,
-    /// Offer pinning this output. Outputs only; a definition pane resolves no
-    /// single occurrence to pin.
-    pinning: bool,
 }
 
 /// A port's hover tooltip, built only for the node under the pointer —
@@ -170,7 +165,6 @@ fn input_cells(
         let opts = CellOpts {
             rename: (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output),
             tips,
-            pinning: false,
         };
         input_label_cell(ui, rcx, port, node, input, opts, out);
         if allow_const {
@@ -192,7 +186,6 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, tips: bool, o
         let opts = CellOpts {
             rename: (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input),
             tips,
-            pinning: rcx.graph.run_available(),
         };
         output_cell(ui, rcx, port, output, opts, out);
     }
@@ -404,9 +397,7 @@ fn value_cell(
 }
 
 /// Column 3: the output label + circle, right-aligned (the fill column
-/// pins it to the node's right edge); the circle overhangs that edge. A
-/// pinned output's bezier + satellite are a canvas-level decoration, not
-/// painted here — see `crate::gui::canvas::pin_ui::draw_pin` (a dragged
+/// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
 fn output_cell(
@@ -450,39 +441,13 @@ fn output_cell(
     // Double-click to disconnect every consumer is handled in
     // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
 
-    // Right-click anywhere on the cell (circle or label) opens the same
-    // toggle as a menu item — mirrors the input side's binding menu.
-    //
-    // Creating a pin is a Cmd+drag from the circle, repositioning one is a
-    // plain drag off its satellite (see `PinUi`) — neither is a click, so
-    // the menu item below and the drag are the only ways to pin/unpin.
+    // Right-click anywhere on the cell (circle or label) opens the port menu —
+    // mirrors the input side's binding menu.
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
     open_port_context_menu(ui, menu_id, cell_secondary, wid);
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            let pinned = output.pin_position.is_some();
-            let label = if pinned { "Unpin output" } else { "Pin output" };
-            if MenuItem::new(label)
-                .enabled(pinned || opts.pinning)
-                .show(ui, popup)
-                .left
-                .clicked()
-            {
-                let pinning = !pinned;
-                out.push(set_output_pinned(port, pinning));
-                // Unlike Cmd+drag (which places a fresh pin via its own
-                // drag anchor), this toggle has no drag to derive a
-                // position from — seed one explicitly so the widget floats
-                // clear of the node instead of landing on top of it.
-                if pinning && let Some(port_center) = rcx.geometry.ports.center(port) {
-                    let out_port = OutputPort::new(port.node_id, port.port_idx);
-                    out.push(pin_ui::seed_pin_position_intent(
-                        out_port,
-                        port_center + pin_ui::default_pin_offset(theme),
-                    ));
-                }
-            }
             remove_port_item(ui, popup, port, opts.rename, out);
         });
 }

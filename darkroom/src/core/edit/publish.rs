@@ -84,9 +84,7 @@ fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for key in &view.selected {
-            let ItemRef::Node(nid) = key else {
-                continue;
-            };
+            let ItemRef::Node(nid) = key;
             if let Some(node) = graph.find(*nid, NodeSearch::TopLevel)
                 && let NodeKind::Graph(link) = node.kind
             {

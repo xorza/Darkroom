@@ -52,12 +52,6 @@ impl CullRegion {
         self.keeps_rect(wire.hull())
     }
 
-    /// A pinned output stays recorded while *either* half of its glyph is
-    /// visible: the preview card or the bezier reaching back to its port.
-    pub(super) fn keeps_pin(self, card: Rect, wire: &Wire) -> bool {
-        self.keeps_rect(card) || self.keeps_wire(wire)
-    }
-
     fn keeps_rect(self, rect: Rect) -> bool {
         self.visible.is_none_or(|visible| visible.intersects(rect))
     }

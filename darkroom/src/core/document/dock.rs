@@ -683,10 +683,10 @@ impl DockLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::{NodeId, OutputPort};
+    use scenarium::NodeId;
 
     fn viewer(n: u128) -> TabRef {
-        TabRef::ImageViewer(OutputPort::new(NodeId::from_u128(n), 0))
+        TabRef::ImageViewer(NodeId::from_u128(n))
     }
 
     fn main_tab() -> TabRef {

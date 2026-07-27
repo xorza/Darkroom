@@ -30,7 +30,7 @@ use palantir::{
     Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
     Splitter, Stroke, Text, Ui, WidgetId,
 };
-use scenarium::OutputPort;
+use scenarium::NodeId;
 
 use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
@@ -81,7 +81,7 @@ fn drag_ghost_wid() -> WidgetId {
 pub(crate) struct DockContext<'a> {
     pub(crate) doc: &'a Document,
     pub(crate) theme: &'a Theme,
-    pub(crate) viewer_labels: &'a HashMap<OutputPort, String>,
+    pub(crate) viewer_labels: &'a HashMap<NodeId, String>,
 }
 
 /// The dock's persistent GUI state — just the drag in flight; the
@@ -347,7 +347,7 @@ fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
         // A hit skips `port_label`'s recursive search; a miss falls through
         // to it rather than to a placeholder, so the cache can only make the
         // label cheaper, never different.
-        TabRef::ImageViewer(port) => match cx.viewer_labels.get(&port) {
+        TabRef::ImageViewer(node_id) => match cx.viewer_labels.get(&node_id) {
             Some(label) => Cow::Borrowed(label.as_str()),
             None => tab_text(cx.doc, tab),
         },
@@ -367,7 +367,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
             .unwrap_or("graph")
             .into(),
         TabRef::Preferences => Cow::Borrowed("preferences"),
-        TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
+        TabRef::ImageViewer(node_id) => image_viewer::node_label(doc, node_id).into(),
     }
 }
 

@@ -205,9 +205,9 @@ pub enum NodeSearch {
 /// are: `bindings` and `graphs` are plain maps a caller keys into directly, so
 /// they're public rather than fronted by trivial accessors; `nodes` stays
 /// `pub(crate)` for cross-module test call sites that force every node's
-/// cache mode directly, while `subscriptions` and `pinned_outputs` are
-/// private — every real way in (fresh-id insertion, recursive lookup, a range
-/// query) already goes through a method.
+/// cache mode directly, while `subscriptions` is private — every real way in
+/// (fresh-id insertion, recursive lookup, a range query) already goes through a
+/// method.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     pub(crate) nodes: HashMap<NodeId, Node>,
@@ -225,13 +225,6 @@ pub struct Graph {
     /// one emitter-event's subscribers contiguously.
     #[serde(default)]
     subscriptions: BTreeSet<Subscription>,
-
-    /// Output ports read by a consumer outside the graph (e.g. a GUI
-    /// inspector), flagged so the plan counts them as used even with no
-    /// in-graph binding. Presence, not a richer value, is the flag — same
-    /// sparse-side-table shape as `subscriptions`.
-    #[serde(default)]
-    pinned_outputs: BTreeSet<OutputPort>,
 
     /// Local graph definitions referenced by this graph's `GraphLink::Local`
     /// instances. Shared definitions live in `Library::graphs`.

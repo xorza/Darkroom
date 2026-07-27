@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::graph::{NodeId, OutputPort};
+use crate::graph::NodeId;
 
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
@@ -93,20 +93,6 @@ pub enum ExecutionIdentityError {
 pub(crate) struct FlattenMap {
     scopes: Vec<Scope>,
     leaves: HashMap<ExecutionNodeId, Leaf>,
-    /// Which authored output ports each delivered flat slot stands for.
-    ///
-    /// An authored port and the slot computing it are the same thing only for
-    /// a leaf in the entry graph. A graph instance's port is backed by whatever
-    /// its interior wires to the `GraphOutput` boundary — several levels down,
-    /// under an id the instance does not share — so the value comes back
-    /// addressed to a node the user never pinned. This is what maps it home,
-    /// and it is the one direction attribution cannot answer: attribution
-    /// names the *nodes* behind an execution id, not the *ports*.
-    ///
-    /// Several authored ports can share one slot (an instance's output and the
-    /// interior producer's own port, both pinned). The reverse never happens:
-    /// flatten records a port only when exactly one slot backs it.
-    pinned_ports: HashMap<ExecutionOutputPort, Vec<OutputPort>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -133,25 +119,10 @@ impl FlattenMap {
     pub(crate) fn reset(&mut self) {
         self.scopes.clear();
         self.leaves.clear();
-        self.pinned_ports.clear();
         self.scopes.push(Scope {
             instance: None,
             parent: 0,
         });
-    }
-
-    /// Record that `source` computes the value authored `port` asks for.
-    pub(crate) fn set_pinned_port(&mut self, source: ExecutionOutputPort, port: OutputPort) {
-        self.pinned_ports.entry(source).or_default().push(port);
-    }
-
-    /// The authored output ports one delivered flat slot stands for. Empty
-    /// when nothing pinned it — a run root delivers every output it has,
-    /// including ports no one asked for.
-    pub(crate) fn pinned_ports(&self, source: ExecutionOutputPort) -> &[OutputPort] {
-        self.pinned_ports
-            .get(&source)
-            .map_or(&[][..], |ports| ports.as_slice())
     }
 
     pub(crate) fn push_scope(&mut self, instance: NodeId, parent: u32) -> u32 {

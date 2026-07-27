@@ -82,36 +82,3 @@ fn wire_cull_uses_the_control_hull() {
     // No viewport → no culling.
     assert!(CullRegion { visible: None }.keeps_wire(&flat(200.0, 300.0)));
 }
-
-#[test]
-fn pin_cull_keeps_either_visible_part() {
-    let region = CullRegion {
-        visible: Some(Rect::new(0.0, 0.0, 100.0, 100.0)),
-    };
-    let cases = [
-        (
-            "card intersects while wire stays left",
-            Vec2::new(-500.0, 50.0),
-            Vec2::new(-250.0, 25.0),
-            true,
-        ),
-        (
-            "wire crosses while card stays right",
-            Vec2::new(50.0, 50.0),
-            Vec2::new(200.0, 50.0),
-            true,
-        ),
-        (
-            "wire and card both stay right",
-            Vec2::new(500.0, 50.0),
-            Vec2::new(700.0, 50.0),
-            false,
-        ),
-    ];
-
-    for (label, port_center, top_left, expected) in cases {
-        let card = Rect::new(top_left.x, top_left.y, 280.0, 200.0);
-        let wire = Wire::data(port_center, top_left);
-        assert_eq!(region.keeps_pin(card, &wire), expected, "{label}");
-    }
-}

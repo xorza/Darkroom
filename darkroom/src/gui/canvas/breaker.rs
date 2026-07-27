@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use scenarium::NodeId;
-use scenarium::{InputPort, OutputPort, Subscription};
+use scenarium::{InputPort, Subscription};
 
 use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
@@ -79,11 +79,6 @@ impl BreakerProbe<'_> {
         self.live_state().broken_subscriptions.push(s);
     }
 
-    /// Record `port`'s pin glyph as targeted by the breaker this frame.
-    pub(super) fn mark_broken_pin(&mut self, port: OutputPort) {
-        self.live_state().broken_pins.push(port);
-    }
-
     fn live_state(&mut self) -> &mut BreakerState {
         self.state
             .as_deref_mut()
@@ -139,10 +134,6 @@ pub(super) struct BreakerState {
     /// Event subscriptions whose wire the breaker intersects this frame,
     /// drained on release into `SetSubscription { subscribe: false }`.
     broken_subscriptions: Vec<Subscription>,
-    /// Pinned outputs whose satellite glyph (or its connecting bezier) the
-    /// breaker intersects this frame, drained on release into
-    /// `Intent::SetOutputPinned { pinned: false }`.
-    broken_pins: Vec<OutputPort>,
 }
 
 impl BreakerState {
@@ -155,7 +146,6 @@ impl BreakerState {
             broken: Vec::new(),
             broken_nodes: Vec::new(),
             broken_subscriptions: Vec::new(),
-            broken_pins: Vec::new(),
         }
     }
 
@@ -168,7 +158,6 @@ impl BreakerState {
         self.broken.clear();
         self.broken_nodes.clear();
         self.broken_subscriptions.clear();
-        self.broken_pins.clear();
     }
 
     pub(super) fn add_point(&mut self, p: Vec2) {
@@ -361,17 +350,6 @@ impl BreakerUI {
                             subscribe: false,
                         });
                     }
-                    // A removed node already drops its own pin state, so skip
-                    // any pinned output on a doomed node.
-                    for port in b.broken_pins.drain(..) {
-                        if doomed_nodes.contains(&port.node_id) {
-                            continue;
-                        }
-                        out.push(Intent::SetOutputPinned {
-                            output: port,
-                            pinned: false,
-                        });
-                    }
                 });
                 self.state = None;
             }
@@ -424,15 +402,7 @@ impl BreakerUI {
 pub(crate) mod internals {
     use super::*;
 
-    impl BreakerState {
-        /// The pins recorded as cut this frame, so a sibling module can
-        /// assert its own `mark_broken_pin` discipline — notably that
-        /// resolving a pin once per frame records it once, however many
-        /// render passes then read that resolution.
-        pub(crate) fn broken_pins(&self) -> &[OutputPort] {
-            &self.broken_pins
-        }
-    }
+    impl BreakerState {}
 }
 
 #[cfg(test)]
@@ -478,7 +448,7 @@ mod tests {
         // field, and two of the four forgot), so a port/wire crossed once
         // mid-drag stayed marked even after the scribble moved away —
         // over-committing severs on release. `begin_frame` is now the one
-        // place that clears all four.
+        // place that clears all three.
         let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
         let node = NodeId::from_u128(1);
         b.broken.push(InputPort::new(node, 0));
@@ -488,14 +458,12 @@ mod tests {
             event_idx: 0,
             subscriber: node,
         });
-        b.broken_pins.push(OutputPort::new(node, 0));
 
         b.begin_frame();
 
         assert!(b.broken.is_empty());
         assert!(b.broken_nodes.is_empty());
         assert!(b.broken_subscriptions.is_empty());
-        assert!(b.broken_pins.is_empty());
     }
 
     #[test]
@@ -513,10 +481,10 @@ mod tests {
         ui.state
             .as_mut()
             .unwrap()
-            .broken_pins
-            .push(OutputPort::new(NodeId::from_u128(1), 0));
+            .broken_nodes
+            .push(NodeId::from_u128(1));
         let probe = ui.probe(Vec2::ZERO, GraphRef::Main);
-        assert!(probe.state.unwrap().broken_pins.is_empty());
+        assert!(probe.state.unwrap().broken_nodes.is_empty());
     }
 
     #[test]

@@ -95,8 +95,8 @@ pub(crate) enum ExecutionPlanValidationError {
     },
     #[error("execution node {e_node_id:?} appears more than once")]
     DuplicateNode { e_node_id: ExecutionNodeId },
-    #[error("pinned node {e_node_id:?} is not an execution root")]
-    PinnedNodeNotRoot { e_node_id: ExecutionNodeId },
+    #[error("seeded node {e_node_id:?} is not an execution root")]
+    SeededNodeNotRoot { e_node_id: ExecutionNodeId },
     #[error("event source {e_node_id:?} is not an execution root")]
     EventSourceNotRoot { e_node_id: ExecutionNodeId },
 }
@@ -277,7 +277,7 @@ impl ExecutionPlan {
         for (set, len) in [
             ("verdicts", self.verdicts.len()),
             ("roots", self.roots.len()),
-            ("pinned", self.pinned.len()),
+            ("seeded", self.seeded.len()),
             ("event sources", self.event_sources.len()),
         ] {
             if len != program.e_nodes.len() {
@@ -329,12 +329,12 @@ impl ExecutionPlan {
 
         // A set bit in the last word's padding survives a release-build
         // out-of-range `insert`, so an iterated index is checked like any other.
-        for node_idx in self.pinned.iter() {
+        for node_idx in self.seeded.iter() {
             if node_idx.idx() >= program.e_nodes.len() {
                 return Err(ExecutionPlanValidationError::NodeOutOfRange { node_idx });
             }
             if !self.roots.contains(node_idx) {
-                return Err(ExecutionPlanValidationError::PinnedNodeNotRoot {
+                return Err(ExecutionPlanValidationError::SeededNodeNotRoot {
                     e_node_id: program.e_node_ids[node_idx],
                 });
             }

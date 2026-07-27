@@ -10,8 +10,7 @@ use crate::execution::program::index::{
     NodeColumn, NodeIdx, NodeSet, OutputAddr, OutputColumn, OutputIdx,
 };
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
-use crate::execution::report::PinnedOutputs;
-use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
+use crate::execution::report::internals::DiscardedReports;
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
@@ -75,12 +74,6 @@ impl Prog {
     /// and so can never be reused).
     fn set_behavior(&mut self, e_node_id: ExecutionNodeId, behavior: FuncBehavior) {
         self.program.by_id_mut(e_node_id).behavior = behavior;
-    }
-
-    /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
-    fn set_output_pinned(&mut self, e_node_id: ExecutionNodeId, port: usize, pinned: bool) {
-        let start = self.program.by_id(e_node_id).outputs.start as usize;
-        self.program.outputs[start + port].pinned = pinned;
     }
 }
 
@@ -160,15 +153,15 @@ fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
     for &node_idx in &process_order {
         roots.insert(node_idx);
     }
-    let mut pinned = NodeSet::default();
-    pinned.reset(program.e_nodes.len());
+    let mut seeded = NodeSet::default();
+    seeded.reset(program.e_nodes.len());
     let mut event_sources = NodeSet::default();
     event_sources.reset(program.e_nodes.len());
     ExecutionPlan {
         process_order,
         verdicts,
         roots,
-        pinned,
+        seeded,
         event_sources,
     }
 }
@@ -259,35 +252,6 @@ async fn run_with(
         )
         .await;
     outcome
-}
-
-/// Like [`run`] but wires a reporter through the executor and returns every `PinnedOutputs`
-/// it pushed.
-async fn run_with_pinned(
-    program: &ExecutionProgram,
-    run: &TestRun,
-) -> (RuntimeCache, ExecutionOutcome, Vec<PinnedOutputs>) {
-    let mut cache = RuntimeCache::default();
-    cache.reconcile(program);
-    let mut executor = Executor::default();
-    let mut resource_stamps = RunResourceStamps::default();
-    let mut reporter = CollectingReporter::default();
-    let mut stats = ExecutionOutcome::default();
-    executor
-        .run(
-            RunRequest {
-                program,
-                plan: &run.plan,
-                resolved: &run.resolved,
-                cache: &mut cache,
-                resource_stamps: &mut resource_stamps,
-                reporter: &mut reporter,
-                cancel: CancelToken::never(),
-            },
-            &mut stats,
-        )
-        .await;
-    (cache, stats, reporter.pinned)
 }
 
 #[tokio::test]
@@ -533,40 +497,6 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     );
 }
 
-/// A host pin demands and receives the value before the downstream binding reads it, but
-/// does not delay release after that final real reader.
-#[tokio::test]
-async fn pinned_delivery_does_not_create_a_reader() {
-    let mut p = Prog::default();
-    let producer = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-        Ok(())
-    });
-    let consumer = async_lambda!(|Invocation {
-                                      inputs, outputs, ..
-                                  }| {
-        let v = inputs[0].as_i64().unwrap();
-        outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
-        Ok(())
-    });
-    let a = p.node(&[], 1, producer);
-    let b = p.node(&[bind(&p.program, a, 0)], 1, consumer);
-    p.set_cache(a, CacheMode::None);
-    p.set_cache(b, CacheMode::Ram);
-    p.set_output_pinned(a, 0, true);
-
-    let plan = run_with_readers(&p.program, vec![1, 1]);
-    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert!(
-        matches!(cache.slots[nx(&p.program, a)].value, ValueState::Empty),
-        "A is released after its only binding reader despite host delivery: {:?}",
-        cache.slots[nx(&p.program, a)].value
-    );
-    assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
-}
-
 /// A lambda can name the execution node it is running as — the hook a host-side
 /// sink (an editor value view, a per-node logger) needs to attribute what it
 /// receives. Set per invoke, so two nodes sharing one lambda still report
@@ -604,10 +534,11 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     assert_ne!(a, b, "the two nodes are distinguishable at all");
 }
 
-/// A pinned (node-seeded preview) root demands its output but does not override
-/// `CacheMode::None` retention.
+/// A node seed ("run to this node") demands the node's output but does not
+/// override `CacheMode::None` retention — targeting says *compute this*, not
+/// *keep this*.
 #[tokio::test]
-async fn pinned_root_demands_output_without_retaining_it() {
+async fn a_node_seed_demands_its_output_without_retaining_it() {
     use std::sync::Mutex;
 
     let seen: Arc<Mutex<Option<OutputDemand>>> = Arc::new(Mutex::new(None));
@@ -623,20 +554,20 @@ async fn pinned_root_demands_output_without_retaining_it() {
     let a = p.node(&[], 1, probe);
     p.set_cache(a, CacheMode::None);
 
-    // Unpinned root, no consumers: the lambda reads `Skip` and the slot is
+    // Unseeded root, no consumers: the lambda reads `Skip` and the slot is
     // reclaimed the instant it's stored.
     let plan = run_with_readers(&p.program, vec![0]);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
         matches!(cache.slots[nx(&p.program, a)].value, ValueState::Empty),
-        "unpinned Skip root is drained at store time: {:?}",
+        "unseeded Skip root is drained at store time: {:?}",
         cache.slots[nx(&p.program, a)].value
     );
 
     let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, output(&p.program, a, 0));
-    plan.plan.pinned.insert(nx(&p.program, a));
+    plan.plan.seeded.insert(nx(&p.program, a));
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
@@ -646,60 +577,14 @@ async fn pinned_root_demands_output_without_retaining_it() {
     );
 }
 
-/// An individually pinned output pushes its fresh value the instant its node
-/// finishes running.
+/// A reused node whose demanded output no consumer reads is released as soon as
+/// it is served, rather than held to end-of-run eviction.
 #[tokio::test]
-async fn pinned_output_pushes_right_after_it_runs() {
-    let mut p = Prog::default();
-    let producer = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-        Ok(())
-    });
-    let a = p.node(&[], 1, producer);
-    p.set_output_pinned(a, 0, true);
-
-    let plan = straight_run(&p.program);
-    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert_eq!(pushes.len(), 1, "one push for the one finished node");
-    assert_eq!(pushes[0].e_node_id, a);
-    assert_eq!(pushes[0].values.len(), 1);
-    assert_eq!(pushes[0].values[0].port_idx, 0);
-    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
-}
-
-/// A pinned output with zero real consumers and a non-RAM cache mode is reclaimed
-/// immediately after delivery because the reader column starts drained.
-#[tokio::test]
-async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
-    let mut p = Prog::default();
-    let producer = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-        Ok(())
-    });
-    let a = p.node(&[], 1, producer);
-    p.set_cache(a, CacheMode::None); // not Ram — retention must not be why it survives
-    p.set_output_pinned(a, 0, true);
-
-    let mut plan = run_with_readers(&p.program, vec![0]);
-    demand_output(&p.program, &mut plan, output(&p.program, a, 0));
-    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert_eq!(pushes.len(), 1, "the value was still pushed");
-    assert!(
-        matches!(cache.slots[nx(&p.program, a)].value, ValueState::Empty),
-        "reclaimed right after the push, not left resident to end-of-run eviction: {:?}",
-        cache.slots[nx(&p.program, a)].value
-    );
-}
-
-#[tokio::test]
-async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
+async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     let mut p = Prog::default();
     let producer = async_lambda!(|_| { panic!("a reused node must not invoke its lambda") });
     let a = p.node(&[], 1, producer);
     p.set_cache(a, CacheMode::Disk);
-    p.set_output_pinned(a, 0, true);
     // Only a `Pure` node earns a digest, and the run loop serves a `Reuse` by asking the
     // cache for the value — so the fixture has to be the coherent state a resolver `Reuse`
     // implies: a resident snapshot produced under the node's current digest.
@@ -718,7 +603,6 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
         produced_under: cache.slots[nx(&p.program, a)].current_digest,
     };
     let mut executor = Executor::default();
-    let mut reporter = CollectingReporter::default();
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
@@ -728,92 +612,17 @@ async fn reused_pinned_output_with_no_consumers_is_reclaimed_right_after_the_pus
                 resolved: &run.resolved,
                 cache: &mut cache,
                 resource_stamps: &mut resource_stamps,
-                reporter: &mut reporter,
+                reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },
             &mut stats,
         )
         .await;
-    let pushes = reporter.pinned;
 
     assert_eq!(stats.cached_nodes, vec![a]);
-    assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
     assert!(
         matches!(cache.slots[nx(&p.program, a)].value, ValueState::Empty),
-        "the reused value is released immediately after delivery"
-    );
-}
-
-/// A pinned-root node (a node-seeded on-demand preview target) pushes *every*
-/// output, not just an individually-pinned one — `run.plan.pinned` alone is
-/// enough to qualify the whole node.
-#[tokio::test]
-async fn pinned_root_pushes_every_output() {
-    let mut p = Prog::default();
-    let producer = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
-        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
-        Ok(())
-    });
-    let a = p.node(&[], 2, producer);
-    p.set_cache(a, CacheMode::None);
-
-    let mut plan = run_with_readers(&p.program, vec![0, 0]);
-    demand_output(&p.program, &mut plan, output(&p.program, a, 0));
-    demand_output(&p.program, &mut plan, output(&p.program, a, 1));
-    plan.plan.pinned.insert(nx(&p.program, a));
-    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].e_node_id, a);
-    assert_eq!(pushes[0].values.len(), 2);
-    assert_eq!(pushes[0].values[0].port_idx, 0);
-    assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));
-    assert_eq!(pushes[0].values[1].port_idx, 1);
-    assert_eq!(pushes[0].values[1].value.as_i64(), Some(2));
-    assert!(matches!(
-        cache.slots[nx(&p.program, a)].value,
-        ValueState::Empty
-    ));
-}
-
-/// Neither an individually-pinned port nor a pinned root: no push at all,
-/// even though the node ran successfully.
-#[tokio::test]
-async fn non_pinned_node_pushes_nothing() {
-    let mut p = Prog::default();
-    let producer = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-        Ok(())
-    });
-    p.node(&[], 1, producer);
-
-    let plan = straight_run(&p.program);
-    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert!(
-        pushes.is_empty(),
-        "no pinned output or pinned root ⇒ no push"
-    );
-}
-
-/// A pinned output on a node whose lambda *fails* pushes nothing — only a
-/// fresh, successful `Ran` outcome triggers the push (mirrors
-/// `RunPhase::Finished`'s own cancelled/failed suppression).
-#[tokio::test]
-async fn failed_pinned_node_pushes_nothing() {
-    let mut p = Prog::default();
-    let failing = async_lambda!(|_| { Err(internals::failure("boom")) });
-    let a = p.node(&[], 1, failing);
-    p.set_output_pinned(a, 0, true);
-
-    let plan = straight_run(&p.program);
-    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
-
-    assert!(
-        pushes.is_empty(),
-        "a failed node's pinned output never pushes"
+        "the reused value is released as soon as it is served"
     );
 }
 

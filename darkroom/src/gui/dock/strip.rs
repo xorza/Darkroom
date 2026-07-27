@@ -383,7 +383,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::{NodeId, OutputPort};
+    use scenarium::NodeId;
 
     #[test]
     fn a_renamable_tab_offers_its_label_as_a_drag_handle() {
@@ -407,7 +407,7 @@ mod tests {
         for tab in [
             TabRef::Graph(GraphRef::Main),
             TabRef::Preferences,
-            TabRef::ImageViewer(OutputPort::new(NodeId::from_u128(1), 0)),
+            TabRef::ImageViewer(NodeId::from_u128(1)),
         ] {
             assert_eq!(
                 drag_handles(tab).collect::<Vec<_>>(),

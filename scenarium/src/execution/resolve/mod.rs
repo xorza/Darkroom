@@ -20,7 +20,7 @@
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
+use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resource::RunResourceStamps;
 use crate::node::lambda::OutputDemand;
@@ -53,7 +53,7 @@ pub(crate) enum Disposition {
 pub(crate) struct ResolvedOutputs {
     /// Whether each output must be produced for a live reader or a host pin.
     pub(crate) demand: OutputColumn<OutputDemand>,
-    /// Consumers which will actually run and read each output. Pins do not create readers.
+    /// Consumers which will actually run and read each output.
     pub(crate) readers: OutputColumn<u32>,
 }
 
@@ -61,25 +61,6 @@ impl ResolvedOutputs {
     fn reset(&mut self, output_count: usize) {
         self.demand.reset(output_count, OutputDemand::Skip);
         self.readers.reset(output_count, 0);
-    }
-
-    fn seed_external_demand(
-        &mut self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        node_idx: NodeIdx,
-    ) {
-        let outputs = program[node_idx].outputs;
-        if plan.pinned.contains(node_idx) {
-            self.demand.slice_mut(outputs).fill(OutputDemand::Produce);
-            return;
-        }
-        for port_idx in 0..outputs.len {
-            let output_idx = program.output_idx(OutputAddr { node_idx, port_idx });
-            if program.outputs[output_idx.idx()].pinned {
-                self.demand[output_idx] = OutputDemand::Produce;
-            }
-        }
     }
 
     fn add_reader(&mut self, output_idx: OutputIdx) {
@@ -177,8 +158,15 @@ async fn resolve_run(
             run.disposition[node_idx] = Disposition::MissingLambda;
             continue;
         }
-        run.outputs.seed_external_demand(program, plan, node_idx);
         let outputs = program[node_idx].outputs;
+        // A node seed ("run to this node") demands every output the node has:
+        // the host asked for the node itself, not for what a consumer reads.
+        if plan.seeded.contains(node_idx) {
+            run.outputs
+                .demand
+                .slice_mut(outputs)
+                .fill(OutputDemand::Produce);
+        }
         let demand = run.outputs.demand.slice(outputs);
         if !plan.event_sources.contains(node_idx)
             && cache.probe_reuse(program, node_idx, demand).await

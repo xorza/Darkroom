@@ -12,6 +12,7 @@
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
+use scenarium::NodeId;
 use std::fmt::Write as _;
 
 use glam::{UVec2, Vec2};
@@ -20,12 +21,12 @@ use palantir::{
     Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
     Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
 };
-use scenarium::{NodeSearch, OutputPort};
+use scenarium::NodeSearch;
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
-use crate::gui::pinned_output::{FullImage, StoredContent};
+use crate::gui::preview_store::{FullImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
@@ -54,7 +55,7 @@ const CHECKER_SQUARE_PX: f32 = 8.0;
 pub(crate) struct ImageViewer {
     /// The port this viewer shows — keys the pane's widget id so two
     /// viewer tabs never share gesture responses.
-    port: OutputPort,
+    node_id: NodeId,
     /// Texture dimensions used to decide whether a new revision needs a refit.
     source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
@@ -83,9 +84,9 @@ struct ShownImage<'a> {
 
 impl ImageViewer {
     /// An empty viewer for `port` (shows the hint until content arrives).
-    pub(crate) fn new(port: OutputPort) -> Self {
+    pub(crate) fn new(node_id: NodeId) -> Self {
         Self {
-            port,
+            node_id,
             source_size: None,
             view: None,
             pan_anchor: PanAnchor::default(),
@@ -174,7 +175,7 @@ impl ImageViewer {
         self.sync_source(shown.map(|image| image.handle.size()));
         self.apply_gestures(ui, shown);
 
-        let pane = pane_size(ui, self.port);
+        let pane = pane_size(ui, self.node_id);
         let display_scale = ui.display().scale_factor;
         let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.colors.canvas_bg,
@@ -183,7 +184,7 @@ impl ImageViewer {
         };
         let mut prefs_changed = false;
         Panel::zstack()
-            .id(pane_wid(self.port))
+            .id(pane_wid(self.node_id))
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
@@ -315,23 +316,25 @@ impl ImageViewer {
         prefs: &mut ViewerPreferences,
         shown: ShownImage<'_>,
     ) -> bool {
-        let port = self.port;
+        let node_id = self.node_id;
         let mut changed = false;
         Panel::vstack()
-            .id(control_wid(port, "panel"))
+            .id(control_wid(node_id, "panel"))
             .size((Sizing::HUG, Sizing::HUG))
             .align(Align::new(HAlign::Right, VAlign::Top))
             .child_align(Align::new(HAlign::Right, VAlign::Top))
             .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
             .gap(BUTTON_GAP)
             .show(ui, |ui| {
-                let framing = Panel::hstack().id(control_wid(port, "pill_framing"));
+                let framing = Panel::hstack().id(control_wid(node_id, "pill_framing"));
                 pill(ui, theme, framing, |ui| {
-                    if Chip::new(control_wid(port, "fit"), "Fit to view").show(ui, theme, draw_fit)
+                    if Chip::new(control_wid(node_id, "fit"), "Fit to view")
+                        .show(ui, theme, draw_fit)
                     {
                         self.reset_framing();
                     }
-                    if Chip::new(control_wid(port, "100"), "Zoom to 100%").show(ui, theme, draw_100)
+                    if Chip::new(control_wid(node_id, "100"), "Zoom to 100%")
+                        .show(ui, theme, draw_100)
                         && let Some(pane) = pane
                     {
                         let img =
@@ -340,11 +343,11 @@ impl ImageViewer {
                         self.view = Some(zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
-                let appearance = Panel::vstack().id(control_wid(port, "pill_appearance"));
+                let appearance = Panel::vstack().id(control_wid(node_id, "pill_appearance"));
                 pill(ui, theme, appearance, |ui| {
                     for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
-                        if Chip::new(control_wid(port, key), tip).show(ui, theme, |ui, s, _| {
+                        if Chip::new(control_wid(node_id, key), tip).show(ui, theme, |ui, s, _| {
                             draw_swatch(ui, s, theme, mode, selected)
                         }) && !selected
                         {
@@ -355,7 +358,7 @@ impl ImageViewer {
                     // Rule between the backdrop radio stack and the
                     // sampling toggle — two concepts, one pill.
                     pill_rule(ui, theme);
-                    changed |= filter_toggle(ui, theme, port, &mut prefs.mag_filter);
+                    changed |= filter_toggle(ui, theme, node_id, &mut prefs.mag_filter);
                 });
             });
         changed
@@ -372,8 +375,8 @@ impl ImageViewer {
         // Registered images have non-zero dims by construction, so the
         // texel size is always a valid divisor.
         let img = logical_image_size(shown.handle.size(), ui.display().scale_factor);
-        let resp = ui.response_for(pane_wid(self.port));
-        let Some(pane) = pane_size(ui, self.port) else {
+        let resp = ui.response_for(pane_wid(self.node_id));
+        let Some(pane) = pane_size(ui, self.node_id) else {
             return;
         };
         if resp.left.double_clicked() {
@@ -407,31 +410,30 @@ impl ImageViewer {
 ///
 /// A recursive whole-document node search plus a fresh `String`, so
 /// resolve it once per tab per frame rather than once per reader.
-pub(crate) fn port_label(doc: &Document, port: OutputPort) -> String {
-    let name = doc
-        .graph
-        .find(port.node_id, NodeSearch::Recursive)
+pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
+    doc.graph
+        .find(node_id, NodeSearch::Recursive)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
-        .unwrap_or("image");
-    format!("{name} \u{b7} out {}", port.port_idx)
+        .unwrap_or("image")
+        .to_owned()
 }
 
 /// Last frame's measured pane size, `None` before the first layout.
-fn pane_size(ui: &Ui, port: OutputPort) -> Option<Vec2> {
-    let size = ui.response_for(pane_wid(port)).layout_rect?.size;
+fn pane_size(ui: &Ui, node_id: NodeId) -> Option<Vec2> {
+    let size = ui.response_for(pane_wid(node_id)).layout_rect?.size;
     (size.w > 0.0 && size.h > 0.0).then(|| Vec2::new(size.w, size.h))
 }
 
-/// Stable id for a viewer's pane — keyed by port so switching between two
+/// Stable id for a viewer's pane — keyed by node so switching between two
 /// viewer tabs can't cross-feed their gesture responses.
-fn pane_wid(port: OutputPort) -> WidgetId {
-    WidgetId::from_hash(("image_viewer.pane", port))
+fn pane_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("image_viewer.pane", node_id))
 }
 
-/// Stable id for one control-panel widget, keyed by port + role.
-fn control_wid(port: OutputPort, key: &'static str) -> WidgetId {
-    WidgetId::from_hash(("image_viewer.controls", port, key))
+/// Stable id for one control-panel widget, keyed by node + role.
+fn control_wid(node_id: NodeId, key: &'static str) -> WidgetId {
+    WidgetId::from_hash(("image_viewer.controls", node_id, key))
 }
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
@@ -465,14 +467,14 @@ fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Te
 
 /// The nearest/bilinear magnification toggle: accent-filled while nearest
 /// is active. Flips `filter` on click; returns whether it changed.
-fn filter_toggle(ui: &mut Ui, theme: &Theme, port: OutputPort, filter: &mut ImageFilter) -> bool {
+fn filter_toggle(ui: &mut Ui, theme: &Theme, node_id: NodeId, filter: &mut ImageFilter) -> bool {
     let nearest = *filter == ImageFilter::Nearest;
     let tip = if nearest {
         "Zoom-in sampling: nearest — click for bilinear"
     } else {
         "Zoom-in sampling: bilinear — click for nearest"
     };
-    if Chip::new(control_wid(port, "filter"), tip)
+    if Chip::new(control_wid(node_id, "filter"), tip)
         .toggled(nearest)
         .show(ui, theme, draw_pixels)
     {
@@ -628,8 +630,8 @@ mod tests {
     use scenarium::NodeId;
     use scenarium::{FuncId, GraphDef, GraphId, Node, NodeKind};
 
-    fn port() -> OutputPort {
-        OutputPort::new(NodeId::from_u128(1), 0)
+    fn viewer_node() -> NodeId {
+        NodeId::from_u128(1)
     }
 
     /// A `Func` node called `name` (empty for an unnamed one).
@@ -640,44 +642,31 @@ mod tests {
     }
 
     #[test]
-    fn port_label_names_the_node_and_its_port_at_any_depth() {
+    fn node_label_names_the_preview_node_at_any_depth() {
         let mut doc = Document::default();
         let stack = doc.graph.add(named_node("stack"));
         let unnamed = doc.graph.add(named_node(""));
 
-        // A node in a nested definition resolves too: viewer tabs can be
-        // opened from a graph interior, and the label is what tells two
-        // ports of one node apart.
+        // A node in a nested definition resolves too, so a stale tab from
+        // before the entry-only rule still labels rather than blanking.
         let def_id = GraphId::unique();
         let mut def = GraphDef::new("S");
         let interior = def.body.add(named_node("blur"));
         doc.graph.insert_graph(def_id, def);
 
+        assert_eq!(node_label(&doc, stack), "stack");
+        assert_eq!(node_label(&doc, interior), "blur");
         assert_eq!(
-            port_label(&doc, OutputPort::new(stack, 1)),
-            "stack \u{b7} out 1"
+            node_label(&doc, unnamed),
+            "image",
+            "an unnamed node falls back rather than showing a blank chip"
         );
         assert_eq!(
-            port_label(&doc, OutputPort::new(stack, 0)),
-            "stack \u{b7} out 0",
-            "the port tag distinguishes two ports of one node"
-        );
-        assert_eq!(
-            port_label(&doc, OutputPort::new(interior, 0)),
-            "blur \u{b7} out 0"
-        );
-        assert_eq!(
-            port_label(&doc, OutputPort::new(unnamed, 0)),
-            "image \u{b7} out 0",
-            "an unnamed node falls back rather than labelling a bare tag"
-        );
-        assert_eq!(
-            port_label(&doc, OutputPort::new(NodeId::unique(), 3)),
-            "image \u{b7} out 3",
-            "a node that no longer exists keeps the tab labelled"
+            node_label(&doc, NodeId::unique()),
+            "image",
+            "a node that no longer exists still labels"
         );
     }
-
     #[test]
     fn fit_viewport_centers_and_scales_like_contain() {
         // 400×200 texture in an 800×800 pane: width binds at zoom 2 —
@@ -714,7 +703,7 @@ mod tests {
 
     #[test]
     fn sync_source_refits_only_for_size_changes_or_removal() {
-        let mut viewer = ImageViewer::new(port());
+        let mut viewer = ImageViewer::new(viewer_node());
         viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 3.0,

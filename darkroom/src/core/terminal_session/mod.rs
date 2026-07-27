@@ -101,9 +101,7 @@ impl TerminalSession {
                 WorkerReport::Error(error) => {
                     self.workspace.runtime.status.error(error.to_string())
                 }
-                WorkerReport::Installed(_)
-                | WorkerReport::Cleared
-                | WorkerReport::PinnedOutputs(_) => {}
+                WorkerReport::Installed(_) | WorkerReport::Cleared => {}
             }
         }
     }

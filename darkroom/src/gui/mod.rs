@@ -6,10 +6,10 @@ pub(crate) mod image_viewer;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
-pub(crate) mod pinned_output;
 pub(crate) mod preferences_view;
+pub(crate) mod preview_store;
 pub(crate) mod widgets;
-use scenarium::OutputPort;
+use scenarium::NodeId;
 
 pub(crate) mod app;
 pub(crate) mod format;
@@ -52,7 +52,7 @@ pub(crate) enum UiAction {
     /// chip at the end of the strip).
     NewGraph,
     /// Show this pinned output's full runtime image in its viewer tab.
-    OpenImageViewer(OutputPort),
+    OpenImageViewer(NodeId),
 }
 
 /// One event (emitter) port's identity. Events are indexed independently

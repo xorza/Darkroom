@@ -9,11 +9,9 @@ use glam::Vec2;
 use indexmap::IndexMap;
 use scenarium::GraphId;
 use scenarium::GraphLink;
-use scenarium::{
-    DetachedNode, Graph as CoreGraph, GraphDef as CoreGraphDef, NodeId, NodeSearch, OutputPort,
-};
+use scenarium::{DetachedNode, Graph as CoreGraph, GraphDef as CoreGraphDef, NodeId, NodeSearch};
 use scenarium::{Node, NodeKind};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::{DockLayout, TabGroup};
@@ -93,11 +91,10 @@ pub(crate) enum TabRef {
     /// from `RunState` when drawn. Pruned when its node is deleted, like a
     /// graph tab whose def vanished.
     ///
-    /// Carries an [`OutputPort`] rather than a `PortRef` so an input-side
-    /// port is unrepresentable: a persisted document cannot deserialize a
-    /// viewer tab that no code path could have produced, and the readers
-    /// need no filter, assert, or unreachable arm to cope with one.
-    ImageViewer(OutputPort),
+    /// Keyed by the preview node whose value it shows — the same identity the
+    /// preview card on the canvas uses, so the two can never disagree about
+    /// which value a tab is for.
+    ImageViewer(NodeId),
 }
 
 /// Which side of a graph interface a boundary-port edit targets.
@@ -123,17 +120,14 @@ pub(crate) enum BoundarySide {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) enum ItemRef {
     Node(NodeId),
-    Pin(OutputPort),
 }
 
 impl ItemRef {
-    /// The node this key lives on — the node itself, or the one a pinned
-    /// output hangs off. Both kinds die with their node, so this is what a
-    /// liveness check (a mid-drag delete, a selection prune) tests.
+    /// The node this key lives on — what a liveness check (a mid-drag delete,
+    /// a selection prune) tests.
     pub(crate) fn owner(self) -> NodeId {
         match self {
             ItemRef::Node(id) => id,
-            ItemRef::Pin(port) => port.node_id,
         }
     }
 
@@ -228,9 +222,6 @@ impl GraphView {
         for node in graph.iter() {
             item_placements.insert(ItemRef::Node(node.id), Vec2::ZERO);
         }
-        for port in graph.pinned_outputs() {
-            item_placements.insert(ItemRef::Pin(port), Vec2::ZERO);
-        }
         Self {
             item_placements,
             ..Default::default()
@@ -305,7 +296,7 @@ fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
         TabRef::Graph(GraphRef::Local(id)) => graph.find_graph(id).is_some(),
-        TabRef::ImageViewer(port) => graph.find(port.node_id, NodeSearch::Recursive).is_some(),
+        TabRef::ImageViewer(node_id) => graph.find(node_id, NodeSearch::Recursive).is_some(),
     }
 }
 
@@ -391,30 +382,6 @@ impl Document {
         }
     }
 
-    /// Every pinned output across the graph tree, collected in one walk.
-    fn pinned_outputs(&self) -> HashSet<OutputPort> {
-        fn collect(graph: &CoreGraph, out: &mut HashSet<OutputPort>) {
-            out.extend(graph.pinned_outputs());
-            for nested in graph.graphs.values() {
-                collect(&nested.body, out);
-            }
-        }
-
-        let mut out = HashSet::new();
-        collect(&self.graph, &mut out);
-        out
-    }
-
-    /// The ports whose pushed values the UI must keep: pinned previews plus
-    /// open viewer tabs. Collected in one document walk — the pinned side
-    /// recurses every nested graph, so a per-port predicate called from a
-    /// loop re-walked the whole document per item.
-    pub(crate) fn retained_output_ports(&self) -> HashSet<OutputPort> {
-        let mut retained = self.pinned_outputs();
-        retained.extend(self.viewer_outputs());
-        retained
-    }
-
     /// Whether `node_id` is a live preview node in the entry graph — what
     /// retains the value it published.
     ///
@@ -430,24 +397,24 @@ impl Document {
             })
     }
 
-    /// Every open viewer tab's port, visible or not — the retention half:
-    /// a hidden tab still expects its value to be there when it is shown.
-    pub(crate) fn viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
+    /// Every open viewer tab's preview node, visible or not — the retention
+    /// half: a hidden tab still expects its value to be there when shown.
+    pub(crate) fn viewer_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.layout.all_tabs().filter_map(|tab| match tab {
-            TabRef::ImageViewer(port) => Some(port),
+            TabRef::ImageViewer(node_id) => Some(node_id),
             _ => None,
         })
     }
 
-    /// The viewer ports a record pass will actually draw: each group renders
+    /// The viewer nodes a record pass will actually draw: each group renders
     /// its *visible* tab and nothing else. Scopes full-resolution texture
     /// uploads to what's on screen — a viewer stacked behind another tab in
     /// the same pane costs nothing until it's activated.
-    pub(crate) fn visible_viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
+    pub(crate) fn visible_viewer_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.layout
             .groups()
             .filter_map(|group| match group.active_tab() {
-                TabRef::ImageViewer(port) => Some(port),
+                TabRef::ImageViewer(node_id) => Some(node_id),
                 _ => None,
             })
     }
@@ -625,7 +592,7 @@ impl From<CoreGraph> for Document {
 mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
-    use crate::core::document::validate::{DocumentValidationError, GraphViewValidationError};
+
     use scenarium::testing::test_graph as core_test_graph;
     use scenarium::{FuncId, GraphInterface};
 
@@ -1106,80 +1073,48 @@ mod tests {
             .expect("document still validates after edits");
     }
 
-    /// An output-0 [`OutputPort`] on `node_id`, for viewer-tab tests.
-    fn out_port(node_id: NodeId) -> OutputPort {
-        OutputPort::new(node_id, 0)
-    }
-
     /// All open tabs across the layout, for order-sensitive asserts.
     fn all_tabs(doc: &Document) -> Vec<TabRef> {
         doc.layout.all_tabs().collect()
     }
 
+    /// A viewer tab retains its node's value while open, and only the pane's
+    /// *visible* tab is owed a full-resolution texture.
     #[test]
-    fn output_resources_follow_recursive_pins_and_open_viewers() {
+    fn viewer_tabs_retain_their_node_and_only_the_visible_one_draws() {
         let mut doc = Document::default();
         let root_node = add_node_at(&mut doc, Vec2::ZERO);
-        let root_port = OutputPort::new(root_node, 0);
-        assert!(doc.retained_output_ports().is_empty());
+        assert_eq!(doc.viewer_nodes().count(), 0);
 
         let primary = doc.layout.primary().id;
         doc.layout
-            .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
+            .find_or_insert(TabRef::ImageViewer(root_node), primary);
         assert_eq!(
-            doc.retained_output_ports(),
-            HashSet::from([root_port]),
-            "an open viewer tab retains exactly its own port"
+            doc.viewer_nodes().collect::<Vec<_>>(),
+            vec![root_node],
+            "an open viewer tab retains exactly its own node"
         );
 
         // Retention and visibility are different questions: the tab is open
         // (so its value must be kept) but the pane still shows the graph tab,
         // so nothing draws it and no full-resolution texture is owed.
-        assert_eq!(doc.visible_viewer_outputs().count(), 0);
+        assert_eq!(doc.visible_viewer_nodes().count(), 0);
         doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(out_port(root_node)),
+            tab: TabRef::ImageViewer(root_node),
         });
         assert_eq!(
-            doc.visible_viewer_outputs().collect::<Vec<_>>(),
-            vec![root_port],
+            doc.visible_viewer_nodes().collect::<Vec<_>>(),
+            vec![root_node],
             "activating the tab makes it the pane's drawn viewer"
-        );
-        assert_eq!(
-            doc.retained_output_ports(),
-            HashSet::from([root_port]),
-            "activation moves nothing in or out of the retained set"
-        );
-
-        let def_id = doc.create_graph(GraphRef::Main).unwrap();
-        let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
-        let definition = doc.graph.graphs.get_mut(&def_id).unwrap();
-        let nested_node_id = definition.body.add(nested_node);
-        let nested_port = OutputPort::new(nested_node_id, 0);
-        let nested_sibling = OutputPort::new(nested_node_id, 1);
-        definition.body.set_output_pinned(nested_port, true);
-        assert_eq!(
-            doc.retained_output_ports(),
-            HashSet::from([root_port, nested_port]),
-            "pins in nested authoring graphs retain their presentation resource, \
-             an unpinned sibling port does not"
-        );
-
-        // Pins are per port: dropping one drops exactly its retention.
-        let body = &mut doc.graph.graphs.get_mut(&def_id).unwrap().body;
-        body.set_output_pinned(nested_sibling, true);
-        body.set_output_pinned(nested_port, false);
-        assert_eq!(
-            doc.retained_output_ports(),
-            HashSet::from([root_port, nested_sibling])
         );
 
         doc.layout.apply(DockOp::CloseTab {
-            tab: TabRef::ImageViewer(out_port(root_node)),
+            tab: TabRef::ImageViewer(root_node),
         });
         assert_eq!(
-            doc.retained_output_ports(),
-            HashSet::from([nested_sibling]),
-            "closing the viewer leaves only the nested pin retained"
+            doc.viewer_nodes().count(),
+            0,
+            "closing the viewer leaves nothing retained"
         );
     }
 
@@ -1194,8 +1129,8 @@ mod tests {
         assert_eq!(doc.visible_targets().collect::<Vec<_>>(), [GraphRef::Main]);
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
-        for tab in [TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))] {
+            .find_or_insert(TabRef::ImageViewer(node_id), primary);
+        for tab in [TabRef::Preferences, TabRef::ImageViewer(node_id)] {
             doc.layout.apply(DockOp::ActivateTab { tab });
             assert_eq!(
                 doc.focused_target(),
@@ -1212,7 +1147,7 @@ mod tests {
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
-                TabRef::ImageViewer(out_port(node_id))
+                TabRef::ImageViewer(node_id)
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
@@ -1288,9 +1223,9 @@ mod tests {
             .find_or_insert(TabRef::Graph(GraphRef::Local(id)), primary);
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
+            .find_or_insert(TabRef::ImageViewer(node_id), primary);
         doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(out_port(node_id)),
+            tab: TabRef::ImageViewer(node_id),
         }); // viewing the image tab
         // Drop the graph out from under its open tab.
         doc.graph.graphs.remove(&id);
@@ -1304,7 +1239,7 @@ mod tests {
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
-                TabRef::ImageViewer(out_port(node_id))
+                TabRef::ImageViewer(node_id)
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
@@ -1316,7 +1251,7 @@ mod tests {
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let primary = doc.layout.primary().id;
         doc.layout
-            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
+            .find_or_insert(TabRef::ImageViewer(node_id), primary);
         doc.reconcile_with_graph();
         assert_eq!(
             all_tabs(&doc).len(),
@@ -1346,11 +1281,11 @@ mod tests {
         let primary = doc.layout.primary().id;
         doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
+            .find_or_insert(TabRef::ImageViewer(node_id), primary);
         // A split pane too, so the whole tree shape round-trips — not
         // just a flat strip.
         doc.layout.apply(DockOp::MoveTab {
-            tab: TabRef::ImageViewer(out_port(node_id)),
+            tab: TabRef::ImageViewer(node_id),
             to: DockDrop::Split {
                 group: primary,
                 side: SplitSide::Right,
@@ -1496,101 +1431,6 @@ mod tests {
         assert_eq!(
             doc, deserialized,
             "the complete document should round-trip through JSON"
-        );
-    }
-
-    #[test]
-    fn validate_accepts_and_round_trips_a_pinned_output_with_its_item() {
-        // A well-formed document — every pinned output carries a view item
-        // (`for_graph` seeds one; the edit layer does the same on pin) —
-        // validates and round-trips, position, slot, and all.
-        let mut graph = core_test_graph();
-        let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let port = OutputPort::new(node_id, 0);
-        graph.set_output_pinned(port, true);
-
-        let mut doc: Document = graph.into();
-        let key = ItemRef::Pin(port);
-        let pos = Vec2::new(5.0, 6.0);
-        *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
-        doc.validate().unwrap();
-
-        let bytes = serde_json::to_vec_pretty(&doc).expect("serialize");
-        let reloaded: Document = serde_json::from_slice(&bytes).expect("load");
-        reloaded.validate().expect("reloaded document is valid");
-        assert_eq!(
-            reloaded.main_view.item_placements.get(&key).copied(),
-            Some(pos),
-            "the pinned output's position round-trips"
-        );
-        assert_eq!(
-            reloaded.main_view.item_placements.get_index_of(&key),
-            doc.main_view.item_placements.get_index_of(&key),
-            "the pinned output's paint-stack slot round-trips"
-        );
-    }
-
-    #[test]
-    fn validate_rejects_pin_item_drift_in_both_directions() {
-        // A pinned output with no view item is malformed: the edit layer's
-        // `MoveSelection` build looks the item up unconditionally, so validation
-        // surfaces the drift rather than letting it crash later. Pin the
-        // port *after* the view was built so nothing seeds the item.
-        let graph = core_test_graph();
-        let port = OutputPort::new(
-            graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id,
-            0,
-        );
-        let mut doc: Document = graph.into();
-        doc.graph.set_output_pinned(port, true);
-        let err = doc.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                DocumentValidationError::MainView {
-                    source: GraphViewValidationError::MissingPinnedOutput {
-                        port: missing_port
-                    }
-                } if missing_port == port
-            ),
-            "missing pin item reports the exact port"
-        );
-
-        // The project loader calls this same gate in every build (release too),
-        // so encoding with bare serde cannot make malformed state valid.
-        let bytes = serde_json::to_vec(&doc).expect("serialize");
-        let decoded: Document = serde_json::from_slice(&bytes).expect("deserialize");
-        let err = decoded.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                DocumentValidationError::MainView {
-                    source: GraphViewValidationError::MissingPinnedOutput {
-                        port: missing_port
-                    }
-                } if missing_port == port
-            ),
-            "deserialized missing pin item reports the exact port"
-        );
-
-        // The reverse drift — a ghost item for an unpinned port (unpinning
-        // removes the item; a leftover would be a phantom slot in the paint
-        // stack) — is rejected too.
-        doc.graph.set_output_pinned(port, false);
-        doc.main_view
-            .item_placements
-            .insert(ItemRef::Pin(port), Vec2::ZERO);
-        let err = doc.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                DocumentValidationError::MainView {
-                    source: GraphViewValidationError::UnpinnedOutput {
-                        port: unpinned_port
-                    }
-                } if unpinned_port == port
-            ),
-            "ghost pin item reports the exact port"
         );
     }
 }

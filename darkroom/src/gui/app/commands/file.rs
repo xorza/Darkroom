@@ -59,7 +59,7 @@ impl App {
     /// document's textures alive, keyed by node ids that no longer exist.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.editor = Editor::new();
-        self.editor.run_state.pinned_outputs.request_reconcile();
+        self.editor.run_state.previews.request_reconcile();
         self.workspace.replace_document(open);
         self.remember_document_path();
     }

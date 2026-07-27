@@ -8,7 +8,8 @@
 //! [`App`]: crate::gui::app::App
 
 use palantir::Ui;
-use scenarium::{Library, OutputPort};
+use scenarium::Library;
+use scenarium::NodeId;
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
@@ -256,7 +257,7 @@ impl Editor {
         // Pins and viewer tabs move in both directions, so the store has to
         // re-derive which ports it still owes a presentation resource.
         if signals.reconcile {
-            self.run_state.pinned_outputs.request_reconcile();
+            self.run_state.previews.request_reconcile();
         }
     }
 
@@ -293,7 +294,7 @@ impl Editor {
         // Only when an edit moved the retained set or a fresh value landed —
         // an idle frame has nothing to release or upload.
         self.run_state
-            .pinned_outputs
+            .previews
             .reconcile_if_needed(ui, &open.document);
         // Every pane showing a graph gets a canvas; a layout of nothing but
         // non-graph views (Preferences, viewers) leaves the set empty and
@@ -528,7 +529,7 @@ impl Editor {
                         self.open_graph(open, GraphRef::Local(id));
                     }
                 }
-                UiAction::OpenImageViewer(port) => self.open_image_viewer(open, port),
+                UiAction::OpenImageViewer(node_id) => self.open_image_viewer(open, node_id),
             }
         }
     }
@@ -536,14 +537,14 @@ impl Editor {
     /// Open `port`'s image-viewer tab and focus it — one tab per port,
     /// deduped. Mirrors [`Self::open_preferences`]: adding the tab is the
     /// non-undoable part, focus routes through a recorded activation.
-    fn open_image_viewer(&mut self, open: &mut OpenDocument, port: OutputPort) {
+    fn open_image_viewer(&mut self, open: &mut OpenDocument, node_id: NodeId) {
         let group = open.document.layout.focused;
-        let tab = TabRef::ImageViewer(port);
+        let tab = TabRef::ImageViewer(node_id);
         open.document.layout.find_or_insert(tab, group);
         // Inserting the tab is the half no step records, so it has to ask for
         // the reconcile itself: the port's stored value is preview-only until
         // this viewer's full-resolution upload.
-        self.run_state.pinned_outputs.request_reconcile();
+        self.run_state.previews.request_reconcile();
         self.push_activate(tab);
     }
 
@@ -615,7 +616,7 @@ mod tests {
     use scenarium::DataType;
     use scenarium::testing;
     use scenarium::{Binding, Func, FuncId, FuncInput, FuncOutput};
-    use scenarium::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
+    use scenarium::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
     use crate::core::document::open_document::OpenDocument;
     use crate::core::document::{Document, GraphRef, ItemRef, TabRef};
@@ -708,16 +709,26 @@ mod tests {
     }
 
     #[test]
-    fn image_viewer_tabs_dedupe_per_port_and_prune_state_on_close() {
+    fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
         let mut test = TestEditor::new(Document::default());
-        let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = test.open.document.graph.add(node);
-        test.open
-            .document
-            .main_view
-            .item_placements
-            .insert(ItemRef::Node(id), Vec2::ZERO);
-        let port = |port_idx| OutputPort::new(id, port_idx);
+        // Two real nodes: a viewer tab is keyed by node, and a tab naming a
+        // node the graph no longer holds is pruned by `reconcile_with_graph`.
+        let ids: Vec<NodeId> = (0..2)
+            .map(|_| {
+                let id = test
+                    .open
+                    .document
+                    .graph
+                    .add(Node::new(NodeKind::Func(FuncId::unique())));
+                test.open
+                    .document
+                    .main_view
+                    .item_placements
+                    .insert(ItemRef::Node(id), Vec2::ZERO);
+                id
+            })
+            .collect();
+        let viewer_node = |n: usize| ids[n];
         let open = |test: &mut TestEditor, p| {
             test.editor.actions.push(UiAction::OpenImageViewer(p));
             test.editor.apply_view_actions(&mut test.open);
@@ -728,10 +739,13 @@ mod tests {
 
         // Opening only changes the layout. Viewer state is created by the
         // renderer when it draws the tab and pulls from `RunState`.
-        open(&mut test, port(0));
+        open(&mut test, viewer_node(0));
         assert_eq!(
             tabs(&test),
-            vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
+            vec![
+                TabRef::Graph(GraphRef::Main),
+                TabRef::ImageViewer(viewer_node(0))
+            ]
         );
         assert_eq!(active(&test), 1);
         assert!(
@@ -741,21 +755,31 @@ mod tests {
         test.editor
             .main_window
             .image_viewers
-            .insert(port(0), ImageViewer::new(port(0)));
+            .insert(viewer_node(0), ImageViewer::new(viewer_node(0)));
 
-        // Re-clicking the same port reuses its tab; a different port gets
+        // Re-clicking the same node reuses its tab; a different node gets
         // its own renderer-owned state.
-        open(&mut test, port(0));
-        assert_eq!(tabs(&test).len(), 2, "same port dedupes");
-        open(&mut test, port(1));
-        assert_eq!(tabs(&test).len(), 3, "distinct port adds a tab");
+        open(&mut test, viewer_node(0));
+        assert_eq!(tabs(&test).len(), 2, "the same node dedupes");
+        open(&mut test, viewer_node(1));
+        assert_eq!(tabs(&test).len(), 3, "a distinct node adds a tab");
         assert_eq!(active(&test), 2);
         test.editor
             .main_window
             .image_viewers
-            .insert(port(1), ImageViewer::new(port(1)));
-        assert!(test.editor.main_window.image_viewers.contains_key(&port(0)));
-        assert!(test.editor.main_window.image_viewers.contains_key(&port(1)));
+            .insert(viewer_node(1), ImageViewer::new(viewer_node(1)));
+        assert!(
+            test.editor
+                .main_window
+                .image_viewers
+                .contains_key(&viewer_node(0))
+        );
+        assert!(
+            test.editor
+                .main_window
+                .image_viewers
+                .contains_key(&viewer_node(1))
+        );
 
         test.editor.sync_image_viewers(&test.open);
 
@@ -764,12 +788,21 @@ mod tests {
         test.open
             .document
             .layout
-            .retain_tabs(|t| t != TabRef::ImageViewer(port(1)));
+            .retain_tabs(|t| t != TabRef::ImageViewer(viewer_node(1)));
         test.open.document.reconcile_with_graph();
         test.editor.sync_image_viewers(&test.open);
-        assert!(test.editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(
-            !test.editor.main_window.image_viewers.contains_key(&port(1)),
+            test.editor
+                .main_window
+                .image_viewers
+                .contains_key(&viewer_node(0))
+        );
+        assert!(
+            !test
+                .editor
+                .main_window
+                .image_viewers
+                .contains_key(&viewer_node(1)),
             "closed tab's viewer state is pruned"
         );
     }

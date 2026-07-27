@@ -119,22 +119,6 @@ fn insert_graph_replaces_existing_graph() {
 }
 
 #[test]
-fn pinned_outputs_roundtrip_serialization() -> TestResult {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
-
-    for format in SerdeFormat::all_formats_for_testing() {
-        let serialized = graph.serialize(format)?;
-        let deserialized = Graph::deserialize(&serialized, format)?;
-        assert!(deserialized.is_output_pinned(OutputPort::new(sum_id, 0)));
-        assert_eq!(graph, deserialized);
-    }
-
-    Ok(())
-}
-
-#[test]
 fn validate_passes_for_valid_graph() {
     assert!(test_graph().validate().is_ok());
 }
@@ -544,15 +528,12 @@ fn validate_for_execution_tolerates_library_range_drift() {
 
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
-    graph.set_output_pinned(OutputPort::new(id, 0), true);
     assert!(graph.validate_for_execution(&library).is_ok());
 
-    // Wiring the current library can't resolve — a pin, binding,
-    // subscription, and exposed event past the declared ranges — stays
-    // valid: drift is tolerated (it degrades to unbound at flatten/plan
-    // time), never a compile error. See
+    // Wiring the current library can't resolve — a binding, subscription, and
+    // exposed event past the declared ranges — stays valid: drift is tolerated
+    // (it degrades to unbound at flatten/plan time), never a compile error. See
     // `engine::tests::dangling_wiring_compiles_and_reports_missing_input`.
-    graph.set_output_pinned(OutputPort::new(id, 1), true);
     graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
     graph.subscribe(id, 3, id);
     let mut child = GraphDef::new("child");
@@ -987,7 +968,6 @@ fn node_remove_test() -> TestResult {
     }
     assert!(graph.iter().all(|node| node.disabled));
 
-    graph.set_output_pinned(OutputPort::new(node_id, 0), true);
     graph.detach_node(node_id);
 
     assert!(graph.find_by_name("sum", NodeSearch::TopLevel).is_none());
@@ -998,9 +978,6 @@ fn node_remove_test() -> TestResult {
         assert_ne!(dst.node_id, node_id);
         assert_ne!(src.node_id, node_id);
     }
-
-    // Nor does a pin on one of its own output ports.
-    assert!(!graph.is_output_pinned(OutputPort::new(node_id, 0)));
 
     Ok(())
 }
@@ -1124,39 +1101,6 @@ fn subscribers_ranges_one_emitter_event() {
 }
 
 #[test]
-fn set_output_pinned_and_is_output_pinned() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    let port = OutputPort::new(sum_id, 0);
-
-    assert!(!graph.is_output_pinned(port));
-    graph.set_output_pinned(port, true);
-    assert!(graph.is_output_pinned(port));
-
-    // A distinct port on the same node is a distinct flag.
-    assert!(!graph.is_output_pinned(OutputPort::new(sum_id, 1)));
-
-    // Re-marking is idempotent (BTreeSet dedups).
-    graph.set_output_pinned(port, true);
-
-    graph.set_output_pinned(port, false);
-    assert!(!graph.is_output_pinned(port));
-}
-
-#[test]
-fn clone_mapped_remaps_pinned_outputs() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
-
-    let fresh = graph.clone_mapped();
-    let new_sum_id = fresh.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-
-    assert!(!fresh.is_output_pinned(OutputPort::new(sum_id, 0)));
-    assert!(fresh.is_output_pinned(OutputPort::new(new_sum_id, 0)));
-}
-
-#[test]
 fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
@@ -1164,11 +1108,8 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
         .find_by_name("get_a", NodeSearch::TopLevel)
         .unwrap()
         .id;
-    let pinned = OutputPort::new(sum_id, 0);
-
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
-    graph.set_output_pinned(pinned, true);
 
     let bindings = graph.bindings_touching(sum_id);
 
@@ -1179,7 +1120,6 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     let detached = graph.detach_node(sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
     assert!(!graph.is_subscribed(get_a_id, 0, sum_id));
-    assert!(!graph.is_output_pinned(pinned));
 
     let serialized = serialize(&detached, SerdeFormat::Bitcode)?;
     let decoded: DetachedNode = deserialize(&serialized, SerdeFormat::Bitcode)?;

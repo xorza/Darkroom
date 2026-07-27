@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::pool::{Pool, PoolRange};
-use crate::graph::{CacheMode, OutputPort};
+use crate::graph::CacheMode;
 use crate::library::Library;
 use crate::node::definition::{FuncBehavior, FuncId, OutputType};
 use crate::node::event::EventLambda;
@@ -45,7 +45,6 @@ pub(crate) struct ExecutionEvent {
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionOutput {
     pub(crate) data_type: DataType,
-    pub(crate) pinned: bool,
 }
 
 /// A resolved data edge awaiting interning: the input-pool slot to write, and
@@ -56,18 +55,6 @@ pub(crate) struct ExecutionOutput {
 pub(crate) struct PendingBind {
     pub(crate) input_idx: u32,
     pub(crate) producer: ExecutionOutputPort,
-}
-
-/// An authored output port the document pinned, and the flat slot flatten
-/// resolved it to — the [`PendingBind`] counterpart for pins, deferred for the
-/// same reason (the slot's producer can be emitted later in the walk).
-///
-/// For a leaf the two sides name the same node; for a graph instance the
-/// source is somewhere in its interior.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PendingPin {
-    pub(crate) authored: OutputPort,
-    pub(crate) source: ExecutionOutputPort,
 }
 
 /// A resolved event edge awaiting wiring — the [`PendingBind`] counterpart for
@@ -137,8 +124,8 @@ pub(crate) struct ExecutionProgram {
     pub(crate) e_node_index: HashMap<ExecutionNodeId, NodeIdx>,
     pub(crate) inputs: Pool<ExecutionInput>,
     pub(crate) events: Pool<ExecutionEvent>,
-    /// Each node's resolved declared output types (wildcards followed) and pin bits,
-    /// packed in the same index space as the plan's output columns. Resolved once at flatten
+    /// Each node's resolved declared output types (wildcards followed), packed
+    /// in the same index space as the plan's output columns. Resolved once at flatten
     /// by [`Self::resolve_output_types`]
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
@@ -183,16 +170,6 @@ impl ExecutionProgram {
         self.adopt_nodes(e_nodes);
         self.intern_bindings(binds);
         self.apply_subscriptions(subs);
-    }
-
-    /// The outputs-pool index of one flat output port. Every producer exists:
-    /// flatten only names slots it emitted.
-    pub(crate) fn output_slot(&self, port: ExecutionOutputPort) -> OutputIdx {
-        let node_idx = *self
-            .e_node_index
-            .get(&port.e_node_id)
-            .expect("flatten only names producers it emitted");
-        OutputIdx(self[node_idx].outputs.start + port.port_idx as u32)
     }
 
     /// Adopt the flattened node set, assigning dense indices in id order so the

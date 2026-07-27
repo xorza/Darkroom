@@ -131,10 +131,10 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
 
     // Likewise for a set that no longer spans the program.
     f.compiled.program.inputs[b_input].binding = bind(a, 0);
-    p.pinned.reset(0);
+    p.seeded.reset(0);
     assert_eq!(
         p.validate(&f.compiled.program).unwrap_err().to_string(),
-        "plan pinned spans 0 nodes, not the program's 3"
+        "plan seeded spans 0 nodes, not the program's 3"
     );
 }
 
@@ -215,10 +215,9 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
 }
 
 #[test]
-fn node_seed_is_both_a_root_and_pinned() {
+fn node_seed_is_both_a_root_and_seeded() {
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
-    f.compiled.program.outputs[0].pinned = true;
 
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
@@ -228,7 +227,7 @@ fn node_seed_is_both_a_root_and_pinned() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
-    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(a)]);
+    assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(a)]);
     assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
 
     let seeds = RunSeeds {
@@ -236,7 +235,7 @@ fn node_seed_is_both_a_root_and_pinned() {
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
-    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(a)]);
+    assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(a)]);
     assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
 }
 
@@ -261,7 +260,7 @@ fn dependency_cycle_is_rejected() {
 fn node_seed_schedules_only_its_cone_and_pins_it() {
     // A → B → C (C sink). Seeding node B (by authoring id — top-level ids resolve
     // straight against the program) schedules only [A, B] — C is upstream of nothing
-    // seeded — and records B as both a root and a pinned node. B's output has no
+    // seeded — and records B as both a root and a seeded node. B's output has no
     // scheduled consumer.
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
@@ -278,13 +277,13 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     assert_eq!(p.process_order, [a, b].map(nx), "only B's cone, deps first");
     assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(b)]);
-    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(b)]);
+    assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
     assert!(p.verdicts[nx(a)].wants_execute());
     assert!(p.verdicts[nx(b)].wants_execute());
     assert!(!p.verdicts[nx(c)].wants_execute(), "C never verdicted");
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
-    // everything, and B stays pinned.
+    // everything, and B stays seeded.
     let seeds = RunSeeds {
         sinks: true,
         e_node_ids: vec![b],
@@ -292,7 +291,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
     assert_eq!(p.process_order, [a, b, c].map(nx));
-    assert_eq!(p.pinned.iter().collect::<Vec<_>>(), vec![nx(b)]);
+    assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.

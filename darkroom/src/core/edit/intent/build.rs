@@ -129,15 +129,6 @@ pub(crate) fn build_step(
                 .map(DetachedBoundaryPort::Output),
         }
         .ok_or(Refusal::Quiet)?;
-        // A pinned port keeps a preview widget in some GraphView; refuse
-        // the removal (unpin first) rather than reconcile view items.
-        let pinned = match &detached {
-            DetachedBoundaryPort::Input(input) => !input.pins.is_empty(),
-            DetachedBoundaryPort::Output(output) => !output.pins.is_empty(),
-        };
-        if pinned {
-            return Err(Refusal::Quiet);
-        }
         return Ok(UndoStep::Doc(DocStep::RemoveBoundaryPort {
             graph_id,
             detached,
@@ -252,8 +243,8 @@ pub(crate) fn build_step(
         Intent::RemoveNode { node_id } => {
             validate::live_node(graph, node_id, "RemoveNode")?;
             let detached = graph.snapshot_node(node_id).ok_or(Refusal::Quiet)?;
-            // The node's own item plus its pinned outputs', each with its
-            // paint-stack slot — ascending by construction (enumerate).
+            // The node's own item with its paint-stack slot — ascending by
+            // construction (enumerate).
             let item_placements = view
                 .item_placements
                 .iter()
@@ -278,7 +269,7 @@ pub(crate) fn build_step(
             for (key, to) in moves {
                 validate::finite_position(to, "MoveSelection")?;
                 // Drag-sourced (spans frames): a member whose item vanished
-                // mid-gesture (node removed, port unpinned) drops quietly.
+                // mid-gesture (node removed) drops quietly.
                 let Some(&from) = view.item_placements.get(&key) else {
                     continue;
                 };
@@ -408,23 +399,6 @@ pub(crate) fn build_step(
                 emitter,
                 event_idx,
                 subscriber,
-            }
-        }
-        Intent::SetOutputPinned { output, pinned } => {
-            validate::live_node(graph, output.node_id, "SetOutputPinned")?;
-            let key = ItemRef::Pin(output);
-            // Present iff currently pinned; captured so reverting an unpin
-            // puts the widget back in its exact paint-stack slot.
-            let prior_slot = view
-                .item_placements
-                .get_index_of(&key)
-                .map(|slot| (slot, view.item_placements[slot]));
-            GraphStep::SetOutputPinned {
-                output,
-                from: graph.is_output_pinned(output),
-                to: pinned,
-                was_selected: view.selected.contains(&key),
-                prior_slot,
             }
         }
     };

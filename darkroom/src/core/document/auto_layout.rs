@@ -15,19 +15,11 @@ const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
 /// placement (its own `BOUNDARY_LAYOUT_GAP`).
 pub(super) const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
 
-/// Where auto-layout parks a pinned output's preview relative to its owner
-/// node: above and to the right, clear of the node body (the widget is
-/// 280×200 canvas units). Multiple pins on one node stagger diagonally by
-/// [`PIN_LAYOUT_STAGGER`] per port index so they don't stack exactly.
-const PIN_LAYOUT_OFFSET: Vec2 = Vec2::new(60.0, -240.0);
-const PIN_LAYOUT_STAGGER: Vec2 = Vec2::new(28.0, 28.0);
-
 impl GraphView {
     /// Assign positions using topological-depth columns: nodes with no
     /// bound inputs go in column 0, downstream nodes shift right by one
     /// column per max-upstream-depth. Within a column, stack vertically in
-    /// the current view order. Pinned-output previews then park beside their
-    /// owner node.
+    /// the current view order.
     pub(super) fn auto_layout(&mut self, graph: &CoreGraph) {
         let mut depth: HashMap<NodeId, u32> = graph.iter().map(|node| (node.id, 0)).collect();
         for _ in 0..graph.len().saturating_sub(1) {
@@ -47,9 +39,7 @@ impl GraphView {
 
         let mut row_in_col: HashMap<u32, u32> = HashMap::new();
         for (key, position) in &mut self.item_placements {
-            let ItemRef::Node(id) = *key else {
-                continue;
-            };
+            let ItemRef::Node(id) = *key;
             let d = depth.get(&id).copied().unwrap_or(0);
             let row = row_in_col.entry(d).or_insert(0);
             *position = AUTO_LAYOUT_ORIGIN
@@ -59,40 +49,18 @@ impl GraphView {
                 );
             *row += 1;
         }
-
-        // Pins read their owner's just-assigned position, so this can't
-        // fold into the mutable pass above; collect first, then write.
-        let pin_positions: Vec<(ItemRef, Vec2)> = self
-            .item_placements
-            .iter()
-            .filter_map(|(key, _)| {
-                let ItemRef::Pin(port) = *key else {
-                    return None;
-                };
-                let owner = self
-                    .item_placements
-                    .get(&ItemRef::Node(port.node_id))
-                    .copied()
-                    .unwrap_or(AUTO_LAYOUT_ORIGIN);
-                let pos = owner + PIN_LAYOUT_OFFSET + PIN_LAYOUT_STAGGER * port.port_idx as f32;
-                Some((*key, pos))
-            })
-            .collect();
-        for (key, pos) in pin_positions {
-            *self.item_placements.get_mut(&key).unwrap() = pos;
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use scenarium::FuncId;
-    use scenarium::{Binding, InputPort, Node, NodeKind, OutputPort};
+    use scenarium::{Binding, InputPort, Node, NodeKind};
 
     use super::*;
 
     #[test]
-    fn auto_layout_columns_nodes_and_parks_pins_beside_their_owner() {
+    fn auto_layout_columns_nodes_by_topological_depth() {
         let mut graph = CoreGraph::default();
         for _ in 0..3 {
             graph.add(Node::new(NodeKind::Func(FuncId::unique())));
@@ -109,13 +77,6 @@ mod tests {
             InputPort::new(downstream_id, 0),
             Binding::bind(middle_id, 0),
         );
-        let (p0, p1) = (
-            OutputPort::new(downstream_id, 0),
-            OutputPort::new(downstream_id, 1),
-        );
-        graph.set_output_pinned(p0, true);
-        graph.set_output_pinned(p1, true);
-
         let mut view = GraphView::for_graph(&graph);
         view.auto_layout(&graph);
 
@@ -136,19 +97,6 @@ mod tests {
             downstream_pos,
             AUTO_LAYOUT_ORIGIN + Vec2::new(AUTO_LAYOUT_COL_SPACING * 2.0, 0.0),
             "downstream node two columns right"
-        );
-
-        let pin0 = pos(ItemRef::Pin(p0));
-        let pin1 = pos(ItemRef::Pin(p1));
-        assert_eq!(
-            pin0,
-            downstream_pos + PIN_LAYOUT_OFFSET,
-            "port 0 parks at the base offset"
-        );
-        assert_eq!(
-            pin1,
-            downstream_pos + PIN_LAYOUT_OFFSET + PIN_LAYOUT_STAGGER,
-            "port 1 staggers one step so the two previews don't stack"
         );
     }
 }
