@@ -25,7 +25,8 @@ use crate::gui::scene::{GraphScene, Scene, SceneNode, selection_holds};
 use crate::gui::theme::Theme;
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
+    Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui,
+    WidgetId,
 };
 use scenarium::Binding;
 use scenarium::InputPort;
@@ -101,6 +102,15 @@ pub(super) struct NodeUI {
     /// keeps the node recorded through it; otherwise the cull would let
     /// palantir sweep the draft unseen.
     focus_kept_last: Option<NodeId>,
+    /// Row tracks staged for the port grids, grown to the widest node seen.
+    ///
+    /// `Grid::show` copies its tracks into the tree's own capacity-retained
+    /// arena, so this buffer only has to live for the length of that call —
+    /// but building it fresh meant an allocation per node per frame, for a
+    /// run of identical tracks that is memcpy'd out and dropped. Every row of
+    /// every node takes the same track, so one buffer serves the whole frame
+    /// and each node slices the prefix it needs.
+    row_tracks: Vec<Track>,
 }
 
 impl NodeUI {
@@ -228,6 +238,9 @@ impl NodeUI {
             subscription_pin(ui, theme, node, rcx.geometry.subs.is_hovered(node.id));
         }
 
+        // Borrowed off `self` before the body closure so it can't conflict
+        // with the drag latch below, which reads a different field.
+        let row_tracks = &mut self.row_tracks;
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
@@ -245,7 +258,7 @@ impl NodeUI {
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
-                ports_row(ui, rcx, node, out);
+                ports_row(ui, rcx, node, row_tracks, out);
                 memory_row(ui, rcx, node);
             });
         // Pull the body response's click flag into a local so its `&Ui`
