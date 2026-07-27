@@ -10,6 +10,7 @@
 
 pub(super) mod glyph;
 
+use glam::Vec2;
 use palantir::{
     Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
     Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId,
@@ -18,12 +19,13 @@ use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::{DataType, FsPathMode};
+use scenarium::{DataType, FsPathMode, Func, NodePorts};
 
 use crate::core::document::BoundarySide;
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::{GraphRef, PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
+use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
@@ -448,8 +450,64 @@ fn output_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
+            add_preview_item(ui, popup, rcx, port, out);
             remove_port_item(ui, popup, port, opts.rename, out);
         });
+}
+
+/// Where a preview lands relative to the port it was added from: clear of the
+/// node body and a little above, so it doesn't cover what it is watching.
+const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
+
+/// "Add preview" — spawn a preview node already wired to this output. The
+/// replacement for the old pin toggle: same affordance, but what it creates is
+/// an ordinary node the user can move, delete, and undo like any other.
+///
+/// Hidden when the library has no preview func, and in a definition pane, where
+/// [`Func::entry_only`] makes the node a compile error.
+fn add_preview_item(
+    ui: &mut Ui,
+    popup: &PopupHandle,
+    rcx: RecordCtx<'_>,
+    port: PortRef,
+    out: &mut Intents,
+) {
+    if rcx.graph.target() != GraphRef::Main {
+        return;
+    }
+    let Some(func) = preview::registered(rcx.library) else {
+        return;
+    };
+    if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
+        return;
+    }
+    // Positioned off the port when its center is known (it is, after the first
+    // frame); otherwise the node lands at the origin and the user drags it.
+    let pos = rcx
+        .geometry
+        .ports
+        .center(port)
+        .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
+    out.extend(add_preview_intents(func, port, pos));
+}
+
+/// The two intents that spawn a preview already reading `port`. Emitted
+/// together so one undo removes node *and* wire — the same shape
+/// `connection_ui::commit_connection` uses for a boundary port.
+fn add_preview_intents(func: &Func, port: PortRef, pos: Vec2) -> [Intent; 2] {
+    let node_id = NodeId::unique();
+    [
+        Intent::AddNode {
+            pos,
+            node_id,
+            node: func.into(),
+            bindings: NodePorts::from(func).default_bindings(node_id).collect(),
+        },
+        Intent::SetInput {
+            input: InputPort::new(node_id, 0),
+            to: Some(Binding::bind(port.node_id, port.port_idx)),
+        },
+    ]
 }
 
 /// One event (emitter) port row: the event name plus an event-colored triangle
@@ -538,5 +596,45 @@ fn type_label(library: &Library, ty: &DataType) -> String {
             }
         }
         _ => library.type_name(ty).into_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenarium::{NodeKind, OutputPort};
+
+    use crate::core::preview::preview_func;
+
+    /// "Add preview" spawns a node already reading the port it was raised
+    /// from, offset clear of it, as one batch — so a single undo removes both
+    /// the node and its wire.
+    #[test]
+    fn add_preview_spawns_a_node_already_wired_to_the_port() {
+        let func = preview_func(Default::default());
+        let producer = NodeId::unique();
+        let port = PortRef {
+            node_id: producer,
+            kind: PortKind::Output,
+            port_idx: 2,
+        };
+        let center = Vec2::new(100.0, 40.0);
+
+        let [add, bind] = add_preview_intents(&func, port, center + PREVIEW_SPAWN_OFFSET);
+
+        let Intent::AddNode {
+            pos, node_id, node, ..
+        } = add
+        else {
+            panic!("first intent adds the node, got {add:?}");
+        };
+        assert_eq!(pos, Vec2::new(180.0, -20.0), "offset clear of the port");
+        assert_eq!(node.kind, NodeKind::Func(func.id));
+        assert!(matches!(
+            bind,
+            Intent::SetInput { input, to: Some(Binding::Bind(src)) }
+                if input == InputPort::new(node_id, 0)
+                    && src == OutputPort::new(producer, 2)
+        ));
     }
 }

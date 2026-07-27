@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
-    DataType, DynamicValue, ExecutionNodeId, Func, FuncId, FuncInput, Invocation, async_lambda,
+    DataType, DynamicValue, ExecutionNodeId, Func, FuncId, FuncInput, Invocation, Library,
+    async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -83,6 +84,13 @@ pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
                 Ok(())
             }
         ))
+}
+
+/// The preview func as the current library registered it, or `None` when the
+/// document's library has lost it — the editor's "add a preview here" action
+/// builds its node from this rather than re-declaring the interface.
+pub(crate) fn registered(library: &Library) -> Option<&Func> {
+    library.funcs().find(|func| is_preview(func.id))
 }
 
 /// Whether `func_id` is the preview func — what the scene projection asks to
