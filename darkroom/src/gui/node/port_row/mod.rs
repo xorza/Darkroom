@@ -59,7 +59,15 @@ const COL_OUTPUT: u16 = COL_SPACER + 1;
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
-pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+/// `row_tracks` is [`NodeUI`](crate::gui::node::NodeUI)'s retained staging
+/// buffer — see its doc for why the grid's rows aren't built fresh here.
+pub(super) fn ports_row(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node: &SceneNode,
+    row_tracks: &mut Vec<Track>,
+    out: &mut Intents,
+) {
     let theme = rcx.theme;
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
@@ -83,8 +91,14 @@ pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     };
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
-    let row_height = theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
-    let rows: Vec<Track> = vec![Track::fixed(row_height); n_rows];
+    // Every row of every node gets the same track, so the buffer is rebuilt
+    // only when a wider node needs more of them or the theme moves the height
+    // — not per node. Not a `const`: the height rides the theme's font size.
+    let track = Track::fixed(theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM);
+    if row_tracks.len() < n_rows || row_tracks.first() != Some(&track) {
+        row_tracks.clear();
+        row_tracks.resize(n_rows, track);
+    }
     Grid::new()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::HUG))
@@ -94,7 +108,7 @@ pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
             Track::fill(),
             Track::hug(),
         ])
-        .rows(rows)
+        .rows(&row_tracks[..n_rows])
         .gap_xy(theme.port_gap, theme.port_cols_gap)
         .padding(Spacing::new(
             theme.port_col_pad_x,
