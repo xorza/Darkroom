@@ -25,7 +25,17 @@ impl ExecutionNodeId {
     /// Derive an execution identity from a non-empty authoring path, ordered
     /// from the outermost graph instance to the leaf node. A root node uses
     /// `[node_id]`; a nested node uses `[outer_instance, ..., node_id]`.
-    pub fn from_authoring(path: &[NodeId]) -> Self {
+    ///
+    /// Minting ids is flatten's business, so this stays inside the crate.
+    /// Deriving one answers only for a node flatten emits: a composite
+    /// dissolves and has no id of its own, so a host asking "which execution
+    /// nodes is this?" would get an id that exists nowhere. Hosts look the
+    /// relation up instead — [`CompiledGraph::occurrences`] and its siblings
+    /// (`run_targets`, `is_sink`, `is_impure`), which answer for every
+    /// authored node.
+    ///
+    /// [`CompiledGraph::occurrences`]: crate::execution::compile::CompiledGraph::occurrences
+    pub(crate) fn from_authoring(path: &[NodeId]) -> Self {
         let (&node_id, instances) = path
             .split_last()
             .expect("an authoring path must include its leaf node");

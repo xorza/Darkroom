@@ -195,7 +195,7 @@ fn boundary_nodes_mirror_graph_interface() {
     );
     assert!(
         !input_node.runnable() && !output_node.runnable(),
-        "boundary nodes offer no run affordance — they have no execution identity"
+        "boundary nodes offer no run affordance — they emit no compiled work"
     );
     assert!(
         graph.nodes().all(|n| !n.run_available),

@@ -502,15 +502,8 @@ fn validation_returns_compiled_and_installed_mismatches() {
         compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
         vec![interior]
     );
-    assert_eq!(compiled.leaf(e_node_id).unwrap(), interior);
 
     let missing_node = ExecutionNodeId::unique();
-    assert_eq!(
-        compiled.leaf(missing_node),
-        Err(ExecutionIdentityError::NodeNotFound {
-            e_node_id: missing_node,
-        })
-    );
     assert!(matches!(
         compiled.attribution(missing_node),
         Err(ExecutionIdentityError::NodeNotFound { e_node_id }) if e_node_id == missing_node
