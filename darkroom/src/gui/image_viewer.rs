@@ -25,7 +25,7 @@ use scenarium::NodeSearch;
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
-use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
+use crate::gui::canvas::pan_zoom::{fold_scroll_zoom, zoom_about};
 use crate::gui::preview_store::{FullImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
@@ -64,8 +64,10 @@ pub(crate) struct ImageViewer {
     /// display px per texture texel). Texture dimensions are converted to
     /// their 1:1 logical footprint before applying it.
     view: Option<Viewport>,
-    /// Pan-drag bookkeeping: the viewport pan at drag start.
-    pan_anchor: PanAnchor,
+    /// Pan-drag bookkeeping: the viewport pan at drag start. A bare
+    /// `Option` — one viewer is one surface, so there is no pane to key
+    /// it by the way the canvas has to.
+    pan_anchor: Option<Vec2>,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
     /// The backdrop choice and magnification filter live in
     /// [`ViewerPreferences`] — one persisted setting shared by every
@@ -89,7 +91,7 @@ impl ImageViewer {
             node_id,
             source_size: None,
             view: None,
-            pan_anchor: PanAnchor::default(),
+            pan_anchor: None,
             checker: None,
         }
     }
@@ -98,7 +100,7 @@ impl ImageViewer {
     /// source change, the fit button, or a double-click.
     fn reset_framing(&mut self) {
         self.view = None;
-        self.pan_anchor.clear();
+        self.pan_anchor = None;
     }
 
     /// The framing to draw with: the user's explicit viewport, else the
@@ -394,10 +396,18 @@ impl ImageViewer {
         let mut v = self.effective_view(img, pane);
 
         if resp.left.drag.started() || resp.middle.drag.started() {
-            self.pan_anchor.latch((), v.pan);
+            self.pan_anchor = Some(v.pan);
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
-        self.pan_anchor.apply((), drag, &mut v.pan);
+        // Measured from the latch, not integrated per frame, so a pan
+        // lands where the pointer says however many frames it took; a
+        // missing delta after a latch is the release edge.
+        if let Some(start) = self.pan_anchor {
+            match drag {
+                Some(d) => v.pan = start + d,
+                None => self.pan_anchor = None,
+            }
+        }
         fold_scroll_zoom(&mut v, ui, &resp, VIEWER_MIN_ZOOM, VIEWER_MAX_ZOOM);
         self.view = Some(v);
     }

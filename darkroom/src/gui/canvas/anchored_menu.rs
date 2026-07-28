@@ -4,6 +4,7 @@ use scenarium::NodeId;
 
 use crate::core::document::GraphRef;
 use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
+use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::scene::GraphScene;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
@@ -25,17 +26,19 @@ use crate::gui::scene::GraphScene;
 /// [`Self::show`] answers `None` for every pane but the one that opened it.
 #[derive(Default, Debug)]
 pub(super) struct AnchoredMenu {
-    anchor: Option<Vec2>,
-    /// The pane that opened the menu; `None` while it's closed.
-    graph: Option<GraphRef>,
+    /// The surface-space anchor, on the pane that opened the menu.
+    ///
+    /// One slot rather than an `Option<Vec2>` beside an
+    /// `Option<GraphRef>`: those were always both set or both clear, and
+    /// nothing said so.
+    anchor: PaneSlot<Vec2>,
 }
 
 impl AnchoredMenu {
     /// Open (or re-anchor) the menu at a surface-space point, on `graph`'s
     /// pane.
     pub(super) fn open_at(&mut self, anchor: Vec2, graph: GraphRef) {
-        self.anchor = Some(anchor);
-        self.graph = Some(graph);
+        self.anchor.latch(graph, anchor);
     }
 
     /// Show the menu when open **and** `graph` is the pane that opened it,
@@ -53,10 +56,9 @@ impl AnchoredMenu {
         max_height: Option<f32>,
         body: impl FnOnce(&mut Ui, &PopupHandle) -> Option<T>,
     ) -> Option<T> {
-        if self.graph != Some(graph) {
-            return None;
-        }
-        let anchor = self.anchor?;
+        // `None` for every pane but the one that opened it, and for a
+        // menu that isn't open at all.
+        let anchor = *self.anchor.get(graph)?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate `escape_pressed` here.
         //
@@ -85,8 +87,7 @@ impl AnchoredMenu {
             pick = body(ui, popup);
         });
         if pick.is_some() || resp.dismissed || resp.close_requested {
-            self.anchor = None;
-            self.graph = None;
+            self.anchor.clear();
         }
         pick
     }

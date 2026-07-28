@@ -325,12 +325,12 @@ mod tests {
     ///
     /// This pins the *outcome*, not either mechanism. Two independent
     /// guards produce it — `emit_pan_zoom` reads each pane's own
-    /// `outer_canvas_widget_id` response, and `PanAnchor::apply` refuses
+    /// `outer_canvas_widget_id` response, and `fold_pan_drag` refuses
     /// a delta whose key is not the pane that latched. Mutating either
     /// one alone still passes, because the other covers it; mutating
     /// both fails here. That redundancy is worth knowing about: a future
     /// simplification that removes one guard will not be caught by this
-    /// test, and `pan_zoom`'s own tests cover `PanAnchor::apply` with a
+    /// test, and `pan_zoom`'s own tests cover `fold_pan_drag` with a
     /// hand-passed key rather than through a real pointer.
     #[test]
     fn a_pan_moves_only_the_pane_under_the_pointer() {

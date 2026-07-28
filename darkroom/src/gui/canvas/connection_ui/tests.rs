@@ -242,13 +242,17 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
 /// across an arbitrary number of undos.
 fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
-    let mut connections = ConnectionUI {
-        state: Some(InFlight {
+    // The fixture is one pane, and it isn't `Main` — latch on whichever
+    // it built, the way the production latch resolves it from the node.
+    let target = scene.graphs().next().expect("fixture has a pane").target();
+    let mut connections = ConnectionUI::default();
+    connections.state.latch(
+        target,
+        InFlight {
             drag: GlyphDrag::new(start),
             mode: DragMode::Floating,
-        }),
-        ..Default::default()
-    };
+        },
+    );
     let mut out = Intents::default();
     connections.apply(
         arena.ui(),
@@ -259,7 +263,7 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
         &mut out,
     );
     assert!(out.is_empty(), "an untouched prepass emits nothing");
-    connections.state
+    connections.state.get(target).copied()
 }
 
 #[test]

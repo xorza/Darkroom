@@ -15,25 +15,6 @@ Line anchors were refreshed after the whole-scene-sweep work landed.
 
 ---
 
-## Batch 1 (remainder) — "Is this my pane?" is spelled four ways
-
-The other three items in this batch are done; this one is left because the
-duplication is a *shape*, not a body — each site is already a single correct
-comparison, and the two families are genuinely different (state that carries an
-explicit `graph`, versus state whose pane is derived from its node so a
-cross-pane wire stays unrepresentable). A generic wrapper over both would add
-indirection to save one line each. Needs a decision on whether the uniformity
-is worth that, not a mechanical fix.
-
-- [ ] **"Is this my pane?" is spelled four different ways.**
-      `selection_ui.rs:98` (`band.graph != target` → early return),
-      `breaker.rs:284` (same shape, different field), `anchored_menu.rs:56`
-      (`self.graph != Some(graph)`), and the wire gestures' shared
-      `state.filter(|s| graph.contains(s.node()))` (`connection_ui/mod.rs:290`,
-      `subscription_ui.rs:186`). A fifth,
-      `ConnectionUI::take_pending_connection_in` (`connection_ui/mod.rs:141`),
-      folds the test into the take.
-
 ## Batch 2 — Stale documentation
 
 Cheap, zero code risk, and actively misleading as it stands — the chord is

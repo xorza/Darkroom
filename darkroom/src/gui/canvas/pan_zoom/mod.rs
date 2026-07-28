@@ -12,58 +12,33 @@ use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::scene::GraphScene;
 
-/// Anchor-latched pan: the viewport pan captured at drag start, so the
-/// gesture applies `anchor + total_delta` each frame (immune to
-/// per-frame rounding drift). Shared by the canvas and image-viewer
-/// pans — each caller keeps its own latch policy (which buttons, which
-/// arbitration) and folds the live drag through [`Self::apply`].
+/// Fold `owner`'s live pan drag into `pan`: `anchor + delta` while the
+/// drag is held; a missing delta after a latch is the release edge and
+/// drops the anchor. A call from a pane that doesn't hold it does nothing
+/// at all — neither panning nor releasing.
 ///
-/// `K` identifies **which** surface holds the anchor. One `PanAnchor`
-/// can be driven by several surfaces — the canvas keeps a single one
-/// while running [`emit_pan_zoom`] once per visible graph pane — and
-/// only one of them is ever being dragged. Without the key, every idle
-/// surface passes `delta: None`, which reads as the release edge and
-/// tears down the live drag's anchor. The image viewer has one surface
-/// and uses the default `()`.
-#[derive(Debug)]
-pub(crate) struct PanAnchor<K = ()>(Option<(K, Vec2)>);
-
-impl<K> Default for PanAnchor<K> {
-    fn default() -> Self {
-        Self(None)
-    }
-}
-
-impl<K: Copy + PartialEq> PanAnchor<K> {
-    /// Capture `owner`'s gesture-start pan, replacing any anchor held by
-    /// another surface — one pointer means one pan at a time.
-    pub(crate) fn latch(&mut self, owner: K, pan: Vec2) {
-        self.0 = Some((owner, pan));
-    }
-
-    /// Fold `owner`'s live drag into `pan`: `anchor + delta` while the
-    /// drag is held; a missing delta after a latch is the release edge
-    /// and drops the anchor. A call from a surface that doesn't hold the
-    /// anchor does nothing at all — neither panning nor releasing.
-    pub(crate) fn apply(&mut self, owner: K, delta: Option<Vec2>, pan: &mut Vec2) {
-        let Some((holder, anchor)) = self.0 else {
-            return;
-        };
-        if holder != owner {
-            return;
-        }
-        match delta {
-            Some(d) => *pan = anchor + d,
-            None => self.0 = None,
-        }
-    }
-
-    /// Drop the anchor (framing reset, gesture-state clear).
-    pub(crate) fn clear(&mut self) {
-        self.0 = None;
+/// Measured from the latch rather than integrated per frame, so a pan
+/// lands exactly where the pointer says however many frames it took (no
+/// per-frame rounding drift). The keying is what makes the "does nothing"
+/// clause load-bearing: [`emit_pan_zoom`] runs once per visible pane, and
+/// without it every idle pane's `None` would read as the release edge and
+/// tear down the live drag.
+pub(super) fn fold_pan_drag(
+    anchor: &mut PaneSlot<Vec2>,
+    owner: GraphRef,
+    delta: Option<Vec2>,
+    pan: &mut Vec2,
+) {
+    let Some(&start) = anchor.get(owner) else {
+        return;
+    };
+    match delta {
+        Some(d) => *pan = start + d,
+        None => anchor.clear(),
     }
 }
 
@@ -153,7 +128,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
 pub(super) fn emit_pan_zoom(
-    pan_anchor: &mut PanAnchor<GraphRef>,
+    pan_anchor: &mut PaneSlot<Vec2>,
     ui: &Ui,
     graph: GraphScene<'_>,
     gesture: Option<CanvasGesture>,
@@ -168,7 +143,7 @@ pub(super) fn emit_pan_zoom(
     if gesture == Some(CanvasGesture::Pan) {
         pan_anchor.latch(target, viewport.pan);
     }
-    pan_anchor.apply(target, resp.middle.drag.delta(), &mut v.pan);
+    fold_pan_drag(pan_anchor, target, resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
