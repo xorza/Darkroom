@@ -199,4 +199,13 @@ impl MainWindow {
     pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
     }
+
+    /// Release the canvas's cached geometry for nodes the document has
+    /// stopped holding. Paired with the preview store's reconcile: both are
+    /// `NodeId`-keyed caches that outlive the scene on purpose, so both need
+    /// the document to tell them when an entry's subject is gone for good.
+    pub(crate) fn release_dead_nodes(&mut self, document: &Document) {
+        self.graph_ui
+            .retain_nodes(|node_id| document.holds_node(node_id));
+    }
 }

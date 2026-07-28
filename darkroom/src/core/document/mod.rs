@@ -337,6 +337,17 @@ impl Document {
         }
     }
 
+    /// Whether the document still holds `node_id` anywhere — every local
+    /// graph's interior included, since node ids are unique across the whole
+    /// document and the canvas caches geometry for interiors it has shown.
+    ///
+    /// The retention question for any `NodeId`-keyed cache that outlives the
+    /// scene: a node absent from the *scene* may just be in a closed tab, but
+    /// one absent from here is gone for good — ids are never reused.
+    pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
+        self.graph.find(node_id, NodeSearch::Recursive).is_some()
+    }
+
     /// Whether `node_id` is a live preview node in the entry graph — what
     /// retains the value it published.
     ///

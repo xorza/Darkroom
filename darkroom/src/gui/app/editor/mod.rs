@@ -106,6 +106,12 @@ pub(crate) struct Editor {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
+    /// Set alongside the preview store's reconcile request, whenever an
+    /// applied step could have removed a node; consumed once per frame to
+    /// evict the canvas's `NodeId`-keyed geometry caches. A separate flag
+    /// rather than a direct call because the fold that raises it has no
+    /// document in hand.
+    needs_geometry_prune: bool,
     /// Per-frame accumulator: set by any step that strands
     /// `CanvasGeometry`'s cross-frame caches (see
     /// `invalidates_cached_geometry`) and by `sync_target` for a graph
@@ -145,6 +151,7 @@ impl Editor {
             main_window: MainWindow::default(),
             scene_targets: Vec::new(),
             scene_dirty: false,
+            needs_geometry_prune: false,
             needs_relayout: false,
             intents: Intents::default(),
             actions: Vec::new(),
@@ -306,6 +313,7 @@ impl Editor {
         // re-derive which ports it still owes a presentation resource.
         if signals.reconcile {
             self.run_state.previews.request_reconcile();
+            self.needs_geometry_prune = true;
         }
     }
 
@@ -344,6 +352,13 @@ impl Editor {
         self.run_state
             .previews
             .reconcile_if_needed(ui, &open.document);
+        // Same signal, same reason, one cache over: the canvas's port-offset
+        // and node-size tables are keyed by `NodeId` and deliberately outlive
+        // the scene, so only the document can say when an entry's node is
+        // gone rather than merely off-screen.
+        if std::mem::take(&mut self.needs_geometry_prune) {
+            self.main_window.release_dead_nodes(&open.document);
+        }
         // Every pane showing a graph gets a canvas; a layout of nothing but
         // non-graph views (Preferences, viewers) leaves the set empty and
         // skips the canvas pipeline entirely.
