@@ -41,6 +41,15 @@ impl AnchoredMenu {
         self.anchor.latch(graph, anchor);
     }
 
+    /// Whether the menu is open on `graph`'s pane.
+    ///
+    /// For a caller with per-frame setup to skip: [`Self::show`] answers
+    /// `None` for a closed menu anyway, but only *after* its arguments
+    /// have been built.
+    pub(super) fn open_on(&self, graph: GraphRef) -> bool {
+        self.anchor.get(graph).is_some()
+    }
+
     /// Show the menu when open **and** `graph` is the pane that opened it,
     /// recording `body` inside the shared popup chrome. `body` records the
     /// items and returns the pick (if any); returning `Some` — or an Esc /
