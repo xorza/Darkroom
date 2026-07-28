@@ -22,7 +22,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -229,10 +229,10 @@ impl RuntimeCache {
     pub(crate) fn stamp_digest(
         &mut self,
         program: &ExecutionProgram,
-        resource_stamps: &RunResourceStamps,
+        resource_stamper: &ResourceStamper,
         node_idx: NodeIdx,
     ) {
-        let digest = node_digest(program, node_idx, self, resource_stamps);
+        let digest = node_digest(program, node_idx, self, resource_stamper);
         self.slots[node_idx].current_digest = digest;
     }
 
