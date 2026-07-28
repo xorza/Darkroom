@@ -230,14 +230,18 @@ impl GraphUI {
     /// canvas itself. Called once per visible graph tab from the dock's
     /// content closure, so everything here is scoped to `graph` — the
     /// canvas widget ids included.
+    ///
+    /// Returns the [`AppCommand`] this pane contributes, if any. Which
+    /// command *wins the frame* is not decided here: the caller arbitrates
+    /// every tab kind's answer through one `claim`, so the canvas states its
+    /// own precedence and nothing else.
     pub(crate) fn draw(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         graph: GraphScene<'_>,
         out: &mut Intents,
-        cmd: &mut Option<AppCommand>,
-    ) {
+    ) -> Option<AppCommand> {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
         // transform below reads the up-to-date viewport directly. The
@@ -247,9 +251,10 @@ impl GraphUI {
             .gesture
             .filter(|g| g.target == graph.target())
             .map(|g| g.gesture);
-        self.resolve_gestures(ui, ctx, graph, gesture, out, cmd);
+        let command = self.resolve_gestures(ui, ctx, graph, gesture, out);
         self.bake_snap_hovers();
         self.record_canvas(ui, ctx, graph, out);
+        command
     }
 
     /// The record pass's gesture half: run each controller's record-phase
@@ -263,8 +268,7 @@ impl GraphUI {
         graph: GraphScene<'_>,
         gesture: Option<CanvasGesture>,
         out: &mut Intents,
-        cmd: &mut Option<AppCommand>,
-    ) {
+    ) -> Option<AppCommand> {
         let target = graph.target();
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
@@ -306,27 +310,20 @@ impl GraphUI {
         self.gestures
             .new_node_ui
             .apply(ui, ctx, graph, popup_gesture, pending_connection, out);
-        // Exactly one `AppCommand` leaves a frame, and this is the single
-        // place that decides which: sources in the precedence order written
-        // here, first to claim it wins, nothing below able to overwrite a
-        // decision above. That includes a command the *caller* already
-        // placed — the menu bar records before this — so the canvas never
-        // clobbers one.
+        // This pane's own precedence, in the order written: first source to
+        // answer wins, and nothing below can overwrite a decision above.
         //
-        // The two context menus are polled unconditionally even so. Their
-        // popups own a lifecycle that has to record every frame, and a
-        // pick's other effects (a `DetachGraph` intent, a stashed
-        // `NodeMenuAction`) still land; only the command they would have
-        // contributed is dropped when the slot is already taken. The chip
-        // scans below them are pure reads, so those are skipped outright.
-        let menu_command = self
-            .gestures
+        // Both context menus are polled whatever comes of it — their popups
+        // own a lifecycle that has to record every frame, and a pick's other
+        // effects (a `DetachGraph` intent, a stashed `NodeMenuAction`) land
+        // through `out` rather than through the return. The chip scans are
+        // pure reads over last frame's responses, so `or_else` short-circuits
+        // past them once a menu has answered.
+        self.gestures
             .graph_menu
             .apply(ui, graph, out)
-            .or(self.gestures.node_menu.apply(ui, graph, out));
-        if cmd.is_none() {
-            *cmd = menu_command.or_else(|| emit_chip_command(ui, graph));
-        }
+            .or(self.gestures.node_menu.apply(ui, graph, out))
+            .or_else(|| emit_chip_command(ui, graph))
     }
 
     /// Bake each in-flight wire drag's snap target into `CanvasGeometry`'s
