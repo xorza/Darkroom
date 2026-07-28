@@ -241,6 +241,101 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     );
 }
 
+/// A node-body right-click selects the node it landed on before the menu
+/// opens, so whatever the user picks next acts on a coherent set. A boundary
+/// interface node carries no structural identity to duplicate or remove, so it
+/// offers no menu at all and a right-click on one is inert.
+///
+/// Both halves come out of the one closure the shared trigger scan takes —
+/// "which of this node's widgets opens the menu, or `None` if it offers no
+/// menu" — so they're checked through real clicks rather than by calling it.
+#[test]
+fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() {
+    let library = one_func_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+
+    // A definition body, so the pane holds an ordinary node beside the two
+    // boundary nodes that have to stay inert.
+    let mut def = GraphDef::new("Adder")
+        .inputs([FuncInput::optional("a", DataType::Int)])
+        .output(FuncOutput::new("sum", DataType::Int));
+    let boundary = def.body.add(Node::new(NodeKind::GraphInput));
+    def.body.add(Node::new(NodeKind::GraphOutput));
+    let func = def.body.add_func_node(&probe);
+
+    let target = GraphRef::Local(GraphId::unique());
+    let mut view = GraphView::for_graph(&def.body);
+    spread(&mut view);
+
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut harness = UiHarness::new(UVec2::new(1600, 900));
+    let mut graph_ui = GraphUI::default();
+    let mut scene = Scene::default();
+
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+            process_memory: 0,
+        };
+        let mut intents = Intents::default();
+        scene.rebuild(
+            ui,
+            &library,
+            &run_state,
+            [GraphProjection {
+                target,
+                source: SceneSource::Def(&def),
+                view: &view,
+            }],
+        );
+        graph_ui.prepass(ui, scene, &library, &mut intents);
+        let graph = scene.graph(target).expect("projected");
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+            });
+        intents.drain().collect::<Vec<_>>()
+    };
+
+    // Two frames so every node body has recorded and carries a hit-testable
+    // rect for the clicks below.
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+
+    // The boundary node first, while no popup is up to intercept the press.
+    let on_boundary = harness.center_of(node_widget_id(boundary));
+    harness.right_click_at(on_boundary);
+    let inert = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    assert!(
+        inert.is_empty(),
+        "a boundary node offers no menu, so its right-click raises nothing: {inert:?}"
+    );
+
+    let on_func = harness.center_of(node_widget_id(func));
+    harness.right_click_at(on_func);
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    // The helper carries the pane assertion: the selection lands on the pane
+    // the menu opened over, not the focused one.
+    let intents = scoped_intents(&emitted, target);
+    assert!(
+        matches!(
+            intents[..],
+            [Intent::SetSelection { to }] if to.len() == 1 && to.contains(&func),
+        ),
+        "the right-click selects exactly the node it opened on: {intents:?}"
+    );
+}
+
 /// A bare drag off an output port onto a compatible input commits the bind.
 ///
 /// Drives the whole `GlyphDrag` lifecycle through real input rather than

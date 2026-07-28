@@ -1,7 +1,9 @@
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
+use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui, WidgetId};
+use scenarium::NodeId;
 
 use crate::core::document::GraphRef;
+use crate::gui::scene::{GraphScene, SceneNode};
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
@@ -87,4 +89,81 @@ impl AnchoredMenu {
         }
         pick
     }
+}
+
+/// A context popup latched by a right-click on one node's own widget — the
+/// whole shape both canvas node menus share, from the trigger scan to the pick.
+/// Wraps [`AnchoredMenu`] with the one per-open extra they have in common: the
+/// node the menu was opened on, which the open latched frames before the pick
+/// that needs it.
+///
+/// What each caller still owns is which nodes offer the menu and which of their
+/// widgets triggers it (both stated in one [`Self::latch`] closure), the items,
+/// and where a pick goes — an `AppCommand`, an `Intent`, or a stash for the
+/// `Editor` to resolve.
+#[derive(Default, Debug)]
+pub(super) struct NodeContextMenu {
+    menu: AnchoredMenu,
+    /// The node whose widget opened the menu. Set with the anchor and read
+    /// back by [`Self::show`]; left set after a close, which is unreachable
+    /// because the wrapped `AnchoredMenu` is what gates every read of it.
+    node_id: Option<NodeId>,
+}
+
+impl NodeContextMenu {
+    /// Open on a secondary click of the widget `trigger` names, anchored at the
+    /// pointer, and report the node it opened on (`None` on every other frame).
+    ///
+    /// `trigger` answers "which of this node's widgets opens the menu", or
+    /// `None` for a node that doesn't offer it at all — one closure for what
+    /// would otherwise be an eligibility filter and a widget-id lookup. Read
+    /// off *last* frame's responses, the same timing as everything else in the
+    /// canvas's input passes.
+    pub(super) fn latch(
+        &mut self,
+        ui: &mut Ui,
+        graph: GraphScene<'_>,
+        trigger: impl Fn(&SceneNode) -> Option<WidgetId>,
+    ) -> Option<NodeId> {
+        let clicked = graph.nodes().find_map(|n| {
+            let widget = trigger(n)?;
+            ui.response_for(widget).right.clicked().then_some(n.id)
+        })?;
+        // A press that opened the menu has a pointer position by construction;
+        // the `?` is only for the frames where the pointer left the window
+        // between the click and this read.
+        let at = ui.pointer_pos()?;
+        self.node_id = Some(clicked);
+        self.menu.open_at(at, graph.target());
+        Some(clicked)
+    }
+
+    /// Show the menu — see [`AnchoredMenu::show`] for the pane scoping and the
+    /// close rules. `body` records the items against the node the open latched
+    /// and returns the pick, which comes back paired with that node.
+    pub(super) fn show<T>(
+        &mut self,
+        ui: &mut Ui,
+        graph: GraphScene<'_>,
+        id_salt: &'static str,
+        body: impl FnOnce(&mut Ui, &PopupHandle, NodeId) -> Option<T>,
+    ) -> Option<NodePick<T>> {
+        let node_id = self.node_id?;
+        let choice = self
+            .menu
+            .show(ui, graph.target(), id_salt, None, |ui, popup| {
+                body(ui, popup, node_id)
+            })?;
+        Some(NodePick { node_id, choice })
+    }
+}
+
+/// A pick from a [`NodeContextMenu`], carrying the node the menu was opened
+/// on. The two travel together because a pick means nothing without the node
+/// it applies to, and that node was latched frames earlier — not read back off
+/// whatever the pointer or the selection happens to be at click time.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NodePick<T> {
+    pub(super) node_id: NodeId,
+    pub(super) choice: T,
 }
