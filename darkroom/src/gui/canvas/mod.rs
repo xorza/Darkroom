@@ -23,7 +23,6 @@ use palantir::{
 };
 use scenarium::Library;
 use std::collections::BTreeSet;
-use std::hash::Hash;
 
 use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::sink::Intents;
@@ -36,7 +35,7 @@ use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::geometry::{CanvasGeometry, PortLayer};
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::graph_menu::GraphMenuUi;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
@@ -330,25 +329,17 @@ impl GraphUI {
         }
     }
 
-    /// Bake each in-flight drag's snap target into `CanvasGeometry`'s hover
-    /// flags, so `port_row` picks the hover color up through the same lookup
-    /// it uses for an ordinary mouse-over.
-    ///
-    /// Needed because palantir suppresses `response.hovered` on every widget
-    /// except the drag-capture owner while a drag is live — without the
-    /// override, the snapped-but-not-captured target stays at its idle color.
+    /// Bake each in-flight wire drag's snap target into `CanvasGeometry`'s
+    /// hover flags. Each controller knows which glyph layer its target lives
+    /// in, so the override is one call apiece rather than an accessor per
+    /// layer read back out here.
     fn bake_snap_hovers(&mut self) {
-        if let Some(snap) = self.gestures.connection_ui.snap_port() {
-            self.geometry.ports.set_hovered(snap);
-        }
-        // Same for an event drag's snapped subscription pin (emitter-started
-        // drag) or snapped emitter glyph (subscriber-started drag).
-        if let Some(sub) = self.gestures.subscription_ui.snap_sub() {
-            self.geometry.subs.set_hovered(sub);
-        }
-        if let Some(emitter) = self.gestures.subscription_ui.snap_emitter() {
-            self.geometry.events.set_hovered(emitter);
-        }
+        self.gestures
+            .connection_ui
+            .bake_snap_hover(&mut self.geometry);
+        self.gestures
+            .subscription_ui
+            .bake_snap_hover(&mut self.geometry);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -611,30 +602,11 @@ fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
 }
 
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.
-/// The free end of an in-flight wire that hasn't snapped to a target yet;
+/// Where an in-flight wire's free end sits before it snaps to a target;
 /// `canvas_origin` is the inner canvas's pre-transform origin.
 fn pointer_world(ui: &mut Ui, graph: GraphScene<'_>, canvas_origin: Vec2) -> Option<Vec2> {
     ui.pointer_pos()
         .map(|p| to_world(p - canvas_origin, &graph.viewport()))
-}
-
-/// The moving end of an in-flight wire preview: the snapped glyph's center
-/// once the gesture has a target, else the bare pointer. `None` on a frame
-/// where neither resolves (pointer off-window, or a snap target that hasn't
-/// measured yet) — the preview simply doesn't paint that frame. Shared by
-/// both wire controllers, which differ only in the glyph domain they snap
-/// within.
-fn free_end<K: Eq + Hash + Copy>(
-    ui: &mut Ui,
-    graph: GraphScene<'_>,
-    canvas_origin: Vec2,
-    layer: &PortLayer<K>,
-    snap: Option<K>,
-) -> Option<Vec2> {
-    match snap {
-        Some(key) => layer.center(key),
-        None => pointer_world(ui, graph, canvas_origin),
-    }
 }
 
 /// Stable id for one pane's outer (pan-capture) canvas. Keyed by the graph

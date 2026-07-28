@@ -6,9 +6,8 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::free_end;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{Wire, WirePass};
+use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::{GraphScene, Scene, SceneNode};
 
@@ -21,42 +20,36 @@ use crate::gui::scene::{GraphScene, Scene, SceneNode};
 /// than a mode of it: an event wire carries no data type, runs no cycle /
 /// const checks, and links an emitter event glyph to a whole-node
 /// subscription pin (which only sink nodes expose — that's what makes
-/// "events connect only to subscribers" structural). The drag can start from
-/// either end (mirroring a data wire's start-from-input-or-output): pull from
-/// an emitter and drop on a pin, or pull from a pin and drop on an emitter.
-/// Held-drag only; no const-drop or new-node spawn.
+/// "events connect only to subscribers" structural). What the two *do* share
+/// — latching, the release edge, pane ownership, the preview's free end — is
+/// [`GlyphDrag`]'s. The drag can start from either end (mirroring a data
+/// wire's start-from-input-or-output): pull from an emitter and drop on a pin,
+/// or pull from a pin and drop on an emitter. Held-drag only; no const-drop or
+/// new-node spawn.
 #[derive(Default, Debug)]
 pub(super) struct SubscriptionUI {
     state: Option<InFlight>,
 }
 
-/// The in-flight event wire, discriminated by which end it started from. Both
-/// directions commit the same `SetSubscription { subscribe: true }`; only the
-/// fixed end and the snap target differ. Identity-only — endpoints resolve every
-/// frame from `CanvasGeometry`, so the wire survives layout changes and node moves.
+/// The in-flight event wire, discriminated by which end it started from —
+/// which is also what flips the drag's two glyph domains, so the two
+/// directions are distinct [`GlyphDrag`] types rather than one with a flag.
+/// Both commit the same `SetSubscription { subscribe: true }`.
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
-    FromEmitter {
-        emitter: EventRef,
-        /// Subscription pin currently under the pointer, if any.
-        snap_sub: Option<NodeId>,
-    },
+    FromEmitter(GlyphDrag<EventRef, NodeId>),
     /// Started on a subscription pin; snapping to an emitter event glyph.
-    FromSubscriber {
-        subscriber: NodeId,
-        /// Emitter event glyph currently under the pointer, if any.
-        snap_emitter: Option<EventRef>,
-    },
+    FromSubscriber(GlyphDrag<NodeId, EventRef>),
 }
 
 impl InFlight {
     /// The node at the drag's *fixed* end — whichever glyph the press
-    /// latched on. Its graph is the pane that owns the gesture.
-    fn anchor_node(self) -> NodeId {
+    /// latched. Its graph is the pane that owns the gesture.
+    fn node(self) -> NodeId {
         match self {
-            InFlight::FromEmitter { emitter, .. } => emitter.node_id,
-            InFlight::FromSubscriber { subscriber, .. } => subscriber,
+            InFlight::FromEmitter(drag) => drag.node(),
+            InFlight::FromSubscriber(drag) => drag.node(),
         }
     }
 }
@@ -67,8 +60,7 @@ impl SubscriptionUI {
     /// event wire in one pane doesn't dim every other pane's wires.
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
     pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
-        self.state
-            .is_some_and(|state| graph.contains(state.anchor_node()))
+        self.state.is_some_and(|state| graph.contains(state.node()))
     }
 
     /// Drive the in-flight subscription wire: latch a fresh drag from either
@@ -88,19 +80,15 @@ impl SubscriptionUI {
     ) {
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
-        // preferring the emitter scan is arbitrary, not a conflict.
+        // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_none() {
-            if let Some(emitter) = scan_event_drag_start(geometry, scene) {
-                self.state = Some(InFlight::FromEmitter {
-                    emitter,
-                    snap_sub: None,
-                });
-            } else if let Some(subscriber) = scan_sub_drag_start(geometry, scene) {
-                self.state = Some(InFlight::FromSubscriber {
-                    subscriber,
-                    snap_emitter: None,
-                });
-            }
+            let emitters = scene.nodes.values().flat_map(SceneNode::events);
+            // Only sink nodes render a pin, so only they can start a reverse
+            // event drag.
+            let pins = scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
+            self.state = GlyphDrag::latch(&geometry.events, emitters)
+                .map(InFlight::FromEmitter)
+                .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
         }
         if ui.escape_pressed() {
             self.state = None;
@@ -112,41 +100,38 @@ impl SubscriptionUI {
         // The pane holding the drag's fixed end owns the gesture — its
         // nodes are the only snap candidates, and its target is what the
         // commit lands on. A pane closed mid-drag drops the wire.
-        let Some(graph) = scene.owner(state.anchor_node()) else {
+        let Some(graph) = scene.owner(state.node()) else {
             self.state = None;
             return;
         };
         // Refresh the snapped opposite end, then read the source glyph's drag
-        // state: `*_dragging` rolls up `drag_delta().is_some() ||
-        // drag_started()`, so its transition to `false` is the release edge.
-        let still_dragging = match &mut state {
-            InFlight::FromEmitter { emitter, snap_sub } => {
-                *snap_sub = scan_sub_target(geometry, ui, graph, *emitter);
-                geometry.events.dragging(*emitter)
+        // state off its own layer: its transition out of `dragging` is the
+        // release edge.
+        let released = match &mut state {
+            InFlight::FromEmitter(drag) => {
+                drag.snap = scan_sub_target(geometry, ui, graph, drag.from);
+                !drag.held(&geometry.events)
             }
-            InFlight::FromSubscriber {
-                subscriber,
-                snap_emitter,
-            } => {
-                *snap_emitter = scan_emitter_target(geometry, ui, graph, *subscriber);
-                geometry.subs.dragging(*subscriber)
+            InFlight::FromSubscriber(drag) => {
+                drag.snap = scan_emitter_target(geometry, ui, graph, drag.from);
+                !drag.held(&geometry.subs)
             }
         };
         self.state = Some(state);
-        if still_dragging {
+        if !released {
             return;
         }
         // Released over a valid target: both directions resolve to the same
         // (emitter, subscriber) pair and commit the same idempotent intent.
         match state {
-            InFlight::FromEmitter {
-                emitter,
-                snap_sub: Some(subscriber),
-            }
-            | InFlight::FromSubscriber {
-                subscriber,
-                snap_emitter: Some(emitter),
-            } => out.push(
+            InFlight::FromEmitter(GlyphDrag {
+                from: emitter,
+                snap: Some(subscriber),
+            })
+            | InFlight::FromSubscriber(GlyphDrag {
+                from: subscriber,
+                snap: Some(emitter),
+            }) => out.push(
                 graph.target(),
                 Intent::SetSubscription {
                     emitter: emitter.node_id,
@@ -160,23 +145,25 @@ impl SubscriptionUI {
         self.state = None;
     }
 
-    /// The subscription pin currently snapped under the pointer (an
-    /// emitter-started drag), if any — read by `GraphUI` to highlight the
-    /// drop target.
-    pub(super) fn snap_sub(&self) -> Option<NodeId> {
+    /// Force the hover flag on the glyph the wire is currently snapped to —
+    /// the subscription pin for an emitter-started drag, the emitter glyph for
+    /// a subscriber-started one — so it paints as the drop target. Palantir
+    /// suppresses `response.hovered` on every widget but the drag-capture
+    /// owner while a drag is live, so without this the snapped-but-not-
+    /// captured target stays at its idle color.
+    pub(super) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
         match self.state {
-            Some(InFlight::FromEmitter { snap_sub, .. }) => snap_sub,
-            _ => None,
-        }
-    }
-
-    /// The emitter event glyph currently snapped under the pointer (a
-    /// subscriber-started drag), if any — read by `GraphUI` to highlight the
-    /// drop target.
-    pub(super) fn snap_emitter(&self) -> Option<EventRef> {
-        match self.state {
-            Some(InFlight::FromSubscriber { snap_emitter, .. }) => snap_emitter,
-            _ => None,
+            Some(InFlight::FromEmitter(drag)) => {
+                if let Some(sub) = drag.snap {
+                    geometry.subs.set_hovered(sub);
+                }
+            }
+            Some(InFlight::FromSubscriber(drag)) => {
+                if let Some(emitter) = drag.snap {
+                    geometry.events.set_hovered(emitter);
+                }
+            }
+            None => {}
         }
     }
 
@@ -196,26 +183,22 @@ impl SubscriptionUI {
         // Scoped to the pane holding the drag's fixed end — see
         // `ConnectionUI::draw_in_flight` for what an unscoped preview
         // paints on the neighbouring canvases.
-        let (p0, p3) = match self.state.filter(|s| graph.contains(s.anchor_node())) {
+        let (p0, p3) = match self.state.filter(|s| graph.contains(s.node())) {
             None => return,
-            Some(InFlight::FromEmitter { emitter, snap_sub }) => {
-                let Some(p0) = geometry.events.center(emitter) else {
+            Some(InFlight::FromEmitter(drag)) => {
+                let Some(p0) = geometry.events.center(drag.from) else {
                     return;
                 };
-                let Some(p3) = free_end(ui, graph, canvas_origin, &geometry.subs, snap_sub) else {
+                let Some(p3) = drag.free_end(ui, graph, canvas_origin, &geometry.subs) else {
                     return;
                 };
                 (p0, p3)
             }
-            Some(InFlight::FromSubscriber {
-                subscriber,
-                snap_emitter,
-            }) => {
-                let Some(p3) = geometry.subs.center(subscriber) else {
+            Some(InFlight::FromSubscriber(drag)) => {
+                let Some(p3) = geometry.subs.center(drag.from) else {
                     return;
                 };
-                let Some(p0) = free_end(ui, graph, canvas_origin, &geometry.events, snap_emitter)
-                else {
+                let Some(p0) = drag.free_end(ui, graph, canvas_origin, &geometry.events) else {
                     return;
                 };
                 (p0, p3)
@@ -249,41 +232,16 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         ) else {
             continue;
         };
+        let hover = geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
         let wire = Wire::event(p0, p3);
-        let endpoint_hover =
-            geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
-        let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
-            continue;
-        };
-        if stroke.broken {
+        // Events carry no data type, so one neutral swatch runs the whole
+        // curve rather than a per-end gradient.
+        if pass.draw_wire(ui, &wire, hover, || {
+            WireTint::flat(event_color(theme, false))
+        }) {
             pass.probe.mark_broken_subscription(*s);
         }
-        // Event wires share the breaker-alarm hue, so a broken one paints
-        // flat rather than tinted — full strength against the
-        // breaker-faded rest of the set.
-        let brush = if stroke.broken {
-            CurveBrush::Solid(theme.colors.connection_broken)
-        } else {
-            CurveBrush::Solid(
-                pass.emphasis
-                    .tint(event_color(theme, false), stroke.hovered),
-            )
-        };
-        wire.add(ui, stroke.width, brush);
     }
-}
-
-/// First emitter event glyph whose drag started this frame, or `None`.
-fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
-    let keys = scene.nodes.values().flat_map(SceneNode::events);
-    geometry.events.first_drag_started(keys)
-}
-
-/// First subscription pin whose drag started this frame, or `None`. Only
-/// sink nodes render a pin, so only they can start a reverse event drag.
-fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeId> {
-    let keys = scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
-    geometry.subs.first_drag_started(keys)
 }
 
 /// Subscription pin under the pointer that's a valid drop for `emitter`: a

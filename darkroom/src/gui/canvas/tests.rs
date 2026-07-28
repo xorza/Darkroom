@@ -241,6 +241,118 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     );
 }
 
+/// A bare drag off an output port onto a compatible input commits the bind.
+///
+/// Drives the whole `GlyphDrag` lifecycle through real input rather than
+/// poking the controller: the latch off the port layer's drag edge, the
+/// per-frame snap scan (which is a geometry hit test precisely *because*
+/// palantir hides `hovered` from every widget but the drag-capture owner), and
+/// the release edge — the layer's `dragging` flag going false, which is the
+/// only thing that says a held wire is done.
+#[test]
+fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
+    use palantir::PointerButton;
+
+    use crate::gui::node::port_row::port_circle_wid;
+
+    let library = one_func_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+
+    // Two unwired nodes, so the drag has a producer to leave and a consumer
+    // to land on and nothing to trip the cycle check.
+    let mut root = Graph::default();
+    let producer = root.add_func_node(&probe);
+    let consumer = root.add_func_node(&probe);
+    let mut view = GraphView::for_graph(&root);
+    spread(&mut view);
+
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut harness = UiHarness::new(UVec2::new(1200, 800));
+    let mut graph_ui = GraphUI::default();
+    let mut scene = Scene::default();
+
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+            process_memory: 0,
+        };
+        let mut intents = Intents::default();
+        scene.rebuild(
+            ui,
+            &library,
+            &run_state,
+            [GraphProjection {
+                target: GraphRef::Main,
+                source: SceneSource::Entry(&root),
+                view: &view,
+            }],
+        );
+        graph_ui.prepass(ui, scene, &library, &mut intents);
+        let graph = scene.graph(GraphRef::Main).expect("projected");
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+            });
+        intents.drain().collect::<Vec<_>>()
+    };
+
+    // Two frames to record both nodes, so their port circles have widget ids
+    // and `CanvasGeometry` measured centers to hit-test against.
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+
+    let source = port_circle_wid(PortRef {
+        node_id: producer,
+        kind: PortKind::Output,
+        port_idx: 0,
+    });
+    let sink = port_circle_wid(PortRef {
+        node_id: consumer,
+        kind: PortKind::Input,
+        port_idx: 0,
+    });
+    // The snap scan tests the post-transform rect, so aim at that one.
+    let drop_at = harness.center_of(sink);
+
+    harness.press_on(source);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    harness.drag_to(drop_at);
+    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    assert!(
+        held.is_empty(),
+        "a wire still held commits nothing: {held:?}"
+    );
+
+    harness.release_button(PointerButton::Left);
+    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+
+    // The helper carries the pane assertion: a wire commits against the pane
+    // holding its start node, never the focused one.
+    let released = scoped_intents(&released, GraphRef::Main);
+    assert!(
+        matches!(
+            released[..],
+            [Intent::SetInput { input, to: Some(Binding::Bind(src)) }]
+                if *input == InputPort::new(consumer, 0)
+                    && src.node_id == producer
+                    && src.port_idx == 0
+        ),
+        "the release binds the port it snapped to, and nothing else: {released:?}"
+    );
+}
+
 /// Ctrl+drag off an output port spawns a preview node already reading it, as
 /// one batch — the one-gesture counterpart to the port menu's "Add preview".
 ///

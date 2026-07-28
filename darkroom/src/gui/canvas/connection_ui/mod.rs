@@ -1,7 +1,5 @@
 use glam::Vec2;
-use palantir::{
-    Color, CurveBrush, LinearGradient, PointerButton, PointerEvent, PointerWake, Stop, Ui,
-};
+use palantir::{CurveBrush, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
 
@@ -10,11 +8,12 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{Wire, WirePass};
-use crate::gui::canvas::{free_end, outer_canvas_widget_id, preview_drag_modifier};
+use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
+use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{GraphScene, InputBindingView, Scene};
+use crate::gui::theme::Theme;
 
 /// Owns the in-flight new-connection wire — a held drag or a free-floating
 /// wire, see [`InFlight`]. Single-wire-at-a-time means one `Option` is
@@ -26,7 +25,7 @@ pub(super) struct ConnectionUI {
     state: Option<InFlight>,
     /// Source port of a wire dropped on empty canvas this frame. Handed to
     /// the new-node popup so it opens; the wire then resumes *floating*
-    /// once a node is picked (see [`InFlight::Floating`]). Taken by the
+    /// once a node is picked (see [`DragMode::Floating`]). Taken by the
     /// canvas the same frame.
     pending_open: Option<PortRef>,
     /// Set when a floating wire ended on a right-click this frame, so the
@@ -35,25 +34,21 @@ pub(super) struct ConnectionUI {
     ended_on_secondary: bool,
 }
 
-/// The in-flight wire being created. Both modes share one preview renderer
-/// ([`ConnectionUI::draw_in_flight`]), snap tracking, and data — only the
-/// terminating input differs (so `mode` is a discriminant, not distinct
-/// payloads). Identity-only — port centers resolve every frame from
-/// `CanvasGeometry`, so a wire survives layout changes.
+/// The in-flight wire being created: a [`GlyphDrag`] within the data-port
+/// domain (both ends are `PortRef`s — a wire can be pulled from either kind),
+/// plus which terminating input ends it. Both modes share one preview renderer
+/// ([`ConnectionUI::draw_in_flight`]), snap tracking, and data, so `mode` is a
+/// discriminant rather than distinct payloads.
 #[derive(Clone, Copy, Debug)]
-struct InFlight {
-    /// The port the wire started from.
-    start: PortRef,
-    /// Compatible port currently under the pointer, if any — drives the
-    /// preview's snap end and the hover highlight.
-    snap_end: Option<PortRef>,
-    mode: DragMode,
+pub(super) struct InFlight {
+    pub(super) drag: GlyphDrag<PortRef, PortRef>,
+    pub(super) mode: DragMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum DragMode {
-    /// LMB-drag from `start`; ends on button release. The original
-    /// gesture: a compatible `snap_end` commits, an input dropped on its
+pub(super) enum DragMode {
+    /// LMB-drag from the latched port; ends on button release. The original
+    /// gesture: a compatible snap commits, an input dropped on its
     /// own body gets a const, a drop on empty canvas opens the palette.
     Held,
     /// Free wire following the cursor with **no button held** — entered
@@ -67,13 +62,13 @@ impl ConnectionUI {
     /// Drive the in-flight wire: latch a fresh drag, track the snap
     /// target, and resolve on the active mode's terminating input.
     ///
-    /// Latch: the first port whose `CanvasGeometry::drag_started` fires starts a
-    /// [`InFlight::Held`] wire. While active, every port is rescanned each
+    /// Latch: the first port whose `PortLayer::first_drag_started` fires starts
+    /// a [`DragMode::Held`] wire. While active, every port is rescanned each
     /// frame for the topmost opposite-kind port under the pointer
-    /// (`snap_end`). [`InFlight::Held`] resolves on release; a drop on
+    /// (`drag.snap`). [`DragMode::Held`] resolves on release; a drop on
     /// empty canvas opens the new-node palette instead of dropping, and
     /// `resume` (the source of such a wire, after its node was picked)
-    /// re-enters [`InFlight::Floating`] so the user clicks the exact port
+    /// re-enters [`DragMode::Floating`] so the user clicks the exact port
     /// to land it. Esc cancels either mode without emitting anything.
     ///
     /// Swept over the whole scene once per frame. The latch scan spans
@@ -94,18 +89,17 @@ impl ConnectionUI {
         // A just-spawned node hands its dropped wire back to float.
         if let Some(start) = resume {
             self.state = Some(InFlight {
-                start,
-                snap_end: None,
+                drag: GlyphDrag::new(start),
                 mode: DragMode::Floating,
             });
         }
         // Latch a fresh port drag only when idle.
+        let candidates = drag_candidates(scene, preview_drag_modifier(ui));
         if self.state.is_none()
-            && let Some(start) = scan_drag_start(geometry, scene, ui)
+            && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
         {
             self.state = Some(InFlight {
-                start,
-                snap_end: None,
+                drag,
                 mode: DragMode::Held,
             });
         }
@@ -123,22 +117,18 @@ impl ConnectionUI {
         let Some(mut state) = self.state else {
             return;
         };
-        let Some(graph) = scene.owner(state.start.node_id) else {
+        let Some(graph) = scene.owner(state.drag.node()) else {
             self.state = None;
             return;
         };
 
         // Refresh the compatible port under the pointer for both modes.
-        state.snap_end = scan_snap_target(geometry, ui, graph, state.start);
+        state.drag.snap = scan_snap_target(geometry, ui, graph, state.drag.from);
         self.state = Some(state);
 
         match state.mode {
-            DragMode::Held => {
-                self.resolve_held(ui, graph, geometry, state.start, state.snap_end, out)
-            }
-            DragMode::Floating => {
-                self.resolve_floating(ui, graph, state.start, state.snap_end, out)
-            }
+            DragMode::Held => self.resolve_held(ui, graph, geometry, state.drag, out),
+            DragMode::Floating => self.resolve_floating(ui, graph, state.drag, out),
         }
     }
 
@@ -161,7 +151,7 @@ impl ConnectionUI {
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
     pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
         self.state
-            .is_some_and(|state| graph.contains(state.start.node_id))
+            .is_some_and(|state| graph.contains(state.drag.node()))
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
@@ -178,23 +168,20 @@ impl ConnectionUI {
         ui: &mut Ui,
         graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
-        start: PortRef,
-        snap_end: Option<PortRef>,
+        drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Intents,
     ) {
-        // `CanvasGeometry::dragging` rolls up `drag_delta().is_some() ||
-        // drag_started()`; its transition to `false` is the release edge.
-        if geometry.ports.dragging(start) {
+        if drag.held(&geometry.ports) {
             return;
         }
-        if let Some(end) = snap_end {
-            commit_connection(graph, start, end, out);
-        } else if let Some(intent) = self.const_drop(ui, graph, start) {
+        if let Some(end) = drag.snap {
+            commit_connection(graph, drag.from, end, out);
+        } else if let Some(intent) = self.const_drop(ui, graph, drag.from) {
             out.push(graph.target(), intent);
         } else if dropped_on_empty_canvas(ui, graph) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
-            self.pending_open = Some(start);
+            self.pending_open = Some(drag.from);
         }
         self.state = None;
     }
@@ -209,8 +196,7 @@ impl ConnectionUI {
         &mut self,
         ui: &mut Ui,
         graph: GraphScene<'_>,
-        start: PortRef,
-        snap_end: Option<PortRef>,
+        drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Intents,
     ) {
         // `MOVE` wakes a repaint on every cursor move so the wire tracks the
@@ -228,8 +214,8 @@ impl ConnectionUI {
         });
         match ended {
             Some(PointerButton::Left) => {
-                if let Some(end) = snap_end {
-                    commit_connection(graph, start, end, out);
+                if let Some(end) = drag.snap {
+                    commit_connection(graph, drag.from, end, out);
                 }
                 self.state = None;
             }
@@ -270,12 +256,15 @@ impl ConnectionUI {
         Some(set_input(start, Binding::Const(default)))
     }
 
-    /// Compatible-kind port currently snapped under the pointer
-    /// during an active drag, or `None`. Read by `GraphUI` to force
-    /// the hover state in `CanvasGeometry` (otherwise palantir's
-    /// drag-capture suppression would hide it).
-    pub(super) fn snap_port(&self) -> Option<PortRef> {
-        self.state.and_then(|s| s.snap_end)
+    /// Force the hover flag on the port the wire is currently snapped to, so
+    /// `port_row` picks the hover color up through the same lookup it uses for
+    /// an ordinary mouse-over — palantir suppresses `response.hovered` on
+    /// every widget but the drag-capture owner while a drag is live, so the
+    /// snapped-but-not-captured target would otherwise stay at its idle color.
+    pub(super) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
+        if let Some(snap) = self.state.and_then(|state| state.drag.snap) {
+            geometry.ports.set_hovered(snap);
+        }
     }
 
     /// Paint the in-flight drag preview: cubic from the start port's
@@ -295,14 +284,17 @@ impl ConnectionUI {
         // its own `canvas_origin` and under its own transform, so the
         // wire's graph-space endpoints landed as a phantom curve over an
         // unrelated graph.
-        let Some(state) = self.state.filter(|s| graph.contains(s.start.node_id)) else {
+        let Some(state) = self.state.filter(|s| graph.contains(s.drag.node())) else {
             return;
         };
-        let start_port = state.start;
+        let start_port = state.drag.from;
         let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
-        let Some(end) = free_end(ui, graph, canvas_origin, &geometry.ports, state.snap_end) else {
+        let Some(end) = state
+            .drag
+            .free_end(ui, graph, canvas_origin, &geometry.ports)
+        else {
             return;
         };
         // Orient handles by kind: outputs grow rightward, inputs grow
@@ -316,7 +308,7 @@ impl ConnectionUI {
         // preview already reads as the type being connected.
         let drag_ty = port_data_type(graph, start_port).unwrap_or_default();
         let color = port_color(ctx.theme, &drag_ty, start_port.kind, false);
-        Wire::data(p0, p3).add(ui, ctx.theme.connection_width, port_gradient(color, color));
+        Wire::data(p0, p3).add(ui, ctx.theme.connection_width, CurveBrush::Solid(color));
     }
 }
 
@@ -330,96 +322,65 @@ impl ConnectionUI {
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (theme, graph, geometry) = (pass.rcx.theme, pass.rcx.graph, pass.rcx.geometry);
     for c in graph.connections() {
-        let src_port = PortRef {
+        let src = PortRef {
             node_id: c.src.node_id,
             kind: PortKind::Output,
             port_idx: c.src.port_idx,
         };
-        let tgt_port = PortRef {
+        let tgt = PortRef {
             node_id: c.tgt.node_id,
             kind: PortKind::Input,
             port_idx: c.tgt.port_idx,
         };
-        let (Some(p0), Some(p3)) = (
-            geometry.ports.center(src_port),
-            geometry.ports.center(tgt_port),
-        ) else {
+        let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt)) else {
             continue;
         };
+        let hover = geometry.ports.is_hovered(src) || geometry.ports.is_hovered(tgt);
         let wire = Wire::data(p0, p3);
-        let endpoint_hover =
-            geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
-        let Some(stroke) = pass.resolve(&wire, endpoint_hover) else {
-            continue;
-        };
-        if stroke.broken {
+        if pass.draw_wire(ui, &wire, hover, || data_tint(theme, graph, src, tgt)) {
             pass.probe.mark_broken_input(c.tgt);
         }
-        // Gradient from output (p0) → input (p3) port color so each
-        // end of a connection visually matches the port it touches —
-        // and, with per-type port colors, the wire reads as its data
-        // type (both ends share it unless one side is the untyped
-        // `Any` wildcard). Palantir's cubic-curve lowering samples
-        // `CurveBrush::Linear` along the curve parameter `t` and ignores
-        // `angle` — we pass 0.0. Broken-state still wins as a flat color
-        // so the alarm read doesn't get diluted by the gradient.
-        let src_ty = port_data_type(graph, src_port).unwrap_or_default();
-        let tgt_ty = port_data_type(graph, tgt_port).unwrap_or_default();
-        let brush = if stroke.broken {
-            CurveBrush::Solid(theme.colors.connection_broken)
-        } else if !tgt_ty.compatible_with(&src_ty) {
-            // A wildcard retype upstream left this wire type-mismatched.
-            // Nothing severs it — it flattens as unbound (drift
-            // tolerance) — so paint it in the missing-input warning
-            // color, matching the port glow the run will report.
-            CurveBrush::Solid(
-                pass.emphasis
-                    .tint(theme.colors.exec_missing_glow, stroke.hovered),
-            )
-        } else {
-            let a = pass.emphasis.tint(
-                port_color(theme, &src_ty, PortKind::Output, false),
-                stroke.hovered,
-            );
-            let b = pass.emphasis.tint(
-                port_color(theme, &tgt_ty, PortKind::Input, false),
-                stroke.hovered,
-            );
-            port_gradient(a, b)
-        };
-        wire.add(ui, stroke.width, brush);
     }
 }
 
-/// Linear gradient running along the curve parameter from `start`
-/// (`t = 0`, the output-port side at `p0`) to `end` (`t = 1`, the
-/// input-port side at `p3`). Palantir's cubic-curve lowering samples
-/// the brush along `t` and ignores `angle`, so the geometric direction
-/// doesn't matter here.
-fn port_gradient(start: Color, end: Color) -> CurveBrush {
-    CurveBrush::Linear(LinearGradient::new(
-        0.0,
-        [Stop::new(0.0, start), Stop::new(1.0, end)],
-    ))
+/// The endpoint colors of a committed data wire: the two ports' type colors,
+/// so each end matches the port it touches and the wire reads as its data type
+/// (both ends share it unless one side is the untyped `Any` wildcard).
+///
+/// A wire an upstream wildcard retype left type-mismatched paints entirely in
+/// the missing-input warning color instead. Nothing severs it — it flattens as
+/// unbound (drift tolerance) — so it wears the same warning the run will report
+/// on the port.
+fn data_tint(theme: &Theme, graph: GraphScene<'_>, src: PortRef, tgt: PortRef) -> WireTint {
+    let src_ty = port_data_type(graph, src).unwrap_or_default();
+    let tgt_ty = port_data_type(graph, tgt).unwrap_or_default();
+    if !tgt_ty.compatible_with(&src_ty) {
+        return WireTint::flat(theme.colors.exec_missing_glow);
+    }
+    WireTint::new(
+        port_color(theme, &src_ty, PortKind::Output, false),
+        port_color(theme, &tgt_ty, PortKind::Input, false),
+    )
 }
 
-/// First port whose response shows `drag_started` this frame, or `None`.
-/// Iterates inputs first then outputs per node so the topmost recorded
-/// port wins ties (matches paint order). Skips output ports while
-/// [`preview_drag_modifier`] is held — that chord is reserved for the
+/// Every port a fresh wire drag may latch on, a node's inputs before its
+/// outputs so the topmost recorded port wins ties (matches paint order).
+///
+/// The output column drops out while the preview-spawn chord is held
+/// ([`preview_drag_modifier`], passed in as `preview_chord` so the returned
+/// iterator doesn't keep `Ui` borrowed): that chord is reserved for the
 /// preview-spawn drag (see `preview_drag.rs`), so the two controllers never
 /// both latch the same press.
-fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &mut Ui) -> Option<PortRef> {
-    let kinds: &[PortKind] = if preview_drag_modifier(ui) {
+fn drag_candidates(scene: &Scene, preview_chord: bool) -> impl Iterator<Item = PortRef> {
+    let kinds: &'static [PortKind] = if preview_chord {
         &[PortKind::Input]
     } else {
         &[PortKind::Input, PortKind::Output]
     };
-    let keys = scene
+    scene
         .nodes
         .values()
-        .flat_map(|n| kinds.iter().flat_map(move |&kind| n.ports(kind)));
-    geometry.ports.first_drag_started(keys)
+        .flat_map(|n| kinds.iter().flat_map(move |&kind| n.ports(kind)))
 }
 
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
