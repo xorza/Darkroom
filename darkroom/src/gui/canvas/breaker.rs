@@ -268,12 +268,14 @@ impl BreakerUI {
     /// pinned: false }`). `RemoveNode` supersedes any per-edge severing on
     /// the same target — the undo step already detaches every incoming
     /// edge and pin, so emitting both would log a redundant history entry.
-    /// Esc cancels without emitting.
+    /// `cancelled` — the frame's Esc, resolved once by the canvas —
+    /// drops the scribble without emitting.
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
         graph: GraphScene<'_>,
         gesture: Option<CanvasGesture>,
+        cancelled: bool,
         out: &mut Intents,
     ) {
         let target = graph.target();
@@ -295,7 +297,7 @@ impl BreakerUI {
                 button,
             ));
         }
-        if self.state.is_some() && ui.escape_pressed() {
+        if cancelled {
             self.state = None;
             return;
         }

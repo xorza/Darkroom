@@ -23,11 +23,6 @@ use crate::gui::scene::GraphScene;
 #[derive(Default, Debug)]
 pub(super) struct SelectionUI {
     band: Option<RubberBand>,
-    /// Pre-drag selection captured at latch (empty unless Shift extends).
-    /// The swept set unions onto this each frame, so we never re-read
-    /// `scene.selected` mid-drag — no dependency on the document staying
-    /// untouched, and the additive base is fixed at latch.
-    base: BTreeSet<NodeId>,
     /// The swept set while a band is active — sorted and deduped, like the
     /// committed spans it stands in for, so the draw's membership test stays
     /// a binary search. Owned here rather than written into the projection so
@@ -43,7 +38,7 @@ pub(super) struct SelectionUI {
     preview: Option<GraphRef>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct RubberBand {
     /// The pane the band was latched on. Every visible graph pane runs
     /// this controller, so without it a band started on one canvas would
@@ -55,6 +50,15 @@ struct RubberBand {
     /// the pointer every frame.
     start: Vec2,
     current: Vec2,
+    /// Pre-drag selection captured at latch (empty unless Shift extends).
+    /// The swept set unions onto this each frame, so we never re-read
+    /// `scene.selected` mid-drag — no dependency on the document staying
+    /// untouched, and the additive base is fixed at latch.
+    ///
+    /// Inside the band, not beside it: it is captured with the gesture
+    /// and meaningless without one, and at struct level it outlived every
+    /// commit as stale state.
+    base: BTreeSet<NodeId>,
 }
 
 impl RubberBand {
@@ -79,7 +83,8 @@ impl SelectionUI {
     /// the swept set every frame. The set is stashed in `self.preview` so
     /// nodes highlight *live* as the rectangle moves (read back via
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
-    /// committing `SetSelection` emitted on release. Esc cancels without
+    /// committing `SetSelection` emitted on release. `cancelled` — the
+    /// frame's Esc, resolved once by the canvas — drops the band without
     /// emitting.
     ///
     /// Called once per visible graph pane; a band in flight belongs to
@@ -91,10 +96,11 @@ impl SelectionUI {
         graph: GraphScene<'_>,
         geometry: &CanvasGeometry,
         gesture: Option<CanvasGesture>,
+        cancelled: bool,
         out: &mut Intents,
     ) {
         let target = graph.target();
-        if self.band.is_some_and(|band| band.graph != target) {
+        if self.band.as_ref().is_some_and(|band| band.graph != target) {
             return;
         }
         let resp = ui.response_for(outer_canvas_widget_id(target));
@@ -103,32 +109,31 @@ impl SelectionUI {
             && let Some(p) = resp.pointer_local
         {
             let w = to_world(p, &graph.viewport());
-            // Shift is a gesture *parameter* (extend vs replace), not
-            // arbitration — read it here, not in the classifier. Capture
-            // the base once so the per-frame union doesn't re-read the doc.
-            self.base = if ui.modifiers().shift {
-                graph.selection()
-            } else {
-                BTreeSet::new()
-            };
             self.band = Some(RubberBand {
                 graph: target,
                 start: w,
                 current: w,
+                // Shift is a gesture *parameter* (extend vs replace), not
+                // arbitration — read it here, not in the classifier.
+                // Captured once, so the per-frame union never re-reads the
+                // document.
+                base: if ui.modifiers().shift {
+                    graph.selection()
+                } else {
+                    BTreeSet::new()
+                },
             });
         }
-        let Some(mut band) = self.band else {
-            // No band in flight — drop any preview left by the
-            // just-committed (or cancelled) drag so node draw falls back
-            // to the now-committed selection.
+        if cancelled {
+            self.band = None;
+        }
+        let Some(mut band) = self.band.take() else {
+            // No band in flight — just cancelled, or committed last frame.
+            // Either way drop the preview so node draw falls back to the
+            // committed selection.
             self.preview = None;
             return;
         };
-        if ui.escape_pressed() {
-            self.band = None;
-            self.preview = None;
-            return;
-        }
         if let Some(p) = resp.pointer_local {
             band.current = to_world(p, &graph.viewport());
         }
@@ -140,7 +145,7 @@ impl SelectionUI {
         // allocation across frames.
         let swept = &mut self.swept;
         swept.clear();
-        swept.extend(self.base.iter().copied());
+        swept.extend(band.base.iter().copied());
         for n in graph.nodes() {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
@@ -174,7 +179,6 @@ impl SelectionUI {
         let to: BTreeSet<NodeId> = swept.iter().copied().collect();
         out.push(target, Intent::SetSelection { to });
         self.preview = Some(target);
-        self.band = None;
     }
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
@@ -182,7 +186,7 @@ impl SelectionUI {
     /// No-op when no gesture is active on `graph`'s pane or the rect has
     /// no area yet.
     pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
-        let Some(band) = self.band.filter(|band| band.graph == graph) else {
+        let Some(band) = self.band.as_ref().filter(|band| band.graph == graph) else {
             return;
         };
         let rect = band.rect();
