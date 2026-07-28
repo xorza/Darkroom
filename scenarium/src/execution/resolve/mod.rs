@@ -177,6 +177,20 @@ async fn resolve_run(
         run.disposition[node_idx] = Disposition::Run;
         for input in &program.inputs[program[node_idx].inputs] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
+                // Only a producer the plan will actually run can deliver
+                // a value. A **disabled** producer feeding an *optional*
+                // input leaves the consumer perfectly schedulable —
+                // `input_missing` treats an optional port fed by a
+                // disabled producer as satisfied — but the producer
+                // itself never enters `process_order`. Marking it live
+                // here put a node the schedule does not contain into the
+                // run, and the consumer's read then demanded an output
+                // nothing would ever produce: a panic on a cold cache,
+                // and on a warm one the value from before it was
+                // disabled, served as if it were this run's.
+                if !plan.verdicts[addr.node_idx].wants_execute() {
+                    continue;
+                }
                 run.disposition[addr.node_idx] = Disposition::Run;
                 run.outputs.add_reader(program.output_idx(*addr));
             }
