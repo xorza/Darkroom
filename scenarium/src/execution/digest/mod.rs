@@ -7,7 +7,7 @@
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
 //! needed). External identities come from one memoized per-run
-//! [`RunResourceStamps`](crate::execution::resource::RunResourceStamps), keeping this fold
+//! [`ResourceStamper`](crate::execution::resource::ResourceStamper), keeping this fold
 //! I/O-free. Equal digests ⇒ identical computation, so the digest is at once the cache key
 //! and the invalidation signal: change anything upstream and every downstream digest
 //! changes — on this machine or any other. See `README.md` Part B.
@@ -22,8 +22,9 @@
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
-//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's entries',
-//!   prepared by [`RunResourceStamps`](crate::execution::resource::RunResourceStamps), so a
+//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or that of every file
+//!   beneath a directory (empty directories are not part of it),
+//!   prepared by [`ResourceStamper`](crate::execution::resource::ResourceStamper), so a
 //!   folder-reading node can be `Pure` and still re-key when its contents change. A
 //!   same-size edit within mtime granularity can slip through; explicit runtime cache
 //!   eviction removes the affected node and downstream blobs. The same tier holds
@@ -40,13 +41,13 @@ use blake3::Hasher;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 use crate::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-const DOMAIN: &[u8] = b"scenarium-cache-v3";
+const DOMAIN: &[u8] = b"scenarium-cache-v4";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same function identity and version, params, upstream outputs, and file inputs.
@@ -195,14 +196,14 @@ fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
 fn hash_fs_content(
     hasher: &mut DigestHasher,
     value: &StaticValue,
-    resource_stamps: &RunResourceStamps,
+    resource_stamper: &ResourceStamper,
 ) -> Option<()> {
     match value {
         StaticValue::FsPath(path) => {
-            resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
+            resource_stamper.hash_fs_paths(hasher, std::slice::from_ref(path))?;
         }
         StaticValue::FsPaths(paths) => {
-            resource_stamps.hash_fs_paths(hasher, paths)?;
+            resource_stamper.hash_fs_paths(hasher, paths)?;
         }
         _ => {}
     }
@@ -247,7 +248,7 @@ pub(crate) fn node_digest(
     program: &ExecutionProgram,
     node_idx: NodeIdx,
     cache: &RuntimeCache,
-    resource_stamps: &RunResourceStamps,
+    resource_stamper: &ResourceStamper,
 ) -> Option<Digest> {
     let e_node = &program[node_idx];
 
@@ -277,7 +278,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Const(value) => {
                 hasher.write_bytes(&[1]);
                 hash_static(&mut hasher, value);
-                hash_fs_content(&mut hasher, value, resource_stamps)?;
+                hash_fs_content(&mut hasher, value, resource_stamper)?;
             }
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
@@ -292,7 +293,7 @@ pub(crate) fn node_digest(
                 // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
                 if input.stamps_fs_path {
-                    hash_bound_fs_path(&mut hasher, cache, resource_stamps, addr)?;
+                    hash_bound_fs_path(&mut hasher, cache, resource_stamper, addr)?;
                 }
             }
         }
@@ -311,7 +312,7 @@ pub(crate) fn node_digest(
 fn hash_bound_fs_path(
     hasher: &mut DigestHasher,
     cache: &RuntimeCache,
-    resource_stamps: &RunResourceStamps,
+    resource_stamper: &ResourceStamper,
     addr: &OutputAddr,
 ) -> Option<()> {
     let value = cache.slots[addr.node_idx]
@@ -320,11 +321,11 @@ fn hash_bound_fs_path(
     match value.as_static() {
         Some(StaticValue::FsPath(path)) => {
             hasher.write_bytes(&[3]);
-            resource_stamps.hash_fs_paths(hasher, std::slice::from_ref(path))?;
+            resource_stamper.hash_fs_paths(hasher, std::slice::from_ref(path))?;
         }
         Some(StaticValue::FsPaths(paths)) => {
             hasher.write_bytes(&[3]);
-            resource_stamps.hash_fs_paths(hasher, paths)?;
+            resource_stamper.hash_fs_paths(hasher, paths)?;
         }
         _ => {
             hasher.write_bytes(&[4]);

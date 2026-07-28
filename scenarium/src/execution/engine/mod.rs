@@ -16,7 +16,7 @@ use crate::execution::plan::{ExecutionPlan, Planner};
 use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunReporter;
 use crate::execution::resolve::Resolver;
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 
@@ -46,7 +46,7 @@ pub(crate) struct ExecutionEngine {
     resolver: Resolver,
     /// Per-run filesystem identities, collected off-thread and shared by initial
     /// resolution and late bound-path restamps.
-    resource_stamps: RunResourceStamps,
+    resource_stamper: ResourceStamper,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
 }
@@ -60,7 +60,7 @@ impl ExecutionEngine {
         self.compiled = Arc::default();
         self.plan.reset_for_program(&self.compiled.program);
         self.cache.clear();
-        self.resource_stamps = RunResourceStamps::default();
+        self.resource_stamper = ResourceStamper::default();
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program.
@@ -106,7 +106,7 @@ impl ExecutionEngine {
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
-        self.resource_stamps
+        self.resource_stamper
             .prepare_run(
                 &self.compiled.program,
                 &self.plan,
@@ -123,7 +123,7 @@ impl ExecutionEngine {
                 &self.compiled.program,
                 &self.plan,
                 &mut self.cache,
-                &self.resource_stamps,
+                &self.resource_stamper,
             )
             .await;
 
@@ -137,7 +137,7 @@ impl ExecutionEngine {
                     plan: &self.plan,
                     resolved: &self.resolver.run,
                     cache: &mut self.cache,
-                    resource_stamps: &mut self.resource_stamps,
+                    resource_stamper: &mut self.resource_stamper,
                     reporter,
                     cancel,
                 },
@@ -196,7 +196,7 @@ mod internals {
     use crate::execution::program::ExecutionBinding;
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::resolve::Disposition;
-    use crate::execution::resource::RunResourceStamps;
+    use crate::execution::resource::ResourceStamper;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::NodeId;
     use crate::node::lambda::OutputDemand;
@@ -286,13 +286,13 @@ mod internals {
                 e_node_ids: Vec::new(),
             };
             self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
-            self.resource_stamps = RunResourceStamps::default();
+            self.resource_stamper = ResourceStamper::default();
             self.resolver
                 .resolve(
                     &self.compiled.program,
                     &self.plan,
                     &mut self.cache,
-                    &self.resource_stamps,
+                    &self.resource_stamper,
                 )
                 .await;
             Ok(())
