@@ -15,7 +15,7 @@ mod selection_ui;
 mod subscription_ui;
 #[cfg(test)]
 mod tests;
-pub(crate) mod wire;
+mod wire;
 
 use glam::Vec2;
 use palantir::{

@@ -227,7 +227,7 @@ impl BreakerState {
     }
 }
 
-pub(super) fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
+fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
     let uu = u * u;
     let tt = t * t;
@@ -389,13 +389,6 @@ impl BreakerUI {
             .join(LineJoin::Round),
         );
     }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use super::*;
-
-    impl BreakerState {}
 }
 
 #[cfg(test)]

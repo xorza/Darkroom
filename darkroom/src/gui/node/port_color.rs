@@ -18,7 +18,7 @@ use palantir::Color;
 use scenarium::DataType;
 
 use crate::core::document::PortKind;
-use crate::gui::canvas::wire::toward;
+use crate::gui::color::toward;
 use crate::gui::theme::{Theme, ThemePreset, TypeColors};
 
 /// Color for a port of type `ty` on the given side. `hovered` lightens

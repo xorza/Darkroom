@@ -30,6 +30,7 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::PortLayer;
 use crate::gui::canvas::pointer_world;
+use crate::gui::color::toward;
 use crate::gui::node::RecordCtx;
 use crate::gui::scene::GraphScene;
 
@@ -323,17 +324,6 @@ const WIRE_DRAG_FADE: f32 = 0.35;
 /// Width multiplier for an emphasized (hovered or broken-alarm) wire, so
 /// one connection stays traceable through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
-
-/// Linear-space pull of `c` toward `to` by `t`, alpha untouched. Storage
-/// colors are already linear, so a straight component lerp is correct.
-pub(crate) fn toward(c: Color, to: Color, t: f32) -> Color {
-    Color::linear_rgba(
-        c.r + (to.r - c.r) * t,
-        c.g + (to.g - c.g) * t,
-        c.b + (to.b - c.b) * t,
-        c.a,
-    )
-}
 
 /// Per-pass emphasis state shared by every wire renderer, resolved once in
 /// the canvas frame. The tiers: while any wire gesture is in flight
