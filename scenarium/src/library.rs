@@ -6,7 +6,7 @@ use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
 use crate::graph::GraphDef;
 use crate::graph::interface::GraphId;
-use crate::node::definition::{Func, FuncId};
+use crate::node::definition::{Func, FuncId, OutputType};
 use crate::{DataType, EnumVariants, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
@@ -134,7 +134,15 @@ impl Library {
             !self.funcs.contains_key(&func.id),
             "duplicate function registration"
         );
-        self.assert_enum_defaults(&func);
+        assert_enum_defaults(&func, |type_id| self.enum_variants(type_id));
+        for type_id in declared_enum_types(&func) {
+            assert!(
+                !self.is_registered_custom(type_id),
+                "function {:?} declares {type_id:?} as an enum, but it is registered as a \
+                 custom type",
+                func.name,
+            );
+        }
         self.funcs.insert(func.id, func);
     }
 
@@ -169,43 +177,53 @@ impl Library {
             !self.types.contains_key(&type_id),
             "duplicate type registration"
         );
-        self.types.insert(type_id, entry);
         // Funcs and their enum types register in either order, so the
         // membership gate runs from both directions: `add` checks against
         // types already present, and a fresh enum entry re-checks the funcs
         // already added.
-        if self.enum_variants(type_id).is_some() {
-            for func in self.funcs.values() {
-                self.assert_enum_defaults(func);
+        //
+        // **Before the insert.** This gate panics, and installing first
+        // left the rejected entry in `types` for every later lookup to
+        // find — the registry kept exactly the declaration it had just
+        // refused. Nothing is in the map yet, so the check resolves
+        // `type_id` from `entry` directly; every *other* enum a func
+        // declares was already gated when that type registered.
+        match entry.variants() {
+            Some(variants) => {
+                for func in self.funcs.values() {
+                    assert_enum_defaults(func, |declared| {
+                        (declared == type_id).then_some(variants)
+                    });
+                }
+            }
+            // The other half of the same gate. `enum_variants` answers
+            // `None` for "not registered yet" *and* for "registered as a
+            // custom type", and deferred registration makes the first one
+            // legitimate — so nothing rejected a func that declared this
+            // id as an enum, and the mismatch only surfaced much later
+            // and much quieter, as an enum const that failed
+            // `const_satisfies` and flattened to unbound.
+            None => {
+                for func in self.funcs.values() {
+                    assert!(
+                        !declared_enum_types(func).any(|declared| declared == type_id),
+                        "{type_id:?} is being registered as a custom type, but function {:?} \
+                         declares it as an enum",
+                        func.name,
+                    );
+                }
             }
         }
+        self.types.insert(type_id, entry);
     }
 
-    /// Panic when `func` declares an `Enum` default whose name isn't among
-    /// its type's registered variants. Variant-kind and picker-membership
-    /// checks already ran in `Func::validate`; this closes the half that
-    /// needs the registry. A default on a type not (yet) registered passes —
-    /// `register_type` re-checks when the entry arrives.
-    fn assert_enum_defaults(&self, func: &Func) {
-        for input in &func.inputs {
-            if !input.value_variants.is_empty() {
-                continue;
-            }
-            let (DataType::Enum(type_id), Some(StaticValue::Enum(name))) =
-                (&input.data_type, &input.default_value)
-            else {
-                continue;
-            };
-            if let Some(variants) = self.enum_variants(*type_id) {
-                assert!(
-                    variants.iter().any(|variant| variant == name),
-                    "function {:?} input {:?} defaults to {name:?}, which is not a registered \
-                     variant of its enum type",
-                    func.name,
-                    input.name,
-                );
-            }
-        }
+    /// Whether `type_id` is registered as a **custom** type — the state
+    /// [`Self::enum_variants`] cannot tell apart from "not registered at
+    /// all", since it answers `None` to both.
+    fn is_registered_custom(&self, type_id: TypeId) -> bool {
+        self.types
+            .get(&type_id)
+            .is_some_and(|entry| entry.variants().is_none())
     }
 
     /// The variant names of a registered `Enum` type — for the editor's enum
@@ -261,6 +279,56 @@ impl Library {
     }
 }
 
+/// Every type a `func` port declares as [`DataType::Enum`], inputs and
+/// outputs alike. A wildcard output declares no nominal type of its
+/// own, so it contributes nothing here.
+fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
+    let enum_id = |ty: &DataType| match ty {
+        DataType::Enum(type_id) => Some(*type_id),
+        _ => None,
+    };
+    let inputs = func
+        .inputs
+        .iter()
+        .filter_map(move |i| enum_id(&i.data_type));
+    let outputs = func.outputs.iter().filter_map(move |o| match &o.ty {
+        OutputType::Fixed(ty) => enum_id(ty),
+        OutputType::Wildcard { .. } => None,
+    });
+    inputs.chain(outputs)
+}
+
+/// Panic when `func` declares an `Enum` default whose name isn't among
+/// its type's registered variants. Variant-kind and picker-membership
+/// checks already ran in `Func::validate`; this closes the half that
+/// needs the registry. A default on a type `variants_of` doesn't
+/// resolve passes — `register_type` re-checks when the entry arrives.
+///
+/// Variants arrive through `variants_of` rather than off `&self`
+/// because [`Library::register_type`] has to run this *before* its entry
+/// is installed, so the type under test isn't in the map yet.
+fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<&'a [String]>) {
+    for input in &func.inputs {
+        if !input.value_variants.is_empty() {
+            continue;
+        }
+        let (DataType::Enum(type_id), Some(StaticValue::Enum(name))) =
+            (&input.data_type, &input.default_value)
+        else {
+            continue;
+        };
+        if let Some(variants) = variants_of(*type_id) {
+            assert!(
+                variants.iter().any(|variant| variant == name),
+                "function {:?} input {:?} defaults to {name:?}, which is not a registered \
+                 variant of its enum type",
+                func.name,
+                input.name,
+            );
+        }
+    }
+}
+
 impl<It> From<It> for Library
 where
     It: IntoIterator<Item = Func>,
@@ -280,6 +348,7 @@ mod tests {
 
     use tokio::io::{AsyncRead, AsyncWrite};
 
+    use crate::FuncOutput;
     use crate::Invocation;
     use crate::graph::GraphDef;
     use crate::graph::interface::GraphId;
@@ -369,6 +438,71 @@ mod tests {
         }
     }
 
+    /// A func declaring a type as an enum while that type is registered
+    /// as a *custom* one is a wiring bug, and it is refused whichever of
+    /// the two arrives first.
+    ///
+    /// `enum_variants` answers `None` both for "not registered yet" and
+    /// for "registered as a custom type". Deferred registration makes the
+    /// first legitimate, so nothing could reject the second: the library
+    /// accepted the pair, and the contradiction only surfaced later and
+    /// far quieter, when the enum const failed `const_satisfies` and the
+    /// input flattened to unbound — indistinguishable from a port the
+    /// user simply never wired.
+    #[test]
+    fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
+        // Type first, then the func that disagrees with it.
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.register_type(type_id, TypeEntry::custom("Opaque"));
+        let func_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.add(modal_func(type_id, "fast"));
+        }));
+        assert!(
+            func_after.is_err(),
+            "a func declaring a registered custom type as an enum must be refused",
+        );
+        assert_eq!(
+            library.funcs().len(),
+            0,
+            "the refused func is not installed"
+        );
+
+        // …and the reverse order, which is the one deferred registration
+        // makes reachable in real hosts.
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.add(modal_func(type_id, "fast"));
+        let type_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.register_type(type_id, TypeEntry::custom("Opaque"));
+        }));
+        assert!(
+            type_after.is_err(),
+            "registering a custom type a func declares as an enum must be refused",
+        );
+        assert!(
+            !library.types.contains_key(&type_id),
+            "the refused type is not installed",
+        );
+        // The id stays free for the declaration that was actually meant.
+        library.register_type(type_id, mode_entry());
+        assert!(library.enum_variants(type_id).is_some());
+    }
+
+    /// An *output* declaring the enum counts too — the gate reads both
+    /// port lists, so a mismatch can't hide on the side with no default.
+    #[test]
+    #[should_panic(expected = "declares it as an enum")]
+    fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
+        let type_id = TypeId::unique();
+        let mut library = Library::default();
+        library.add(testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "emit")
+                .output(FuncOutput::new("mode", DataType::Enum(type_id))),
+        ));
+        library.register_type(type_id, TypeEntry::custom("Opaque"));
+    }
+
     /// A func whose `mode` input defaults to the enum variant `default`.
     fn modal_func(type_id: TypeId, default: &str) -> Func {
         testing::with_stub_lambda(
@@ -406,13 +540,48 @@ mod tests {
         library.add(modal_func(type_id, "slothful"));
     }
 
+    /// A refusal has to leave nothing behind.
+    ///
+    /// The panic alone is not the contract — installing the entry and
+    /// *then* validating meant the registry kept the very declaration it
+    /// had just refused, and every later `enum_variants` / `type_name`
+    /// lookup resolved against it. A caller that catches the panic (a
+    /// host loading a plugin library, a test) went on with a registry
+    /// that reported the rejected type as registered, and a second
+    /// `register_type` for the same id then failed as a *duplicate*.
     #[test]
-    #[should_panic(expected = "not a registered variant")]
-    fn register_type_rejects_an_earlier_enum_default_naming_no_variant() {
+    fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
         let type_id = TypeId::unique();
         let mut library = Library::default();
         library.add(modal_func(type_id, "slothful"));
-        library.register_type(type_id, mode_entry());
+
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            library.register_type(type_id, mode_entry());
+        }));
+        let message = *rejected
+            .expect_err("an unregistered variant must be refused")
+            .downcast::<String>()
+            .expect("assert! panics carry a String");
+        assert!(
+            message.contains("not a registered variant"),
+            "unexpected panic: {message}",
+        );
+
+        assert!(
+            !library.types.contains_key(&type_id),
+            "the refused entry must not stay installed",
+        );
+        assert_eq!(library.enum_variants(type_id), None);
+        // The id is still free, so a corrected entry registers normally
+        // rather than colliding with the rejected one.
+        library.register_type(
+            type_id,
+            TypeEntry::enum_with_variants("Mode", vec!["slothful".to_string()]),
+        );
+        assert_eq!(
+            library.enum_variants(type_id),
+            Some(["slothful".to_string()].as_slice()),
+        );
     }
 
     #[test]
