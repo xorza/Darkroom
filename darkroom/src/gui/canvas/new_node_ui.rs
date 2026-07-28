@@ -145,7 +145,7 @@ impl NewNodeUi {
         // the overflow (via the inner vertical `Scroll`) instead of
         // running off-screen. The popup's `max_size` height bounds the
         // whole popup; the search row sits above a `Scroll` whose own cap
-        // (`max_height` minus the search row) keeps it from eating the
+        // (`max_height` minus the chrome above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
         let max_height = ctx
@@ -153,7 +153,7 @@ impl NewNodeUi {
             .new_node_popup_max_height
             .min(surface.size.h - 16.0)
             .max(120.0);
-        let scroll_cap = (max_height - SEARCH_ROW_ALLOWANCE).max(80.0);
+        let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
         let target = graph.target();
         let query = &mut self.query;
         // Rows are picked at the position the *open* captured, not wherever
@@ -196,10 +196,51 @@ impl NewNodeUi {
 /// Gap (px) below the search field, before the results scroll.
 const SEARCH_ROW_GAP: f32 = 8.0;
 
-/// Vertical space (px) the search row (field + its [`SEARCH_ROW_GAP`]) and
-/// popup padding claim above the scrolling results, subtracted from the
-/// popup's height cap to size the inner `Scroll`.
-const SEARCH_ROW_ALLOWANCE: f32 = 48.0;
+/// Floor under the results area, so a window short enough that the chrome eats
+/// the whole cap still shows a scrollable strip of rows rather than nothing.
+const MIN_RESULTS_HEIGHT: f32 = 80.0;
+
+/// Stable id for the palette's search field. A free function rather than a
+/// `const` because the height cap below reads the field's rect *before* the
+/// body that records it runs, so both sites have to name the same id.
+pub(super) fn search_field_wid() -> WidgetId {
+    WidgetId::from_hash("new_node_search")
+}
+
+/// Stable id for the scrolling results area, the half [`chrome_above_results`]
+/// sizes. Explicit like the search field's so the two ends of that arithmetic
+/// are both addressable.
+pub(super) fn results_wid() -> WidgetId {
+    WidgetId::from_hash("new_node_results")
+}
+
+/// Vertical space the palette's chrome claims above the scrolling results: the
+/// popup's own padding, the gutter between its two children, the search field,
+/// and [`SEARCH_ROW_GAP`] under it.
+///
+/// The inner `Scroll` needs this subtracted from the popup's height cap
+/// because a stack hands every non-`Fill` child its *full* main extent — a
+/// `Hug` scroll offered the whole cap takes it, and the search row above then
+/// pushes the popup past the cap. `Sizing::FILL` is not the way out: palantir
+/// clears a scroll's fit flag on any axis the caller didn't `Hug`, so a filled
+/// scroll reports zero desired height and the popup collapses onto its search
+/// row.
+///
+/// Every term is read rather than assumed — the field's height off its own
+/// last-frame rect, the rest off the theme slot the popup is built from — so
+/// restyling the field's text or the menu's padding resizes the results area
+/// with it instead of silently mis-sizing the scroll. Only the first frame of
+/// the first open has no rect yet and falls back to one line of body text.
+fn chrome_above_results(ui: &Ui) -> f32 {
+    let menu = &ui.theme.context_menu;
+    // An arranged rect is margin-inclusive, so the field's already carries
+    // [`SEARCH_ROW_GAP`]; only the bare-line fallback has to add it.
+    let row = ui.response_for(search_field_wid()).layout_rect.map_or_else(
+        || ui.theme.text.line_height_for(ui.theme.text.font_size_px) + SEARCH_ROW_GAP,
+        |rect| rect.size.h,
+    );
+    menu.padding.vert() + menu.gap + row
+}
 
 /// Record the palette: a search field pinned at the top, then the category
 /// columns (one `hstack` column per category) inside a vertical `Scroll`.
@@ -222,7 +263,7 @@ fn palette_body(
 ) -> Option<Intent> {
     let mut chosen: Option<Intent> = None;
 
-    let search_id = WidgetId::from_hash("new_node_search");
+    let search_id = search_field_wid();
     TextEdit::new(query)
         .id(search_id)
         .placeholder("Search…")
@@ -237,7 +278,7 @@ fn palette_body(
     let query_lc = query.to_lowercase();
 
     Scroll::vertical()
-        .id_salt("new_node_scroll")
+        .id(results_wid())
         .size((Sizing::HUG, Sizing::HUG))
         .max_size((f32::INFINITY, scroll_cap))
         .show(ui, |ui| {
@@ -339,7 +380,9 @@ impl<'a> Palette<'a> {
                 Some(PaletteColumn { category, entries })
             })
             .collect();
-        columns.sort_by_key(|column| column.category);
+        // Same fold the rows above use: a category the user spelled in
+        // lowercase belongs among its peers, not after every capitalized one.
+        columns.sort_by(|a, b| lowercase_cmp(a.category, b.category));
         columns
     }
 }
