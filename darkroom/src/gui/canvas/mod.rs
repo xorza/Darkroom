@@ -21,7 +21,7 @@ use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
-use scenarium::Library;
+use scenarium::{Library, NodeId};
 use std::collections::BTreeSet;
 
 use crate::core::document::{GraphRef, Viewport};
@@ -133,6 +133,14 @@ struct Gestures {
 }
 
 impl GraphUI {
+    /// Evict the cross-frame geometry caches down to the nodes `keep` still
+    /// accepts — see [`CanvasGeometry::retain_nodes`] for why absence from
+    /// the scene isn't grounds on its own, and why this has to come from a
+    /// caller that can see the whole document.
+    pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.geometry.retain_nodes(keep);
+    }
+
     /// Drop all in-flight gesture state while **keeping** cross-frame
     /// caches — notably `CanvasGeometry`'s port-offset table, so connections
     /// still anchor on the first frame after a tab switch. Called when

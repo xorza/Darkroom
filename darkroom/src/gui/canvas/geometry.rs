@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 
 use glam::Vec2;
@@ -73,6 +74,34 @@ pub(crate) struct CanvasGeometry {
     node_screen: HashMap<NodeId, Rect>,
 }
 
+/// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
+/// evicts a deleted node's entries, and how a wire drag resolves the pane it
+/// belongs to (`Scene::owner`) and notices the node disappearing under it.
+/// Every glyph domain the canvas keys on has one: a data port and an emitter
+/// event belong to their node, and a subscription pin *is* its node (a
+/// subscription is whole-node, so its layer is keyed by `NodeId` directly).
+pub(crate) trait GlyphKey: Copy + Eq + Hash + Debug {
+    fn node(self) -> NodeId;
+}
+
+impl GlyphKey for PortRef {
+    fn node(self) -> NodeId {
+        self.node_id
+    }
+}
+
+impl GlyphKey for EventRef {
+    fn node(self) -> NodeId {
+        self.node_id
+    }
+}
+
+impl GlyphKey for NodeId {
+    fn node(self) -> NodeId {
+        self
+    }
+}
+
 /// One key-domain's port snapshot, split into two tiers by lifetime:
 ///
 /// - `live` is cleared and rebuilt every frame from last frame's responses.
@@ -100,11 +129,32 @@ impl<K> Default for PortLayer<K> {
     }
 }
 
-impl<K: Eq + Hash + Copy> PortLayer<K> {
+impl<K: GlyphKey> PortLayer<K> {
     /// Snapshot one widget into `live`, refreshing its persistent offset.
     fn record(&mut self, key: K, r: ResponseState, node_min: Option<Vec2>, node_pos: Vec2) {
         let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
         self.live.insert(key, info);
+    }
+
+    /// The entry for a glyph whose node didn't record: its center from the
+    /// persistent offset against this frame's `node_pos`, and no interaction
+    /// state at all. Equivalent to [`Self::record`] with a default response —
+    /// which is exactly what `response_for` would have returned — without
+    /// asking for one.
+    fn replay(&mut self, key: K, node_pos: Vec2) {
+        let Some(offset) = self.offsets.get(&key).copied() else {
+            return;
+        };
+        self.live.insert(
+            key,
+            PortInfo {
+                layout_center: Some(node_pos + offset),
+                screen_rect: None,
+                hovered: false,
+                drag_started: false,
+                dragging: false,
+            },
+        );
     }
 
     /// Canvas-local pre-transform center, or `None` when the widget or its
@@ -222,6 +272,25 @@ impl CanvasGeometry {
         self.node_screen.values().any(|r| r.contains(pointer))
     }
 
+    /// Drop every cross-frame entry whose node `keep` rejects.
+    ///
+    /// `offsets` and `node_sizes` deliberately outlive the scene — a graph
+    /// whose tab is merely closed must still resolve its port centers the
+    /// frame it comes back — so absence from the scene is no reason to evict
+    /// and [`Self::rebuild`] can't do this itself. Deletion is: a `NodeId` is
+    /// never reused, so a node the document has stopped holding will never be
+    /// asked about again and its entries are pure ballast.
+    ///
+    /// Driven off the same `requires_reconcile` signal the preview store
+    /// prunes on, so it runs when the document's node set can actually have
+    /// shrunk rather than every frame.
+    pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.ports.offsets.retain(|key, _| keep(key.node()));
+        self.events.offsets.retain(|key, _| keep(key.node()));
+        self.subs.offsets.retain(|key, _| keep(key.node()));
+        self.node_sizes.retain(|id, _| keep(*id));
+    }
+
     pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.ports.live.clear();
         self.events.live.clear();
@@ -242,24 +311,54 @@ impl CanvasGeometry {
             if let Some(r) = body.rect {
                 self.node_screen.insert(n.id, r);
             }
-            let node_min = body.layout_rect.map(|r| r.min);
+            // A node that didn't record has no glyph that did either — they
+            // are its descendants — so every one of their responses is the
+            // default, and polling them one by one only rediscovers that.
+            // Skip straight to the cached-offset reconstruction, which is
+            // what those polls would have produced anyway. This is what keeps
+            // the pass proportional to what's *on screen*: a culled node
+            // costs one lookup, not one per port plus one per event glyph
+            // plus one for its pin.
+            let Some(node_min) = body.layout_rect.map(|r| r.min) else {
+                self.replay_cached(n);
+                continue;
+            };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
-                    self.ports.record(port, r, node_min, n.pos);
+                    self.ports.record(port, r, Some(node_min), n.pos);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.events() {
                 let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
-                self.events.record(ev, r, node_min, n.pos);
+                self.events.record(ev, r, Some(node_min), n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
-                self.subs.record(n.id, r, node_min, n.pos);
+                self.subs.record(n.id, r, Some(node_min), n.pos);
             }
+        }
+    }
+
+    /// Fill in `n`'s glyph snapshots from the persistent offsets alone, for a
+    /// node that recorded nothing last frame. Positions still track this
+    /// frame's `n.pos`, so a wire leaving the viewport stays anchored to the
+    /// off-screen port it runs to; every interaction flag is false, which is
+    /// the truth for a widget that isn't on screen to interact with.
+    fn replay_cached(&mut self, n: &SceneNode) {
+        for kind in [PortKind::Input, PortKind::Output] {
+            for port in n.ports(kind) {
+                self.ports.replay(port, n.pos);
+            }
+        }
+        for ev in n.events() {
+            self.events.replay(ev, n.pos);
+        }
+        if n.sink {
+            self.subs.replay(n.id, n.pos);
         }
     }
 }
@@ -269,7 +368,7 @@ impl CanvasGeometry {
 /// back to the cached offset so a just-shown graph still anchors. The center
 /// is `node_pos + offset` so a moved node's glyph tracks its current
 /// position. Shared by data ports, event glyphs, and subscription pins.
-fn snapshot<K: Eq + Hash + Copy>(
+fn snapshot<K: GlyphKey>(
     r: ResponseState,
     node_min: Option<Vec2>,
     node_pos: Vec2,

@@ -17,18 +17,13 @@
 //! here; each family still owns which glyphs are candidates and what a release
 //! commits.
 
-use std::fmt::Debug;
-use std::hash::Hash;
-
 use glam::Vec2;
 use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, Stop, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::PortRef;
-use crate::gui::EventRef;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
-use crate::gui::canvas::geometry::PortLayer;
+use crate::gui::canvas::geometry::{GlyphKey, PortLayer};
 use crate::gui::canvas::pointer_world;
 use crate::gui::color::toward;
 use crate::gui::node::RecordCtx;
@@ -131,34 +126,6 @@ impl Wire {
                 .brush(brush)
                 .cap(LineCap::Round),
         );
-    }
-}
-
-/// A glyph key that names the node its glyph hangs off — how a wire drag
-/// resolves the pane it belongs to (`Scene::owner`) and notices the node
-/// disappearing under it. Every glyph domain the canvas drags between has one:
-/// a data port and an emitter event belong to their node, and a subscription
-/// pin *is* its node (a subscription is whole-node, so its layer is keyed by
-/// `NodeId` directly).
-pub(super) trait GlyphKey: Copy + Eq + Hash + Debug {
-    fn node(self) -> NodeId;
-}
-
-impl GlyphKey for PortRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for EventRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for NodeId {
-    fn node(self) -> NodeId {
-        self
     }
 }
 
