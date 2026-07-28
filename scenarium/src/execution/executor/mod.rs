@@ -47,7 +47,7 @@ use crate::execution::executor::value_flow::RemainingOutputReads;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::{Disposition, ResolvedRun};
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -72,7 +72,7 @@ pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) plan: &'a ExecutionPlan,
     pub(crate) resolved: &'a ResolvedRun,
     pub(crate) cache: &'a mut RuntimeCache,
-    pub(crate) resource_stamps: &'a mut RunResourceStamps,
+    pub(crate) resource_stamper: &'a mut ResourceStamper,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
     pub(crate) cancel: CancelToken,
@@ -92,7 +92,7 @@ impl Executor {
             plan,
             resolved,
             cache,
-            resource_stamps,
+            resource_stamper,
             reporter,
             cancel,
         } = request;
@@ -114,7 +114,7 @@ impl Executor {
                 plan,
                 resolved,
                 cache,
-                resource_stamps,
+                resource_stamper,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
                 node_outcomes: &mut self.outcomes,
@@ -164,7 +164,7 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
     plan: &'a ExecutionPlan,
     resolved: &'a ResolvedRun,
     cache: &'a mut RuntimeCache,
-    resource_stamps: &'a mut RunResourceStamps,
+    resource_stamper: &'a mut ResourceStamper,
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
@@ -204,7 +204,7 @@ impl ExecutionFrame<'_, '_> {
             // digest-valid cached value stays valid even when an upstream re-ran for another
             // consumer and failed, so it must not be cleared as skipped.
             Disposition::Run => {
-                if !self.improved_to_reuse(node_idx, demand).await {
+                if self.needs_invoke(node_idx, demand).await {
                     self.invoke_node(node_idx, demand).await;
                 }
             }
@@ -247,35 +247,56 @@ impl ExecutionFrame<'_, '_> {
         self.deliver_reused(node_idx);
     }
 
+    /// Whether this node's lambda still has to run — and the late second chance at reuse
+    /// that decides it.
+    ///
     /// The one verdict the loop *improves*: a `Run` whose stamped digest is `None` because it
     /// folds a Bind-delivered path value the resolver couldn't read yet
     /// (`hash_bound_fs_path`). Its producers settled earlier in this walk — the `Run` verdict
     /// kept them alive — so re-stamp it now and serve the cache on a hit. A genuinely
     /// uncacheable node (an impure cone) just re-folds to `None` and runs as before.
     ///
+    /// `true` — nothing was improvable, or the improved digest still missed: the node runs.
+    /// `false` — its turn is already settled, whether it was *served* from cache or *failed*
+    /// on its own resource. The two are one answer to the caller, which asks only whether to
+    /// invoke; which of them happened is in the node's outcome.
+    ///
     /// Loading *before* retiring this node's input reads is what lets a failed load fall
     /// through to a normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
-    async fn improved_to_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
+    async fn needs_invoke(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
         if self.cache.slots[node_idx].current_digest.is_some() {
-            return false;
+            return true;
         }
         let program = self.program;
         let cancel = self.ctx.cancel.clone();
-        self.resource_stamps
+        if let Err(error) = self
+            .resource_stamper
             .prepare_node(program, self.cache, node_idx, cancel)
-            .await;
+            .await
+        {
+            // Attributable to exactly this node, so it fails as one rather
+            // than taking the run down — and the invoke is skipped because
+            // the node is already marked, and running it would report a
+            // second, less specific failure for the same cause.
+            let run_error = RunError::ResourceUnavailable {
+                func_id: program[node_idx].func_id,
+                message: error.to_string(),
+            };
+            mark_skipped(self.cache, self.node_outcomes, node_idx, run_error);
+            return false;
+        }
         self.cache
-            .stamp_digest(program, self.resource_stamps, node_idx);
+            .stamp_digest(program, self.resource_stamper, node_idx);
         if !self
             .cache
             .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
             .await
         {
-            return false;
+            return true;
         }
         self.abandon_input_reads(node_idx);
         self.deliver_reused(node_idx);
-        true
+        false
     }
 
     /// The tail both reuse paths share, once the value is readable.
