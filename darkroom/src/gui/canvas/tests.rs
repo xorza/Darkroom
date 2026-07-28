@@ -1240,3 +1240,98 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         "and it is already reading the port the drag came off: {spawned:?}"
     );
 }
+
+/// The palette reads the open graph's own definitions **once per open**, so
+/// a definition added between two opens has to show up in the second one.
+///
+/// Those rows have to be owned (`LocalDefRow` copies each name out of the
+/// scene's interned handles), and rebuilding them on every frame the
+/// palette was up was pure waste — nothing can add a definition while the
+/// popup holds the pointer. Caching them at open is what makes that read
+/// cheap, and serving a *closed* palette's stale list on the next open is
+/// the one way that can go wrong.
+#[test]
+fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
+    use crate::gui::canvas::new_node_ui::search_field_wid;
+
+    let library = Library::default();
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut root = Graph::default();
+    root.insert_graph(GraphId::unique(), GraphDef::new("First").category("Local"));
+
+    let mut harness = UiHarness::with_text(UVec2::new(1200, 900));
+    let mut graph_ui = GraphUI::default();
+    let mut scene = Scene::default();
+
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, root: &Graph| {
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+            process_memory: 0,
+        };
+        let view = GraphView::for_graph(root);
+        let mut intents = Intents::default();
+        scene.rebuild(
+            ui,
+            &library,
+            &run_state,
+            [GraphProjection {
+                target: GraphRef::Main,
+                source: SceneSource::Entry(root),
+                view: &view,
+            }],
+        );
+        graph_ui.prepass(ui, scene, &library, &mut intents);
+        let graph = scene.graph(GraphRef::Main).expect("projected");
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
+            });
+    };
+
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    assert!(
+        graph_ui.gestures.new_node_ui.cached_local_defs().is_empty(),
+        "a palette that never opened caches nothing",
+    );
+
+    // First open: the one definition the graph holds.
+    harness.right_click_at(Vec2::new(500.0, 400.0));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    assert_eq!(
+        graph_ui.gestures.new_node_ui.cached_local_defs(),
+        ["First"],
+        "the open reads the graph's definitions",
+    );
+
+    // Click outside to dismiss, which clears the anchor — so the next
+    // right-click is a fresh open rather than a re-anchor. (Not Esc: the
+    // search field holds focus and takes the first one to blur itself.)
+    harness.click_at(Vec2::new(100.0, 100.0));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    assert!(
+        harness.rect(search_field_wid()).is_none(),
+        "the outside click dismissed the palette",
+    );
+
+    // The document gains a definition while the palette is down.
+    root.insert_graph(GraphId::unique(), GraphDef::new("Second").category("Local"));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    harness.advance_past_double_click(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+
+    // Second open: both, not the first open's list.
+    harness.right_click_at(Vec2::new(500.0, 400.0));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    let mut cached = graph_ui.gestures.new_node_ui.cached_local_defs();
+    cached.sort_unstable();
+    assert_eq!(
+        cached,
+        ["First", "Second"],
+        "every open re-reads, so a definition added since the last one lists",
+    );
+}

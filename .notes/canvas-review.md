@@ -45,28 +45,6 @@ one edit.
       `frame`"; the method is `GraphUI::draw`. `pan_zoom/mod.rs:2` says it was
       "Split out of `graph_ui`"; that module is now `canvas`.
 
-## Batch 3 — `new_node_ui`
-
-One file, three items, all in `apply` / `palette_body` / the `PaletteEntry`
-match. Two of them are work done per frame per pane whether or not the palette
-is open.
-
-- [ ] **`NewNodeUi::apply` computes the popup's sizing every frame for every
-      pane whether or not the palette is open** (`new_node_ui.rs:150`:
-      `ui.display().logical_rect()`, `max_height`, `scroll_cap`), while the
-      genuinely expensive `local_def_rows` was correctly deferred into the body.
-
-- [ ] **`local_def_rows` (`new_node_ui.rs:77`) allocates two `String`s per
-      local definition, every frame the palette is up**, purely to escape
-      `InternedStr` borrow guards; `palette_body` then allocates a third with
-      `query.to_lowercase()` (`new_node_ui.rs:278`) each frame.
-
-- [ ] **`PaletteEntry::Func` and `PaletteEntry::Special` produce the same intent
-      from the same `Func`** — identical `node_id`, `pos`, and
-      `default_bindings` construction — differing only in the `Node` value.
-      `name()`/`category()` (`new_node_ui.rs:41-51`) already collapse the two
-      through `SpecialNode::func()`.
-
 ## Batch 4 — Per-frame allocation in the record
 
 Same class, different files: heap traffic on every frame a panel or menu is
