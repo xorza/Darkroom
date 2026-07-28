@@ -15,6 +15,7 @@ use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
@@ -60,6 +61,9 @@ pub(crate) struct RecordCtx<'a> {
     /// the committed field.
     pub(crate) selected: &'a [NodeId],
     pub(crate) geometry: &'a CanvasGeometry,
+    /// This frame's swept node interactions — the node body reads its
+    /// drag latch from here rather than re-polling its own handles.
+    pub(crate) hits: &'a CanvasHits,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     pub(crate) inspectors: &'a Inspectors,
@@ -272,13 +276,12 @@ impl NodeUI {
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
-        // caught the press; subsequent frames' `prepass` peeks
-        // `response_for(widget_id)` before record runs and converts
+        // caught the press (resolved by this frame's sweep, which walks the
+        // same curated `drag_handles` list); subsequent frames' `prepass`
+        // peeks `response_for(widget_id)` before record runs and converts
         // `drag_delta` into a `MoveSelection` applied to `Document`
         // upstream of `Scene::rebuild`.
-        if let Some(handle) =
-            drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
-        {
+        if let Some(handle) = rcx.hits.latched_on(node.id) {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
@@ -379,7 +382,7 @@ pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
 /// "did anything in here start a drag" would wrongly move the node
 /// along with them. The dock's tab chips carry the same shape for the
 /// same reason (`gui::dock::strip::drag_handles`).
-pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
+pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
     [node_widget_id(node_id), node_rename_wid(node_id)].into_iter()
 }
 

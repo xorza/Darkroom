@@ -8,7 +8,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
-use crate::gui::node::node_widget_id;
+use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
 use crate::gui::scene::GraphScene;
 
 /// Right-click on a node body → a small popup with actions on the node.
@@ -53,14 +53,14 @@ impl NodeMenuUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
+        hits: &CanvasHits,
         graph: GraphScene<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         // Boundary interface nodes carry no structural identity to
-        // duplicate/remove, so they offer no menu at all.
-        let opened = self
-            .menu
-            .latch(ui, graph, |n| (!n.boundary).then(|| node_widget_id(n.id)));
+        // duplicate/remove — the sweep applies that guard, so a boundary
+        // node never surfaces here.
+        let opened = self.menu.latch(ui, hits, graph, MenuTrigger::Body);
         // Right-click selects the clicked node when it isn't already part of
         // the selection, so the chosen action always targets a coherent set
         // ("select then act").

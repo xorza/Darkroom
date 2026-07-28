@@ -1,12 +1,11 @@
 use palantir::{MenuItem, Ui};
-use scenarium::GraphLink;
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::graph::GraphCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
-use crate::gui::node::header::graph_badge_wid;
+use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
 use crate::gui::scene::GraphScene;
 
 /// Right-click on a graph node's `G` badge → a small popup with
@@ -26,13 +25,11 @@ impl GraphMenuUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
+        hits: &CanvasHits,
         graph: GraphScene<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
-        // Only a *local* graph node wears a `G` badge to right-click.
-        self.menu.latch(ui, graph, |n| {
-            matches!(n.graph, Some(GraphLink::Local(_))).then(|| graph_badge_wid(n.id))
-        });
+        self.menu.latch(ui, hits, graph, MenuTrigger::GraphBadge);
         let pick = self
             .menu
             .show(ui, graph, "graph_node_menu", |ui, popup, _| {

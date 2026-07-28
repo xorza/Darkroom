@@ -453,11 +453,11 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
 /// The run-to-node play chip. `pub(super)` so the prepass scan
 /// ([`crate::gui::node::prepass::emit_play_clicks`]) can poll the click from
 /// last frame's response.
-pub(super) fn play_badge_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
     node_wid("play_badge", node_id)
 }
 
-pub(super) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
     node_wid("cache_eviction_badge", node_id)
 }
 

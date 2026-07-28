@@ -204,14 +204,14 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
-pub(super) fn const_editor_wid(input: InputPort) -> WidgetId {
+pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
     port_wid("const_editor", input_ref(input))
 }
 
 /// An input port's cell (circle + label). The prepass polls it for a
 /// double-click on the *label* area — the circle has its own
 /// [`port_circle_wid`] and consumes hits over its own rect.
-pub(super) fn input_cell_wid(port: PortRef) -> WidgetId {
+pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
     port_wid("input_cell", port)
 }
 

@@ -1,79 +1,52 @@
-//! Free-standing prepass scanners: plain `(ui, scene, ..)` functions that
-//! read last frame's chip/port responses into domain facts (a graph to
-//! open, a node to run, a file dialog to open, a binding to toggle). None
-//! of these touch [`crate::gui::node::NodeUI`]'s own state — that's the
-//! node body's drag anchor, handled in `NodeUI::prepass` — so they live
-//! here instead of crowding `node::mod` alongside the `NodeUI` struct.
+//! Free-standing prepass scanners: plain `(hits, scene, ..)` functions
+//! that turn one of [`CanvasHits`]' domain facts into the edit it means (a
+//! graph to open, a file dialog to raise, a binding to toggle). None of
+//! these touch [`crate::gui::node::NodeUI`]'s own state — that's the node
+//! body's drag anchor, handled in `NodeUI::prepass` — so they live here
+//! instead of crowding `node::mod` alongside the `NodeUI` struct.
+//!
+//! They read no responses of their own. Every widget poll behind them
+//! happens once, in [`CanvasHits::scan`]; what is left here is the part
+//! that needs the *scene* — resolving a chip's node to the graph it
+//! opens, a clicked editor to the port config it picks for, a
+//! double-clicked port to the bindings it severs.
 
 use std::sync::Arc;
 
-use palantir::{Ui, WidgetId};
 use scenarium::Binding;
 use scenarium::GraphLink;
 use scenarium::InputPort;
-use scenarium::NodeId;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::UiAction;
-use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
-use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
+use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::node::set_input;
-use crate::gui::scene::{GraphScene, InputBindingView, SceneNode};
+use crate::gui::scene::{GraphScene, InputBindingView, Scene};
 
-/// Prepass scan: surface an `OpenGraph` for any graph node whose `G`
-/// chip was clicked (read from last frame's response). Detecting the
-/// open here — *before* the record — lets `App` switch the active graph
-/// ahead of Pass A, so the graph records a pass earlier and its
-/// connections draw with no first-frame gap. Linked graphs aren't
-/// editable targets yet, so only `Local` opens.
-pub(crate) fn emit_graph_opens(ui: &Ui, graph: GraphScene<'_>, actions: &mut Vec<UiAction>) {
-    for n in graph.nodes() {
-        // Instances are always `Local` (library graphs are localized on
-        // instance), so the "G" chip opens the graph directly.
-        if let Some(GraphLink::Local(id)) = n.graph
-            && ui.response_for(graph_badge_wid(n.id)).left.clicked()
-        {
-            actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
-        }
-    }
-}
-
-/// The node whose header chip `wid` was clicked this frame, among those
-/// `drawn` accepts. First hit wins — one per frame.
+/// Prepass scan: surface an `OpenGraph` for the graph node whose `G`
+/// chip was clicked. Detecting the open here — *before* the record — lets
+/// `App` switch the active graph ahead of Pass A, so the graph records a
+/// pass earlier and its connections draw with no first-frame gap. Linked
+/// graphs aren't editable targets yet, so only `Local` opens.
 ///
-/// The `drawn` guard mirrors where the chip actually draws, so a stale
-/// response can't act on a node that no longer offers the affordance.
-fn clicked_chip(
-    ui: &Ui,
-    graph: GraphScene<'_>,
-    drawn: impl Fn(&SceneNode) -> bool,
-    wid: fn(NodeId) -> WidgetId,
-) -> Option<NodeId> {
-    graph
-        .nodes()
-        .find(|node| drawn(node) && ui.response_for(wid(node.id)).left.clicked())
-        .map(|node| node.id)
-}
-
-/// A click on a node's header play chip, returning the node to run to. The
-/// node UI surfaces only the domain fact (which node); the canvas translates
-/// it into the run command.
-pub(crate) fn emit_play_clicks(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
-    clicked_chip(ui, graph, |node| graph.runnable(node), play_badge_wid)
-}
-
-/// A click on a node's runtime-cache eviction chip. The canvas translates the
-/// returned authored node into a worker command.
-pub(crate) fn emit_cache_evictions(ui: &Ui, graph: GraphScene<'_>) -> Option<NodeId> {
-    clicked_chip(
-        ui,
-        graph,
-        |node| node.can_evict_cache,
-        cache_eviction_badge_wid,
-    )
+/// Whole-scene rather than per-pane: the chip is keyed by a
+/// document-unique `NodeId`, so there is one hit to resolve however many
+/// panes are open.
+pub(crate) fn emit_graph_opens(hits: &CanvasHits, scene: &Scene, actions: &mut Vec<UiAction>) {
+    // Instances are always `Local` (library graphs are localized on
+    // instance), so the "G" chip opens the graph directly. The badge draws
+    // for any link, which is why the `Local` filter is here and not on the
+    // scan's draw guard.
+    if let Some(node) = hits
+        .chip(Chip::OpenGraph)
+        .and_then(|id| scene.nodes.get(&id))
+        && let Some(GraphLink::Local(id)) = node.graph
+    {
+        actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+    }
 }
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
@@ -89,62 +62,71 @@ pub(crate) struct PathPickRequest {
     pub(crate) config: Arc<FsPathConfig>,
 }
 
-/// Scan for a click on an `FsPath` input's inline pick button (polled by
-/// its const-editor id, from last frame's responses). Returns the first
-/// hit — one pick per frame — for the caller to open a blocking file dialog
-/// after authoring.
-pub(crate) fn emit_path_picks(ui: &Ui, graph: GraphScene<'_>) -> Option<PathPickRequest> {
-    for node in graph.nodes() {
-        for (port_idx, input) in graph.inputs(node.inputs).iter().enumerate() {
-            let port = InputPort::new(node.id, port_idx);
-            if matches!(
-                &input.binding,
-                InputBindingView::Const(StaticValue::FsPath(_) | StaticValue::FsPaths(_))
-            ) && let DataType::FsPath(config) = &input.ty
-                && ui.response_for(const_editor_wid(port)).left.clicked()
-            {
-                return Some(PathPickRequest {
-                    port,
-                    config: config.clone(),
-                });
-            }
-        }
+/// Resolve a clicked const editor into a path pick, for the caller to
+/// open a blocking file dialog after authoring.
+///
+/// Every const editor shares one widget family, so "which editor was
+/// clicked" is all the scan can say; whether that click means *pick a
+/// path* is a question about the port's type, and answering it needs the
+/// scene. An editor on any other type has no button to click and falls
+/// out here.
+pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: GraphScene<'_>) -> Option<PathPickRequest> {
+    let port = hits.clicked_const_editor()?;
+    let node = graph.node(port.node_id)?;
+    let input = graph.inputs(node.inputs).get(port.port_idx)?;
+    if !matches!(
+        &input.binding,
+        InputBindingView::Const(StaticValue::FsPath(_) | StaticValue::FsPaths(_))
+    ) {
+        return None;
     }
-    None
+    let DataType::FsPath(config) = &input.ty else {
+        return None;
+    };
+    Some(PathPickRequest {
+        port,
+        config: config.clone(),
+    })
 }
 
-/// Prepass scan: port double-clicks read from last frame's responses. An
-/// input double-click (on the port circle *or* its label) toggles the
-/// binding — clears it, or seeds the default const when unbound; an output
-/// double-click disconnects every consumer it feeds.
+/// Prepass scan: the port double-click. An input double-click (on the
+/// port circle *or* its label) toggles the binding — clears it, or seeds
+/// the default const when unbound; an output double-click disconnects
+/// every consumer it feeds.
 ///
 /// Emitted pre-record (like the connection commit) because adding or removing
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Intents) {
+pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, scene: &Scene, out: &mut Intents) {
+    // Whole-scene: the hit is keyed by a document-unique `PortRef`, so the
+    // pane it edits comes off the node it names rather than from a loop
+    // over the panes asking each whether it holds it.
+    let Some(port) = hits.double_clicked_port() else {
+        return;
+    };
+    let Some(graph) = scene.owner(port.node_id) else {
+        return;
+    };
+    let Some(node) = graph.node(port.node_id) else {
+        return;
+    };
     let target = graph.target();
-    for node in graph.nodes() {
-        // Boundary ports route the interface — no const affordance, so an
-        // unbound one has nothing to seed (its label double-click renames).
-        let can_set = !node.boundary;
-        for (i, input) in graph.inputs(node.inputs).iter().enumerate() {
-            let port = PortRef {
-                node_id: node.id,
-                kind: PortKind::Input,
-                port_idx: i,
+    match port.kind {
+        PortKind::Input => {
+            let Some(input) = graph.inputs(node.inputs).get(port.port_idx) else {
+                return;
             };
-            // The circle intercepts its own rect; the cell catches the label.
-            let dbl = ui.response_for(port_circle_wid(port)).left.double_clicked()
-                || ui.response_for(input_cell_wid(port)).left.double_clicked();
-            if !dbl {
-                continue;
-            }
             match &input.binding {
                 // Unbound → seed the default literal (or first enum / value-
                 // option variant, both already folded into `SceneInput::default`).
+                // Boundary ports route the interface — no const affordance, so
+                // an unbound one has nothing to seed (its label double-click
+                // renames).
                 InputBindingView::None => {
-                    if can_set && let Some(default) = &input.default {
+                    if !node.boundary
+                        && let Some(default) = &input.default
+                    {
                         out.push(target, set_input(port, Binding::Const(default.clone())));
                     }
                 }
@@ -152,23 +134,21 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, graph: GraphScene<'_>, out: &mut Inte
                 _ => out.push(target, set_input(port, None)),
             }
         }
-        for port in node.ports(PortKind::Output) {
-            if ui.response_for(port_circle_wid(port)).left.double_clicked() {
-                // An output may feed many inputs — clear each consumer.
-                for c in graph.connections() {
-                    if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
-                        out.push(
-                            target,
-                            set_input(
-                                PortRef {
-                                    node_id: c.tgt.node_id,
-                                    kind: PortKind::Input,
-                                    port_idx: c.tgt.port_idx,
-                                },
-                                None,
-                            ),
-                        );
-                    }
+        // An output may feed many inputs — clear each consumer.
+        PortKind::Output => {
+            for c in graph.connections() {
+                if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
+                    out.push(
+                        target,
+                        set_input(
+                            PortRef {
+                                node_id: c.tgt.node_id,
+                                kind: PortKind::Input,
+                                port_idx: c.tgt.port_idx,
+                            },
+                            None,
+                        ),
+                    );
                 }
             }
         }
