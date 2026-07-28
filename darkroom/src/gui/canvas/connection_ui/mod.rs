@@ -11,7 +11,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
-use crate::gui::node::{node_widget_id, set_input};
+use crate::gui::node::set_input;
 use crate::gui::scene::{GraphScene, InputBindingView, Scene};
 use crate::gui::theme::Theme;
 
@@ -176,9 +176,9 @@ impl ConnectionUI {
         }
         if let Some(end) = drag.snap {
             commit_connection(graph, drag.from, end, out);
-        } else if let Some(intent) = self.const_drop(ui, graph, drag.from) {
+        } else if let Some(intent) = const_drop(ui, graph, geometry, drag.from) {
             out.push(graph.target(), intent);
-        } else if dropped_on_empty_canvas(ui, graph) {
+        } else if dropped_on_empty_canvas(ui, graph, geometry) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
             self.pending_open = Some(drag.from);
@@ -225,35 +225,6 @@ impl ConnectionUI {
             }
             _ => {} // keep floating
         }
-    }
-
-    /// "Set const" gesture: an input-port drag released over its own
-    /// node's body (and not onto a compatible port) means the user
-    /// wants a literal there. Returns the `SetInput { Const(default) }`
-    /// intent, or `None` when the gesture doesn't apply — drag started
-    /// on an output, released off the start node, the port is unknown,
-    /// or the input is already a const (don't clobber the value).
-    fn const_drop(&self, ui: &mut Ui, graph: GraphScene<'_>, start: PortRef) -> Option<Intent> {
-        if start.kind != PortKind::Input {
-            return None;
-        }
-        let pointer = ui.pointer_pos()?;
-        let body = ui.response_for(node_widget_id(start.node_id)).rect?;
-        if !body.contains(pointer) {
-            return None;
-        }
-        let node = graph.node(start.node_id)?;
-        // Boundary ports route the interface, not literal values.
-        if node.boundary {
-            return None;
-        }
-        // Don't overwrite an existing const value.
-        let input = graph.inputs(node.inputs).get(start.port_idx)?;
-        if matches!(input.binding, InputBindingView::Const(_)) {
-            return None;
-        }
-        let default = input.default.clone()?;
-        Some(set_input(start, Binding::Const(default)))
     }
 
     /// Force the hover flag on the port the wire is currently snapped to, so
@@ -460,10 +431,45 @@ fn accepts_wire(graph: GraphScene<'_>, start: PortRef, port: PortRef) -> bool {
     compatible && !closes_data_cycle(edges, producer, consumer)
 }
 
+/// "Set const" gesture: an input-port drag released over its own
+/// node's body (and not onto a compatible port) means the user
+/// wants a literal there. Returns the `SetInput { Const(default) }`
+/// intent, or `None` when the gesture doesn't apply — drag started
+/// on an output, released off the start node, the port is unknown,
+/// or the input is already a const (don't clobber the value).
+fn const_drop(
+    ui: &mut Ui,
+    graph: GraphScene<'_>,
+    geometry: &CanvasGeometry,
+    start: PortRef,
+) -> Option<Intent> {
+    if start.kind != PortKind::Input {
+        return None;
+    }
+    let pointer = ui.pointer_pos()?;
+    if !geometry.node_screen_rect(start.node_id)?.contains(pointer) {
+        return None;
+    }
+    let node = graph.node(start.node_id)?;
+    // Boundary ports route the interface, not literal values.
+    if node.boundary {
+        return None;
+    }
+    // Don't overwrite an existing const value.
+    let input = graph.inputs(node.inputs).get(start.port_idx)?;
+    if matches!(input.binding, InputBindingView::Const(_)) {
+        return None;
+    }
+    let default = input.default.clone()?;
+    Some(set_input(start, Binding::Const(default)))
+}
+
 /// Whether the pointer is over the canvas but not over any node body —
 /// the "released into empty space" condition that offers the new-node
-/// palette. Uses the same arranged-rect hit test as `const_drop`.
-fn dropped_on_empty_canvas(ui: &mut Ui, graph: GraphScene<'_>) -> bool {
+/// palette. Both halves are screen-space, the frame the raw pointer is in;
+/// the node half comes off `CanvasGeometry`'s snapshot of this frame's body
+/// rects, taken in the same sweep `const_drop` reads.
+fn dropped_on_empty_canvas(ui: &mut Ui, graph: GraphScene<'_>, geometry: &CanvasGeometry) -> bool {
     let Some(pointer) = ui.pointer_pos() else {
         return false;
     };
@@ -471,12 +477,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, graph: GraphScene<'_>) -> bool {
         .response_for(outer_canvas_widget_id(graph.target()))
         .rect
         .is_some_and(|r| r.contains(pointer));
-    over_canvas
-        && !graph.nodes().any(|n| {
-            ui.response_for(node_widget_id(n.id))
-                .rect
-                .is_some_and(|r| r.contains(pointer))
-        })
+    over_canvas && !geometry.over_any_node(pointer)
 }
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
