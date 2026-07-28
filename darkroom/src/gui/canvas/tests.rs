@@ -123,7 +123,6 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     let mut graph_ui = GraphUI::default();
     let mut scene = Scene::default();
     let mut intents = Intents::default();
-    let mut command = None;
     let mut harness = UiHarness::new(UVec2::new(1600, 900));
 
     // Returns what the frame queued, so the target assertions below read the
@@ -159,7 +158,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
                         .id_salt(("graph_overlay", target))
                         .size((Sizing::FILL, Sizing::FILL))
                         .show(ui, |ui| {
-                            graph_ui.draw(ui, &ctx, graph, &mut intents, &mut command);
+                            graph_ui.draw(ui, &ctx, graph, &mut intents);
                             graph_toolbar::show(ui, &ctx, graph, &graph_ui.geometry, &mut intents);
                         });
                 }
@@ -302,7 +301,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+                    graph_ui.draw(ui, &ctx, graph, &mut intents);
                 });
         };
 
@@ -451,7 +450,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -556,7 +555,7 @@ fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() 
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -650,7 +649,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -770,7 +769,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents, &mut None);
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };

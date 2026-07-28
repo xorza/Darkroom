@@ -25,12 +25,17 @@ use crate::gui::status_bar;
 /// Offer `produce`'s command to the frame's single [`AppCommand`] slot, first
 /// claim winning.
 ///
-/// Exactly one command leaves a frame. The menu bar records first, then every
-/// visible pane in dock order, and `GraphUI::draw` guards its own chip scans
-/// the same way — so without this, a later pane's toolbar silently overwrote
-/// the menu-bar pick, or one pane's overwrote its neighbour's. `produce` still
-/// runs when the slot is taken: these surfaces have to record every frame
-/// regardless, and only the command they'd have contributed is dropped.
+/// Exactly one command leaves a frame, and this is the only thing that decides
+/// which: the menu bar records first, then every visible pane in dock order.
+/// Without it a later pane silently overwrote the menu-bar pick, or one pane's
+/// overwrote its neighbour's — so every surface that can raise a command goes
+/// through here rather than reaching for the slot itself.
+///
+/// `produce` still runs when the slot is taken: these surfaces have to record
+/// every frame regardless, and only the command they'd have contributed is
+/// dropped. In practice nothing is: every source here reads a pointer click,
+/// and one pointer produces one click. (The keyboard's own commands are a
+/// separate source, merged by `Editor::frame`.)
 fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppCommand>) {
     let produced = produce();
     if slot.is_none() {
@@ -151,7 +156,7 @@ impl MainWindow {
                             .id_salt(("graph_overlay", target))
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
-                                graph_ui.draw(ui, ctx, graph, out, &mut command);
+                                claim(&mut command, || graph_ui.draw(ui, ctx, graph, out));
                                 claim(&mut command, || {
                                     graph_toolbar::show(ui, ctx, graph, &graph_ui.geometry, out)
                                 });
