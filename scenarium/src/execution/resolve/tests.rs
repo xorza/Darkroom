@@ -85,8 +85,8 @@ impl Fix {
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);
-        let resource_stamps = RunResourceStamps::default();
-        stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
+        let resource_stamper = ResourceStamper::default();
+        stamp_digests(&self.program, &mut cache, &resource_stamper, &plan);
         for cached in cached {
             let digest = cache.slots[nx(cached.e_node_id)].current_digest.unwrap();
             cache.slots[nx(cached.e_node_id)].value = ValueState::Resident {
@@ -96,7 +96,7 @@ impl Fix {
         }
         let mut resolver = Resolver::default();
         resolver
-            .resolve(&self.program, &plan, &mut cache, &resource_stamps)
+            .resolve(&self.program, &plan, &mut cache, &resource_stamper)
             .await;
         resolver.run
     }
