@@ -151,6 +151,91 @@ mod tests {
         (h, GraphRef::Main, right)
     }
 
+    /// A focused text field takes the chords it edits with, and only
+    /// those — the whole point of `KeyFilter::TEXT_FIELD` omitting
+    /// `ACCEL`, and what replaced `dock::typing_focus_held`.
+    ///
+    /// Driven through a real inline rename rather than by poking focus:
+    /// the scope is declared by `TextEdit` while focused, so nothing is
+    /// under test unless a real editor is really up.
+    #[test]
+    fn a_focused_field_takes_edit_chords_and_lets_accelerators_through() {
+        use palantir::{Key, Modifiers};
+
+        use crate::gui::app::commands::AppCommand;
+        use crate::gui::app::commands::run::RunCommand;
+
+        // Both tabs in one group, so activating the other is a real,
+        // recorded `DockOp::ActivateTab` — the undo history the `Edit`
+        // leg below needs in order to prove anything.
+        let mut h = EditorHarness::new(Document::default());
+        let local = h
+            .open
+            .document
+            .create_graph(GraphRef::Main)
+            .expect("a local graph");
+        let primary = h.open.document.layout.primary().id;
+        h.open
+            .document
+            .layout
+            .find_or_insert(TabRef::Graph(GraphRef::Local(local)), primary);
+        h.prime(2);
+        h.ui.click_on(strip::tab_chip_wid(TabRef::Graph(GraphRef::Main)));
+        h.frame();
+        h.frame();
+
+        // Double-click the local tab's label to open its inline rename,
+        // which focuses a `TextEdit` and so declares the scope.
+        let label = strip::tab_rename_wid(local);
+        h.ui.click_on(label);
+        h.frame();
+        h.ui.click_on(label);
+        h.frame();
+        assert_eq!(
+            h.ui.ui().focused_id(),
+            Some(label),
+            "the double-click must open the rename editor, or nothing is scoped",
+        );
+        let before = format!("{:?}", h.document().layout);
+
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        };
+        // `Accel` — not in `TEXT_FIELD`, so it walks past the editor to
+        // the app root. This is the case an exclusive capture breaks.
+        h.ui.set_modifiers(ctrl);
+        h.ui.key(Key::Char('r'));
+        assert!(
+            matches!(h.frame(), Some(AppCommand::Run(RunCommand::Once))),
+            "Ctrl+R must still run the graph while a field is focused",
+        );
+
+        // `Edit` — the field takes it, so the document is untouched.
+        h.ui.set_modifiers(ctrl);
+        h.ui.key(Key::Char('z'));
+        h.frame();
+        assert_eq!(
+            format!("{:?}", h.document().layout),
+            before,
+            "Ctrl+Z belongs to the focused field, not to the document",
+        );
+
+        // Control leg, and the non-vacuity proof: blur the field and the
+        // same chord walks the same stack it just refused to.
+        h.ui.ui().request_focus(None);
+        h.frame();
+        h.ui.set_modifiers(ctrl);
+        h.ui.key(Key::Char('z'));
+        h.frame();
+        assert_ne!(
+            format!("{:?}", h.document().layout),
+            before,
+            "with nothing focused Ctrl+Z must undo — otherwise the case above \
+             proves nothing",
+        );
+    }
+
     /// The bar used to collapse when it had nothing to say; the process
     /// footprint gives it something on every frame, so it is recorded on
     /// an untouched document — and stays recorded when no reading is

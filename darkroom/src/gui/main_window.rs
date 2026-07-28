@@ -1,7 +1,7 @@
 use scenarium::Library;
 use std::collections::HashMap;
 
-use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
+use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::{Document, TabRef};
@@ -21,6 +21,14 @@ use crate::gui::node::prepass::emit_graph_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
+
+/// The application root's [`Configure::input_scope`] anchor. A fixed id
+/// rather than an auto one because the scope is the thing darkroom's
+/// chord handling resolves against, and an auto id moves with the call
+/// site.
+fn app_root_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.app_root")
+}
 
 /// Offer `produce`'s command to the frame's single [`AppCommand`] slot, first
 /// claim winning.
@@ -133,8 +141,16 @@ impl MainWindow {
             viewer_labels: &viewer_labels,
         };
         Panel::vstack()
-            .auto_id()
+            .id(app_root_wid())
             .size((Sizing::FILL, Sizing::FILL))
+            // The application's input scope, and the only one darkroom
+            // declares — palantir's overlays and text fields bring their
+            // own. Everything except `TEXT`: a canvas has no typing, so a
+            // focused editor's characters, its Ctrl+Z, its Delete and its
+            // Escape all stop here rather than doubling as graph edits,
+            // while `ACCEL` (Ctrl+S, Ctrl+R, …) still lands on the app
+            // mid-edit.
+            .input_scope(KeyFilter::all() - KeyFilter::TEXT)
             .show(ui, |ui| {
                 Panel::hstack()
                     .id_salt("chrome_row")
