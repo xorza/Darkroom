@@ -1,8 +1,8 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
+use crate::execution::flatten::map::internals::FlattenMapBuilder;
 use crate::execution::identity::ExecutionEventPort;
-use crate::execution::identity::internals::FlattenMapBuilder;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionNode, PendingSubscription};
 use crate::execution::validate::CompiledGraphValidationError;
