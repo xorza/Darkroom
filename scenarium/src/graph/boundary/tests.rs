@@ -328,20 +328,51 @@ fn a_rejected_attach_leaves_the_graph_untouched() {
     assert_eq!(graph, after_detach, "refused before touching the graph");
 }
 
+/// The severed interior edge's port was re-bound in the meantime; the
+/// shift can't vacate it (it renumbers boundary-fed *values*, not this
+/// consumer-keyed port), so restoring would destroy an authored wire.
+///
+/// **Refusing is only half the contract — the newer wire has to survive
+/// it.** Restoring first and asserting afterwards meant the overwrite had
+/// already happened when the panic fired: the `Const(99)` authored after
+/// detachment was gone, the entries restored ahead of it stayed applied,
+/// and the parent-side slots had already shifted. A caller that caught
+/// the panic — the editor's undo replay does exactly this — kept a graph
+/// that had been half-attached and had silently lost a binding.
 #[test]
-#[should_panic(expected = "created after detachment")]
-fn attach_refuses_to_overwrite_a_binding_authored_after_detachment() {
-    // The severed interior edge's port was re-bound in the meantime; the
-    // shift can't vacate it (it renumbers boundary-fed *values*, not this
-    // consumer-keyed port), so restoring would destroy an authored wire.
+fn attach_refusing_an_overlapping_binding_leaves_the_graph_untouched() {
     let fixture = input_fixture();
     let mut graph = fixture.graph;
     let detached = graph.detach_graph_input(fixture.graph_id, 1);
     let child = graph.graphs.get_mut(&fixture.graph_id).unwrap();
-    child
-        .body
-        .set_input_binding(InputPort::new(fixture.consumer, 1), const_int(99));
-    graph.attach_graph_input(fixture.graph_id, detached);
+    let overlapping = InputPort::new(fixture.consumer, 1);
+    child.body.set_input_binding(overlapping, const_int(99));
+    let before_attach = graph.clone_verbatim();
+
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        graph.attach_graph_input(fixture.graph_id, detached);
+    }));
+    let message = *refused
+        .expect_err("an overlapping binding must be refused")
+        .downcast::<String>()
+        .expect("assert! panics carry a String");
+    assert!(
+        message.contains("created after detachment"),
+        "unexpected panic: {message}",
+    );
+
+    assert_eq!(
+        graph.graphs[&fixture.graph_id]
+            .body
+            .bindings
+            .get(&overlapping),
+        Some(&const_int(99)),
+        "the binding authored after detachment must survive the refusal",
+    );
+    assert_eq!(
+        graph, before_attach,
+        "a refused attach must not shift slots or restore any entry",
+    );
 }
 
 #[test]

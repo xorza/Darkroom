@@ -434,3 +434,67 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     assert!(read_snapshot(&store, &target, 1).await.is_none());
     assert!(!file.0.exists(), "a corrupt cache blob is removed");
 }
+
+/// Recovery from a corrupt body must not depend on the unlink working.
+///
+/// `covers_demand` is header-only, so a blob whose header is intact and
+/// whose body is not keeps passing the reuse check. Ignoring the removal
+/// error meant that when the unlink failed the blob survived, kept
+/// answering "reusable", and every subsequent run pruned the producer
+/// cone and failed the same decode — permanently, with nothing reported
+/// beyond the same `CacheLoadFailed` each time.
+///
+/// Removing needs write permission on the *directory*; truncating needs
+/// only the file. This drops the first and keeps the second, which is
+/// exactly the reachable split.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_corrupt_blob_that_cannot_be_removed_is_still_invalidated() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Its own directory — this test revokes write on the parent, and the
+    // shared one is in use by every other test in this binary.
+    let dir = temp_file("undeletable-dir");
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("blob.bin");
+
+    let store = DiskStore::default();
+    let target = target(&path, Digest([7; 32]));
+    store
+        .store(
+            &target,
+            &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::String(
+                "payload".into(),
+            ))]),
+            StorePolicy::KnownMiss,
+            &mut ContextStore::default(),
+        )
+        .await;
+
+    // Corrupt the body *without changing its length*, so the header —
+    // which cross-checks the total file length — still passes and only
+    // the decode discovers otherwise. `0xff` is never valid UTF-8, so
+    // the stored string fails to decode.
+    let mut bytes = std::fs::read(&path).unwrap();
+    *bytes.last_mut().unwrap() = 0xff;
+    std::fs::write(&path, bytes).unwrap();
+    let demand = [OutputDemand::Produce];
+    assert!(
+        store.covers_demand(&target, &demand).await,
+        "the header must still pass, or the test isn't exercising the decode path",
+    );
+
+    std::fs::set_permissions(&dir.0, Permissions::from_mode(0o555)).unwrap();
+    let read = read_snapshot(&store, &target, 1).await;
+    // Restore before asserting, so a failure still leaves a removable dir.
+    std::fs::set_permissions(&dir.0, Permissions::from_mode(0o755)).unwrap();
+
+    assert!(read.is_none(), "an undecodable blob is a miss");
+    assert!(path.exists(), "the unlink could not have succeeded here");
+    assert!(
+        !store.covers_demand(&target, &demand).await,
+        "an invalidated blob must stop claiming it can serve the demand, \
+         or every later run repeats the same failed decode",
+    );
+}

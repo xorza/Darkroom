@@ -81,6 +81,57 @@ async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_cloc
     assert_eq!(next.frame_no, 2);
 }
 
+/// Re-executing the source must not postpone a waiting FPS event.
+///
+/// `last_fps_emit` belongs to the event callback, which stamps it when it
+/// emits. The lambda also stamping it meant every source execution
+/// restarted the countdown, so an `Always` subscriber reading the source's
+/// outputs — the ordinary way to consume a frame tick — re-executed it
+/// faster than the period and starved the FPS event indefinitely: no
+/// error, no missed-deadline signal, just an event that never fires.
+///
+/// Hand-traced at 2 Hz (500 ms period): the tick is armed at t=0, the
+/// source re-executes at t=250 and t=400, and the event must still fire
+/// at its original t=500 rather than being pushed out to 750 and 900.
+#[tokio::test(start_paused = true)]
+async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
+    let func = frame_func();
+    let event_state = SharedAnyState::default();
+    invoke_frame(&func, 2.0, &event_state).await.unwrap();
+
+    let event = func.events[1].event_lambda.clone();
+    let tick_state = event_state.clone();
+    let tick = tokio::spawn(async move {
+        event.invoke(tick_state).await;
+    });
+    tokio::task::yield_now().await;
+    assert!(!tick.is_finished());
+
+    // Re-execute the source twice while the event is still waiting.
+    for (step, at) in [(250u64, 250u64), (150, 400)] {
+        tokio::time::advance(Duration::from_millis(step)).await;
+        invoke_frame(&func, 2.0, &event_state).await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!tick.is_finished(), "the event is not due yet at t={at}ms");
+    }
+
+    // t=500: the deadline the event was armed for. Asserted *at* that
+    // instant rather than by awaiting the handle — `start_paused`
+    // auto-advances the clock whenever the runtime goes idle, so a
+    // postponed event still fires eventually and only the exact deadline
+    // tells the two apart. Yielding (rather than sleeping) keeps the main
+    // task runnable, which is what holds the auto-advance off.
+    tokio::time::advance(Duration::from_millis(100)).await;
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        tick.is_finished(),
+        "the FPS event must fire at its own deadline, not one restarted by each execution",
+    );
+    tick.await.unwrap();
+}
+
 #[tokio::test(start_paused = true)]
 async fn zero_frequency_disables_fps_event_and_starts_with_zero_delta() {
     let func = frame_func();

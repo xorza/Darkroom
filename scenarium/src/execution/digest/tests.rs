@@ -293,11 +293,16 @@ fn fs_path_folds_file_identity_and_path() {
 
     // The path string itself is folded, independent of file identity (both missing).
     let d_other = digest_at(&prog_for("definitely-missing-elsewhere").program, 0);
+    // Moves only when the resource-identity encoding changes on purpose
+    // — read the new number off the failure and update it here, the way
+    // the tag split for unreadable/missing directories did. Every other
+    // failure of this line is accidental digest drift, which would
+    // silently invalidate every persisted cache blob.
     assert_eq!(
         d_other,
         Some(Digest([
-            176, 232, 89, 255, 138, 89, 119, 40, 183, 103, 129, 186, 168, 197, 234, 18, 53, 132,
-            24, 131, 229, 252, 228, 149, 13, 238, 235, 109, 166, 65, 110, 61,
+            226, 7, 212, 117, 182, 106, 35, 232, 251, 184, 106, 5, 62, 68, 239, 229, 8, 116, 218,
+            5, 173, 107, 183, 68, 249, 229, 127, 165, 36, 37, 214, 146,
         ])),
         "the single-path digest encoding must remain stable"
     );

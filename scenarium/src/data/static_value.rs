@@ -54,11 +54,20 @@ impl StaticValue {
         }
     }
 
+    /// Scalar truthiness: **any** nonzero value reads as `true`, per the
+    /// coercion class on [`crate::DataType::compatible_with`].
+    ///
+    /// The float arm compares against zero exactly, deliberately. A
+    /// tolerance here is not float hygiene — there is no subtraction
+    /// whose rounding it would absorb — it is a second, narrower
+    /// definition of zero that silently reads small-but-real magnitudes
+    /// (`f64::MIN_POSITIVE`, a normalized weight, a converged residual)
+    /// as `false`. NaN is not zero and so reads as `true`.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             StaticValue::Bool(value) => Some(*value),
             StaticValue::Int(value) => Some(*value != 0),
-            StaticValue::Float(value) => Some(value.abs() > f64::EPSILON),
+            StaticValue::Float(value) => Some(*value != 0.0),
             _ => None,
         }
     }
@@ -172,7 +181,18 @@ mod tests {
         assert_eq!(StaticValue::Bool(true).as_f64(), Some(1.0));
         assert_eq!(StaticValue::Float(2.7).as_i64(), Some(2));
         assert_eq!(StaticValue::Float(0.0).as_bool(), Some(false));
+        assert_eq!(StaticValue::Float(-0.0).as_bool(), Some(false));
         assert_eq!(StaticValue::Float(0.5).as_bool(), Some(true));
+        // Any nonzero reads as true, however small. An epsilon band here
+        // would read each of these as `false` despite being real values.
+        for tiny in [f64::MIN_POSITIVE, f64::EPSILON, -f64::EPSILON, 1e-300] {
+            assert_eq!(
+                StaticValue::Float(tiny).as_bool(),
+                Some(true),
+                "nonzero float {tiny:e} must read as true",
+            );
+        }
+        assert_eq!(StaticValue::Float(f64::NAN).as_bool(), Some(true));
         assert_eq!(StaticValue::String("x".into()).as_f64(), None);
         assert_eq!(StaticValue::String("hi".into()).as_string(), Some("hi"));
         assert_eq!(StaticValue::Enum("Add".into()).as_enum(), Some("Add"));
