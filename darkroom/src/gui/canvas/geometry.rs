@@ -108,7 +108,10 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     }
 
     /// Canvas-local pre-transform center, or `None` when the widget or its
-    /// parent node hasn't measured yet.
+    /// parent node hasn't measured yet. `pub(crate)` for the port menu's "Add
+    /// preview", which spawns its node off the port circle it was opened on
+    /// (`crate::gui::node::port_row`); everything else that reads a center is
+    /// inside the canvas.
     pub(crate) fn center(&self, key: K) -> Option<Vec2> {
         self.live.get(&key)?.layout_center
     }
