@@ -136,10 +136,11 @@ pub(super) fn show(
         DataType::Enum(type_id) => {
             // A dropdown over the port's registered variants. The variant list
             // lives on the library's `Enum` type entry, not on the value or the
-            // id-only `DataType` — without it (an unregistered type) we can't
-            // populate the menu, so fall back to a read-only label. A drifted
-            // non-`Enum` literal seeds the first variant; any pick repairs it.
-            let Some(variants) = library.enum_variants(*type_id) else {
+            // id-only `DataType` — without it (an unregistered type, or one
+            // registered with no variants) we can't populate the menu, so fall
+            // back to a read-only label. A drifted non-`Enum` literal seeds the
+            // first variant; any pick repairs it.
+            let Some(variants) = library.enum_variants(*type_id).filter(|v| !v.is_empty()) else {
                 return read_only_label(ui, theme, id, value);
             };
             let current = value.as_enum().unwrap_or_default();
