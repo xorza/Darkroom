@@ -12,7 +12,7 @@ use crate::execution::program::index::{
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::Invocation;
@@ -202,7 +202,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut executor = Executor::default();
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
@@ -211,7 +211,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
                 plan: &run.plan,
                 resolved: &run.resolved,
                 cache: &mut cache,
-                resource_stamps: &mut resource_stamps,
+                resource_stamper: &mut resource_stamper,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },
@@ -232,9 +232,9 @@ async fn run_with(
     // Resolve dispositions like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
     let mut resolver = Resolver::default();
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
     resolver
-        .resolve(program, plan, cache, &resource_stamps)
+        .resolve(program, plan, cache, &resource_stamper)
         .await;
     let mut outcome = ExecutionOutcome::default();
     executor
@@ -244,7 +244,7 @@ async fn run_with(
                 plan,
                 resolved: &resolver.run,
                 cache,
-                resource_stamps: &mut resource_stamps,
+                resource_stamper: &mut resource_stamper,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },
@@ -378,7 +378,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
     let mut executor = Executor::default();
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
     let mut stats = ExecutionOutcome::default();
     executor
         .run(
@@ -387,7 +387,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
                 plan: &run.plan,
                 resolved: &run.resolved,
                 cache: &mut cache,
-                resource_stamps: &mut resource_stamps,
+                resource_stamper: &mut resource_stamper,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
             },
@@ -594,10 +594,10 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     demand_output(&p.program, &mut run, output(&p.program, a, 0));
     run.resolved.disposition[nx(&p.program, a)] = Disposition::Reuse;
 
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    cache.stamp_digest(&p.program, &resource_stamps, nx(&p.program, a));
+    cache.stamp_digest(&p.program, &resource_stamper, nx(&p.program, a));
     cache.slots[nx(&p.program, a)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
         produced_under: cache.slots[nx(&p.program, a)].current_digest,
@@ -611,7 +611,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
                 plan: &run.plan,
                 resolved: &run.resolved,
                 cache: &mut cache,
-                resource_stamps: &mut resource_stamps,
+                resource_stamper: &mut resource_stamper,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
             },

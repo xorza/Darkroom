@@ -105,7 +105,7 @@ and prepares triggers only for sources that complete successfully. The worker
 takes those exact runtime triggers from `ExecutionOutcome` and moves them into
 event tasks; fired-event runs do not rebuild unrelated triggers.
 
-Before resolution, `RunResourceStamps` collects filesystem identities on Tokio's
+Before resolution, `ResourceStamper` collects filesystem identities on Tokio's
 blocking pool. It memoizes each path for one run and is reused by late bound-path
 restamps after producers settle, keeping `node_digest` itself synchronous and
 I/O-free.

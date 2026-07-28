@@ -2176,6 +2176,94 @@ mod resource_binds {
     /// file behind the *delivered value*. Editing the file re-keys and recomputes the
     /// loader (pre-fix the chain's digests never changed, so the stale decode was served
     /// forever), while an unchanged file still reuses the cache — the reach-time re-stamp
+    /// A declared path with no determinate identity fails **the node that
+    /// declares it**, and its dependents skip as errored-upstream.
+    ///
+    /// Leaving it unstamped is correct — the node recomputes rather than
+    /// reusing a result keyed on a guess — but it is also silent: the only
+    /// symptom is a cache that stops hitting, with nothing said. Failing
+    /// the whole run is the other extreme, and the pre-run sweep cannot
+    /// even name a culprit, since it batches every executing node's paths
+    /// at once. Both routes therefore converge on the node: a const path
+    /// the sweep could not stamp leaves its digest `None`, which sends it
+    /// through the same per-node stamp a producer-supplied path takes.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("locked");
+        let data = dir.0.join("data.txt");
+        std::fs::write(&data, "v1").unwrap();
+        let data_path = data.to_string_lossy().into_owned();
+        let lock = |mode| std::fs::set_permissions(&dir.0, Permissions::from_mode(mode)).unwrap();
+        let path_library = || {
+            path_lib(
+                Arc::new(AtomicUsize::new(0)),
+                Arc::new(AtomicUsize::new(0)),
+                Arc::new(StdMutex::new(String::new())),
+            )
+        };
+        // `loader` failed for want of a path identity, `dependent` was
+        // skipped for reading it, and the run itself still succeeded.
+        let assert_unavailable = |run: Result<ExecutionOutcome>, loader, dependent| {
+            let stats = run.expect("a per-node failure must not abort the run");
+            let error_for = |node_id| {
+                stats
+                    .node_errors
+                    .iter()
+                    .find(|failure| failure.e_node_id == root_execution_node(node_id))
+                    .map(|failure| failure.error.clone())
+            };
+            assert!(
+                matches!(
+                    error_for(loader),
+                    Some(RunError::ResourceUnavailable { .. })
+                ),
+                "the node declaring the path must fail: {:?}",
+                error_for(loader),
+            );
+            assert!(
+                matches!(error_for(dependent), Some(RunError::SkippedUpstream { .. })),
+                "its dependent must skip as errored-upstream: {:?}",
+                error_for(dependent),
+            );
+        };
+
+        // A const path, known before the run: the sweep cannot stamp it,
+        // so the node reaches its turn with no digest and re-stamps there.
+        let lib = path_library();
+        let mut graph = Graph::default();
+        let load_id = NodeId::from_u128(2);
+        graph.insert(load_id, node(&lib, "load_text"));
+        let capture_id = NodeId::from_u128(4);
+        graph.insert(capture_id, node(&lib, "capture"));
+        graph.set_input_binding(
+            InputPort::new(load_id, 0),
+            Binding::Const(StaticValue::FsPath(data_path.clone())),
+        );
+        graph.set_input_binding(InputPort::new(capture_id, 0), Binding::bind(load_id, 0));
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        lock(0o000);
+        let run = engine.execute_sinks().await;
+        lock(0o755);
+        assert_unavailable(run, load_id, capture_id);
+
+        // The same file reached through a producer's value, known only at
+        // the node's turn. Same outcome, same route.
+        let lib = path_library();
+        let fx = path_graph(&lib, &data_path, CacheMode::None);
+        let mut engine = ExecutionEngine::default();
+        engine.update(&fx.graph, &lib).unwrap();
+        lock(0o000);
+        let run = engine.execute_sinks().await;
+        lock(0o755);
+        assert_unavailable(run, fx.load_id, fx.annotate_id);
+    }
+
     /// keeps wired-path loaders cacheable instead of tainting them uncacheable.
     #[tokio::test]
     async fn wired_path_rekeys_loader_on_file_change() {

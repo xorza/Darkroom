@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
-use hashbrown::HashSet;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::{Digest, DigestHasher};
@@ -11,9 +10,7 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
-use crate::execution::resource::{
-    FileId, FsPathId, RunResourceStamps, Stamp, epoch_offset_ns, resolve_paths,
-};
+use crate::execution::resource::{FileId, FsPathId, ResourceStamper, epoch_offset_ns};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 
@@ -39,17 +36,17 @@ impl Drop for TempDir {
     }
 }
 
-fn stamp(path: &str) -> std::io::Result<Stamp> {
-    FsPathId::collect(path, &CancelToken::never())
-}
-
-fn fingerprint(path: &str) -> Digest {
-    let Ok(Stamp::Known(identity)) = stamp(path) else {
+fn fingerprint_with(stamper: &mut ResourceStamper, path: &str) -> Digest {
+    let Ok(identity) = stamper.stamp(path, &CancelToken::never()) else {
         panic!("{path} has no determinate identity");
     };
     let mut hasher = DigestHasher::new();
     identity.hash(&mut hasher);
     hasher.finish()
+}
+
+fn fingerprint(path: &str) -> Digest {
+    fingerprint_with(&mut ResourceStamper::default(), path)
 }
 
 #[test]
@@ -69,24 +66,23 @@ fn directory_identity_tracks_entry_changes() {
         let empty = fingerprint(&path);
         let permissions = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(&dir.0, permissions(0o000)).unwrap();
-        let unreadable = stamp(&path);
-        let resolved = resolve_paths(HashSet::from([path.clone()]), &CancelToken::never());
+        let unreadable = ResourceStamper::default().stamp(&path, &CancelToken::never());
+        // The whole pass fails with it, rather than dropping the path and
+        // leaving the node silently uncached forever.
+        let mut stamps = ResourceStamper::default();
+        stamps.requests.insert(path.clone());
+        let resolved = stamps.resolve(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
         assert!(
             unreadable.is_err(),
             "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
         );
-        // The consequence that matters: nothing lands in the map, so the
-        // fold declines and `node_digest` comes out `None` — the node
-        // recomputes rather than reusing a result keyed on a guess.
-        assert!(resolved.is_empty(), "an unknown path is left unstamped");
-        let stamps = RunResourceStamps { fs_paths: resolved };
-        assert_eq!(
-            stamps.hash_fs_paths(&mut DigestHasher::new(), std::slice::from_ref(&path)),
-            None,
-            "an unstamped path must refuse to produce a digest",
+        assert!(
+            resolved.is_err(),
+            "one unstampable path must fail the pass: {resolved:?}",
         );
+        assert!(stamps.fs_paths.is_empty(), "and stamp nothing");
         assert_eq!(
             fingerprint(&path),
             empty,
@@ -135,9 +131,53 @@ fn directory_identity_tracks_nested_changes() {
     let after_deep_add = fingerprint(&path);
     assert_ne!(after_deep_add, after_nested_edit);
 
-    // An empty directory is a real entry, not an absence.
+    // Only files are folded, so an empty directory is an absence: there
+    // is nothing beneath it for a node to read, and nothing it can change
+    // without a file changing with it.
     std::fs::create_dir(sub.join("deeper").join("empty")).unwrap();
+    assert_eq!(
+        fingerprint(&path),
+        after_deep_add,
+        "an empty directory is not part of the identity"
+    );
+    // …and it stops being an absence the moment it holds something.
+    std::fs::write(sub.join("deeper").join("empty").join("c.bin"), b"c").unwrap();
     assert_ne!(fingerprint(&path), after_deep_add);
+}
+
+/// One stamper walks every path of every run in the same buffers, so a
+/// walk must leave nothing of itself behind — a stale entry from the last
+/// directory would fold into the next directory's identity.
+#[test]
+fn a_reused_stamper_stamps_like_a_fresh_one() {
+    let dir = TempDir::new("reuse");
+    let deep = dir.0.join("deep");
+    let shallow = dir.0.join("shallow");
+    std::fs::create_dir_all(deep.join("nested")).unwrap();
+    std::fs::create_dir(&shallow).unwrap();
+    std::fs::write(deep.join("nested").join("a.bin"), b"one").unwrap();
+    std::fs::write(shallow.join("b.bin"), b"two").unwrap();
+    let deep_path = deep.to_string_lossy().into_owned();
+    let shallow_path = shallow.to_string_lossy().into_owned();
+
+    let mut stamper = ResourceStamper::default();
+    let expected = fingerprint_with(&mut stamper, &shallow_path);
+    // The buffer is genuinely retained — which is what makes a leak
+    // between walks possible. `deep` holds one file, `nested/a.bin`; the
+    // `nested` directory itself is not listed.
+    fingerprint_with(&mut stamper, &deep_path);
+    assert_eq!(stamper.files.len(), 1, "the walked files are retained");
+
+    assert_eq!(
+        fingerprint_with(&mut stamper, &shallow_path),
+        expected,
+        "a reused stamper must fold only the tree it was handed",
+    );
+    assert_eq!(
+        fingerprint_with(&mut stamper, &shallow_path),
+        fingerprint(&shallow_path),
+        "and agree with a stamper that never walked anything else",
+    );
 }
 
 /// Entry names are folded as raw bytes. `to_string_lossy` collapses
@@ -293,9 +333,9 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
     cache.reconcile(&fixture.program);
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
 
-    resource_stamps
+    resource_stamper
         .prepare_run(
             &fixture.program,
             &fixture.plan,
@@ -305,14 +345,14 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         .await;
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamps,
+        &resource_stamper,
         fixture.program.e_node_index[&fixture.first],
     );
 
     std::fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamps,
+        &resource_stamper,
         fixture.program.e_node_index[&fixture.second],
     );
     assert_eq!(
@@ -322,7 +362,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     );
 
     let first_run = cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest;
-    resource_stamps
+    resource_stamper
         .prepare_run(
             &fixture.program,
             &fixture.plan,
@@ -332,7 +372,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         .await;
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamps,
+        &resource_stamper,
         fixture.program.e_node_index[&fixture.first],
     );
     assert_ne!(

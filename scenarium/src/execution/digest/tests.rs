@@ -5,8 +5,8 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
-use crate::execution::resource::RunResourceStamps;
-use crate::execution::resource::internals::prepare_node;
+use crate::execution::resource::ResourceStamper;
+use crate::execution::resource::internals::{prepare_node, stamp_file};
 use crate::node::definition::FuncId;
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
@@ -126,10 +126,10 @@ struct DigestPair {
 fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
-    let mut resource_stamps = RunResourceStamps::default();
+    let mut resource_stamper = ResourceStamper::default();
     for idx in 0..=through {
-        prepare_node(&mut resource_stamps, program, &cache, node_idx(idx));
-        let digest = node_digest(program, node_idx(idx), &cache, &resource_stamps);
+        prepare_node(&mut resource_stamper, program, &cache, node_idx(idx));
+        let digest = node_digest(program, node_idx(idx), &cache, &resource_stamper);
         cache.slots[node_idx(idx)].current_digest = digest;
     }
     cache
@@ -286,39 +286,54 @@ fn fs_path_folds_file_identity_and_path() {
         "path-list order is part of the authored input"
     );
 
-    // A present file and a missing one are distinct identities.
+    // A path that is not there has no identity to fold at all: the node
+    // is left without a digest, and the executor fails it at its turn
+    // rather than keying it on an absence.
     std::fs::remove_file(&file).unwrap();
-    let d_missing = digest_at(&p.program, 0);
-    assert_ne!(d_len3, d_missing, "file presence must matter");
+    assert_eq!(
+        digest_at(&p.program, 0),
+        None,
+        "a missing file leaves its node with no digest"
+    );
 
-    // The path string itself is folded, independent of file identity (both missing).
-    let d_other = digest_at(&prog_for("definitely-missing-elsewhere").program, 0);
+    // The path string is folded on top of the file identity, so two nodes
+    // reading equal files under different names still key apart. Planted
+    // identities rather than real files: a constant is what makes the
+    // encoding pinnable, and no test controls a real file's mtime.
+    let planted = |value: StaticValue, path: &str| {
+        let mut p = Prog::default();
+        p.add(10, 1, &[konst(value)]);
+        let mut cache = RuntimeCache::default();
+        cache.reconcile(&p.program);
+        let mut stamps = ResourceStamper::default();
+        stamp_file(&mut stamps, path, 4, 7);
+        node_digest(&p.program, node_idx(0), &cache, &stamps)
+    };
+    let here = "definitely-missing-elsewhere";
+    let there = "definitely-missing-somewhere";
+    let d_here = planted(StaticValue::FsPath(here.into()), here);
+    assert_ne!(
+        planted(StaticValue::FsPath(there.into()), there),
+        d_here,
+        "same file identity under a different path ⇒ different digest"
+    );
+    assert_ne!(
+        planted(StaticValue::FsPaths(vec![here.into()]), here),
+        d_here,
+        "single-path and path-list variants must hash apart"
+    );
     // Moves only when the resource-identity encoding changes on purpose —
     // read the new number off the failure and update it here. Every other
     // failure of this line is accidental digest drift, which would
     // silently invalidate every persisted cache blob.
     assert_eq!(
-        d_other,
+        d_here,
         Some(Digest([
-            176, 232, 89, 255, 138, 89, 119, 40, 183, 103, 129, 186, 168, 197, 234, 18, 53, 132,
-            24, 131, 229, 252, 228, 149, 13, 238, 235, 109, 166, 65, 110, 61,
+            128, 125, 192, 230, 35, 129, 82, 24, 7, 16, 107, 127, 38, 16, 185, 174, 95, 246, 112,
+            199, 104, 177, 218, 96, 191, 140, 142, 182, 57, 112, 38, 97,
         ])),
         "the single-path digest encoding must remain stable"
     );
-    let mut singleton_list = Prog::default();
-    singleton_list.add(
-        10,
-        1,
-        &[konst(StaticValue::FsPaths(vec![
-            "definitely-missing-elsewhere".into(),
-        ]))],
-    );
-    assert_ne!(
-        digest_at(&singleton_list.program, 0),
-        d_other,
-        "single-path and path-list variants must hash apart"
-    );
-    assert_ne!(d_missing, d_other, "different path ⇒ different digest");
     std::fs::remove_file(unselected).unwrap();
     std::fs::remove_file(second).unwrap();
 }
@@ -350,8 +365,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let mut resource_stamps = RunResourceStamps::default();
-        let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
+        let mut resource_stamper = ResourceStamper::default();
+        let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamper).unwrap();
         cache.slots[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
@@ -361,11 +376,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 producer,
             );
         }
-        prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(1));
-        prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(2));
+        prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(1));
+        prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(2));
         DigestPair {
-            typed: node_digest(&p.program, node_idx(1), &cache, &resource_stamps),
-            plain: node_digest(&p.program, node_idx(2), &cache, &resource_stamps),
+            typed: node_digest(&p.program, node_idx(1), &cache, &resource_stamper),
+            plain: node_digest(&p.program, node_idx(2), &cache, &resource_stamper),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -417,15 +432,24 @@ fn bound_fs_path_folds_delivered_file_identity() {
     std::fs::remove_file(second).unwrap();
 
     std::fs::remove_file(&file).unwrap();
-    let typed_missing = digests_with(fs_path()).typed;
-    assert_ne!(typed_len3, typed_missing, "file presence must matter");
+    let DigestPair {
+        typed: typed_missing,
+        plain: plain_missing,
+    } = digests_with(fs_path());
+    assert_eq!(
+        typed_missing, None,
+        "a wired path that is not there has no identity to fold"
+    );
+    assert_eq!(
+        plain_missing, plain_len3,
+        "the undeclared consumer never dereferences it, so it folds on regardless"
+    );
 
     // A delivered non-path value folds a distinct marker — still cacheable.
     let typed_int = digests_with(Some(DynamicValue::Static(StaticValue::Int(7)))).typed;
-    assert!(typed_int.is_some(), "a mis-typed wire stays cacheable");
-    assert_ne!(
-        typed_int, typed_missing,
-        "a non-path delivered value hashes apart from a missing path"
+    assert!(
+        typed_int.is_some(),
+        "a mis-typed wire stays cacheable, unlike an unreadable referent"
     );
 
     // An unreadable delivered value (producer not resident) taints only the declared consumer.
@@ -444,8 +468,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    let mut resource_stamps = RunResourceStamps::default();
-    let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamps).unwrap();
+    let mut resource_stamper = ResourceStamper::default();
+    let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamper).unwrap();
     cache.slots[node_idx(0)].current_digest = Some(producer);
     hydrate(
         &mut cache,
@@ -454,9 +478,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         producer,
     );
     cache.slots[node_idx(0)].current_digest = Some(Digest([9; 32]));
-    prepare_node(&mut resource_stamps, &p.program, &cache, node_idx(1));
+    prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(1));
     assert_eq!(
-        node_digest(&p.program, node_idx(1), &cache, &resource_stamps),
+        node_digest(&p.program, node_idx(1), &cache, &resource_stamper),
         None,
         "a path value produced under an old producer digest is unreadable"
     );
