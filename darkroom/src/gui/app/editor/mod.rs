@@ -63,7 +63,7 @@ struct BatchOutcome {
 /// straight onto [`Editor`] because undo/redo replay folds its steps from a
 /// callback while `action_stack` itself is mutably borrowed — so both the
 /// commit path and the replay path fold here and hand the result to
-/// [`Editor::absorb_signals`], and a seventh signal is added in one place.
+/// [`Editor::absorb_signals`], and a fourth signal is added in one place.
 #[derive(Default, Debug)]
 struct StepSignals {
     geometry_stale: bool,

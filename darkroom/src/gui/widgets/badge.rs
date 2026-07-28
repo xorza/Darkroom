@@ -89,8 +89,8 @@ enum BadgeGlyph {
 }
 
 /// One header indicator chip; the two families render differently (see
-/// [`BadgeKind`]). Build one with [`Badge::control`] /
-/// [`Badge::control_drawn`] / [`Badge::marker`], then
+/// [`BadgeKind`]). Build one with [`Badge::control`] / [`Badge::go`] /
+/// [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
 /// frame (always `false` for a marker).
 #[derive(Debug)]
@@ -119,14 +119,14 @@ impl Badge {
     }
 
     /// A "go" chip: a vector-glyph control that runs something rather than
-    /// configuring it — a node header's play chip and its refresh
-    /// chip. Quiet at rest (muted ink like every other idle control) and
-    /// swinging whole — border, glyph, hover fill — to the palette's success
-    /// green when hovered, pointing at the outcome the click delivers.
+    /// configuring it — the node header's play chip. Quiet at rest (muted
+    /// ink like every other idle control) and swinging whole — border,
+    /// glyph, hover fill — to the palette's success green when hovered,
+    /// pointing at the outcome the click delivers.
     ///
-    /// The colour is resolved by [`Self::show_go`] rather than passed in,
-    /// because it depends on last frame's hover: written out at each call
-    /// site, the two chips were the same four lines twice.
+    /// The colour is resolved by [`GoBadge::show`] rather than passed in,
+    /// because it depends on last frame's hover, which the call site does
+    /// not otherwise read.
     pub(crate) fn go(wid: WidgetId, tip: &'static str, draw: fn(&mut Ui, Color)) -> GoBadge {
         GoBadge { wid, tip, draw }
     }

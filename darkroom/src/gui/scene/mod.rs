@@ -475,8 +475,8 @@ impl Scene {
         let (graph, interface) = (source.graph(), source.interface());
         // A definition pane is no particular instance of that definition, so
         // a node there has an occurrence per instance and a run raised over
-        // the pane has no single one to target. Same reason a pin there
-        // delivers nothing — see `CompiledGraph::pinned_ports`.
+        // the pane has no single one to target — and a preview spawned there
+        // would be an entry-only func in a definition body, a compile error.
         let run_available = target == GraphRef::Main;
 
         // `GraphView::selected` is a `BTreeSet`, so this lands sorted —
@@ -693,7 +693,8 @@ impl<'a> GraphScene<'a> {
 
     /// Whether a run raised over this pane resolves to one occurrence — see
     /// [`SceneGraph::run_available`]. Gates the affordances that need a
-    /// single target: the pin toggle and the pin-creation drag.
+    /// single target: the header play chip, the context menu's "Run to this
+    /// node", and the port menu's "Add preview".
     pub(crate) fn run_available(self) -> bool {
         self.graph.run_available
     }

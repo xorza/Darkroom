@@ -18,7 +18,7 @@ use crate::gui::scene::{Scene, SceneNode};
 /// port-ish glyph plus the cross-frame node-size cache, all filled by one
 /// [`Self::rebuild`] pass polling [`Ui::response_for`] on deterministic
 /// widget ids. Rebuilt in [`crate::gui::canvas::GraphUI::prepass`] and
-/// reused by `frame`. Each glyph snapshot is sized to the four
+/// reused by [`crate::gui::canvas::GraphUI::draw`]. Each glyph snapshot is sized to the four
 /// bytes-and-bits we use (`layout_rect.center()`, `rect`, two edge bools)
 /// instead of the full `ResponseState`.
 ///

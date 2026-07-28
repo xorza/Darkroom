@@ -10,13 +10,30 @@
 /// Stays within 7 characters up to `999.99s`, which is what
 /// `node::header::RUN_TIME_MIN_WIDTH` reserves so a running node's label
 /// measures identically across digit-count changes (see the test).
-pub(crate) fn fmt_elapsed(secs: f64) -> String {
-    if secs >= 1.0 {
-        format!("{secs:.2}s")
-    } else if secs >= 1e-3 {
-        format!("{:.1}ms", secs * 1e3)
-    } else {
-        format!("{:.0}µs", secs * 1e6)
+pub(crate) fn fmt_elapsed(secs: f64) -> Elapsed {
+    Elapsed(secs)
+}
+
+/// A run time that renders on demand rather than into a `String`.
+///
+/// `Display` rather than an owned buffer because every caller is a
+/// per-frame label: the node header's live timer runs once per node per
+/// frame and the inspector's status line once per open panel, and both
+/// feed the result straight into a formatter that never needed it to be
+/// heap-allocated.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Elapsed(f64);
+
+impl std::fmt::Display for Elapsed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let secs = self.0;
+        if secs >= 1.0 {
+            write!(f, "{secs:.2}s")
+        } else if secs >= 1e-3 {
+            write!(f, "{:.1}ms", secs * 1e3)
+        } else {
+            write!(f, "{:.0}µs", secs * 1e6)
+        }
     }
 }
 
@@ -66,7 +83,7 @@ mod tests {
             (999.994, "999.99s"),
         ];
         for (secs, expected) in cases {
-            let got = fmt_elapsed(secs);
+            let got = fmt_elapsed(secs).to_string();
             assert_eq!(got, expected, "fmt_elapsed({secs})");
             assert!(
                 got.chars().count() <= 7,

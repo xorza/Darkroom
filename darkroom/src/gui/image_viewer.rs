@@ -1,13 +1,13 @@
-//! Full-resolution viewers for pinned ports' runtime images, one editor tab
-//! per port ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
+//! Full-resolution viewers for preview nodes' runtime images, one editor tab
+//! per node ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
 //! borrows its node's registered texture from the centralized preview
 //! store and keeps only navigation state. Opening or restoring a tab therefore
 //! shows an already-received value without an editor-driven notification path.
 //!
 //! The store materializes the full RGBA8 texture before the viewer records and
 //! releases the source value immediately after registration. It does that only
-//! for the ports a pane will actually show
-//! (`Document::visible_viewer_outputs`), so a viewer stacked behind another tab
+//! for the nodes a pane will actually show
+//! (`Document::visible_viewer_nodes`), so a viewer stacked behind another tab
 //! holds no full-resolution texture until it is activated.
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
@@ -48,13 +48,13 @@ const VIEWER_MAX_ZOOM: f32 = 32.0;
 const CHECKER_SQUARE_PX: f32 = 8.0;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
-/// Lives in the `MainWindow`'s per-port viewer map, keyed by (and
-/// carrying) the [`OutputPort`] its tab binds to; content is runtime-only
+/// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
+/// carrying) the [`NodeId`] its tab binds to; content is runtime-only
 /// (never persisted).
 #[derive(Debug)]
 pub(crate) struct ImageViewer {
-    /// The port this viewer shows — keys the pane's widget id so two
-    /// viewer tabs never share gesture responses.
+    /// The preview node this viewer shows — keys the pane's widget id so
+    /// two viewer tabs never share gesture responses.
     node_id: NodeId,
     /// Texture dimensions used to decide whether a new revision needs a refit.
     source_size: Option<UVec2>,
@@ -85,7 +85,7 @@ struct ShownImage<'a> {
 }
 
 impl ImageViewer {
-    /// An empty viewer for `port` (shows the hint until content arrives).
+    /// An empty viewer for `node_id` (shows the hint until content arrives).
     pub(crate) fn new(node_id: NodeId) -> Self {
         Self {
             node_id,
@@ -168,7 +168,7 @@ impl ImageViewer {
                     None,
                     Some(match value {
                         StoredContent::Error(message) => message.as_str(),
-                        _ => "pinned output has no image value",
+                        _ => "this preview has no image value",
                     }),
                 ),
             },
@@ -263,9 +263,9 @@ impl ImageViewer {
         );
     }
 
-    /// The top-left readout: source port, native dimensions and pixel
+    /// The top-left readout: source node, native dimensions and pixel
     /// format, whether the view is texture-capped, and the current zoom.
-    /// (`title` is never empty — `port_label` supplies the fallback.)
+    /// (`title` is never empty — [`node_label`] supplies the fallback.)
     fn header(
         &self,
         ui: &mut Ui,

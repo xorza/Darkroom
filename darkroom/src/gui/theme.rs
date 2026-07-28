@@ -85,7 +85,7 @@ pub(crate) mod dark {
         hover: Color::hex(0xffc878),
     };
     // Events wear the palette's `error` red — the same swatch as the
-    // sink `T` badge the subscription pin sits beside, so the trigger
+    // sink `■` marker the subscription pin sits beside, so the trigger
     // machinery reads as one family. Shape (triangle vs. circle) keeps
     // events apart from data ports; hover lifts toward white like the
     // typed port hovers.
@@ -372,10 +372,9 @@ pub(crate) struct Theme {
     pub(crate) port_gap: f32,
     /// Horizontal gap between the input and output port columns.
     pub(crate) port_cols_gap: f32,
-    /// Gap between a node's edge (or a port circle) and a floating widget's
-    /// near edge — the pin-preview card anchors from the port circle, the
-    /// inspector panel from the node's right edge, so both read as the same
-    /// clearance.
+    /// Gap between a node's edge and a floating widget's near edge — the
+    /// inspector panel anchors from the node's right edge, so any future
+    /// floating surface reads as the same clearance.
     pub(crate) floating_widget_gap: f32,
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
@@ -722,9 +721,8 @@ impl Theme {
         self.port_overhang_for(self.port_radius())
     }
 
-    /// The stroke width every selectable card draws — node bodies and
-    /// pin-preview widgets alike — always the *selection* width
-    /// (`node_border_width * 2`) regardless of selection state, so
+    /// The stroke width a selectable card draws — always the *selection*
+    /// width (`node_border_width * 2`) regardless of selection state, so
     /// selecting one never resizes it (only its color changes). Named so
     /// the doubling can't drift between the call sites that need to agree
     /// on it: the stroke itself, [`Self::card_inner_radius`], and
@@ -735,8 +733,8 @@ impl Theme {
     }
 
     /// Border color + width for a selectable card's 3-tier resting decision
-    /// — node bodies and pin-preview widgets both resolve their outline this
-    /// way: a breaker hit wins as the alarm color, else the selection halo
+    /// — how a node body resolves its outline: a breaker hit wins as the
+    /// alarm color, else the selection halo
     /// when selected, else the neutral resting `node_border`. Width is
     /// always [`Self::card_border_width`] regardless of tier, so selecting
     /// (or breaking) a card never resizes it — only the color changes. A

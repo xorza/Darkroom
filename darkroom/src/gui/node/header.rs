@@ -227,7 +227,8 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                         .color(color)
                         .show(ui);
                 }
-                Text::new(fmt_elapsed(secs))
+                let elapsed = ui.fmt(format_args!("{}", fmt_elapsed(secs)));
+                Text::new(elapsed)
                     .style(&TextStyle {
                         color,
                         font_size_px: BADGE_FONT,
