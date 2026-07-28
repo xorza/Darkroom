@@ -10,7 +10,7 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
-use crate::execution::resource::{FsPathId, RunResourceStamps};
+use crate::execution::resource::{FileId, FsPathId, RunResourceStamps, epoch_offset_ns};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 
@@ -76,6 +76,117 @@ fn directory_identity_tracks_entry_changes() {
 
     std::fs::remove_file(dir.0.join("b.fits")).unwrap();
     assert_ne!(fingerprint(&path), after_edit);
+}
+
+/// A pure function handed a directory consumes it recursively, so its
+/// identity has to be the whole subtree. Stamping one level deep let
+/// everything below the first level change under a fingerprint that
+/// never moved, and the node reused output built from the old contents.
+#[test]
+fn directory_identity_tracks_nested_changes() {
+    let dir = TempDir::new("nested");
+    let path = dir.0.to_string_lossy().into_owned();
+    let sub = dir.0.join("sub");
+    std::fs::create_dir_all(sub.join("deeper")).unwrap();
+    std::fs::write(sub.join("file.bin"), b"one").unwrap();
+    let base = fingerprint(&path);
+    assert_eq!(fingerprint(&path), base, "a still tree stamps stably");
+
+    // The case the one-level stamp missed: a nested edit that does not
+    // touch any immediate child of the root.
+    std::fs::write(sub.join("file.bin"), b"one-plus").unwrap();
+    let after_nested_edit = fingerprint(&path);
+    assert_ne!(after_nested_edit, base, "nested edit must move the root");
+
+    // Depth is not special-cased — the deepest level counts too.
+    std::fs::write(sub.join("deeper").join("leaf.bin"), b"x").unwrap();
+    let after_deep_add = fingerprint(&path);
+    assert_ne!(after_deep_add, after_nested_edit);
+
+    // An empty directory is a real entry, not an absence.
+    std::fs::create_dir(sub.join("deeper").join("empty")).unwrap();
+    assert_ne!(fingerprint(&path), after_deep_add);
+}
+
+/// Entry names are folded as raw bytes. `to_string_lossy` collapses
+/// every non-UTF-8 name onto one replacement string, so two distinct
+/// names would be interchangeable without moving the fingerprint —
+/// a rename that a pure node's cache key could not see.
+#[test]
+#[cfg(unix)]
+fn directory_identity_separates_non_utf8_names() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = TempDir::new("bytes");
+    let path = dir.0.to_string_lossy().into_owned();
+    // Both lossy-convert to the same U+FFFD replacement character.
+    let first = dir.0.join(OsStr::from_bytes(b"\xff"));
+    let second = dir.0.join(OsStr::from_bytes(b"\xfe"));
+
+    std::fs::write(&first, b"same").unwrap();
+    let with_first = fingerprint(&path);
+    std::fs::rename(&first, &second).unwrap();
+    // Same length, and the rename preserves mtime, so the *name* is the
+    // only thing that moved.
+    assert_ne!(
+        fingerprint(&path),
+        with_first,
+        "a rename between two non-UTF-8 names must move the fingerprint",
+    );
+}
+
+/// `duration_since(UNIX_EPOCH).ok().unwrap_or(0)` mapped *every* mtime
+/// before 1970 onto the same `0` as the epoch itself — and handed the
+/// same `0` to a metadata read that simply failed. Three distinct
+/// states, one value, so files differing only in those ways shared a
+/// pure node's cache key.
+#[test]
+fn file_identity_separates_pre_epoch_and_absent_mtimes() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    // The conversion: signed, so before and after the epoch are ordered
+    // rather than folded together. Hand-computed against the epoch.
+    assert_eq!(epoch_offset_ns(UNIX_EPOCH), 0);
+    assert_eq!(
+        epoch_offset_ns(UNIX_EPOCH + Duration::from_secs(1)),
+        1_000_000_000,
+    );
+    assert_eq!(
+        epoch_offset_ns(UNIX_EPOCH - Duration::from_secs(1)),
+        -1_000_000_000,
+    );
+    assert_eq!(
+        epoch_offset_ns(UNIX_EPOCH - Duration::from_nanos(3)),
+        -3,
+        "sub-second resolution survives on the pre-epoch side too",
+    );
+
+    // …and that the identities built from them stay apart. Same length
+    // throughout, so mtime is the only field in play.
+    let stamp = |mtime_ns| {
+        let mut hasher = DigestHasher::new();
+        FsPathId::File(FileId { len: 4, mtime_ns }).hash(&mut hasher);
+        hasher.finish()
+    };
+    let one_sec_before = stamp(Some(-1_000_000_000));
+    let two_sec_before = stamp(Some(-2_000_000_000));
+    let at_epoch = stamp(Some(0));
+    let one_sec_after = stamp(Some(1_000_000_000));
+    let absent = stamp(None);
+
+    let all = [
+        ("1s before epoch", one_sec_before),
+        ("2s before epoch", two_sec_before),
+        ("epoch", at_epoch),
+        ("1s after epoch", one_sec_after),
+        ("no mtime", absent),
+    ];
+    for (i, (left_name, left)) in all.iter().enumerate() {
+        for (right_name, right) in &all[i + 1..] {
+            assert_ne!(left, right, "{left_name} must not alias {right_name}");
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -49,6 +49,15 @@ impl ExecutionFrame<'_, '_> {
             let value = match binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
+                ExecutionBinding::Bind(addr) if !self.producer_runs(*addr) => {
+                    // Nothing will produce this. Only an *optional* input
+                    // can reach here — `input_missing` turns a required
+                    // one into a `MissingInputs` verdict, so this node
+                    // would not be running at all — and unbound is
+                    // precisely what optional means. The resolver planned
+                    // no read for it either, so none is completed.
+                    DynamicValue::Unbound
+                }
                 ExecutionBinding::Bind(addr) => {
                     let address = *addr;
                     let output_idx = self.program.output_idx(address);
@@ -66,16 +75,21 @@ impl ExecutionFrame<'_, '_> {
         }
     }
 
+    /// Whether the plan will run `addr`'s producer — the same predicate the
+    /// resolver registers reader counts by, so a read is completed exactly
+    /// when one was planned.
+    fn producer_runs(&self, addr: OutputAddr) -> bool {
+        self.plan.verdicts[addr.node_idx].wants_execute()
+    }
+
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
     pub(super) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
-            let address = match &input.binding {
-                ExecutionBinding::Bind(address) => Some(*address),
-                ExecutionBinding::None | ExecutionBinding::Const(_) => None,
-            };
-            if let Some(address) = address {
-                self.complete_planned_read(address);
+            if let ExecutionBinding::Bind(address) = &input.binding
+                && self.producer_runs(*address)
+            {
+                self.complete_planned_read(*address);
             }
         }
     }

@@ -6,14 +6,27 @@ use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
+use crate::execution::program::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::OutputDemand;
-use crate::{DynamicValue, RamUsage, StaticValue};
+use crate::{DataType, DynamicValue, RamUsage, StaticValue};
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
+}
+
+/// Declare one output on `program`, matching the single-value snapshots
+/// [`out`] builds.
+///
+/// `release_dead_outputs` compares a resident snapshot's length against
+/// the node's declared port count, so a fixture node declaring none while
+/// holding a value is not a shape any real program produces.
+fn one_output(program: &mut ExecutionProgram) -> PoolRange<ExecutionOutput> {
+    program.outputs.append([ExecutionOutput {
+        data_type: DataType::Int,
+    }])
 }
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
@@ -202,11 +215,13 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
     for (index, (_, mode, behavior, current_digest, produced_under, _)) in cases.iter().enumerate()
     {
         let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        let outputs = one_output(&mut program);
         program.push(
             e_node_id,
             ExecutionNode {
                 cache: *mode,
                 behavior: *behavior,
+                outputs,
                 ..Default::default()
             },
         );
@@ -248,11 +263,13 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 
     for (index, _) in cases.iter().enumerate() {
         let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
+        let outputs = one_output(&mut program);
         program.push(
             e_node_id,
             ExecutionNode {
                 cache: CacheMode::Ram,
                 behavior: FuncBehavior::Pure,
+                outputs,
                 ..Default::default()
             },
         );
@@ -288,15 +305,17 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 #[tokio::test]
 async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let func_id = FuncId::from_u128(77);
-    let node = |func_id, version| ExecutionNode {
+    let mut program = ExecutionProgram::default();
+    let outputs = one_output(&mut program);
+    let node = move |func_id, version| ExecutionNode {
         func_id,
         version,
         cache: CacheMode::Ram,
         behavior: FuncBehavior::Pure,
+        outputs,
         ..Default::default()
     };
     let e_node_id = ExecutionNodeId::from_u128(1);
-    let mut program = ExecutionProgram::default();
     program.push(e_node_id, node(func_id, 0));
 
     let mut cache = RuntimeCache::default();

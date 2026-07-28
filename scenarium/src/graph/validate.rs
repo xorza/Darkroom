@@ -309,7 +309,21 @@ pub(crate) fn const_satisfies(library: &Library, input: &FuncInput, value: &Stat
     if matches!(value, StaticValue::Null) {
         return !input.required;
     }
-    match &input.data_type {
+    declared_accepts_const(library, &input.data_type, value)
+}
+
+/// Whether `value` is a valid literal for a port declared `declared`.
+///
+/// The type half of [`const_satisfies`], without the picker list and
+/// optionality only a [`FuncInput`] carries — a graph interface's *output*
+/// ports declare a bare [`DataType`], and the flattener's boundary gate
+/// needs the same table rather than a second copy of it.
+pub(crate) fn declared_accepts_const(
+    library: &Library,
+    declared: &DataType,
+    value: &StaticValue,
+) -> bool {
+    match declared {
         DataType::Any => true,
         DataType::Float | DataType::Int | DataType::Bool => matches!(
             value,

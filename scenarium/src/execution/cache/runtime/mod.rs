@@ -351,13 +351,27 @@ impl RuntimeCache {
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
     pub(crate) fn release_dead_outputs(&mut self, program: &ExecutionProgram) {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            let retained = e_node.cache.caches_in_ram()
+            let Some(resident_len) = self.slots[node_idx].output_values().map(Vec::len) else {
+                continue;
+            };
+            // A snapshot holding a different number of values cannot
+            // describe this node's outputs, whatever its digest says.
+            //
+            // The digest is the only other thing keeping a snapshot
+            // alive, and it does not have to move: a func that grows an
+            // output while keeping its id *and* version reuses the flat
+            // node, so `reown` sees no owner change and the stale
+            // `produced_under` still equals the stale `current_digest`.
+            // Both retention checks passed, and the mismatch surfaced
+            // only at install validation — a debug panic, and in release
+            // a snapshot indexed by port positions it no longer has.
+            let retained = resident_len == e_node.outputs.len as usize
+                && e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure
                 && self.is_resident_current(node_idx);
-            if retained || self.slots[node_idx].output_values().is_none() {
-                continue;
+            if !retained {
+                self.slots[node_idx].clear_output();
             }
-            self.slots[node_idx].clear_output();
         }
     }
 }

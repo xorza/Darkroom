@@ -42,7 +42,7 @@ fn random_func() -> Func {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 2);
                     debug_assert_eq!(outputs.len(), 1);
-                    let rng = cache.get_or_default_with(|| StdRng::from_rng(&mut rand::rng()));
+                    let rng = cache.get_or_insert_with(|| StdRng::from_rng(&mut rand::rng()));
                     let min = float_input(inputs, 0)?;
                     let max = float_input(inputs, 1)?;
                     outputs[0] = scale_random(rng.random::<f64>(), min, max).into();

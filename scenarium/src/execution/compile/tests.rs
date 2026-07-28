@@ -294,6 +294,66 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
     assert!(compiled.run_targets(f.boundary).is_empty());
 }
 
+/// An exposed producer that an interior node *also* reads is still a
+/// target.
+///
+/// Inferring "its value leaves the footprint" from the flattened program
+/// cannot see this case: flattening dissolves the `GraphOutput` edge, so
+/// the only consumers left are interior and the producer reads as
+/// ordinary plumbing. Meanwhile a dead interior terminal — no readers at
+/// all, not a sink — qualified. A run-to-instance request therefore
+/// seeded the wrong cone: it demanded the dead branch and skipped the
+/// one output the instance exists to produce, which then surfaced only
+/// as a preview that never filled in.
+///
+/// The fixture above cannot catch this: nothing reads its exposed
+/// producer internally, so `readers.is_empty()` carried it regardless.
+#[test]
+fn run_targets_seed_an_exposed_producer_that_an_interior_node_also_reads() {
+    use crate::data::type_system::DataType;
+    use crate::graph::{Binding, InputPort, Node, NodeKind};
+    use crate::node::definition::FuncOutput;
+
+    let library = test_func_lib(TestFuncHooks::default());
+    let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
+    let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
+    let source = nested.body.add(library.by_name("get_b").unwrap().into());
+    let exposed = nested.body.add(library.by_name("sum").unwrap().into());
+    // Reads `exposed` and is read by nothing; not a sink, so it qualifies
+    // only through the "nothing consumes it" arm.
+    let dead = nested.body.add(library.by_name("sum").unwrap().into());
+    nested
+        .body
+        .set_input_binding(InputPort::new(exposed, 0), Binding::bind(source, 0));
+    nested
+        .body
+        .set_input_binding(InputPort::new(dead, 0), Binding::bind(exposed, 0));
+    nested
+        .body
+        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(exposed, 0));
+
+    let nested_id = GraphId::unique();
+    let mut graph = Graph::default();
+    let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
+    graph.insert_graph(nested_id, nested);
+
+    let compiled = Compiler::default().compile(&graph, &library).unwrap();
+    let interior = |node_id| ExecutionNodeId::from_authoring(&[instance, node_id]);
+    let targets = compiled.run_targets(instance);
+
+    assert!(
+        targets.contains(&interior(exposed)),
+        "the producer behind the instance's output port must be seeded",
+    );
+    // The dead terminal keeps qualifying — "nothing consumes it" is a
+    // deliberate arm, and this is about what was *missing* alongside it.
+    assert!(targets.contains(&interior(dead)));
+    assert!(
+        !targets.contains(&interior(source)),
+        "a purely interior producer is still a dependency, not a target",
+    );
+}
+
 #[test]
 fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     let f = nested_fixture();

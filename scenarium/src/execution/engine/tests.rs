@@ -2735,6 +2735,64 @@ mod disabled_nodes {
 
         Ok(())
     }
+
+    /// …and the same shape must survive **execution**, not just planning.
+    ///
+    /// The consumer is schedulable and the disabled producer is not in
+    /// `process_order` — but resolution marked every bound producer live
+    /// regardless, so it registered a reader for an output nothing would
+    /// ever write. Collecting the consumer's inputs then demanded that
+    /// output: on a cold cache the run died on `a resolved producer
+    /// output must be resident when consumed`, and on a warm one it
+    /// silently served whatever the producer had left in RAM from before
+    /// it was disabled, as if it were this run's value.
+    ///
+    /// `mult`'s `B` is the optional port, so the disabled producer feeds
+    /// *that* one; unbound is what optional means, and its lambda's
+    /// `unwrap_or(1)` is what reads it.
+    #[tokio::test]
+    async fn a_disabled_producer_on_an_optional_input_delivers_unbound() -> TestResult {
+        use std::sync::Mutex as StdMutex;
+
+        let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
+        let library = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(7)),
+            print: {
+                let p = printed.clone();
+                Arc::new(move |v| p.lock().unwrap().push(v))
+            },
+            ..default_hooks()
+        });
+
+        let mut graph = test_graph();
+        let id = |name: &str| graph.find_by_name(name, NodeSearch::TopLevel).unwrap().id;
+        let (get_a_id, sum_id, mult_id) = (id("get_a"), id("sum"), id("mult"));
+        // A (required) from a live producer, B (optional) from the one
+        // about to be disabled.
+        graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
+        graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(sum_id, 0));
+        graph
+            .find_mut(sum_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph.update(&graph, &library).unwrap();
+        execution_graph.execute_sinks().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph, &graph, &library),
+            ["get_a", "mult", "Print"],
+            "the disabled producer stays out of the run",
+        );
+        assert_eq!(
+            *printed.lock().unwrap(),
+            vec![7],
+            "the optional input read as unbound, so `mult` used its own default of 1",
+        );
+
+        Ok(())
+    }
 }
 
 mod const_bindings {
@@ -3430,6 +3488,58 @@ mod composite_behavior {
         assert!(
             message.contains(&format!("{get_b:?}")),
             "message should name the interior's missing func, got: {message}"
+        );
+    }
+
+    /// A composite's interface is a type contract, and crossing it must
+    /// be gated like any other wire.
+    ///
+    /// The exterior gate checks the consumer against the interface's
+    /// *declared* output type and passes — correctly, the declaration
+    /// says `Int`. Following the hop then ignored that declaration and
+    /// resolved the interior binding raw, so a `String` producer wired to
+    /// a `GraphOutput` port declared `Int` compiled a direct `Bind` into
+    /// the `Int` consumer. Nothing downstream could catch it: the edge
+    /// that would show the mismatch is precisely the one flattening
+    /// dissolves, so the consumer saw an ordinary bound input and the run
+    /// delivered a `String` to a port that declared `Int`.
+    ///
+    /// Degrading to unbound is the documented drift behaviour — a
+    /// required input then surfaces as a missing-input verdict, which is
+    /// visible, rather than a type violation that is not.
+    #[test]
+    fn a_composite_output_bound_to_a_mismatched_interior_flattens_unbound() {
+        let library = test_func_lib(TestFuncHooks::default());
+        let mut string_lib = library;
+        string_lib.add(testing::with_stub_lambda(
+            Func::new("6a5c9a1e-64e7-4d63-9b2f-3a0e1c7d8b45", "make_str")
+                .category("Test")
+                .output(FuncOutput::new("V", DataType::String)),
+        ));
+
+        // The definition declares `Int` out, but wires `make_str` to it.
+        let inner = func_node(&string_lib, "make_str", "producer");
+        let mut def = GraphDef::new("Drifted").output(int_output("Out"));
+        let inner_id = def.body.add(inner);
+        let so_id = def.body.add(Node::new(NodeKind::GraphOutput));
+        def.body
+            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
+
+        // `main_with` binds the instance's output 0 into `Print`'s input.
+        let graph = main_with(&string_lib, def);
+        let compiled = Compiler::default().compile(&graph, &string_lib).unwrap();
+
+        let print_id = graph.find_by_name("p", NodeSearch::TopLevel).unwrap().id;
+        let print = compiled
+            .program
+            .by_id(ExecutionNodeId::from_authoring(&[print_id]));
+        assert!(
+            matches!(
+                compiled.program.inputs[print.inputs][0].binding,
+                ExecutionBinding::None,
+            ),
+            "a boundary wire whose interior type contradicts the declared \
+             port must degrade to unbound, not bind straight through",
         );
     }
 
@@ -6234,6 +6344,68 @@ mod compile_regressions {
             vec![1, 2],
             "the input-shape change re-keyed the digest and the new lambda ran"
         );
+    }
+
+    /// A func that grows an **output** must not leave its previous,
+    /// shorter snapshot resident.
+    ///
+    /// The grown-input case above re-keys the digest, which is what
+    /// retires the old value. Growing an output need not: the id and
+    /// version are unchanged, so `reown` sees no owner change, and the
+    /// stale `produced_under` still equals the stale `current_digest`, so
+    /// the RAM-retention check keeps a snapshot that is now one value
+    /// short of the port list. Debug builds caught it at install as an
+    /// `OutputArity` invariant violation; release builds carried the
+    /// mismatched snapshot into the run.
+    #[tokio::test]
+    async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
+        let make_lib = |extra_output: bool| {
+            let mut lib = test_func_lib(default_hooks());
+            let mut generator = Func::new("1f4b4a0f-0d0e-4a6e-8f7f-2c9a4a0b6f21", "generate")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new("V", DataType::Int));
+            if extra_output {
+                generator = generator.output(FuncOutput::new("W", DataType::Int));
+            }
+            lib.add(
+                generator.lambda(async_lambda!(move |Invocation { outputs, .. }| {
+                    outputs[0] = StaticValue::Int(1).into();
+                    if outputs.len() > 1 {
+                        outputs[1] = StaticValue::Int(2).into();
+                    }
+                    Ok(())
+                })),
+            );
+            lib
+        };
+
+        let lib_v1 = make_lib(false);
+        let mut graph = Graph::default();
+        // RAM-cached, so the snapshot is *meant* to survive an install —
+        // which is what makes the stale one survive too.
+        let mut generator = node(&lib_v1, "generate");
+        generator.cache = CacheMode::Ram;
+        graph.add(generator);
+        graph.add(node(&lib_v1, "Print"));
+        let generate_id = graph
+            .find_by_name("generate", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let print_id = graph
+            .find_by_name("Print", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib_v1).unwrap();
+        engine.execute_sinks().await.unwrap();
+
+        // v2: same FuncId and version, one more output. `update` installs
+        // it, which is where the retained snapshot had to be retired.
+        engine.update(&graph, &make_lib(true)).unwrap();
+        engine.execute_sinks().await.unwrap();
     }
 
     /// Inspecting a node *inside* a graph requires its complete authoring path,

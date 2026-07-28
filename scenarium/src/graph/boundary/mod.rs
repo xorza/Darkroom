@@ -171,6 +171,15 @@ impl Graph {
             "attach index out of range"
         );
         detached.assert_targets_slot(&instances, boundary);
+        // Still in the validation phase: `insert_output_slot` renumbers
+        // bound *values*, not consumer-keyed ports, so these targets are
+        // exactly as occupied now as when the restore reaches them.
+        //
+        // Deliberately not the parent side: `insert_input_slot` shifts
+        // every key at `idx` and above up by one, so the parent restore
+        // always lands on a slot that shift has just vacated — checking
+        // it against pre-shift occupancy would refuse every valid attach.
+        child.body.assert_restorable(&detached.interior);
 
         let DetachedGraphInput {
             idx,
@@ -252,6 +261,12 @@ impl Graph {
             "attach index out of range"
         );
         detached.assert_targets_slot(&instances, boundary);
+        // Mirror of the input side, with the two halves swapped: here it
+        // is the *parent* consumers whose keys `insert_output_slot`
+        // leaves alone (it renumbers bound values), while the interior
+        // entry lands on `(boundary, idx)`, which `insert_input_slot`
+        // always vacates.
+        self.assert_restorable(&detached.parent);
 
         let DetachedGraphOutput {
             idx,
@@ -337,16 +352,53 @@ impl Graph {
         self.shift_binding_keys(node, idx, Shift::Up);
     }
 
+    /// Assert `entries` can all be restored, writing nothing: no port
+    /// already holds wiring, and no port is named twice.
+    ///
+    /// The pre-flight half of [`Self::restore_bindings`], hoisted by both
+    /// `attach_*` operations into their validation phase so a refusal
+    /// happens before the first mutation. `entries` comes from a
+    /// caller-held `Detached*` record, so a duplicate port in it is
+    /// caller-supplied too and is refused in release like the rest;
+    /// checking it here rather than on the way in means it also refuses
+    /// before anything moves. Quadratic over a port list of a few entries,
+    /// on the editor's undo path.
+    fn assert_restorable(&self, entries: &[BindingEntry]) {
+        for (i, entry) in entries.iter().enumerate() {
+            assert!(
+                !self.bindings.contains_key(&entry.port),
+                "cannot attach over the binding on {:?}, created after detachment",
+                entry.port,
+            );
+            assert!(
+                !entries[..i]
+                    .iter()
+                    .any(|earlier| earlier.port == entry.port),
+                "detached record restores {:?} twice",
+                entry.port,
+            );
+        }
+    }
+
     /// Put severed bindings back, refusing to overwrite wiring authored after
     /// the detachment.
-    fn restore_bindings(&mut self, entries: impl IntoIterator<Item = BindingEntry>) {
+    ///
+    /// **Every port is checked before any is written.** Inserting first
+    /// meant the newer binding was already gone by the time the assert
+    /// fired, and the entries restored ahead of the conflicting one
+    /// stayed applied — an attach that "refused" had still destroyed the
+    /// wiring it was refusing to overwrite.
+    ///
+    /// Each caller pre-flights the *other* half of its record through
+    /// [`Self::assert_restorable`] before it shifts any slot; this call is
+    /// what covers the half whose ports only that shift vacates.
+    ///
+    /// Takes the `Vec` rather than an `IntoIterator` because the two
+    /// passes need it twice, and both call sites already own one.
+    fn restore_bindings(&mut self, entries: Vec<BindingEntry>) {
+        self.assert_restorable(&entries);
         for entry in entries {
-            let port = entry.port;
-            let previous = self.bindings.insert(port, entry.binding);
-            assert!(
-                previous.is_none(),
-                "cannot attach over the binding on {port:?}, created after detachment"
-            );
+            self.bindings.insert(entry.port, entry.binding);
         }
     }
 
