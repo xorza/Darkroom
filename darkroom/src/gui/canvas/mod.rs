@@ -198,8 +198,8 @@ impl GraphUI {
     /// `CanvasGeometry` from that stale cascade — the new connection floats
     /// to the old port. Committing pre-record makes `cascade_A` the
     /// resized layout, so Pass B anchors the curve correctly with no
-    /// extra frame. `CanvasGeometry` is rebuilt here (and reused by `frame`)
-    /// because the commit reads it. Navigation (tab/open) is handled
+    /// extra frame. `CanvasGeometry` is rebuilt here (and reused by
+    /// [`Self::draw`]) because the commit reads it. Navigation (tab/open) is handled
     /// separately, before this, so the target is already fixed here.
     ///
     /// Runs **once** for the whole scene. The viewport-dependent half —
@@ -566,7 +566,7 @@ enum CanvasGesture {
     Select,
     /// Ctrl+LMB-drag or RMB-drag → connection breaker. Carries the button
     /// that latched it, since the breaker polls that same button for
-    /// continuation/release (a Cmd+LMB breaker must keep reading Left).
+    /// continuation/release (a Ctrl+LMB breaker must keep reading Left).
     Breaker(PointerButton),
     /// RMB-click or LMB double-click on empty canvas (no drag) → new-node
     /// popup.

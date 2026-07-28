@@ -1,5 +1,5 @@
 //! Canvas viewport gesture: middle-drag pan, wheel/pinch zoom-about-
-//! cursor, and the zoom-factor math. Split out of `graph_ui` so the
+//! cursor, and the zoom-factor math. Split out of `canvas` so the
 //! orchestration there isn't tangled with the (independently testable)
 //! viewport algebra. The gesture emits `Intent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.

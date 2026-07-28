@@ -154,93 +154,6 @@ those owners document have no enforcement point.
       "the one definition of empty" but tests three of `NodeRunState`'s four
       payload fields** — `errors` is not considered.
 
-## Docs still describing the removed pinned-output feature
-
-Three separate subsystems document affordances that no longer exist. Cheap,
-zero code risk, and actively misleading as it stands.
-
-- [ ] **`widgets/support.rs` names a "pin-preview widget" five times** as the
-      second consumer of its shared chrome — `:50`, `:60`, `:73`, `:82`,
-      `:88`. Nothing but the node body uses any of them now.
-
-- [ ] **`theme.rs` does the same three times** — `floating_widget_gap`
-      (`:376`) says the pin-preview card anchors from the port circle,
-      `card_border_width` (`:726`) and `card_border` (`:738`) both say "node
-      bodies and pin-preview widgets".
-
-- [ ] **`scene.rs`'s `run_available` doc names the affordances it gates as
-      "the pin toggle and the pin-creation drag"** (`scene/mod.rs:695-696`);
-      it actually gates the play chip, the context-menu run, and "Add
-      preview". `scene/mod.rs:478` still explains itself by what a pin there
-      would deliver.
-
-- [ ] **`UiAction::OpenImageViewer` is documented as showing "this pinned
-      output's" image** (`gui/mod.rs:56`); it carries a `NodeId` and shows a
-      preview node's value.
-
-- [ ] **`BreakerUI::apply` documents a `SetOutputPinned { pinned: false }`
-      intent it drains** (`canvas/breaker.rs:262-263`); no such intent
-      exists.
-
-- [ ] **`inspector.rs` describes a runtime-value pipeline it no longer has** —
-      the module doc's "that on-demand fetch pipeline was removed pending a
-      redesign" (`:5-7`) sits beside `value_str`'s comment about "the
-      runtime-value line" (`:388-390`), a line the panel never draws.
-
-- [ ] **`image_viewer.rs` is documented in terms of ports throughout** — the
-      module doc's "pinned ports' runtime images, one editor tab per port"
-      (`:1-2`), the struct doc's "keyed by (and carrying) the `OutputPort` its
-      tab binds to" (`:51-53`), `ImageViewer::new`'s "empty viewer for `port`"
-      (`:89`), and the `"pinned output has no image value"` message
-      (`:171`). Everything is keyed by `NodeId`.
-
-- [ ] **Two sentences were left broken when the pin variant was removed.**
-      `canvas/drag_anchor.rs:45-46` reads "Every member moving with this drag
-      \n mixed — and its position at drag start"; `canvas/selection_ui.rs:17-18`
-      reads "intersecting nodes \n widgets highlight live".
-
-## Doc links and names that resolve to nothing
-
-- [ ] **`dock/mod.rs` links `image_viewer::port_label` three times**
-      (`:76`, `:387`, `:391`); the function is `node_label`.
-      `image_viewer.rs:268` names it the same wrong way, and
-      `image_viewer.rs:10` cites `Document::visible_viewer_outputs`, which is
-      `visible_viewer_nodes`.
-
-- [ ] **`widgets/badge.rs` links two non-existent items** — `Badge::control_drawn`
-      (`:93`) and `Self::show_go` (`:127`, the method is `GoBadge::show`) —
-      and `Badge::go` (`:122-129`) claims two callers ("a node header's play
-      chip and its refresh chip"); the refresh chip uses `Badge::control`.
-
-- [ ] **`canvas/drag_anchor.rs:37` links `NodeId::owner`, which does not
-      exist** (and `:230` names it again in a comment).
-
-- [ ] **Method and module names in docs no longer match the code.**
-      `canvas/mod.rs:201` and `canvas/geometry.rs:21` say `CanvasGeometry` is
-      "reused by `frame`"; the method is `GraphUI::draw`.
-      `canvas/pan_zoom/mod.rs:2` says it was "Split out of `graph_ui`"; that
-      module is now `canvas`.
-
-- [ ] **`theme.rs:88` calls the sink badge `T`**; the glyph is `■`
-      (`node/header.rs:156`).
-
-## Doc counts that contradict the code
-
-- [ ] **The breaker chord is documented as two different keys.** The code
-      checks `ui.modifiers().ctrl` (`canvas/mod.rs:600`), and
-      `canvas/mod.rs:567` documents it as Ctrl+LMB, while
-      `canvas/breaker.rs:111`, `canvas/breaker.rs:247` and
-      `canvas/selection_ui.rs:20` call the same chord Cmd+LMB.
-
-- [ ] **`breaker.rs` counts three things as four**, fallout from the removed
-      pin variant: "the four `mark_broken_*` siblings" / "each of the four
-      call sites" (`:56-58`), "The four `broken_*` collections" (`:98`),
-      "two of the four" (`:141`), and "all four `broken_*` collections"
-      (`:260`). There are three of each.
-
-- [ ] **`StepSignals`'s doc promises "a seventh signal is added in one place"**
-      (`app/editor/mod.rs:66`); the struct has three fields.
-
 ## Independent
 
 The only user-visible item is first; the rest are local and unordered.
@@ -326,5 +239,3 @@ The only user-visible item is first; the rest are local and unordered.
 
 - [ ] **`app/mod.rs:140` is a commented-out debug line**
       (`// ui.debug_overlay.damage_rect = true;`).
-</content>
-</invoke>

@@ -32,19 +32,18 @@ pub(crate) struct GroupDrag {
 /// and whose response drives it.
 #[derive(Debug)]
 struct Anchor {
-    /// The member the pointer grabbed. Names the drag in the emitted intent
+    /// The node the pointer grabbed. Names the drag in the emitted intent
     /// (so the edit layer knows which item the user is actually holding),
-    /// and its [`NodeId::owner`] is the node [`GroupDrag::advance`] checks
-    /// against the scene.
+    /// and it is the node [`GroupDrag::advance`] checks against the scene.
     grabbed: NodeId,
     /// The graph pane the drag latched on. Several are on screen, and the
     /// gesture outlives the frame that started it, so the target travels
     /// with the anchor rather than being re-derived from whatever pane the
     /// pointer has since wandered over.
     target: GraphRef,
-    /// Every member moving with this drag
-    /// mixed — and its position at drag start: the whole selection when the
-    /// grabbed member was already selected, else just the grabbed one.
+    /// Every node moving with this drag — and its position at drag start:
+    /// the whole selection when the grabbed node was already selected,
+    /// else just the grabbed one.
     start_positions: Vec<(NodeId, Vec2)>,
     /// The widget whose drag delta drives the gesture, captured at latch so
     /// later frames can `ui.response_for(widget_id)` without the caller
@@ -224,11 +223,9 @@ mod tests {
 
     #[test]
     fn advance_drops_a_stale_anchor_without_emitting() {
-        // Undo or a breaker swipe can delete the dragged item's node
-        // mid-gesture. The anchor has to let go: a `MoveSelection` naming a
-        // node that left the scene panics in `build_step`. The grabbed key
-        // here is a *pin*, so this also covers `NodeId::owner` reaching
-        // through to the node a pin hangs off.
+        // Undo or a breaker swipe can delete the dragged node mid-gesture.
+        // The anchor has to let go: a `MoveSelection` naming a node that
+        // left the scene panics in `build_step`.
         let mut arena = UiHarness::arena();
         let survivor = NodeId::unique();
         let scene = scene_with(arena.ui(), survivor);

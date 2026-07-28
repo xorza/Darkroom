@@ -53,7 +53,7 @@ pub(crate) enum UiAction {
     /// Create a fresh empty graph and open it in a new tab (the "+"
     /// chip at the end of the strip).
     NewGraph,
-    /// Show this pinned output's full runtime image in its viewer tab.
+    /// Show this preview node's full runtime image in its viewer tab.
     OpenImageViewer(NodeId),
     /// Move dock focus onto this pane, because a press landed inside it.
     /// The one navigation request that is *not* undoable — see

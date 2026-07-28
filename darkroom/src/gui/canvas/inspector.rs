@@ -2,9 +2,8 @@
 //! (identity, inputs, outputs, run status, log) toggled by the `i` chip
 //! in the node header.
 //!
-//! Input lines show the static binding; outputs show only their label —
-//! neither reads a runtime value (that on-demand fetch pipeline was
-//! removed pending a redesign).
+//! Input lines show the static binding; outputs show only their label.
+//! Neither reads a runtime value — a preview node is how you look at one.
 //!
 //! Panels are **not** palantir `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
@@ -208,9 +207,10 @@ impl Inspectors {
                 // The colored line is self-labeling; no section header.
                 let status_color =
                     exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                let status = status_text(ui, node.exec_status);
                 line(
                     ui,
-                    status_text(node.exec_status),
+                    status,
                     TextStyle {
                         color: status_color,
                         ..body_style(ui)
@@ -240,15 +240,8 @@ impl Inspectors {
                 if !inputs.is_empty() {
                     section(ui, theme, "Inputs");
                     for input in inputs {
-                        let val = value_str(&input.binding);
-                        port_row(
-                            ui,
-                            theme,
-                            rcx.library,
-                            &input.name,
-                            &input.ty,
-                            Some(val.as_str()),
-                        );
+                        let val = value_str(ui, &input.binding);
+                        port_row(ui, theme, rcx.library, &input.name, &input.ty, Some(val));
                     }
                 }
 
@@ -345,9 +338,9 @@ fn port_row(
     library: &Library,
     name: &InternedStr,
     ty: &DataType,
-    val: Option<&str>,
+    val: Option<TextInput<'static>>,
 ) {
-    let label = port_label_text(library, &name.borrow_str(), ty);
+    let label = port_label(library, name, ty);
     line(ui, label, muted_style(theme, ui));
     if let Some(v) = val {
         line(ui, v, body_style(ui));
@@ -357,13 +350,21 @@ fn port_row(
 /// The label tier of a port row. Skips the type when it repeats the port
 /// name (`Image · Image`, the dominant case; `Path · path` likewise) —
 /// otherwise `name · type`, so even a valueless port announces its type.
-fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
+///
+/// The dominant case hands back the scene's own handle, which is already
+/// in this pass's text arena — so the common port row costs no string at
+/// all. Only the differing case builds one, and it cannot be interned
+/// here: `borrow_str` holds a shared borrow of the arena that
+/// [`Ui::fmt`](palantir::Ui::fmt) would need mutably, and the two
+/// overlap for exactly as long as the format call.
+fn port_label(library: &Library, name: &InternedStr, ty: &DataType) -> TextInput<'static> {
     let ty_name = library.type_name(ty);
-    if ty_name.eq_ignore_ascii_case(name) {
-        name.to_owned()
-    } else {
-        format!("{name} \u{b7} {ty_name}")
+    let text = name.borrow_str();
+    if ty_name.eq_ignore_ascii_case(&text) {
+        drop(text);
+        return TextInput::Interned(name.clone());
     }
+    TextInput::Owned(format!("{text} \u{b7} {ty_name}"))
 }
 
 fn title_style(ui: &Ui) -> TextStyle {
@@ -381,25 +382,35 @@ fn body_style(ui: &Ui) -> TextStyle {
     sized_text(ui, 12.0)
 }
 
-fn value_str(b: &InputBindingView) -> String {
+/// The value tier of an input row.
+///
+/// The two fixed answers stay borrowed and the formatted one goes
+/// straight into the text arena, so an open panel builds no owned string
+/// per input per frame.
+fn value_str(ui: &mut Ui, b: &InputBindingView) -> TextInput<'static> {
     match b {
-        InputBindingView::None => "—".to_owned(),
-        InputBindingView::Bind => "linked".to_owned(),
-        // `StaticValue::Display` — the same formatter the runtime-value
-        // line gets via `DynamicValue::Display`, so a static binding and
-        // its fetched value can't render one float two ways.
-        InputBindingView::Const(v) => v.to_string(),
+        InputBindingView::None => TextInput::Borrowed("—"),
+        InputBindingView::Bind => TextInput::Borrowed("linked"),
+        // `StaticValue::Display` — the same formatter a preview node's
+        // value goes through via `DynamicValue::Display`, so a static
+        // binding and a live one can't render one float two ways.
+        InputBindingView::Const(v) => TextInput::Interned(ui.fmt(format_args!("{v}"))),
     }
 }
 
-fn status_text(status: ExecStatus) -> String {
+fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
     match status {
-        ExecStatus::None => "not run".to_owned(),
-        ExecStatus::Cached => "cached".to_owned(),
-        ExecStatus::Executed(secs) => format!("ran in {}", fmt_elapsed(secs)),
-        ExecStatus::Running(at) => format!("running… {}", fmt_elapsed(at.elapsed().as_secs_f64())),
-        ExecStatus::MissingInputs => "missing inputs".to_owned(),
-        ExecStatus::Errored => "errored".to_owned(),
+        ExecStatus::None => TextInput::Borrowed("not run"),
+        ExecStatus::Cached => TextInput::Borrowed("cached"),
+        ExecStatus::Executed(secs) => {
+            TextInput::Interned(ui.fmt(format_args!("ran in {}", fmt_elapsed(secs))))
+        }
+        ExecStatus::Running(at) => TextInput::Interned(ui.fmt(format_args!(
+            "running… {}",
+            fmt_elapsed(at.elapsed().as_secs_f64())
+        ))),
+        ExecStatus::MissingInputs => TextInput::Borrowed("missing inputs"),
+        ExecStatus::Errored => TextInput::Borrowed("errored"),
     }
 }
 
@@ -417,26 +428,52 @@ pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
 mod tests {
     use super::*;
 
+    /// The rendered text of a label, whichever form it came back in.
+    fn shown(input: &TextInput<'_>) -> String {
+        match input {
+            TextInput::Borrowed(text) => (*text).to_owned(),
+            TextInput::Owned(text) => text.clone(),
+            TextInput::Interned(text) => text.borrow_str().to_owned(),
+        }
+    }
+
     #[test]
-    fn port_label_text_dedups_type_repeating_the_name() {
+    fn port_label_dedups_the_type_and_reuses_the_scenes_own_handle() {
+        use palantir::internals::UiHarness;
         use scenarium::FsPathConfig;
         use std::sync::Arc;
+
         let lib = Library::default();
-        // Type repeats the name (case-insensitive) → the name alone, no
-        // "Image · Image" stutter; distinct type → "name · type".
-        assert_eq!(port_label_text(&lib, "Float", &DataType::Float), "Float");
-        assert_eq!(
-            port_label_text(&lib, "Brightness", &DataType::Float),
-            "Brightness \u{b7} float"
-        );
-        // A path port still announces its type when the name differs —
-        // the old formatter dropped it entirely for valueless path ports.
+        let mut arena = UiHarness::arena();
+        let ui = arena.ui();
         let path_ty = DataType::FsPath(Arc::new(FsPathConfig::default()));
-        assert_eq!(port_label_text(&lib, "Path", &path_ty), "Path");
-        assert_eq!(
-            port_label_text(&lib, "Output", &path_ty),
-            "Output \u{b7} path"
-        );
+
+        // Type repeats the name (case-insensitively) → the name alone, no
+        // "Image · Image" stutter; distinct type → "name · type". A path
+        // port still announces its type when the name differs — the old
+        // formatter dropped it entirely for valueless path ports.
+        let cases: [(&str, &DataType, &str); 4] = [
+            ("Float", &DataType::Float, "Float"),
+            ("Brightness", &DataType::Float, "Brightness \u{b7} float"),
+            ("Path", &path_ty, "Path"),
+            ("Output", &path_ty, "Output \u{b7} path"),
+        ];
+        for (name, ty, expected) in cases {
+            let interned = ui.intern(name);
+            let label = port_label(&lib, &interned, ty);
+            assert_eq!(shown(&label), expected, "label for {name}");
+            // The deduped case is the dominant one, and it must hand back
+            // the scene's existing handle rather than build a string: that
+            // is the whole reason an open panel costs no allocation per
+            // port row per frame. Only the differing case owns anything.
+            let deduped = expected == name;
+            assert_eq!(
+                matches!(label, TextInput::Interned(_)),
+                deduped,
+                "{name}: a deduped label reuses the interned handle, a \
+                 combined one does not",
+            );
+        }
     }
 
     #[test]

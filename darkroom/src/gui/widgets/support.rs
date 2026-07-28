@@ -46,9 +46,8 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
 /// A muted micro-label immediately followed by its mono-styled value, as two
 /// direct `Text` widgets (no wrapping panel — draw it inside the caller's
 /// own panel so its `gap` spaces the pair like any other sibling). Shared
-/// shape behind a node body's memory footer
-/// ([`crate::gui::node::memory_row::meter`]) and the pin-preview widget's
-/// image-info facts.
+/// shape behind a node body's memory footer (`gui::node::memory_row`) and a
+/// preview node's image-info footer (`gui::node::preview_row`).
 pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: String) {
     Text::new(label).style(&muted_text(ui, theme, 8.5)).show(ui);
     Text::new(value).style(&mono_text(ui, 10.5)).show(ui);
@@ -57,7 +56,7 @@ pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: Stri
 /// A read-only "fact strip" footer's background: the chrome fill, rounded
 /// on only its bottom two corners so it seats under whatever rounds the
 /// top (a header bar, or the card's own top edge). Shared by a node body's
-/// memory footer and the pin-preview widget's image-info footer.
+/// memory footer and a preview node's image-info footer.
 pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background {
     Background::rounded(
         theme.colors.chrome_fill,
@@ -69,8 +68,8 @@ pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background
 /// two corners so it seats inside the card's own outer stroke — `corner_radius`
 /// should be [`Theme::card_inner_radius`](crate::gui::theme::Theme::card_inner_radius),
 /// not the card's outer radius, else the band's corner leaves a wedge of the
-/// card's plain fill showing through. Shared by a node body's header and the
-/// pin-preview widget's title bar.
+/// card's plain fill showing through. Used by a node body's header — the one
+/// title bar in the tree, kept here beside its footer peer.
 pub(crate) fn header_background(theme: &Theme, corner_radius: f32) -> Background {
     Background::rounded(
         theme.colors.header_fill,
@@ -78,14 +77,14 @@ pub(crate) fn header_background(theme: &Theme, corner_radius: f32) -> Background
     )
 }
 
-/// Horizontal/vertical padding of a card's header band — shared by a node
-/// body's header and the pin-preview widget's title bar so the two read as
-/// the same strip at a different width, not two independently-tuned bars.
+/// Horizontal/vertical padding of a card's header band, named beside the
+/// footer pair below so a header and a footer on the same card can't be
+/// tuned apart by accident.
 pub(crate) const CARD_HEADER_PAD_X: f32 = 8.0;
 pub(crate) const CARD_HEADER_PAD_Y: f32 = 7.0;
 
 /// Horizontal/vertical padding of a card's fact-strip footer — shared by a
-/// node body's memory footer and the pin-preview widget's image-info footer.
+/// node body's memory footer and a preview node's image-info footer.
 pub(crate) const CARD_FOOTER_PAD_X: f32 = 10.0;
 pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
 

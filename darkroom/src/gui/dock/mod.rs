@@ -73,7 +73,7 @@ fn drag_ghost_wid() -> WidgetId {
 /// What the render walk needs from outside the layout: the document, plus
 /// this frame's viewer-tab labels resolved once by the caller.
 ///
-/// `image_viewer::port_label` runs a recursive whole-document node search
+/// [`image_viewer::node_label`] runs a recursive whole-document node search
 /// and allocates a `String`, and a visible viewer tab is labelled twice a
 /// frame — once for its strip chip, once for its pane header — so resolving
 /// it at each call site repeated that walk. Carried alongside `doc` rather
@@ -384,11 +384,11 @@ fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabe
 }
 
 /// Per-frame label for a strip chip. Viewer tabs read the caller's
-/// resolved map instead of re-running [`image_viewer::port_label`]'s
+/// resolved map instead of re-running [`image_viewer::node_label`]'s
 /// recursive node search; every other kind is cheap and formats inline.
 fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
     match tab {
-        // A hit skips `port_label`'s recursive search; a miss falls through
+        // A hit skips `node_label`'s recursive search; a miss falls through
         // to it rather than to a placeholder, so the cache can only make the
         // label cheaper, never different.
         TabRef::ImageViewer(node_id) => match cx.viewer_labels.get(&node_id) {

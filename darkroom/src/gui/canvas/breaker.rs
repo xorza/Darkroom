@@ -53,9 +53,9 @@ impl BreakerProbe<'_> {
 
     /// Record `addr`'s input binding as targeted by the breaker this frame.
     /// Call only after a `crosses_*` check returned true for it — asserts a
-    /// gesture is live, so the four `mark_broken_*` siblings are the one
+    /// gesture is live, so the three `mark_broken_*` siblings are the one
     /// place that invariant is spelled out, instead of a copy-pasted
-    /// `unwrap` at each of the four call sites.
+    /// `unwrap` at each of the three call sites.
     pub(super) fn mark_broken_input(&mut self, addr: InputPort) {
         self.live_state().broken.push(addr);
     }
@@ -95,10 +95,10 @@ const BEZIER_SAMPLES: usize = 16;
 /// the points verbatim and intersection tests share the same frame
 /// as the cubic bezier endpoints.
 ///
-/// The four `broken_*` collections below are each filled by one render
+/// The three `broken_*` collections below are each filled by one render
 /// pass's hit-test (via `BreakerProbe::mark_broken_*`) and drained by
 /// `BreakerUI::apply` on release into the matching severing `Intent`. All
-/// four are cleared together at the start of every frame's probing
+/// three are cleared together at the start of every frame's probing
 /// (`begin_frame`, called from `BreakerUI::probe`) rather than each
 /// renderer clearing its own — every render pass visits its own targets at
 /// most once per frame, so within-frame duplicates aren't possible either
@@ -108,7 +108,7 @@ pub(super) struct BreakerState {
     points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
-    /// check polls `drag_delta_by(button)`, so a Cmd+LMB-launched
+    /// check polls `drag_delta_by(button)`, so a Ctrl+LMB-launched
     /// breaker must keep reading the Left button, not Right.
     button: PointerButton,
     /// Target input ports whose data binding the breaker intersects this
@@ -138,7 +138,7 @@ impl BreakerState {
     /// The single point where this happens — called once from
     /// [`BreakerUI::probe`] — rather than each renderer clearing its own
     /// field, which is easy to forget (and had been forgotten for two of
-    /// the four).
+    /// the three).
     fn begin_frame(&mut self) {
         self.broken.clear();
         self.broken_nodes.clear();
@@ -244,7 +244,7 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
     (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
 }
 
-/// Owns the active connection-breaker gesture (RMB / Cmd+LMB drag on
+/// Owns the active connection-breaker gesture (RMB / Ctrl+LMB drag on
 /// the outer canvas). The state is `Option<BreakerState>` rather than
 /// flat fields so the absence of a gesture is one variant and the
 /// gesture can be cancelled by a single assignment. Hands out a
@@ -257,10 +257,10 @@ pub(super) struct BreakerUI {
 
 impl BreakerUI {
     /// Drive the gesture from the outer canvas response: start, extend,
-    /// release. On release, drains all four `broken_*` collections into
+    /// release. On release, drains all three `broken_*` collections into
     /// their matching severing `Intent` (`RemoveNode`, `SetInput { to: None
-    /// }`, `SetSubscription { subscribe: false }`, `SetOutputPinned {
-    /// pinned: false }`). `RemoveNode` supersedes any per-edge severing on
+    /// }`, `SetSubscription { subscribe: false }`).
+    /// `RemoveNode` supersedes any per-edge severing on
     /// the same target — the undo step already detaches every incoming
     /// edge and pin, so emitting both would log a redundant history entry.
     /// `cancelled` — the frame's Esc, resolved once by the canvas —

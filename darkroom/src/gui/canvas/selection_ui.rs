@@ -14,10 +14,10 @@ use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; intersecting nodes
-/// widgets highlight live as it moves and the set is committed on
+/// sweeps a rectangle; intersecting nodes highlight live as it moves and
+/// the set is committed on
 /// release. Holding Shift at drag-start *extends* the current selection
-/// instead of replacing it. Cmd+LMB is the breaker and RMB opens the
+/// instead of replacing it. Ctrl+LMB is the breaker and RMB opens the
 /// new-node menu / breaker, so this only claims unmodified left-drags
 /// that fall through to the bare canvas (node bodies hit-test first, so
 /// a drag that starts on a node never reaches here).
