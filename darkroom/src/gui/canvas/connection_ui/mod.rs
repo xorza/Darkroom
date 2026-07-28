@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{CurveBrush, PointerButton, PointerEvent, PointerWake, Ui};
+use palantir::{CurveBrush, InternedStr, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
 
@@ -507,7 +507,12 @@ fn commit_connection(graph: GraphScene<'_>, start: PortRef, end: PortRef, out: &
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
-        _ => return, // unreachable — scan_snap_target enforces opposite kinds
+        // Both entries into a commit snap through `scan_snap_target`, which
+        // only ever offers `start.kind.opposite()`. A same-kind pair means
+        // that invariant broke upstream — not that the user did something
+        // odd — and silently dropping it would hide the break behind a wire
+        // that just doesn't land.
+        (a, b) => unreachable!("a wire committed a {a:?} → {b:?} pair"),
     };
     let target = graph.target();
     out.extend(target, add_boundary_port_intent(graph, output, input));
@@ -538,40 +543,76 @@ fn add_boundary_port_intent(
     }
     // A boundary node mirrors the interface: the `GraphInput` node's
     // *output* column is the graph's `Input` side and vice versa.
-    let (count, side, prefix) = match port.kind {
-        PortKind::Output => (
-            graph.outputs(node.outputs).len(),
-            BoundarySide::Input,
-            "input",
-        ),
-        PortKind::Input => (
-            graph.inputs(node.inputs).len(),
-            BoundarySide::Output,
-            "output",
-        ),
+    let (side, prefix) = match port.kind {
+        PortKind::Output => (BoundarySide::Input, "input"),
+        PortKind::Input => (BoundarySide::Output, "output"),
     };
-    if port.port_idx + 1 != count {
-        return None; // an existing interface port, not the trailing placeholder
-    }
-    let taken: Vec<String> = match port.kind {
-        PortKind::Output => graph.outputs(node.outputs)[..port.port_idx]
-            .iter()
-            .map(|output| String::from(&*output.name.borrow_str()))
-            .collect(),
-        PortKind::Input => graph.inputs(node.inputs)[..port.port_idx]
-            .iter()
-            .map(|input| String::from(&*input.name.borrow_str()))
-            .collect(),
-    };
-    let name = (0..)
-        .map(|n| format!("{prefix}{n}"))
-        .find(|candidate| !taken.contains(candidate))
-        .unwrap();
+    // The two columns hold different row types, so each kind reads its own —
+    // but reads it once, and both hand back the same answer.
+    let taken = match port.kind {
+        PortKind::Output => taken_suffixes(
+            graph.outputs(node.outputs).iter().map(|o| &o.name),
+            port.port_idx,
+            prefix,
+        ),
+        PortKind::Input => taken_suffixes(
+            graph.inputs(node.inputs).iter().map(|i| &i.name),
+            port.port_idx,
+            prefix,
+        ),
+    }?;
     Some(Intent::AddBoundaryPort {
         side,
-        name,
+        name: fresh_port_name(prefix, taken),
         data_type: port_data_type(graph, opposite).unwrap_or_default(),
     })
+}
+
+/// The `{prefix}{n}` numbers the ports *before* `idx` already use, or `None`
+/// when `idx` isn't the column's trailing "+" placeholder.
+///
+/// Takes the names rather than the rows because a boundary node's two columns
+/// hold different row types and this is the only thing either is asked for.
+/// A name that isn't the prefix followed by a decimal number can't collide
+/// with a generated one, so it contributes nothing and is dropped here.
+fn taken_suffixes<'a>(
+    names: impl ExactSizeIterator<Item = &'a InternedStr>,
+    idx: usize,
+    prefix: &str,
+) -> Option<Vec<usize>> {
+    if idx + 1 != names.len() {
+        return None; // an existing interface port, not the trailing placeholder
+    }
+    Some(
+        names
+            .take(idx)
+            .filter_map(|name| {
+                let text = name.borrow_str();
+                text.strip_prefix(prefix)?.parse().ok()
+            })
+            .collect(),
+    )
+}
+
+/// The lowest free `{prefix}{n}` over the already-`taken` suffixes.
+///
+/// Resolved on the numbers alone: a generated name collides only with the
+/// prefix followed by a number, so sorting the taken ones and walking to the
+/// first gap answers it without building a candidate `String` per probe or
+/// comparing a single pair of strings. Duplicates in `taken` are tolerated —
+/// the walk steps past a repeat rather than counting it twice.
+fn fresh_port_name(prefix: &str, mut taken: Vec<usize>) -> String {
+    taken.sort_unstable();
+    let mut free = 0;
+    for n in taken {
+        if n > free {
+            break; // the run of used numbers ends before `free`
+        }
+        if n == free {
+            free += 1;
+        }
+    }
+    format!("{prefix}{free}")
 }
 
 #[cfg(test)]
