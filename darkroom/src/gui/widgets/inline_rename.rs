@@ -8,8 +8,8 @@
 //! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
 use palantir::{
-    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Spacing,
-    Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
+    Align, Configure, HAlign, InternedStr, Justify, Panel, Sense, Sizing, Spacing, Text, TextEdit,
+    TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::theme::InlineRenameTheme;
@@ -194,25 +194,32 @@ impl<'a> InlineRename<'a> {
 
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).edit.text);
         let edit_style = edit_style(theme, style);
-        TextEdit::new(&mut draft)
-            .id(id)
-            .style(&edit_style)
-            .max_chars(max_chars)
-            .size((Sizing::HUG, Sizing::HUG))
-            .min_size((MIN_EDIT_WIDTH, line_h))
-            .text_align(text_align)
-            .show(ui);
+        // Both signals come off the editor, not off `ui`. A focused
+        // `TextEdit` declares a `TEXT_FIELD` scope, which takes Enter
+        // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
+        // them here would see nothing, and the widget that consumed them
+        // is the one that can report them anyway.
+        let (submitted, cancelled) = {
+            let edit = TextEdit::new(&mut draft)
+                .id(id)
+                .style(&edit_style)
+                .max_chars(max_chars)
+                .size((Sizing::HUG, Sizing::HUG))
+                .min_size((MIN_EDIT_WIDTH, line_h))
+                .text_align(text_align)
+                .show(ui);
+            (edit.submitted, edit.cancelled)
+        };
         let focused = ui.focused_id() == Some(id);
-        let escape = ui.escape_pressed();
-        let enter = ui.key_pressed(Shortcut::key(Key::Enter));
         let commit = {
             let st = ui.state_mut::<RenameState>(id);
             st.edit.text = draft.clone();
             let blurred = st.edit.blur_edge(focused);
-            // Commit on Enter or on blur; Esc wins as a cancel.
-            !escape && (enter || blurred)
+            // Commit on Enter or on blur; Esc wins as a cancel. Escape
+            // blurs too, so `cancelled` has to be tested first.
+            !cancelled && (submitted || blurred)
         };
-        if !(commit || escape) {
+        if !(commit || cancelled) {
             return RenameEvent {
                 clicked: false,
                 committed: None,

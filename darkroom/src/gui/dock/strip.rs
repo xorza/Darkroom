@@ -106,7 +106,7 @@ fn tab_menu_wid(tab: TabRef) -> WidgetId {
 /// Stable id for the rename editor on a graph tab, keyed on the graph
 /// id like every other chip widget. A click landing on the label is
 /// captured there, so the scan polls this id alongside the outer chip's.
-pub(super) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
+pub(crate) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
 

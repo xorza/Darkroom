@@ -245,7 +245,8 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
         .size((Sizing::FILL, Sizing::FILL))
         // Focusable so a press anywhere in the pane that misses every inner
         // focusable lands here — what [`scan_focus`] reads to move dock
-        // focus. Never a keyboard target in its own right.
+        // focus. Never a keyboard target in its own right: keys route by
+        // input scope, and a pane declares none.
         .focusable(true)
         .show(ui, |ui| {
             strip::show(ui, cx.theme, group, &labels, out);
@@ -284,24 +285,6 @@ fn scan_focus(ui: &Ui, doc: &Document, actions: &mut Vec<UiAction>) {
     {
         actions.push(UiAction::FocusPane(group.id));
     }
-}
-
-/// Whether keyboard focus sits on a widget that owns typing — anything
-/// focused that isn't one of the pane containers.
-///
-/// Panes are focusable so [`scan_focus`] can route dock focus, which leaves
-/// [`Ui::focused_id`] `Some` nearly always. A keyboard chord that must stand
-/// down for a text field (undo, Delete) asks this instead of `focused_id()`,
-/// which would otherwise read as "a field is being edited" whenever any pane
-/// is focused — i.e. always.
-///
-/// Reads "not a pane ⇒ typing" because the pane container is darkroom's only
-/// non-text `focusable`. Marking some other widget focusable without teaching
-/// this predicate about it would silently disable those chords while it holds
-/// focus.
-pub(crate) fn typing_focus_held(ui: &Ui, doc: &Document) -> bool {
-    ui.focused_id()
-        .is_some_and(|id| !doc.layout.groups().any(|g| pane_wid(g.id) == id))
 }
 
 /// The drop the pointer currently indicates: the pane whose rect
@@ -569,7 +552,7 @@ mod tests {
                 dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
                 let mut actions = Vec::new();
                 dock.scan(ui, doc, &mut actions);
-                (actions, typing_focus_held(ui, doc))
+                actions
             })
         };
 
@@ -579,17 +562,12 @@ mod tests {
         // pane senses nothing (it is focusable only), so there is no pointer
         // target at its center to aim at.
         h.press_at(h.center_of(pane_wid(primary)));
-        let (actions, typing) = scanned(&mut h, &mut dock, &doc);
+        let actions = scanned(&mut h, &mut dock, &doc);
         assert_eq!(
             actions,
             vec![UiAction::FocusPane(primary)],
             "the press resolves to exactly one focus request, on the pane it \
              landed in"
-        );
-        assert!(
-            !typing,
-            "a focused pane is not a text field — the Delete/undo chords \
-             must stay live"
         );
 
         // Apply it, as `apply_view_actions` would, and the same press now
@@ -598,7 +576,7 @@ mod tests {
         doc.layout.focus(primary);
         assert_eq!(doc.layout.focused, primary);
         h.press_at(h.center_of(pane_wid(primary)));
-        let (actions, _) = scanned(&mut h, &mut dock, &doc);
+        let actions = scanned(&mut h, &mut dock, &doc);
         assert!(
             actions.is_empty(),
             "a press in the already-focused pane changes nothing: {actions:?}"
