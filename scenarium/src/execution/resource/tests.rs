@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
+use hashbrown::HashSet;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::{Digest, DigestHasher};
@@ -10,7 +11,9 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
-use crate::execution::resource::{FileId, FsPathId, RunResourceStamps, epoch_offset_ns};
+use crate::execution::resource::{
+    FileId, FsPathId, RunResourceStamps, Stamp, epoch_offset_ns, resolve_paths,
+};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 
@@ -36,8 +39,14 @@ impl Drop for TempDir {
     }
 }
 
+fn stamp(path: &str) -> std::io::Result<Stamp> {
+    FsPathId::collect(path, &CancelToken::never())
+}
+
 fn fingerprint(path: &str) -> Digest {
-    let identity = FsPathId::collect(path, &CancelToken::never()).unwrap();
+    let Ok(Stamp::Known(identity)) = stamp(path) else {
+        panic!("{path} has no determinate identity");
+    };
     let mut hasher = DigestHasher::new();
     identity.hash(&mut hasher);
     hasher.finish()
@@ -53,13 +62,36 @@ fn directory_identity_tracks_entry_changes() {
         use std::fs::Permissions;
         use std::os::unix::fs::PermissionsExt;
 
+        // A directory that will not list has no identity to stamp, and is
+        // deliberately *not* handed one: a marker value would be perfectly
+        // stable, so the node would go on reusing a cached result while
+        // the contents it cannot see changed underneath it.
         let empty = fingerprint(&path);
         let permissions = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(&dir.0, permissions(0o000)).unwrap();
-        let unreadable = fingerprint(&path);
+        let unreadable = stamp(&path);
+        let resolved = resolve_paths(HashSet::from([path.clone()]), &CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
-        assert_ne!(unreadable, empty);
-        assert_eq!(fingerprint(&path), empty);
+
+        assert!(
+            unreadable.is_err(),
+            "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
+        );
+        // The consequence that matters: nothing lands in the map, so the
+        // fold declines and `node_digest` comes out `None` — the node
+        // recomputes rather than reusing a result keyed on a guess.
+        assert!(resolved.is_empty(), "an unknown path is left unstamped");
+        let stamps = RunResourceStamps { fs_paths: resolved };
+        assert_eq!(
+            stamps.hash_fs_paths(&mut DigestHasher::new(), std::slice::from_ref(&path)),
+            None,
+            "an unstamped path must refuse to produce a digest",
+        );
+        assert_eq!(
+            fingerprint(&path),
+            empty,
+            "and it stamps again once readable"
+        );
     }
 
     std::fs::write(dir.0.join("a.fits"), b"one").unwrap();
@@ -137,12 +169,13 @@ fn directory_identity_separates_non_utf8_names() {
 }
 
 /// `duration_since(UNIX_EPOCH).ok().unwrap_or(0)` mapped *every* mtime
-/// before 1970 onto the same `0` as the epoch itself — and handed the
-/// same `0` to a metadata read that simply failed. Three distinct
-/// states, one value, so files differing only in those ways shared a
-/// pure node's cache key.
+/// before 1970 onto the same `0` as the epoch itself, so two files
+/// differing only in when they were modified shared a pure node's cache
+/// key. (The third state it folded into that same `0` — a metadata read
+/// that simply failed — is no longer a value at all; an unstampable file
+/// is left out of the map entirely.)
 #[test]
-fn file_identity_separates_pre_epoch_and_absent_mtimes() {
+fn file_identity_separates_pre_epoch_mtimes() {
     use std::time::{Duration, UNIX_EPOCH};
 
     // The conversion: signed, so before and after the epoch are ordered
@@ -164,23 +197,16 @@ fn file_identity_separates_pre_epoch_and_absent_mtimes() {
 
     // …and that the identities built from them stay apart. Same length
     // throughout, so mtime is the only field in play.
-    let stamp = |mtime_ns| {
+    let digest_of = |mtime_ns| {
         let mut hasher = DigestHasher::new();
         FsPathId::File(FileId { len: 4, mtime_ns }).hash(&mut hasher);
         hasher.finish()
     };
-    let one_sec_before = stamp(Some(-1_000_000_000));
-    let two_sec_before = stamp(Some(-2_000_000_000));
-    let at_epoch = stamp(Some(0));
-    let one_sec_after = stamp(Some(1_000_000_000));
-    let absent = stamp(None);
-
     let all = [
-        ("1s before epoch", one_sec_before),
-        ("2s before epoch", two_sec_before),
-        ("epoch", at_epoch),
-        ("1s after epoch", one_sec_after),
-        ("no mtime", absent),
+        ("1s before epoch", digest_of(-1_000_000_000)),
+        ("2s before epoch", digest_of(-2_000_000_000)),
+        ("epoch", digest_of(0)),
+        ("1s after epoch", digest_of(1_000_000_000)),
     ];
     for (i, (left_name, left)) in all.iter().enumerate() {
         for (right_name, right) in &all[i + 1..] {
