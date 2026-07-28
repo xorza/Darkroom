@@ -10,6 +10,8 @@ use crate::core::document::{GraphRef, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::app::AppContext;
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::inspector::{inspect_badge_wid, inspect_panel_wid};
 use crate::gui::graph_toolbar;
@@ -125,9 +127,14 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     let mut intents = Intents::default();
     let mut harness = UiHarness::new(UVec2::new(1600, 900));
 
-    // Returns what the frame queued, so the target assertions below read the
-    // same sink the real pipeline drains.
-    let mut draw = |ui: &mut Ui| -> Vec<Queued> {
+    // Returns what the frame queued *and* the command it surfaced, so the
+    // assertions below read the same two channels the real pipeline drains.
+    let mut draw = |ui: &mut Ui| -> FrameOut {
+        // Navigation phase: sweep last frame's node responses before the
+        // rebuild replaces the projection they were recorded from — the
+        // order `Editor::frame` runs, and the one every reader below
+        // depends on.
+        graph_ui.hits.scan(ui, &scene);
         scene.rebuild(
             ui,
             &library,
@@ -148,6 +155,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
         graph_ui.prepass(ui, &scene, &Library::default(), &mut intents);
         // Mirrors `main_window`'s per-pane content closure: each pane's
         // subtree under its own `("graph_overlay", target)` parent.
+        let mut command = None;
         Panel::hstack()
             .id_salt("panes")
             .size((Sizing::FILL, Sizing::FILL))
@@ -158,12 +166,18 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
                         .id_salt(("graph_overlay", target))
                         .size((Sizing::FILL, Sizing::FILL))
                         .show(ui, |ui| {
-                            graph_ui.draw(ui, &ctx, graph, &mut intents);
+                            command =
+                                command
+                                    .take()
+                                    .or(graph_ui.draw(ui, &ctx, graph, &mut intents));
                             graph_toolbar::show(ui, &ctx, graph, &graph_ui.geometry, &mut intents);
                         });
                 }
             });
-        intents.drain().collect()
+        FrameOut {
+            queued: intents.drain().collect(),
+            command,
+        }
     };
 
     // Two frames: the first fills `CanvasGeometry` and the response cache
@@ -174,6 +188,25 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
         harness.frame_value(&mut draw);
         seen_collisions.extend(harness.collisions());
     }
+
+    // The chip scans behind `emit_chip_command` read one swept hit and then
+    // look for the node wearing it. Both halves need checking: the click has
+    // to reach the one node whose play chip took it — out of four on screen,
+    // in the pane that offers the chip at all — and an otherwise identical
+    // frame with no click has to surface nothing. Before the inspector opens,
+    // since its panel would sit over the neighbouring node's header.
+    harness.click_on(node_wid("play_badge", downstream));
+    let ran = harness.frame_value(&mut draw);
+    seen_collisions.extend(harness.collisions());
+    assert!(
+        matches!(ran.command, Some(AppCommand::Run(RunCommand::Node(id))) if id == downstream),
+        "the play chip runs the node it sits on: {:?}",
+        ran.command
+    );
+    assert!(
+        harness.frame_value(&mut draw).command.is_none(),
+        "a frame with no click surfaces no command"
+    );
 
     // Open an inspector and draw again. `Inspectors::modes` is a
     // document-wide `NodeId` map that *every* pane iterates, so the panel
@@ -205,7 +238,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     // has to come off `SceneNode::owner` — the widget has no other way to
     // know which of the two graphs it is drawing.
     harness.click_on(node_wid("ram_badge", def_func));
-    let emitted = harness.frame_value(&mut draw);
+    let emitted = harness.frame_value(&mut draw).queued;
     let intents = scoped_intents(&emitted, local);
     assert!(
         matches!(
@@ -229,7 +262,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     harness.click_on(port_circle_wid(port));
     harness.frame_value(&mut draw);
     harness.click_on(port_circle_wid(port));
-    let emitted = harness.frame_value(&mut draw);
+    let emitted = harness.frame_value(&mut draw).queued;
     let intents = scoped_intents(&emitted, local);
     assert!(
         matches!(
@@ -238,6 +271,28 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
         ),
         "the double-click must clear the binding of the port it landed on: {intents:?}"
     );
+
+    // The chip scans behind `emit_chip_command` open on a gate — the widget
+    // holding the left button's click — and only then look for the node
+    // wearing it. Both halves need checking: the click has to reach the one
+    // node whose play chip took it (out of four on screen, in the pane that
+    // offers the chip at all), and an otherwise identical frame with no
+    // click has to surface nothing.
+    // Every click above landed on a chip or a port, and a widget that
+    // captures its own press is not an action *outside* the panel — so the
+    // transient inspector opened back at the top is still open.
+    assert!(
+        harness.rect(inspect_panel_wid(upstream)).is_some(),
+        "a chip or port click must not dismiss an unpinned inspection panel"
+    );
+}
+
+/// The two channels one canvas frame writes to: the intent queue and the
+/// single `AppCommand` the pane claims.
+#[derive(Debug)]
+struct FrameOut {
+    queued: Vec<Queued>,
+    command: Option<AppCommand>,
 }
 
 /// A node scrolled off-screen keeps resolvable port centers — and loses them
@@ -673,6 +728,9 @@ fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() 
             process_memory: 0,
         };
         let mut intents = Intents::default();
+        // Navigation phase first — see the two-pane test for why the sweep
+        // reads the pre-rebuild scene.
+        graph_ui.hits.scan(ui, scene);
         scene.rebuild(
             ui,
             &library,
@@ -724,6 +782,107 @@ fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() 
             [Intent::SetSelection { to }] if to.len() == 1 && to.contains(&func),
         ),
         "the right-click selects exactly the node it opened on: {intents:?}"
+    );
+}
+
+/// A drag on a node body moves that node, by the pointer's travel.
+///
+/// The drag *latch* is the one thing `CanvasHits` resolves for the record
+/// rather than for an input pass: `NodeUI::draw_one` no longer polls the
+/// node's own handles, it reads the handle the sweep found. So this drives
+/// a real press-and-travel through the harness — nothing else in the suite
+/// latches a body drag, and a latch that silently stopped firing would
+/// leave every node unmovable with the whole rest of the canvas green.
+#[test]
+fn a_body_drag_moves_the_node_by_the_pointers_travel() {
+    let library = one_func_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+
+    let mut root = Graph::default();
+    let dragged = root.add_func_node(&probe);
+    let bystander = root.add_func_node(&probe);
+    let mut view = GraphView::for_graph(&root);
+    spread(&mut view);
+    let start = view.item_placements[&dragged];
+
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut harness = UiHarness::new(UVec2::new(1200, 800));
+    let mut graph_ui = GraphUI::default();
+    let mut scene = Scene::default();
+
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+        let ctx = AppContext {
+            theme: &theme,
+            library: &library,
+            run_state: &run_state,
+            status_error: None,
+            process_memory: 0,
+        };
+        let mut intents = Intents::default();
+        graph_ui.hits.scan(ui, scene);
+        scene.rebuild(
+            ui,
+            &library,
+            &run_state,
+            [GraphProjection {
+                target: GraphRef::Main,
+                source: SceneSource::Entry(&root),
+                view: &view,
+            }],
+        );
+        graph_ui.prepass(ui, scene, &library, &mut intents);
+        let graph = scene.graph(GraphRef::Main).expect("projected");
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, &ctx, graph, &mut intents);
+            });
+        intents.drain().collect::<Vec<_>>()
+    };
+
+    for _ in 0..2 {
+        harness.frame(|ui| {
+            draw(ui, &mut graph_ui, &mut scene);
+        });
+    }
+
+    // Press the body, then travel past the drag threshold. The sweep sees
+    // the latch on the frame after the travel; the record consumes it.
+    let grab = harness.center_of(node_widget_id(dragged));
+    harness.press_at(grab);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+    let travel = Vec2::new(37.0, -21.0);
+    harness.drag_to(grab + travel);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene);
+    });
+
+    // Next frame, `NodeUI::prepass` advances the anchor the record latched.
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let intents = scoped_intents(&emitted, GraphRef::Main);
+    let moves = intents
+        .iter()
+        .find_map(|intent| match intent {
+            Intent::MoveSelection { grabbed, moves } => Some((*grabbed, moves)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));
+    assert_eq!(moves.0, dragged, "the grabbed node is the one pressed");
+    // Target = press-frame position + cumulative travel, so the node lands
+    // exactly where the pointer took it — and the untouched node stays out
+    // of the batch, since the grab selected only the node under it.
+    assert_eq!(
+        moves.1.as_slice(),
+        &[(dragged, start + travel)],
+        "the drag moves only the grabbed node, to its start plus the travel"
+    );
+    assert!(
+        !moves.1.iter().any(|(id, _)| *id == bystander),
+        "an unselected neighbour is not dragged along"
     );
 }
 

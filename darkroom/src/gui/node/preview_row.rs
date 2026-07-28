@@ -15,11 +15,10 @@ use palantir::{
 };
 use scenarium::NodeId;
 
-use crate::gui::UiAction;
 use crate::gui::format::fmt_bytes;
 use crate::gui::node::RecordCtx;
 use crate::gui::preview_store::{PreviewImage, StoredContent};
-use crate::gui::scene::{Scene, SceneNode};
+use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value, mono_text, sized_text,
@@ -43,18 +42,8 @@ const EMPTY_LABEL: &str = "No value yet";
 
 /// Stable id for a preview's value area. Reconstructible from the node, so the
 /// canvas-level scan can read last frame's click without a cache.
-fn preview_image_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.preview_image", node_id))
-}
-
-/// Surface a click on a preview card's image as a viewer-open request. Only an
-/// image area senses at all, so a text value can't open an image viewer.
-pub(crate) fn emit_preview_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
-    for node in scene.nodes.values().filter(|n| n.preview) {
-        if ui.response_for(preview_image_wid(node.id)).left.clicked() {
-            actions.push(UiAction::OpenImageViewer(node.id));
-        }
-    }
 }
 
 /// Draw one preview node's value area, plus the image info footer when there is

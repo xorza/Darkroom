@@ -6,6 +6,7 @@ pub(crate) mod cull;
 pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
 mod graph_menu;
+pub(crate) mod hits;
 pub(crate) mod inspector;
 mod new_node_ui;
 pub(crate) mod node_menu;
@@ -37,6 +38,7 @@ use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::graph_menu::GraphMenuUi;
+use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
@@ -45,9 +47,7 @@ use crate::gui::canvas::preview_drag::PreviewDrag;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
-use crate::gui::node::prepass::{
-    emit_cache_evictions, emit_path_picks, emit_play_clicks, emit_port_dblclicks,
-};
+use crate::gui::node::prepass::{emit_path_picks, emit_port_dblclicks};
 use crate::gui::node::{NodeUI, RecordCtx};
 use crate::gui::scene::{GraphScene, Scene};
 
@@ -87,6 +87,17 @@ use crate::gui::scene::{GraphScene, Scene};
 pub(crate) struct GraphUI {
     background: CanvasBackground,
     pub(crate) geometry: CanvasGeometry,
+    /// Last frame's node interactions, swept once at the top of the frame
+    /// and read by every pass below instead of each re-polling the same
+    /// widget ids. Persistent for ownership only — [`CanvasHits::scan`]
+    /// rewrites it whole.
+    ///
+    /// Swept by `MainWindow::scan_navigation`, *before* the scene is
+    /// rebuilt, because the graph-open chip it collects has to resolve
+    /// before the tab set settles — so it holds ids from last frame's
+    /// projection, and every reader confirms the node is still in the pane
+    /// it is drawing before acting.
+    pub(crate) hits: CanvasHits,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
@@ -204,10 +215,13 @@ impl GraphUI {
                 self.gesture = Some(PaneGesture { target, gesture });
             }
             pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, graph, gesture, out);
-            emit_port_dblclicks(ui, graph, out);
         }
         self.gestures.node_ui.prepass(ui, scene, out);
-        self.geometry.rebuild(ui, scene);
+        self.geometry.rebuild(ui, scene, &mut self.hits);
+        // After the rebuild, which is where the port half of `hits` fills:
+        // a port double-click rides the same response read as that port's
+        // center, so there is nothing to act on before it.
+        emit_port_dblclicks(&self.hits, scene, out);
         // Both port-drag claimants sit *after* the rebuild so they read this
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
@@ -229,9 +243,9 @@ impl GraphUI {
             .subscription_ui
             .apply(ui, scene, &self.geometry, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
-        // read off last frame's responses like everything else here. Whole
-        // scene, so a panel pinned on a pane that just closed is pruned.
-        self.inspectors.apply(ui, scene);
+        // off this frame's swept hits. Whole scene, so a panel pinned on a
+        // pane that just closed is pruned.
+        self.inspectors.apply(ui, &self.hits, scene);
     }
 
     /// Record one graph pane: its gestures' record-phase halves, then the
@@ -329,9 +343,9 @@ impl GraphUI {
         // past them once a menu has answered.
         self.gestures
             .graph_menu
-            .apply(ui, graph, out)
-            .or(self.gestures.node_menu.apply(ui, graph, out))
-            .or_else(|| emit_chip_command(ui, graph))
+            .apply(ui, &self.hits, graph, out)
+            .or(self.gestures.node_menu.apply(ui, &self.hits, graph, out))
+            .or_else(|| emit_chip_command(&self.hits, graph))
     }
 
     /// Bake each in-flight wire drag's snap target into `CanvasGeometry`'s
@@ -362,6 +376,7 @@ impl GraphUI {
         let Self {
             background,
             geometry,
+            hits,
             inspectors,
             gesture: _,
             gestures:
@@ -451,6 +466,7 @@ impl GraphUI {
                             graph,
                             selected,
                             geometry,
+                            hits,
                             inspectors,
                             run_state: ctx.run_state,
                         };
@@ -578,22 +594,26 @@ fn classify_canvas_gesture(ui: &mut Ui, target: GraphRef) -> Option<CanvasGestur
 /// frame: an `FsPath` input's pick button, a node header's play or
 /// or cache-eviction chip. First hit in that order wins.
 ///
-/// Each scan surfaces only a domain fact — which node to run, which port to
-/// pick a path for — and naming `AppCommand` is the canvas's job, since it
-/// owns the command channel. So the translation lives here rather than in
-/// `node`. All three are pure reads over last frame's responses,
-/// which is why [`GraphUI::draw`] can skip the whole group once something
-/// else has claimed the frame.
-fn emit_chip_command(ui: &Ui, graph: GraphScene<'_>) -> Option<AppCommand> {
-    if let Some(req) = emit_path_picks(ui, graph) {
+/// Each source surfaces only a domain fact — which node to run, which port
+/// to pick a path for — and naming `AppCommand` is the canvas's job, since
+/// it owns the command channel. So the translation lives here rather than
+/// in `node`. All three are pure reads over [`CanvasHits`], which is why
+/// [`GraphUI::draw`] can skip the whole group once something else has
+/// claimed the frame.
+fn emit_chip_command(hits: &CanvasHits, graph: GraphScene<'_>) -> Option<AppCommand> {
+    // A hit is keyed by a document-unique `NodeId`, so it can belong to a
+    // neighbouring pane — or to a node this pane no longer holds, since the
+    // sweep ran against last frame's projection. Both fall out here.
+    let in_pane = |id: NodeId| graph.contains(id).then_some(id);
+    if let Some(req) = emit_path_picks(hits, graph) {
         return Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
     }
     // A header play-chip click runs that node's cone — the same command the
     // context menu's "Run to this node" resolves to.
-    if let Some(node_id) = emit_play_clicks(ui, graph) {
+    if let Some(node_id) = hits.chip(Chip::Play).and_then(in_pane) {
         return Some(AppCommand::Run(RunCommand::Node(node_id)));
     }
-    if let Some(node_id) = emit_cache_evictions(ui, graph) {
+    if let Some(node_id) = hits.chip(Chip::EvictCache).and_then(in_pane) {
         return Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
     }
     None

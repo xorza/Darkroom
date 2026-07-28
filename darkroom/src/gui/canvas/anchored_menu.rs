@@ -1,9 +1,10 @@
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui, WidgetId};
+use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::GraphRef;
-use crate::gui::scene::{GraphScene, SceneNode};
+use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
+use crate::gui::scene::GraphScene;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
@@ -97,10 +98,11 @@ impl AnchoredMenu {
 /// node the menu was opened on, which the open latched frames before the pick
 /// that needs it.
 ///
-/// What each caller still owns is which nodes offer the menu and which of their
-/// widgets triggers it (both stated in one [`Self::latch`] closure), the items,
-/// and where a pick goes — an `AppCommand`, an `Intent`, or a stash for the
-/// `Editor` to resolve.
+/// What each caller still owns is which widget triggers it (one
+/// [`MenuTrigger`]), the items, and where a pick goes — an `AppCommand`, an
+/// `Intent`, or a stash for the `Editor` to resolve. Which nodes offer the
+/// menu at all is settled by [`CanvasHits::scan`], alongside the same guard
+/// that decides whether the trigger widget draws.
 #[derive(Default, Debug)]
 pub(super) struct NodeContextMenu {
     menu: AnchoredMenu,
@@ -111,24 +113,21 @@ pub(super) struct NodeContextMenu {
 }
 
 impl NodeContextMenu {
-    /// Open on a secondary click of the widget `trigger` names, anchored at the
-    /// pointer, and report the node it opened on (`None` on every other frame).
+    /// Open on the secondary click `trigger` names, anchored at the pointer,
+    /// and report the node it opened on (`None` on every other frame).
     ///
-    /// `trigger` answers "which of this node's widgets opens the menu", or
-    /// `None` for a node that doesn't offer it at all — one closure for what
-    /// would otherwise be an eligibility filter and a widget-id lookup. Read
-    /// off *last* frame's responses, the same timing as everything else in the
-    /// canvas's input passes.
+    /// The hit comes from this frame's sweep, which already applied the
+    /// trigger widget's draw guard; all that is left here is confirming the
+    /// node still belongs to `graph` — the sweep spans every pane and ran
+    /// against last frame's projection.
     pub(super) fn latch(
         &mut self,
         ui: &mut Ui,
+        hits: &CanvasHits,
         graph: GraphScene<'_>,
-        trigger: impl Fn(&SceneNode) -> Option<WidgetId>,
+        trigger: MenuTrigger,
     ) -> Option<NodeId> {
-        let clicked = graph.nodes().find_map(|n| {
-            let widget = trigger(n)?;
-            ui.response_for(widget).right.clicked().then_some(n.id)
-        })?;
+        let clicked = hits.menu(trigger).filter(|&id| graph.contains(id))?;
         // A press that opened the menu has a pointer position by construction;
         // the `?` is only for the frames where the pointer left the window
         // between the click and this read.

@@ -12,12 +12,12 @@ use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
+use crate::gui::canvas::hits::Chip;
 use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::prepass::emit_graph_opens;
-use crate::gui::node::preview_row::emit_preview_image_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
@@ -74,10 +74,15 @@ impl MainWindow {
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
-        emit_preview_image_opens(ui, scene, actions);
-        for graph in scene.graphs() {
-            emit_graph_opens(ui, graph, actions);
+        // One sweep of last frame's node responses, before anything reads
+        // one: the canvas's own passes read it later in the frame, and the
+        // two chip opens below are why it has to happen this early.
+        self.graph_ui.hits.scan(ui, scene);
+        let hits = &self.graph_ui.hits;
+        if let Some(node) = hits.chip(Chip::PreviewImage) {
+            actions.push(UiAction::OpenImageViewer(node));
         }
+        emit_graph_opens(hits, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the

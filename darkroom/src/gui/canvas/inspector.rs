@@ -32,9 +32,10 @@ use scenarium::Library;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 
+use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::format::fmt_elapsed;
-use crate::gui::node::{RecordCtx, exec_color, node_widget_id};
+use crate::gui::node::{RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
@@ -94,20 +95,18 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(super) fn apply(&mut self, ui: &Ui, scene: &Scene) {
-        for n in scene.nodes.values() {
-            if ui.response_for(inspect_badge_wid(n.id)).left.clicked() {
-                match cycle(self.modes.get(&n.id).copied()) {
-                    Some(m) => {
-                        self.modes.insert(n.id, m);
-                    }
-                    None => {
-                        self.modes.remove(&n.id);
-                    }
+    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, scene: &Scene) {
+        if let Some(node) = hits.chip(Chip::Inspect) {
+            match cycle(self.modes.get(&node).copied()) {
+                Some(m) => {
+                    self.modes.insert(node, m);
+                }
+                None => {
+                    self.modes.remove(&node);
                 }
             }
         }
-        if outside_action(ui, scene) {
+        if outside_action(ui, hits, scene) {
             self.close_unpinned();
         }
         self.modes.retain(|id, _| scene.nodes.contains_key(id));
@@ -296,7 +295,7 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// node body, clicking bare canvas, or panning/zooming the canvas all
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
-fn outside_action(ui: &Ui, scene: &Scene) -> bool {
+fn outside_action(ui: &Ui, hits: &CanvasHits, scene: &Scene) -> bool {
     // Any pane counts: an action on one canvas closes a transient panel
     // opened on another, the same way it closes one on its own.
     let canvas_acted = scene.graphs().any(|graph| {
@@ -311,11 +310,9 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
             || oc.scroll.pixels != Vec2::ZERO
             || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON
     });
-    let node_acted = scene.nodes.values().any(|n| {
-        let r = ui.response_for(node_widget_id(n.id));
-        r.left.clicked() || r.left.drag.started()
-    });
-    canvas_acted || node_acted
+    // The node half comes off the frame's sweep — any pane's node counts,
+    // same as any pane's canvas does above.
+    canvas_acted || hits.body_acted().is_some()
 }
 
 fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {

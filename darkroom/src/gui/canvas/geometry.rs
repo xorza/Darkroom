@@ -8,6 +8,7 @@ use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
+use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -39,6 +40,11 @@ use crate::gui::scene::{Scene, SceneNode};
 /// coords for the ones testing a raw pointer position. Everything else asks
 /// here rather than calling `response_for(node_widget_id(..))` itself, so no
 /// two of them can disagree about where a node is.
+///
+/// **And the one place a port glyph's is.** The same rule, one level down:
+/// [`Self::rebuild`] hands each port's response to
+/// [`CanvasHits::note_port`] as it reads it, so a double-click and a port
+/// center come off one poll instead of a poll each.
 #[derive(Default, Debug)]
 pub(crate) struct CanvasGeometry {
     /// Data-port circles, keyed by [`PortRef`].
@@ -291,7 +297,12 @@ impl CanvasGeometry {
         self.node_sizes.retain(|id, _| keep(*id));
     }
 
-    pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
+    /// Fills `hits`' port half on the way through — see the type docs for
+    /// why the port polls live here. Runs in
+    /// [`crate::gui::canvas::GraphUI::prepass`], after
+    /// [`CanvasHits::scan`] has cleared the digest in the navigation
+    /// phase, so the two writers never race for a slot.
+    pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene, hits: &mut CanvasHits) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
@@ -326,6 +337,7 @@ impl CanvasGeometry {
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
+                    hits.note_port(ui, port, r);
                     self.ports.record(port, r, Some(node_min), n.pos);
                 }
             }
