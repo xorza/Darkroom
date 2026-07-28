@@ -69,7 +69,8 @@ impl ConnectionUI {
     /// empty canvas opens the new-node palette instead of dropping, and
     /// `resume` (the source of such a wire, after its node was picked)
     /// re-enters [`DragMode::Floating`] so the user clicks the exact port
-    /// to land it. Esc cancels either mode without emitting anything.
+    /// to land it. `cancelled` — the frame's Esc, resolved once by the
+    /// canvas — drops either mode without emitting anything.
     ///
     /// Swept over the whole scene once per frame. The latch scan spans
     /// every pane (only one press exists), but everything after it runs
@@ -82,6 +83,7 @@ impl ConnectionUI {
         scene: &Scene,
         geometry: &CanvasGeometry,
         resume: Option<PortRef>,
+        cancelled: bool,
         out: &mut Intents,
     ) {
         self.ended_on_secondary = false;
@@ -103,9 +105,8 @@ impl ConnectionUI {
                 mode: DragMode::Held,
             });
         }
-        if ui.escape_pressed() {
+        if cancelled {
             self.state = None;
-            return;
         }
         // Both modes span frames, and undo runs before this prepass, so the
         // node the wire grew out of can disappear under it (or its pane can

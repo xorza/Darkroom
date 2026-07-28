@@ -66,7 +66,8 @@ impl SubscriptionUI {
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
-    /// a valid target. Esc cancels.
+    /// a valid target. `cancelled` — the frame's Esc, resolved once by
+    /// the canvas — drops the wire.
     ///
     /// Swept over the whole scene once per frame — one press, one wire —
     /// but the snap scans and the commit run against the pane holding the
@@ -76,6 +77,7 @@ impl SubscriptionUI {
         ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
+        cancelled: bool,
         out: &mut Intents,
     ) {
         // Latch a fresh drag only when idle. An emitter and a pin can't both
@@ -90,9 +92,8 @@ impl SubscriptionUI {
                 .map(InFlight::FromEmitter)
                 .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
         }
-        if ui.escape_pressed() {
+        if cancelled {
             self.state = None;
-            return;
         }
         let Some(mut state) = self.state else {
             return;

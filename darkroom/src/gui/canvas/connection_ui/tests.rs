@@ -255,6 +255,7 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
         scene,
         &CanvasGeometry::default(),
         None,
+        false,
         &mut out,
     );
     assert!(out.is_empty(), "an untouched prepass emits nothing");

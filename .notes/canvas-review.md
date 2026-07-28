@@ -15,46 +15,24 @@ Line anchors were refreshed after the whole-scene-sweep work landed.
 
 ---
 
-## Batch 1 — Gesture lifecycle and pane ownership
+## Batch 1 (remainder) — "Is this my pane?" is spelled four ways
 
-Five files, one missing concept. `classify_canvas_gesture` centralizes which
-gesture *starts*; nothing centralizes which pane owns it or when it ends, and
-each controller re-derives both. The four items land on the same lines in the
-same controllers — `selection_ui.rs:97` and `:127` are adjacent, as are
-`breaker.rs:282` and `:299` — so doing them apart means three passes over
-`selection_ui`, `breaker`, `connection_ui` and `subscription_ui`.
+The other three items in this batch are done; this one is left because the
+duplication is a *shape*, not a body — each site is already a single correct
+comparison, and the two families are genuinely different (state that carries an
+explicit `graph`, versus state whose pane is derived from its node so a
+cross-pane wire stays unrepresentable). A generic wrapper over both would add
+indirection to save one line each. Needs a decision on whether the uniformity
+is worth that, not a mechanical fix.
 
 - [ ] **"Is this my pane?" is spelled four different ways.**
-      `selection_ui.rs:97` (`band.is_some_and(|b| b.graph != target)` → early
-      return), `breaker.rs:282` (same shape, different field),
-      `anchored_menu.rs:56` (`self.graph != Some(graph)`), and the wire
-      gestures' shared `state.filter(|s| graph.contains(s.node()))`
-      (`connection_ui/mod.rs:287`, `subscription_ui.rs:186`). A fifth,
-      `ConnectionUI::take_pending_connection_in` (`connection_ui/mod.rs:140`),
-      folds the test into the take. Same invariant, re-derived per controller.
-
-- [ ] **Cancellation is not part of the gesture classification, so four
-      controllers each poll `ui.escape_pressed()` with three different guards.**
-      `connection_ui/mod.rs:106`, `subscription_ui.rs:93` (both return
-      unconditionally, even with no gesture in flight, so an Escape frame also
-      skips their latch), `breaker.rs:298` (gated on `state.is_some()`),
-      `selection_ui.rs:127` (after the band check). The divergent guards are the
-      visible cost.
-
-- [ ] **`SelectionUI` keeps three coupled fields whose validity relationship is
-      documented rather than typed** (`selection_ui.rs:24-43`): `band:
-      Option<RubberBand>` (which itself carries `graph`), `preview:
-      Option<GraphRef>` (duplicating `band.graph` except on the release frame,
-      where the handoff is explained in a five-line comment at
-      `selection_ui.rs:169-173`), and `base`, which is left populated and stale
-      after every commit.
-
-- [ ] **`GraphUI::bake_snap_hovers` runs once per visible pane (`mod.rs:277`)
-      though it mutates document-unique, pane-agnostic state** (`mod.rs:355`).
-      Both controllers' snap targets are resolved back in `prepass`, so with N
-      panes open the same idempotent writes happen N times, and the frame's
-      "geometry is now final" point is smeared across the per-pane draws instead
-      of sitting at the end of the once-per-frame pass.
+      `selection_ui.rs:98` (`band.graph != target` → early return),
+      `breaker.rs:284` (same shape, different field), `anchored_menu.rs:56`
+      (`self.graph != Some(graph)`), and the wire gestures' shared
+      `state.filter(|s| graph.contains(s.node()))` (`connection_ui/mod.rs:290`,
+      `subscription_ui.rs:186`). A fifth,
+      `ConnectionUI::take_pending_connection_in` (`connection_ui/mod.rs:141`),
+      folds the test into the take.
 
 ## Batch 2 — Stale documentation
 

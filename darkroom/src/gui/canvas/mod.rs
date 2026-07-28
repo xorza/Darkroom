@@ -106,6 +106,15 @@ pub(crate) struct GraphUI {
     /// resolved once in [`Self::prepass`] and read back by [`Self::draw`].
     /// At most one pane can own a press, so one slot is enough.
     gesture: Option<PaneGesture>,
+    /// Whether this frame cancels whatever gesture is in flight (Esc).
+    ///
+    /// Resolved once in [`Self::prepass`], beside the classification —
+    /// the counterpart to [`classify_canvas_gesture`], which says which
+    /// gesture *starts*. Read there rather than per controller because
+    /// the escape is one fact about the frame, and four controllers
+    /// polling it separately is how they grew three different guards
+    /// around it.
+    cancelled: bool,
     /// In-flight gesture controllers. Grouped so a tab switch can reset
     /// *all* of them in one assignment (`clear_gestures`) without the
     /// caller enumerating each — and so the persistent caches
@@ -208,6 +217,11 @@ impl GraphUI {
         // pane) for `draw` to read back — the classification is one
         // response poll, and both phases must agree on the winner.
         self.gesture = None;
+        // One read for the whole frame. A controller with nothing in
+        // flight has nothing to cancel, so each applies this to its own
+        // state slot unconditionally and lets its existing "no gesture"
+        // path do the rest.
+        self.cancelled = ui.escape_pressed();
         for graph in scene.graphs() {
             let target = graph.target();
             let gesture = classify_canvas_gesture(ui, target);
@@ -234,18 +248,22 @@ impl GraphUI {
         let resume = self.gestures.new_node_ui.take_resume_floating();
         self.gestures
             .connection_ui
-            .apply(ui, scene, &self.geometry, resume, out);
+            .apply(ui, scene, &self.geometry, resume, self.cancelled, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the connection gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
         self.gestures
             .subscription_ui
-            .apply(ui, scene, &self.geometry, out);
+            .apply(ui, scene, &self.geometry, self.cancelled, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
         // off this frame's swept hits. Whole scene, so a panel pinned on a
         // pane that just closed is pruned.
         self.inspectors.apply(ui, &self.hits, scene);
+        // Last, once: both wire gestures have settled their snap targets
+        // above, and the flags this writes are document-unique, so every
+        // pane's draw reads the same finished geometry.
+        self.bake_snap_hovers();
     }
 
     /// Record one graph pane: its gestures' record-phase halves, then the
@@ -274,7 +292,6 @@ impl GraphUI {
             .filter(|g| g.target == graph.target())
             .map(|g| g.gesture);
         let command = self.resolve_gestures(ui, ctx, graph, gesture, out);
-        self.bake_snap_hovers();
         self.record_canvas(ui, ctx, graph, out);
         command
     }
@@ -313,8 +330,10 @@ impl GraphUI {
         // hadn't recorded yet. Reuse it here; no second rebuild needed.
         self.gestures
             .selection_ui
-            .apply(ui, graph, &self.geometry, gesture, out);
-        self.gestures.breaker_ui.apply(ui, graph, gesture, out);
+            .apply(ui, graph, &self.geometry, gesture, self.cancelled, out);
+        self.gestures
+            .breaker_ui
+            .apply(ui, graph, gesture, self.cancelled, out);
         // A connection released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
         // the pane holding the dropped wire's source claims it.
@@ -352,6 +371,11 @@ impl GraphUI {
     /// hover flags. Each controller knows which glyph layer its target lives
     /// in, so the override is one call apiece rather than an accessor per
     /// layer read back out here.
+    ///
+    /// Once per frame, at the end of [`Self::prepass`]: the writes are
+    /// keyed by document-unique glyph ids and say nothing about a pane,
+    /// so running it per pane repeated the same idempotent writes N times
+    /// and smeared "geometry is final" across the per-pane draws.
     fn bake_snap_hovers(&mut self) {
         self.gestures
             .connection_ui
@@ -377,6 +401,7 @@ impl GraphUI {
             background,
             geometry,
             hits,
+            cancelled: _,
             inspectors,
             gesture: _,
             gestures:
