@@ -5,7 +5,9 @@ use scenarium::{Binding, DataType, GraphDef, GraphId, InputPort, Node, NodeId, N
 use crate::core::document::{BoundarySide, GraphRef, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::Intent;
-use crate::gui::canvas::connection_ui::{ConnectionUI, DragMode, InFlight, commit_connection};
+use crate::gui::canvas::connection_ui::{
+    ConnectionUI, DragMode, InFlight, commit_connection, fresh_port_name, taken_suffixes,
+};
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::GlyphDrag;
 use crate::gui::run_state::RunState;
@@ -92,6 +94,79 @@ fn committed(fixture: &Fixture, start: PortRef, end: PortRef) -> Vec<Intent> {
             Queued::Global(intent) => panic!("a wire raises nothing global: {intent:?}"),
         })
         .collect()
+}
+
+#[test]
+fn fresh_port_name_takes_the_lowest_free_suffix() {
+    // Nothing taken: the first slot.
+    assert_eq!(fresh_port_name("input", vec![]), "input0");
+    // A run from zero fills forward.
+    assert_eq!(fresh_port_name("input", vec![0]), "input1");
+    assert_eq!(fresh_port_name("output", vec![0, 1, 2]), "output3");
+    // A gap is reused rather than skipped, whatever order it arrives in —
+    // 1 is free even though 2 and 5 are taken.
+    assert_eq!(fresh_port_name("input", vec![0, 2, 5]), "input1");
+    assert_eq!(fresh_port_name("input", vec![5, 2, 0]), "input1");
+    // Nothing at zero: the whole run sits above the answer.
+    assert_eq!(fresh_port_name("input", vec![3, 4]), "input0");
+    // Duplicates are stepped past, not counted twice: 0 and 1 are taken, so
+    // the answer is 2, not 3.
+    assert_eq!(fresh_port_name("input", vec![0, 0, 1]), "input2");
+}
+
+#[test]
+fn taken_suffixes_reads_only_conforming_names_and_only_at_the_trailing_slot() {
+    let mut arena = UiHarness::arena();
+    let ui = arena.ui();
+    // A column of four: two generated names, one a user rename, one the
+    // trailing "+" placeholder itself (whose own name never matters).
+    let names = [
+        ui.intern("input0"),
+        ui.intern("brightness"),
+        ui.intern("input3"),
+        ui.intern("+"),
+    ];
+
+    // Index 3 is the trailing slot, so the three before it are read: the two
+    // conforming names contribute 0 and 3; "brightness" can't collide with a
+    // generated name, so it contributes nothing.
+    let taken = taken_suffixes(names.iter(), 3, "input").expect("index 3 is the trailing slot");
+    assert_eq!(taken, vec![0, 3]);
+    // Which leaves 1 as the lowest free slot — the gap, not `input4`.
+    assert_eq!(fresh_port_name("input", taken), "input1");
+
+    // A different prefix matches none of them, so every slot is free.
+    assert_eq!(
+        taken_suffixes(names.iter(), 3, "output").expect("still the trailing slot"),
+        Vec::<usize>::new()
+    );
+
+    // Any index but the last is an existing interface port, not a
+    // placeholder — no name is minted for it at all.
+    for idx in 0..3 {
+        assert_eq!(
+            taken_suffixes(names.iter(), idx, "input"),
+            None,
+            "index {idx} is a real port, not the trailing placeholder"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "a wire committed a")]
+fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
+    // `scan_snap_target` only ever offers `start.kind.opposite()`, so a
+    // same-kind pair reaching the commit means that broke upstream. Dropping
+    // it silently would show up as a wire that simply refuses to land, with
+    // nothing anywhere saying why.
+    let fixture = fixture();
+    let mut out = Intents::default();
+    commit_connection(
+        fixture.graph(),
+        port(fixture.mult, PortKind::Input, 0),
+        port(fixture.boundary_in, PortKind::Input, 0),
+        &mut out,
+    );
 }
 
 #[test]
