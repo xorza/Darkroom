@@ -42,8 +42,25 @@ pub(crate) struct BlobTarget {
 }
 
 impl BlobTarget {
+    /// Delete a blob whose body would not decode, so the next run
+    /// recomputes instead of meeting the same unreadable frame.
+    ///
+    /// [`DiskStore::covers_demand`] is header-only, so a blob with an
+    /// intact header and a corrupt body goes on passing the reuse check —
+    /// while the file survives, every run prunes the producer cone and
+    /// fails the same decode. Discarding the removal error left that both
+    /// permanent and invisible; reporting it is what makes it
+    /// diagnosable, since nothing here can force the unlink through.
     async fn delete(&self) {
-        let _ = tokio::fs::remove_file(&self.path).await;
+        if let Err(error) = tokio::fs::remove_file(&self.path).await
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            tracing::error!(
+                path = %self.path.display(),
+                %error,
+                "could not delete an undecodable cache blob; it will keep failing to load",
+            );
+        }
     }
 }
 
