@@ -28,8 +28,16 @@ use crate::gui::scene::{Scene, SceneNode};
 /// The glyph domains are read directly by consumers via the public
 /// fields — `geometry.ports.center(p)`, `geometry.events.drag_started(e)`,
 /// `geometry.subs.contains_pointer(id, ptr)` — rather than through a
-/// per-domain forwarding method each; node body rects resolve through
-/// [`Self::node_world_rect`].
+/// per-domain forwarding method each; node bodies resolve through
+/// [`Self::node_world_rect`] and [`Self::node_screen_rect`].
+///
+/// **The one place a node body's rect is polled.** [`Self::rebuild`] already
+/// reads that response to derive the port offsets, so both frames a caller
+/// could want come off the same read: world coords for the gestures that share
+/// the canvas's own space (cull, breaker, rubber band, view fitting), screen
+/// coords for the ones testing a raw pointer position. Everything else asks
+/// here rather than calling `response_for(node_widget_id(..))` itself, so no
+/// two of them can disagree about where a node is.
 #[derive(Default, Debug)]
 pub(crate) struct CanvasGeometry {
     /// Data-port circles, keyed by [`PortRef`].
@@ -41,13 +49,28 @@ pub(crate) struct CanvasGeometry {
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
     pub(crate) subs: PortLayer<NodeId>,
-    /// Last measured body size per node, kept **across frames** like
-    /// `PortLayer::offsets` — a culled node records no response, so its
-    /// world rect must come from the last time it measured. A node's size
-    /// depends only on its content, so a stale entry is off only across a
-    /// content edit applied while hidden and self-heals on next record.
-    /// Read through [`Self::node_world_rect`].
+    /// Last measured body size per node, from the **pre-transform, unclipped**
+    /// `layout_rect` and kept **across frames** like `PortLayer::offsets` — a
+    /// culled node records no response, so its world rect must come from the
+    /// last time it measured, and view-fitting and the rubber band both have
+    /// to see off-screen nodes. A node's size depends only on its content, so
+    /// a stale entry is off only across a content edit applied while hidden,
+    /// and self-heals on next record. Read through [`Self::node_world_rect`].
+    ///
+    /// Only the *size* is cached, never the position: `SceneNode::pos` is
+    /// mirrored pre-record and a cached corner would be a frame behind it,
+    /// which is the whole reason the world rect is assembled fresh each read.
     node_sizes: HashMap<NodeId, Size>,
+    /// Post-transform, **clipped** body rect per node, refilled every frame
+    /// like `PortLayer::live`, for the tests that compare against a raw
+    /// pointer position. Read through [`Self::node_screen_rect`] and
+    /// [`Self::over_any_node`].
+    ///
+    /// Not a superset of `node_sizes`, despite carrying a size of its own: it
+    /// is scaled by the viewport zoom and cut off at the canvas edge, so it
+    /// yields no usable world size for a node at the margin — and it is
+    /// absent exactly for the culled nodes that most need one.
+    node_screen: HashMap<NodeId, Rect>,
 }
 
 /// One key-domain's port snapshot, split into two tiers by lifetime:
@@ -169,10 +192,11 @@ struct PortInfo {
 }
 
 impl CanvasGeometry {
-    /// The node's world-space body rect *this frame*: the scene's current
-    /// position combined with the cached measured size — so a mid-drag or
-    /// culled node culls and band-hits where it is today, not where it
-    /// last recorded. `None` until the node's first record.
+    /// The node's world-space (inner-canvas pre-transform) body rect *this
+    /// frame*: the scene's current position combined with the cached measured
+    /// size — so a node the document moved under a live gesture (a drag, an
+    /// undo) culls, band-hits, and breaker-hits where it is today, not where
+    /// it last recorded. `None` until the node's first record.
     pub(crate) fn node_world_rect(&self, node: &SceneNode) -> Option<Rect> {
         let size = *self.node_sizes.get(&node.id)?;
         Some(Rect {
@@ -181,10 +205,25 @@ impl CanvasGeometry {
         })
     }
 
+    /// The node's post-transform, clipped body rect — the frame a raw
+    /// `Ui::pointer_pos` lives in, for the release-time drop tests that ask
+    /// "did this land on a node?". `None` for a node that didn't record last
+    /// frame (never shown, or culled off-screen), which reads as "not here".
+    pub(super) fn node_screen_rect(&self, node_id: NodeId) -> Option<Rect> {
+        self.node_screen.get(&node_id).copied()
+    }
+
+    /// Whether `pointer` (screen coords) is over any node body at all — the
+    /// "released into empty space" half of the connection gesture's drop.
+    pub(super) fn over_any_node(&self, pointer: Vec2) -> bool {
+        self.node_screen.values().any(|r| r.contains(pointer))
+    }
+
     pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
+        self.node_screen.clear();
         for n in scene.nodes.values() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -193,11 +232,14 @@ impl CanvasGeometry {
             // ancestor-shared canvas-origin term cancels) and combine
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
-            let node_rect = ui.response_for(node_widget_id(n.id)).layout_rect;
-            if let Some(r) = node_rect {
+            let body = ui.response_for(node_widget_id(n.id));
+            if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.id, r.size);
             }
-            let node_min = node_rect.map(|r| r.min);
+            if let Some(r) = body.rect {
+                self.node_screen.insert(n.id, r);
+            }
+            let node_min = body.layout_rect.map(|r| r.min);
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));

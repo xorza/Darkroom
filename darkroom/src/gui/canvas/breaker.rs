@@ -11,15 +11,17 @@ use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
-/// Per-frame bundle threaded through node and connection rendering.
-/// Carries `canvas_origin` (subtracted from `layout_rect` to convert
-/// surface-space rects into the inner canvas's pre-transform frame,
-/// matching the breaker's polyline) and the optional active gesture.
+/// The active gesture, threaded through node and wire rendering so
+/// intersection tests run inline with the draw that knows the geometry.
 /// Passed as `&mut BreakerProbe<'_>` so Rust auto-reborrows at each
 /// nested call.
+///
+/// Everything it tests against is already in the polyline's own frame
+/// (inner-canvas pre-transform world coords), because every caller takes its
+/// geometry from `CanvasGeometry` rather than from a raw `Ui::response_for`
+/// rect — so the probe converts nothing.
 #[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
-    pub(super) origin: Vec2,
     pub(super) state: Option<&'a mut BreakerState>,
 }
 
@@ -29,18 +31,6 @@ impl BreakerProbe<'_> {
     /// directly.
     pub(super) fn is_active(&self) -> bool {
         self.state.is_some()
-    }
-
-    /// Convert a widget's screen-space rect into the breaker's own
-    /// pre-transform world frame (see [`BreakerState`]'s doc), by
-    /// subtracting the probe's origin. Only a raw `Ui::response_for` rect
-    /// needs this — wire/pin endpoints instead read straight out of
-    /// `CanvasGeometry`, which already resolves to this frame.
-    pub(crate) fn to_world(&self, rect: Rect) -> Rect {
-        Rect {
-            min: rect.min - self.origin,
-            size: rect.size,
-        }
     }
 
     /// True if the active breaker polyline crosses `wire`. A no-op (false)
@@ -361,23 +351,23 @@ impl BreakerUI {
     }
 
     /// Hand the active state to `graph`'s inline intersection consumers
-    /// (node body, connection, subscription, and pin-glyph hit-tests), or
-    /// an inert probe when the scribble belongs to another pane.
+    /// (the node body and both wire hit-tests), or an inert probe when the
+    /// scribble belongs to another pane.
     ///
     /// The pane check is load-bearing, not cosmetic. The polyline lives in
-    /// its own graph's pre-transform world coordinates, and every pane has
-    /// its own origin — so an unscoped probe would test one pane's
+    /// its own graph's pre-transform world coordinates, and every pane places
+    /// its nodes in its own — so an unscoped probe would test one pane's
     /// scribble against another's rects and mark wires and nodes broken in
     /// a graph the pointer never touched, deleting them on release. It
     /// also keeps `begin_frame` to one call per frame: this runs once per
     /// visible pane, and a second call would clear the marks the owning
     /// pane just recorded.
-    pub(super) fn probe(&mut self, origin: Vec2, graph: GraphRef) -> BreakerProbe<'_> {
+    pub(super) fn probe(&mut self, graph: GraphRef) -> BreakerProbe<'_> {
         let mut state = self.state.as_mut().filter(|b| b.graph == graph);
         if let Some(b) = state.as_deref_mut() {
             b.begin_frame();
         }
-        BreakerProbe { origin, state }
+        BreakerProbe { state }
     }
 
     /// Paint the polyline. No-op when no gesture is active or the
@@ -432,15 +422,15 @@ mod tests {
         // A rect the scribble genuinely crosses, offered by the wrong pane.
         let crossed = Rect::new(-10.0, -10.0, 20.0, 20.0);
         assert!(
-            !ui.probe(Vec2::ZERO, other).is_active(),
+            !ui.probe(other).is_active(),
             "a foreign pane sees no gesture at all"
         );
         assert!(
-            !ui.probe(Vec2::ZERO, other).crosses_rect(crossed),
+            !ui.probe(other).crosses_rect(crossed),
             "and so cannot register a hit on its own geometry"
         );
         // The owning pane still probes normally.
-        let mine = ui.probe(Vec2::ZERO, GraphRef::Main);
+        let mine = ui.probe(GraphRef::Main);
         assert!(mine.is_active() && mine.crosses_rect(crossed));
     }
 
@@ -486,7 +476,7 @@ mod tests {
             .unwrap()
             .broken_nodes
             .push(NodeId::from_u128(1));
-        let probe = ui.probe(Vec2::ZERO, GraphRef::Main);
+        let probe = ui.probe(GraphRef::Main);
         assert!(probe.state.unwrap().broken_nodes.is_empty());
     }
 

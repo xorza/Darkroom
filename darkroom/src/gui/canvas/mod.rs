@@ -450,7 +450,7 @@ impl GraphUI {
                             run_state: ctx.run_state,
                         };
                         {
-                            let mut probe = breaker_ui.probe(canvas_origin, target);
+                            let mut probe = breaker_ui.probe(target);
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.

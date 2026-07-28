@@ -178,17 +178,18 @@ impl NodeUI {
     ) {
         let theme = rcx.theme;
 
-        // Probe last-frame's body rect (in canvas world coords) against
-        // the breaker polyline. Hit → recolor border red and flag the
-        // node for deletion on release. First-frame nodes have no rect
-        // yet, so the breaker simply can't catch them until next frame
-        // — acceptable: the user can't aim at something that hasn't
-        // been painted.
-        let body_rect = ui
-            .response_for(node_widget_id(node.id))
-            .layout_rect
-            .map(|r| probe.to_world(r));
-        let broken = body_rect.is_some_and(|r| probe.crosses_rect(r));
+        // Probe the body against the breaker polyline. Hit → recolor border
+        // red and flag the node for deletion on release. The rect is the same
+        // `node_world_rect` the cull above and the rubber band test — this
+        // frame's position plus the cached measured size — so all three agree
+        // on where the node is even when the document moved it out from under
+        // a live gesture (an undo, a scripted edit). A node that has never
+        // recorded has no size yet, so the breaker can't catch it until next
+        // frame: acceptable, since the user can't aim at something unpainted.
+        let broken = rcx
+            .geometry
+            .node_world_rect(node)
+            .is_some_and(|r| probe.crosses_rect(r));
         if broken {
             probe.mark_broken_node(node.id);
         }
