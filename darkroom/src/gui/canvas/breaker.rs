@@ -7,6 +7,7 @@ use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
@@ -104,11 +105,6 @@ const BEZIER_SAMPLES: usize = 16;
 /// way.
 #[derive(Debug)]
 pub(super) struct BreakerState {
-    /// The pane the scribble was started on — its world coordinates, its
-    /// canvas response, and the edit target every severing intent commits
-    /// against. Several graph panes run this controller each frame; only
-    /// this one advances or draws the gesture.
-    graph: GraphRef,
     points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
@@ -127,9 +123,8 @@ pub(super) struct BreakerState {
 }
 
 impl BreakerState {
-    pub(super) fn start(graph: GraphRef, p: Vec2, button: PointerButton) -> Self {
+    pub(super) fn start(p: Vec2, button: PointerButton) -> Self {
         Self {
-            graph,
             points: vec![p],
             length: 0.0,
             button,
@@ -257,7 +252,7 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
 /// can flag intersections inline.
 #[derive(Default, Debug)]
 pub(super) struct BreakerUI {
-    state: Option<BreakerState>,
+    state: PaneSlot<BreakerState>,
 }
 
 impl BreakerUI {
@@ -281,29 +276,28 @@ impl BreakerUI {
         let target = graph.target();
         // One scribble at a time, and it belongs to the pane it started
         // on — every other pane leaves it alone.
-        if self.state.as_ref().is_some_and(|b| b.graph != target) {
+        if self.state.elsewhere(target) {
             return;
         }
         let resp = ui.response_for(outer_canvas_widget_id(target));
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
         if let Some(CanvasGesture::Breaker(button)) = gesture
-            && self.state.is_none()
+            && self.state.is_idle()
             && let Some(p) = resp.pointer_local
         {
-            self.state = Some(BreakerState::start(
+            self.state.latch(
                 target,
-                to_world(p, &graph.viewport()),
-                button,
-            ));
+                BreakerState::start(to_world(p, &graph.viewport()), button),
+            );
         }
         if cancelled {
-            self.state = None;
+            self.state.clear();
             return;
         }
-        let button = self.state.as_ref().map(|b| b.button);
+        let button = self.state.get(target).map(|b| b.button);
         match (
-            self.state.as_mut(),
+            self.state.get_mut(target),
             button.and_then(|b| resp.button(b).drag.delta()),
         ) {
             (Some(b), Some(_)) => {
@@ -346,7 +340,7 @@ impl BreakerUI {
                         },
                     );
                 }
-                self.state = None;
+                self.state.clear();
             }
             _ => {}
         }
@@ -365,7 +359,7 @@ impl BreakerUI {
     /// visible pane, and a second call would clear the marks the owning
     /// pane just recorded.
     pub(super) fn probe(&mut self, graph: GraphRef) -> BreakerProbe<'_> {
-        let mut state = self.state.as_mut().filter(|b| b.graph == graph);
+        let mut state = self.state.get_mut(graph);
         if let Some(b) = state.as_deref_mut() {
             b.begin_frame();
         }
@@ -375,7 +369,7 @@ impl BreakerUI {
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
     pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
-        let Some(b) = self.state.as_ref().filter(|b| b.graph == graph) else {
+        let Some(b) = self.state.get(graph) else {
             return;
         };
         if b.points.len() < 2 {
@@ -407,13 +401,11 @@ mod tests {
         // It also let each pane's `begin_frame` clear the marks the owning
         // pane had just recorded.
         let other = GraphRef::Local(scenarium::GraphId::from_u128(1));
-        let mut ui = BreakerUI {
-            state: Some(BreakerState::start(
-                GraphRef::Main,
-                Vec2::ZERO,
-                PointerButton::Right,
-            )),
-        };
+        let mut ui = BreakerUI::default();
+        ui.state.latch(
+            GraphRef::Main,
+            BreakerState::start(Vec2::ZERO, PointerButton::Right),
+        );
         // A rect the scribble genuinely crosses, offered by the wrong pane.
         let crossed = Rect::new(-10.0, -10.0, 20.0, 20.0);
         assert!(
@@ -437,7 +429,7 @@ mod tests {
         // mid-drag stayed marked even after the scribble moved away —
         // over-committing severs on release. `begin_frame` is now the one
         // place that clears all three.
-        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
         let node = NodeId::from_u128(1);
         b.broken.push(InputPort::new(node, 0));
         b.broken_nodes.push(node);
@@ -459,15 +451,13 @@ mod tests {
         // `BreakerUI::probe` is the one call site `begin_frame` is driven
         // from — exercise it through that entry point too, not just the
         // underlying `BreakerState` method.
-        let mut ui = BreakerUI {
-            state: Some(BreakerState::start(
-                GraphRef::Main,
-                Vec2::ZERO,
-                PointerButton::Right,
-            )),
-        };
+        let mut ui = BreakerUI::default();
+        ui.state.latch(
+            GraphRef::Main,
+            BreakerState::start(Vec2::ZERO, PointerButton::Right),
+        );
         ui.state
-            .as_mut()
+            .get_mut(GraphRef::Main)
             .unwrap()
             .broken_nodes
             .push(NodeId::from_u128(1));
@@ -479,7 +469,7 @@ mod tests {
     fn add_point_skips_short_segments() {
         // Samples below MIN_POINT_DISTANCE are dropped — a slow drag
         // that crawls 1px/frame must not accumulate one point per frame.
-        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
         b.add_point(Vec2::new(1.0, 0.0));
         b.add_point(Vec2::new(2.0, 0.0));
         b.add_point(Vec2::new(3.0, 0.0));
@@ -495,7 +485,7 @@ mod tests {
         // pushing (3000, 0) has seg = 3000 > remaining = 2000, so t =
         // 2000/3000 and the appended point lands at exactly
         // (2000, 0) — the cap.
-        let mut b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
+        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
         b.add_point(Vec2::new(3000.0, 0.0));
         assert_eq!(b.points.len(), 2);
         assert!((b.points[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
@@ -512,8 +502,7 @@ mod tests {
         // (50, 0), nowhere near a cubic endpoint (which would be a
         // degenerate "touch at vertex" the strict-crossing test
         // intentionally rejects).
-        let mut b =
-            BreakerState::start(GraphRef::Main, Vec2::new(50.0, -10.0), PointerButton::Right);
+        let mut b = BreakerState::start(Vec2::new(50.0, -10.0), PointerButton::Right);
         b.add_point(Vec2::new(50.0, 10.0));
         assert!(b.intersects_cubic(
             Vec2::new(0.0, 0.0),
@@ -526,7 +515,7 @@ mod tests {
     #[test]
     fn intersects_cubic_misses_parallel_polyline() {
         // Breaker runs parallel to the wire well below it — no crossing.
-        let mut b = BreakerState::start(GraphRef::Main, Vec2::new(0.0, 50.0), PointerButton::Right);
+        let mut b = BreakerState::start(Vec2::new(0.0, 50.0), PointerButton::Right);
         b.add_point(Vec2::new(100.0, 50.0));
         assert!(!b.intersects_cubic(
             Vec2::new(0.0, 0.0),
@@ -539,7 +528,7 @@ mod tests {
     #[test]
     fn intersects_cubic_empty_breaker_is_false() {
         // Single-point breaker (no segments yet) can't intersect.
-        let b = BreakerState::start(GraphRef::Main, Vec2::ZERO, PointerButton::Right);
+        let b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
         assert!(!b.intersects_cubic(
             Vec2::ZERO,
             Vec2::new(1.0, 0.0),

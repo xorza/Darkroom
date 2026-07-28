@@ -11,6 +11,7 @@ pub(crate) mod inspector;
 mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
+mod pane;
 mod preview_drag;
 mod selection_ui;
 mod subscription_ui;
@@ -42,7 +43,7 @@ use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
-use crate::gui::canvas::pan_zoom::PanAnchor;
+use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::preview_drag::PreviewDrag;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
@@ -149,7 +150,7 @@ struct Gestures {
     /// bookkeeping (lifetime = one gesture), not viewport state — and
     /// keyed because `emit_pan_zoom` runs once per visible pane, so the
     /// idle ones must not consume the live one's release edge.
-    pan_anchor: PanAnchor<GraphRef>,
+    pan_anchor: PaneSlot<Vec2>,
 }
 
 impl GraphUI {

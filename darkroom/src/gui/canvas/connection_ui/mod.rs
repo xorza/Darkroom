@@ -8,6 +8,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::pane::{Held, PaneSlot};
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
@@ -22,12 +23,12 @@ use crate::gui::theme::Theme;
 /// which needs nothing from here.
 #[derive(Default, Debug)]
 pub(super) struct ConnectionUI {
-    state: Option<InFlight>,
+    state: PaneSlot<InFlight>,
     /// Source port of a wire dropped on empty canvas this frame. Handed to
     /// the new-node popup so it opens; the wire then resumes *floating*
     /// once a node is picked (see [`DragMode::Floating`]). Taken by the
     /// canvas the same frame.
-    pending_open: Option<PortRef>,
+    pending_open: PaneSlot<PortRef>,
     /// Set when a floating wire ended on a right-click this frame, so the
     /// canvas can suppress the new-node popup that same right-click would
     /// otherwise open — a right-click then reads purely as "cancel".
@@ -88,44 +89,61 @@ impl ConnectionUI {
     ) {
         self.ended_on_secondary = false;
 
-        // A just-spawned node hands its dropped wire back to float.
-        if let Some(start) = resume {
-            self.state = Some(InFlight {
-                drag: GlyphDrag::new(start),
-                mode: DragMode::Floating,
-            });
+        // A just-spawned node hands its dropped wire back to float. The
+        // latch scans every pane — there is one press — so the owning pane
+        // is resolved here, once, and rides the slot from then on.
+        if let Some(start) = resume
+            && let Some(graph) = scene.owner(start.node_id)
+        {
+            self.state.latch(
+                graph.target(),
+                InFlight {
+                    drag: GlyphDrag::new(start),
+                    mode: DragMode::Floating,
+                },
+            );
         }
         // Latch a fresh port drag only when idle.
         let candidates = drag_candidates(scene, preview_drag_modifier(ui));
-        if self.state.is_none()
+        if self.state.is_idle()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
+            && let Some(graph) = scene.owner(drag.node())
         {
-            self.state = Some(InFlight {
-                drag,
-                mode: DragMode::Held,
-            });
+            self.state.latch(
+                graph.target(),
+                InFlight {
+                    drag,
+                    mode: DragMode::Held,
+                },
+            );
         }
         if cancelled {
-            self.state = None;
+            self.state.clear();
         }
-        // Both modes span frames, and undo runs before this prepass, so the
-        // node the wire grew out of can disappear under it (or its pane can
-        // close). Drop the gesture rather than let it keep snapping — a
-        // commit against a dead producer is refused at the edit boundary
-        // anyway, silently, and `port_data_type` would meanwhile report the
-        // start as untyped (which `scan_snap_target` reads as "compatible
-        // with anything").
-        let Some(mut state) = self.state else {
+        let Some(Held {
+            graph: target,
+            mut state,
+        }) = self.state.take_held()
+        else {
             return;
         };
-        let Some(graph) = scene.owner(state.drag.node()) else {
-            self.state = None;
+        // Both modes span frames, and undo runs before this prepass, so the
+        // pane can close and the node the wire grew out of can be deleted
+        // under it. Not re-latching is how the gesture drops — a commit
+        // against a dead producer is refused at the edit boundary anyway,
+        // silently, and `port_data_type` would meanwhile report the start
+        // as untyped (which `scan_snap_target` reads as "compatible with
+        // anything").
+        let Some(graph) = scene
+            .graph(target)
+            .filter(|graph| graph.contains(state.drag.node()))
+        else {
             return;
         };
 
         // Refresh the compatible port under the pointer for both modes.
         state.drag.snap = scan_snap_target(geometry, ui, graph, state.drag.from);
-        self.state = Some(state);
+        self.state.latch(target, state);
 
         match state.mode {
             DragMode::Held => self.resolve_held(ui, graph, geometry, state.drag, out),
@@ -139,11 +157,7 @@ impl ConnectionUI {
     /// test and the take are one call: a pane that doesn't own the wire
     /// must not consume it.
     pub(super) fn take_pending_connection_in(&mut self, graph: GraphScene<'_>) -> Option<PortRef> {
-        let start = self.pending_open?;
-        graph.contains(start.node_id).then(|| {
-            self.pending_open = None;
-            start
-        })
+        self.pending_open.take(graph.target())
     }
 
     /// Whether a new-connection gesture is in flight **over `graph`'s
@@ -151,8 +165,7 @@ impl ConnectionUI {
     /// wire in one pane doesn't dim the standing wires in every other.
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
     pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
-        self.state
-            .is_some_and(|state| graph.contains(state.drag.node()))
+        self.state.get(graph.target()).is_some()
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
@@ -182,9 +195,9 @@ impl ConnectionUI {
         } else if dropped_on_empty_canvas(ui, graph, geometry) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
-            self.pending_open = Some(drag.from);
+            self.pending_open.latch(graph.target(), drag.from);
         }
-        self.state = None;
+        self.state.clear();
     }
 
     /// `Floating` resolve: the wire follows the cursor with no button held,
@@ -218,11 +231,11 @@ impl ConnectionUI {
                 if let Some(end) = drag.snap {
                     commit_connection(graph, drag.from, end, out);
                 }
-                self.state = None;
+                self.state.clear();
             }
             Some(PointerButton::Right) => {
                 self.ended_on_secondary = true;
-                self.state = None;
+                self.state.clear();
             }
             _ => {} // keep floating
         }
@@ -234,7 +247,7 @@ impl ConnectionUI {
     /// every widget but the drag-capture owner while a drag is live, so the
     /// snapped-but-not-captured target would otherwise stay at its idle color.
     pub(super) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
-        if let Some(snap) = self.state.and_then(|state| state.drag.snap) {
+        if let Some(snap) = self.state.held().and_then(|state| state.drag.snap) {
             geometry.ports.set_hovered(snap);
         }
     }
@@ -256,7 +269,7 @@ impl ConnectionUI {
         // its own `canvas_origin` and under its own transform, so the
         // wire's graph-space endpoints landed as a phantom curve over an
         // unrelated graph.
-        let Some(state) = self.state.filter(|s| graph.contains(s.drag.node())) else {
+        let Some(state) = self.state.get(graph.target()).copied() else {
             return;
         };
         let start_port = state.drag.from;

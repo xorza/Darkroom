@@ -9,6 +9,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::GraphScene;
 
@@ -22,7 +23,7 @@ use crate::gui::scene::GraphScene;
 /// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
 pub(super) struct SelectionUI {
-    band: Option<RubberBand>,
+    band: PaneSlot<RubberBand>,
     /// The swept set while a band is active — sorted and deduped, like the
     /// committed spans it stands in for, so the draw's membership test stays
     /// a binary search. Owned here rather than written into the projection so
@@ -32,18 +33,16 @@ pub(super) struct SelectionUI {
     /// its allocation; [`Self::preview`] is what says whether its contents
     /// mean anything.
     swept: Vec<NodeId>,
-    /// The pane a live band belongs to, and thus whose draw reads
-    /// [`Self::swept`]. `None` when no band is in flight — draw falls back to
-    /// the committed selection.
-    preview: Option<GraphRef>,
+    /// The pane whose draw reads [`Self::swept`]. Empty when no band is
+    /// in flight — draw falls back to the committed selection. A slot of
+    /// its own, not the band's, because it deliberately outlives the band
+    /// by one frame: the release frame paints the final selection while
+    /// the `SetSelection` is still draining.
+    preview: PaneSlot<()>,
 }
 
 #[derive(Clone, Debug)]
 struct RubberBand {
-    /// The pane the band was latched on. Every visible graph pane runs
-    /// this controller, so without it a band started on one canvas would
-    /// be advanced (and drawn) by its neighbours, in their coordinates.
-    graph: GraphRef,
     /// Anchor + live corner in inner-canvas pre-transform (world)
     /// coords — the same frame node positions live in — so the rect and
     /// its hit-test need no extra transform. `current` is refreshed from
@@ -75,7 +74,8 @@ impl SelectionUI {
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
     pub(super) fn preview(&self, graph: GraphRef) -> Option<&[NodeId]> {
-        (self.preview? == graph).then_some(self.swept.as_slice())
+        self.preview.get(graph)?;
+        Some(self.swept.as_slice())
     }
 
     /// Drive the gesture from the outer-canvas response: latch on an
@@ -100,17 +100,16 @@ impl SelectionUI {
         out: &mut Intents,
     ) {
         let target = graph.target();
-        if self.band.as_ref().is_some_and(|band| band.graph != target) {
+        if self.band.elsewhere(target) {
             return;
         }
         let resp = ui.response_for(outer_canvas_widget_id(target));
-        if self.band.is_none()
+        if self.band.is_idle()
             && gesture == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
             let w = to_world(p, &graph.viewport());
-            self.band = Some(RubberBand {
-                graph: target,
+            let band = RubberBand {
                 start: w,
                 current: w,
                 // Shift is a gesture *parameter* (extend vs replace), not
@@ -122,16 +121,17 @@ impl SelectionUI {
                 } else {
                     BTreeSet::new()
                 },
-            });
+            };
+            self.band.latch(target, band);
         }
         if cancelled {
-            self.band = None;
+            self.band.clear();
         }
-        let Some(mut band) = self.band.take() else {
+        let Some(mut band) = self.band.take(target) else {
             // No band in flight — just cancelled, or committed last frame.
             // Either way drop the preview so node draw falls back to the
             // committed selection.
-            self.preview = None;
+            self.preview.clear();
             return;
         };
         if let Some(p) = resp.pointer_local {
@@ -167,8 +167,8 @@ impl SelectionUI {
         // place (node draw reads it via `preview()` for live highlight).
         // A `None` delta is the release edge that commits.
         if resp.left.drag.delta().is_some() {
-            self.band = Some(band);
-            self.preview = Some(target);
+            self.band.latch(target, band);
+            self.preview.latch(target, ());
             return;
         }
         // Only the committing frame pays for the owned set the intent
@@ -178,7 +178,7 @@ impl SelectionUI {
         // above clears the preview and draw falls back to the committed set.
         let to: BTreeSet<NodeId> = swept.iter().copied().collect();
         out.push(target, Intent::SetSelection { to });
-        self.preview = Some(target);
+        self.preview.latch(target, ());
     }
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
@@ -186,7 +186,7 @@ impl SelectionUI {
     /// No-op when no gesture is active on `graph`'s pane or the rect has
     /// no area yet.
     pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
-        let Some(band) = self.band.as_ref().filter(|band| band.graph == graph) else {
+        let Some(band) = self.band.get(graph) else {
             return;
         };
         let rect = band.rect();
