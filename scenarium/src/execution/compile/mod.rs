@@ -9,7 +9,8 @@ use hashbrown::HashMap;
 use thiserror::Error;
 
 use crate::execution::flatten::Flattener;
-use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId, FlattenMap};
+use crate::execution::flatten::map::FlattenMap;
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::program::index::{NodeIdx, NodeSet};
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 use crate::graph::{Graph, NodeId};
@@ -50,6 +51,13 @@ pub struct CompiledGraph {
     /// function of the program, so it is built with the program rather than
     /// rebuilt by each caller that needs it.
     consumers: HashMap<NodeIdx, Vec<NodeIdx>>,
+    /// Graph instance → the execution nodes behind its exposed output
+    /// ports, resolved from [`FlattenMap::exposed_producers`].
+    ///
+    /// Not derivable from `consumers`: flattening removes the
+    /// `GraphOutput` edges, so this is the only surviving record of which
+    /// interior nodes an instance exists to produce.
+    exposed: HashMap<NodeId, Vec<NodeIdx>>,
 }
 
 impl CompiledGraph {
@@ -79,11 +87,18 @@ impl CompiledGraph {
                 }
             }
         }
+        let mut exposed: HashMap<NodeId, Vec<NodeIdx>> = HashMap::new();
+        for (instance, producer) in flatten_map.exposed_producers() {
+            if let Some(&node_idx) = program.e_node_index.get(&producer) {
+                exposed.entry(instance).or_default().push(node_idx);
+            }
+        }
         Self {
             program,
             flatten_map,
             footprints,
             consumers,
+            exposed,
         }
     }
 
@@ -179,11 +194,20 @@ impl CompiledGraph {
         let footprint = self.footprint(node_id);
         // Footprints are built in index order, so membership is a search.
         let inside = |node_idx: &NodeIdx| footprint.binary_search(node_idx).is_ok();
+        // What the instance exposes, taken from the record flatten kept
+        // rather than inferred. "Its value leaves the footprint" is not
+        // observable in the finished program: the `GraphOutput` edge that
+        // carried it is gone, so an exposed producer that an interior node
+        // also reads looked purely internal and dropped out of the seeds —
+        // while a dead interior terminal, with no readers at all, stayed
+        // in. The request then ran the wrong cone entirely.
+        let exposed = self.exposed.get(&node_id).map_or(&[][..], Vec::as_slice);
         footprint
             .iter()
             .filter(|&&node_idx| {
                 let readers = self.consumers_of(node_idx);
                 self.program.e_nodes[node_idx].sink
+                    || exposed.contains(&node_idx)
                     || readers.is_empty()
                     || !readers.iter().all(inside)
             })
@@ -283,7 +307,8 @@ pub(crate) mod internals {
     use std::sync::Arc;
 
     use crate::execution::compile::CompiledGraph;
-    use crate::execution::identity::{ExecutionNodeId, FlattenMap};
+    use crate::execution::flatten::map::FlattenMap;
+    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
     use crate::graph::NodeId;
 

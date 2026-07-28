@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
-use hashbrown::HashSet;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::digest::{Digest, DigestHasher};
@@ -11,9 +10,7 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
-use crate::execution::resource::{
-    FileId, FsPathId, RunResourceStamps, Stamp, epoch_offset_ns, resolve_paths,
-};
+use crate::execution::resource::{FileId, FsPathId, RunResourceStamps, epoch_offset_ns};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 
@@ -39,12 +36,8 @@ impl Drop for TempDir {
     }
 }
 
-fn stamp(path: &str) -> std::io::Result<Stamp> {
-    FsPathId::collect(path, &CancelToken::never())
-}
-
 fn fingerprint(path: &str) -> Digest {
-    let Ok(Stamp::Known(identity)) = stamp(path) else {
+    let Ok(identity) = FsPathId::collect(path, &CancelToken::never()) else {
         panic!("{path} has no determinate identity");
     };
     let mut hasher = DigestHasher::new();
@@ -69,24 +62,23 @@ fn directory_identity_tracks_entry_changes() {
         let empty = fingerprint(&path);
         let permissions = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(&dir.0, permissions(0o000)).unwrap();
-        let unreadable = stamp(&path);
-        let resolved = resolve_paths(HashSet::from([path.clone()]), &CancelToken::never());
+        let unreadable = FsPathId::collect(&path, &CancelToken::never());
+        // The whole pass fails with it, rather than dropping the path and
+        // leaving the node silently uncached forever.
+        let mut stamps = RunResourceStamps::default();
+        stamps.requests.insert(path.clone());
+        let resolved = stamps.resolve(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
         assert!(
             unreadable.is_err(),
             "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
         );
-        // The consequence that matters: nothing lands in the map, so the
-        // fold declines and `node_digest` comes out `None` — the node
-        // recomputes rather than reusing a result keyed on a guess.
-        assert!(resolved.is_empty(), "an unknown path is left unstamped");
-        let stamps = RunResourceStamps { fs_paths: resolved };
-        assert_eq!(
-            stamps.hash_fs_paths(&mut DigestHasher::new(), std::slice::from_ref(&path)),
-            None,
-            "an unstamped path must refuse to produce a digest",
+        assert!(
+            resolved.is_err(),
+            "one unstampable path must fail the pass: {resolved:?}",
         );
+        assert!(stamps.fs_paths.is_empty(), "and stamp nothing");
         assert_eq!(
             fingerprint(&path),
             empty,

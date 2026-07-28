@@ -12,19 +12,20 @@
 //!
 //! See `README.md` Part A §5.
 
+pub(super) mod map;
+
 use hashbrown::HashSet;
 
-use crate::execution::identity::{
-    ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
-};
+use crate::execution::flatten::map::FlattenMap;
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::pool::Pool;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
     ExecutionProgram, PendingBind, PendingSubscription,
 };
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies};
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
+use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies, declared_accepts_const};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput};
 use crate::node::special::SpecialNode;
@@ -212,6 +213,7 @@ impl<'a> Run<'a> {
                         .resolve_graph(*link, self.library)
                         .expect("graph node references a missing graph");
                     self.push_level(node.id, &nested.body);
+                    self.record_exposed_outputs(node.id, nested);
                     // Open this instance's scope under the current one; its
                     // interior nodes record their leaves against it.
                     let parent = *self.scope_stack.last().unwrap();
@@ -426,12 +428,8 @@ impl<'a> Run<'a> {
                 let nested = graph
                     .resolve_graph(*r, self.library)
                     .expect("graph node references a missing graph");
-                let Some(output) = nested.body.boundary_node(NodeKind::GraphOutput) else {
-                    return FlatBinding::None;
-                };
-                let binding = nested.body.bindings.get(&InputPort::new(output, port_idx));
                 self.push_level(node_id, &nested.body);
-                let source = self.resolve_binding(binding);
+                let source = self.resolve_exposed_output(nested, port_idx);
                 self.pop_level();
                 source
             }
@@ -440,9 +438,23 @@ impl<'a> Run<'a> {
             NodeKind::GraphInput => {
                 let instance_id = *self.path.last().expect("GraphInput at the root level");
                 self.pop_level();
-                let port = InputPort::new(instance_id, port_idx);
-                let binding = self.current().bindings.get(&port);
-                let source = self.resolve_binding(binding);
+                let outer = self.current();
+                let binding = outer.bindings.get(&InputPort::new(instance_id, port_idx));
+                // The instance's own interface declares this port, so the
+                // exterior wire is gated against it — the same `FuncInput`
+                // the interior side would be gated against, picker list and
+                // optionality included.
+                let declared = outer
+                    .find(instance_id, NodeSearch::TopLevel)
+                    .and_then(|instance| match &instance.kind {
+                        NodeKind::Graph(link) => outer.resolve_graph(*link, self.library),
+                        _ => None,
+                    })
+                    .and_then(|def| def.interface.inputs.get(port_idx));
+                let source = match declared {
+                    Some(declared) => self.typed_binding(outer, declared, binding),
+                    None => FlatBinding::None,
+                };
                 self.push_level(instance_id, graph);
                 source
             }
@@ -467,6 +479,79 @@ impl<'a> Run<'a> {
                 .data_type
                 .compatible_with(&graph.resolve_output_type(self.library, *src)),
             Some(Binding::Const(value)) => !const_satisfies(self.library, input, value),
+            None => false,
+        };
+        if mismatched {
+            return FlatBinding::None;
+        }
+        self.resolve_binding(binding)
+    }
+
+    /// Resolve `nested`'s interface output `port_idx` through the interior
+    /// wiring behind it, gated by the declared port type. Call with
+    /// `nested`'s own level pushed.
+    ///
+    /// The single definition of "what comes out of this port", shared by
+    /// the on-demand hop in [`Self::resolve`] and the eager record in
+    /// [`Self::record_exposed_outputs`] — the two must agree, or an
+    /// instance would name a producer its consumers never see.
+    fn resolve_exposed_output(&mut self, nested: &'a GraphDef, port_idx: usize) -> FlatBinding {
+        // Drift can leave the definition without a boundary node, or the
+        // interface without this port at all.
+        let (Some(output_node), Some(declared)) = (
+            nested.body.boundary_node(NodeKind::GraphOutput),
+            nested.interface.outputs.get(port_idx),
+        ) else {
+            return FlatBinding::None;
+        };
+        let declared = declared.ty.declared();
+        let binding = nested
+            .body
+            .bindings
+            .get(&InputPort::new(output_node, port_idx));
+        self.typed_boundary_binding(&nested.body, &declared, binding)
+    }
+
+    /// Note which execution node backs each of `nested`'s interface output
+    /// ports, against the instance `instance_id`. Called with that
+    /// instance's level already pushed.
+    ///
+    /// Eager, and for every instance — not only those something binds to.
+    /// The finished program has no `GraphOutput` edges left, so nothing
+    /// downstream can tell an exposed producer from interior plumbing:
+    /// with an interior reader and no exterior one, its consumer set is
+    /// entirely inside the footprint, exactly like a node the instance
+    /// merely uses. That is the shape `run_targets` used to skip.
+    fn record_exposed_outputs(&mut self, instance_id: NodeId, nested: &'a GraphDef) {
+        for port_idx in 0..nested.interface.outputs.len() {
+            if let FlatBinding::Bind(port) = self.resolve_exposed_output(nested, port_idx) {
+                self.flatten.push_exposed(instance_id, port.e_node_id);
+            }
+        }
+    }
+
+    /// [`Self::typed_binding`] for a **boundary** port, whose declaration is
+    /// a bare [`DataType`] rather than a `FuncInput`.
+    ///
+    /// A composite's interface is a type contract in its own right. The
+    /// outer gate checks the consumer against the *declared* port type and
+    /// passes; crossing the boundary through raw `resolve_binding` then
+    /// ignored that declaration entirely, so a definition declaring an
+    /// `Int` output while wiring it to a `String` producer compiled a
+    /// direct `Bind` from that producer into an `Int` consumer. Nothing
+    /// downstream could see it — the edge that would have shown the
+    /// mismatch is exactly the one flattening dissolves.
+    fn typed_boundary_binding(
+        &mut self,
+        graph: &'a Graph,
+        declared: &DataType,
+        binding: Option<&Binding>,
+    ) -> FlatBinding {
+        let mismatched = match binding {
+            Some(Binding::Bind(src)) => {
+                !declared.compatible_with(&graph.resolve_output_type(self.library, *src))
+            }
+            Some(Binding::Const(value)) => !declared_accepts_const(self.library, declared, value),
             None => false,
         };
         if mismatched {

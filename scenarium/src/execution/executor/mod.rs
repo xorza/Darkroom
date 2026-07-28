@@ -261,9 +261,22 @@ impl ExecutionFrame<'_, '_> {
         }
         let program = self.program;
         let cancel = self.ctx.cancel.clone();
-        self.resource_stamps
+        if let Err(error) = self
+            .resource_stamps
             .prepare_node(program, self.cache, node_idx, cancel)
-            .await;
+            .await
+        {
+            // Attributable to exactly this node, so it fails as one rather
+            // than taking the run down. Returning `true` skips the invoke:
+            // the node is already marked, and running it would report a
+            // second, less specific failure for the same cause.
+            let run_error = RunError::ResourceUnavailable {
+                func_id: program[node_idx].func_id,
+                message: error.to_string(),
+            };
+            mark_skipped(self.cache, self.node_outcomes, node_idx, run_error);
+            return true;
+        }
         self.cache
             .stamp_digest(program, self.resource_stamps, node_idx);
         if !self
