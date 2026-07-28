@@ -301,6 +301,10 @@ fn palette_body(
     let search_id = search_field_wid();
     TextEdit::new(&mut search.text)
         .id(search_id)
+        // The field filters the palette rather than editing a value, so Esc
+        // closes the whole popup instead of blurring the only thing in it
+        // the user can type into.
+        .escape_falls_through()
         .placeholder("Search…")
         .style(&palette.ctx.theme.inline_rename.text_edit)
         .size((Sizing::fill(1.0), Sizing::HUG))
