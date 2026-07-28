@@ -7,6 +7,7 @@ use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::connection_ui::{ConnectionUI, DragMode, InFlight, commit_connection};
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::wire::GlyphDrag;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::{GraphProjection, GraphScene, Scene, SceneSource};
 
@@ -168,8 +169,7 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
     let mut connections = ConnectionUI {
         state: Some(InFlight {
-            start,
-            snap_end: None,
+            drag: GlyphDrag::new(start),
             mode: DragMode::Floating,
         }),
         ..Default::default()
