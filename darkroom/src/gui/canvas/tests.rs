@@ -1252,6 +1252,8 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
 /// the one way that can go wrong.
 #[test]
 fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
+    use palantir::Key;
+
     use crate::gui::canvas::new_node_ui::search_field_wid;
 
     let library = Library::default();
@@ -1309,14 +1311,16 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
         "the open reads the graph's definitions",
     );
 
-    // Click outside to dismiss, which clears the anchor — so the next
-    // right-click is a fresh open rather than a re-anchor. (Not Esc: the
-    // search field holds focus and takes the first one to blur itself.)
-    harness.click_at(Vec2::new(100.0, 100.0));
+    // One Esc dismisses, which clears the anchor — so the next right-click
+    // is a fresh open rather than a re-anchor. One, not two: the search
+    // field yields `ESCAPE` (`TextEdit::escape_falls_through`) precisely so
+    // it can't blur itself and strand the palette open around a box the
+    // user can no longer type in.
+    harness.key(Key::Escape);
     harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
     assert!(
         harness.rect(search_field_wid()).is_none(),
-        "the outside click dismissed the palette",
+        "one Esc dismissed the palette",
     );
 
     // The document gains a definition while the palette is down.
