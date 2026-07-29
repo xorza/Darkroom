@@ -7,8 +7,7 @@
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the
-//! [`Resolver`](crate::execution::resolve::Resolver)'s
-//! [`ResolvedRun`](crate::execution::resolve::ResolvedRun) — disposition, output demand,
+//! [`Resolver`](crate::execution::resolve::Resolver) — disposition, output demand,
 //! and reader counts derived together and authoritative for the whole run. A
 //! [`Disposition::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
@@ -44,7 +43,7 @@ use crate::execution::executor::outcomes::{
 };
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::resolve::{Disposition, ResolvedRun};
+use crate::execution::resolve::{Disposition, Resolver};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -67,7 +66,7 @@ pub(crate) struct Executor {
 pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) program: &'a ExecutionProgram,
     pub(crate) plan: &'a ExecutionPlan,
-    pub(crate) resolved: &'a ResolvedRun,
+    pub(crate) resolver: &'a Resolver,
     pub(crate) cache: &'a mut RuntimeCache,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
@@ -80,8 +79,8 @@ pub(super) struct RemainingOutputReads {
 }
 
 impl RemainingOutputReads {
-    pub(super) fn seed(&mut self, resolved: &ResolvedRun) {
-        self.counts.clone_from(&resolved.outputs.readers);
+    pub(super) fn seed(&mut self, resolver: &Resolver) {
+        self.counts.clone_from(&resolver.outputs.readers);
     }
 
     fn is_last(&self, output_idx: OutputIdx) -> bool {
@@ -118,7 +117,7 @@ impl Executor {
         let RunRequest {
             program,
             plan,
-            resolved,
+            resolver,
             cache,
             reporter,
             cancel,
@@ -133,13 +132,13 @@ impl Executor {
         self.ctx_manager.logs.clear();
         self.outcomes
             .reset(program.e_nodes.len(), NodeOutcome::Pending);
-        self.remaining_reads.seed(resolved);
+        self.remaining_reads.seed(resolver);
 
         {
             let mut frame = ExecutionFrame {
                 program,
                 plan,
-                resolved,
+                resolver,
                 cache,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
@@ -185,7 +184,7 @@ impl Executor {
 pub(crate) struct ExecutionFrame<'a, 'r> {
     program: &'a ExecutionProgram,
     plan: &'a ExecutionPlan,
-    resolved: &'a ResolvedRun,
+    resolver: &'a Resolver,
     cache: &'a mut RuntimeCache,
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<DynamicValue>,
@@ -205,8 +204,8 @@ impl ExecutionFrame<'_, '_> {
             return;
         }
         let e_node = &self.program[node_idx];
-        let demand = self.resolved.outputs.demand.slice(e_node.outputs);
-        match self.resolved.disposition[node_idx] {
+        let demand = self.resolver.outputs.demand.slice(e_node.outputs);
+        match self.resolver.disposition[node_idx] {
             // Pruned by the pre-run cut: every consumer that would read this node reused a
             // cache, so its output is never read. Report only a current resident value;
             // unneeded disk blobs remain unprobed.
@@ -239,7 +238,7 @@ impl ExecutionFrame<'_, '_> {
     fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
         let plan = self.plan;
         for &node_idx in &plan.process_order[from_process_idx..] {
-            if self.resolved.disposition[node_idx] == Disposition::Run {
+            if self.resolver.disposition[node_idx] == Disposition::Run {
                 self.abandon_input_reads(node_idx);
             }
         }
