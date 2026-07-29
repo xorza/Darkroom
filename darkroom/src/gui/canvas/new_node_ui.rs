@@ -6,8 +6,8 @@ use palantir::{
     Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
     WidgetId,
 };
+use scenarium::Func;
 use scenarium::NodeId;
-use scenarium::{Func, NodePorts};
 use scenarium::{GraphDef, GraphId};
 use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
@@ -561,7 +561,7 @@ fn add_from_func(
             pos,
             node_id,
             node: node(),
-            bindings: NodePorts::from(func).default_bindings(node_id).collect(),
+            bindings: func.ports().default_bindings(node_id).collect(),
         }
     })
 }

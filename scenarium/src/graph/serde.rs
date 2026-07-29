@@ -36,7 +36,8 @@ mod tests {
     use serde::{Deserialize, Deserializer, Serialize};
 
     use crate::graph::Binding;
-    use crate::graph::address::{InputPort, NodeId};
+    use crate::graph::address::InputPort;
+    use crate::graph::node::NodeId;
     use common::{SerdeFormat, deserialize, serialize};
 
     #[derive(Debug, Serialize)]

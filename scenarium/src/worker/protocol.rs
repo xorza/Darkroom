@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::address::NodeId;
+use crate::graph::node::NodeId;
 use crate::worker::status::WorkerStatus;
 
 #[derive(Debug)]

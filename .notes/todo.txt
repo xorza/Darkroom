@@ -39,3 +39,5 @@ investigate dependencies skill
 fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> - what is option
 
 remove scene?
+
+refactor graph.tests
