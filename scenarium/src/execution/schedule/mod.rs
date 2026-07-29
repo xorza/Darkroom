@@ -3,7 +3,7 @@
 //!
 //! [`Planner`](planner::Planner) opens it with one backward post-order DFS from the run's
 //! roots (sinks, event subscribers, event-trigger owners — plus every sink when a fired
-//! event reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
+//! event reaches a [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers) and each node's [`NodeState`]
 //! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
 //! state. [`Scheduled::resolve`] then refines that same column against the
@@ -37,18 +37,18 @@
 //! the planner keeps its scratch across runs, so a repeated plan on an unchanged graph
 //! allocates nothing — the handles borrow that buffer, they do not own a copy of it.
 
+use crate::execution::schedule::error::RunScheduleValidationError;
 use common::is_debug;
-use thiserror::Error;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::{Error, Result};
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
-use crate::node::lambda::OutputDemand;
-use crate::node::special::SpecialNode;
+use crate::graph::node::lambda::OutputDemand;
+use crate::graph::node::special::SpecialNode;
 
+pub(crate) mod error;
 pub(crate) mod planner;
 
 /// What becomes of one node this run — one column, written by two passes.
@@ -446,38 +446,6 @@ impl RunSchedule {
         self.validate(program)
             .expect("run schedule invariant violated");
     }
-}
-
-#[derive(Debug, Error)]
-pub(crate) enum RunScheduleValidationError {
-    #[error("execution order contains more entries than the program")]
-    OrderTooLong,
-    #[error("schedule {set} spans {len} entries, not the program's {expected}")]
-    SetLength {
-        set: &'static str,
-        len: usize,
-        expected: usize,
-    },
-    #[error("execution order contains an out-of-range node index: {node_idx:?}")]
-    NodeOutOfRange { node_idx: NodeIdx },
-    #[error("execution node {e_node_id:?} input range is out of bounds")]
-    InputRange { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} appears before dependency {dependency:?}")]
-    BeforeDependency {
-        e_node_id: ExecutionNodeId,
-        dependency: ExecutionNodeId,
-    },
-    #[error("execution node {e_node_id:?} appears more than once")]
-    DuplicateNode { e_node_id: ExecutionNodeId },
-    #[error("unscheduled node {e_node_id:?} was decided {state:?}")]
-    UnscheduledNodeDecided {
-        e_node_id: ExecutionNodeId,
-        state: NodeState,
-    },
-    #[error("seeded node {e_node_id:?} is not an execution root")]
-    SeededNodeNotRoot { e_node_id: ExecutionNodeId },
-    #[error("event source {e_node_id:?} is not an execution root")]
-    EventSourceNotRoot { e_node_id: ExecutionNodeId },
 }
 
 /// A schedule the planner has filled, paired with the program it was planned against —
