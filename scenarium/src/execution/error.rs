@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::FuncId;
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence

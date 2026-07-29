@@ -4,7 +4,7 @@ use ::serde::de::Error as _;
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::graph::Binding;
-use crate::graph::address::InputPort;
+use crate::graph::identity::InputPort;
 
 /// Struct keys cannot be map keys in string-keyed formats such as JSON and TOML.
 pub(super) fn serialize<S: Serializer>(
@@ -36,8 +36,8 @@ mod tests {
     use serde::{Deserialize, Deserializer, Serialize};
 
     use crate::graph::Binding;
-    use crate::graph::address::InputPort;
-    use crate::graph::node::NodeId;
+    use crate::graph::identity::InputPort;
+    use crate::graph::identity::NodeId;
     use common::{SerdeFormat, deserialize, serialize};
 
     #[derive(Debug, Serialize)]

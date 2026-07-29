@@ -10,10 +10,8 @@ use crate::execution::program::ExecutionBinding;
 use crate::execution::report::internals::DiscardedReports;
 use crate::graph::Binding;
 use crate::graph::Graph;
-use crate::graph::address::{InputPort, OutputPort};
 use crate::graph::definition::GraphDef;
-use crate::graph::node::NodeId;
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
 use crate::graph::node::definition::{Func, FuncBehavior};
 use crate::graph::node::error::InvokeError;
 use crate::graph::node::lambda::Invocation;
@@ -146,7 +144,7 @@ mod cache_persistence {
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::schedule::NodeState;
-    use crate::graph::node::definition::{FuncId, FuncOutput};
+    use crate::graph::node::definition::FuncOutput;
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -3205,7 +3203,7 @@ mod behavior {
 
         use crate::async_lambda;
         use crate::graph::Graph;
-        use crate::graph::node::NodeId;
+        use crate::graph::identity::NodeId;
         use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::Library;
 
@@ -3297,7 +3295,7 @@ mod behavior {
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
         use crate::graph::Graph;
-        use crate::graph::node::NodeId;
+        use crate::graph::identity::NodeId;
         use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::Library;
         let library: Library = [
@@ -3395,7 +3393,7 @@ mod behavior {
 mod composite_behavior {
     use super::*;
     use crate::graph::Graph;
-    use crate::graph::definition::{GraphId, GraphLink};
+    use crate::graph::definition::GraphLink;
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::FuncOutput;
 
@@ -5266,9 +5264,9 @@ mod topology {
 mod graph {
     use super::*;
     use crate::graph::Graph;
-    use crate::graph::definition::{GraphEvent, GraphId, GraphLink};
+    use crate::graph::definition::{GraphEvent, GraphLink};
     use crate::graph::node::NodeKind;
-    use crate::graph::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::graph::node::event::EventLambda;
     use std::sync::Mutex as StdMutex;
 
@@ -6075,7 +6073,7 @@ mod compile_regressions {
     use super::*;
     use crate::async_lambda;
     use crate::graph::Graph;
-    use crate::graph::definition::{GraphId, GraphLink};
+    use crate::graph::definition::GraphLink;
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};

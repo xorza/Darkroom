@@ -1,11 +1,12 @@
+use crate::graph::identity::{FuncId, GraphId};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
-use crate::graph::definition::{GraphDef, GraphId};
-use crate::graph::node::definition::{Func, FuncId, FuncInput, OutputType};
+use crate::graph::definition::GraphDef;
+use crate::graph::node::definition::{Func, FuncInput, OutputType};
 use crate::{DataType, EnumVariants, FsPathMode, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
@@ -400,14 +401,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::graph::identity::{FuncId, GraphId};
     use std::sync::Arc;
 
     use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::FuncOutput;
     use crate::Invocation;
-    use crate::graph::definition::{GraphDef, GraphId};
-    use crate::graph::node::definition::{Func, FuncId, FuncInput};
+    use crate::graph::definition::GraphDef;
+    use crate::graph::node::definition::{Func, FuncInput};
     use crate::graph::node::error::InvokeError;
     use crate::graph::node::lambda::OutputDemand;
     use crate::library::{Library, TypeEntry};

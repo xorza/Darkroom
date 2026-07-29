@@ -15,9 +15,9 @@ use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatu
 use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
 use crate::graph::Graph;
-use crate::graph::address::InputPort;
 use crate::graph::definition::GraphDef;
-use crate::graph::node::NodeId;
+use crate::graph::identity::InputPort;
+use crate::graph::identity::NodeId;
 use crate::graph::node::error::InvokeError;
 use crate::graph::node::event::EventLambda;
 use crate::graph::node::lambda::FuncLambda;
@@ -844,7 +844,8 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     use std::collections::HashSet;
 
     use crate::DataType;
-    use crate::graph::definition::{GraphId, GraphLink};
+    use crate::graph::definition::GraphLink;
+    use crate::graph::identity::GraphId;
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::FuncOutput;
     use crate::testing::{TestFuncHooks, test_func_lib};

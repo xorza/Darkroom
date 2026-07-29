@@ -1,7 +1,8 @@
 use crate::graph::Graph;
-use crate::graph::definition::{GraphDef, GraphEvent, GraphId, GraphLink};
+use crate::graph::definition::{GraphDef, GraphEvent, GraphLink};
 use crate::graph::error::{GraphDeserializeError, GraphValidationError};
-use crate::graph::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+use crate::graph::identity::{FuncId, GraphId};
+use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
 use crate::graph::node::event::EventLambda;
 use crate::graph::node::{CacheMode, Node, NodeKind, NodeSearch};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort};
@@ -354,7 +355,7 @@ fn validate_rejects_dangling_binding() {
 
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
-    use crate::graph::node::definition::FuncId;
+    use crate::graph::identity::FuncId;
     use crate::library::Library;
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise

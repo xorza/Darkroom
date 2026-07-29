@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::node::NodeId;
+use crate::graph::identity::NodeId;
 
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
@@ -80,7 +80,7 @@ pub struct ExecutionEventPort {
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
-    use crate::graph::node::NodeId;
+    use crate::graph::identity::NodeId;
 
     impl ExecutionNodeId {
         pub fn unique() -> Self {
