@@ -4810,7 +4810,7 @@ mod events {
         // The sink's cone (source → sink) is wholly independent of emit.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
         graph.subscribe(emit_id, 0, trigger_id);
-        graph.validate_for_execution_debug(&library);
+        graph.validate_with_debug(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
@@ -4884,7 +4884,7 @@ mod events {
         graph.insert(source_id, node(&library, "source"));
         graph.insert(sink_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
-        graph.validate_for_execution_debug(&library);
+        graph.validate_with_debug(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
