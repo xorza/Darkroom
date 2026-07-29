@@ -5,19 +5,22 @@
 //! compile is never sent, so the worker's install is infallible and a running
 //! event loop is never disturbed by a bad edit.
 
+use common::is_debug;
 use hashbrown::HashMap;
 use thiserror::Error;
 
+use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::slot::StateOwner;
 use crate::execution::flatten::Flattener;
-use crate::execution::flatten::map::FlattenMap;
+use crate::execution::flatten::map::{FlattenMap, FlattenMapValidationError};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputAddr};
 use crate::execution::program::pool::{Pool, PoolRange};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::Graph;
 use crate::graph::address::NodeId;
 use crate::library::Library;
-use crate::node::definition::FuncBehavior;
+use crate::node::definition::{FuncBehavior, FuncId};
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -29,6 +32,61 @@ use crate::node::definition::FuncBehavior;
 #[error("invalid graph: {message}")]
 pub struct CompileError {
     pub message: String,
+}
+
+/// Self-consistency checks for the compile artifact. Each fallible `validate` has an
+/// `is_debug()`-gated `validate_debug` wrapper, so production call sites pay nothing
+/// while tests can inspect exact validation errors.
+#[derive(Debug, Error)]
+pub(crate) enum CompiledGraphValidationError {
+    #[error(transparent)]
+    FlattenMap(#[from] FlattenMapValidationError),
+    #[error("execution node {e_node_id:?} has a nil func id")]
+    NilFuncId { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} references missing func {func_id:?}")]
+    MissingFunc {
+        e_node_id: ExecutionNodeId,
+        func_id: FuncId,
+    },
+    #[error("execution node {e_node_id:?} input arity does not match its function")]
+    InputArity { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} output arity does not match its function")]
+    OutputArity { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} event arity does not match its function")]
+    EventArity { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} input range is out of bounds")]
+    InputRange { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} output range is out of bounds")]
+    OutputRange { e_node_id: ExecutionNodeId },
+    #[error("execution node {e_node_id:?} event range is out of bounds")]
+    EventRange { e_node_id: ExecutionNodeId },
+    #[error(
+        "execution node {e_node_id:?} has an event subscriber outside the program: {subscriber:?}"
+    )]
+    MissingEventSubscriber {
+        e_node_id: ExecutionNodeId,
+        subscriber: NodeIdx,
+    },
+    #[error("execution node {e_node_id:?} binds to missing output {target:?}")]
+    MissingBindingTarget {
+        e_node_id: ExecutionNodeId,
+        target: OutputAddr,
+    },
+    #[error("execution node {e_node_id:?} binds to out-of-range output {target:?}")]
+    BindingOutputOutOfRange {
+        e_node_id: ExecutionNodeId,
+        target: OutputAddr,
+    },
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum InstalledGraphValidationError {
+    #[error("runtime cache node set does not match the compiled program")]
+    NodeSet,
+    #[error("runtime cache output arity does not match node {e_node_id:?}")]
+    OutputArity { e_node_id: ExecutionNodeId },
+    #[error("runtime cache state owner does not match node {e_node_id:?}")]
+    StateOwner { e_node_id: ExecutionNodeId },
 }
 
 /// The compile artifact: the flattened, immutable program (lambdas, resolved
@@ -301,6 +359,155 @@ impl CompiledGraph {
             "dense indices are assigned in id order, so an ascending index walk yields ascending ids"
         );
         closure
+    }
+
+    /// Self-consistency of the freshly compiled artifact against the `Library`
+    /// it was compiled from. The source graph is gone after flattening, so this
+    /// validates each `e_node` against its func and checks binding integrity.
+    /// The debug wrapper runs at compile (where the library is in hand); the
+    /// library-free install-side checks live in [`Self::validate_installed`].
+    pub(crate) fn validate(&self, library: &Library) -> Result<(), CompiledGraphValidationError> {
+        let program = &self.program;
+        self.flatten_map
+            .validate(program.e_node_ids.iter().copied())?;
+        for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
+            if e_node.func_id.is_nil() {
+                return Err(CompiledGraphValidationError::NilFuncId {
+                    e_node_id: *e_node_id,
+                });
+            }
+            // A special node's interface is its hardcoded spec, not a library func.
+            let func = match e_node.special {
+                Some(special) => special.func(),
+                None => library.by_id(e_node.func_id).ok_or(
+                    CompiledGraphValidationError::MissingFunc {
+                        e_node_id: *e_node_id,
+                        func_id: e_node.func_id,
+                    },
+                )?,
+            };
+            if e_node.inputs.len as usize != func.inputs.len() {
+                return Err(CompiledGraphValidationError::InputArity {
+                    e_node_id: *e_node_id,
+                });
+            }
+            if e_node.outputs.len as usize != func.outputs.len() {
+                return Err(CompiledGraphValidationError::OutputArity {
+                    e_node_id: *e_node_id,
+                });
+            }
+            if e_node.events.len as usize != func.events.len() {
+                return Err(CompiledGraphValidationError::EventArity {
+                    e_node_id: *e_node_id,
+                });
+            }
+            let inputs = program.inputs.get(e_node.inputs.range()).ok_or(
+                CompiledGraphValidationError::InputRange {
+                    e_node_id: *e_node_id,
+                },
+            )?;
+            if program.outputs.get(e_node.outputs.range()).is_none() {
+                return Err(CompiledGraphValidationError::OutputRange {
+                    e_node_id: *e_node_id,
+                });
+            }
+            let events = program.events.get(e_node.events.range()).ok_or(
+                CompiledGraphValidationError::EventRange {
+                    e_node_id: *e_node_id,
+                },
+            )?;
+
+            // Unreachable while `apply_subscriptions` mints every subscriber from a
+            // successful id lookup — kept as the backstop if that stops holding.
+            for e_event in events {
+                if let Some(&subscriber) = e_event
+                    .subscribers
+                    .iter()
+                    .find(|s| s.idx() >= program.e_nodes.len())
+                {
+                    return Err(CompiledGraphValidationError::MissingEventSubscriber {
+                        e_node_id: *e_node_id,
+                        subscriber,
+                    });
+                }
+            }
+
+            for e_input in inputs {
+                if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
+                    // Unreachable while `intern_bindings` mints every address from a
+                    // successful id lookup — kept as the backstop if that stops holding.
+                    let target_e_node = program.e_nodes.get(e_addr.node_idx).ok_or(
+                        CompiledGraphValidationError::MissingBindingTarget {
+                            e_node_id: *e_node_id,
+                            target: *e_addr,
+                        },
+                    )?;
+                    if e_addr.port_idx >= target_e_node.outputs.len {
+                        return Err(CompiledGraphValidationError::BindingOutputOutOfRange {
+                            e_node_id: *e_node_id,
+                            target: *e_addr,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Debug-only assert form of [`Self::validate`].
+    pub(crate) fn validate_debug(&self, library: &Library) {
+        if !is_debug() {
+            return;
+        }
+        self.validate(library)
+            .expect("compiled graph invariant violated");
+    }
+
+    /// The engine's runtime `cache` is index-aligned to exactly this artifact
+    /// after `reconcile` — the install-side half of the checks;
+    /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
+    pub(crate) fn validate_installed(
+        &self,
+        cache: &RuntimeCache,
+    ) -> Result<(), InstalledGraphValidationError> {
+        if cache.slot_count() != self.program.e_nodes.len() {
+            return Err(InstalledGraphValidationError::NodeSet);
+        }
+
+        for ((e_node_id, e_node), slot) in self
+            .program
+            .e_node_ids
+            .iter()
+            .zip(self.program.e_nodes.iter())
+            .zip(cache.slots())
+        {
+            if let Some(output_values) = slot.output_values()
+                && output_values.len() != e_node.outputs.len as usize
+            {
+                return Err(InstalledGraphValidationError::OutputArity {
+                    e_node_id: *e_node_id,
+                });
+            }
+            let owner = StateOwner {
+                func_id: e_node.func_id,
+                version: e_node.version,
+            };
+            if slot.owner != owner {
+                return Err(InstalledGraphValidationError::StateOwner {
+                    e_node_id: *e_node_id,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Debug-only assert form of [`Self::validate_installed`].
+    pub(crate) fn validate_installed_debug(&self, cache: &RuntimeCache) {
+        if !is_debug() {
+            return;
+        }
+        self.validate_installed(cache)
+            .expect("installed compiled graph invariant violated");
     }
 }
 

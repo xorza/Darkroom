@@ -67,12 +67,11 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
 | `graph/query.rs` | Node-port resolution (`NodePorts`), type and reachability queries |
 | `graph/interface/` | Graph identity, instance links, exposed events, and the `GraphInterface` they compose |
-| `execution/compile.rs` | Host-side compiler and compiled artifact |
+| `execution/compile/` | Host-side compiler, the compiled artifact, and its self-consistency checks |
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
 | `execution/program/` | Private flat runtime program and typed packed pools |
-| `execution/plan/` | The per-run `RunSchedule` (schedule, node states, output demand and readers) and the structural planner that opens it |
-| `execution/resolve/` | The cache-aware sweep refining that schedule: liveness, reuse, output demand, reader counts |
+| `execution/schedule/` | The per-run `RunSchedule` and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
@@ -94,9 +93,9 @@ in the program with an effective disabled bit inherited from composite
 ancestors. Compile errors never enter the worker. Planning is structural: it
 selects exact execution-node roots, treats those seeds as one-run disable
 overrides, orders dependencies before consumers, and detects missing inputs.
-Resolution stamps
-content digests, then derives cache-aware liveness, exact `OutputDemand`, and
-binding-reader counts together. Execution invokes the surviving nodes in plan
+Resolution refines that same
+`RunSchedule` in place: it stamps content digests, then derives cache-aware
+liveness, exact `OutputDemand`, and binding-reader counts together. Execution invokes the surviving nodes in plan
 order. Event-loop bootstrap marks subscribed event owners as event sources,
 forces their initialization lambdas to run instead of reusing output caches,
 and prepares triggers only for sources that complete successfully. The worker

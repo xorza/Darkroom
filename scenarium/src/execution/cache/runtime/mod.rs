@@ -274,7 +274,7 @@ impl RuntimeCache {
     /// stamps `None`; the run loop can improve that node to reuse once its
     /// path producer settles.
     /// `executing` is the run's schedule in producer-first order
-    /// ([`ExecutionPlan::executing`](crate::execution::plan::ExecutionPlan::executing));
+    /// ([`ExecutionPlan::executing`](crate::execution::schedule::ExecutionPlan::executing));
     /// the cache reads the nodes, not the plan that selected them.
     pub(crate) fn stamp_digests(
         &mut self,
