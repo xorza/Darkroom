@@ -180,12 +180,12 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
         store.store_io.publication_attempts.load(Ordering::Relaxed),
         1
     );
-    assert!(store.covers(&first_target, &first.values).await);
-    assert!(!store.covers(&second_target, &first.values).await);
+    assert!(store.covers(&first_target, first.values()).await);
+    assert!(!store.covers(&second_target, first.values()).await);
     let restored = read_snapshot(&store, &first_target, 3).await.unwrap();
-    assert!(matches!(restored.values[0], DynamicValue::Unbound));
-    assert_eq!(restored.values[1].as_i64(), Some(7));
-    assert_eq!(restored.values[2].as_string(), Some("x"));
+    assert!(matches!(restored.values()[0], DynamicValue::Unbound));
+    assert_eq!(restored.values()[1].as_i64(), Some(7));
+    assert_eq!(restored.values()[2].as_string(), Some("x"));
 
     let second = OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(35))]);
     store
@@ -206,7 +206,7 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
         read_snapshot(&store, &second_target, 1)
             .await
             .unwrap()
-            .values[0]
+            .values()[0]
             .as_i64(),
         Some(35)
     );
@@ -280,12 +280,12 @@ async fn broader_same_digest_blob_is_preserved() {
         2
     );
     assert_eq!(std::fs::read(&file.0).unwrap(), complete_bytes);
-    assert!(store.covers(&target, &complete.values).await);
-    assert!(store.covers(&target, &partial.values).await);
+    assert!(store.covers(&target, complete.values()).await);
+    assert!(store.covers(&target, partial.values()).await);
     let restored = read_snapshot(&store, &target, 2).await.unwrap();
-    assert_eq!(restored.values[0].as_i64(), Some(7));
+    assert_eq!(restored.values()[0].as_i64(), Some(7));
     assert_eq!(
-        restored.values[1].as_custom::<Blob>(),
+        restored.values()[1].as_custom::<Blob>(),
         Some(&Blob(vec![1, 2, 3]))
     );
     assert_eq!(decode_calls.load(Ordering::SeqCst), 1);
@@ -307,7 +307,11 @@ async fn missing_and_changed_codecs_miss_before_decode() {
         )
         .await;
 
-    assert!(!DiskStore::default().covers(&target, &snapshot.values).await);
+    assert!(
+        !DiskStore::default()
+            .covers(&target, snapshot.values())
+            .await
+    );
     assert!(
         read_snapshot(&DiskStore::default(), &target, 1)
             .await
@@ -316,7 +320,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
 
     let new_calls = Arc::new(AtomicU64::new(0));
     let new_store = versioned_store(2, new_calls.clone());
-    assert!(!new_store.covers(&target, &snapshot.values).await);
+    assert!(!new_store.covers(&target, snapshot.values()).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_none());
     assert_eq!(new_calls.load(Ordering::SeqCst), 0);
 
@@ -328,7 +332,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
             &mut ContextStore::default(),
         )
         .await;
-    assert!(!old_store.covers(&target, &snapshot.values).await);
+    assert!(!old_store.covers(&target, snapshot.values()).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_some());
     assert_eq!(new_calls.load(Ordering::SeqCst), 1);
     assert_eq!(old_calls.load(Ordering::SeqCst), 0);

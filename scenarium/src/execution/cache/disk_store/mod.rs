@@ -201,7 +201,7 @@ impl DiskStore {
                 .coverage_probes
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-        if policy == StorePolicy::PreserveCovering && self.covers(target, &snapshot.values).await {
+        if policy == StorePolicy::PreserveCovering && self.covers(target, snapshot.values()).await {
             return;
         }
         #[cfg(test)]
@@ -230,7 +230,7 @@ impl DiskStore {
         if let Err(error) = format::write(
             &mut writer,
             target.digest,
-            &snapshot.values,
+            snapshot.values(),
             &self.codecs,
             ctx,
         )

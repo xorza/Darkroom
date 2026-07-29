@@ -71,8 +71,8 @@ fn directory_identity_tracks_entry_changes() {
         // The whole pass fails with it, rather than dropping the path and
         // leaving the node silently uncached forever.
         let mut job = StampJob::default();
-        job.requests.insert(path.clone());
-        job.requests.insert("never-queued-twice".to_string());
+        job.request(&path);
+        job.request("never-queued-twice");
         let resolved = job.run(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
@@ -91,7 +91,7 @@ fn directory_identity_tracks_entry_changes() {
         // queued behind it — which is why queueing a node's paths never has
         // to clear the queue first.
         assert!(
-            job.requests.is_empty(),
+            !job.is_queued(),
             "a failed pass must still empty its queue, including paths it never reached",
         );
         assert_eq!(

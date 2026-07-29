@@ -176,7 +176,9 @@ mod cache_persistence {
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::library::Library;
         let mut engine = ExecutionEngine::default();
-        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
+        engine
+            .cache
+            .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
     }
 
@@ -226,7 +228,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .coverage_probes
                 .load(Ordering::Relaxed),
@@ -236,7 +238,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .publication_attempts
                 .load(Ordering::Relaxed),
@@ -247,7 +249,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .coverage_probes
                 .load(Ordering::Relaxed),
@@ -257,7 +259,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .publication_attempts
                 .load(Ordering::Relaxed),
@@ -294,7 +296,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .coverage_probes
                 .load(Ordering::Relaxed),
@@ -304,7 +306,7 @@ mod cache_persistence {
         assert_eq!(
             engine
                 .cache
-                .disk_store
+                .disk_store()
                 .store_io
                 .publication_attempts
                 .load(Ordering::Relaxed),
@@ -761,7 +763,10 @@ mod cache_persistence {
         );
 
         let empty_dir = TempDir::new("chain-empty");
-        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(empty_dir.0.clone()));
+        engine.cache.set_disk_store(DiskStore::new(
+            &Library::default(),
+            Some(empty_dir.0.clone()),
+        ));
         assert!(
             engine
                 .slot(root_execution_node(mult_id))
@@ -836,7 +841,7 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         engine
             .cache
-            .disk_store
+            .disk_store()
             .corrupt_payload(root_execution_node(mult_id), 1);
         engine.prepare_execution(true, false, &[]).await.unwrap();
         assert_eq!(
@@ -944,7 +949,10 @@ mod cache_persistence {
 
         // An empty replacement store proves the later hit comes from retained RAM, not disk.
         let empty_dir = TempDir::new("both-retained-empty");
-        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(empty_dir.0.clone()));
+        engine.cache.set_disk_store(DiskStore::new(
+            &Library::default(),
+            Some(empty_dir.0.clone()),
+        ));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         engine.update(&graph, &lib).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
@@ -1601,7 +1609,8 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.cache.disk_store = DiskStore::new(&lib, Some(dir.0.clone()));
+            eg.cache
+                .set_disk_store(DiskStore::new(&lib, Some(dir.0.clone())));
             eg
         };
 
@@ -1835,7 +1844,9 @@ mod cache_persistence {
 
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
             let mut engine = ExecutionEngine::default();
-            engine.cache.disk_store = DiskStore::new(&library, Some(dir.0.clone()));
+            engine
+                .cache
+                .set_disk_store(DiskStore::new(&library, Some(dir.0.clone())));
             engine
         };
 
@@ -1958,7 +1969,9 @@ mod resource_binds {
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::execution::cache::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
-        engine.cache.disk_store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
+        engine
+            .cache
+            .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
     }
 

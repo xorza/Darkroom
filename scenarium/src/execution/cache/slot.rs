@@ -7,12 +7,19 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 #[derive(Debug)]
 pub(crate) struct OutputSnapshot {
-    pub(crate) values: Vec<DynamicValue>,
+    values: Vec<DynamicValue>,
 }
 
 impl OutputSnapshot {
     pub(crate) fn new(values: Vec<DynamicValue>) -> Self {
         Self { values }
+    }
+
+    /// The values, in output-port order. Read-only outside this file: a
+    /// snapshot's length is its node's arity, so nothing but the slot that
+    /// owns it may resize or replace what it holds.
+    pub(crate) fn values(&self) -> &[DynamicValue] {
+        &self.values
     }
 
     fn empty(output_count: usize) -> Self {
