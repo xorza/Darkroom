@@ -16,11 +16,11 @@
 use ::serde::{Deserialize, Serialize};
 
 use crate::graph::Binding;
+use crate::graph::BindingEntry;
 use crate::graph::func::{FuncInput, FuncOutput};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort, Subscription};
 use crate::graph::node::Node;
-use crate::graph::{BindingEntry, binding_touches, subscription_touches};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DetachedNode {
@@ -37,11 +37,9 @@ impl DetachedNode {
     pub(super) fn assert_valid(&self) {
         assert!(!self.node_id.is_nil(), "detached node id must not be nil");
         assert!(
-            self.bindings.iter().all(|entry| binding_touches(
-                entry.port,
-                &entry.binding,
-                self.node_id
-            )),
+            self.bindings
+                .iter()
+                .all(|entry| entry.binding.touches(entry.port, self.node_id)),
             "detached bindings must touch the detached node"
         );
         assert!(
@@ -53,7 +51,7 @@ impl DetachedNode {
         assert!(
             self.subscriptions
                 .iter()
-                .all(|subscription| subscription_touches(subscription, self.node_id)),
+                .all(|subscription| subscription.touches(self.node_id)),
             "detached subscriptions must touch the detached node"
         );
         assert!(

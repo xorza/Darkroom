@@ -62,3 +62,12 @@ pub struct Subscription {
     pub event_idx: usize,
     pub subscriber: NodeId,
 }
+
+impl Subscription {
+    /// Whether this edge touches `node_id` from either end — it emits to that
+    /// node, or that node emits it. [`Binding::touches`](crate::Binding) for
+    /// an event edge.
+    pub(crate) fn touches(&self, node_id: NodeId) -> bool {
+        self.emitter == node_id || self.subscriber == node_id
+    }
+}
