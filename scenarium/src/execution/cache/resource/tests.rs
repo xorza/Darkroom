@@ -73,6 +73,7 @@ fn directory_identity_tracks_entry_changes() {
         // leaving the node silently uncached forever.
         let mut stamps = ResourceStamper::default();
         stamps.job.requests.insert(path.clone());
+        stamps.job.requests.insert("never-queued-twice".to_string());
         let resolved = stamps.stamp_queued(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
@@ -85,6 +86,13 @@ fn directory_identity_tracks_entry_changes() {
             "one unstampable path must fail the pass: {resolved:?}",
         );
         assert!(stamps.fs_paths.is_empty(), "and stamp nothing");
+        // The pass drains as it walks, so a failure part-way leaves nothing
+        // queued behind it — which is why queueing a node's paths never has
+        // to clear the queue first.
+        assert!(
+            stamps.job.requests.is_empty(),
+            "a failed pass must still empty its queue, including paths it never reached",
+        );
         assert_eq!(
             fingerprint(&path),
             empty,

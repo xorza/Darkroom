@@ -11,7 +11,7 @@ use crate::execution::program::index::{
 };
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
-use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
+use crate::execution::resolve::{Disposition, ResolvedOutputs, Resolver};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::Invocation;
@@ -79,7 +79,7 @@ impl Prog {
 #[derive(Debug)]
 struct TestRun {
     plan: ExecutionPlan,
-    resolved: ResolvedRun,
+    resolver: Resolver,
 }
 
 /// A `straight_run` with an explicit per-output consumer count (indexed by output-pool
@@ -102,7 +102,7 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
     disposition.reset(program.e_nodes.len(), Disposition::Run);
     TestRun {
         plan: structural_plan(program),
-        resolved: ResolvedRun {
+        resolver: Resolver {
             disposition,
             outputs: ResolvedOutputs {
                 demand: OutputColumn::from(demand),
@@ -114,7 +114,7 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
 
 fn demand_output(program: &ExecutionProgram, run: &mut TestRun, address: OutputAddr) {
     let output_idx = program.output_idx(address);
-    run.resolved.outputs.demand[output_idx] = OutputDemand::Produce;
+    run.resolver.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 /// These tests name nodes by their stable id; the program owns the id ↔ index
@@ -207,7 +207,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
             RunRequest {
                 program,
                 plan: &run.plan,
-                resolved: &run.resolved,
+                resolver: &run.resolver,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -236,7 +236,7 @@ async fn run_with(
             RunRequest {
                 program,
                 plan,
-                resolved: &resolver.run,
+                resolver: &resolver,
                 cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -377,7 +377,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
             RunRequest {
                 program: &p.program,
                 plan: &run.plan,
-                resolved: &run.resolved,
+                resolver: &run.resolver,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
@@ -583,7 +583,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
 
     let mut run = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut run, output(&p.program, a, 0));
-    run.resolved.disposition[nx(&p.program, a)] = Disposition::Reuse;
+    run.resolver.disposition[nx(&p.program, a)] = Disposition::Reuse;
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
@@ -599,7 +599,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
             RunRequest {
                 program: &p.program,
                 plan: &run.plan,
-                resolved: &run.resolved,
+                resolver: &run.resolver,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
