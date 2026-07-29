@@ -4,7 +4,7 @@ use crate::worker::error::WorkerError;
 use tokio::sync::oneshot;
 
 use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::compiled::CompiledGraph;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 use crate::worker::status::WorkerStatus;

@@ -3,7 +3,7 @@
 //! Where each of these ids came from is flattening's own record, kept with the
 //! walk that builds it in [`crate::execution::compile::flatten`]; the form a
 //! host queries is the artifact's, in
-//! [`crate::execution::compile::attribution`].
+//! [`crate::execution::source_map`].
 //!
 //! Naming convention: `Execution`-prefixed types are the **stable identity
 //! space** — they survive installs, cross the host boundary, and may enter
@@ -39,7 +39,7 @@ impl ExecutionNodeId {
     /// (`attribution`, `is_sink`, `is_impure`), which answer for every
     /// authored node.
     ///
-    /// [`CompiledGraph::run_targets`]: crate::execution::compile::compiled_graph::CompiledGraph::run_targets
+    /// [`CompiledGraph::run_targets`]: crate::execution::compiled::CompiledGraph::run_targets
     pub(crate) fn from_authoring(path: &[NodeId]) -> Self {
         let (&node_id, instances) = path
             .split_last()
@@ -100,7 +100,7 @@ impl Idx for NodeIdx {
 /// An [`ExecutionOutputPort`](crate::execution::identity::ExecutionOutputPort)
 /// interned into the installed program's dense index space — the hash-free form
 /// every per-run edge walk uses, resolved once at compile
-/// ([`link`](crate::execution::compile::compiled_graph::CompiledGraph::link)).
+/// ([`link`](crate::execution::compiled::CompiledGraph::link)).
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
 /// byte, or a host-facing report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
