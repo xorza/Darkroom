@@ -51,7 +51,7 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     program_mut(&mut compiled).events[events][0].subscribers[0] = past_the_end;
     assert!(
         matches!(
-            compiled.validate(&library),
+            validate::validate(&compiled, &library),
             Err(CompiledGraphValidationError::MissingEventSubscriber { subscriber, .. })
                 if subscriber == past_the_end
         ),
@@ -92,7 +92,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     });
     assert!(
         matches!(
-            compiled.validate(&library),
+            validate::validate(&compiled, &library),
             Err(CompiledGraphValidationError::MissingBindingTarget { target, .. })
                 if target.node_idx == past_the_end
         ),
@@ -112,7 +112,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     });
     assert!(
         matches!(
-            compiled.validate(&library),
+            validate::validate(&compiled, &library),
             Err(CompiledGraphValidationError::BindingOutputOutOfRange { target, .. })
                 if target.port_idx == port_idx
         ),
@@ -445,11 +445,10 @@ fn validation_returns_compiled_mismatches() {
     builder.insert_leaf(e_node_id, [], interior);
     let mut flat = builder.build();
     flat.nodes[0].func_id = missing_func;
-    let compiled = CompiledGraph::link(flat);
+    let compiled = link::link(flat);
 
     assert_eq!(
-        compiled
-            .validate(&Library::default())
+        validate::validate(&compiled, &Library::default())
             .unwrap_err()
             .to_string(),
         format!("execution node {e_node_id:?} references missing func {missing_func:?}")

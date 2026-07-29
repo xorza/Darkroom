@@ -55,26 +55,3 @@ fn flatten_id_nested_is_deterministic_and_path_sensitive() {
 fn rejects_an_empty_authoring_path() {
     ExecutionNodeId::from_authoring(&[]);
 }
-
-/// Scopes nest by index: a child names its parent, and the entry graph
-/// names no instance — the shape that lets a leaf walk outward without a
-/// materialized path, and that makes the walk terminate.
-#[test]
-fn scopes_nest_under_the_entry_graph() {
-    let outer = NodeId::from_u128(1);
-    let inner = NodeId::from_u128(2);
-    let mut scopes = ScopeTable::open();
-
-    let outer_scope = scopes.push(outer, 0);
-    let inner_scope = scopes.push(inner, outer_scope);
-
-    assert_eq!((outer_scope, inner_scope), (1, 2));
-    assert_eq!(scopes.len(), 3);
-    assert_eq!(scopes.instance(inner_scope), Some(inner));
-    assert_eq!(scopes.parent(inner_scope), outer_scope);
-    assert_eq!(
-        scopes.instance(0),
-        None,
-        "the entry graph names no instance"
-    );
-}

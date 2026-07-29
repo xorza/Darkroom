@@ -1,20 +1,21 @@
-//! What compiling rejects, and what a compiled artifact checks about itself.
+//! What compiling rejects, including the compiler's debug-only checks of a
+//! freshly linked artifact.
 //!
 //! [`CompileError`] is the only one a caller sees: a graph that will not compile
 //! against the library it names — a dropped func, a shrunk port list, a
 //! type-mismatched binding — which a document can reach simply by being older
 //! than the library. It is recoverable, and never enters the worker.
 //!
-//! The crate-private errors are *self-consistency* verdicts on an artifact
-//! linking has already produced. Nothing but a bug in this crate can raise one,
-//! so they surface only through the `is_debug()`-gated `validate_debug` wrappers
-//! — as values rather than panics, so a test can assert on exactly which
-//! invariant broke.
+//! The crate-private errors are *self-consistency* verdicts from the validation
+//! stage after linking. Nothing but a bug in this crate can raise one, so they
+//! surface only through its `is_debug()`-gated wrapper — as values rather than
+//! panics, so a test can assert on exactly which invariant broke.
 
 use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::source_map::AttributionValidationError;
 use crate::graph::identity::FuncId;
 
 /// The graph won't compile against the library: a document can be stale
@@ -72,14 +73,4 @@ pub(crate) enum CompiledGraphValidationError {
         e_node_id: ExecutionNodeId,
         target: OutputAddr,
     },
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub(crate) enum AttributionValidationError {
-    #[error("attribution spans {len} nodes, not the program's {expected}")]
-    LeafCount { len: usize, expected: usize },
-    #[error("node {node_idx:?} is attributed to out-of-range scope {scope}")]
-    LeafScope { node_idx: NodeIdx, scope: u32 },
-    #[error("scope {scope} has parent {parent}, which does not precede it")]
-    ScopeParent { scope: u32, parent: u32 },
 }
