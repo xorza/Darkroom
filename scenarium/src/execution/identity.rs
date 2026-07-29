@@ -36,7 +36,7 @@ impl ExecutionNodeId {
     /// (`attribution`, `is_sink`, `is_impure`), which answer for every
     /// authored node.
     ///
-    /// [`CompiledGraph::run_targets`]: crate::execution::compile::artifact::CompiledGraph::run_targets
+    /// [`CompiledGraph::run_targets`]: crate::execution::compile::compiled_graph::CompiledGraph::run_targets
     pub(crate) fn from_authoring(path: &[NodeId]) -> Self {
         let (&node_id, instances) = path
             .split_last()

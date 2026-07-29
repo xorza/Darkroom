@@ -1,8 +1,8 @@
 # Scenarium compile/execute pipeline — target design
 
-A ground-up design for the path from authored graph to executed run, written as
-the system *should* be rather than as it is. Grounded in the current code
-(`2da5975d` plus the in-tree attribution work) but not constrained by it.
+The design of the path from authored graph to executed run. The compile side
+(flatten → link) is built this way; the run side already was. What remains is
+listed at the end.
 
 ## The rule
 
@@ -20,25 +20,19 @@ Two corollaries, and they are the whole design:
   "not yet" needs a type that says so, or it belongs to a different stage's
   type.
 
-Today's pipeline breaks both, in the same place and for the same reason: the
-flatten walk streams into a `Program`, so between the walk and the end of
-`Compiler::compile` the program exists in states nothing may observe —
+What the rule rules out, concretely. A pipeline where the walk streams into a
+`Program` has to be able to express one half-built, and three of its fields end
+up meaning "not yet":
 
-- `ExecutionOutput { data_type }` holds `DataType::default()` until
-  `resolve_output_types` runs (`execution/program/mod.rs:46`, `:253`);
-- `ExecutionEvent { subscribers: Vec<NodeIdx> }` holds an empty subscriber list
-  until `apply_subscriptions` (`:40`, `:214`);
-- `ExecutionInput { binding }` holds `ExecutionBinding::None` for edges that
-  *are* bound, until `intern_bindings` (`:32`, `:196`).
+- an output's `data_type`, until types are resolved;
+- an event's subscriber list, until subscriptions are wired;
+- an input's binding, until edges are interned — where "unbound" and "bound to
+  a node not yet placed" become the same value, which is the sharp one.
 
-The third is the sharp one: an un-interned `Bind` is indistinguishable from an
-unbound input. Nothing reads the program in that window today, but the types
-permit it, and the window is real — `flattened.program` in `Compiler::compile`
-has unresolved output types by construction.
-
-Note what all three have in common: they are **dense-space fields created by
-the stable-id stage**. `NodeIdx`, `OutputAddr` — flatten cannot know any of
-them, so it writes the type's empty value and moves on.
+All three are **dense-space fields created by the stable-id stage**: `NodeIdx`,
+`OutputAddr` — the walk cannot know any of them, so it writes the type's empty
+value and something later fills it in. Stage-local port types remove the
+question: `FlatInput` has no `Bind(OutputAddr)` to leave empty.
 
 ## The pipeline
 
@@ -99,28 +93,23 @@ everything copied out of the library so nothing downstream needs it.
 ```rust
 pub(super) struct FlatGraph {
     /// Emit order — the walk's order, not the program's. Ordering is link's.
+    /// Each node carries the authored `Leaf` it came from, so the sort that
+    /// places the nodes places the attribution with them.
     nodes: Vec<FlatNode>,
-    /// Packed port pools. Node ranges index these, and ranges survive
-    /// re-ordering the nodes, so link *moves* them into the program unchanged.
+    /// Packed port pools. Node ranges index these, and ranges survive both the
+    /// node sort and link's element-wise rebuild.
     inputs: Pool<FlatInput>,
     outputs: Pool<FlatOutput>,
     events: Pool<FlatEvent>,
-    /// Edges, by id: a `Bind` can name a node the walk emits later.
-    binds: Vec<PendingBind>,
+    /// Event edges, by id — the one edge kind that needs a side list: the slot
+    /// to write belongs to the *emitter*. A data edge goes straight into the
+    /// consumer's own input slot, as `FlatBinding::Bind`.
     subscriptions: Vec<PendingSubscription>,
-    /// Authored origin: one leaf per node, parallel to `nodes`, over the
-    /// instance scopes the descent opened.
-    scopes: Vec<Scope>,
+    /// The instance ancestry the leaves point into.
+    scopes: ScopeTable,
     /// (instance, the node behind one of its exposed output ports) — not
     /// recoverable once the `GraphOutput` edges are gone.
     exposed: Vec<(NodeId, ExecutionNodeId)>,
-}
-
-struct FlatNode {
-    id: ExecutionNodeId,
-    leaf: Leaf,
-    /// Topology and code, minus anything only link can know.
-    node: FlatNodeData,
 }
 ```
 
@@ -128,19 +117,16 @@ The three port types are where the "no placeholders" rule pays:
 
 | Flat (stage 2) | Execution (stage 3) | Why they differ |
 | --- | --- | --- |
-| `FlatInput { required, stamps_fs_path, binding: FlatBinding }` where `FlatBinding = None \| Const(StaticValue)` | `ExecutionInput { …, binding: ExecutionBinding }` adding `Bind(OutputAddr)` | a bound edge is a `PendingBind` until link interns it — so "unbound" and "not yet interned" cannot be the same value |
+| `FlatInput { required, stamps_fs_path, binding: FlatBinding }` where `FlatBinding::Bind` names an `ExecutionOutputPort` | `ExecutionInput { …, binding: ExecutionBinding }` whose `Bind` is an `OutputAddr` | the edge lives in the slot it belongs to from the start, named by id until link addresses it — so "unbound" and "not yet interned" are different values, and there is no fixup list |
 | `FlatOutput { ty: FlatOutputType }` — `Fixed(DataType)` or `Wildcard { mirrors, mirrored_declared: DataType }` | `ExecutionOutput { data_type: DataType }` | flatten knows the *declaration*; link resolves it to the effective type |
 | `FlatEvent { lambda }` | `ExecutionEvent { lambda, subscribers: Vec<NodeIdx> }` | subscribers are dense indices |
 
-`FlatOutputType` carrying the mirrored input's declared type is what makes
-**link library-free**: today `resolve_output_types` re-fetches each node's
-`Func` from the library to read `func.outputs[i].ty` and
-`func.inputs[mirrors].data_type` (`execution/program/mod.rs:256`–`:280`). With
-the declaration recorded at flatten — where the func is already in hand — the
-resolution pass needs only the flat graph and its interned edges. The library
-stops being an argument to program construction, which is the property the
-crate's docs already claim ("runtime digesting does not retain the function
-library") but currently achieves by convention.
+`FlatOutput::Wildcard` carrying the mirrored input's declared type is what makes
+**link library-free**: resolution would otherwise re-fetch each node's `Func` to
+read `func.outputs[i].ty` and `func.inputs[mirrors].data_type`. Recorded at
+flatten — where the func is already in hand — the resolution pass needs only the
+flat graph and its interned edges, and `Program` never mentions a `Library` at
+all. Self-containment becomes a fact about the types rather than a convention.
 
 **Flatten never names `NodeIdx`, `OutputIdx`, `OutputAddr`, or `NodeColumn`.**
 That is the test for whether this stage boundary is being respected.
@@ -163,22 +149,27 @@ In order, all private to link:
    Determinism comes from the id sort, independent of walk order.
 2. **Index.** Build `e_node_ids: NodeColumn<ExecutionNodeId>` and
    `e_node_index: HashMap<_, NodeIdx>` — the artifact's one stable-id index.
-3. **Intern.** `PendingBind` → `ExecutionBinding::Bind(OutputAddr)`;
-   `PendingSubscription` → subscriber lists. The pools move over unchanged
-   except for these writes, which is the input pool's *first* value for a bound
-   port rather than an overwrite.
-4. **Resolve output types.** The wildcard fixpoint over interned edges, from
-   `FlatOutput` into `ExecutionOutput`. Memoized per output as today; no
-   library.
-5. **Attribute.** `Attribution { scopes, leaves: NodeColumn<Leaf> }` — the
+3. **Intern.** Rebuild the input pool, `FlatBinding::Bind(id)` becoming
+   `ExecutionBinding::Bind(OutputAddr)` — each element's *first* value rather
+   than an overwrite.
+4. **Resolve output types.** The wildcard fixpoint over the edges just
+   interned, rebuilding `FlatOutput` into `ExecutionOutput`. Memoized per
+   output; no library.
+5. **Wire.** Group `subscriptions` by emitter port, then build each
+   `ExecutionEvent` with the subscriber list it ends up with — so an empty one
+   means "nothing subscribes", not "not wired yet".
+6. **Attribute.** `Attribution { scopes, leaves: NodeColumn<Leaf> }` — the
    leaves in the order step 1 fixed.
-6. **Invert.** `footprints` (authored id → its execution nodes),
+7. **Invert.** `footprints` (authored id → its execution nodes),
    `consumers` (reversed data edges), `exposed` (instance → its producer
    nodes), all packed into one `Pool<NodeIdx>`.
 
-Steps 1–4 produce `Program`; 5–6 produce the host-facing half. They are one
+Steps 1–5 produce `Program`; 6–7 produce the host-facing half. They are one
 stage because they share one ordering decision and because a `Program` without
-its attribution answers no host question.
+its attribution answers no host question. `Attribution` is link's type, not
+flatten's: the relation is the walk's, but the *placed* form belongs to the
+stage that placed it — flatten keeps only the raw `Leaf` and `ScopeTable`
+records it can actually produce.
 
 `Program` is then final and immutable for the life of the install, which is
 what lets `Arc<Program>` be shared with `RuntimeCache` as the alignment
@@ -203,38 +194,28 @@ reads end to end:
   `WorkerStatusKind` discriminator. See item A1 in
   `.notes/scenarium-analysis.md`.
 
-## What this changes, concretely
+## What it costs
 
-| Today | Target |
-| --- | --- |
-| `Flattener::flatten(root, library) -> Flattened { program, attribution, exposed }` | `Flattener::flatten(authored) -> FlatGraph` |
-| `Program` built by the walk, mutated by three later passes | `Program` constructed once, inside link, already final |
-| `Program::adopt_nodes` / `intern_bindings` / `apply_subscriptions` / `resolve_output_types` as `pub(crate)` mutators | private steps of `CompiledGraph::link`; `Program` has no mutators at all |
-| `resolve_output_types(&mut self, library)` | resolution reads `FlatOutput`; no library |
-| flatten builds `NodeColumn<Leaf>` (dense) | flatten builds `Vec<Leaf>` parallel to its nodes; link makes the column |
-| `ExecutionOutput::default()` pushed as a placeholder | `FlatOutput` carries the declaration; no placeholder exists |
-
-Costs, stated plainly:
-
-- **Allocations.** Flatten's output buffers (`nodes`, `binds`, `subscriptions`,
-  `scopes`, `exposed`) move into `FlatGraph` and cannot be reused across
-  compiles; traversal scratch (`path`, `levels`, `scope_stack`, `seen_shared`)
-  stays on the `Flattener`. That is ~5 vector allocations per compile, on a
-  cold host-thread path that already clones a lambda handle per node. The
-  **pools do not copy** — they move into the program, ranges intact.
-- **One extra pass** over the output pool, converting `FlatOutput` →
-  `ExecutionOutput`. It replaces a pass that did the same work *plus* a library
-  lookup per node.
-- **Churn.** `Program`'s three mutators and their direct unit tests move into
-  link; the flatten tests gain the ability to assert on a `FlatGraph` without a
-  program, which they currently cannot.
+- **Allocations.** Flatten's output buffers (`nodes`, `subscriptions`,
+  `scopes`, `exposed`) move into `FlatGraph` and are not reused across compiles;
+  traversal scratch (`path`, `levels`, `scope_stack`, `seen_shared`, the
+  per-node input buffer) stays on the `Flattener`. That is ~4 vector
+  allocations per compile, on a cold host-thread path that already clones a
+  lambda handle per node — and it replaces the per-compile `Vec` the old
+  adoption pass allocated to sort into.
+- **Three element-wise pool rebuilds** at link, one per port kind: each moves
+  its elements (no deep clone) into a pool of the program's type, positions
+  preserved. The output one replaces a pass that did the same work *plus* a
+  library lookup per node; the other two are the price of "unbound" and "not yet
+  interned" being different values.
 
 ## What must not change
 
 - **Streaming into packed pools.** The walk appending straight into the port
   pools, with nodes holding `PoolRange`s, is why no intermediate graph is
-  materialized. `FlatGraph` owns those pools and hands them to the program by
-  move — the split is a change of *ownership*, not of layout.
+  materialized. `FlatGraph` owns those pools and linking rebuilds each into the
+  program's element-for-element, positions preserved — so a node's ranges carry
+  over unchanged (`PoolRange::retype`) and the layout is the same on both sides.
 - **The stable/dense identity split**, and the rule that `NodeIdx` never enters
   a digest, a persisted byte, or a report.
 - **Typed phase handles** for the run stages.
@@ -243,24 +224,10 @@ Costs, stated plainly:
   rather than rejecting.
 - **`Arc<CompiledGraph>` / `Arc<Program>` sharing** with the worker and cache.
 
-## Migration order
+## What is left
 
-Each step compiles and passes tests on its own; none needs the next.
-
-1. **`FlatGraph` with today's port types.** Flatten stops taking a `Program`
-   and returns its own value; `link` performs adopt/intern/subscribe/resolve as
-   today, just moved. This alone removes the "flatten builds a Program"
-   inversion the design note starts from.
-2. **Split the port types** (`FlatInput`/`FlatOutput`/`FlatEvent`). Placeholders
-   and the "unbound vs. un-interned" ambiguity disappear; `link` becomes
-   library-free.
-3. **Move attribution densification into link**, leaving flatten with
-   `Vec<Leaf>` — removing the dense type from the stable-id stage.
-4. **`Program` loses its mutators**, becoming construct-once. Its unit tests
-   move to link.
-5. *(Optional)* **`Authored` validation token.**
-6. **`WorkerStatus` sum type** — independent of 1–5, and the largest remaining
-   win on the run side.
-
-Steps 1–2 are where the value is. Steps 3–4 are cleanup that only becomes
-cheap once 1–2 have landed.
+1. **`WorkerStatus` sum type** — the one stage whose output type still carries
+   fields its kind has no use for. The largest remaining win, and independent of
+   everything above. See item A1 in `.notes/scenarium-analysis.md`.
+2. *(Optional)* **`Authored` validation token** — the least valuable item here;
+   take it only if the walk's infallible lookups keep growing.

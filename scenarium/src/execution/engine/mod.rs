@@ -9,7 +9,7 @@ use common::CancelToken;
 use crate::RamUsage;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
-use crate::execution::compile::artifact::CompiledGraph;
+use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;

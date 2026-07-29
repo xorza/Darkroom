@@ -4,7 +4,7 @@ use indexmap::IndexSet;
 use tokio::sync::oneshot;
 
 use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::artifact::CompiledGraph;
+use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::seeds::RunSeeds;
