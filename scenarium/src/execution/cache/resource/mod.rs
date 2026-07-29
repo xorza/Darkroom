@@ -13,9 +13,7 @@ use common::CancelToken;
 use hashbrown::{HashMap, HashSet};
 
 use crate::DynamicValue;
-use crate::execution::cache::digest::{
-    DOMAIN, Digest, DigestHasher, InputTag, hash_data_type, hash_static,
-};
+use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
@@ -399,7 +397,7 @@ impl ResourceStamper {
         let outputs = &program.outputs[e_node.outputs];
         hasher.write_pod(outputs.len() as u64);
         for output in outputs {
-            hash_data_type(&mut hasher, &output.data_type);
+            hasher.write_data_type(&output.data_type);
         }
 
         for input in &program.inputs[e_node.inputs] {
@@ -409,7 +407,7 @@ impl ResourceStamper {
                 }
                 ExecutionBinding::Const(value) => {
                     hasher.write_input_tag(InputTag::Const);
-                    hash_static(&mut hasher, value);
+                    hasher.write_static(value);
                     self.hash_fs_paths(&mut hasher, value.as_fs_paths())?;
                 }
                 ExecutionBinding::Bind(addr) => {
