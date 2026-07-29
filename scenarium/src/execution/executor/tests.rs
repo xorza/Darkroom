@@ -20,10 +20,19 @@ use crate::{DynamicValue, StaticValue};
 /// planner gates required ones; these tests drive the executor directly).
 #[derive(Default)]
 struct Prog {
-    program: Program,
+    /// Shared like the compile artifact's, so it can be handed to
+    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
+    program: Arc<Program>,
 }
 
 impl Prog {
+    /// The program while it is still exclusively this fixture's — every
+    /// mutation below goes through here, and it stops being available the
+    /// moment a cache is reconciled onto it.
+    fn building(&mut self) -> &mut Program {
+        Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+    }
+
     fn node(
         &mut self,
         inputs: &[ExecutionBinding],
@@ -31,7 +40,7 @@ impl Prog {
         lambda: FuncLambda,
     ) -> ExecutionNodeId {
         let inputs = self
-            .program
+            .building()
             .inputs
             .append(inputs.iter().map(|binding| ExecutionInput {
                 required: false,
@@ -39,12 +48,12 @@ impl Prog {
                 binding: binding.clone(),
             }));
         let outputs = self
-            .program
+            .building()
             .outputs
             .append((0..outputs).map(|_| ExecutionOutput::default()));
         let idx = self.program.e_nodes.len();
         let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
-        self.program.push(
+        self.building().push(
             e_node_id,
             ExecutionNode {
                 func_id: FuncId::from_u128(idx as u128 + 1),
@@ -63,13 +72,13 @@ impl Prog {
     /// Override a node's [`CacheMode`] (nodes default to `Ram`). Drives the mid-run
     /// output-release tests, which turn on the non-RAM modes.
     fn set_cache(&mut self, e_node_id: ExecutionNodeId, cache: CacheMode) {
-        self.program.by_id_mut(e_node_id).cache = cache;
+        self.building().by_id_mut(e_node_id).cache = cache;
     }
 
     /// Override a node's [`FuncBehavior`] (nodes default to `Impure`, which has no digest
     /// and so can never be reused).
     fn set_behavior(&mut self, e_node_id: ExecutionNodeId, behavior: FuncBehavior) {
-        self.program.by_id_mut(e_node_id).behavior = behavior;
+        self.building().by_id_mut(e_node_id).behavior = behavior;
     }
 }
 
@@ -190,10 +199,10 @@ fn collect(
     executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
 }
 
-async fn run(program: &Program, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
+async fn run(program: &Arc<Program>, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(program);
+    cache.reconcile(program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -344,7 +353,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     let run = run_with_readers(&p.program, vec![1]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -550,7 +559,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     run.states[nx(&p.program, a)] = NodeState::Reuse;
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
     cache.stamp_digest(&p.program, nx(&p.program, a));
     cache[nx(&p.program, a)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
@@ -627,14 +636,14 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let a = p.node(&[], 1, producer);
     let live = p.node(&[bind(&p.program, a, 0)], 1, consumer.clone());
     let cached = p.node(&[bind(&p.program, a, 0)], 1, consumer);
-    p.program.by_id_mut(a).behavior = FuncBehavior::Pure;
-    p.program.by_id_mut(cached).behavior = FuncBehavior::Pure;
+    p.building().by_id_mut(a).behavior = FuncBehavior::Pure;
+    p.building().by_id_mut(cached).behavior = FuncBehavior::Pure;
     p.set_cache(a, CacheMode::None);
     p.set_cache(live, CacheMode::None);
 
     let mut plan = structural_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
     let first = run_with(&p.program, &mut plan, &mut cache).await;
     assert_eq!(first.ran_node_count, 3);
 
@@ -710,7 +719,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     plan.roots.reset(p.program.e_nodes.len());
     plan.roots.insert(nx(&p.program, downstream));
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
     cache[nx(&p.program, missing)].value = ValueState::Resident {
         snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         produced_under: None,
@@ -771,7 +780,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     let c = p.node(&[bind(&p.program, a, 0)], 1, consumer());
     // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
     for e_node_id in [a, b, c] {
-        p.program.by_id_mut(e_node_id).behavior = FuncBehavior::Pure;
+        p.building().by_id_mut(e_node_id).behavior = FuncBehavior::Pure;
     }
     // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
     p.set_cache(a, CacheMode::None);
@@ -784,7 +793,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let mut plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &mut plan, &mut cache).await;

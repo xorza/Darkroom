@@ -69,12 +69,11 @@ impl ExecutionEngine {
     /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
-        // Realign the runtime cache to the new node set (preserve by id,
-        // default new, trim gone) — before the swap, while the program its
-        // slots are still aligned to is in hand to name them by.
-        self.cache
-            .reconcile(&self.compiled.program, &compiled.program);
         self.compiled = compiled;
+        // Realign the runtime cache to the new node set (preserve by id,
+        // default new, trim gone). The program it is coming *from* is its own
+        // field, so the swap above does not have to happen after this.
+        self.cache.reconcile(&self.compiled.program);
 
         self.compiled.validate_installed_debug(&self.cache);
     }

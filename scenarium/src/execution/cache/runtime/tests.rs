@@ -37,6 +37,10 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
 /// Append a slot at the next dense index. The programs in this file push ids
 /// `from_u128(idx + 1)` in the same order, so the cache lands aligned to them
 /// without a reconcile.
+///
+/// It leaves the cache's own alignment unset, so a test that goes on to
+/// `reconcile` must build its slots through one instead — that is the pairing
+/// `reconcile` reads to carry slots across an install.
 fn insert_slot(cache: &mut RuntimeCache, slot: RuntimeSlot) -> NodeIdx {
     let node_idx = NodeIdx(cache.slots.len() as u32);
     cache.slots.push(slot);
@@ -254,40 +258,38 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
         (CacheMode::Ram, true),
         (CacheMode::Both, true),
     ];
-    let mut cache = RuntimeCache::default();
-    let mut program = Program::default();
-
-    for (index, _) in cases.iter().enumerate() {
-        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
-        let outputs = one_output(&mut program);
-        program.push(
-            e_node_id,
-            ExecutionNode {
-                cache: CacheMode::Ram,
-                behavior: FuncBehavior::Pure,
-                outputs,
-                ..Default::default()
-            },
-        );
-        insert_slot(
-            &mut cache,
-            RuntimeSlot {
-                current_digest: Some(digest),
-                value: ValueState::Resident {
-                    snapshot: complete_snapshot(out()),
-                    produced_under: Some(digest),
+    // One program per install: the values are produced under the first, where
+    // every node retains in RAM, and the second is the recompile that downgrades
+    // each node to its case's mode.
+    let build = |modes: [CacheMode; 4]| {
+        let mut program = Program::default();
+        for (index, mode) in modes.into_iter().enumerate() {
+            let outputs = one_output(&mut program);
+            program.push(
+                ExecutionNodeId::from_u128(index as u128 + 1),
+                ExecutionNode {
+                    cache: mode,
+                    behavior: FuncBehavior::Pure,
+                    outputs,
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        );
-    }
-    for (index, (mode, _)) in cases.iter().enumerate() {
-        program
-            .by_id_mut(ExecutionNodeId::from_u128(index as u128 + 1))
-            .cache = *mode;
+            );
+        }
+        Arc::new(program)
+    };
+
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&build([CacheMode::Ram; 4]));
+    for (index, _) in cases.iter().enumerate() {
+        let slot = &mut cache.slots[NodeIdx(index as u32)];
+        slot.current_digest = Some(digest);
+        slot.value = ValueState::Resident {
+            snapshot: complete_snapshot(out()),
+            produced_under: Some(digest),
+        };
     }
 
-    cache.reconcile(&program, &program);
+    cache.reconcile(&build(cases.map(|(mode, _)| mode)));
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -301,21 +303,28 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 #[tokio::test]
 async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let func_id = FuncId::from_u128(77);
-    let mut program = Program::default();
-    let outputs = one_output(&mut program);
-    let node = move |func_id, version| ExecutionNode {
-        func_id,
-        version,
-        cache: CacheMode::Ram,
-        behavior: FuncBehavior::Pure,
-        outputs,
-        ..Default::default()
-    };
     let e_node_id = ExecutionNodeId::from_u128(1);
-    program.push(e_node_id, node(func_id, 0));
+    // Each install is its own program — the owner change under test is what a
+    // recompile does to the node, not an edit to the program already installed.
+    let build = move |func_id, version| {
+        let mut program = Program::default();
+        let outputs = one_output(&mut program);
+        program.push(
+            e_node_id,
+            ExecutionNode {
+                func_id,
+                version,
+                cache: CacheMode::Ram,
+                behavior: FuncBehavior::Pure,
+                outputs,
+                ..Default::default()
+            },
+        );
+        Arc::new(program)
+    };
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&program);
+    cache.reconcile(&build(func_id, 0));
     let digest = Digest([5u8; 32]);
     let node_idx = NodeIdx(0);
     let slot = &mut cache.slots[node_idx];
@@ -328,7 +337,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     };
 
     // Same (func, version): everything survives.
-    cache.reconcile(&program, &program);
+    cache.reconcile(&build(func_id, 0));
     assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
         cache.slots[node_idx].event_state.lock().await.get::<u32>(),
@@ -338,8 +347,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Bumped version: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the version.
-    *program.by_id_mut(e_node_id) = node(func_id, 1);
-    cache.reconcile(&program, &program);
+    cache.reconcile(&build(func_id, 1));
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a version bump must drop the predecessor's state"
@@ -352,8 +360,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Changed func id at the same version: state drops too.
     cache.slots[node_idx].state.set(31_u32);
-    *program.by_id_mut(e_node_id) = node(FuncId::from_u128(78), 1);
-    cache.reconcile(&program, &program);
+    cache.reconcile(&build(FuncId::from_u128(78), 1));
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a func change must drop the predecessor's state"
@@ -377,13 +384,13 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
                 },
             );
         }
-        program
+        Arc::new(program)
     };
     let digest = |id: u128| Digest([id as u8; 32]);
 
     // Ids 1, 2, 3 at indices 0, 1, 2 — each slot stamped with its own digest.
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&build(&[1, 2, 3]));
+    cache.reconcile(&build(&[1, 2, 3]));
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
         slot.current_digest = Some(digest(i as u128 + 1));
@@ -395,8 +402,9 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     }
 
     // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
-    // surviving node slides down one index.
-    cache.reconcile(&build(&[1, 2, 3]), &build(&[2, 3, 4]));
+    // surviving node slides down one index. Only the new program is named —
+    // the one being left is the cache's own.
+    cache.reconcile(&build(&[2, 3, 4]));
 
     assert_eq!(
         cache.slots[NodeIdx(0)].current_digest,

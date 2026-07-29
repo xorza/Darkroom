@@ -5,6 +5,8 @@
 //! compile is never sent, so the worker's install is infallible and a running
 //! event loop is never disturbed by a bad edit.
 
+use std::sync::Arc;
+
 use common::is_debug;
 use hashbrown::HashMap;
 use thiserror::Error;
@@ -96,7 +98,11 @@ pub(crate) enum InstalledGraphValidationError {
 /// program (the engine's pre-install / cleared state).
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
-    pub(crate) program: Program,
+    /// Shared rather than owned outright so the [`RuntimeCache`] can hold the
+    /// program its slots are aligned to without copying anything to name them
+    /// by. One allocation, two holders: the artifact and the cache reconciled
+    /// onto it.
+    pub(crate) program: Arc<Program>,
     pub(crate) flatten_map: FlattenMap,
     /// The packed backing of all three relations below: each of them owns
     /// runs of this one buffer rather than a `Vec` of its own per key.
@@ -202,7 +208,7 @@ impl CompiledGraph {
         }
 
         Self {
-            program,
+            program: Arc::new(program),
             flatten_map,
             node_lists,
             footprints,

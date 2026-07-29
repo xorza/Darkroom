@@ -481,6 +481,8 @@ mod planning {
 }
 
 mod resolving {
+    use std::sync::Arc;
+
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{OutputSnapshot, ValueState};
     use crate::execution::identity::ExecutionNodeId;
@@ -501,14 +503,23 @@ mod resolving {
 
     #[derive(Default)]
     struct Fix {
-        program: Program,
+        /// Shared like the compile artifact's, so it can be handed to
+        /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
+        program: Arc<Program>,
         order: Vec<ExecutionNodeId>,
     }
 
     impl Fix {
+        /// The program while it is still exclusively this fixture's — every
+        /// mutation below goes through here, and it stops being available the
+        /// moment a cache is reconciled onto it.
+        fn building(&mut self) -> &mut Program {
+            Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+        }
+
         fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
             let inputs = self
-                .program
+                .building()
                 .inputs
                 .append(inputs.iter().map(|(required, binding)| ExecutionInput {
                     required: *required,
@@ -516,13 +527,13 @@ mod resolving {
                     binding: binding.clone(),
                 }));
             let outputs = self
-                .program
+                .building()
                 .outputs
                 .append((0..outputs).map(|_| ExecutionOutput::default()));
             let idx = self.program.e_nodes.len();
             let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
             self.order.push(e_node_id);
-            self.program.push(
+            self.building().push(
                 e_node_id,
                 ExecutionNode {
                     behavior: FuncBehavior::Pure,
@@ -564,7 +575,7 @@ mod resolving {
                 schedule.seeded.insert(nx(*seed));
             }
             let mut cache = RuntimeCache::default();
-            cache.reconcile_fresh(&self.program);
+            cache.reconcile(&self.program);
             cache.stamp_digests(&self.program, schedule.executing());
             for cached in cached {
                 let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
@@ -698,7 +709,7 @@ mod resolving {
         let mut fix = Fix::default();
         let source = fix.node(&[], 1);
         let missing = fix.node(&[(false, bind(source, 0))], 1);
-        fix.program.by_id_mut(missing).lambda = FuncLambda::None;
+        fix.building().by_id_mut(missing).lambda = FuncLambda::None;
         let sink = fix.node(&[(false, bind(missing, 0))], 0);
 
         let run = fix

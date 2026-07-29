@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
@@ -16,10 +18,19 @@ use crate::node::definition::{FuncBehavior, FuncId};
 /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
 #[derive(Debug, Default)]
 struct Prog {
-    program: Program,
+    /// Shared like the compile artifact's, so it can be handed to
+    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
+    program: Arc<Program>,
 }
 
 impl Prog {
+    /// The program while it is still exclusively this fixture's — every
+    /// mutation below goes through here, and it stops being available the
+    /// moment a cache is reconciled onto it.
+    fn building(&mut self) -> &mut Program {
+        Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+    }
+
     /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
     fn add(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
         self.add_with(
@@ -53,7 +64,7 @@ impl Prog {
     /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
     fn stamp_fs_path_input(&mut self, idx: usize, input_idx: usize) {
         let pool = self.program.by_id(e_node_id(idx)).inputs.start as usize + input_idx;
-        self.program.inputs[pool].stamps_fs_path = true;
+        self.building().inputs[pool].stamps_fs_path = true;
     }
 
     fn add_with(
@@ -64,7 +75,7 @@ impl Prog {
         bindings: &[ExecutionBinding],
     ) -> usize {
         let inputs = self
-            .program
+            .building()
             .inputs
             .append(bindings.iter().map(|binding| ExecutionInput {
                 required: false,
@@ -72,14 +83,14 @@ impl Prog {
                 binding: binding.clone(),
             }));
         let idx = self.program.e_nodes.len();
-        let outputs = self.program.outputs.append(
+        let outputs = self.building().outputs.append(
             types
                 .iter()
                 .cloned()
                 .map(|data_type| ExecutionOutput { data_type }),
         );
         let e_node_id = e_node_id(idx);
-        self.program.push(
+        self.building().push(
             e_node_id,
             ExecutionNode {
                 behavior,
@@ -124,9 +135,9 @@ struct DigestPair {
 /// in fixture index order, each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. The cache
 /// identifies its own paths each call. Returns it, holding every computed digest.
-fn digested_cache(program: &Program, through: usize) -> RuntimeCache {
+fn digested_cache(program: &Arc<Program>, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(program);
+    cache.reconcile(program);
     for idx in 0..=through {
         cache.prepare_node_blocking(program, node_idx(idx));
         cache.stamp_digest(program, node_idx(idx));
@@ -135,7 +146,7 @@ fn digested_cache(program: &Program, through: usize) -> RuntimeCache {
 }
 
 /// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &Program, idx: usize) -> Option<Digest> {
+fn digest_at(program: &Arc<Program>, idx: usize) -> Option<Digest> {
     digested_cache(program, idx)[node_idx(idx)].current_digest
 }
 
@@ -165,7 +176,7 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first[1], first[2]);
     assert_ne!(first[0], first[2]);
 
-    p.program.by_id_mut(e_node_id(0)).version = 1;
+    p.building().by_id_mut(e_node_id(0)).version = 1;
     let versioned = digests(&p);
     assert_ne!(
         first[0], versioned[0],
@@ -303,7 +314,7 @@ fn fs_path_folds_file_identity_and_path() {
         let mut p = Prog::default();
         p.add(10, 1, &[konst(value)]);
         let mut cache = RuntimeCache::default();
-        cache.reconcile_fresh(&p.program);
+        cache.reconcile(&p.program);
         cache.stamp_file(path, 4, 7);
         cache.node_digest(&p.program, node_idx(0))
     };
@@ -362,7 +373,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
-        cache.reconcile_fresh(&p.program);
+        cache.reconcile(&p.program);
         let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
         cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
@@ -464,7 +475,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&p.program);
+    cache.reconcile(&p.program);
     let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
     cache[node_idx(0)].current_digest = Some(producer);
     hydrate(

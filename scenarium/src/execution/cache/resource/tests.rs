@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
@@ -272,7 +273,9 @@ fn file_identity_separates_pre_epoch_mtimes() {
 
 #[derive(Debug)]
 struct ConstPathFixture {
-    program: Program,
+    /// Shared like the compile artifact's, so it can be handed to
+    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
+    program: Arc<Program>,
     schedule: RunSchedule,
     first: ExecutionNodeId,
     second: ExecutionNodeId,
@@ -323,7 +326,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     schedule.roots.insert(NodeIdx(0));
     schedule.roots.insert(NodeIdx(1));
     ConstPathFixture {
-        program,
+        program: Arc::new(program),
         schedule,
         first,
         second,
@@ -337,7 +340,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     std::fs::write(&file, b"x").unwrap();
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
-    cache.reconcile_fresh(&fixture.program);
+    cache.reconcile(&fixture.program);
 
     cache
         .prepare(
