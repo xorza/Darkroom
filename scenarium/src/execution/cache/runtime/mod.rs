@@ -20,7 +20,7 @@ use hashbrown::HashMap;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::{FsPathId, StampError, StampJob};
-use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
+use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
@@ -161,11 +161,11 @@ impl RuntimeCache {
         by_node.reset(program.e_nodes.len(), RamUsage::default());
         let mut total = RamUsage::default();
         for (node_idx, slot) in self.slots.iter_indexed() {
-            let ValueState::Resident { snapshot, .. } = &slot.value else {
+            let Some(values) = slot.output_values() else {
                 continue;
             };
             let mut node_usage = RamUsage::default();
-            for value in &snapshot.values {
+            for value in values {
                 let usage = value.ram_usage();
                 node_usage += usage;
                 let counts_toward_total = match value {
@@ -212,10 +212,7 @@ impl RuntimeCache {
                     slot.reown(owner);
                     slot
                 }
-                None => RuntimeSlot {
-                    owner,
-                    ..Default::default()
-                },
+                None => RuntimeSlot::new(owner),
             };
             self.slots.push(slot);
         }
@@ -233,12 +230,9 @@ impl RuntimeCache {
             .is_some_and(|snapshot| snapshot.covers_demand(demand))
     }
 
-    /// Read a producer output for a consumer: a clone of the value, or — with
-    /// `take` — the value itself, moved out of the slot (leaving `Unbound`). The move is the
-    /// executor's last-read fast path for a non-RAM producer: the RAM copy would be released
-    /// right after anyway, and handing over the slot's copy leaves the consumer as the sole
-    /// `Arc` holder so [`DynamicValue::into_custom`] can reuse the allocation in place.
-    /// `None` when the slot holds no resident values.
+    /// [`RuntimeSlot::read_output`] addressed by [`OutputAddr`], with the one check
+    /// the slot cannot make itself: that what it holds still has the arity the
+    /// installed program declares.
     pub(crate) fn read_output_port(
         &mut self,
         program: &Program,
@@ -246,29 +240,13 @@ impl RuntimeCache {
         take: bool,
     ) -> Option<DynamicValue> {
         let arity = program[address.node_idx].outputs.len as usize;
-        let ValueState::Resident { snapshot, .. } = &mut self.slots[address.node_idx].value else {
-            return None;
-        };
-        debug_assert_eq!(snapshot.values.len(), arity);
-        Some(if take {
-            std::mem::take(&mut snapshot.values[address.port_idx as usize])
-        } else {
-            snapshot.values[address.port_idx as usize].clone()
-        })
-    }
-
-    /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
-    /// mid-run per-output release for a non-RAM producer whose one output just went spent while
-    /// others are still owed to other consumers.
-    pub(crate) fn clear_output_port(&mut self, address: OutputAddr) {
-        let ValueState::Resident { snapshot, .. } = &mut self.slots[address.node_idx].value else {
-            panic!("an output can only be released from a resident slot");
-        };
+        let slot = &mut self.slots[address.node_idx];
         debug_assert!(
-            (address.port_idx as usize) < snapshot.values.len(),
-            "output port must be in range"
+            slot.output_values()
+                .is_none_or(|values| values.len() == arity),
+            "cached output values must match the node's compiled arity"
         );
-        snapshot.values[address.port_idx as usize] = DynamicValue::Unbound;
+        slot.read_output(address.port_idx, take)
     }
 
     /// Producer-first digest pass over the whole schedule, so a consumer
@@ -614,10 +592,7 @@ impl RuntimeCache {
         let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
             return false;
         };
-        self.slots[node_idx].value = ValueState::Resident {
-            snapshot,
-            produced_under: Some(target.digest),
-        };
+        self.slots[node_idx].load_output(snapshot, Some(target.digest));
         true
     }
 
@@ -689,7 +664,7 @@ pub(crate) mod internals {
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::resource::{FsPathId, StampError};
     use crate::execution::cache::runtime::RuntimeCache;
-    use crate::execution::cache::slot::{OutputSnapshot, ValueState};
+    use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::program::Program;
     use crate::execution::program::index::NodeIdx;
 
@@ -723,10 +698,7 @@ pub(crate) mod internals {
         snapshot: OutputSnapshot,
         digest: Digest,
     ) {
-        cache.slots[node_idx].value = ValueState::Resident {
-            snapshot,
-            produced_under: Some(digest),
-        };
+        cache.slots[node_idx].load_output(snapshot, Some(digest));
     }
 }
 

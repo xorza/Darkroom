@@ -183,7 +183,7 @@ mod internals {
     use common::CancelToken;
 
     use crate::DynamicValue;
-    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
+    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
@@ -374,10 +374,8 @@ mod internals {
         ) {
             let node_idx = self.compiled.program.e_node_index[&e_node_id];
             let slot = &mut self.cache[node_idx];
-            slot.value = ValueState::Resident {
-                snapshot: OutputSnapshot::new(values),
-                produced_under: slot.current_digest,
-            };
+            let produced_under = slot.current_digest;
+            slot.load_output(OutputSnapshot::new(values), produced_under);
         }
     }
 }

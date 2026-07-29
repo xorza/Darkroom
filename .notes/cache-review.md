@@ -27,12 +27,12 @@ remaining methods still receive one per call.
       `reuse_source`, `hydrate_reuse`, `store_node`, `release_dead_outputs`.
       Each is free to be handed a program that is not `aligned_to` — the
       indices then mean something the slots do not.
-- [ ] `runtime/mod.rs:242` — `read_output_port` takes `&Program` solely to compute
-      `arity` for a `debug_assert_eq!`; nothing else in the body uses it. The one
-      slice of this group that lands standalone.
+- [ ] `runtime/mod.rs:236` — `read_output_port` exists only to take `&Program` and
+      check the resident arity against it before delegating to
+      `RuntimeSlot::read_output`. The one slice of this group that lands standalone.
 - [ ] `runtime/mod.rs:154` — `resident_ram_stats` takes a whole `&Program` for
       `e_nodes.len()`, and asserts the alignment it depends on.
-- [ ] `runtime/mod.rs:543` — `blob_target` re-derives `(e_node_id, e_node, digest)`
+- [ ] `runtime/mod.rs:521` — `blob_target` re-derives `(e_node_id, e_node, digest)`
       from `(program, node_idx)` at two sites per node per run (`reuse_source`,
       `store_node`).
 
@@ -43,31 +43,21 @@ into a local (an atomic bump per node per run), or the slots move behind an inne
 struct the program field can be borrowed alongside. Pick that before touching
 signatures.
 
-## 2. `RuntimeCache` ↔ `RuntimeSlot`: one state, mutated from two layers
-
-- [ ] `slot.rs:81` — `RuntimeSlot::value` is `pub(crate)`, and the cache
-      destructures and writes it directly at `runtime/mod.rs:240` (`read_output_port`),
-      `:255` (`clear_output_port`), and `:608` (`hydrate_reuse`), while the
-      neighbouring mutators (`clear_output`, `invoke_slot`, `stamp_produced`) are
-      methods on the slot. Outside `cache/` nothing production touches `.value`,
-      so the field can go private behind the three missing slot methods without
-      reaching past the subtree.
-
-## 3. `RuntimeCache` ↔ `StampJob`: buffers owned by one type, driven by another
+## 2. `RuntimeCache` ↔ `StampJob`: buffers owned by one type, driven by another
 
 `StampJob` was split off so the walk can cross to the blocking pool, but its
 queue and result buffers are `pub(super)` and manipulated from the cache, so
 neither type owns the pass end to end.
 
 - [ ] `resource/mod.rs:113,116` — `requests` and `stamped` are `pub(super)`; the
-      cache inserts into `requests` (`runtime/mod.rs:475`), clears it (`:113,431`),
-      tests emptiness (`:490`), and drains `stamped` (`:501,706`). Three methods
+      cache inserts into `requests` (`runtime/mod.rs:462`), clears it (`:122,418`),
+      tests emptiness (`:477`), and drains `stamped` (`:488,683`). Three methods
       on `StampJob` — request, is-queued, drain-stamped — close it, and the fields
       go private.
 
-## 4. `RuntimeCache` ↔ `DiskStore`: boundaries
+## 3. `RuntimeCache` ↔ `DiskStore`: boundaries
 
-- [ ] `runtime/mod.rs:47` — `pub(crate) disk_store` is public and the worker
+- [ ] `runtime/mod.rs:55` — `pub(crate) disk_store` is public and the worker
       replaces it wholesale (`worker/task.rs:174`). The swap happens in
       `apply_intent`, between runs, so no verdict is actually in flight — but the
       cache cannot see it happen, and a setter costs nothing. Tests assign the
@@ -75,6 +65,17 @@ neither type owns the pass end to end.
 - [ ] `disk_store/mod.rs:68` — `DiskStore::new` takes `&Library` to call
       `library.codecs()` once, making the cache subtree depend on the library
       registry for a single extraction. Take the `Codecs`.
+
+## 4. `OutputSnapshot`: the buffer is public to everyone holding one
+
+- [ ] `slot.rs:10` — `OutputSnapshot::values` is `pub(crate)`, read directly at
+      `disk_store/mod.rs:204,233` (the whole slice, into `covers` and
+      `format::write`) and `runtime/mod.rs:367` (one indexed port, in
+      `hash_bound_fs_path`). One level below the slot field that just went
+      private, and the same shape of leak — but read-only: nothing outside
+      `slot.rs` writes through it, so an accessor closes it and no invariant is
+      at risk meanwhile. Lowest-value item here; worth folding into whichever
+      change next touches the disk store.
 
 ---
 

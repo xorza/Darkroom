@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::async_lambda;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::slot::{OutputSnapshot, ValueState};
+use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
@@ -326,7 +326,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         "retiring the blocked read leaves the healthy value for its live reader"
     );
     assert!(
-        matches!(cache[nx(&p.program, healthy)].value, ValueState::Empty),
+        cache[nx(&p.program, healthy)].output_values().is_none(),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
     let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id).map(RunError::to_string);
@@ -375,7 +375,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
         "the pending consumer's read was retired"
     );
     assert!(
-        matches!(cache[nx(&p.program, source)].value, ValueState::Empty),
+        cache[nx(&p.program, source)].output_values().is_none(),
         "tail retirement reclaims the source before the engine's final sweep"
     );
 }
@@ -450,9 +450,9 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "A (None) is freed the moment its last consumer B reads it: {:?}",
-        cache[nx(&p.program, a)].value
+        cache[nx(&p.program, a)].output_values()
     );
     assert_eq!(
         cache[nx(&p.program, b)].output_values().unwrap()[0].as_i64(),
@@ -524,9 +524,9 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "unseeded Skip root is drained at store time: {:?}",
-        cache[nx(&p.program, a)].value
+        cache[nx(&p.program, a)].output_values()
     );
 
     let mut plan = run_with_readers(&p.program, vec![0]);
@@ -535,9 +535,9 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "targeting controls demand, not RAM retention: {:?}",
-        cache[nx(&p.program, a)].value
+        cache[nx(&p.program, a)].output_values()
     );
 }
 
@@ -561,10 +561,11 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
     cache.stamp_digest(&p.program, nx(&p.program, a));
-    cache[nx(&p.program, a)].value = ValueState::Resident {
-        snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
-        produced_under: cache[nx(&p.program, a)].current_digest,
-    };
+    let produced_under = cache[nx(&p.program, a)].current_digest;
+    cache[nx(&p.program, a)].load_output(
+        OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
+        produced_under,
+    );
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -582,7 +583,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
 
     assert!(stats.cached(a));
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "the reused value is released as soon as it is served"
     );
 }
@@ -657,7 +658,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
         "the producer and impure consumer still run"
     );
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "the producer is reclaimed immediately after its only live reader"
     );
 }
@@ -683,9 +684,9 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
+        cache[nx(&p.program, a)].output_values().is_none(),
         "A (None, no consumers) is freed right after it runs: {:?}",
-        cache[nx(&p.program, a)].value
+        cache[nx(&p.program, a)].output_values()
     );
     assert_eq!(
         cache[nx(&p.program, b)].output_values().unwrap()[0].as_i64(),
@@ -720,10 +721,10 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     plan.roots.insert(nx(&p.program, downstream));
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    cache[nx(&p.program, missing)].value = ValueState::Resident {
-        snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
-        produced_under: None,
-    };
+    cache[nx(&p.program, missing)].load_output(
+        OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
+        None,
+    );
     let stats = run_with(&p.program, &mut plan, &mut cache).await;
 
     assert!(

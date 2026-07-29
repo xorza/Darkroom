@@ -484,7 +484,7 @@ mod resolving {
     use std::sync::Arc;
 
     use crate::execution::cache::runtime::RuntimeCache;
-    use crate::execution::cache::slot::{OutputSnapshot, ValueState};
+    use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::index::{NodeIdx, OutputAddr};
     use crate::execution::program::{
@@ -579,10 +579,8 @@ mod resolving {
             cache.stamp_digests(&self.program, schedule.executing());
             for cached in cached {
                 let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
-                cache[nx(cached.e_node_id)].value = ValueState::Resident {
-                    snapshot: OutputSnapshot::new(cached.values),
-                    produced_under: Some(digest),
-                };
+                cache[nx(cached.e_node_id)]
+                    .load_output(OutputSnapshot::new(cached.values), Some(digest));
             }
             Scheduled::assume(&self.program, &mut schedule)
                 .resolve(&mut cache)
