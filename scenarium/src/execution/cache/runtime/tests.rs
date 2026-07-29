@@ -55,17 +55,38 @@ fn keyed_slot(current_digest: Option<Digest>) -> RuntimeSlot {
     slot
 }
 
-/// Append a slot at the next dense index. The programs in this file push ids
-/// `from_u128(idx + 1)` in the same order, so the cache lands aligned to them
-/// without a reconcile.
-///
-/// It leaves the cache's own alignment unset, so a test that goes on to
-/// `reconcile` must build its slots through one instead — that is the pairing
-/// `reconcile` reads to carry slots across an install.
-fn insert_slot(cache: &mut RuntimeCache, slot: RuntimeSlot) -> NodeIdx {
-    let node_idx = NodeIdx(cache.slots.len() as u32);
-    cache.slots.push(slot);
-    node_idx
+/// A program of `nodes`, ids `from_u128(idx + 1)` in order, one `Int` output
+/// each — the shape the slot fixtures above hold values for.
+fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> Arc<Program> {
+    let mut program = Program::default();
+    for (index, mut e_node) in nodes.into_iter().enumerate() {
+        e_node.outputs = one_output(&mut program);
+        program.push(ExecutionNodeId::from_u128(index as u128 + 1), e_node);
+    }
+    Arc::new(program)
+}
+
+/// A `Pure` node retained in RAM — the default the residency fixtures assume.
+fn ram_node() -> ExecutionNode {
+    ExecutionNode {
+        cache: CacheMode::Ram,
+        behavior: FuncBehavior::Pure,
+        ..Default::default()
+    }
+}
+
+/// Install `program` and fill the slots it opens, in index order. The only way
+/// a test gets slots: the column and the program its indices mean are written
+/// together, so a fixture cannot leave the cache describing itself wrongly.
+fn install(
+    cache: &mut RuntimeCache,
+    program: &Arc<Program>,
+    slots: impl IntoIterator<Item = RuntimeSlot>,
+) {
+    cache.reconcile(program);
+    for (index, slot) in slots.into_iter().enumerate() {
+        cache.slots[NodeIdx(index as u32)] = slot;
+    }
 }
 
 #[tokio::test]
@@ -76,11 +97,10 @@ async fn eviction_clears_only_the_output_cache() {
     slot.event_state.lock().await.set(23_u32);
 
     let mut cache = RuntimeCache::default();
-    let node_idx = insert_slot(&mut cache, slot);
+    let node_idx = NodeIdx(0);
+    install(&mut cache, &program_of([ram_node()]), [slot]);
     let e_node_id = ExecutionNodeId::from_u128(1);
-    let mut program = Program::default();
-    program.push(e_node_id, ExecutionNode::default());
-    let failures = cache.evict(&program, &[e_node_id]).await;
+    let failures = cache.evict(&[e_node_id]).await;
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
@@ -97,15 +117,21 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     let d = Digest([7u8; 32]);
     let other = Digest([8u8; 32]);
     let mut cache = RuntimeCache::default();
-
-    // 0: impure cone (no current digest) — never hits, even holding values.
-    let impure = insert_slot(&mut cache, resident_slot(None, Some(d), out()));
-    // 1: has a current digest but no cached values.
-    let empty = insert_slot(&mut cache, keyed_slot(Some(d)));
-    // 2: values present, but produced under a *different* digest (stale).
-    let stale = insert_slot(&mut cache, resident_slot(Some(d), Some(other), out()));
-    // 3: values produced under the current digest — the only hit.
-    let current = insert_slot(&mut cache, resident_slot(Some(d), Some(d), out()));
+    let (impure, empty, stale, current) = (NodeIdx(0), NodeIdx(1), NodeIdx(2), NodeIdx(3));
+    install(
+        &mut cache,
+        &program_of([ram_node(), ram_node(), ram_node(), ram_node()]),
+        [
+            // 0: impure cone (no current digest) — never hits, even holding values.
+            resident_slot(None, Some(d), out()),
+            // 1: has a current digest but no cached values.
+            keyed_slot(Some(d)),
+            // 2: values present, but produced under a *different* digest (stale).
+            resident_slot(Some(d), Some(other), out()),
+            // 3: values produced under the current digest — the only hit.
+            resident_slot(Some(d), Some(d), out()),
+        ],
+    );
 
     assert!(
         !cache.is_resident_hit(impure, DEMANDED),
@@ -188,28 +214,20 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
     ];
     let mut cache = RuntimeCache::default();
-    let mut program = Program::default();
+    let program = program_of(cases.map(|(_, mode, behavior, ..)| ExecutionNode {
+        cache: mode,
+        behavior,
+        ..Default::default()
+    }));
+    install(
+        &mut cache,
+        &program,
+        cases.map(|(_, _, _, current_digest, produced_under, _)| {
+            resident_slot(current_digest, produced_under, out())
+        }),
+    );
 
-    for (index, (_, mode, behavior, current_digest, produced_under, _)) in cases.iter().enumerate()
-    {
-        let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
-        let outputs = one_output(&mut program);
-        program.push(
-            e_node_id,
-            ExecutionNode {
-                cache: *mode,
-                behavior: *behavior,
-                outputs,
-                ..Default::default()
-            },
-        );
-        insert_slot(
-            &mut cache,
-            resident_slot(*current_digest, *produced_under, out()),
-        );
-    }
-
-    cache.release_dead_outputs(&program);
+    cache.release_dead_outputs();
 
     for (index, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -393,7 +411,8 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
 fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
     let mut cache = RuntimeCache::default();
-    let node_idx = insert_slot(&mut cache, keyed_slot(Some(d)));
+    let node_idx = NodeIdx(0);
+    install(&mut cache, &program_of([ram_node()]), [keyed_slot(Some(d))]);
     assert!(
         !cache.is_resident_hit(node_idx, DEMANDED),
         "empty slot misses"
@@ -420,7 +439,8 @@ fn resident_hit_derives_coverage_from_values() {
     let mut slot = keyed_slot(Some(digest));
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
-    let node_idx = insert_slot(&mut cache, slot);
+    let node_idx = NodeIdx(0);
+    install(&mut cache, &program_of([ram_node()]), [slot]);
 
     let values = cache.slots[node_idx]
         .output_values()
@@ -463,27 +483,27 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
         "resident values and output demand require equal arity"
     );
 
-    let e_node_id = ExecutionNodeId::from_u128(1);
+    // Two declared outputs, one resident value: the arity check must fire.
     let mut program = Program::default();
     let outputs = program
         .outputs
         .append([ExecutionOutput::default(), ExecutionOutput::default()]);
     program.push(
-        e_node_id,
+        ExecutionNodeId::from_u128(1),
         ExecutionNode {
             outputs,
             ..Default::default()
         },
     );
     let mut cache = RuntimeCache::default();
-    insert_slot(
+    install(
         &mut cache,
-        resident_slot(None, None, vec![DynamicValue::Unbound]),
+        &Arc::new(program),
+        [resident_slot(None, None, vec![DynamicValue::Unbound])],
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
             cache.read_output_port(
-                &program,
                 OutputAddr {
                     node_idx: NodeIdx(0),
                     port_idx: 0,
@@ -553,43 +573,33 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
 
     let mut cache = RuntimeCache::default();
     // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
-    insert_slot(
+    install(
         &mut cache,
-        resident_slot(
-            Some(d),
-            Some(d),
-            vec![
-                DynamicValue::Custom(shared.clone()),
-                DynamicValue::Custom(Arc::new(Payload {
-                    cpu: 5,
-                    gpu: 0,
-                    calls: distinct_calls.clone(),
-                })),
-                DynamicValue::Static(StaticValue::Int(9)),
-            ],
-        ),
+        &program_of([ram_node(), ram_node(), ram_node()]),
+        [
+            resident_slot(
+                Some(d),
+                Some(d),
+                vec![
+                    DynamicValue::Custom(shared.clone()),
+                    DynamicValue::Custom(Arc::new(Payload {
+                        cpu: 5,
+                        gpu: 0,
+                        calls: distinct_calls.clone(),
+                    })),
+                    DynamicValue::Static(StaticValue::Int(9)),
+                ],
+            ),
+            // Slot B: the *same* shared Arc again — must not be counted twice.
+            resident_slot(Some(d), Some(d), vec![DynamicValue::Custom(shared.clone())]),
+            // Slot C: empty — contributes zero.
+            RuntimeSlot::default(),
+        ],
     );
-    // Slot B: the *same* shared Arc again — must not be counted twice.
-    insert_slot(
-        &mut cache,
-        resident_slot(Some(d), Some(d), vec![DynamicValue::Custom(shared.clone())]),
-    );
-    // Slot C: empty — contributes zero.
-    insert_slot(&mut cache, RuntimeSlot::default());
-
-    // The slots are named by the program they are aligned to — three nodes at
-    // ids 1, 2, 3, matching the order `insert_slot` appended them in.
-    let mut program = Program::default();
-    for index in 0..3u128 {
-        program.push(
-            ExecutionNodeId::from_u128(index + 1),
-            ExecutionNode::default(),
-        );
-    }
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
     let mut by_node = NodeColumn::default();
-    let total = cache.resident_ram_stats(&program, &mut by_node);
+    let total = cache.resident_ram_stats(&mut by_node);
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);
 
@@ -606,7 +616,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     let capacity = by_node.capacity();
     let seen_capacity = cache.ram_seen.capacity();
     assert_eq!(
-        cache.resident_ram_stats(&program, &mut by_node),
+        cache.resident_ram_stats(&mut by_node),
         RamUsage { cpu: 105, gpu: 10 }
     );
     assert_eq!(

@@ -343,22 +343,12 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache.reconcile(&fixture.program);
 
     cache
-        .prepare(
-            &fixture.program,
-            fixture.schedule.executing(),
-            CancelToken::never(),
-        )
+        .prepare(fixture.schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.e_node_index[&fixture.first],
-    );
+    cache.stamp_digest(fixture.program.e_node_index[&fixture.first]);
 
     std::fs::write(&file, b"longer").unwrap();
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.e_node_index[&fixture.second],
-    );
+    cache.stamp_digest(fixture.program.e_node_index[&fixture.second]);
     assert_eq!(
         cache[fixture.program.e_node_index[&fixture.first]].current_digest,
         cache[fixture.program.e_node_index[&fixture.second]].current_digest,
@@ -367,16 +357,9 @@ async fn same_path_uses_one_identity_until_the_next_run() {
 
     let first_run = cache[fixture.program.e_node_index[&fixture.first]].current_digest;
     cache
-        .prepare(
-            &fixture.program,
-            fixture.schedule.executing(),
-            CancelToken::never(),
-        )
+        .prepare(fixture.schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.e_node_index[&fixture.first],
-    );
+    cache.stamp_digest(fixture.program.e_node_index[&fixture.first]);
     assert_ne!(
         cache[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
         "the next run refreshes resource identity"

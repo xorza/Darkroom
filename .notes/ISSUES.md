@@ -25,7 +25,8 @@
   layering.
 
 - `scenarium/src/execution/cache/digest/mod.rs:32` — the cache digest
-  documentation links to a `ResourceStamper` type that no longer exists.
+  documentation links to a `ResourceStamper` type that no longer exists, and
+  `:25` links to `RuntimeCache::reconcile` with no `RuntimeCache` in scope.
 
 - `AGENTS.md:7` — the `common` crate summary lists `Buffer2`, `BitBuffer2`,
   `Slot`, `PauseGate`, and `ReadyState`, none of which exist in that crate.

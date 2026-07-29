@@ -32,7 +32,12 @@ use crate::{DynamicValue, RamUsage};
 /// The per-node cross-run cache plus its disk backing. `slots` is a
 /// [`NodeColumn`] aligned to the installed program, so every run-loop access is
 /// an array read; cross-install survival happens at [`reconcile`](Self::reconcile),
-/// which re-pairs the slots with the new index order by stable id. The resolver stamps
+/// which re-pairs the slots with the new index order by stable id.
+///
+/// The program those indices mean something in is held here, not passed in: a
+/// `NodeIdx` reaching one of these methods is read against
+/// [`aligned_to`](Self::aligned_to), so there is no program a caller could name
+/// that the slots do not belong to. The resolver stamps
 /// each node's digest and decides cache reuse,
 /// while the executor mutates outputs/state and consumes that decision. `disk_store`
 /// persists outputs and serves them back; it is kept across graph updates while only `slots`
@@ -136,12 +141,12 @@ impl RuntimeCache {
 
     pub(crate) async fn evict(
         &mut self,
-        program: &Program,
         e_node_ids: &[ExecutionNodeId],
     ) -> Vec<CacheEvictionFailure> {
         let mut failures = Vec::new();
         for e_node_id in e_node_ids {
-            let node_idx = *program
+            let node_idx = *self
+                .aligned_to
                 .e_node_index
                 .get(e_node_id)
                 .expect("an eviction target belongs to the installed program");
@@ -160,17 +165,12 @@ impl RuntimeCache {
     /// shared custom values by pointer identity, while each node reports the full size of
     /// every value it holds. `Empty` slots read as zero.
     ///
-    /// `by_node` is filled from scratch, aligned to `program` like the slots themselves —
-    /// dense rather than sparse so the caller can pair a node's RAM with its run result by
+    /// `by_node` is filled from scratch, aligned like the slots themselves — dense
+    /// rather than sparse so the caller can pair a node's RAM with its run result by
     /// index, without hashing an id or merging two orders.
-    pub(crate) fn resident_ram_stats(
-        &mut self,
-        program: &Program,
-        by_node: &mut NodeColumn<RamUsage>,
-    ) -> RamUsage {
-        debug_assert_eq!(self.slots.len(), program.e_nodes.len());
+    pub(crate) fn resident_ram_stats(&mut self, by_node: &mut NodeColumn<RamUsage>) -> RamUsage {
         self.ram_seen.clear();
-        by_node.reset(program.e_nodes.len(), RamUsage::default());
+        by_node.reset(self.slots.len(), RamUsage::default());
         let mut total = RamUsage::default();
         for (node_idx, slot) in self.slots.iter_indexed() {
             let Some(values) = slot.output_values() else {
@@ -228,7 +228,7 @@ impl RuntimeCache {
             };
             self.slots.push(slot);
         }
-        self.release_dead_outputs(installed);
+        self.release_dead_outputs();
     }
 
     pub(crate) fn is_resident_current(&self, node_idx: NodeIdx) -> bool {
@@ -247,11 +247,10 @@ impl RuntimeCache {
     /// installed program declares.
     pub(crate) fn read_output_port(
         &mut self,
-        program: &Program,
         address: OutputAddr,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = program[address.node_idx].outputs.len as usize;
+        let arity = self.aligned_to[address.node_idx].outputs.len as usize;
         let slot = &mut self.slots[address.node_idx];
         debug_assert!(
             slot.output_values()
@@ -268,25 +267,21 @@ impl RuntimeCache {
     /// stamps `None`; the run loop can improve that node to reuse once its
     /// path producer settles.
     /// `executing` is the run's schedule in producer-first order
-    /// ([`ExecutionPlan::executing`](crate::execution::schedule::ExecutionPlan::executing));
+    /// ([`Scheduled::executing`](crate::execution::schedule::Scheduled::executing));
     /// the cache reads the nodes, not the plan that selected them.
-    pub(crate) fn stamp_digests(
-        &mut self,
-        program: &Program,
-        executing: impl IntoIterator<Item = NodeIdx>,
-    ) {
+    pub(crate) fn stamp_digests(&mut self, executing: impl IntoIterator<Item = NodeIdx>) {
         for node_idx in executing {
-            self.stamp_digest(program, node_idx);
+            self.stamp_digest(node_idx);
         }
     }
 
     /// Stamp one node's structural content digest into its slot. The resolver's
     /// pass calls this before exact output demand is known; cache coverage is
     /// probed later by [`probe_reuse`](Self::probe_reuse).
-    pub(crate) fn stamp_digest(&mut self, program: &Program, node_idx: NodeIdx) {
+    pub(crate) fn stamp_digest(&mut self, node_idx: NodeIdx) {
         // Folded whole before the write, so the fold's read of the slots ends
         // before the slot it stamps is borrowed mutably.
-        let digest = self.node_digest(program, node_idx);
+        let digest = self.node_digest(node_idx);
         self.slots[node_idx].current_digest = digest;
     }
 
@@ -308,7 +303,8 @@ impl RuntimeCache {
     /// A method on the cache because all three things it folds are the cache's: the slots it
     /// reads producer digests and delivered values from, and the `fs_paths` memo behind every
     /// external identity. The *encoding* stays in `digest`, beside the [`DOMAIN`] versioning it.
-    pub(crate) fn node_digest(&self, program: &Program, node_idx: NodeIdx) -> Option<Digest> {
+    pub(crate) fn node_digest(&self, node_idx: NodeIdx) -> Option<Digest> {
+        let program = &self.aligned_to;
         let e_node = &program[node_idx];
 
         // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
@@ -421,14 +417,13 @@ impl RuntimeCache {
     /// which node it concerns.
     pub(crate) async fn prepare(
         &mut self,
-        program: &Program,
         executing: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) {
         // A fresh run identifies afresh.
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
-        let _ = self.identify(program, executing, cancel).await;
+        let _ = self.identify(executing, cancel).await;
     }
 
     /// Identify every path `nodes` reads, in one off-thread pass: queue, then
@@ -436,19 +431,19 @@ impl RuntimeCache {
     /// one.
     async fn identify(
         &mut self,
-        program: &Program,
         nodes: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) -> Result<(), StampError> {
         for node_idx in nodes {
-            self.request_node_paths(program, node_idx);
+            self.request_node_paths(node_idx);
         }
         self.walk_queued(cancel).await
     }
 
     /// Queue the paths `node_idx` reads, on top of whatever is already queued,
     /// skipping any this run already identified.
-    fn request_node_paths(&mut self, program: &Program, node_idx: NodeIdx) {
+    fn request_node_paths(&mut self, node_idx: NodeIdx) {
+        let program = &self.aligned_to;
         let e_node = &program[node_idx];
         if e_node.behavior != FuncBehavior::Pure {
             return;
@@ -515,25 +510,21 @@ impl RuntimeCache {
     /// rather than a run-wide abort blaming nobody.
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
-        program: &Program,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         contexts: &mut ContextStore,
         cancel: CancelToken,
     ) -> Result<bool, StampError> {
-        self.identify(program, std::iter::once(node_idx), cancel)
-            .await?;
-        self.stamp_digest(program, node_idx);
-        Ok(self
-            .hydrate_reuse(program, node_idx, demand, contexts)
-            .await)
+        self.identify(std::iter::once(node_idx), cancel).await?;
+        self.stamp_digest(node_idx);
+        Ok(self.hydrate_reuse(node_idx, demand, contexts).await)
     }
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
-    fn blob_target(&self, program: &Program, node_idx: NodeIdx) -> Option<BlobTarget> {
+    fn blob_target(&self, node_idx: NodeIdx) -> Option<BlobTarget> {
         self.disk_store.blob_target(
-            program.e_node_ids[node_idx],
-            &program[node_idx],
+            self.aligned_to.e_node_ids[node_idx],
+            &self.aligned_to[node_idx],
             self.slots[node_idx].current_digest,
         )
     }
@@ -552,13 +543,8 @@ impl RuntimeCache {
     /// Takes `&mut self` without mutating anything: the slots hold `Send`-but-not-`Sync`
     /// node state, so a *shared* cache borrow held across this await would make the whole
     /// worker future non-`Send`.
-    pub(crate) async fn probe_reuse(
-        &mut self,
-        program: &Program,
-        node_idx: NodeIdx,
-        demand: &[OutputDemand],
-    ) -> bool {
-        match self.reuse_source(program, node_idx, demand) {
+    pub(crate) async fn probe_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
+        match self.reuse_source(node_idx, demand) {
             None => false,
             Some(ReuseSource::Resident) => true,
             Some(ReuseSource::Blob(target)) => self.disk_store.covers_demand(&target, demand).await,
@@ -567,16 +553,11 @@ impl RuntimeCache {
 
     /// Whether this node could be served without running it, and from where.
     /// Shared by the verdict and the load so neither derives its own target.
-    fn reuse_source(
-        &self,
-        program: &Program,
-        node_idx: NodeIdx,
-        demand: &[OutputDemand],
-    ) -> Option<ReuseSource> {
+    fn reuse_source(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> Option<ReuseSource> {
         if self.is_resident_hit(node_idx, demand) {
             return Some(ReuseSource::Resident);
         }
-        self.blob_target(program, node_idx).map(ReuseSource::Blob)
+        self.blob_target(node_idx).map(ReuseSource::Blob)
     }
 
     /// [`probe_reuse`](Self::probe_reuse)'s verdict, but leaving the value readable by the
@@ -591,12 +572,11 @@ impl RuntimeCache {
     /// and recomputes.
     pub(crate) async fn hydrate_reuse(
         &mut self,
-        program: &Program,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
     ) -> bool {
-        let target = match self.reuse_source(program, node_idx, demand) {
+        let target = match self.reuse_source(node_idx, demand) {
             None => return false,
             Some(ReuseSource::Resident) => return true,
             Some(ReuseSource::Blob(target)) => target,
@@ -623,12 +603,11 @@ impl RuntimeCache {
     /// disk store is attached.
     pub(crate) fn store_node<'a>(
         &'a self,
-        program: &Program,
         node_idx: NodeIdx,
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
-        let target = self.blob_target(program, node_idx);
+        let target = self.blob_target(node_idx);
         let resident = self.slots[node_idx].current_snapshot();
         let disk = &self.disk_store;
         async move {
@@ -642,7 +621,8 @@ impl RuntimeCache {
     /// Release resident values that cannot be a future RAM hit under the installed program.
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
-    pub(crate) fn release_dead_outputs(&mut self, program: &Program) {
+    pub(crate) fn release_dead_outputs(&mut self) {
+        let program = &self.aligned_to;
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let Some(resident_len) = self.slots[node_idx].output_values().map(<[_]>::len) else {
                 continue;
@@ -678,7 +658,6 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::{FsPathId, StampError};
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::program::Program;
     use crate::execution::program::index::NodeIdx;
 
     impl RuntimeCache {
@@ -692,8 +671,8 @@ pub(crate) mod internals {
         /// pass, without the blocking pool a test has no runtime to reach. A
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
-        pub(crate) fn prepare_node_blocking(&mut self, program: &Program, node_idx: NodeIdx) {
-            self.request_node_paths(program, node_idx);
+        pub(crate) fn prepare_node_blocking(&mut self, node_idx: NodeIdx) {
+            self.request_node_paths(node_idx);
             let _ = self.stamp_queued(&CancelToken::never());
         }
 

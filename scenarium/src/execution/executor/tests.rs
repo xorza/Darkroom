@@ -560,7 +560,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    cache.stamp_digest(&p.program, nx(&p.program, a));
+    cache.stamp_digest(nx(&p.program, a));
     let produced_under = cache[nx(&p.program, a)].current_digest;
     cache[nx(&p.program, a)].load_output(
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),

@@ -80,7 +80,7 @@ impl ExecutionEngine {
 
     pub(crate) async fn evict_cache(&mut self, node_ids: &[NodeId]) -> Vec<CacheEvictionFailure> {
         let e_node_ids = self.compiled.data_consumer_closure(node_ids);
-        self.cache.evict(&self.compiled.program, &e_node_ids).await
+        self.cache.evict(&e_node_ids).await
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
@@ -111,7 +111,7 @@ impl ExecutionEngine {
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
         self.cache
-            .prepare(scheduled.program(), scheduled.executing(), cancel.clone())
+            .prepare(scheduled.executing(), cancel.clone())
             .await;
 
         // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
@@ -134,13 +134,11 @@ impl ExecutionEngine {
             )
             .await;
 
-        self.cache.release_dead_outputs(resolved.program());
+        self.cache.release_dead_outputs();
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
-        outcome.cache_ram = self
-            .cache
-            .resident_ram_stats(resolved.program(), &mut self.node_ram);
+        outcome.cache_ram = self.cache.resident_ram_stats(&mut self.node_ram);
 
         // Phase 4: reduce the run to one status row per node. Last, because a node's row
         // carries the RAM it ended up holding — which the two steps above just settled —
@@ -168,7 +166,6 @@ impl ExecutionEngine {
             }
             self.cache
                 .store_node(
-                    &self.compiled.program,
                     node_idx,
                     StorePolicy::PreserveCovering,
                     &mut self.executor.ctx_manager.contexts,

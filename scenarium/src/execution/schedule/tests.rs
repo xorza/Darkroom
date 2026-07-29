@@ -576,7 +576,7 @@ mod resolving {
             }
             let mut cache = RuntimeCache::default();
             cache.reconcile(&self.program);
-            cache.stamp_digests(&self.program, schedule.executing());
+            cache.stamp_digests(schedule.executing());
             for cached in cached {
                 let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
                 cache[nx(cached.e_node_id)]

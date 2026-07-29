@@ -361,7 +361,7 @@ impl ExecutionFrame<'_, '_> {
         let program = self.program;
         if !self
             .cache
-            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
+            .hydrate_reuse(node_idx, demand, &mut self.ctx.contexts)
             .await
         {
             let error = RunError::CacheLoadFailed {
@@ -398,7 +398,7 @@ impl ExecutionFrame<'_, '_> {
         let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
+            .restamp_and_hydrate(node_idx, demand, &mut self.ctx.contexts, cancel)
             .await;
         match hydrated {
             // Attributable to exactly this node, so it fails as one rather
@@ -539,12 +539,7 @@ impl ExecutionFrame<'_, '_> {
         // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
         // preceding reuse miss proves that no blob can cover this result.
         self.cache
-            .store_node(
-                program,
-                node_idx,
-                StorePolicy::KnownMiss,
-                &mut self.ctx.contexts,
-            )
+            .store_node(node_idx, StorePolicy::KnownMiss, &mut self.ctx.contexts)
             .await;
         self.release_drained_outputs(node_idx);
     }
@@ -614,7 +609,7 @@ impl ExecutionFrame<'_, '_> {
                         && !self.program[address.node_idx].cache.caches_in_ram();
                     let value = self
                         .cache
-                        .read_output_port(self.program, address, take)
+                        .read_output_port(address, take)
                         .expect("a resolved producer output must be resident when consumed");
                     self.complete_planned_read(address);
                     value
