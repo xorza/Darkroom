@@ -113,24 +113,39 @@ impl RuntimeSlot {
     }
 
     /// The resident output values, or `None` when the slot isn't `Resident`.
-    pub(crate) fn output_values(&self) -> Option<&Vec<DynamicValue>> {
+    pub(crate) fn output_values(&self) -> Option<&[DynamicValue]> {
         match &self.value {
             ValueState::Resident { snapshot, .. } => Some(&snapshot.values),
             _ => None,
         }
     }
 
-    /// Reject stale resident references so they cannot enter a new resource-backed digest.
+    /// The resident values, but only where they were produced under the digest
+    /// the slot currently carries — the one definition of "the bytes are here",
+    /// which cache reuse, the executor's input read, and the disk store all rely
+    /// on. A `None` current digest (an impure cone) never qualifies, nor does a
+    /// value produced under a *different* digest, which is what a changed input
+    /// leaves behind.
+    ///
+    /// It lives here because both halves of the test are this slot's own fields;
+    /// a second copy on the cache was a second definition of "current".
+    pub(crate) fn current_snapshot(&self) -> Option<&OutputSnapshot> {
+        let ValueState::Resident {
+            snapshot,
+            produced_under,
+        } = &self.value
+        else {
+            return None;
+        };
+        (self.current_digest.is_some() && *produced_under == self.current_digest)
+            .then_some(snapshot)
+    }
+
+    /// [`current_snapshot`](Self::current_snapshot)'s values — rejecting stale
+    /// resident references so they cannot enter a new resource-backed digest.
     pub(crate) fn current_output_values(&self) -> Option<&[DynamicValue]> {
-        match &self.value {
-            ValueState::Resident {
-                snapshot,
-                produced_under,
-            } if self.current_digest.is_some() && *produced_under == self.current_digest => {
-                Some(&snapshot.values)
-            }
-            _ => None,
-        }
+        self.current_snapshot()
+            .map(|snapshot| snapshot.values.as_slice())
     }
 
     /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable

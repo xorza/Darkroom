@@ -436,10 +436,7 @@ async fn unbound_output_errors_only_when_demanded() {
 
     assert!(stats.node_errors.is_empty());
     assert!(matches!(
-        cache[nx(&p.program, skipped)]
-            .output_values()
-            .unwrap()
-            .as_slice(),
+        cache[nx(&p.program, skipped)].output_values().unwrap(),
         [DynamicValue::Unbound]
     ));
 }
