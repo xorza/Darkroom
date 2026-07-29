@@ -61,10 +61,9 @@ impl<'a> GraphChecker<'a> {
         self.validate_graph(&def.body, false)
     }
 
-    /// `entry` marks the execution entry graph — the one place a
-    /// [`Preview`](crate::node::special::SpecialNode::Preview) node may live.
-    /// Passed rather than derived from `depth`: [`GraphDef::validate`] enters at
-    /// depth 0 for the definition's own body.
+    /// `entry` marks the execution entry graph — the one place a func declaring
+    /// `entry_only` may live. Passed rather than derived from `depth`:
+    /// [`GraphDef::validate`] enters at depth 0 for the definition's own body.
     fn validate_graph(&mut self, graph: &Graph, entry: bool) -> ValidationResult<()> {
         if self.depth > MAX_NESTING_DEPTH {
             return Err(GraphValidationError::NestingTooDeep {

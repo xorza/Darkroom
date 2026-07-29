@@ -1,6 +1,6 @@
 //! Node-attributed log records produced during a run.
 //!
-//! A leaf of the execution tree: [`Context::log`](crate::runtime::context::Context::log)
+//! A leaf of the execution tree: [`ContextManager::log`](crate::runtime::context::ContextManager::log)
 //! writes these, [`ExecutionOutcome`](crate::execution::outcome::ExecutionOutcome) and
 //! [`WorkerStatus`](crate::worker::status::WorkerStatus) carry them, and the host reads
 //! them. Kept apart from the outcome that collects them so a lambda can log without

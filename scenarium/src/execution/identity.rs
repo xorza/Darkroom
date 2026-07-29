@@ -31,11 +31,11 @@ impl ExecutionNodeId {
     /// Deriving one answers only for a node flatten emits: a composite
     /// dissolves and has no id of its own, so a host asking "which execution
     /// nodes is this?" would get an id that exists nowhere. Hosts look the
-    /// relation up instead — [`CompiledGraph::occurrences`] and its siblings
-    /// (`run_targets`, `is_sink`, `is_impure`), which answer for every
+    /// relation up instead — [`CompiledGraph::run_targets`] and its siblings
+    /// (`attribution`, `is_sink`, `is_impure`), which answer for every
     /// authored node.
     ///
-    /// [`CompiledGraph::occurrences`]: crate::execution::compile::CompiledGraph::occurrences
+    /// [`CompiledGraph::run_targets`]: crate::execution::compile::CompiledGraph::run_targets
     pub(crate) fn from_authoring(path: &[NodeId]) -> Self {
         let (&node_id, instances) = path
             .split_last()

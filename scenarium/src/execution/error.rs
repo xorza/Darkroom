@@ -9,7 +9,9 @@ use crate::node::definition::FuncId;
 /// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), an event seed had no port
 /// ([`EventSeedNotFound`](Error::EventSeedNotFound)), or the event loop's lambda
 /// panicked ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the
-/// engine's `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
+/// `Result`-returning entry points on both sides of the worker boundary — the engine's
+/// plan/execute, and the worker operations around them, which is where the event-loop
+/// panic is caught. A *single node's* run failure is a [`RunError`]
 /// (collected into `ExecutionOutcome::node_errors`),
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](crate::execution::compile::CompileError), produced on the host before anything

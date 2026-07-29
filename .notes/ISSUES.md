@@ -1,46 +1,23 @@
 # Issues noticed in passing
 
-- `scenarium/src/execution/executor/mod.rs:264` — a node reached exactly as
-  cancellation fires gets `prepare_node`'s `StampError::Cancelled` turned into
-  `RunError::ResourceUnavailable { message: "the run was cancelled" }`, so a
-  cancelled run reports one node as failed on a resource it could read.
+Ordered by impact: wrong behaviour first, then structure, then cosmetics.
 
-- `scenarium/src/execution/engine/mod.rs:46` — the `plan` field carries a
-  leftover doc comment describing per-run filesystem identities (a field that
-  no longer exists there) stacked above its own one-line doc.
+- `scenarium/src/execution/executor/mod.rs:408` — `needs_invoke` maps every
+  `StampError` from `restamp_and_hydrate` to `RunError::ResourceUnavailable`,
+  including `StampError::Cancelled`, so a node reached exactly as cancellation
+  fires is reported as having failed on a resource it could read, with the
+  message "the run was cancelled".
 
-- `scenarium/src/execution/error.rs:27` — `Error::EventLambdaPanic` is
-  constructed only in `worker/task.rs:316`, while its type is documented as the
-  error of the engine's `Result`-returning entry points.
+- `lumos/src/io/image/` ↔ `lumos/src/stacking/` are mutually dependent: `io`
+  implements the `StackableImage` trait declared at
+  `stacking/frame_store/mod.rs:126` (`linear.rs:18`, `cfa.rs:22`, and two test
+  modules), while `stacking/product.rs` and `stacking/frame_store/mod.rs` import
+  `io::image`'s `LinearImage`, `LinearPixels`, `LoadContext`, and `ImageError`.
 
-- `scenarium/src/execution/engine/mod.rs:97` — `outcome.clear()` runs here and
-  again at the top of `Executor::run`.
+- `scenarium/src/execution/engine/mod.rs:99` — `outcome.clear()` runs here and
+  again at the top of `Executor::run` (`executor/mod.rs:131`).
 
-- `darkroom/src/gui/theme.rs:302` — the inherent `impl ThemeChoice` lives in
-  `gui::theme` while the type is declared in `core::theme_pref`, making `core`
-  and `gui` mutually dependent.
-
-- `lumos/src/io/image/linear.rs:18` — the I/O-layer `linear` module imports
-  `StackableImage` from `stacking::frame_store`, inverting the io → stacking
-  layering.
-
-- `scenarium/src/execution/cache/digest/mod.rs:32` — the cache digest
-  documentation links to a `ResourceStamper` type that no longer exists, and
-  `:25` links to `RuntimeCache::reconcile` with no `RuntimeCache` in scope.
-
-- `AGENTS.md:7` — the `common` crate summary lists `Buffer2`, `BitBuffer2`,
-  `Slot`, `PauseGate`, and `ReadyState`, none of which exist in that crate.
-
-- `scenarium/src/execution/executor/mod.rs:12` — execution documentation links
-  to a nonexistent `Disposition::Reuse`; `execution/plan/mod.rs:222` similarly
-  links to a nonexistent `NodeVerdict`.
-
-- `palantir/src/scene/node/mod.rs:43` — the `Salt` documentation has a
-  malformed `ode` intra-doc link where it names `Node`.
-
-- `palantir/src/layout/mod.rs:47` — `Layout` is documented as returned by
-  `LayoutEngine::run`, but the method writes into a caller-owned `&mut Layout`
-  and returns nothing.
-
-- `palantir/src/layout/cache/mod.rs:279` — `MeasureCache::capture_tree` computes
-  the same subtree end twice in consecutive statements.
+- `palantir` has 52 unresolved intra-doc links across the crate
+  (`cargo doc -p palantir --no-deps --document-private-items`), naming types that
+  moved or were renamed — `Ui`, `InputState`, `crate::scene::cascade::Cascade`,
+  and others.

@@ -22,14 +22,15 @@
 //! - **`Func::version` is the implementation contract.** Bump it when a lambda can return
 //!   different values for the same inputs; leaving it unchanged can reuse an old digest.
 //!   A bump also drops the node's persistent `state`/`event_state` at the next install
-//!   ([`RuntimeCache::reconcile`]), so a new implementation never inherits its
+//!   ([`RuntimeCache::reconcile`](crate::execution::cache::runtime::RuntimeCache::reconcile)),
+//!   so a new implementation never inherits its
 //!   predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
 //! - **`FsPath` identity is `(len, mtime)`** — a file's own, or that of every file
 //!   beneath a directory (empty directories are not part of it),
-//!   prepared by [`ResourceStamper`](crate::execution::cache::resource::ResourceStamper), so a
+//!   prepared by [`RuntimeCache::prepare`](crate::execution::cache::runtime::RuntimeCache::prepare), so a
 //!   folder-reading node can be `Pure` and still re-key when its contents change. A
 //!   same-size edit within mtime granularity can slip through; explicit runtime cache
 //!   eviction removes the affected node and downstream blobs. The same tier holds
@@ -172,7 +173,7 @@ impl DigestHasher {
     ///
     /// Filesystem-path values fold only their authored path string(s) here — the
     /// external files/dirs they point at are a separate concern, folded by the
-    /// caller through [`ResourceStamper::hash_fs_paths`], so this stays a pure,
+    /// caller through `RuntimeCache::hash_fs_paths`, so this stays a pure,
     /// no-I/O structural fold.
     pub(super) fn write_static(&mut self, value: &StaticValue) {
         match value {

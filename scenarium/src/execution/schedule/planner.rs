@@ -69,9 +69,10 @@ impl Planner {
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
     /// consumers), detects cycles, and — folded in here rather than a separate forward
-    /// pass — resolves each node's [`NodeVerdict`].
-    /// The verdict is set in the `Done` arm, i.e. in post-order, so every Bind dep is
-    /// already `Black` with its own verdict set when a consumer reads it (what the old
+    /// pass — resolves each node's structural
+    /// [`NodeState`](crate::execution::schedule::NodeState).
+    /// The state is set in the `Done` arm, i.e. in post-order, so every Bind dep is
+    /// already `Black` with its own state set when a consumer reads it (what the old
     /// separate `resolve_verdicts` pass asserted, now structural).
     fn walk_backward_collect_order(
         &mut self,
