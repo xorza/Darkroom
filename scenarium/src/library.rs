@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
-use crate::graph::GraphDef;
+use crate::graph::definition::GraphDef;
 use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId, OutputType};
 use crate::{DataType, EnumVariants, StaticValue, TypeId};
@@ -157,7 +157,7 @@ impl Library {
 
     /// Register a shared graph definition. Panics on a duplicate id, like
     /// [`Self::add`] and [`Self::register_type`] — and unlike
-    /// [`Graph::insert_graph`](crate::graph::Graph::insert_graph), whose
+    /// [`Graph::insert_graph`](crate::graph::entry::Graph::insert_graph), whose
     /// map-`insert` semantics undo/redo replay depends on.
     pub fn register_graph(&mut self, id: GraphId, graph: GraphDef) {
         assert!(!id.is_nil());
@@ -350,7 +350,7 @@ mod tests {
 
     use crate::FuncOutput;
     use crate::Invocation;
-    use crate::graph::GraphDef;
+    use crate::graph::definition::GraphDef;
     use crate::graph::interface::GraphId;
     use crate::library::{Library, TypeEntry};
     use crate::node::definition::{Func, FuncId, FuncInput};

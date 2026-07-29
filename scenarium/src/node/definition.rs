@@ -162,7 +162,7 @@ pub enum OutputType {
     /// A polymorphic passthrough / reroute output whose type mirrors the
     /// resolved type of input `mirrors`. It reads as
     /// the wildcard `Any` until the editor resolves it by following the wire
-    /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
+    /// (see [`Graph::resolve_output_type`](crate::graph::entry::Graph::resolve_output_type));
     /// compilation resolves the same type into the cache signature and codec preflight.
     Wildcard { mirrors: usize },
 }

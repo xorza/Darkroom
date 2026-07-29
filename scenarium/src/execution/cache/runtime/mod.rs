@@ -47,7 +47,7 @@ pub(crate) struct RuntimeCache {
     /// The program `slots` is aligned to — what its indices mean, and the ids
     /// that name them across an install.
     ///
-    /// Shared with the [`CompiledGraph`](crate::execution::compile::CompiledGraph)
+    /// Shared with the [`CompiledGraph`](crate::execution::compile::artifact::CompiledGraph)
     /// it came from rather than copied, so holding it duplicates nothing. It is
     /// written only where `slots` is, which is what makes the alignment a fact
     /// about the struct instead of a precondition every caller has to honour.

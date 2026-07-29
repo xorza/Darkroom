@@ -77,7 +77,7 @@ impl NodeIdx {
 /// An [`ExecutionOutputPort`](crate::execution::identity::ExecutionOutputPort)
 /// interned into the installed program's dense index space — the hash-free form
 /// every per-run edge walk uses, resolved once at compile
-/// ([`intern_bindings`](crate::execution::program::Program::intern_bindings)).
+/// ([`link`](crate::execution::compile::artifact::CompiledGraph::link)).
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
 /// byte, or a host-facing report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

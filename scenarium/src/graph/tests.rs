@@ -1,10 +1,9 @@
 use crate::error::{GraphDeserializeError, GraphValidationError};
-use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
+use crate::graph::definition::GraphDef;
+use crate::graph::entry::Graph;
+use crate::graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
 use crate::graph::query::NodePorts;
-use crate::graph::{
-    Binding, CacheMode, Graph, GraphDef, GraphInterface, InputPort, Node, NodeId, NodeKind,
-    NodeSearch, OutputPort,
-};
+use crate::graph::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::node::event::EventLambda;

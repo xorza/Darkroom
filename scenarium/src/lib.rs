@@ -20,9 +20,10 @@ pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_lib
 pub use error::{GraphDeserializeError, GraphValidationError};
 pub use execution::cache::disk_store::DiskStore;
 pub use execution::codec::{CodecError, CustomValueCodec};
+pub use execution::compile::artifact::CompiledGraph;
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;
-pub use execution::compile::{CompileError, CompiledGraph, Compiler};
+pub use execution::compile::{CompileError, Compiler};
 pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{ExecutionEventPort, ExecutionIdentityError, ExecutionNodeId};
 pub use execution::log::{LogEntry, LogLevel};
@@ -30,10 +31,12 @@ pub use execution::outcome::{NodeExecutionStatus, NodeStatus};
 pub use execution::seeds::RunSeeds;
 pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
 pub use graph::boundary::{DetachedGraphInput, DetachedGraphOutput};
+pub use graph::definition::GraphDef;
+pub use graph::entry::Graph;
 pub use graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
 pub use graph::query::{NodeEvents, NodePorts};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
-pub use graph::{Binding, CacheMode, Graph, GraphDef, Node, NodeKind, NodeRef, NodeSearch};
+pub use graph::{Binding, CacheMode, Node, NodeKind, NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};
 pub use node::definition::{
     Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, FuncValidationError, OutputType,
