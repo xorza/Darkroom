@@ -194,7 +194,7 @@ mod internals {
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::address::NodeId;
-    use crate::node::lambda::OutputDemand;
+    use crate::graph::node::lambda::OutputDemand;
 
     #[derive(Debug, Default)]
     pub(super) struct ArgumentValues {
@@ -209,9 +209,9 @@ mod internals {
         /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
         pub(super) fn update(
             &mut self,
-            graph: &crate::graph::entry::Graph,
+            graph: &crate::graph::Graph,
             library: &crate::library::Library,
-        ) -> std::result::Result<(), compile::CompileError> {
+        ) -> std::result::Result<(), compile::error::CompileError> {
             self.install(compile::Compiler::default().compile(graph, library)?.into());
             Ok(())
         }
