@@ -26,7 +26,7 @@ pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::error::ExecutionIdentityError;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{ExecutionEventPort, ExecutionNodeId};
-pub use execution::log::{LogEntry, LogLevel};
+pub use execution::outcome::{LogEntry, LogLevel};
 pub use execution::outcome::{NodeExecutionStatus, NodeStatus};
 pub use execution::seeds::RunSeeds;
 pub use graph::Binding;

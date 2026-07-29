@@ -5,7 +5,7 @@ use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::{Id, JoinSet};
 
-use crate::execution::event::EventTrigger;
+use crate::execution::outcome::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::worker::pause_gate::PauseGate;
