@@ -1,5 +1,7 @@
+use crate::graph::definition::GraphDef;
+use crate::graph::entry::Graph;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
-use crate::graph::{Graph, GraphDef, Node, NodeKind, NodeSearch};
+use crate::graph::{Node, NodeKind, NodeSearch};
 use crate::node::definition::FuncId;
 
 /// The link of the one graph-instance node `graph` holds.

@@ -43,7 +43,7 @@ the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
 BLAKE3 from the enclosing instance ids and interior node id. Flatten records
 each node's authored origin beside the node itself as it emits, so the one sort
-that gives the program its dense order settles the `Attribution` column with it:
+that gives the program its dense order settles the attribution column with it:
 one leaf per node, dense in the program's index space, over the compact scope
 ancestry naming its enclosing instances. Nothing is keyed by execution id in
 between, and the program's `e_node_index` is the artifact's only stable-id
@@ -63,18 +63,20 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `node/output_type.rs` | Shared wildcard-output type resolution |
 | `node/lambda.rs` | Function invocation ABI and output demand |
 | `node/event.rs` | Event-lambda ABI |
-| `graph/mod.rs` | Core authoring structs, construction, and serialization entry points |
+| `graph/mod.rs` | The authoring satellite types (`Node`, `Binding`, `CacheMode`, `NodeRef`, …) and `Graph`'s insertion/lookup mutations |
+| `graph/entry.rs` | The `Graph` type and every `&self` question asked of one — arity and port types, wiring lookups, validation, clones, snapshots |
+| `graph/definition.rs` | The `GraphDef` type: its builders and its `&self` questions |
 | `graph/serde.rs` | Custom graph wire formats |
 | `graph/validate.rs` | Standalone and execution-entry graph validation |
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
 | `graph/clone.rs` | Deep clones: identity-remapping and identity-preserving |
 | `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
-| `graph/query.rs` | Node-port resolution (`NodePorts`), type and reachability queries |
+| `graph/query.rs` | The `NodePorts`/`NodeEvents` views a node's declaration resolves to |
 | `graph/interface/` | Graph identity, instance links, exposed events, and the `GraphInterface` they compose |
-| `execution/compile/` | Host-side compiler, the compiled artifact, and its self-consistency checks |
-| `execution/flatten/` | Composite lowering |
+| `execution/compile/` | Host-side compiler, linking (flat graph → program + indices), the compiled artifact, and its self-consistency checks |
+| `execution/flatten/` | Composite lowering into a stable-id `FlatGraph` |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
-| `execution/program/` | Private flat runtime program and typed packed pools |
+| `execution/program/` | Private flat runtime program (construct-once) and typed packed pools |
 | `execution/schedule/` | The per-run `RunSchedule`, the `Scheduled`/`Resolved` phase handles, and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
@@ -92,7 +94,16 @@ through the installed `CompiledGraph` when it needs authoring identities.
 ## Compile, plan, execute
 
 `Compiler::compile` runs synchronously on the host and returns a
-`CompiledGraph`; compilation is independent of run seeds. Disabled leaves stay
+`CompiledGraph`; compilation is independent of run seeds. It is two stages, each
+producing one value from the last: **flatten** lowers the authoring graph into a
+`FlatGraph` — func-only, in the stable-id space, carrying everything it copied
+out of the `Library` — and **link** places those nodes in the dense index space,
+resolving every id-named reference (bindings, subscriptions, wildcard output
+types) against that placement and building the host-facing indices over the
+result. Flatten never names a dense index and link never sees the library, so
+each of flatten's port types is the stage-local half of a program one
+(`FlatInput`/`ExecutionInput`, and so on) rather than a program type with fields
+left blank. Disabled leaves stay
 in the program with an effective disabled bit inherited from composite
 ancestors. Compile errors never enter the worker. Planning is structural: it
 selects exact execution-node roots, treats those seeds as one-run disable

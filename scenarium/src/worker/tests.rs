@@ -6,13 +6,16 @@ use tokio::time::{Duration, timeout};
 
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
-use crate::execution::compile::{CompiledGraph, Compiler};
+use crate::execution::compile::Compiler;
+use crate::execution::compile::artifact::CompiledGraph;
 use crate::execution::error::{Error, Result as ExecResult, RunError};
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::address::{InputPort, NodeId};
-use crate::graph::{Binding, Graph, GraphDef, Node, NodeSearch};
+use crate::graph::definition::GraphDef;
+use crate::graph::entry::Graph;
+use crate::graph::{Binding, Node, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::node::lambda::{FuncLambda, InvokeError};

@@ -1,8 +1,9 @@
 //! Strongly typed identities for one flattened compiled graph.
 //!
-//! The attribution taking these ids back to authored nodes is flattening's own
-//! record, so it lives with the walk that builds it in
-//! [`crate::execution::flatten::attribution`].
+//! Where each of these ids came from is flattening's own record, kept with the
+//! walk that builds it in [`crate::execution::flatten::origin`]; the form a
+//! host queries is the artifact's, in
+//! [`crate::execution::compile::attribution`].
 //!
 //! Naming convention: `Execution`-prefixed types are the **stable identity
 //! space** — they survive installs, cross the host boundary, and may enter
@@ -35,7 +36,7 @@ impl ExecutionNodeId {
     /// (`attribution`, `is_sink`, `is_impure`), which answer for every
     /// authored node.
     ///
-    /// [`CompiledGraph::run_targets`]: crate::execution::compile::CompiledGraph::run_targets
+    /// [`CompiledGraph::run_targets`]: crate::execution::compile::artifact::CompiledGraph::run_targets
     pub(crate) fn from_authoring(path: &[NodeId]) -> Self {
         let (&node_id, instances) = path
             .split_last()

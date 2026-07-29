@@ -9,7 +9,7 @@ use common::CancelToken;
 use crate::RamUsage;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
-use crate::execution::compile::CompiledGraph;
+use crate::execution::compile::artifact::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
@@ -209,7 +209,7 @@ mod internals {
         /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
         pub(super) fn update(
             &mut self,
-            graph: &crate::graph::Graph,
+            graph: &crate::graph::entry::Graph,
             library: &crate::library::Library,
         ) -> std::result::Result<(), compile::CompileError> {
             self.install(compile::Compiler::default().compile(graph, library)?.into());

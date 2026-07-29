@@ -8,7 +8,9 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::execution::report::internals::DiscardedReports;
 use crate::graph::address::{InputPort, NodeId, OutputPort};
-use crate::graph::{Binding, CacheMode, Graph, GraphDef, Node, NodeKind, NodeSearch};
+use crate::graph::definition::GraphDef;
+use crate::graph::entry::Graph;
+use crate::graph::{Binding, CacheMode, Node, NodeKind, NodeSearch};
 use crate::library::Library;
 use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncBehavior};
@@ -3198,8 +3200,8 @@ mod behavior {
         use common::CancelToken;
 
         use crate::async_lambda;
-        use crate::graph::Graph;
         use crate::graph::address::NodeId;
+        use crate::graph::entry::Graph;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
 
@@ -3290,8 +3292,8 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
-        use crate::graph::Graph;
         use crate::graph::address::NodeId;
+        use crate::graph::entry::Graph;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
         let library: Library = [
@@ -3388,8 +3390,8 @@ mod behavior {
 
 mod composite_behavior {
     use super::*;
-    use crate::graph::Graph;
     use crate::graph::NodeKind;
+    use crate::graph::entry::Graph;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::FuncOutput;
 
@@ -3897,7 +3899,7 @@ mod execution {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
-        use crate::graph::Graph;
+        use crate::graph::entry::Graph;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
 
@@ -5259,8 +5261,8 @@ mod topology {
 
 mod graph {
     use super::*;
-    use crate::graph::Graph;
     use crate::graph::NodeKind;
+    use crate::graph::entry::Graph;
     use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
     use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
     use crate::node::event::EventLambda;
@@ -6068,8 +6070,8 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::graph::Graph;
     use crate::graph::NodeKind;
+    use crate::graph::entry::Graph;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};

@@ -3,7 +3,7 @@
 //! 1. **compile** — the [`Compiler`](compile::Compiler) flattens the authoring
 //!    `Graph` into an immutable [`Program`](program::Program).
 //!    Runs on the *host's* thread (compile errors are synchronous); the resulting
-//!    [`CompiledGraph`](compile::CompiledGraph) is installed into the engine
+//!    [`CompiledGraph`](compile::artifact::CompiledGraph) is installed into the engine
 //!    via [`engine::ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
 //!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
