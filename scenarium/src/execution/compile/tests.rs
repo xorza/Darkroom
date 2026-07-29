@@ -1,11 +1,8 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::CompiledGraphValidationError;
-use crate::execution::flatten::Flattened;
-use crate::execution::flatten::attribution::internals::AttributionBuilder;
-use crate::execution::identity::ExecutionEventPort;
+use crate::execution::flatten::internals::FlatGraphBuilder;
 use crate::execution::program::index::OutputAddr;
-use crate::execution::program::{ExecutionNode, PendingSubscription};
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{GraphDef, NodeSearch};
 use crate::node::definition::{Func, FuncId};
@@ -44,22 +41,8 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
         "the authored subscription wired one flat subscriber"
     );
 
-    // An unemitted subscriber is a flatten bug, not drift to absorb.
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        program_mut(&mut compiled).apply_subscriptions(&[PendingSubscription {
-            event: ExecutionEventPort {
-                e_node_id: ExecutionNodeId::from_authoring(&[emitter]),
-                event_idx: 0,
-            },
-            subscriber: ExecutionNodeId::unique(),
-        }]);
-    }));
-    assert!(
-        panic.is_err(),
-        "wiring a subscriber the program never adopted must panic"
-    );
-
-    // And the artifact check catches a subscriber index that names no node.
+    // The artifact check catches a subscriber index that names no node.
+    // (Wiring one the walk never emitted panics at link — covered there.)
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     program_mut(&mut compiled).events[events][0].subscribers[0] = past_the_end;
     assert!(
@@ -456,21 +439,11 @@ fn validation_returns_compiled_and_installed_mismatches() {
     let e_node_id = ExecutionNodeId::unique();
     let interior = NodeId::unique();
     let missing_func = FuncId::unique();
-    let mut builder = AttributionBuilder::new();
+    let mut builder = FlatGraphBuilder::default();
     builder.insert_leaf(e_node_id, [], interior);
-    let mut program = Program::default();
-    program.push(
-        e_node_id,
-        ExecutionNode {
-            func_id: missing_func,
-            ..Default::default()
-        },
-    );
-    let compiled = CompiledGraph::indexed(Flattened {
-        program,
-        attribution: builder.build().attribution,
-        exposed: Vec::new(),
-    });
+    let mut flat = builder.build();
+    flat.nodes[0].func_id = missing_func;
+    let compiled = CompiledGraph::link(flat);
 
     assert_eq!(
         compiled

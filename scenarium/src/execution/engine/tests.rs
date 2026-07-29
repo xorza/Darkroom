@@ -6,7 +6,6 @@ use crate::execution::error::{Error, RunError};
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
-use crate::execution::program::ExecutionNode;
 use crate::execution::report::internals::DiscardedReports;
 use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::{Binding, CacheMode, Graph, GraphDef, Node, NodeKind, NodeSearch};
@@ -6069,8 +6068,6 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::program::index::{NodeIdx, OutputAddr};
-    use crate::execution::program::{ExecutionInput, ExecutionOutput, Program};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
@@ -6231,29 +6228,12 @@ mod compile_regressions {
             DataType::Any
         );
 
-        let mut program = Program::default();
-        let e_node_id = root_execution_node(node_id);
-        let inputs = program.inputs.append([ExecutionInput {
-            required: true,
-            stamps_fs_path: false,
-            binding: ExecutionBinding::Bind(OutputAddr {
-                node_idx: NodeIdx(0),
-                port_idx: 0,
-            }),
-        }]);
-        let outputs = program.outputs.append([ExecutionOutput::default()]);
-        program.push(
-            e_node_id,
-            ExecutionNode {
-                func_id: passthrough.id,
-                inputs,
-                outputs,
-                ..Default::default()
-            },
-        );
-        program.resolve_output_types(&library);
+        // The same wire, compiled: linking resolves the wildcard through the
+        // binding it just interned, and the cycle closes on `Any` there too.
+        let compiled = Compiler::default().compile(&graph, &library).unwrap();
+        let e_node = compiled.program.by_id(root_execution_node(node_id));
         assert_eq!(
-            program.outputs[program.by_id(e_node_id).outputs][0].data_type,
+            compiled.program.outputs[e_node.outputs][0].data_type,
             DataType::Any
         );
     }

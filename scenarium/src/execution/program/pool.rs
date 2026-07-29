@@ -5,7 +5,7 @@ use std::ops::{Deref, Index, IndexMut};
 pub(crate) struct PoolRange<T> {
     pub(crate) start: u32,
     pub(crate) len: u32,
-    marker: PhantomData<fn() -> T>,
+    marker: PhantomData<T>,
 }
 
 impl<T> PoolRange<T> {
@@ -20,6 +20,16 @@ impl<T> PoolRange<T> {
     pub(crate) fn range(self) -> std::ops::Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize
+    }
+
+    /// The same run of slots, in a pool of `U`.
+    ///
+    /// For one case only: a pool rebuilt element-for-element from another, as
+    /// linking rebuilds each of flatten's pools into the program's. Positions
+    /// are preserved there, so a range over the one addresses the same ports in
+    /// the other — which is exactly what makes it *not* general.
+    pub(crate) fn retype<U>(self) -> PoolRange<U> {
+        PoolRange::new(self.start, self.len)
     }
 }
 
@@ -37,9 +47,18 @@ impl<T> Default for PoolRange<T> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Pool<T> {
     values: Vec<T>,
+}
+
+/// An empty pool, for any `T`. Derived, this would demand `T: Default` — a
+/// bound the empty vector does not need, and one a stage-specific element type
+/// has no reason to satisfy.
+impl<T> Default for Pool<T> {
+    fn default() -> Self {
+        Self { values: Vec::new() }
+    }
 }
 
 impl<T> Pool<T> {
@@ -48,6 +67,12 @@ impl<T> Pool<T> {
         self.values.extend(values);
         let end = u32::try_from(self.values.len()).expect("program pool length exceeds u32");
         PoolRange::new(start, end - start)
+    }
+
+    /// Consume the pool for its values, in pool order — how a stage's pool is
+    /// rebuilt into the next stage's without copying an element.
+    pub(crate) fn into_values(self) -> impl Iterator<Item = T> {
+        self.values.into_iter()
     }
 }
 
