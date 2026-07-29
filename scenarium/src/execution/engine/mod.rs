@@ -122,7 +122,7 @@ impl ExecutionEngine {
                 RunRequest {
                     program: &self.compiled.program,
                     plan: &self.plan,
-                    resolved: &self.resolver.run,
+                    resolver: &self.resolver,
                     cache: &mut self.cache,
                     reporter,
                     cancel,
@@ -279,7 +279,7 @@ mod internals {
 
         /// The resolved disposition for a stable id — test introspection.
         pub(super) fn node_disposition(&self, e_node_id: ExecutionNodeId) -> Disposition {
-            self.resolver.run.disposition[self.compiled.program.e_node_index[&e_node_id]]
+            self.resolver.disposition[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
@@ -294,7 +294,6 @@ mod internals {
 
         pub(super) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
             self.resolver
-                .run
                 .outputs
                 .demand
                 .slice(self.compiled.program.by_id(e_node_id).outputs)
@@ -302,7 +301,6 @@ mod internals {
 
         pub(super) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
             self.resolver
-                .run
                 .outputs
                 .readers
                 .slice(self.compiled.program.by_id(e_node_id).outputs)
