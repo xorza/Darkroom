@@ -6,13 +6,14 @@ use std::sync::Arc;
 
 use crate::DataType;
 use crate::async_lambda;
+use crate::graph::Binding;
+use crate::graph::Graph;
 use crate::graph::address::{InputPort, NodeId};
-use crate::graph::entry::Graph;
-use crate::graph::{Binding, CacheMode, Node};
+use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
+use crate::graph::node::error::InvokeResult;
+use crate::graph::node::lambda::Invocation;
+use crate::graph::node::{CacheMode, Node};
 use crate::library::Library;
-use crate::node::definition::{Func, FuncInput, FuncOutput};
-use crate::node::lambda::Invocation;
-use crate::node::lambda::InvokeResult;
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> InvokeResult<i64> + Send + Sync + 'static>,

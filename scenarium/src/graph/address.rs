@@ -3,7 +3,7 @@
 //! A dependency-free leaf: these types address the authoring model without
 //! knowing it, so the execution side can speak about nodes and ports —
 //! [`identity`](crate::execution::identity) derives execution ids from
-//! [`NodeId`], [`error`](crate::error) reports the ports a fault touched —
+//! [`NodeId`], [`error`](crate::graph::error) reports the ports a fault touched —
 //! without reaching into [`graph`](crate::graph) itself.
 
 use ::serde::{Deserialize, Serialize};

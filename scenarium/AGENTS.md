@@ -59,31 +59,37 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `data/type_system.rs` | `TypeId`, `DataType`, enum metadata, filesystem path configuration |
 | `data/static_value.rs` | Serializable authored constants |
 | `data/dynamic_value.rs` | Runtime values, custom values, and RAM accounting |
-| `node/definition.rs` | Function declarations and port metadata |
-| `node/output_type.rs` | Shared wildcard-output type resolution |
-| `node/lambda.rs` | Function invocation ABI and output demand |
-| `node/event.rs` | Event-lambda ABI |
-| `graph/mod.rs` | The authoring satellite types (`Node`, `Binding`, `CacheMode`, `NodeRef`, …) and `Graph`'s insertion/lookup mutations |
-| `graph/entry.rs` | The `Graph` type and every `&self` question asked of one — arity and port types, wiring lookups, validation, clones, snapshots |
-| `graph/definition.rs` | The `GraphDef` type: its builders and its `&self` questions |
+
+| `graph/error.rs` | What an authoring graph rejects: `GraphValidationError`, `GraphDeserializeError` |
+| `graph/node/mod.rs` | The authored `Node` and its vocabulary: `NodeKind`, `CacheMode`, `NodeRef`, `NodeSearch` |
+| `graph/node/error.rs` | `FuncValidationError` (registration) and `InvokeError`/`InvokeResult` (run time) |
+| `graph/node/definition.rs` | Function declarations and port metadata |
+| `graph/node/output_type.rs` | Shared wildcard-output type resolution |
+| `graph/node/lambda.rs` | Function invocation ABI and output demand |
+| `graph/node/event.rs` | Event-lambda ABI |
+| `graph/mod.rs` | The `Graph` type, `Binding`/`BindingEntry`, the cycle check, and every `Graph` method in one impl |
+| `graph/definition.rs` | The `GraphDef` type: its builders and every question asked of one |
 | `graph/serde.rs` | Custom graph wire formats |
-| `graph/validate.rs` | Standalone and execution-entry graph validation |
-| `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
-| `graph/clone.rs` | Deep clones: identity-remapping and identity-preserving |
-| `graph/boundary/` | Reversible subgraph interface-port removal (detach/attach with severed wiring) |
+| `graph/validate.rs` | `Validator`: standalone and execution-entry graph validation |
+| `graph/detached.rs` | The reversible-removal records (`DetachedNode`, `DetachedGraphInput`/`Output`) and their preflight asserts |
+| `graph/clone.rs` | `MappedClone`, the result of an identity-remapping deep clone |
+| `graph/boundary/` | `Shift`: how an interface-port edit renumbers the ports around it |
 | `graph/query.rs` | The `NodePorts`/`NodeEvents` views a node's declaration resolves to |
 | `graph/interface/` | Graph identity, instance links, exposed events, and the `GraphInterface` they compose |
-| `execution/compile/` | Host-side compiler, linking (flat graph → program + indices), the compiled artifact, and its self-consistency checks |
+| `execution/compile/` | Host-side compiler, linking (flat graph → program + indices), and the compiled artifact |
+| `execution/compile/error.rs` | `CompileError` plus the artifact's self-consistency verdicts |
+| `execution/error.rs` | Run-phase failures: whole-operation `Error`, per-node `RunError`, `ExecutionIdentityError` |
 | `execution/flatten/` | Composite lowering into a stable-id `FlatGraph` |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
 | `execution/program/` | Private flat runtime program (construct-once) and typed packed pools |
-| `execution/schedule/` | The per-run `RunSchedule`, the `Scheduled`/`Resolved` phase handles, and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
+| `execution/schedule/` | (with `error.rs` for its validation verdicts) The per-run `RunSchedule`, the `Scheduled`/`Resolved` phase handles, and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
-| `execution/codec.rs` | Streaming downstream custom-value codec API |
+| `execution/codec/` | Streaming downstream custom-value codec API, and what it rejects |
 | `execution/report.rs` | Internal live progress and pinned-output transport |
 | `execution/outcome.rs` | Completed-run outcome and the public per-node status row it carries |
 | `worker/protocol.rs` | Host/worker messages and reports |
+| `worker/error.rs` | `WorkerError` and `WorkerExited` |
 | `worker/status.rs` | Shared worker activity and node-status snapshots |
 | `worker/batch.rs` | Ordered batch reduction |
 | `worker/event_loop.rs` | Active event-task lifecycle |

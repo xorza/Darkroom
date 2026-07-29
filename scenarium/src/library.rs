@@ -6,7 +6,7 @@ use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
 use crate::graph::definition::GraphDef;
 use crate::graph::interface::GraphId;
-use crate::node::definition::{Func, FuncId, OutputType};
+use crate::graph::node::definition::{Func, FuncId, OutputType};
 use crate::{DataType, EnumVariants, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
@@ -157,7 +157,7 @@ impl Library {
 
     /// Register a shared graph definition. Panics on a duplicate id, like
     /// [`Self::add`] and [`Self::register_type`] — and unlike
-    /// [`Graph::insert_graph`](crate::graph::entry::Graph::insert_graph), whose
+    /// [`Graph::insert_graph`](crate::graph::Graph::insert_graph), whose
     /// map-`insert` semantics undo/redo replay depends on.
     pub fn register_graph(&mut self, id: GraphId, graph: GraphDef) {
         assert!(!id.is_nil());
@@ -352,9 +352,10 @@ mod tests {
     use crate::Invocation;
     use crate::graph::definition::GraphDef;
     use crate::graph::interface::GraphId;
+    use crate::graph::node::definition::{Func, FuncId, FuncInput};
+    use crate::graph::node::error::InvokeError;
+    use crate::graph::node::lambda::OutputDemand;
     use crate::library::{Library, TypeEntry};
-    use crate::node::definition::{Func, FuncId, FuncInput};
-    use crate::node::lambda::{InvokeError, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::{ContextManager, ContextStore};
     use crate::runtime::shared_any_state::SharedAnyState;
