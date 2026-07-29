@@ -33,3 +33,5 @@ uitest harness internals/test cfg
 A Pure node with an unset path input now errors per run. DataType::FsPath's default value is String::new(), and metadata("") is NotFound.
 
  sink: run_state.is_sink(id).unwrap_or(node_interface.sink), impure: run_state.is_impure(id).unwrap_or(node_interface.impure),
+
+investigate dependencies skill
