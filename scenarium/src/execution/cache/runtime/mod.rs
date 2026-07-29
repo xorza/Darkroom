@@ -23,6 +23,7 @@ use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, StateOwner, Val
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
+use crate::execution::ram::NodeRamUsage;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -55,16 +56,6 @@ pub(crate) struct RuntimeCache {
 pub(crate) struct CacheEvictionFailure {
     pub(crate) e_node_id: ExecutionNodeId,
     pub(crate) message: String,
-}
-
-/// One node's share of the resident RAM, as
-/// [`resident_ram_stats`](RuntimeCache::resident_ram_stats) measures it. Lives
-/// with the cache that owns the values rather than with the run outcome that
-/// collects it — the cache is what knows what is resident.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NodeRamUsage {
-    pub(crate) e_node_id: ExecutionNodeId,
-    pub(crate) usage: RamUsage,
 }
 
 impl RuntimeCache {

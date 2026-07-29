@@ -1,9 +1,10 @@
 use crate::RamUsage;
-use crate::execution::cache::runtime::NodeRamUsage;
 use crate::execution::error::RunError;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{ExecutionInputPort, ExecutionNodeId};
+use crate::execution::log::LogEntry;
+use crate::execution::ram::NodeRamUsage;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutedNodeOutcome {
@@ -15,20 +16,6 @@ pub(crate) struct ExecutedNodeOutcome {
 pub(crate) struct NodeError {
     pub(crate) e_node_id: ExecutionNodeId,
     pub(crate) error: RunError,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    Info,
-    Warn,
-    Error,
-}
-
-#[derive(Debug, Clone)]
-pub struct LogEntry {
-    pub e_node_id: ExecutionNodeId,
-    pub level: LogLevel,
-    pub message: String,
 }
 
 #[derive(Debug, Default)]

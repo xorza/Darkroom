@@ -31,7 +31,7 @@ pub struct CompileError {
 }
 
 /// The compile artifact: the flattened, immutable program (lambdas, resolved
-/// output types, and bound-path stamping metadata) plus the [`FlattenMap`] that
+/// output types, and bound-path stamping metadata) plus the `FlattenMap` that
 /// attributes execution identities to authored nodes. Self-contained — executing
 /// it needs neither the authoring graph nor the library. `Default` is the empty
 /// program (the engine's pre-install / cleared state).
@@ -303,7 +303,7 @@ impl CompiledGraph {
     }
 }
 
-/// The compile entry point, owning reusable [`Flattener`] traversal scratch.
+/// The compile entry point, owning reusable `Flattener` traversal scratch.
 /// Hosts keep one per compile site (e.g. darkroom's `Engine`); the produced
 /// [`CompiledGraph`] is always fresh and can be shared with the worker in an
 /// [`Arc`](std::sync::Arc).
@@ -316,7 +316,7 @@ impl Compiler {
     /// Compile `graph` against `library`: validate, flatten composites into a
     /// flat func-only program, and resolve the output-type pool. Pure CPU on
     /// the caller's thread; the result is
-    /// [installed](crate::execution::engine::ExecutionEngine::install) into an engine
+    /// installed into an engine (`ExecutionEngine::install`)
     /// (typically across the worker channel).
     pub fn compile(
         &mut self,
@@ -361,7 +361,7 @@ pub(crate) mod internals {
 
     impl CompiledGraph {
         /// Every execution node an authored node covers, in ascending id
-        /// order — [`CompiledGraph::footprint`] spelled out.
+        /// order — `CompiledGraph::footprint` spelled out.
         ///
         /// Production never needs the set itself, only the questions asked of
         /// it (`run_targets`, `is_sink`, `is_impure`, `data_consumer_closure`),
@@ -376,7 +376,7 @@ pub(crate) mod internals {
     }
 
     /// A [`CompiledGraph`] over an empty program, carrying only attribution
-    /// — the published half of [`FlattenMapBuilder`], which owns the
+    /// — the published half of `FlattenMapBuilder`, which owns the
     /// leaf-building itself.
     #[derive(Debug)]
     pub struct CompiledGraphBuilder {
