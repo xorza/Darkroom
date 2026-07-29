@@ -1,412 +1,284 @@
-# `scenarium/src/execution` — ownership map, call graph, redesign notes
+# `scenarium/src/execution` — ownership, borrows, call graph, redesign
 
-Snapshot of commit `71b3bfe3`. Sizes are `wc -l` (doc comments and gated
-`internals`/`tests` mods included).
-
-| | files | lines |
-| --- | --- | --- |
-| production files | 27 | 6 650 |
-| dedicated `tests.rs` | 13 | 11 531 |
-| total | 40 | 18 181 |
-
-Biggest production files: `disk_store/format` 616, `flatten` 599, `executor`
-573, `resource` 533, `cache/runtime` 497, `compile` 418, `engine` 374,
-`validate` 365.
+Supersedes the first pass. Reflects the five changes already landed (plan→compile
+edge removed, `ExecutionProgram`→`Program`, cache made a leaf, `RuntimeCache::e_node_ids`
+deleted, `NodeVerdict`+`Disposition` merged into `NodeState`).
 
 ---
 
-## 1. Ownership map
-
-Everything below is owned by value unless marked. `Arc` marks the one shared
-edge; `→` marks a borrow taken per call.
+## 1. Ownership
 
 ```
 host thread
-└── Compiler                                     [compile/mod.rs]
-    └── flattener: Flattener                     [flatten/mod.rs]
-        ├── path: Vec<NodeId>                    reusable descent scratch
-        ├── scope_stack: Vec<u32>
-        ├── seen_shared: HashSet<GraphId>
-        ├── subs: Vec<PendingSubscription>
-        ├── pending_binds: Vec<PendingBind>
-        └── e_nodes: Vec<(ExecutionNodeId, ExecutionNode)>
-   (per build only: Run<'a> — borrows all of the above + `levels: Vec<&Graph>`)
+└── Compiler
+    └── flattener: Flattener { path, scope_stack, seen_shared, subs, pending_binds, e_nodes }
+        └─(per build)─ Run<'a> { library, path:&mut, levels:Vec<&Graph>, scope_stack:&mut,
+                                 flatten:&mut, seen_shared:&mut, subs:&mut,
+                                 pending_binds:&mut, e_nodes:&mut, program:&mut }
 
-     ── Arc<CompiledGraph> crosses the worker channel ──
+     ── Arc<CompiledGraph> ──▶ worker channel ──▶
 
-worker thread (WorkerTask)
-├── outcome: ExecutionOutcome                    [outcome.rs]  retained buffer
-└── ExecutionEngine                              [engine/mod.rs]
-    ├── compiled: Arc<CompiledGraph>             [compile/mod.rs]  replaced wholesale
-    │   ├── program: ExecutionProgram            [program/mod.rs]
-    │   │   ├── e_nodes:      NodeColumn<ExecutionNode>
-    │   │   ├── e_node_ids:   NodeColumn<ExecutionNodeId>
-    │   │   ├── e_node_index: HashMap<ExecutionNodeId, NodeIdx>
-    │   │   ├── inputs:  Pool<ExecutionInput>     ← ExecutionBinding{None,Const,Bind(OutputAddr)}
-    │   │   ├── events:  Pool<ExecutionEvent>
-    │   │   └── outputs: Pool<ExecutionOutput>
-    │   ├── flatten_map: FlattenMap              [flatten/map.rs]
-    │   │   ├── scopes:  Vec<Scope>              instance ancestry
-    │   │   ├── leaves:  HashMap<ExecutionNodeId, Leaf>
-    │   │   └── exposed: Vec<(NodeId, ExecutionNodeId)>
-    │   ├── node_lists: Pool<NodeIdx>            shared backing for the 3 relations below
-    │   ├── footprints: HashMap<NodeId, PoolRange<NodeIdx>>   authored → execution nodes
-    │   ├── consumers:  NodeColumn<PoolRange<NodeIdx>>        reversed data edges
-    │   └── exposed:    HashMap<NodeId, PoolRange<NodeIdx>>   instance → exposed producers
-    │
-    ├── cache: RuntimeCache                      [cache/runtime/mod.rs]  CROSS-RUN
-    │   ├── slots: NodeColumn<RuntimeSlot>       [cache/slot.rs]
-    │   │   └── RuntimeSlot { owner: StateOwner, state: AnyState,
-    │   │                     event_state: SharedAnyState,
-    │   │                     current_digest: Option<Digest>,
-    │   │                     value: ValueState::{Empty, Resident{OutputSnapshot, produced_under}} }
-    │   ├── e_node_ids: NodeColumn<ExecutionNodeId>   ⚠ duplicates program.e_node_ids
-    │   ├── disk_store: DiskStore                [cache/disk_store/]  survives installs
-    │   │   ├── codecs: Codecs                   [codec.rs] TypeId → Arc<dyn CustomValueCodec>
-    │   │   └── disk_root: Option<PathBuf>
-    │   ├── stamper: ResourceStamper             [cache/resource/]
-    │   │   ├── fs_paths: HashMap<String, FsPathId>   per-run memo
-    │   │   └── job: StampJob {requests, stamped, files, pending}  moves to blocking pool
-    │   └── ram_seen: HashSet<usize>             dedup scratch for RAM accounting
-    │
-    ├── planner: Planner                         [plan/mod.rs]  PER-RUN scratch
-    │   ├── color: NodeColumn<Color>
-    │   └── stack: Vec<Visit>
-    ├── plan: ExecutionPlan                      [plan/mod.rs]  PER-RUN, buffer reused
-    │   ├── process_order: Vec<NodeIdx>
-    │   ├── verdicts: NodeColumn<NodeVerdict>    {Execute, Disabled, MissingInputs}
-    │   ├── roots: NodeSet
-    │   ├── seeded: NodeSet
-    │   └── event_sources: NodeSet
-    ├── resolver: Resolver                       [resolve/mod.rs]  PER-RUN
-    │   ├── disposition: NodeColumn<Disposition> {Cut, Reuse, MissingLambda, Run}
-    │   └── outputs: ResolvedOutputs { demand: OutputColumn<OutputDemand>,
-    │                                  readers: OutputColumn<u32> }
-    └── executor: Executor                       [executor/mod.rs]  PER-RUN
-        ├── ctx_manager: ContextManager          [runtime/context.rs] cancel, logs, contexts
-        ├── inputs: Vec<DynamicValue>            per-invoke scratch
-        ├── remaining_reads: RemainingOutputReads(OutputColumn<u32>)
-        └── outcomes: NodeColumn<NodeOutcome>    {Pending, Reused, Cut, Ran, Failed, Skipped}
-
-per-run transients (never stored):
-  RunRequest<'a,'r>   6 borrows   engine → Executor::run
-  ExecutionFrame<'a,'r> 11 borrows  Executor::run → per-node methods
+worker thread
+└── ExecutionEngine
+    ├── compiled: Arc<CompiledGraph>
+    │     ├── program: Program { e_nodes, e_node_ids, e_node_index, inputs, events, outputs }
+    │     ├── flatten_map: FlattenMap { scopes, leaves, exposed }
+    │     └── node_lists / footprints / consumers / exposed        (compile-time indices)
+    ├── cache: RuntimeCache          CROSS-RUN
+    │     ├── slots: NodeColumn<RuntimeSlot>
+    │     ├── disk_store: DiskStore { codecs, disk_root }
+    │     ├── stamper: ResourceStamper { fs_paths, job: StampJob }
+    │     └── ram_seen
+    ├── plan: ExecutionPlan          PER-RUN  { process_order, states, roots, seeded, event_sources }
+    ├── planner: Planner             PER-RUN scratch { color, stack }
+    ├── resolver: Resolver           PER-RUN  { outputs: { demand, readers } }
+    └── executor: Executor           PER-RUN  { ctx_manager, inputs, remaining_reads, outcomes }
 ```
 
-### Lifetime tiers
+**Five sibling owners of `NodeIdx`-aligned state** — `cache.slots`, `plan.states`,
+`resolver.outputs`, `executor.outcomes`, `executor.remaining_reads` — all indexed
+by a `Program` that **none of them holds**. That single fact generates most of
+what follows.
 
-| tier | lives for | members |
+---
+
+## 2. Borrow graph
+
+### Per-run borrow structs
+
+```
+RunRequest<'a,'r>            6 fields, all borrows, destructured on line 1 of Executor::run
+    program:   &'a Program
+    plan:      &'a ExecutionPlan
+    resolver:  &'a Resolver
+    cache:     &'a mut RuntimeCache
+    reporter:  &'a mut (dyn RunReporter + 'r)
+    cancel:    CancelToken
+
+ExecutionFrame<'a,'r>       10 fields, all borrows
+    program          &'a Program                     ─┐
+    plan             &'a ExecutionPlan                ├─ from the engine, via RunRequest
+    resolver         &'a Resolver                     │
+    cache            &'a mut RuntimeCache             │
+    reporter         &'a mut dyn RunReporter          │
+    outcome          &'a mut ExecutionOutcome        ─┘
+    remaining_reads  &'a mut RemainingOutputReads    ─┐
+    inputs           &'a mut Vec<DynamicValue>        ├─ re-borrowed out of `Executor`
+    node_outcomes    &'a mut NodeColumn<NodeOutcome>  │  (self's own fields!)
+    ctx              &'a mut ContextManager          ─┘
+```
+
+Sixteen borrow-fields across two structs for one loop. Four of `ExecutionFrame`'s
+ten are `Executor`'s **own fields**, re-borrowed individually because the loop
+needs them disjointly alongside `&mut cache`; `&mut self` would lock them together.
+
+### Self-borrow splits
+
+Three sites destructure `self` to hand one field to a sibling field:
+
+| site | split | why |
 | --- | --- | --- |
-| immutable artifact | one install | `CompiledGraph` (program, flatten map, 3 relations) |
-| cross-run | many installs | `RuntimeCache.disk_store`; slot `state`/`event_state`/`value` (re-paired by id at `reconcile`) |
-| per-run | one `execute` | `ExecutionPlan`, `Resolver`, `Executor.outcomes`, `ResourceStamper.fs_paths`, `remaining_reads` |
-| per-invoke | one lambda | `Executor.inputs`, `InvokeSlot` |
+| `RuntimeCache::prepare` | `let Self { slots, stamper, .. }` | `stamper.identify(.., slots, ..)` |
+| `RuntimeCache::restamp_and_hydrate` | same | same |
+| `Resolver::resolve` | `let ExecutionPlan { process_order, states, roots, seeded, event_sources }` | read schedule while writing states |
 
-### Per-node state is spread across 8 parallel structures
+The two cache splits exist because **`ResourceStamper` owns `fs_paths` but not
+`slots`**, so the cache must feed its own column back into its own field.
 
-For one `NodeIdx` a run touches: `program.e_nodes[i]`, `program.e_node_ids[i]`,
-`cache.slots[i]`, `cache.e_node_ids[i]`, `plan.verdicts[i]`, `plan.roots/seeded/
-event_sources` (3 bitsets), `resolver.disposition[i]`, `executor.outcomes[i]` —
-plus two output-indexed columns (`demand`, `readers`) and one more
-(`remaining_reads`). Eleven index spaces aligned by convention and checked by
-`validate.rs`.
+### Threading census (production signatures)
 
----
+| threaded parameter | occurrences | files |
+| --- | --- | --- |
+| `program: &Program` (+ `previous`/`installed`) | **33** | runtime 16, plan 5, resource 4, validate 2, executor 2, outcomes 2, resolve 1 |
+| `node_idx: NodeIdx` | 31 | everywhere |
+| `demand: &[OutputDemand]` | 14 | runtime, slot, disk_store, executor |
+| `slots: &NodeColumn<RuntimeSlot>` | 5 | resource only |
 
-## 2. Call graph
-
-### Install path — host thread, synchronous, infallible after `compile`
-
-```
-Compiler::compile(graph, library)
-├── Graph::validate_for_execution(library)                        [graph/validate.rs]
-├── Flattener::build(program, root, library, flatten_map)
-│   └── Run::emit(ancestor_disabled)                              ◀── recursive
-│       ├── Run::emit_instance → push_level → FlattenMap::push_scope → emit
-│       ├── Run::execution_node_id → ExecutionNodeId::from_authoring   (BLAKE3)
-│       ├── Pool::append × {outputs, events, inputs}
-│       ├── FlattenMap::set_leaf
-│       ├── Run::typed_binding → resolve_binding → Run::resolve   ◀── recursive
-│       │      └── resolve_exposed_output → typed_boundary_binding
-│       ├── Run::record_exposed_outputs → FlattenMap::push_exposed
-│       └── Run::collect_subscriptions → resolve_emitter / resolve_subscriber
-│   └── ExecutionProgram::adopt_flattened
-│       ├── adopt_nodes (sort by id) → push
-│       ├── intern_bindings   ExecutionOutputPort → OutputAddr    ◀── only id hashing
-│       └── apply_subscriptions
-├── ExecutionProgram::resolve_output_types(library) → OutputTypeResolver::resolve
-├── CompiledGraph::indexed(program, flatten_map)
-│   ├── FlattenMap::attribution × N  → pack_groups → footprints
-│   ├── FlattenMap::exposed_producers → pack_groups → exposed
-│   └── binding sweep → consumers
-└── CompiledGraph::validate_debug(library)                        [validate.rs]
-
-ExecutionEngine::install(Arc<CompiledGraph>)
-├── RuntimeCache::reconcile(program)
-│   ├── RuntimeSlot::reown(StateOwner)          drops state on impl change
-│   └── RuntimeCache::release_dead_outputs
-└── CompiledGraph::validate_installed_debug(cache)                [validate.rs]
-```
-
-### Run path — worker thread, `async`
-
-```
-ExecutionEngine::execute(seeds, reporter, cancel, outcome)
-├── outcome.clear()                                              ⚠ done again in Executor::run
-│
-├─ PHASE 2 ── Planner::plan(compiled, seeds, plan)
-│   ├── ExecutionPlan::reset_for_program
-│   ├── collect_roots(compiled, seeds, plan)      → roots, seeded, event_sources
-│   │     └── SpecialNode::RunSinks promotes a fired event to a full sinks run
-│   ├── Planner::walk_backward_collect_order      → process_order, verdicts
-│   │     └── plan::input_missing(input, verdicts)
-│   └── ExecutionPlan::validate_debug(program)
-│
-├─ PHASE 2a ── RuntimeCache::prepare(program, plan, cancel)
-│   └── ResourceStamper::identify
-│       ├── request_node_paths × executing → request_fs_paths
-│       └── ResourceStamper::prepare → spawn_blocking(StampJob::run)
-│           └── StampJob::stamp → stamp_directory → collect_files
-│
-├─ PHASE 2b ── Resolver::resolve(program, plan, cache)
-│   ├── RuntimeCache::stamp_digests → stamp_digest       producer-first
-│   │     └── ResourceStamper::node_digest
-│   │           ├── digest::hash_data_type / hash_static
-│   │           ├── ResourceStamper::hash_fs_paths
-│   │           └── ResourceStamper::hash_bound_fs_path   (None ⇒ late restamp)
-│   └── reverse sweep over process_order → disposition, demand, readers
-│         └── RuntimeCache::probe_reuse
-│             ├── is_resident_hit → current_snapshot → OutputSnapshot::covers_demand
-│             └── DiskStore::covers_demand → format::covers_demand
-│                   └── read_header → scan_header → read_prefix / read_descriptor
-│
-├─ PHASE 3 ── Executor::run(RunRequest, outcome)
-│   ├── RemainingOutputReads::seed(resolver)
-│   ├── for node_idx in plan.process_order:
-│   │   ├── task::yield_now
-│   │   ├── cancel? → ExecutionFrame::retire_cancelled_tail → abandon_input_reads
-│   │   └── ExecutionFrame::run_node(node_idx)      ◀── dispatch on Disposition
-│   │       ├── Cut           → RuntimeCache::is_resident_current
-│   │       ├── MissingLambda → outcomes::mark_skipped
-│   │       ├── Reuse         → ExecutionFrame::serve_reuse
-│   │       │                     └── RuntimeCache::hydrate_reuse
-│   │       │                           └── DiskStore::read → format::read → codec.decode
-│   │       └── Run           → ExecutionFrame::needs_invoke
-│   │           ├── RuntimeCache::restamp_and_hydrate     late 2nd chance at reuse
-│   │           │     └── identify → stamp_digest → hydrate_reuse
-│   │           └── ExecutionFrame::invoke_node
-│   │               ├── outcomes::has_errored_dependency → mark_skipped
-│   │               ├── ExecutionFrame::collect_inputs
-│   │               │     ├── RuntimeCache::read_output_port(take?)
-│   │               │     └── complete_planned_read → clear_output_port
-│   │               ├── RuntimeSlot::invoke_slot → FuncLambda::invoke   ◀── user code
-│   │               ├── RunReporter::progress ×2 (Started / Finished)
-│   │               ├── RuntimeSlot::unbound_demanded_outputs
-│   │               ├── RuntimeSlot::stamp_produced | clear_output
-│   │               ├── collect_event_triggers → EventTrigger
-│   │               ├── RuntimeCache::store_node → DiskStore::store → format::write
-│   │               └── release_drained_outputs
-│   └── outcomes::collect_execution_outcome(program, plan, outcomes, start, outcome)
-│         └── plan::input_missing  (shared with the planner)
-│
-├── RuntimeCache::release_dead_outputs(program)
-├── RuntimeCache::resident_ram_stats(&mut outcome.node_ram)
-└── outcome.triggered_events ← seeds.events
-```
-
-### Module dependency graph (production `use` edges only)
-
-```
-LEAF      identity   pool   codec   event   seeds   report   digest
-  │          ▲        ▲       ▲       ▲       ▲       ▲        ▲
-index ──────────────────────────────────────────────────────── slot
-  ▲ └──▶ program (⇄ index)                                      ▲
-program ──▶ identity, index, pool                     resource ─┘──▶ program, index
-  ▲                                                   disk_store ──▶ digest, slot, codec, identity, program
-  │                                                     │  └─ format ──▶ digest, codec
-flatten::map ──▶ identity                             cache::runtime ──▶ digest, disk_store, resource,
-flatten ──▶ map, identity, program                        slot, identity, program, index, plan⚠, outcome⚠
-compile ──▶ flatten, map, identity, program, index, pool        ▲
-plan ──▶ compile⚠, error, program, index, seeds                 │
-resolve ──▶ cache::runtime, plan, program, index ───────────────┘
-executor::outcomes ──▶ runtime, error, identity, outcome, plan, program, index
-executor ──▶ + disk_store, event, report, resolve            (12 edges)
-engine ──▶ 14 modules
-validate ──▶ runtime, slot, compile, flatten::map, identity, plan, index, program   ⚠ cross-layer hub
-```
-
-≈ 92 intra-module edges over 21 modules. `⚠` marks the four edges that make the
-graph non-layered; see §3.
+`&Program` is the subsystem's universal implicit parameter: 32 of ~90 production
+methods take it, and **16 of `RuntimeCache`'s 18** do.
 
 ---
 
-## 3. Redesign findings
+## 3. Call graph — signature and reach
 
-Ordered by (value ÷ risk). Line estimates are net deletions.
+`reach` = the state each method actually touches, beyond dispatching.
 
-### Tier 1 — mechanical, no behavior change (≈ −120 lines, 4 edges + 1 cycle removed)
+### `RuntimeCache` (18 methods)
 
-**T1.1 `plan` → `compile` is spurious.** `Planner::plan` takes
-`&CompiledGraph` and immediately does `let program = &compiled.program`;
-`collect_roots` takes `&CompiledGraph` and does the same. Neither touches
-`flatten_map`, `footprints`, `consumers`, or `exposed`. Change both signatures
-to `&ExecutionProgram` and the whole `plan → compile` edge disappears — `plan`
-then sits directly on `program`, below `compile` instead of above it. This is
-the single edge that forces `compile` (a host-side concern) into the run-side
-layering.
+| method | args | reaches |
+| --- | --- | --- |
+| `clear(&mut self)` | 0 | `slots`, `stamper` |
+| `evict(&mut self, program, e_node_ids)` | 2 | `program.e_node_index`, `disk_store`, `slots` |
+| `resident_ram_stats(&mut self, program, by_node)` | 2 | `program.e_node_ids`, `slots.value`, `ram_seen` |
+| `reconcile(&mut self, previous, installed)` | 2 | both programs' id/node columns, `slots`, →`release_dead_outputs` |
+| `current_snapshot(&self, node_idx)` | 1 | `slots[i].{value, current_digest}` |
+| `is_resident_current(&self, node_idx)` | 1 | →`current_snapshot` *(proxy)* |
+| `is_resident_hit(&self, node_idx, demand)` | 2 | →`current_snapshot`, `OutputSnapshot::covers_demand` |
+| `read_output_port(&mut self, program, address, take)` | 3 | `program[i].outputs.len`, `slots[i].value` |
+| `clear_output_port(&mut self, address)` | 1 | `slots[i].value` |
+| `stamp_digests(&mut self, program, executing)` | 2 | →`stamp_digest` *(loop proxy)* |
+| `stamp_digest(&mut self, program, node_idx)` | 2 | **split**: `stamper.node_digest(program, .., slots)` → `slots[i].current_digest` |
+| `prepare(&mut self, program, executing, cancel)` | 3 | **split**: `stamper`, `slots` |
+| `restamp_and_hydrate(&mut self, program, node_idx, demand, contexts, cancel)` | **5** | **split**: `stamper`, →`stamp_digest`, →`hydrate_reuse` |
+| `blob_target(&self, program, node_idx)` | 2 | `program.e_node_ids[i]`, `program[i]`, `slots[i].current_digest`, →`disk_store.blob_target` *(proxy)* |
+| `probe_reuse(&mut self, program, node_idx, demand)` | 3 | →`is_resident_hit`, →`blob_target`, `disk_store.covers_demand` |
+| `hydrate_reuse(&mut self, program, node_idx, demand, ctx)` | **4** | →`is_resident_hit`, →`blob_target`, `disk_store.read`, `slots[i].value` |
+| `store_node(&'a self, program, node_idx, policy, ctx)` | **4** | →`blob_target`, →`current_snapshot`, `disk_store.store` |
+| `release_dead_outputs(&mut self, program)` | 1 | `program.e_nodes`, `slots` |
 
-**T1.2 `cache::runtime` → `plan` is spurious.** `stamp_digests(program, plan)`
-and `prepare(program, plan, cancel)` both use `plan` only to compute
-`process_order.iter().filter(|i| verdicts[i].wants_execute())`. Take
-`impl Iterator<Item = NodeIdx>` instead. The caller (`Resolver`/`engine`)
-already holds the plan.
+`probe_reuse` and `hydrate_reuse` share the same three-step preamble
+(`is_resident_hit` → `blob_target` → disk), differing only in the last call.
 
-**T1.3 `cache::runtime` → `outcome` is spurious.** The only use is
-`resident_ram_stats(&mut Vec<NodeRamUsage>)`. Have it yield
-`(ExecutionNodeId, RamUsage)` (or fill the vec in `engine`, which owns the
-outcome). With T1.2 this leaves `cache` depending on nothing above
-`program`/`identity`/`codec` — a genuine leaf subsystem, which is what the
-module doc already claims it is ("Per-run results are *not* here").
+### `ResourceStamper` (the `slots`-threading cluster)
 
-**T1.4 `program::index` ⇄ `program` cycle.** `index/mod.rs` imports
-`program::OutputRange` for exactly two methods (`OutputColumn::slice`,
-`slice_mut`). Make them generic over the pool marker
-(`fn slice<M>(&self, r: PoolRange<M>) -> &[T]`) and the import — and the only
-import cycle in the subsystem — goes away.
+| method | args | reaches |
+| --- | --- | --- |
+| `identify(&'a mut self, program, slots, nodes, cancel)` | **4** | →`request_node_paths`, →`prepare` |
+| `request_node_paths(&mut self, program, slots, node_idx)` | 3 | `program[i].behavior/inputs`, `slots[..].output_values`, `job.requests` |
+| `node_digest(&self, program, node_idx, slots)` | 3 | `program.{outputs,inputs}`, `slots[..].current_digest`, `fs_paths` |
+| `hash_bound_fs_path(&self, hasher, slots, addr)` | 3 | `slots[..].current_output_values`, `fs_paths` |
+| `hash_fs_paths(&self, hasher, paths)` | 2 | `fs_paths` |
 
-**T1.5 Split `validate.rs` (365 lines) into `compile/validate.rs` and
-`plan/validate.rs`.** It is a leaf module that reaches *up* into four layers
-(`cache`, `compile`, `flatten::map`, `plan`) purely because three unrelated
-validators share a file. Each half only needs what it validates. Removes the
-one cross-layer hub node from the graph at zero behavioral cost.
+Every one takes `slots` back from its owner. `node_digest` lives here **only**
+because it needs `self.fs_paths` — its own module doc still places it in
+`cache::digest`, where the intra-doc link is broken.
 
-**T1.6 `node_digest` lives in the wrong module.** `cache/digest/mod.rs` (231
-lines) holds only hasher primitives; the actual `node_digest` /
-`hash_bound_fs_path` / `hash_fs_paths` are methods on `ResourceStamper` in
-`cache/resource/mod.rs`, because they read its `fs_paths` memo. The
-consequence is that `digest`'s own module doc has a **broken intra-doc link**
-to `[node_digest]`, as does `slot.rs:76`. Moving `node_digest` back into
-`digest` and passing `&ResourceStamper` (or a narrow `fn(&str) -> Option<&FsPathId>`)
-restores "digest owns the digest, resource owns filesystem identity" and cuts
-`resource` by ~110 lines.
+### `ExecutionFrame` (the run loop)
 
-**T1.7 Double `outcome.clear()`** — `engine::execute:97` and
-`executor::run:126`. Delete one.
+| method | args | reaches |
+| --- | --- | --- |
+| `run_node(node_idx)` | 1 | `program[i]`, `resolver.outputs.demand`, `plan.states` → 6-way match |
+| `retire_cancelled_tail(from_process_idx)` | 1 | `plan.{process_order,states}`, →`abandon_input_reads` |
+| `serve_reuse(node_idx, demand)` | 2 | `cache.hydrate_reuse`, `ctx.contexts`, `node_outcomes`, →`release_drained_outputs` |
+| `needs_invoke(node_idx, demand)` | 2 | `cache.{slots,restamp_and_hydrate}`, `ctx`, `node_outcomes`, →`abandon_input_reads`, →`release_drained_outputs` |
+| `invoke_node(node_idx, demand)` | 2 | `program`, `cache.slots`, `ctx`, `reporter`, `outcome`, `node_outcomes`, →`collect_inputs`, →`store_node`, →`release_drained_outputs` |
+| `collect_event_triggers(node_idx, event_state)` | 2 | `program.events`, `outcome.event_triggers` |
+| `collect_inputs(node_idx)` | 1 | `program.inputs`, `remaining_reads`, `cache.read_output_port`, →`complete_planned_read` |
+| `producer_runs(addr)` | 1 | `plan.states` *(one-line proxy)* |
+| `abandon_input_reads(consumer_idx)` | 1 | `program.inputs`, →`producer_runs`, →`complete_planned_read` |
+| `release_drained_outputs(node_idx)` | 1 | `program[i].cache`, `remaining_reads`, `cache.slots` |
+| `complete_planned_read(address)` | 1 | `program.output_idx`, `remaining_reads`, `cache.slots`, →`release_drained_outputs`, →`clear_output_port` |
 
-**T1.8 `Error::EventLambdaPanic` is never constructed by `execution`.** Its
-only producer is `worker/task.rs:316`. It sits in `execution::error::Error`,
-which the doc describes as "the error type of the engine's `Result`-returning
-entry points" — the engine cannot return it.
-
-### Tier 2 — small structural changes (≈ −220 lines, 2 types removed)
-
-**T2.1 Delete `RuntimeCache::e_node_ids`.** It is a verbatim copy of
-`program.e_node_ids`, rebuilt every install. Three readers: `reconcile` (needs
-the *previous* ids), `validate_installed` (compares the two columns
-element-wise), `resident_ram_stats` (zips to recover ids). The engine still
-holds the previous `CompiledGraph` at install time — it just overwrites it
-before calling `reconcile`. Reorder to
-`self.cache.reconcile(&old.program, &new.program)` and:
-
-- the column and its per-install `NodeColumn` rebuild go,
-- `InstalledGraphValidationError::NodeMismatch` goes (after `reconcile` it
-  compares a column against the column it was just built from — a tautology at
-  its only production call site),
-- `resident_ram_stats` takes `&ExecutionProgram`, which it needs for T1.3 anyway.
-
-**T2.2 Collapse `is_sink` + `is_impure` into one lookup.** Both are
-`footprint(node_id)` + `.iter().any(..)` + the same `Option` contract ("`None`
-where the node covers no compiled work"). `darkroom/src/gui/scene/mod.rs:526`
-and `:531` call them back to back per node per frame — two hash lookups and
-two footprint walks for one answer. One `fn node_facts(&self, NodeId) ->
-Option<NodeFacts { sink: bool, impure: bool }>` halves that and leaves one
-`None` contract to document instead of two. `run_targets` and
-`data_consumer_closure` stay as they are.
-
-**T2.3 Unify `NodeColumn<T>` and `OutputColumn<T>`.** Identical bodies,
-differing only in the index newtype. One `Column<I: ColumnIdx, T>` removes
-~60 lines and one type from the vocabulary; `NodeColumn`/`OutputColumn` stay as
-type aliases so no call site changes.
-
-**T2.4 Drop `RunRequest`.** It exists to avoid a six-argument `Executor::run`,
-but `run` destructures it on line 1 and re-packs all six fields into
-`ExecutionFrame`'s eleven. Since the engine owns every one of them, build the
-`ExecutionFrame` in `engine::execute` and let `Executor` be what it already
-mostly is — a bag of reusable scratch. One struct, one destructure, and one
-lifetime-pair comment disappear.
-
-### Tier 3 — real design change (≈ −250 lines; needs care)
-
-**T3.1 Merge `NodeVerdict` and `Disposition` into one per-node state column.**
-
-Today a run carries two columns whose states are disjoint by construction:
-`NodeVerdict {Execute, Disabled, MissingInputs}` written by the planner, and
-`Disposition {Cut, Reuse, MissingLambda, Run}` written by the resolver — and
-the resolver's first act is to copy one into the other
-(`if !verdicts[i].wants_execute() { disposition[i] = Cut }`). The executor then
-reads *both* on every node (`run_node` checks the verdict, then matches the
-disposition).
-
-The stated reason for the split is that the plan is "structural and reusable
-across runs". It is not reused: `engine::execute` calls `planner.plan(..)`
-unconditionally on every run — only the *buffer* survives. So the split buys
-conceptual separation, not work avoided.
-
-One `NodeState {Disabled, MissingInputs, Cut, Reuse, MissingLambda, Run}`
-column would remove a full `NodeColumn` per run, one enum, the `wants_execute`
-/`missing_required_inputs` predicate pair, and a good deal of prose explaining
-how the two columns interact.
-
-**The hazard, precisely:** the resolver promotes a *producer* to `Run` before
-that producer is itself swept, so a later consumer reading the producer's slot
-would see `Run` where it currently sees the planner's verdict. That is still
-correct — `Run` implies runnable — but two lines must change: the
-`disposition[i] = Cut` write for a non-runnable node has to become a plain
-`continue` (or it erases the `Disabled`/`MissingInputs` value that
-`collect_execution_outcome` later reads to report missing input ports), and the
-default must be `Cut` only for nodes the planner marked runnable. Worth doing
-only with the `resolve` and `executor` test suites as the gate.
-
-**Cheaper variant, same file:** keep both columns but delete the redundant
-`Cut` write and let `run_node`'s existing verdict check carry it. Two lines,
-no risk, removes the double encoding without the merge.
-
-**T3.2 Consolidate the plan's three `NodeSet`s.** `roots`, `seeded`, and
-`event_sources` are three bitsets over the same index space where `seeded ⊆
-roots` and `event_sources ⊆ roots` (both invariants are asserted in
-`validate.rs:333-352`). One `NodeColumn<RootKind>` — or one bitset plus two
-small `Vec<NodeIdx>` lists, since seeds and event sources are sparse — removes
-two allocations per install and the two validation branches that police the
-subset relation.
-
-**T3.3 Flatten's `Run<'a>` duplicates `Flattener`.** Nine of `Run`'s eleven
-fields are `&'a mut` re-borrows of `Flattener`'s six, spelled out twice with
-the same doc comments on both. Making `Run` hold `&'a mut Flattener` plus its
-two genuinely per-build fields (`levels`, `program`) removes ~35 lines of
-declaration and the drift risk between the two copies.
-
-### Deliberately not proposed
-
-- **The dense-index design** (`NodeIdx`/`OutputIdx`/`OutputAddr`, columns,
-  pools) earns its complexity: it is what makes per-run state a memset and every
-  edge walk hash-free. Keep it.
-- **`disk_store/format`** (616 lines) is a wire format with an explicit version
-  and thorough framing validation. Large but irreducible.
-- **Splitting `engine::tests.rs`** (6 566 lines, 40 % of the subsystem) is a
-  separate exercise from anything above.
-
-### Net effect
-
-Tiers 1+2 are ≈ −340 lines with no behavior change, and turn the module graph
-into a clean DAG:
+### The read-accounting cluster — one idea, six methods, two types
 
 ```
-identity  pool  codec ─┐
-                       ├─▶ program ⇄ index ─┬─▶ digest ─▶ slot ─▶ resource ─▶ disk_store ─▶ cache
-flatten ─▶ compile ────┘                    ├─▶ plan ─▶ resolve ─▶ executor ─▶ engine
-                                            └─▶ (compile arm stays host-side)
+RemainingOutputReads::is_last / consume / node_drained   (owns `counts`)
+ExecutionFrame::complete_planned_read / release_drained_outputs / abandon_input_reads
 ```
 
-with `cache` no longer reaching into `plan`/`outcome`, `plan` no longer
-reaching into `compile`, and no import cycle. Tier 3 adds ≈ −250 more and one
-fewer per-node column, at real review cost.
+All six implement: *each planned read is completed once; when a producer's last
+read lands, release its value unless its cache mode retains it.* They are split
+across two types because `counts` lives on `Executor` and the values live on
+`RuntimeCache`, so no single owner can express the rule.
+
+---
+
+## 4. Redesign
+
+Four proposals. **P1 and P2 are the ones with real leverage**; P4/P5 are local.
+
+### P1 — `RuntimeCache` holds `Arc<CompiledGraph>`
+
+Every cache method exists to act on slots that are index-aligned to one program,
+and re-receives that program to find out which. Give the cache the `Arc` it is
+reconciled to:
+
+```rust
+struct RuntimeCache { compiled: Arc<CompiledGraph>, slots, disk_store, stamper, ram_seen }
+
+fn install(&mut self, compiled: Arc<CompiledGraph>)   // was reconcile(previous, installed)
+```
+
+- **Drops `program` from 16 of 18 signatures** — 16 of the 33 occurrences.
+- `reconcile(previous, installed)` → `install(compiled)`: the previous program is
+  `self.compiled`, so passing the wrong one stops being expressible. This is a
+  strict improvement on the two-program signature introduced when
+  `e_node_ids` was deleted — same invariant, one fewer thing to get right.
+- The alignment invariant becomes structural instead of a `debug_assert`.
+- Cost: one `Arc::clone` per install.
+- **Hazard:** a caller cannot hold `&cache.compiled.program` and `&mut cache` at
+  once. Callers that need both take their own `Arc` clone — the engine already
+  holds one, and `ExecutionFrame` would carry a clone instead of a `&'a Program`.
+  Verify this against `executor::invoke_node`, which interleaves program reads
+  with `&mut cache` calls.
+
+### P2 — move `fs_paths` up to the cache; `StampJob` stays the walker
+
+`ResourceStamper` is a field of `RuntimeCache` that receives its owner's `slots`
+back on every call. Split it by what it owns rather than by what it does:
+
+- `fs_paths` (the per-run memo the digest fold reads) → `RuntimeCache`
+- `StampJob` (queue + off-thread walk) stays as-is — it is genuinely separable
+
+Then, with P1:
+
+| before | after |
+| --- | --- |
+| `identify(&mut self, program, slots, nodes, cancel)` | `identify(&mut self, nodes, cancel)` |
+| `request_node_paths(&mut self, program, slots, node_idx)` | `request_node_paths(&mut self, node_idx)` |
+| `node_digest(&self, program, node_idx, slots)` | `node_digest(&self, node_idx)` |
+| `hash_bound_fs_path(&self, hasher, slots, addr)` | `hash_bound_fs_path(&self, hasher, addr)` |
+
+- Deletes all 5 `slots:` params and both `let Self { slots, stamper, .. }` splits.
+- `node_digest` returns to `cache::digest`, fixing the broken doc link there and
+  in `slot.rs:76`.
+
+### P3 — one `Run` object (highest leverage, highest risk)
+
+`plan` + `resolver` + `executor`'s per-run columns are five sibling structures
+with identical lifetimes, re-planned from scratch every run. Merge them:
+
+```rust
+struct Run {
+    compiled: Arc<CompiledGraph>,
+    process_order, states, roots, seeded, event_sources,   // was ExecutionPlan
+    demand, readers,                                        // was Resolver
+    remaining_reads, outcomes,                              // was Executor
+}
+```
+
+`Planner`, `Resolver`, `Executor` become passes over it.
+
+- `RunRequest` disappears; `ExecutionFrame` drops from 10 fields to
+  `{ run: &mut Run, cache: &mut RuntimeCache, ctx, reporter, outcome }` = 5.
+- Removes `program` from the remaining plan/resolve/executor signatures.
+- **Against:** a 10-field object, and the structural-vs-cache-aware pass split
+  stops being expressed in types. That split is already convention-only —
+  `execute` always runs all three back to back — but it is load-bearing
+  *documentation*. Do P1+P2 first and re-measure before committing to this.
+
+### P4 — collapse the read-accounting cluster
+
+Give the six methods one owner. If `RemainingOutputReads` held the `counts`
+*and* took `&mut RuntimeCache` per call, the rule ("complete a read; release on
+the last one") becomes 2–3 methods on one type instead of 6 across two.
+
+### P5 — share the reuse preamble
+
+```rust
+fn reuse_source(&self, node_idx, demand) -> Option<ReuseSource>  // Resident | Blob(BlobTarget)
+```
+`probe_reuse` = `.is_some()`; `hydrate_reuse` = match on it. Removes the
+duplicated `is_resident_hit` → `blob_target` → disk sequence, and makes it
+impossible for the probe and the hydrate to disagree about what is reusable —
+the exact drift `CacheLoadFailed` exists to handle.
+
+### Expected effect
+
+| | now | P1+P2 | +P3 |
+| --- | --- | --- | --- |
+| `&Program` params | 33 | ~17 | ~4 |
+| `slots:` params | 5 | 0 | 0 |
+| self-borrow splits | 3 | 1 | 1 |
+| `ExecutionFrame` fields | 10 | 10 | 5 |
+| per-run borrow structs | 2 (16 fields) | 2 | 1 (5 fields) |
+
+### Not proposed
+
+- **Removing `node_idx` threading** (31 uses). It is the subject of nearly every
+  method — that is a method taking its argument, not a design smell.
+- **`demand` threading** (14 uses). It is a genuine per-run input the cache
+  should not own; deriving it inside would require the cache to see the plan,
+  re-creating the edge just deleted.
+- **The dense-index design.** It is what makes per-run state a memset and every
+  edge walk hash-free.
