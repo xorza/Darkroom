@@ -14,7 +14,7 @@ use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, Static
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::{GraphId, GraphLink};
 
-use crate::core::document::{GraphRef, GraphView, PortKind, PortRef, Viewport};
+use crate::core::document::{Document, GraphRef, GraphView, PortKind, PortRef, Viewport};
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -24,14 +24,21 @@ use crate::gui::run_state::{ExecStatus, RunState};
 ///
 /// Everything a graph owns lives in a pool shared with all the others and
 /// is sliced by a [`Span`] on its [`SceneGraph`]: paint stack, node
-/// projections, wiring, subscriptions, selection, and the per-port pools
-/// under those. Two panes therefore cost one set of allocations, not two,
-/// and the steady-state rebuild still allocates nothing (every `Vec`
-/// retains capacity across the per-frame `clear` + re-`extend`).
+/// projections, and the per-port pools under those. Two panes therefore
+/// cost one set of allocations, not two, and the steady-state rebuild still
+/// allocates nothing (every `Vec` retains capacity across the per-frame
+/// `clear` + re-`extend`).
 ///
-/// Reads go through [`GraphScene`], a `Copy` borrow pairing this with one
-/// of its graphs — `scene.graph(target)` for a named pane,
-/// `scene.owner(node_id)` for whichever pane a node sits in.
+/// **Only what the projection transforms.** A node's ports carry interned
+/// names, wildcard output types resolved through the graph, and the last
+/// run's verdicts folded in — work worth doing once a frame rather than per
+/// widget. Wiring, selection and placements are *not* here: they are read
+/// off the document through [`Pane`], because copying them would buy
+/// nothing but a second source of truth to keep in step.
+///
+/// Reads go through [`Pane`], resolved from a [`Frame`] —
+/// `frame.pane(target)` for a named pane, `frame.owner(node_id)` for
+/// whichever pane a node sits in.
 #[derive(Debug, Default)]
 pub(crate) struct Scene {
     /// One projected graph per visible graph pane, in dock-pane order.
@@ -50,22 +57,6 @@ pub(crate) struct Scene {
     /// Interaction scans use this order to resolve overlapping node and port
     /// hits.
     pub(crate) nodes: IndexMap<NodeId, SceneNode>,
-    connections: Vec<SceneConnection>,
-    /// Event-subscription edges (emitter event → subscriber node), mirrored
-    /// from each graph each rebuild. Drawn as event wires; the editor
-    /// adds/removes them via the subscription drag gesture. The model's
-    /// `Subscription` is a plain `Copy` id-bundle with no render-only fields,
-    /// so it's mirrored verbatim (unlike `SceneConnection`, which flattens).
-    subscriptions: Vec<Subscription>,
-    /// Currently-selected nodes, mirrored from each `GraphView` each rebuild
-    /// so `node_ui` can pick a different paint without taking a `&Document`. Sorted within each
-    /// graph's span (`GraphView::selected` is a `BTreeSet`, so extending
-    /// preserves it), which is what makes [`GraphScene::is_selected`] a
-    /// binary search rather than a set lookup. Read-only, like the rest of
-    /// `Scene`: the in-progress rubber-band preview lives on `SelectionUI`
-    /// (read back via `SelectionUI::preview`) and the canvas unions the two
-    /// when drawing, so the gesture never writes into this projection.
-    selected: Vec<NodeId>,
     /// One flat pool of [`SceneInput`] across every node of every graph,
     /// sliced by the single `SceneNode::inputs` span. A struct-per-port (not
     /// parallel columns) so the per-port fields can't desync.
@@ -120,9 +111,6 @@ pub(crate) struct SceneGraph {
     /// contiguous.
     nodes: Span,
     z_order: Span,
-    connections: Span,
-    subscriptions: Span,
-    selected: Span,
     /// Slice of [`Scene::local_defs`] holding this graph's own local
     /// definitions — the ones a `GraphLink::Local` raised over this pane can
     /// resolve (`validate::insertable_kind` accepts no others).
@@ -133,7 +121,7 @@ pub(crate) struct SceneGraph {
     ///
     /// A fact about the *pane*, so it lives here rather than being copied
     /// onto each of its nodes; readers reach it through
-    /// [`GraphScene::runnable`], which is always called with the pane in hand
+    /// [`Pane::runnable`], which is always called with the pane in hand
     /// anyway.
     run_available: bool,
 }
@@ -147,18 +135,40 @@ pub(crate) struct GraphProjection<'a> {
     pub(crate) view: &'a GraphView,
 }
 
-/// A [`Scene`] borrowed together with one of its graphs — the read handle
-/// every per-pane widget takes instead of a bare `&Scene`. `Copy` (two
-/// shared refs), so it threads through the draw chain like `RecordCtx`.
+/// This frame's two read-only halves: the projection, and the document it
+/// was projected from. The handle every pane is resolved through — panes
+/// come out of here, so one can't be obtained without both halves.
 ///
-/// Anything scoped to one pane (its paint stack, wiring, selection,
-/// viewport) reads through here; the whole-scene sweeps that are keyed by
+/// `Copy` (two shared refs). The whole-scene sweeps keyed by
 /// document-unique ids — `CanvasGeometry`'s rebuild, a drag's
 /// owner-still-alive check — take the `scene` field directly.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct GraphScene<'a> {
+pub(crate) struct Frame<'a> {
     pub(crate) scene: &'a Scene,
-    graph: &'a SceneGraph,
+    pub(crate) doc: &'a Document,
+}
+
+/// One graph pane for this frame: its projection, and the authoring state
+/// that projection was built from. The read handle every per-pane widget
+/// takes. `Copy` (four shared refs), so it threads through the draw chain
+/// like `RecordCtx`.
+///
+/// Both halves, deliberately. A widget reads *rendering* facts — resolved
+/// port types, interned names, run status — off the projection, which is
+/// where the expensive resolution was done once; it reads *authoring* facts
+/// — wiring, selection, placements — off `body`/`view`, which is where they
+/// actually live. A pane carrying only the first half is what made the
+/// projection grow verbatim copies of the second, and made a gesture that
+/// needed the graph thread a second handle alongside this one.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Pane<'a> {
+    pub(crate) scene: &'a Scene,
+    projected: &'a SceneGraph,
+    /// The authoring graph this pane shows — an entry graph or a local
+    /// definition's body.
+    pub(crate) body: &'a Graph,
+    /// Its view metadata: placements, viewport, committed selection.
+    pub(crate) view: &'a GraphView,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -359,14 +369,6 @@ impl SceneNode {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct SceneConnection {
-    /// Producer side — the output feeding the wire.
-    pub(crate) src: OutputPort,
-    /// Consumer side — the input the wire lands on.
-    pub(crate) tgt: InputPort,
-}
-
 /// What one graph's rebuild projects. An enum rather than a graph + optional
 /// interface, so a definition body separated from its interface — which
 /// would strand its boundary nodes with nothing to mirror — can't be
@@ -438,9 +440,6 @@ impl Scene {
             graphs,
             z_order,
             nodes,
-            connections,
-            subscriptions,
-            selected,
             inputs,
             outputs,
             events,
@@ -450,9 +449,6 @@ impl Scene {
         graphs.clear();
         z_order.clear();
         nodes.clear();
-        connections.clear();
-        subscriptions.clear();
-        selected.clear();
         inputs.clear();
         outputs.clear();
         events.clear();
@@ -482,9 +478,6 @@ impl Scene {
         // would be an entry-only func in a definition body, a compile error.
         let run_available = target == GraphRef::Main;
 
-        // `GraphView::selected` is a `BTreeSet`, so this lands sorted —
-        // which is what `GraphScene::is_selected` binary-searches.
-        let selected = extend_pool(&mut self.selected, view.selected.iter().copied());
         let z_start = self.z_order.len();
         let nodes_start = self.nodes.len();
 
@@ -558,11 +551,6 @@ impl Scene {
             self.z_order.push(*key);
         }
 
-        let connections = extend_pool(
-            &mut self.connections,
-            graph.edges().map(|(tgt, src)| SceneConnection { src, tgt }),
-        );
-        let subscriptions = extend_pool(&mut self.subscriptions, graph.subscriptions());
         let local_defs_start = self.local_defs.len();
         self.local_defs
             .extend(graph.graphs.iter().map(|(id, def)| SceneLocalDef {
@@ -580,9 +568,6 @@ impl Scene {
             viewport: view.viewport,
             nodes: span_since(nodes_start, self.nodes.len()),
             z_order: span_since(z_start, self.z_order.len()),
-            connections,
-            subscriptions,
-            selected,
             local_defs: span_since(local_defs_start, self.local_defs.len()),
             run_available,
         }
@@ -673,39 +658,49 @@ impl Scene {
             events,
         }
     }
+}
 
-    /// Every projected graph, in dock-pane order — the per-pane loop the
+impl<'a> Frame<'a> {
+    /// Every projected pane, in dock-pane order — the per-pane loop the
     /// canvas prepass and the editor's target bookkeeping both walk.
-    pub(crate) fn graphs(&self) -> impl Iterator<Item = GraphScene<'_>> {
-        self.graphs
-            .values()
-            .map(move |graph| GraphScene { scene: self, graph })
+    ///
+    /// A projection whose graph the document no longer holds is skipped:
+    /// the pane's tab died this frame and `reconcile_with_graph` prunes it
+    /// before the next one.
+    pub(crate) fn panes(self) -> impl Iterator<Item = Pane<'a>> {
+        self.scene
+            .graphs
+            .keys()
+            .filter_map(move |target| self.pane(*target))
     }
 
-    /// The named pane's projection, or `None` when that graph isn't on
-    /// screen this frame.
-    pub(crate) fn graph(&self, target: GraphRef) -> Option<GraphScene<'_>> {
-        self.graphs
-            .get(&target)
-            .map(|graph| GraphScene { scene: self, graph })
+    /// The named pane, or `None` when that graph isn't on screen this frame
+    /// (or is already gone from the document).
+    pub(crate) fn pane(self, target: GraphRef) -> Option<Pane<'a>> {
+        Some(Pane {
+            scene: self.scene,
+            projected: self.scene.graphs.get(&target)?,
+            body: self.doc.graph_for(target)?,
+            view: self.doc.view(target)?,
+        })
     }
 
     /// The pane `node_id` lives in — how a whole-scene scan turns a node hit
     /// back into the graph whose edit target the intent belongs to.
-    pub(crate) fn owner(&self, node_id: NodeId) -> Option<GraphScene<'_>> {
-        self.graph(self.nodes.get(&node_id)?.owner)
+    pub(crate) fn owner(self, node_id: NodeId) -> Option<Pane<'a>> {
+        self.pane(self.scene.nodes.get(&node_id)?.owner)
     }
 }
 
-impl<'a> GraphScene<'a> {
+impl<'a> Pane<'a> {
     /// The editing target every intent raised over this pane commits
     /// against.
     pub(crate) fn target(self) -> GraphRef {
-        self.graph.target
+        self.projected.target
     }
 
     pub(crate) fn viewport(self) -> Viewport {
-        self.graph.viewport
+        self.projected.viewport
     }
 
     /// Whether a run raised over this pane resolves to one occurrence — see
@@ -713,7 +708,7 @@ impl<'a> GraphScene<'a> {
     /// single target: the header play chip, the context menu's "Run to this
     /// node", and the port menu's "Add preview".
     pub(crate) fn run_available(self) -> bool {
-        self.graph.run_available
+        self.projected.run_available
     }
 
     /// Whether `node` can seed a "run to this node" — drives the header play
@@ -732,7 +727,7 @@ impl<'a> GraphScene<'a> {
     pub(crate) fn nodes(self) -> impl Iterator<Item = &'a SceneNode> {
         self.scene
             .nodes
-            .get_range(self.graph.nodes.range())
+            .get_range(self.projected.nodes.range())
             .into_iter()
             .flat_map(|slice| slice.values())
     }
@@ -743,7 +738,7 @@ impl<'a> GraphScene<'a> {
         self.scene
             .nodes
             .get(&node_id)
-            .filter(|n| n.owner == self.graph.target)
+            .filter(|n| n.owner == self.projected.target)
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
@@ -753,37 +748,35 @@ impl<'a> GraphScene<'a> {
     /// This graph's paint stack: node bodies
     /// interleaved, later entries in front.
     pub(crate) fn z_order(self) -> &'a [NodeId] {
-        slice_pool(&self.scene.z_order, self.graph.z_order)
+        slice_pool(&self.scene.z_order, self.projected.z_order)
     }
 
-    pub(crate) fn connections(self) -> &'a [SceneConnection] {
-        slice_pool(&self.scene.connections, self.graph.connections)
+    /// This graph's data edges, as `(consumer input ← producer output)`.
+    /// Read off the authoring graph: the projection would only be holding a
+    /// copy of it.
+    pub(crate) fn connections(self) -> impl Iterator<Item = (InputPort, OutputPort)> + 'a {
+        self.body.edges()
     }
 
-    pub(crate) fn subscriptions(self) -> &'a [Subscription] {
-        slice_pool(&self.scene.subscriptions, self.graph.subscriptions)
+    /// This graph's event-subscription edges, likewise straight off the
+    /// authoring graph.
+    pub(crate) fn subscriptions(self) -> impl Iterator<Item = Subscription> + 'a {
+        self.body.subscriptions()
     }
 
     /// This graph's own local definitions, ordered by id.
     pub(crate) fn local_defs(self) -> &'a [SceneLocalDef] {
-        slice_pool(&self.scene.local_defs, self.graph.local_defs)
+        slice_pool(&self.scene.local_defs, self.projected.local_defs)
     }
 
-    /// This graph's committed selection, sorted.
-    pub(crate) fn selected(self) -> &'a [NodeId] {
-        slice_pool(&self.scene.selected, self.graph.selected)
+    /// This graph's committed selection.
+    pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
+        &self.view.selected
     }
 
-    /// Whether `key` is in this graph's committed selection — a binary
-    /// search, since the span is kept sorted.
+    /// Whether `key` is in this graph's committed selection.
     pub(crate) fn is_selected(self, key: NodeId) -> bool {
-        selection_holds(self.selected(), key)
-    }
-
-    /// The committed selection as the owned set an `Intent::SetSelection`
-    /// carries.
-    pub(crate) fn selection(self) -> BTreeSet<NodeId> {
-        self.selected().iter().copied().collect()
+        self.view.selected.contains(&key)
     }
 
     /// A node's input ports, sliced by its `inputs` span. The per-port
@@ -819,23 +812,6 @@ struct NodePortSpans {
     inputs: Span,
     outputs: Span,
     events: Span,
-}
-
-/// Whether a **sorted** selection slice holds `key`.
-///
-/// Every selection slice in the GUI is sorted — a graph's committed span
-/// (`GraphView::selected` is a `BTreeSet`, so
-/// [`Scene::project`] extends in order) and `SelectionUI`'s rubber-band
-/// preview (collected from a `BTreeSet` too). That invariant is what makes
-/// membership a binary search instead of a set lookup, so it's asserted in
-/// one place here rather than assumed independently at each of the three
-/// call sites.
-pub(crate) fn selection_holds(selected: &[NodeId], key: NodeId) -> bool {
-    debug_assert!(
-        selected.is_sorted(),
-        "selection slices are kept sorted so membership can binary-search"
-    );
-    selected.binary_search(&key).is_ok()
 }
 
 fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
@@ -1150,69 +1126,71 @@ pub(crate) mod internals {
         }
     }
 
-    impl Scene {
-        /// A one-pane scene at `GraphRef::Main` holding `nodes` — the
-        /// fixture the gesture tests need, without a `Document` or a
-        /// `Library` behind it. Extend it with [`Self::with_selection`] /
-        /// [`Self::with_outputs`].
+    /// A one-pane fixture at `GraphRef::Main`: a hand-built projection plus
+    /// the document it stands for, so a gesture test takes a [`Frame`] and a
+    /// [`Pane`] the way production code does. No `Library` behind it — the
+    /// nodes are stubs, not projected from one.
+    ///
+    /// The two halves are kept consistent for whatever the builders set:
+    /// [`Self::with_selection`] writes the document's view, which is where a
+    /// pane reads its selection from.
+    #[derive(Debug, Default)]
+    pub(crate) struct SceneFixture {
+        pub(crate) scene: Scene,
+        pub(crate) doc: Document,
+    }
+
+    impl SceneFixture {
         pub(crate) fn with_nodes(nodes: impl IntoIterator<Item = SceneNode>) -> Self {
-            let mut scene = Scene::default();
+            let mut fixture = SceneFixture::default();
             for node in nodes {
-                scene.z_order.push(node.id);
-                scene.nodes.insert(node.id, node);
+                fixture.scene.z_order.push(node.id);
+                fixture.scene.nodes.insert(node.id, node);
             }
-            scene.reseal();
-            scene
+            fixture.reseal();
+            fixture
         }
 
-        /// Give the sole graph a committed selection.
+        /// Give the sole pane a committed selection.
         pub(crate) fn with_selection(mut self, selected: impl IntoIterator<Item = NodeId>) -> Self {
-            self.selected.extend(selected);
-            self.selected.sort();
-            self.selected.dedup();
-            self.reseal();
+            self.doc.main_view.selected.extend(selected);
             self
         }
 
-        /// Mark the sole graph as a definition pane: no single occurrence for
-        /// a run to target, so [`GraphScene::runnable`] answers `false`
-        /// whatever the node is. Order-independent like the other builders —
-        /// [`Self::reseal`] carries the flag forward.
+        /// Mark the sole pane as a definition pane: no single occurrence for
+        /// a run to target, so [`Pane::runnable`] answers `false` whatever
+        /// the node is.
         pub(crate) fn without_run_target(mut self) -> Self {
-            self.reseal();
-            let graph = self.graphs.get_mut(&GraphRef::Main).expect("resealed");
+            let graph = self.scene.graphs.get_mut(&GraphRef::Main).expect("sealed");
             graph.run_available = false;
             self
         }
 
-        /// Re-derive the sole graph's spans over whatever the pools now
-        /// hold, so the builder methods can be chained in any order.
+        /// Seal the sole graph's spans over whatever the pools hold.
         fn reseal(&mut self) {
-            // A resealed graph keeps whatever run availability it was given;
-            // a fresh one stands in for the root pane, where a run resolves.
-            let run_available = self
-                .graphs
-                .get(&GraphRef::Main)
-                .is_none_or(|graph| graph.run_available);
-            self.graphs.insert(
+            self.scene.graphs.insert(
                 GraphRef::Main,
                 SceneGraph {
                     target: GraphRef::Main,
                     viewport: Viewport::default(),
-                    nodes: Span::new(0, self.nodes.len() as u32),
-                    z_order: Span::new(0, self.z_order.len() as u32),
-                    connections: Span::default(),
-                    subscriptions: Span::default(),
-                    selected: Span::new(0, self.selected.len() as u32),
-                    local_defs: Span::new(0, self.local_defs.len() as u32),
-                    run_available,
+                    nodes: Span::new(0, self.scene.nodes.len() as u32),
+                    z_order: Span::new(0, self.scene.z_order.len() as u32),
+                    local_defs: Span::new(0, self.scene.local_defs.len() as u32),
+                    run_available: true,
                 },
             );
         }
 
-        /// The sole graph of a single-pane test scene.
-        pub(crate) fn only_graph(&self) -> GraphScene<'_> {
-            self.graph(GraphRef::Main).expect("test scene has Main")
+        pub(crate) fn frame(&self) -> Frame<'_> {
+            Frame {
+                scene: &self.scene,
+                doc: &self.doc,
+            }
+        }
+
+        /// The sole pane of a single-pane test fixture.
+        pub(crate) fn only_pane(&self) -> Pane<'_> {
+            self.frame().pane(GraphRef::Main).expect("fixture has Main")
         }
     }
 }

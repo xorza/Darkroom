@@ -21,7 +21,7 @@ use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::{ExecStatus, RunState};
-use crate::gui::scene::{GraphScene, Scene, SceneNode, selection_holds};
+use crate::gui::scene::{Pane, Scene, SceneNode};
 use crate::gui::theme::Theme;
 use glam::Vec2;
 use palantir::{
@@ -53,13 +53,13 @@ pub(crate) struct RecordCtx<'a> {
     pub(crate) library: &'a Library,
     /// The one graph this record pass is drawing. Every other pane on
     /// screen gets its own `RecordCtx`, so nothing here can reach across.
-    pub(crate) graph: GraphScene<'a>,
-    /// Effective selection to paint, sorted: the pane's committed set
-    /// (`GraphScene::selected`) or, mid-rubber-band, the live swept preview
-    /// owned by `SelectionUI`. Kept off `Scene` so the projection stays a
-    /// read-only mirror — the gesture no longer scribbles its preview into
-    /// the committed field.
-    pub(crate) selected: &'a [NodeId],
+    pub(crate) graph: Pane<'a>,
+    /// Effective selection to paint: the pane's committed set
+    /// (`Pane::selected`) or, mid-rubber-band, the live swept preview owned
+    /// by `SelectionUI` — one type, so the draw substitutes them without
+    /// caring which it got, and the gesture never writes its preview into
+    /// the document.
+    pub(crate) selected: &'a BTreeSet<NodeId>,
     pub(crate) geometry: &'a CanvasGeometry,
     /// This frame's swept node interactions — the node body reads its
     /// drag latch from here rather than re-polling its own handles.
@@ -73,10 +73,9 @@ pub(crate) struct RecordCtx<'a> {
 }
 
 impl RecordCtx<'_> {
-    /// Whether `key` paints selected this pass — a binary search, since
-    /// both the committed span and the rubber-band preview are sorted.
+    /// Whether `key` paints selected this pass.
     pub(crate) fn is_selected(&self, key: NodeId) -> bool {
-        selection_holds(self.selected, key)
+        self.selected.contains(&key)
     }
 }
 
@@ -420,7 +419,7 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
-pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: NodeId, out: &mut Intents) {
+pub(super) fn click_intents(shift: bool, graph: Pane<'_>, key: NodeId, out: &mut Intents) {
     let target = graph.target();
     out.push(target, select_intent(shift, graph, key));
     let deselecting = shift && graph.is_selected(key);
@@ -432,9 +431,9 @@ pub(super) fn click_intents(shift: bool, graph: GraphScene<'_>, key: NodeId, out
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, graph: GraphScene<'_>, key: NodeId) -> Intent {
+fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> Intent {
     let mut to = if shift {
-        graph.selection()
+        graph.selected().clone()
     } else {
         BTreeSet::new()
     };
@@ -450,16 +449,16 @@ fn select_intent(shift: bool, graph: GraphScene<'_>, key: NodeId) -> Intent {
 mod tests {
     use super::*;
     use crate::core::document::PortKind;
-    use crate::gui::scene::internals::scene_node_stub;
+    use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
     use palantir::internals::UiHarness;
 
     /// A one-pane scene holding `selected` as both its node set and its
     /// committed selection — enough for the click-intent rules, which read
     /// nothing else.
-    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> Scene {
+    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> SceneFixture {
         let mut arena = UiHarness::arena();
         let ids: Vec<NodeId> = selected.into_iter().collect();
-        Scene::with_nodes(
+        SceneFixture::with_nodes(
             ids.iter()
                 .map(|id| scene_node_stub(arena.ui(), *id, Vec2::ZERO)),
         )
@@ -504,11 +503,11 @@ mod tests {
         assert!(drag_handles(id).all(|h| !drag_handles(other).any(|o| o == h)));
     }
 
-    fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
+    fn click(shift: bool, scene: &SceneFixture, id: NodeId) -> Vec<Intent> {
         use crate::core::edit::intent::sink::Queued;
 
         let mut out = Intents::default();
-        click_intents(shift, scene.only_graph(), id, &mut out);
+        click_intents(shift, scene.only_pane(), id, &mut out);
         out.drain()
             .map(|queued| match queued {
                 Queued::Scoped { intent, .. } => intent,
