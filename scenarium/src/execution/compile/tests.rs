@@ -1,6 +1,5 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::flatten::map::internals::FlattenMapBuilder;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::program::index::OutputAddr;
@@ -443,29 +442,6 @@ fn validation_returns_compiled_and_installed_mismatches() {
             .unwrap_err()
             .to_string(),
         "runtime cache node set does not match the compiled program"
-    );
-
-    // Right slot count, wrong node: only the cache's own id column can
-    // catch this — the state owners match, so the owner compare stays quiet.
-    let stranger = ExecutionNodeId::unique();
-    let mut misaligned = RuntimeCache::default();
-    misaligned.e_node_ids.push(stranger);
-    misaligned.slots.push(RuntimeSlot {
-        owner: StateOwner {
-            func_id: missing_func,
-            version: 0,
-        },
-        ..Default::default()
-    });
-    assert_eq!(
-        compiled
-            .validate_installed(&misaligned)
-            .unwrap_err()
-            .to_string(),
-        format!(
-            "runtime cache slot {:?} holds node {stranger:?}, not {e_node_id:?}",
-            NodeIdx(0)
-        )
     );
 
     assert_eq!(

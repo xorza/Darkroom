@@ -67,11 +67,12 @@ impl ExecutionEngine {
     /// The plan isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable plan buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
-        self.compiled = compiled;
-
         // Realign the runtime cache to the new node set (preserve by id,
-        // default new, trim gone).
-        self.cache.reconcile(&self.compiled.program);
+        // default new, trim gone) — before the swap, while the program its
+        // slots are still aligned to is in hand to name them by.
+        self.cache
+            .reconcile(&self.compiled.program, &compiled.program);
+        self.compiled = compiled;
 
         self.compiled.validate_installed_debug(&self.cache);
     }
@@ -140,7 +141,9 @@ impl ExecutionEngine {
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
-        outcome.cache_ram = self.cache.resident_ram_stats(&mut outcome.node_ram);
+        outcome.cache_ram = self
+            .cache
+            .resident_ram_stats(&self.compiled.program, &mut outcome.node_ram);
 
         outcome.triggered_events.append(&mut seeds.events);
 
