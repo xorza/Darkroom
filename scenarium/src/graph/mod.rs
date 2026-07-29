@@ -9,6 +9,7 @@
 //! [`definition`] the reusable `GraphDef`.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
 use ::serde::{Deserialize, Serialize};
 use common::{SerdeFormat, SerializeError, deserialize, is_debug, serialize};
@@ -23,10 +24,10 @@ use crate::graph::error::ValidationResult;
 use crate::graph::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
-use crate::graph::identity::{GraphId, InputPort, OutputPort, Subscription};
+use crate::graph::identity::{GraphId, InputPort, OutputPort};
 use crate::graph::interface::NodePorts;
 use crate::graph::node::output_resolver::{OutputResolver, OutputSource};
-use crate::graph::node::{Node, NodeKind, NodeRef, NodeSearch};
+use crate::graph::node::{Node, NodeKind};
 use crate::library::Library;
 
 pub(crate) mod definition;
@@ -91,6 +92,25 @@ pub struct Graph {
     pub graphs: HashMap<GraphId, GraphDef>,
 }
 
+/// One event-subscription edge: `subscriber` fires when `emitter`'s event
+/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so a
+/// `BTreeSet` ranges over one emitter-event's subscribers contiguously.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Subscription {
+    pub emitter: NodeId,
+    pub event_idx: usize,
+    pub subscriber: NodeId,
+}
+
+impl Subscription {
+    /// Whether this edge touches `node_id` from either end — it emits to that
+    /// node, or that node emits it. [`Binding::touches`](crate::Binding) for
+    /// an event edge.
+    pub(crate) fn touches(&self, node_id: NodeId) -> bool {
+        self.emitter == node_id || self.subscriber == node_id
+    }
+}
+
 /// One data edge as a value: the consumer port, and what it was bound to.
 ///
 /// The unit every reversible edit collects severed wiring into — a
@@ -101,6 +121,34 @@ pub struct Graph {
 pub struct BindingEntry {
     pub port: InputPort,
     pub binding: Binding,
+}
+
+/// A [`Node`] with the id the lookup found it by re-attached — what
+/// [`Graph::iter`] and [`Graph::find_by_name`] hand out, since a node stores
+/// no id of its own.
+#[derive(Clone, Copy, Debug)]
+pub struct NodeRef<'a> {
+    pub id: NodeId,
+    /// Private so only this file's lookups mint one; readers go through
+    /// [`Deref`], which is the point of the type.
+    node: &'a Node,
+}
+
+impl Deref for NodeRef<'_> {
+    type Target = Node;
+
+    fn deref(&self) -> &Self::Target {
+        self.node
+    }
+}
+
+/// How deep a node lookup reaches: this graph's own nodes only, or also every
+/// local nested graph, recursively. The argument to [`Graph::find`],
+/// [`Graph::find_mut`], and [`Graph::find_by_name`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeSearch {
+    TopLevel,
+    Recursive,
 }
 
 /// A remapped clone alongside the node mapping that produced it, so a caller
