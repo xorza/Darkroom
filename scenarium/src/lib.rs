@@ -49,8 +49,6 @@ pub use graph::node::{CacheMode, Node, NodeKind};
 pub use graph::{NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
-#[cfg(any(test, feature = "internals"))]
-pub use runtime::context::internals::{insert_context, set_current_node};
 pub use runtime::context::{ContextManager, ContextStore, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;

@@ -20,12 +20,9 @@ fn sample() -> Sample {
 
 fn cpu_context() -> ContextStore {
     let mut context = ContextStore::default();
-    scenarium::insert_context(
-        &mut context,
-        VisionCtx {
-            processing_ctx: ProcessingContext::cpu_only(),
-        },
-    );
+    context.insert_context(VisionCtx {
+        processing_ctx: ProcessingContext::cpu_only(),
+    });
     context
 }
 
