@@ -106,7 +106,7 @@ impl Resolver {
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
     ) {
-        stamp_digests(program, cache, plan);
+        cache.stamp_digests(program, plan);
         resolve_run(program, plan, cache, &mut self.run).await;
     }
 }
