@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
-use scenarium::{GraphDef, NodeId, math_library, system_library, worker_events_library};
+use scenarium::{NodeId, math_library, system_library, worker_events_library};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::publish;
@@ -76,20 +76,6 @@ impl RuntimeLibrary {
             model_paths: model_paths.clone(),
             previews,
         }
-    }
-
-    /// Add an imported template to the library. Ids are remapped so a
-    /// template written elsewhere can't collide with an existing entry.
-    pub(crate) fn import_template(
-        &mut self,
-        graph: GraphDef,
-    ) -> Result<LibraryEdit, GraphLibrarySaveError> {
-        let committed = graph_library_io::commit_entry(graph_library_io::LibraryEntry {
-            origin: None,
-            graph: graph.clone_mapped(),
-        })?;
-        self.adopt(committed.library);
-        Ok(LibraryEdit::Committed)
     }
 
     /// Publish `node_id`'s local graph to the library. The file is written

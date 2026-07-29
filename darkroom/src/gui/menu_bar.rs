@@ -3,7 +3,6 @@ use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Siz
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
-use crate::gui::app::commands::graph::GraphCommand;
 use crate::gui::app::commands::shell::ShellCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
@@ -20,9 +19,6 @@ pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
         .show(ui, |ui| {
             if let Some(file_command) = file_menu(ui) {
                 command = Some(file_command);
-            }
-            if let Some(graph_command) = graph_menu(ui) {
-                command = Some(graph_command);
             }
         });
     command
@@ -77,30 +73,6 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
         MenuItem::separator().show(ui);
         if MenuItem::new("Quit").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Shell(ShellCommand::Quit));
-        }
-        command
-    })
-}
-
-/// Graph-template import/export actions.
-fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
-    dropdown(ui, "Graph", |ui, popup| {
-        let mut command = None;
-        if MenuItem::new("Export Graph Template…")
-            .show(ui, popup)
-            .left
-            .clicked()
-        {
-            command = Some(AppCommand::Graph(GraphCommand::ExportGraphTemplate));
-        }
-        if MenuItem::new("Import Graph Template into Library…")
-            .show(ui, popup)
-            .left
-            .clicked()
-        {
-            command = Some(AppCommand::Graph(
-                GraphCommand::ImportGraphTemplateIntoLibrary,
-            ));
         }
         command
     })
