@@ -10,7 +10,7 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
 };
-use crate::execution::resource::{FileId, FsPathId, ResourceStamper, epoch_offset_ns};
+use crate::execution::resource::{FileId, FsPathId, ResourceStamper, StampJob, epoch_offset_ns};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 
@@ -36,8 +36,8 @@ impl Drop for TempDir {
     }
 }
 
-fn fingerprint_with(stamper: &mut ResourceStamper, path: &str) -> Digest {
-    let Ok(identity) = stamper.stamp(path, &CancelToken::never()) else {
+fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {
+    let Ok(identity) = job.stamp(path, &CancelToken::never()) else {
         panic!("{path} has no determinate identity");
     };
     let mut hasher = DigestHasher::new();
@@ -46,7 +46,7 @@ fn fingerprint_with(stamper: &mut ResourceStamper, path: &str) -> Digest {
 }
 
 fn fingerprint(path: &str) -> Digest {
-    fingerprint_with(&mut ResourceStamper::default(), path)
+    fingerprint_with(&mut StampJob::default(), path)
 }
 
 #[test]
@@ -66,12 +66,12 @@ fn directory_identity_tracks_entry_changes() {
         let empty = fingerprint(&path);
         let permissions = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(&dir.0, permissions(0o000)).unwrap();
-        let unreadable = ResourceStamper::default().stamp(&path, &CancelToken::never());
+        let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
         // The whole pass fails with it, rather than dropping the path and
         // leaving the node silently uncached forever.
         let mut stamps = ResourceStamper::default();
-        stamps.requests.insert(path.clone());
-        let resolved = stamps.resolve(&CancelToken::never());
+        stamps.job.requests.insert(path.clone());
+        let resolved = stamps.stamp_queued(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
         assert!(
@@ -160,23 +160,23 @@ fn a_reused_stamper_stamps_like_a_fresh_one() {
     let deep_path = deep.to_string_lossy().into_owned();
     let shallow_path = shallow.to_string_lossy().into_owned();
 
-    let mut stamper = ResourceStamper::default();
-    let expected = fingerprint_with(&mut stamper, &shallow_path);
+    let mut job = StampJob::default();
+    let expected = fingerprint_with(&mut job, &shallow_path);
     // The buffer is genuinely retained — which is what makes a leak
     // between walks possible. `deep` holds one file, `nested/a.bin`; the
     // `nested` directory itself is not listed.
-    fingerprint_with(&mut stamper, &deep_path);
-    assert_eq!(stamper.files.len(), 1, "the walked files are retained");
+    fingerprint_with(&mut job, &deep_path);
+    assert_eq!(job.files.len(), 1, "the walked files are retained");
 
     assert_eq!(
-        fingerprint_with(&mut stamper, &shallow_path),
+        fingerprint_with(&mut job, &shallow_path),
         expected,
-        "a reused stamper must fold only the tree it was handed",
+        "a reused job must fold only the tree it was handed",
     );
     assert_eq!(
-        fingerprint_with(&mut stamper, &shallow_path),
+        fingerprint_with(&mut job, &shallow_path),
         fingerprint(&shallow_path),
-        "and agree with a stamper that never walked anything else",
+        "and agree with a job that never walked anything else",
     );
 }
 
