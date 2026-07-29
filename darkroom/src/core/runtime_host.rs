@@ -11,7 +11,7 @@ use scenarium::DiskStore;
 use scenarium::{
     CompiledGraph, Compiler, DynamicValue, ExecutionNodeId, WorkerExited, WorkerReport,
 };
-use scenarium::{Graph, GraphDef, NodeId};
+use scenarium::{Graph, NodeId};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
@@ -84,11 +84,6 @@ impl RuntimeHost {
         if self.library.update_ml_model_paths(&model_paths) {
             self.sync_worker_disk_store();
         }
-    }
-
-    pub(crate) fn import_template(&mut self, graph: GraphDef) -> bool {
-        let edit = self.library.import_template(graph);
-        self.report_library_edit(edit)
     }
 
     pub(crate) fn publish_graph_to_library(

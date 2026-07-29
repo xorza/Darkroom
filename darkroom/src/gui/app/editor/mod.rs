@@ -177,10 +177,10 @@ impl Editor {
     /// Nothing raised here can legitimately be malformed. Widgets read every
     /// identity they emit out of the live document, so the worst they build
     /// is stale — which refuses [`Refusal::Quiet`]ly and is dropped — and the
-    /// data that *is* untrusted never reaches an `Intent` unchecked: an
-    /// imported template and the graph-library file are both validated at
-    /// their own boundary (`io::graph_template::load`, `io::graph_library`'s
-    /// load-and-quarantine). So a [`Refusal::Invalid`] here is our own bug,
+    /// data that *is* untrusted never reaches an `Intent` unchecked: the
+    /// graph-library file is validated at its own boundary
+    /// (`io::graph_library`'s load-and-quarantine). So a
+    /// [`Refusal::Invalid`] here is our own bug,
     /// and it fails loudly in every build rather than going to a log nobody
     /// reads.
     fn commit_widget_batch(

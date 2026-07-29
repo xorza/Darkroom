@@ -1,20 +1,13 @@
 //! GUI-side OS shell integration: native file-picker dialogs (rfd) and
-//! opening URLs in the user's browser. Project and reusable-graph byte⇄type
-//! plumbing live in `crate::core::io::{document, graph_template}`; this side hands
-//! paths off to those GUI-free modules. Failures degrade — a cancelled/failed
-//! pick returns `None`, a failed URL open logs — rather than crashing.
+//! opening URLs in the user's browser. Project byte⇄type plumbing lives in
+//! `crate::core::io::document`; this side hands paths off to that GUI-free
+//! module. Failures degrade — a cancelled/failed pick returns `None`, a
+//! failed URL open logs — rather than crashing.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::core::io::document;
-
-const GRAPH_FILE_FILTERS: &[(&str, &[&str])] = &[
-    ("JSON", &["json"]),
-    ("Lz4 compressed JSON", &["lz4"]),
-    ("Bitcode", &["bin"]),
-    ("TOML", &["toml"]),
-];
 
 fn file_dialog(start: Option<&Path>) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
@@ -35,22 +28,6 @@ pub(crate) fn pick_project_save_path(start: Option<&Path>) -> Option<PathBuf> {
         .add_filter("Darkroom project", &[document::EXTENSION])
         .save_file()
         .map(document::with_extension)
-}
-
-pub(crate) fn pick_graph_template_open_path(start: Option<&Path>) -> Option<PathBuf> {
-    graph_file_dialog(start).pick_file()
-}
-
-pub(crate) fn pick_graph_template_save_path(start: Option<&Path>) -> Option<PathBuf> {
-    graph_file_dialog(start).save_file()
-}
-
-fn graph_file_dialog(start: Option<&Path>) -> rfd::FileDialog {
-    let mut dialog = file_dialog(start);
-    for (name, extensions) in GRAPH_FILE_FILTERS {
-        dialog = dialog.add_filter(*name, extensions);
-    }
-    dialog
 }
 
 fn filtered_file_dialog(extensions: &[&str]) -> rfd::FileDialog {

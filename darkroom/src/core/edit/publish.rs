@@ -1,6 +1,5 @@
-//! Graph template export and publication operations.
+//! Graph publication operations.
 
-use scenarium::Library;
 use scenarium::{GraphDef, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
 
@@ -57,48 +56,6 @@ pub(crate) fn link_origin(
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
         nested.interface.origin = Some(origin);
-    }
-}
-
-#[derive(Debug)]
-enum ExportTarget {
-    Node { graph: GraphRef, link: GraphLink },
-    OpenTab { id: GraphId },
-}
-
-/// Resolve the graph targeted by export.
-pub(crate) fn graph_template_to_export<'a>(
-    document: &'a Document,
-    library: &'a Library,
-) -> Option<&'a GraphDef> {
-    match resolve_export_target(document)? {
-        ExportTarget::Node { graph, link } => {
-            document.graph_for(graph)?.resolve_graph(link, library)
-        }
-        ExportTarget::OpenTab { id } => document.graph.find_graph(id),
-    }
-}
-
-fn resolve_export_target(document: &Document) -> Option<ExportTarget> {
-    let target = document.focused_target()?;
-    let graph = document.graph_for(target)?;
-    if let Some(view) = document.view(target) {
-        for key in &view.selected {
-            let nid = key;
-            if let Some(node) = graph.find(*nid, NodeSearch::TopLevel)
-                && let NodeKind::Graph(link) = node.kind
-            {
-                return Some(ExportTarget::Node {
-                    graph: target,
-                    link,
-                });
-            }
-        }
-    }
-    match target {
-        // `graph_for(target)` above already proved the def resolves.
-        GraphRef::Local(id) => Some(ExportTarget::OpenTab { id }),
-        GraphRef::Main => None,
     }
 }
 
