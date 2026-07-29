@@ -155,10 +155,11 @@ fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
 }
 
 /// Fold one constant's *own value* into `hasher`: a discriminant tag plus
-/// length-prefixed payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`). For an
+/// length-prefixed payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`).
 /// Filesystem-path values fold only their authored path string(s) here — the external
-/// files/dirs they point at are a separate concern folded by [`hash_fs_content`], so
-/// this stays a pure, no-I/O structural fold. A free helper like [`hash_data_type`].
+/// files/dirs they point at are a separate concern, folded by the caller through
+/// [`ResourceStamper::hash_fs_paths`], so this stays a pure, no-I/O structural fold.
+/// A free helper like [`hash_data_type`].
 fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
     match value {
         StaticValue::Null => {
@@ -189,25 +190,6 @@ fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
             hasher.write_bytes(&[7]).write_str(name);
         }
     }
-}
-
-/// Fold the prepared external identities a filesystem-path const points at. A no-op
-/// for every other value.
-fn hash_fs_content(
-    hasher: &mut DigestHasher,
-    value: &StaticValue,
-    resource_stamper: &ResourceStamper,
-) -> Option<()> {
-    match value {
-        StaticValue::FsPath(path) => {
-            resource_stamper.hash_fs_paths(hasher, std::slice::from_ref(path))?;
-        }
-        StaticValue::FsPaths(paths) => {
-            resource_stamper.hash_fs_paths(hasher, paths)?;
-        }
-        _ => {}
-    }
-    Some(())
 }
 
 /// Fold a declared port type into `hasher`: a discriminant tag, plus the nominal
@@ -278,7 +260,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Const(value) => {
                 hasher.write_bytes(&[1]);
                 hash_static(&mut hasher, value);
-                hash_fs_content(&mut hasher, value, resource_stamper)?;
+                resource_stamper.hash_fs_paths(&mut hasher, value.as_fs_paths())?;
             }
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
@@ -289,8 +271,8 @@ pub(crate) fn node_digest(
                     .write_digest(&port_digest_of(producer, addr.port_idx as usize));
                 // A resource-typed input dereferences the delivered reference, so the
                 // external state behind the *runtime value* is part of this node's key —
-                // the Bind-side counterpart of the `Const` arm's `hash_fs_content`. Needs
-                // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
+                // the Bind-side counterpart of the `Const` arm's fold. Needs the
+                // producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
                 if input.stamps_fs_path {
                     hash_bound_fs_path(&mut hasher, cache, resource_stamper, addr)?;
