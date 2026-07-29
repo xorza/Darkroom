@@ -1,7 +1,8 @@
 //! Node-graph execution as an explicit three-phase pipeline:
 //!
 //! 1. **compile** — the [`Compiler`](compile::Compiler) flattens the authoring
-//!    `Graph` into an immutable [`Program`](program::Program).
+//!    `Graph` ([`compile::flatten`]) and links the result into an immutable
+//!    [`Program`](compile::program::Program).
 //!    Runs on the *host's* thread (compile errors are synchronous); the resulting
 //!    [`CompiledGraph`](compile::compiled_graph::CompiledGraph) is installed into the engine
 //!    via [`engine::ExecutionEngine::install`], which cannot fail.
@@ -20,7 +21,6 @@ pub(crate) mod compile;
 pub(crate) mod engine;
 pub(crate) mod error;
 pub(crate) mod executor;
-mod flatten;
 pub(crate) mod identity;
 pub(crate) mod report;
 pub(crate) mod schedule;

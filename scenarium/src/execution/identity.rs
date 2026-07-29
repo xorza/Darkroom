@@ -1,7 +1,7 @@
 //! Strongly typed identities for one flattened compiled graph.
 //!
 //! Where each of these ids came from is flattening's own record, kept with the
-//! walk that builds it in [`crate::execution::flatten::origin`]; the form a
+//! walk that builds it in [`crate::execution::compile::flatten`]; the form a
 //! host queries is the artifact's, in
 //! [`crate::execution::compile::attribution`].
 //!
