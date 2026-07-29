@@ -29,6 +29,7 @@ pub use execution::log::{LogEntry, LogLevel};
 pub use execution::outcome::{NodeExecutionStatus, NodeStatus};
 pub use execution::seeds::RunSeeds;
 pub use graph::Binding;
+pub use graph::BindingEntry;
 pub use graph::Graph;
 pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
 pub use graph::definition::GraphDef;
@@ -44,7 +45,6 @@ pub use graph::node::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind, NodeRef, NodeSearch};
 pub use graph::query::{NodeEvents, NodePorts};
-pub use graph::{BindingEntry, closes_data_cycle};
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]
