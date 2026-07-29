@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::*;
 use crate::execution::compile::error::CompiledGraphValidationError;
 use crate::execution::compile::flatten::internals::FlatGraphBuilder;
@@ -18,7 +16,7 @@ use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 /// The program of a freshly compiled artifact, which nothing else holds yet —
 /// the corruption these tests inject before asking `validate` to catch it.
 fn program_mut(compiled: &mut CompiledGraph) -> &mut Program {
-    Arc::get_mut(&mut compiled.program).expect("a freshly compiled artifact is unshared")
+    &mut compiled.program
 }
 
 /// Event edges get the same treatment as bind fixups: an endpoint flatten

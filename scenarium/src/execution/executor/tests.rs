@@ -6,6 +6,7 @@ use crate::async_lambda;
 use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
+use crate::execution::compiled::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
@@ -22,17 +23,14 @@ use crate::{DynamicValue, StaticValue};
 /// planner gates required ones; these tests drive the executor directly).
 #[derive(Default)]
 struct Prog {
-    /// Shared like the compile artifact's, so it can be handed to
-    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
-    program: Arc<Program>,
+    /// A real outer compiled artifact around the hand-built program.
+    program: TestCompiledGraph,
 }
 
 impl Prog {
-    /// The program while it is still exclusively this fixture's — every
-    /// mutation below goes through here, and it stops being available the
-    /// moment a cache is reconciled onto it.
+    /// The program while the fixture is still the artifact's sole holder.
     fn building(&mut self) -> &mut Program {
-        Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+        self.program.program_mut()
     }
 
     fn node(
@@ -201,10 +199,10 @@ fn collect(
     executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
 }
 
-async fn run(program: &Arc<Program>, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
+async fn run(program: &TestCompiledGraph, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile(program);
+    cache.reconcile_for_test(program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -355,7 +353,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     let run = run_with_readers(&p.program, vec![1]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -561,7 +559,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     run.states[nx(&p.program, a)] = NodeState::Reuse;
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
     cache.stamp_digest(nx(&p.program, a));
     let produced_under = cache[nx(&p.program, a)].current_digest;
     cache[nx(&p.program, a)].load_output(
@@ -646,7 +644,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
 
     let mut plan = structural_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
     let first = run_with(&p.program, &mut plan, &mut cache).await;
     assert_eq!(first.ran_node_count, 3);
 
@@ -722,7 +720,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     plan.roots.reset(p.program.e_nodes.len());
     plan.roots.insert(nx(&p.program, downstream));
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
     cache[nx(&p.program, missing)].load_output(
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         None,
@@ -796,7 +794,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let mut plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &mut plan, &mut cache).await;
