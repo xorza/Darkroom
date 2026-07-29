@@ -3394,7 +3394,7 @@ mod behavior {
 mod composite_behavior {
     use super::*;
     use crate::graph::Graph;
-    use crate::graph::interface::{GraphId, GraphLink};
+    use crate::graph::definition::{GraphId, GraphLink};
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::FuncOutput;
 
@@ -5265,7 +5265,7 @@ mod topology {
 mod graph {
     use super::*;
     use crate::graph::Graph;
-    use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
+    use crate::graph::definition::{GraphEvent, GraphId, GraphLink};
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::{Func, FuncId, FuncInput, FuncOutput};
     use crate::graph::node::event::EventLambda;
@@ -6074,7 +6074,7 @@ mod compile_regressions {
     use super::*;
     use crate::async_lambda;
     use crate::graph::Graph;
-    use crate::graph::interface::{GraphId, GraphLink};
+    use crate::graph::definition::{GraphId, GraphLink};
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};

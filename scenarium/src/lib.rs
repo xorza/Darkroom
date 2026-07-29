@@ -32,10 +32,9 @@ pub use graph::Binding;
 pub use graph::BindingEntry;
 pub use graph::Graph;
 pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
-pub use graph::definition::GraphDef;
+pub use graph::definition::{GraphDef, GraphEvent, GraphId, GraphLink};
 pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
-pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::node::definition::{
     Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, OutputType, ValueVariant,
 };

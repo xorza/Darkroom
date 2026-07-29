@@ -843,7 +843,7 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     use std::collections::HashSet;
 
     use crate::DataType;
-    use crate::graph::interface::{GraphId, GraphLink};
+    use crate::graph::definition::{GraphId, GraphLink};
     use crate::graph::node::NodeKind;
     use crate::graph::node::definition::FuncOutput;
     use crate::testing::{TestFuncHooks, test_func_lib};

@@ -12,7 +12,7 @@ use thiserror::Error;
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
 use crate::graph::address::{InputPort, NodeId, OutputPort};
-use crate::graph::interface::GraphId;
+use crate::graph::definition::GraphId;
 use crate::graph::node::definition::FuncId;
 
 #[derive(Debug, Error)]
