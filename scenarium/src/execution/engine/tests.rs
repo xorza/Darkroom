@@ -139,8 +139,8 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Optio
 mod cache_persistence {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::cache::slot::ValueState;
     use crate::execution::cache::disk_store::DiskStore;
+    use crate::execution::cache::slot::ValueState;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::resolve::Disposition;
     use crate::node::definition::{FuncId, FuncOutput};

@@ -18,11 +18,11 @@ pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use error::{GraphDeserializeError, GraphValidationError};
+pub use execution::cache::disk_store::DiskStore;
 pub use execution::codec::{CodecError, CustomValueCodec};
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
-pub use execution::cache::disk_store::DiskStore;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
