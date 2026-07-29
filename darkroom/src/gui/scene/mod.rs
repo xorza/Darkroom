@@ -196,9 +196,12 @@ pub(crate) struct SceneInput {
     /// so the UI can offer "set constant" without re-resolving the func lib.
     /// `None` for types with no `StaticValue` (a `Custom` image port).
     pub(crate) default: Option<StaticValue>,
-    /// A required input with no binding is a missing input — its port renders
-    /// highlighted.
+    /// Required inputs render with more visual weight than optional ones.
     pub(crate) required: bool,
+    /// The last run could not feed this port — its own verdict, so a port wired to a
+    /// disabled or itself-unfed producer counts too, not just an unbound one. Renders
+    /// highlighted while the node reads `MissingInputs`.
+    pub(crate) missing: bool,
     /// Const-only inputs reject a wired binding: the connection gesture won't
     /// snap to them, so they can only hold a literal.
     pub(crate) const_only: bool,
@@ -491,7 +494,15 @@ impl Scene {
                 continue;
             };
             let node_interface = NodeInterface::resolve(ui, graph, library, node, interface, empty);
-            let ports = self.push_node_ports(ui, library, projection, id, &node_interface, empty);
+            let ports = self.push_node_ports(
+                ui,
+                library,
+                projection,
+                id,
+                &node_interface,
+                run_state.missing_inputs(id),
+                empty,
+            );
             let boundary = matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput);
             // Resolved before the literal below, which moves `description`
             // out of `node_interface` and so ends the borrow these need.
@@ -579,7 +590,11 @@ impl Scene {
 
     /// Append one node's ports to the three per-port pools (plus the picker
     /// options under the inputs) and hand back the spans that slice them
-    /// out again.
+    /// out again. `missing_inputs` is the last run's verdict for this node — the
+    /// port indices it could not feed.
+    // One over the lint's threshold, and every argument is a distinct source the ports
+    // are built from — bundling any two would only hide which one a field came from.
+    #[allow(clippy::too_many_arguments)]
     fn push_node_ports(
         &mut self,
         ui: &mut Ui,
@@ -587,6 +602,7 @@ impl Scene {
         projection: GraphProjection<'_>,
         id: NodeId,
         node_interface: &NodeInterface<'_>,
+        missing_inputs: &[usize],
         empty: &InternedStr,
     ) -> NodePortSpans {
         let graph = projection.source.graph();
@@ -612,6 +628,7 @@ impl Scene {
                 binding: InputBindingView::from(graph.bindings.get(&port)),
                 default: default_static_value(library, input),
                 required: input.required,
+                missing: missing_inputs.contains(&port_idx),
                 const_only: input.const_only,
                 value_variants,
             });

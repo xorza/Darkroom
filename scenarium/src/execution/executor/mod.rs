@@ -27,9 +27,10 @@ use tokio::task;
 use common::CancelToken;
 
 use crate::DynamicValue;
+use crate::RamUsage;
 use crate::execution::event::EventTrigger;
-use crate::execution::identity::{ExecutionEventPort, ExecutionInputPort};
-use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
+use crate::execution::identity::ExecutionEventPort;
+use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::node::lambda::{Invocation, InvokeError, OutputDemand};
@@ -169,69 +170,107 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        self.collect_outcome(program, schedule, start, outcome);
+        outcome.elapsed_secs = start.elapsed().as_secs_f64();
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
-    /// Reduce this run's per-node column into the caller's outcome.
-    fn collect_outcome(
+
+    /// Reduce this run's per-node column and the RAM it left resident into the caller's
+    /// outcome — one [`NodeStatus`] row per node, which is also the row the host publishes.
+    /// A node says nothing at all (no row) when it neither produced a result nor holds a
+    /// value: the cancelled run's tail, a node the planner excluded, a pruned cut.
+    ///
+    /// Separate from [`run`](Self::run) because `node_ram` can only be measured once the
+    /// engine has released what the run left dead — but taking the same [`Resolved`] the
+    /// loop walked, so the outcome can only be collected against the program and schedule
+    /// that produced it.
+    ///
+    /// Every column here spans the whole program, so this walks the program rather than
+    /// `process_order`: a node the run never scheduled can still hold RAM from an earlier
+    /// one, and that is the only thing it has to report.
+    pub(crate) fn collect_outcome(
+        &self,
+        run: Resolved<'_>,
+        node_ram: &NodeColumn<RamUsage>,
+        outcome: &mut ExecutionOutcome,
+    ) {
+        let (program, schedule) = (run.program(), run.schedule());
+        for (node_idx, node_outcome) in self.outcomes.iter_indexed() {
+            let status = match node_outcome {
+                // A reuse hit, or a node the cut pruned that still holds a resident value, are
+                // both "available, not recomputed" — reported cached.
+                NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
+                    Some(NodeExecutionStatus::Cached)
+                }
+                NodeOutcome::Ran { secs } => {
+                    outcome.ran_node_count += 1;
+                    Some(NodeExecutionStatus::Executed {
+                        elapsed_secs: *secs,
+                    })
+                }
+                // A cancelled invoke didn't complete, so it has neither a run to report nor a
+                // failure of its own — the run as a whole is what was cancelled.
+                NodeOutcome::Failed {
+                    error: RunError::Cancelled { .. },
+                    ..
+                } => None,
+                // A genuine failure did run: one row carries both the attempt's time and the
+                // reason it ended, so nothing has to reconcile a node listed as two things.
+                NodeOutcome::Failed { secs, error } => {
+                    outcome.ran_node_count += 1;
+                    Some(NodeExecutionStatus::Errored {
+                        elapsed_secs: Some(*secs),
+                        error: error.clone(),
+                    })
+                }
+                NodeOutcome::Skipped { error } => Some(NodeExecutionStatus::Errored {
+                    elapsed_secs: None,
+                    error: error.clone(),
+                }),
+                // The planner may have stopped at this node for want of an input — the one
+                // verdict that isn't the run loop's to give, since a node it never reached
+                // holds no outcome of its own.
+                NodeOutcome::Pending => self.missing_inputs(program, schedule, node_idx),
+                NodeOutcome::Cut { cached: false } => None,
+            };
+            let ram = node_ram[node_idx];
+            if status.is_none() && ram.total() == 0 {
+                continue;
+            }
+            outcome.nodes.push(NodeStatus {
+                e_node_id: program.e_node_ids[node_idx],
+                status,
+                ram,
+            });
+        }
+    }
+
+    /// The unsatisfied input ports of a node the planner verdicted `MissingInputs`, or
+    /// `None` for any other node.
+    ///
+    /// Which ports is recomputed from the schedule's own predicate (the one the planner
+    /// reached its verdict with) rather than stored: only the rare missing node pays for it,
+    /// so it isn't worth a column spanning the program.
+    fn missing_inputs(
         &self,
         program: &Program,
         schedule: &RunSchedule,
-        start: Instant,
-        outcome: &mut ExecutionOutcome,
-    ) {
-        // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
-        // the sole source of truth; a node the run never reached (a cancelled run's tail, or
-        // skipped for missing inputs) is `Pending` and contributes to no list here.
-        for &node_idx in &schedule.process_order {
-            let e_node = &program[node_idx];
-            let e_node_id = program.e_node_ids[node_idx];
-            match &self.outcomes[node_idx] {
-                // A reuse hit, or a node the cut pruned that still holds a resident value, are
-                // both "available, not recomputed" — reported cached. A pruned node
-                // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
-                NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
-                    outcome.cached_nodes.push(e_node_id);
-                }
-                NodeOutcome::Ran { secs } => outcome.executed_nodes.push(ExecutedNodeOutcome {
-                    e_node_id,
-                    elapsed_secs: *secs,
-                }),
-                // A cancelled invoke didn't complete — omit it from the executed set so the
-                // consumer doesn't paint it as executed (its error still lands below). A
-                // genuine failure did run; it appears in both lists.
-                NodeOutcome::Failed { secs, error }
-                    if !matches!(error, RunError::Cancelled { .. }) =>
-                {
-                    outcome.executed_nodes.push(ExecutedNodeOutcome {
-                        e_node_id,
-                        elapsed_secs: *secs,
-                    });
-                }
-                _ => {}
-            }
-            if schedule.states[node_idx].missing_required_inputs() {
-                // Recompute which ports are unsatisfied (the schedule's own predicate,
-                // shared with the planner) — only for the rare missing node, so it isn't
-                // worth a stored column.
-                for (i, input) in program.inputs[e_node.inputs].iter().enumerate() {
-                    if schedule.input_missing(input) {
-                        outcome.missing_inputs.push(ExecutionInputPort {
-                            e_node_id,
-                            port_idx: i,
-                        });
-                    }
-                }
-            }
-            if let Some(err) = self.outcomes[node_idx].error() {
-                outcome.node_errors.push(NodeError {
-                    e_node_id,
-                    error: err.clone(),
-                });
-            }
+        node_idx: NodeIdx,
+    ) -> Option<NodeExecutionStatus> {
+        if !schedule.states[node_idx].missing_required_inputs() {
+            return None;
         }
-        outcome.elapsed_secs = start.elapsed().as_secs_f64();
+        let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
+            .iter()
+            .enumerate()
+            .filter(|(_, input)| schedule.input_missing(input))
+            .map(|(port_idx, _)| port_idx)
+            .collect();
+        debug_assert!(
+            !ports.is_empty(),
+            "a node verdicted `MissingInputs` has at least one unsatisfied port"
+        );
+        Some(NodeExecutionStatus::MissingInputs { ports })
     }
 }
 

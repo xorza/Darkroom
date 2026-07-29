@@ -26,7 +26,6 @@ pub(crate) mod identity;
 pub(crate) mod log;
 pub(crate) mod outcome;
 pub(crate) mod program;
-pub(crate) mod ram;
 pub(crate) mod report;
 pub(crate) mod schedule;
 pub(crate) mod seeds;

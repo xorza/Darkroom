@@ -61,13 +61,6 @@ impl ExecutionNodeId {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-/// One input port of one flattened execution node.
-pub struct ExecutionInputPort {
-    pub e_node_id: ExecutionNodeId,
-    pub port_idx: usize,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 /// One output port of one flattened execution node.
 pub(crate) struct ExecutionOutputPort {
     pub(crate) e_node_id: ExecutionNodeId,

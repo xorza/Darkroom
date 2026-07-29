@@ -223,12 +223,7 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library_v0).unwrap();
         let first = engine.execute_sinks().await.unwrap();
-        assert!(
-            first
-                .executed_nodes
-                .iter()
-                .any(|node| node.e_node_id == e_node_id)
-        );
+        assert!(first.ran(e_node_id));
         assert_eq!(
             engine
                 .cache
@@ -287,10 +282,7 @@ mod cache_persistence {
         );
         let changed = engine.execute_sinks().await.unwrap();
         assert!(
-            changed
-                .executed_nodes
-                .iter()
-                .any(|node| node.e_node_id == e_node_id),
+            changed.ran(e_node_id),
             "a version change must reject both the resident value and old disk blob"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -325,10 +317,7 @@ mod cache_persistence {
         reopened.update(&graph, &library_v1).unwrap();
         let reused = reopened.execute_sinks().await.unwrap();
         assert!(
-            !reused
-                .executed_nodes
-                .iter()
-                .any(|node| node.e_node_id == e_node_id),
+            !reused.ran(e_node_id),
             "the replacement version must be reusable from disk"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -415,11 +404,7 @@ mod cache_persistence {
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
         assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
         assert_eq!(*printed.lock().unwrap(), vec![132, 132, 132]);
-        let reran: HashSet<_> = rerun
-            .executed_nodes
-            .iter()
-            .map(|node| node.e_node_id)
-            .collect();
+        let reran: HashSet<_> = rerun.ran_nodes().collect();
         for e_node_id in expected {
             assert!(
                 reran.contains(&e_node_id),
@@ -532,32 +517,23 @@ mod cache_persistence {
             "the cut prunes the Memory source upstream of a disk-cache hit on reopen"
         );
         assert!(
-            !stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(get_a_id)),
+            !stats.ran(root_execution_node(get_a_id)),
             "get_a was cut, not executed"
         );
         assert!(
-            stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            stats.cached(root_execution_node(mult_id)),
             "mult reused from disk"
         );
         assert!(
-            !stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(mult_id)),
+            !stats.ran(root_execution_node(mult_id)),
             "mult did not recompute"
         );
         assert!(
-            !stats
-                .node_ram
-                .iter()
-                .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
+            !stats.node_ram(root_execution_node(mult_id)).total() > 0,
             "a full run does not retain the Disk node after the run"
         );
-        let executed_allocation = stats.executed_nodes.as_ptr();
-        let executed_capacity = stats.executed_nodes.capacity();
+        let executed_allocation = stats.nodes.as_ptr();
+        let executed_capacity = stats.nodes.capacity();
         assert!(executed_capacity > 0);
 
         // A targeted run on `mult` hydrates the disk hit, but targeting must not
@@ -575,16 +551,13 @@ mod cache_persistence {
             )
             .await
             .unwrap();
-        assert!(stats.cached_nodes.contains(&root_execution_node(mult_id)));
+        assert!(stats.cached(root_execution_node(mult_id)));
         assert!(
-            !stats
-                .node_ram
-                .iter()
-                .any(|usage| usage.e_node_id == root_execution_node(mult_id)),
+            !stats.node_ram(root_execution_node(mult_id)).total() > 0,
             "a targeted run releases the hydrated Disk value"
         );
-        assert_eq!(stats.executed_nodes.as_ptr(), executed_allocation);
-        assert_eq!(stats.executed_nodes.capacity(), executed_capacity);
+        assert_eq!(stats.nodes.as_ptr(), executed_allocation);
+        assert_eq!(stats.nodes.capacity(), executed_capacity);
 
         // Changing one input to a const makes `mult` miss, while its other input
         // still needs `get_a`, so the cut keeps the source alive and it runs.
@@ -598,7 +571,7 @@ mod cache_persistence {
             "input change makes mult miss and recompute from get_a"
         );
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            !stats.cached(root_execution_node(mult_id)),
             "mult should not be cached after a digest change"
         );
         // The blob is keyed by node id, so the recompute replaced the superseded
@@ -671,14 +644,11 @@ mod cache_persistence {
             "get_a is still read by print_direct, so the cut must keep it"
         );
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(get_a_id)),
+            stats.ran(root_execution_node(get_a_id)),
             "the shared producer runs for its executing consumer"
         );
         assert!(
-            stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            stats.cached(root_execution_node(mult_id)),
             "mult still reuses from disk"
         );
     }
@@ -764,8 +734,8 @@ mod cache_persistence {
             "the cut prunes the Memory source feeding only disk-cache hits"
         );
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(sum_id))
-                && stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            !stats.cached(root_execution_node(sum_id))
+                && stats.cached(root_execution_node(mult_id)),
             "only the live frontier cache is hydrated and reported"
         );
 
@@ -808,10 +778,7 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|node| node.e_node_id == root_execution_node(sum_id)),
+            stats.ran(root_execution_node(sum_id)),
             "a value absent from the new store recomputes when needed"
         );
         assert_eq!(
@@ -888,13 +855,7 @@ mod cache_persistence {
             1,
             "the reuse verdict already pruned the producer, so nothing recomputes"
         );
-        let error_for = |node_id| {
-            stats
-                .node_errors
-                .iter()
-                .find(|failure| failure.e_node_id == root_execution_node(node_id))
-                .map(|failure| failure.error.clone())
-        };
+        let error_for = |node_id| stats.error(root_execution_node(node_id)).cloned();
         assert!(
             matches!(error_for(mult_id), Some(RunError::CacheLoadFailed { .. })),
             "the node whose cache stopped loading fails, rather than serving nothing"
@@ -903,7 +864,7 @@ mod cache_persistence {
             matches!(error_for(print_id), Some(RunError::SkippedUpstream { .. })),
             "its consumer skips as errored-upstream"
         );
-        assert!(!stats.cached_nodes.contains(&root_execution_node(mult_id)));
+        assert!(!stats.cached(root_execution_node(mult_id)));
         assert_eq!(
             blob_count(&dir),
             0,
@@ -912,7 +873,7 @@ mod cache_persistence {
 
         // Nothing left to reuse: the whole cone recomputes and republishes.
         let stats = engine.execute_sinks().await.unwrap();
-        assert!(stats.node_errors.is_empty(), "the next run is clean");
+        assert!(stats.errored_nodes().count() == 0, "the next run is clean");
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
         assert_eq!(blob_count(&dir), 1);
     }
@@ -958,11 +919,7 @@ mod cache_persistence {
         );
 
         let stats = engine.execute_sinks().await.unwrap();
-        assert_eq!(
-            stats.executed_nodes.len(),
-            1,
-            "only print runs the second time"
-        );
+        assert_eq!(stats.ran_node_count, 1, "only print runs the second time");
 
         let sum_slot = &engine.slot(root_execution_node(sum_id));
         let mult_resident = engine
@@ -1012,14 +969,11 @@ mod cache_persistence {
 
     /// A top-level node recomputed (rather than reused) in the last run.
     fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats
-            .executed_nodes
-            .iter()
-            .any(|e| e.e_node_id == root_execution_node(id))
+        stats.ran(root_execution_node(id))
     }
     /// A top-level node reused a cache or remained resident behind a cut last run.
     fn cached(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.cached_nodes.contains(&root_execution_node(id))
+        stats.cached(root_execution_node(id))
     }
     /// Count of blobs in the store — one per persisted node.
     fn blob_count(dir: &TempDir) -> usize {
@@ -1269,12 +1223,9 @@ mod cache_persistence {
         // mult is served from its disk blob, not recomputed — without this, a recompute
         // would yield 6 regardless and the stale-RAM path would go untested.
         assert!(
-            !stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(mult_id)),
+            !stats.ran(root_execution_node(mult_id)),
             "mult is a disk cache hit on flip-back, not recomputed: {:?}",
-            stats.executed_nodes
+            stats.nodes
         );
 
         assert_eq!(
@@ -1456,11 +1407,7 @@ mod cache_persistence {
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-        let ran = |s: &ExecutionOutcome, id: NodeId| {
-            s.executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(id))
-        };
+        let ran = |s: &ExecutionOutcome, id: NodeId| s.ran(root_execution_node(id));
 
         // Cold run: mult computes and stores its blob.
         {
@@ -1495,7 +1442,10 @@ mod cache_persistence {
             engine.update(&graph, &lib).unwrap();
             let stats = engine.execute_sinks().await.unwrap();
             assert!(ran(&stats, mult_id), "the corrupt cache is a same-run miss");
-            assert!(stats.node_errors.is_empty(), "the recomputed run succeeds");
+            assert!(
+                stats.errored_nodes().count() == 0,
+                "the recomputed run succeeds"
+            );
         }
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
         assert!(
@@ -1569,14 +1519,11 @@ mod cache_persistence {
 
         // The run completes (no panic): the missing blob just misses, so sum recomputes.
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(sum_id)),
+            stats.ran(root_execution_node(sum_id)),
             "sum recomputes when its blob is gone"
         );
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(sum_id)),
+            !stats.cached(root_execution_node(sum_id)),
             "a vanished blob is not served as a cache hit"
         );
         assert!(
@@ -1731,14 +1678,11 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            !stats.cached(root_execution_node(mult_id)),
             "impure-cone node must not be disk-cached"
         );
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(mult_id)),
+            stats.ran(root_execution_node(mult_id)),
             "mult recomputes on reopen"
         );
     }
@@ -1773,14 +1717,11 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(mult_id)),
+            !stats.cached(root_execution_node(mult_id)),
             "a Memory-persistence node must not be disk-cached"
         );
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(mult_id)),
+            stats.ran(root_execution_node(mult_id)),
             "mult recomputes on reopen"
         );
     }
@@ -1930,7 +1871,7 @@ mod cache_persistence {
             "codec present ⇒ served"
         );
         assert!(
-            stats.cached_nodes.contains(&root_execution_node(blob_id)),
+            stats.cached(root_execution_node(blob_id)),
             "blob node disk-cached"
         );
         assert_eq!(
@@ -1957,14 +1898,11 @@ mod cache_persistence {
             "missing codec ⇒ recompute"
         );
         assert!(
-            !stats.cached_nodes.contains(&root_execution_node(blob_id)),
+            !stats.cached(root_execution_node(blob_id)),
             "an undecodable blob is not a cache hit"
         );
         assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(blob_id)),
+            stats.ran(root_execution_node(blob_id)),
             "the node recomputes instead of tripping a failed frontier load"
         );
     }
@@ -2165,10 +2103,7 @@ mod resource_binds {
     }
 
     fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats
-            .executed_nodes
-            .iter()
-            .any(|n| n.e_node_id == root_execution_node(id))
+        stats.ran(root_execution_node(id))
     }
 
     /// The core regression: a path arriving over a **Bind** edge keys the loader on the
@@ -2208,13 +2143,7 @@ mod resource_binds {
         // skipped for reading it, and the run itself still succeeded.
         let assert_unavailable = |run: Result<ExecutionOutcome>, loader, dependent| {
             let stats = run.expect("a per-node failure must not abort the run");
-            let error_for = |node_id| {
-                stats
-                    .node_errors
-                    .iter()
-                    .find(|failure| failure.e_node_id == root_execution_node(node_id))
-                    .map(|failure| failure.error.clone())
-            };
+            let error_for = |node_id| stats.error(root_execution_node(node_id)).cloned();
             assert!(
                 matches!(
                     error_for(loader),
@@ -2293,21 +2222,13 @@ mod resource_binds {
             1,
             "unchanged file ⇒ the wired-path loader stays cached"
         );
-        assert!(
-            stats
-                .cached_nodes
-                .contains(&root_execution_node(fx.load_id))
-        );
+        assert!(stats.cached(root_execution_node(fx.load_id)));
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader skips compute on its hit"
         );
-        assert!(
-            stats
-                .cached_nodes
-                .contains(&root_execution_node(fx.annotate_id))
-        );
+        assert!(stats.cached(root_execution_node(fx.annotate_id)));
 
         // Edit the file (different length ⇒ unambiguous identity change). The loader
         // re-keys off the delivered value's file identity and the change propagates to its
@@ -2371,22 +2292,14 @@ mod resource_binds {
             1,
             "reopen with an unchanged file serves the loader from disk"
         );
-        assert!(
-            stats
-                .cached_nodes
-                .contains(&root_execution_node(fx.load_id))
-        );
+        assert!(stats.cached(root_execution_node(fx.load_id)));
         assert!(!ran(&stats, fx.load_id));
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader is a disk hit too"
         );
-        assert!(
-            stats
-                .cached_nodes
-                .contains(&root_execution_node(fx.annotate_id))
-        );
+        assert!(stats.cached(root_execution_node(fx.annotate_id)));
         assert_eq!(
             *captured.lock().unwrap(),
             "[v1]",
@@ -2905,14 +2818,13 @@ mod const_bindings {
 
         let mult_id = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print_id = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-        let ran =
-            |stats: &ExecutionOutcome, id| stats.executed_nodes.iter().any(|n| n.e_node_id == id);
+        let ran = |stats: &ExecutionOutcome, id| stats.ran(id);
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's reused
         // (cache hit); only print (impure sink) actually recomputes.
         execution_graph.update(&graph, &library).unwrap();
         let stats = execution_graph.execute_sinks().await?;
-        assert!(stats.cached_nodes.contains(&mult_id), "mult reused");
+        assert!(stats.cached(mult_id), "mult reused");
         assert!(!ran(&stats, mult_id), "mult did not recompute");
         assert!(ran(&stats, print_id), "print recomputes");
 
@@ -3133,7 +3045,7 @@ mod behavior {
             execution_node_names_in_order(&execution_graph, &graph, &library),
             ["Print"]
         );
-        assert_eq!(exe_stats.cached_nodes.len(), 4);
+        assert_eq!(exe_stats.cached_nodes().count(), 4);
 
         // Cached mult must still hold the correct product, not a stale value:
         // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
@@ -3214,7 +3126,7 @@ mod behavior {
             started_order,
             execution_node_names_in_order(&eg, &graph, &library)
         );
-        assert_eq!(started_order.len(), stats.executed_nodes.len());
+        assert_eq!(started_order.len(), stats.ran_node_count);
 
         Ok(())
     }
@@ -3245,7 +3157,7 @@ mod behavior {
         .await?;
         assert!(stats.cancelled, "pre-tripped run is cancelled");
         assert!(
-            stats.executed_nodes.is_empty(),
+            stats.ran_node_count == 0,
             "no node runs when cancel is already set"
         );
 
@@ -3262,11 +3174,7 @@ mod behavior {
         )
         .await?;
         assert!(!stats.cancelled);
-        assert_eq!(
-            stats.executed_nodes.len(),
-            5,
-            "all nodes run when not cancelled"
-        );
+        assert_eq!(stats.ran_node_count, 5, "all nodes run when not cancelled");
 
         Ok(())
     }
@@ -3283,7 +3191,6 @@ mod behavior {
         use common::CancelToken;
 
         use crate::async_lambda;
-        use crate::execution::outcome::NodeError;
         use crate::graph::Graph;
         use crate::graph::address::NodeId;
         use crate::library::Library;
@@ -3332,17 +3239,15 @@ mod behavior {
         .await?;
         assert!(stats.cancelled, "the node cancelled the run mid-invoke");
         assert!(
-            stats.executed_nodes.is_empty(),
+            stats.ran_node_count == 0,
             "an in-flight cancelled node is not reported executed (no green glow)"
         );
         assert!(
-            matches!(
-                stats.node_errors.as_slice(),
-                [NodeError { e_node_id: n, error: RunError::Cancelled { .. } }]
-                    if *n == root_execution_node(node_id)
-            ),
-            "the node is reported truthfully as Cancelled, not a fake success: {:?}",
-            stats.node_errors
+            stats.status(root_execution_node(node_id)).is_none(),
+            "a node the cancel caught mid-invoke reports nothing at all — neither a run \
+             nor a failure of its own; the run-level `cancelled` flag above is what says \
+             why: {:?}",
+            stats.nodes
         );
 
         // Run 2: a fresh token. The node's partial output was dropped, so it
@@ -3359,12 +3264,11 @@ mod behavior {
         .await?;
         assert!(!stats.cancelled);
         assert_eq!(
-            stats.executed_nodes.len(),
-            1,
+            stats.ran_node_count, 1,
             "the cancelled node re-runs next time (its output was not cached)"
         );
         assert!(
-            stats.cached_nodes.is_empty(),
+            stats.cached_nodes().count() == 0,
             "a cancelled node must not be served from cache on the next run"
         );
 
@@ -3379,7 +3283,6 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
-        use crate::execution::outcome::NodeError;
         use crate::graph::Graph;
         use crate::graph::address::NodeId;
         use crate::library::Library;
@@ -3415,17 +3318,14 @@ mod behavior {
         .await?;
 
         assert!(
-            stats.executed_nodes.is_empty(),
+            stats.ran_node_count == 0,
             "a cancelled lambda is not reported executed"
         );
         assert!(
-            matches!(
-                stats.node_errors.as_slice(),
-                [NodeError { e_node_id: n, error: RunError::Cancelled { .. } }]
-                    if *n == root_execution_node(node_id)
-            ),
-            "InvokeError::Cancelled maps to RunError::Cancelled, not Invoke: {:?}",
-            stats.node_errors
+            stats.status(root_execution_node(node_id)).is_none(),
+            "InvokeError::Cancelled maps to RunError::Cancelled, which reports nothing — \
+             had it mapped to Invoke the node would carry an `Errored` row here: {:?}",
+            stats.nodes
         );
 
         Ok(())
@@ -3740,7 +3640,7 @@ mod composite_behavior {
         .await
         .unwrap();
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.executed_nodes.len(), 1);
+        assert_eq!(stats.ran_node_count, 1);
 
         assert!(
             graph
@@ -4030,7 +3930,7 @@ mod execution {
 
         // Run 1: both ports written.
         let stats = eg.execute_sinks().await?;
-        assert!(stats.node_errors.is_empty());
+        assert!(stats.errored_nodes().count() == 0);
         let e_node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
         let outputs = eg
             .slot(e_node_id)
@@ -4050,7 +3950,7 @@ mod execution {
         });
         eg.update(&graph, &library).unwrap();
         let stats = eg.execute_sinks().await?;
-        assert!(stats.node_errors.is_empty());
+        assert!(stats.errored_nodes().count() == 0);
         let outputs = eg
             .slot(e_node_id)
             .output_values()
@@ -4101,12 +4001,12 @@ mod node_seeds {
             .execute_nodes([root_execution_node(sum_id)])
             .await
             .unwrap();
-        assert_eq!(stats.executed_nodes.len(), 3);
+        assert_eq!(stats.ran_node_count, 3);
 
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
         ran.sort();
         assert_eq!(ran, ["get_a", "get_b", "sum"], "only sum's cone runs");
-        assert!(stats.node_ram.is_empty());
+        assert!(stats.ram_holding_nodes().count() == 0);
         assert_eq!(stats.cache_ram.total(), 0);
         assert!(
             eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
@@ -4165,9 +4065,9 @@ mod node_seeds {
             .unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
-        assert_eq!(stats.executed_nodes.len(), 3);
-        assert!(!stats.cached_nodes.contains(&root_execution_node(sum_id)));
-        assert!(stats.node_ram.is_empty());
+        assert_eq!(stats.ran_node_count, 3);
+        assert!(!stats.cached(root_execution_node(sum_id)));
+        assert!(stats.ram_holding_nodes().count() == 0);
     }
 
     /// Node seeds combine with a sink run without retaining `CacheMode::None` values.
@@ -4222,7 +4122,7 @@ mod node_seeds {
             eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
             "the None-cache downstream is drained by its consumer"
         );
-        assert!(stats.node_ram.is_empty());
+        assert!(stats.ram_holding_nodes().count() == 0);
     }
 
     /// A seed that doesn't resolve against the compiled program (deleted or stale node)
@@ -4434,7 +4334,7 @@ mod error_propagation {
         // cross-run cache; the cache only reflects which outputs survived.
         let error_for = |name: &str| {
             let id = execution_node_id(&execution_graph, &graph, &library, name).unwrap();
-            stats.node_errors.iter().find(move |e| e.e_node_id == id)
+            stats.error(id)
         };
         let output_values = |name: &str| {
             execution_graph
@@ -4447,7 +4347,6 @@ mod error_propagation {
         assert!(
             error_for("get_a")
                 .unwrap()
-                .error
                 .to_string()
                 .contains("Intentional failure")
         );
@@ -4464,7 +4363,6 @@ mod error_propagation {
             assert!(
                 error_for(name)
                     .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
-                    .error
                     .to_string()
                     .contains("upstream"),
                 "{name} should report an upstream error",
@@ -4476,7 +4374,7 @@ mod error_propagation {
         }
 
         // 4 errors total: get_a original + 3 upstream-propagated.
-        assert_eq!(stats.node_errors.len(), 4);
+        assert_eq!(stats.errored_nodes().count(), 4);
 
         Ok(())
     }
@@ -4484,6 +4382,8 @@ mod error_propagation {
 
 mod stats {
     use super::*;
+
+    use crate::execution::outcome::NodeExecutionStatus;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_inputs_reported() -> TestResult {
@@ -4497,15 +4397,14 @@ mod stats {
         execution_graph.update(&graph, &library).unwrap();
         let stats = execution_graph.execute_sinks().await?;
 
-        // sum[0] should appear in missing_inputs
+        // sum's port 0 is the only unfed one — port 1 is still bound, so the run names
+        // exactly the port that failed rather than flagging the node as a whole.
         let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        assert!(
-            stats
-                .missing_inputs
-                .iter()
-                .any(|p| p.e_node_id == root_execution_node(sum_id) && p.port_idx == 0),
-            "Expected sum input 0 in missing_inputs, got: {:?}",
-            stats.missing_inputs
+        assert_eq!(
+            stats.missing_input_ports(root_execution_node(sum_id)),
+            [0],
+            "expected sum input 0 unfed, got: {:?}",
+            stats.nodes
         );
 
         Ok(())
@@ -4537,13 +4436,11 @@ mod stats {
             .expect("dangling wiring must not fail compilation");
         let stats = execution_graph.execute_sinks().await?;
 
-        assert!(
-            stats
-                .missing_inputs
-                .iter()
-                .any(|p| p.e_node_id == root_execution_node(sum_id) && p.port_idx == 0),
-            "the dangling binding degrades to a missing input, got: {:?}",
-            stats.missing_inputs
+        assert_eq!(
+            stats.missing_input_ports(root_execution_node(sum_id)),
+            [0],
+            "the dangling binding degrades to a missing input on that exact port, got: {:?}",
+            stats.nodes
         );
 
         Ok(())
@@ -4559,14 +4456,17 @@ mod stats {
         let stats = execution_graph.execute_sinks().await?;
 
         // All 5 nodes should be reported as executed
-        assert_eq!(stats.executed_nodes.len(), 5);
+        assert_eq!(stats.ran_node_count, 5);
 
         // Each node should have a non-negative elapsed time
-        for node_stats in &stats.executed_nodes {
+        for node in &stats.nodes {
+            let Some(NodeExecutionStatus::Executed { elapsed_secs }) = node.status else {
+                continue;
+            };
             assert!(
-                node_stats.elapsed_secs >= 0.0,
+                elapsed_secs >= 0.0,
                 "node {:?} has negative elapsed_secs",
-                node_stats.e_node_id
+                node.e_node_id
             );
         }
 
@@ -4576,22 +4476,12 @@ mod stats {
             .find_by_name("Print", NodeSearch::TopLevel)
             .unwrap()
             .id;
-        assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(sum_id))
-        );
-        assert!(
-            stats
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(print_id))
-        );
+        assert!(stats.ran(root_execution_node(sum_id)));
+        assert!(stats.ran(root_execution_node(print_id)));
 
         // No errors on first clean run
-        assert!(stats.node_errors.is_empty());
-        assert!(stats.missing_inputs.is_empty());
+        assert!(stats.errored_nodes().count() == 0);
+        assert!(stats.missing_input_nodes().count() == 0);
 
         Ok(())
     }
@@ -4796,12 +4686,7 @@ mod events {
         .await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
-        assert!(
-            outcome
-                .executed_nodes
-                .iter()
-                .any(|n| n.e_node_id == root_execution_node(f.emit_id))
-        );
+        assert!(outcome.ran(root_execution_node(f.emit_id)));
         assert!(outcome.event_triggers.is_empty());
 
         Ok(())
@@ -4832,10 +4717,9 @@ mod events {
         )
         .await?;
 
-        assert_eq!(outcome.node_errors.len(), 1);
         assert_eq!(
-            outcome.node_errors[0].e_node_id,
-            root_execution_node(f.emit_id)
+            outcome.errored_nodes().collect::<Vec<_>>(),
+            [root_execution_node(f.emit_id)]
         );
         assert!(outcome.event_triggers.is_empty());
 
@@ -5195,9 +5079,9 @@ mod topology {
         assert!(eg.is_empty());
 
         let stats = eg.execute_sinks().await?;
-        assert!(stats.executed_nodes.is_empty());
-        assert!(stats.node_errors.is_empty());
-        assert!(stats.missing_inputs.is_empty());
+        assert!(stats.ran_node_count == 0);
+        assert!(stats.errored_nodes().count() == 0);
+        assert!(stats.missing_input_nodes().count() == 0);
 
         Ok(())
     }
@@ -5232,7 +5116,7 @@ mod topology {
         let stats = eg.execute_sinks().await?;
 
         // Both sinks plus both sources execute exactly once.
-        assert_eq!(stats.executed_nodes.len(), 4);
+        assert_eq!(stats.ran_node_count, 4);
         let mut got = printed.lock().await.clone();
         got.sort();
         assert_eq!(got, vec![2, 5]);
@@ -5297,11 +5181,7 @@ mod topology {
             1,
             "survivor recomputed after unrelated node removal"
         );
-        assert!(
-            stats
-                .cached_nodes
-                .contains(&root_execution_node(survivor_id))
-        );
+        assert!(stats.cached(root_execution_node(survivor_id)));
         let vals = eg.get_argument_values(&survivor_id).unwrap();
         assert!(
             matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))

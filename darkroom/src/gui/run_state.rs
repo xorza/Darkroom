@@ -112,6 +112,12 @@ struct NodeRunState {
     /// its interior. Zero unless the node retains a value; drives the node body's
     /// memory readout.
     ram: RamUsage,
+    /// Input ports the last run could not satisfy, by index on this node — the run's
+    /// own verdict, so a port bound to a disabled or missing producer counts too.
+    /// Unlike every other field here this does *not* fold onto enclosing instances:
+    /// a port index names a port on one node and means nothing on the instance
+    /// around it.
+    missing_inputs: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +181,16 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
     }
 
+    /// The input ports the last run reported unsatisfied on this node. Read into the
+    /// scene each rebuild so only the ports that actually went unfed glow, rather than
+    /// every required one on a node the run flagged.
+    pub(crate) fn missing_inputs(&self, id: NodeId) -> &[usize] {
+        self.nodes
+            .get(&id)
+            .map(|n| n.missing_inputs.as_slice())
+            .unwrap_or(&[])
+    }
+
     pub(crate) fn apply_worker_status(&mut self, update: &WorkerStatus) {
         self.activity = update.activity;
         match update.kind {
@@ -204,8 +220,11 @@ impl RunState {
                 NodeExecutionStatus::Executed { elapsed_secs } => {
                     ExecStatus::Executed(*elapsed_secs)
                 }
-                NodeExecutionStatus::MissingInputs => ExecStatus::MissingInputs,
-                NodeExecutionStatus::Errored { error } => {
+                // Progress only ever reports a node's lambda starting or finishing, so a
+                // live patch never carries the planner's missing-input verdict; the ports
+                // arrive with the completed snapshot.
+                NodeExecutionStatus::MissingInputs { .. } => ExecStatus::MissingInputs,
+                NodeExecutionStatus::Errored { error, .. } => {
                     self.record_error(&compiled, node.e_node_id, error);
                     ExecStatus::Errored
                 }
@@ -229,6 +248,7 @@ impl RunState {
             node.logs.clear();
             node.errors.clear();
             node.ram = RamUsage::default();
+            node.missing_inputs.clear();
         }
         for node in &update.nodes {
             if let Some(status) = &node.status {
@@ -240,17 +260,20 @@ impl RunState {
                     NodeExecutionStatus::Executed { elapsed_secs } => {
                         ExecStatus::Executed(*elapsed_secs)
                     }
-                    NodeExecutionStatus::MissingInputs => ExecStatus::MissingInputs,
-                    NodeExecutionStatus::Errored { error } => {
+                    NodeExecutionStatus::MissingInputs { ports } => {
+                        self.record_missing_inputs(&compiled, node.e_node_id, ports);
+                        ExecStatus::MissingInputs
+                    }
+                    NodeExecutionStatus::Errored { error, .. } => {
                         self.record_error(&compiled, node.e_node_id, error);
                         ExecStatus::Errored
                     }
                 };
                 self.record_status(&compiled, node.e_node_id, status);
             }
-            if let Some(ram) = node.ram {
+            if node.ram.total() > 0 {
                 for node_id in attributed_nodes(&compiled, node.e_node_id) {
-                    self.nodes.entry(node_id).or_default().ram += ram;
+                    self.nodes.entry(node_id).or_default().ram += node.ram;
                 }
             }
         }
@@ -301,6 +324,28 @@ impl RunState {
         for node_id in attributed_nodes(compiled, e_node_id) {
             let slot = self.nodes.entry(node_id).or_default();
             slot.status = slot.status.merged(status);
+        }
+    }
+
+    /// Record the ports one flattened node went unfed on — against that node alone, not
+    /// its enclosing instances: a port index identifies a port on this node, and the same
+    /// index on the instance around it names an unrelated port. Two occurrences of one
+    /// authored node (a graph instantiated twice) union their unfed ports, since the
+    /// authored view shows a port that failed in *some* instance.
+    fn record_missing_inputs(
+        &mut self,
+        compiled: &CompiledGraph,
+        e_node_id: ExecutionNodeId,
+        ports: &[usize],
+    ) {
+        let Some(node_id) = attributed_nodes(compiled, e_node_id).next() else {
+            return;
+        };
+        let slot = self.nodes.entry(node_id).or_default();
+        for &port in ports {
+            if !slot.missing_inputs.contains(&port) {
+                slot.missing_inputs.push(port);
+            }
         }
     }
 
@@ -410,18 +455,19 @@ mod tests {
             .map(|&(e_node_id, elapsed_secs)| NodeStatus {
                 e_node_id,
                 status: Some(NodeExecutionStatus::Executed { elapsed_secs }),
-                ram: None,
+                ram: RamUsage::default(),
             })
             .collect::<Vec<_>>();
         nodes.extend(errored.iter().map(|&e_node_id| NodeStatus {
             e_node_id,
             status: Some(NodeExecutionStatus::Errored {
+                elapsed_secs: None,
                 error: RunError::Invoke {
                     func_id: FuncId::from_u128(0),
                     message: "test error".into(),
                 },
             }),
-            ram: None,
+            ram: RamUsage::default(),
         }));
         WorkerStatus {
             kind: WorkerStatusKind::Completed {
@@ -445,7 +491,7 @@ mod tests {
             nodes: vec![NodeStatus {
                 e_node_id,
                 status: Some(status),
-                ram: None,
+                ram: RamUsage::default(),
             }],
             ..WorkerStatus::default()
         }
@@ -604,12 +650,13 @@ mod tests {
         s.nodes.push(NodeStatus {
             e_node_id: fail_e_node_id,
             status: Some(NodeExecutionStatus::Errored {
+                elapsed_secs: Some(1.5),
                 error: RunError::Invoke {
                     func_id: FuncId::from_u128(0),
                     message: "no light frames provided".into(),
                 },
             }),
-            ram: None,
+            ram: RamUsage::default(),
         });
 
         rs.apply_worker_status(&s);
@@ -618,6 +665,80 @@ mod tests {
         assert_eq!(rs.errors(interior), ["no light frames provided"]);
         assert_eq!(rs.status(inst), ExecStatus::Errored);
         assert_eq!(rs.errors(inst), ["no light frames provided"]);
+    }
+
+    /// Unfed ports land on the node that owns them and nowhere else: the enclosing
+    /// instance takes the `MissingInputs` status (its subtree failed) but none of the
+    /// port indices, which would name unrelated ports on its own interface. Two
+    /// occurrences of one authored node union their ports.
+    #[test]
+    fn missing_input_ports_attribute_to_the_owning_node_only() {
+        let interior = nid(1);
+        let (inst_a, inst_b) = (nid(10), nid(20));
+        let (e_a, e_b) = (eid(101), eid(102));
+        let mut rs = run_state([(e_a, vec![inst_a], interior), (e_b, vec![inst_b], interior)]);
+
+        let mut s = completed_status(&[], &[]);
+        s.nodes.push(NodeStatus {
+            e_node_id: e_a,
+            status: Some(NodeExecutionStatus::MissingInputs { ports: vec![0, 2] }),
+            ram: RamUsage::default(),
+        });
+        s.nodes.push(NodeStatus {
+            e_node_id: e_b,
+            status: Some(NodeExecutionStatus::MissingInputs { ports: vec![2, 3] }),
+            ram: RamUsage::default(),
+        });
+        rs.apply_worker_status(&s);
+
+        assert_eq!(rs.status(interior), ExecStatus::MissingInputs);
+        assert_eq!(
+            rs.missing_inputs(interior),
+            [0, 2, 3],
+            "both occurrences' ports, unioned, port 2 once"
+        );
+        assert_eq!(rs.status(inst_a), ExecStatus::MissingInputs);
+        assert!(
+            rs.missing_inputs(inst_a).is_empty(),
+            "an instance carries the verdict but not its interior's port indices"
+        );
+        assert!(rs.missing_inputs(inst_b).is_empty());
+
+        // A run that satisfies them replaces the whole projection, ports included.
+        rs.apply_worker_status(&completed_status(&[(e_a, 1.0), (e_b, 1.0)], &[]));
+        assert_eq!(rs.status(interior), ExecStatus::Executed(2.0));
+        assert!(rs.missing_inputs(interior).is_empty());
+    }
+
+    /// A failed node arrives as one row carrying both what it cost and why it failed —
+    /// not as an `Executed` row plus an `Errored` row that a fold has to reconcile.
+    #[test]
+    fn a_failure_is_one_row_carrying_its_own_run_time() {
+        let node = nid(1);
+        let e_node_id = eid(1);
+        let mut rs = run_state([(e_node_id, vec![], node)]);
+
+        let mut s = completed_status(&[], &[]);
+        s.nodes.push(NodeStatus {
+            e_node_id,
+            status: Some(NodeExecutionStatus::Errored {
+                elapsed_secs: Some(2.5),
+                error: RunError::Invoke {
+                    func_id: FuncId::from_u128(0),
+                    message: "boom".into(),
+                },
+            }),
+            ram: RamUsage { cpu: 7, gpu: 0 },
+        });
+        rs.apply_worker_status(&s);
+
+        assert_eq!(rs.status(node), ExecStatus::Errored);
+        assert_eq!(rs.errors(node), ["boom"]);
+        assert_eq!(
+            rs.ram(node),
+            RamUsage { cpu: 7, gpu: 0 },
+            "the same row carries the RAM it kept"
+        );
     }
 
     /// A log line emitted inside a graph instance attributes to both

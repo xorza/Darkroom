@@ -33,3 +33,13 @@
 - `scenarium/src/execution/executor/mod.rs:12` — execution documentation links
   to a nonexistent `Disposition::Reuse`; `execution/plan/mod.rs:222` similarly
   links to a nonexistent `NodeVerdict`.
+
+- `palantir/src/scene/node/mod.rs:43` — the `Salt` documentation has a
+  malformed `ode` intra-doc link where it names `Node`.
+
+- `palantir/src/layout/mod.rs:47` — `Layout` is documented as returned by
+  `LayoutEngine::run`, but the method writes into a caller-owned `&mut Layout`
+  and returns nothing.
+
+- `palantir/src/layout/cache/mod.rs:279` — `MeasureCache::capture_tree` computes
+  the same subtree end twice in consecutive statements.

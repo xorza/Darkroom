@@ -6,13 +6,14 @@ use std::sync::Arc;
 
 use common::CancelToken;
 
+use crate::RamUsage;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
 use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::program::index::NodeIdx;
+use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::report::RunReporter;
 use crate::execution::schedule::RunSchedule;
 use crate::execution::schedule::planner::Planner;
@@ -44,6 +45,10 @@ pub(crate) struct ExecutionEngine {
     /// dispositions, demand, and reader counts the cache-aware sweep refines it into.
     /// Recycled across runs to avoid reallocation.
     schedule: RunSchedule,
+    /// What each node's cache holds once a run has released everything dead — filled by
+    /// the cache, read by the executor when it reduces the run to status rows. It lives
+    /// here because only the engine sees both ends of that handoff.
+    node_ram: NodeColumn<RamUsage>,
 }
 
 impl ExecutionEngine {
@@ -130,13 +135,20 @@ impl ExecutionEngine {
             )
             .await;
 
-        self.cache.release_dead_outputs(&self.compiled.program);
+        self.cache.release_dead_outputs(resolved.program());
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
         outcome.cache_ram = self
             .cache
-            .resident_ram_stats(&self.compiled.program, &mut outcome.node_ram);
+            .resident_ram_stats(resolved.program(), &mut self.node_ram);
+
+        // Phase 4: reduce the run to one status row per node. Last, because a node's row
+        // carries the RAM it ended up holding — which the two steps above just settled —
+        // alongside what it did. `resolved` still names the pair the loop walked, so the
+        // reduction cannot be taken against a different program or schedule.
+        self.executor
+            .collect_outcome(resolved, &self.node_ram, outcome);
 
         outcome.triggered_events.append(&mut seeds.events);
 

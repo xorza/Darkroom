@@ -176,6 +176,20 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     );
 }
 
+/// The executor's own reduction of a finished run, with no RAM measured: these tests
+/// exercise the run loop, and the engine's post-run release/measure sweep — which is what
+/// fills the RAM column — is not part of it.
+fn collect(
+    executor: &Executor,
+    program: &Program,
+    schedule: &RunSchedule,
+    outcome: &mut ExecutionOutcome,
+) {
+    let mut node_ram = NodeColumn::default();
+    node_ram.reset(program.e_nodes.len(), RamUsage::default());
+    executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
+}
+
 async fn run(program: &Program, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
@@ -193,6 +207,7 @@ async fn run(program: &Program, run: &RunSchedule) -> (RuntimeCache, ExecutionOu
             &mut stats,
         )
         .await;
+    collect(&executor, program, run, &mut stats);
     (cache, stats)
 }
 
@@ -219,6 +234,7 @@ async fn run_with(
             &mut outcome,
         )
         .await;
+    collect(&executor, program, schedule, &mut outcome);
     outcome
 }
 
@@ -252,8 +268,8 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
         Some(8),
         "consumer read 7 and wrote 7+1"
     );
-    assert_eq!(stats.executed_nodes.len(), 2);
-    assert!(stats.node_errors.is_empty());
+    assert_eq!(stats.ran_node_count, 2);
+    assert!(stats.errored_nodes().count() == 0);
 }
 
 #[tokio::test]
@@ -304,13 +320,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         matches!(cache[nx(&p.program, healthy)].value, ValueState::Empty),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
-    let error_of = |e_node_id: ExecutionNodeId| {
-        stats
-            .node_errors
-            .iter()
-            .find(|e| e.e_node_id == e_node_id)
-            .map(|e| e.error.to_string())
-    };
+    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id).map(RunError::to_string);
     assert!(error_of(failed).unwrap().contains("boom"));
     assert!(error_of(blocked).unwrap().contains("upstream"));
 }
@@ -378,13 +388,7 @@ async fn unbound_output_errors_only_when_demanded() {
 
     let plan = run_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
-    let error_of = |e_node_id: ExecutionNodeId| {
-        stats
-            .node_errors
-            .iter()
-            .find(|error| error.e_node_id == e_node_id)
-            .map(|error| &error.error)
-    };
+    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id);
 
     assert!(cache[nx(&p.program, a)].output_values().is_none());
     assert!(cache[nx(&p.program, b)].output_values().is_none());
@@ -402,7 +406,7 @@ async fn unbound_output_errors_only_when_demanded() {
     let plan = run_with_readers(&p.program, vec![0]);
     let (cache, stats) = run(&p.program, &plan).await;
 
-    assert!(stats.node_errors.is_empty());
+    assert!(stats.errored_nodes().count() == 0);
     assert!(matches!(
         cache[nx(&p.program, skipped)].output_values().unwrap(),
         [DynamicValue::Unbound]
@@ -565,8 +569,9 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
             &mut stats,
         )
         .await;
+    collect(&executor, &p.program, &run, &mut stats);
 
-    assert_eq!(stats.cached_nodes, vec![a]);
+    assert!(stats.cached(a));
     assert!(
         matches!(cache[nx(&p.program, a)].value, ValueState::Empty),
         "the reused value is released as soon as it is served"
@@ -631,19 +636,15 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let mut cache = RuntimeCache::default();
     cache.reconcile_fresh(&p.program);
     let first = run_with(&p.program, &mut plan, &mut cache).await;
-    assert_eq!(first.executed_nodes.len(), 3);
+    assert_eq!(first.ran_node_count, 3);
 
     let second = run_with(&p.program, &mut plan, &mut cache).await;
     assert!(
-        second.cached_nodes.contains(&cached),
+        second.cached(cached),
         "the pure RAM consumer reuses its first-run result"
     );
     assert!(
-        second.executed_nodes.iter().any(|node| node.e_node_id == a)
-            && second
-                .executed_nodes
-                .iter()
-                .any(|node| node.e_node_id == live),
+        second.ran(a) && second.ran(live),
         "the producer and impure consumer still run"
     );
     assert!(
@@ -717,20 +718,14 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     let stats = run_with(&p.program, &mut plan, &mut cache).await;
 
     assert!(
-        stats.executed_nodes.is_empty(),
+        stats.ran_node_count == 0,
         "the source is cut, the missing implementation errors, and its consumer skips"
     );
     assert!(
         cache[nx(&p.program, missing)].output_values().is_none(),
         "the missing node's stale value is dropped, not served"
     );
-    let error_of = |e_node_id: ExecutionNodeId| {
-        stats
-            .node_errors
-            .iter()
-            .find(|e| e.e_node_id == e_node_id)
-            .map(|e| &e.error)
-    };
+    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id);
     assert!(
         matches!(error_of(missing), Some(RunError::MissingLambda { .. })),
         "the node reports its missing implementation: {:?}",
@@ -793,7 +788,7 @@ async fn reuse_survives_failed_upstream_rerun() {
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &mut plan, &mut cache).await;
-    assert_eq!(stats1.executed_nodes.len(), 3);
+    assert_eq!(stats1.ran_node_count, 3);
     assert_eq!(
         cache[nx(&p.program, b)].output_values().unwrap()[0].as_i64(),
         Some(6)
@@ -804,16 +799,13 @@ async fn reuse_survives_failed_upstream_rerun() {
     // sees the errored upstream, and is skipped.
     let stats2 = run_with(&p.program, &mut plan, &mut cache).await;
     let (a_id, b_id, c_id) = (a, b, c);
-    assert!(
-        stats2.cached_nodes.contains(&b_id),
-        "B is a reuse hit despite A's failure"
-    );
+    assert!(stats2.cached(b_id), "B is a reuse hit despite A's failure");
     assert_eq!(
         cache[nx(&p.program, b)].output_values().unwrap()[0].as_i64(),
         Some(6),
         "B's valid cached value survives the sibling failure"
     );
-    let errored: Vec<ExecutionNodeId> = stats2.node_errors.iter().map(|e| e.e_node_id).collect();
+    let errored: Vec<ExecutionNodeId> = stats2.errored_nodes().collect();
     assert!(errored.contains(&a_id), "A's own failure is reported");
     assert!(
         errored.contains(&c_id),
