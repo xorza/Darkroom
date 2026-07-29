@@ -8,6 +8,9 @@
 use common::DeserializeError;
 use thiserror::Error;
 
+/// Every graph validation returns this.
+pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
+
 use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::interface::GraphId;
 use crate::graph::node::definition::FuncId;

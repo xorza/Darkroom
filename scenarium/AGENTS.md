@@ -67,10 +67,9 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `graph/node/output_type.rs` | Shared wildcard-output type resolution |
 | `graph/node/lambda.rs` | Function invocation ABI and output demand |
 | `graph/node/event.rs` | Event-lambda ABI |
-| `graph/mod.rs` | The `Graph` type, `Binding`/`BindingEntry`, the cycle check, and every `Graph` method in one impl |
-| `graph/definition.rs` | The `GraphDef` type: its builders and every question asked of one |
+| `graph/mod.rs` | The `Graph` type, `Binding`/`BindingEntry`, the cycle check, and every `Graph` method — including both validations — in one impl |
+| `graph/definition.rs` | The `GraphDef` type: its builders, its two validations, and every question asked of one |
 | `graph/serde.rs` | Custom graph wire formats |
-| `graph/validate.rs` | `Validator`: standalone and execution-entry graph validation |
 | `graph/detached.rs` | The reversible-removal records (`DetachedNode`, `DetachedGraphInput`/`Output`) and their preflight asserts |
 | `graph/clone.rs` | `MappedClone`, the result of an identity-remapping deep clone |
 | `graph/boundary/` | `Shift`: how an interface-port edit renumbers the ports around it |
