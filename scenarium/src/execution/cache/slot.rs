@@ -95,6 +95,7 @@ pub(crate) struct RuntimeSlot {
 /// The two slot fields the run loop hands a lambda — its persistent `state` and the
 /// fresh output buffer — split-borrowed from one slot so both can be written at once.
 /// Produced by [`RuntimeSlot::invoke_slot`].
+#[derive(Debug)]
 pub(crate) struct InvokeSlot<'a> {
     pub(crate) state: &'a mut AnyState,
     pub(crate) outputs: &'a mut Vec<DynamicValue>,

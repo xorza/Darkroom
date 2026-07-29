@@ -10,8 +10,9 @@
 //! subscriptions are short-circuited across boundaries (exposed events resolve
 //! to their interior emitter; triggering a composite reaches the interior
 //! nodes wired to its `GraphInput`).
-//! Data-edge and event-edge routing live in separate private modules; this
-//! module owns only traversal, descent state, and leaf emission.
+//! Traversal, descent state, leaf emission, and the data-edge and event-edge
+//! routing the descent calls into are all [`Run`]'s, and so all live here with
+//! it.
 //!
 //! Everything here is in the **stable-id space**: the walk names producers,
 //! subscribers, and emitters by [`ExecutionNodeId`] because that is all it can
@@ -29,23 +30,21 @@
 //!
 //! See `README.md` Part A §5.
 
-mod bindings;
-mod events;
-
 use hashbrown::HashSet;
 
 use crate::DataType;
-use crate::execution::compile::flat::{FlatEvent, FlatGraph, FlatInput, FlatNode, FlatOutput};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::compile::flat::{
+    FlatBinding, FlatEvent, FlatGraph, FlatInput, FlatNode, FlatOutput, PendingSubscription,
+};
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::source_map::Leaf;
-use crate::graph::Graph;
 use crate::graph::MAX_NESTING_DEPTH;
-use crate::graph::definition::GraphLink;
-use crate::graph::func::{Func, OutputType};
-use crate::graph::identity::NodeId;
-use crate::graph::identity::{GraphId, InputPort};
+use crate::graph::definition::{GraphDef, GraphLink};
+use crate::graph::func::{Func, FuncInput, OutputType};
+use crate::graph::identity::{GraphId, InputPort, NodeId, OutputPort};
 use crate::graph::node::NodeKind;
 use crate::graph::node::special::SpecialNode;
+use crate::graph::{Binding, Graph, NodeSearch};
 use crate::library::Library;
 
 /// Reusable traversal scratch owned by the
@@ -287,6 +286,289 @@ impl<'a> Run<'a> {
         self.pop_level();
         if let Some(id) = shared_id {
             self.seen_shared.remove(&id);
+        }
+    }
+
+    /// Resolve an output reference in the current frame to a concrete flat
+    /// producer, following through boundary and composite nodes. Leaves the
+    /// descent stack as it found it.
+    fn resolve(&mut self, port: OutputPort) -> FlatBinding {
+        let OutputPort { node_id, port_idx } = port;
+        let graph = self.current();
+        let node = graph
+            .find(node_id, NodeSearch::TopLevel)
+            .expect("binding to a missing node");
+        match &node.kind {
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                // Library drift can leave a binding to an output the func
+                // no longer declares — degrade to unbound rather than
+                // addressing a vanished slot (the planner reports the
+                // consumer's missing input).
+                if graph
+                    .node_ports(node, self.library)
+                    .is_some_and(|ports| port_idx >= ports.outputs.len())
+                {
+                    return FlatBinding::None;
+                }
+                FlatBinding::Bind(ExecutionOutputPort {
+                    e_node_id: self.execution_node_id(node_id),
+                    port_idx,
+                })
+            }
+            // Follow into the composite: its output `port_idx` is wired by the
+            // GraphOutput node's input `port_idx`.
+            NodeKind::Graph(r) => {
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                self.push_level(node_id, &nested.body);
+                let source = self.resolve_exposed_output(nested, port_idx);
+                self.pop_level();
+                source
+            }
+            // Follow out: this GraphInput output `port_idx` is the enclosing
+            // instance's exposed input `port_idx`; resolve it one level up.
+            NodeKind::GraphInput => {
+                let instance_id = *self.path.last().expect("GraphInput at the root level");
+                self.pop_level();
+                let outer = self.current();
+                let binding = outer.bindings.get(&InputPort::new(instance_id, port_idx));
+                // The level below was descended through this very node, so
+                // it is here and it is a graph — only the port may have
+                // gone, which is drift.
+                let instance = outer
+                    .find(instance_id, NodeSearch::TopLevel)
+                    .expect("the enclosing level was descended through this instance");
+                let NodeKind::Graph(link) = &instance.kind else {
+                    panic!("only a graph node opens a level");
+                };
+                let def = outer
+                    .resolve_graph(*link, self.library)
+                    .expect("graph node references a missing graph");
+                // The instance's own interface declares this port, so the
+                // exterior wire is gated against it — the same `FuncInput`
+                // the interior side would be gated against, picker list and
+                // optionality included.
+                let source = match def.inputs.get(port_idx) {
+                    Some(declared) => self.typed_binding(outer, declared, binding),
+                    None => FlatBinding::None,
+                };
+                self.push_level(instance_id, graph);
+                source
+            }
+            NodeKind::GraphOutput => FlatBinding::None,
+        }
+    }
+
+    /// [`Self::resolve_binding`] behind the type gate: a wire whose resolved
+    /// source type is incompatible with the declared input, or a const that
+    /// doesn't satisfy it, flattens as unbound — the type half of drift
+    /// tolerance. The editor paints such a wire as mismatched; a required
+    /// input surfaces as a missing-input verdict. Nothing is severed, so the
+    /// wiring revives when the types line up again.
+    fn typed_binding(
+        &mut self,
+        graph: &'a Graph,
+        input: &FuncInput,
+        binding: Option<&Binding>,
+    ) -> FlatBinding {
+        let mismatched = match binding {
+            Some(Binding::Bind(src)) => !input
+                .data_type
+                .compatible_with(&graph.resolve_output_type(self.library, *src)),
+            Some(Binding::Const(value)) => !self.library.const_satisfies(input, value),
+            None => false,
+        };
+        if mismatched {
+            return FlatBinding::None;
+        }
+        self.resolve_binding(binding)
+    }
+
+    /// Resolve `nested`'s interface output `port_idx` through the interior
+    /// wiring behind it, gated by the declared port type. Call with
+    /// `nested`'s own level pushed.
+    ///
+    /// The single definition of "what comes out of this port", shared by
+    /// the on-demand hop in [`Self::resolve`] and the eager record in
+    /// [`Self::record_exposed_outputs`] — the two must agree, or an
+    /// instance would name a producer its consumers never see.
+    fn resolve_exposed_output(&mut self, nested: &'a GraphDef, port_idx: usize) -> FlatBinding {
+        // Drift can leave the definition without a boundary node, or the
+        // interface without this port at all.
+        let (Some(output_node), Some(declared)) = (
+            nested.body.boundary_node(NodeKind::GraphOutput),
+            nested.outputs.get(port_idx),
+        ) else {
+            return FlatBinding::None;
+        };
+        let declared = declared.ty.declared();
+        let binding = nested
+            .body
+            .bindings
+            .get(&InputPort::new(output_node, port_idx));
+        self.typed_boundary_binding(&nested.body, &declared, binding)
+    }
+
+    /// Note which execution node backs each of `nested`'s interface output
+    /// ports, against the instance `instance_id`. Called with that
+    /// instance's level already pushed.
+    ///
+    /// Eager, and for every instance — not only those something binds to.
+    /// The finished program has no `GraphOutput` edges left, so nothing
+    /// downstream can tell an exposed producer from interior plumbing:
+    /// with an interior reader and no exterior one, its consumer set is
+    /// entirely inside the footprint, exactly like a node the instance
+    /// merely uses. That is the shape `run_targets` used to skip.
+    fn record_exposed_outputs(&mut self, instance_id: NodeId, nested: &'a GraphDef) {
+        for port_idx in 0..nested.outputs.len() {
+            if let FlatBinding::Bind(port) = self.resolve_exposed_output(nested, port_idx) {
+                self.flat.exposed.push((instance_id, port.e_node_id));
+            }
+        }
+    }
+
+    /// [`Self::typed_binding`] for a **boundary** port, whose declaration is
+    /// a bare [`DataType`] rather than a `FuncInput`.
+    ///
+    /// A composite's interface is a type contract in its own right. The
+    /// outer gate checks the consumer against the *declared* port type and
+    /// passes; crossing the boundary through raw `resolve_binding` then
+    /// ignored that declaration entirely, so a definition declaring an
+    /// `Int` output while wiring it to a `String` producer compiled a
+    /// direct `Bind` from that producer into an `Int` consumer. Nothing
+    /// downstream could see it — the edge that would have shown the
+    /// mismatch is exactly the one flattening dissolves.
+    fn typed_boundary_binding(
+        &mut self,
+        graph: &'a Graph,
+        declared: &DataType,
+        binding: Option<&Binding>,
+    ) -> FlatBinding {
+        let mismatched = match binding {
+            Some(Binding::Bind(src)) => {
+                !declared.compatible_with(&graph.resolve_output_type(self.library, *src))
+            }
+            Some(Binding::Const(value)) => !self.library.declared_accepts_const(declared, value),
+            None => false,
+        };
+        if mismatched {
+            return FlatBinding::None;
+        }
+        self.resolve_binding(binding)
+    }
+
+    fn resolve_binding(&mut self, binding: Option<&Binding>) -> FlatBinding {
+        match binding {
+            None => FlatBinding::None,
+            Some(Binding::Const(value)) => FlatBinding::Const(value.clone()),
+            Some(Binding::Bind(output)) => self.resolve(*output),
+        }
+    }
+
+    /// Resolve this level's event subscriptions across composite boundaries
+    /// into flat `(emitter, event_idx, subscriber)` edges. Subscriptions
+    /// emitted *by* a `GraphInput` (the trigger) are consumed when the
+    /// enclosing instance is resolved as a subscriber, so they are skipped here.
+    fn collect_subscriptions(&mut self, graph: &'a Graph) {
+        let trigger = graph.boundary_node(NodeKind::GraphInput);
+
+        for sub in graph.subscriptions() {
+            if Some(sub.emitter) == trigger {
+                continue;
+            }
+            let Some(event) = self.resolve_emitter(sub.emitter, sub.event_idx) else {
+                continue;
+            };
+            self.resolve_subscriber(sub.subscriber, event);
+        }
+    }
+
+    /// Resolve an emitter `(node, event_idx)` to the concrete flat func event
+    /// it ultimately fires, following composite exposed-event mappings inward.
+    fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<ExecutionEventPort> {
+        let graph = self.current();
+        // Both callers name a validated node: a subscription's emitter, or
+        // an interface event's. `None` below is drift or a deliberate skip,
+        // never an id this graph has no node for.
+        let node = graph
+            .find(node_id, NodeSearch::TopLevel)
+            .expect("subscription emitter resolved by validate_for_execution");
+        if node.disabled {
+            return None; // a disabled node fires no events
+        }
+        match &node.kind {
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                // Drift tolerance: a subscription to an event the func no
+                // longer declares wires nothing.
+                if graph
+                    .node_ports(node, self.library)
+                    .is_some_and(|ports| event_idx >= ports.events.len())
+                {
+                    return None;
+                }
+                Some(ExecutionEventPort {
+                    e_node_id: self.execution_node_id(node_id),
+                    event_idx,
+                })
+            }
+            NodeKind::Graph(r) => {
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                // Drift: the interface may no longer expose this event.
+                let exposed = nested.events.get(event_idx)?;
+                self.push_level(node_id, &nested.body);
+                let resolved = self.resolve_emitter(exposed.emitter, exposed.emitter_event_idx);
+                self.pop_level();
+                resolved
+            }
+            NodeKind::GraphInput | NodeKind::GraphOutput => None,
+        }
+    }
+
+    /// Resolve a subscriber to the concrete flat func nodes that actually run,
+    /// pushing `(emitter, event_idx, flat_subscriber)` for each. A composite
+    /// subscriber expands to the interior nodes wired to its `GraphInput`
+    /// trigger.
+    fn resolve_subscriber(&mut self, node_id: NodeId, event: ExecutionEventPort) {
+        let graph = self.current();
+        // Every caller names a validated subscriber, at this level or a
+        // nested one.
+        let node = graph
+            .find(node_id, NodeSearch::TopLevel)
+            .expect("subscriber resolved by validate_for_execution");
+        // A disabled node runs nothing, so it receives no events.
+        if node.disabled {
+            return;
+        }
+        match &node.kind {
+            // A special node subscribes like a func: it flattens to one leaf and
+            // becomes the flat subscriber. `RunSinks` in particular relies on
+            // this edge so the planner sees it among a fired event's subscribers.
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                let e_node_id = self.execution_node_id(node_id);
+                self.flat.subscriptions.push(PendingSubscription {
+                    event,
+                    subscriber: e_node_id,
+                });
+            }
+            NodeKind::Graph(r) => {
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                // A definition with no inbound boundary has nothing to
+                // deliver the event to — authored, not broken.
+                let Some(trigger) = nested.body.boundary_node(NodeKind::GraphInput) else {
+                    return;
+                };
+                self.push_level(node_id, &nested.body);
+                for sub in nested.body.subscriptions().filter(|s| s.emitter == trigger) {
+                    self.resolve_subscriber(sub.subscriber, event);
+                }
+                self.pop_level();
+            }
+            NodeKind::GraphInput | NodeKind::GraphOutput => {}
         }
     }
 }
