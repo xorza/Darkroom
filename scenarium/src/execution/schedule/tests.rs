@@ -483,13 +483,13 @@ mod planning {
 mod resolving {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::TestCompiledGraph;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::identity::{NodeIdx, OutputAddr};
     use crate::execution::program::{
         ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
     use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
+    use crate::execution::test_support::TestCompiledGraph;
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::{FuncLambda, OutputDemand};
     use crate::graph::identity::FuncId;

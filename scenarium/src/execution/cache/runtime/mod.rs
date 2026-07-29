@@ -700,8 +700,8 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::TestCompiledGraph;
     use crate::execution::identity::NodeIdx;
+    use crate::execution::test_support::TestCompiledGraph;
 
     impl RuntimeCache {
         pub(crate) fn reconcile_for_test(&mut self, installed: &TestCompiledGraph) {

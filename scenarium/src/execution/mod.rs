@@ -28,3 +28,5 @@ pub(crate) mod report;
 pub(crate) mod schedule;
 pub(crate) mod seeds;
 pub(crate) mod source_map;
+#[cfg(test)]
+pub(crate) mod test_support;
