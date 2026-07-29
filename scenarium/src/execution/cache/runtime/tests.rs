@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use crate::execution::cache::digest::Digest;
-use crate::execution::cache::runtime::{NodeRamUsage, RuntimeCache, internals};
+use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
+use crate::execution::ram::NodeRamUsage;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::OutputDemand;

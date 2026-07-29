@@ -10,7 +10,7 @@ use crate::node::definition::FuncId;
 /// ([`EventSeedNotFound`](Error::EventSeedNotFound)), or the event loop's lambda
 /// panicked ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the
 /// engine's `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
-/// (collected into [`ExecutionOutcome::node_errors`](crate::execution::outcome::ExecutionOutcome)),
+/// (collected into `ExecutionOutcome::node_errors`),
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](crate::execution::compile::CompileError), produced on the host before anything
 /// reaches the engine — the phases can't be confused at the type level.
@@ -32,8 +32,8 @@ pub enum Error {
 }
 
 /// A **single node's** run-time failure, collected per-node into
-/// [`ExecutionOutcome::node_errors`](crate::execution::outcome::ExecutionOutcome). Distinct
-/// from [`Error`] (whole-operation failures): a `RunError` always concerns exactly one
+/// `ExecutionOutcome::node_errors`. Distinct
+/// from [`Error`](enum@Error) (whole-operation failures): a `RunError` always concerns exactly one
 /// node, so it can't carry a compile/plan failure, and a caller reading `node_errors`
 /// can't mistake a setup failure for a node's outcome.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]

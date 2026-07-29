@@ -27,7 +27,7 @@ pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
 };
-pub use execution::outcome::{LogEntry, LogLevel};
+pub use execution::log::{LogEntry, LogLevel};
 pub use execution::seeds::RunSeeds;
 pub use graph::boundary::{DetachedGraphInput, DetachedGraphOutput};
 pub use graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};

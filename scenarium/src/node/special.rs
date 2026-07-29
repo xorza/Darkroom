@@ -22,7 +22,7 @@ pub enum SpecialNode {
     /// subscribes to fires, the engine seeds the run with *every* sink node
     /// (re-running the whole graph) instead of a data cone of its own — the
     /// promotion lives in the planner's root collection. Interface in
-    /// [`run_sinks`](crate::elements::run_sinks).
+    /// the `run_sinks` element.
     RunSinks,
 }
 
