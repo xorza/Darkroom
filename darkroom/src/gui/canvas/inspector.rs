@@ -36,7 +36,7 @@ use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::format::fmt_elapsed;
 use crate::gui::node::{RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{InputBindingView, Scene, SceneNode};
+use crate::gui::scene::{Frame, InputBindingView, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
@@ -94,7 +94,7 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, scene: &Scene) {
+    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, frame: Frame<'_>) {
         if let Some(node) = hits.chip(Chip::Inspect) {
             match cycle(self.modes.get(&node).copied()) {
                 Some(m) => {
@@ -105,10 +105,11 @@ impl Inspectors {
                 }
             }
         }
-        if outside_action(ui, hits, scene) {
+        if outside_action(ui, hits, frame) {
             self.close_unpinned();
         }
-        self.modes.retain(|id, _| scene.nodes.contains_key(id));
+        self.modes
+            .retain(|id, _| frame.scene.nodes.contains_key(id));
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -288,10 +289,10 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// node body, clicking bare canvas, or panning/zooming the canvas all
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
-fn outside_action(ui: &Ui, hits: &CanvasHits, scene: &Scene) -> bool {
+fn outside_action(ui: &Ui, hits: &CanvasHits, frame: Frame<'_>) -> bool {
     // Any pane counts: an action on one canvas closes a transient panel
     // opened on another, the same way it closes one on its own.
-    let canvas_acted = scene.graphs().any(|graph| {
+    let canvas_acted = frame.panes().any(|graph| {
         let oc = ui.response_for(outer_canvas_widget_id(graph.target()));
         // Any-button drag: left rubber-bands, middle pans, right scribbles
         // the breaker — all of them count as "acted on the canvas".

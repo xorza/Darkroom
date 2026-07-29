@@ -9,7 +9,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
 use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
@@ -54,7 +54,7 @@ impl NodeMenuUi {
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         // Boundary interface nodes carry no structural identity to

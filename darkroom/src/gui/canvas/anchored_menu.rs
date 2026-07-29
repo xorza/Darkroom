@@ -5,7 +5,7 @@ use scenarium::NodeId;
 use crate::core::document::GraphRef;
 use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
 use crate::gui::canvas::pane::PaneSlot;
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
@@ -134,7 +134,7 @@ impl NodeContextMenu {
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         trigger: MenuTrigger,
     ) -> Option<NodeId> {
         let clicked = hits.menu(trigger).filter(|&id| graph.contains(id))?;
@@ -153,7 +153,7 @@ impl NodeContextMenu {
     pub(super) fn show<T>(
         &mut self,
         ui: &mut Ui,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         id_salt: &'static str,
         body: impl FnOnce(&mut Ui, &PopupHandle, NodeId) -> Option<T>,
     ) -> Option<NodePick<T>> {

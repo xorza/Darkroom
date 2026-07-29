@@ -36,7 +36,7 @@
 //! because two of its consumers (the graph-open and preview-open chips)
 //! have to resolve before the tab set settles. Its hits are therefore ids
 //! from *last* frame's projection; a consumer confirms the node is still
-//! in the pane it is drawing (`GraphScene::contains`) before acting, which
+//! in the pane it is drawing (`Pane::contains`) before acting, which
 //! is the same check it needed anyway for a hit belonging to another pane.
 //! The port half has no such gap — it fills after the rebuild.
 
@@ -49,7 +49,7 @@ use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_b
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::node::preview_row::preview_image_wid;
 use crate::gui::node::{drag_handles, node_widget_id};
-use crate::gui::scene::{GraphScene, Scene, SceneNode};
+use crate::gui::scene::{Frame, Pane, SceneNode};
 
 /// A left-clickable chip on a node, named by what it does rather than by
 /// the widget it lives in. One enum instead of a slot per chip: they are
@@ -165,16 +165,16 @@ impl CanvasHits {
     /// responses, across every visible pane. Run once per frame, in the
     /// navigation phase — see the module docs for why there, what it
     /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, scene: &Scene) {
+    pub(crate) fn scan(&mut self, ui: &Ui, frame: Frame<'_>) {
         *self = Self::default();
-        for graph in scene.graphs() {
+        for graph in frame.panes() {
             for node in graph.nodes() {
                 self.scan_node(ui, graph, node);
             }
         }
     }
 
-    fn scan_node(&mut self, ui: &Ui, graph: GraphScene<'_>, node: &SceneNode) {
+    fn scan_node(&mut self, ui: &Ui, graph: Pane<'_>, node: &SceneNode) {
         let body = ui.response_for(node_widget_id(node.id));
         if body.left.clicked() || body.left.drag.started() {
             self.body_acted.get_or_insert(node.id);
@@ -210,7 +210,7 @@ impl CanvasHits {
     /// `gui::node::preview_row`) — so a stale response can't act on a node
     /// that has stopped offering the affordance, and that rule lives in
     /// one place per chip rather than in the chip's draw and its scan.
-    fn scan_chips(&mut self, ui: &Ui, graph: GraphScene<'_>, node: &SceneNode) {
+    fn scan_chips(&mut self, ui: &Ui, graph: Pane<'_>, node: &SceneNode) {
         let candidates = [
             (Chip::Play, graph.runnable(node), play_badge_wid(node.id)),
             (

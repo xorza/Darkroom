@@ -27,7 +27,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{GraphProjection, Scene, SceneSource};
+use crate::gui::scene::{Frame, GraphProjection, Scene, SceneSource};
 use crate::gui::theme::Theme;
 
 use crate::gui::app::{AppContext, StatusInputs};
@@ -377,8 +377,12 @@ impl Editor {
             // connection commit) drained *before* the record so Pass A sees
             // the settled doc. It reads everything off `Scene`, and each
             // intent it raises carries the pane it came from.
+            let frame = Frame {
+                scene: &self.scene,
+                doc: &open.document,
+            };
             self.main_window
-                .prepass(ui, &self.scene, library, &mut self.intents);
+                .prepass(ui, frame, library, &mut self.intents);
             self.drain_intents(open);
             self.apply_canvas_shortcuts(ui, open);
         }
@@ -404,9 +408,11 @@ impl Editor {
             .frame(
                 ui,
                 &ctx,
-                &self.scene,
+                Frame {
+                    scene: &self.scene,
+                    doc: &open.document,
+                },
                 preferences,
-                &open.document,
                 &mut self.intents,
             )
             .or(command_from_shortcut);
@@ -481,8 +487,12 @@ impl Editor {
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
         // whose chips were clicked.
+        let frame = Frame {
+            scene: &self.scene,
+            doc: &open.document,
+        };
         self.main_window
-            .scan_navigation(ui, &open.document, &self.scene, &mut self.actions);
+            .scan_navigation(ui, frame, &mut self.actions);
         // Open mutates the layout directly; activate/close queue
         // undoable `DocIntent::Dock` ops — drain them.
         self.apply_view_actions(open);

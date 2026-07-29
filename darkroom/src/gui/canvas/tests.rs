@@ -2,11 +2,11 @@ use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::{
-    Binding, CacheMode, DataType, Func, FuncId, FuncInput, FuncOutput, Graph, GraphDef, GraphId,
+    Binding, CacheMode, DataType, Func, FuncId, FuncInput, FuncOutput, GraphDef, GraphId,
     InputPort, Library, Node, NodeKind, testing,
 };
 
-use crate::core::document::{GraphRef, GraphView, PortKind, PortRef};
+use crate::core::document::{Document, GraphRef, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::app::AppContext;
@@ -18,7 +18,7 @@ use crate::gui::graph_toolbar;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::{node_wid, node_widget_id};
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{GraphProjection, Scene, SceneSource};
+use crate::gui::scene::{Frame, GraphProjection, Scene, SceneSource};
 use crate::gui::theme::Theme;
 
 /// One func with an input and an output, so a node projected from it
@@ -86,10 +86,11 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
 
     // Root pane: two func nodes, the second bound to the first, so wires,
     // both port kinds, and a const editor all record.
-    let mut root = Graph::default();
-    let upstream = root.add_func_node(probe);
-    let downstream = root.add_func_node(probe);
-    root.set_input_binding(InputPort::new(downstream, 0), Binding::bind(upstream, 0));
+    let mut doc = Document::default();
+    let upstream = doc.graph.add_func_node(probe);
+    let downstream = doc.graph.add_func_node(probe);
+    doc.graph
+        .set_input_binding(InputPort::new(downstream, 0), Binding::bind(upstream, 0));
 
     // Local-definition pane: boundary nodes, which draw the port-rename
     // widgets the root pane never records, plus a func node — the boundary
@@ -106,11 +107,13 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     def.body
         .set_input_binding(InputPort::new(def_func, 0), Binding::bind(def_in, 0));
 
-    let local = GraphRef::Local(GraphId::unique());
-    let mut root_view = GraphView::for_graph(&root);
-    let mut def_view = GraphView::for_graph(&def.body);
-    spread(&mut root_view);
-    spread(&mut def_view);
+    let def_id = GraphId::unique();
+    let local = GraphRef::Local(def_id);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
+    doc.graph.insert_graph(def_id, def);
+    assert!(doc.ensure_sub_view(def_id), "the def was just inserted");
+    spread(doc.scope_mut(local).expect("the def resolves").view);
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -134,7 +137,13 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
         // rebuild replaces the projection they were recorded from — the
         // order `Editor::frame` runs, and the one every reader below
         // depends on.
-        graph_ui.hits.scan(ui, &scene);
+        graph_ui.hits.scan(
+            ui,
+            Frame {
+                scene: &scene,
+                doc: &doc,
+            },
+        );
         scene.rebuild(
             ui,
             &library,
@@ -142,17 +151,21 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
             [
                 GraphProjection {
                     target: GraphRef::Main,
-                    source: SceneSource::Entry(&root),
-                    view: &root_view,
+                    source: SceneSource::Entry(&doc.graph),
+                    view: &doc.main_view,
                 },
                 GraphProjection {
                     target: local,
-                    source: SceneSource::Def(&def),
-                    view: &def_view,
+                    source: SceneSource::Def(doc.graph.find_graph(def_id).expect("inserted")),
+                    view: doc.view(local).expect("interior view"),
                 },
             ],
         );
-        graph_ui.prepass(ui, &scene, &Library::default(), &mut intents);
+        let frame = Frame {
+            scene: &scene,
+            doc: &doc,
+        };
+        graph_ui.prepass(ui, frame, &Library::default(), &mut intents);
         // Mirrors `main_window`'s per-pane content closure: each pane's
         // subtree under its own `("graph_overlay", target)` parent.
         let mut command = None;
@@ -161,7 +174,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
                 for target in [GraphRef::Main, local] {
-                    let graph = scene.graph(target).expect("projected");
+                    let graph = frame.pane(target).expect("projected");
                     Panel::zstack()
                         .id_salt(("graph_overlay", target))
                         .size((Sizing::FILL, Sizing::FILL))
@@ -211,7 +224,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
     // Open an inspector and draw again. `Inspectors::modes` is a
     // document-wide `NodeId` map that *every* pane iterates, so the panel
     // ids are the one place where a per-pane draw walks a set it doesn't
-    // own — it stays single-pane only because `GraphScene::node` filters
+    // own — it stays single-pane only because `Pane::node` filters
     // on `owner`. Exercise it rather than trusting the read.
     harness.click_on(inspect_badge_wid(upstream));
     harness.frame_value(&mut draw);
@@ -253,7 +266,7 @@ fn two_graph_panes_record_no_duplicate_widget_ids_and_edit_only_themselves() {
 
     // Prepass phase: a port double-click on the same node clears its binding.
     // Scanned per pane rather than per node, so it reads its target off the
-    // `GraphScene` being swept.
+    // `Pane` being swept.
     let port = PortRef {
         node_id: def_func,
         kind: PortKind::Input,
@@ -310,12 +323,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let library = one_func_library();
     let probe = library.by_name("probe").expect("just added").clone();
 
-    let mut root = Graph::default();
-    let stays = root.add_func_node(&probe);
-    let leaves = root.add_func_node(&probe);
-    root.set_input_binding(InputPort::new(leaves, 0), Binding::bind(stays, 0));
-    let mut view = GraphView::for_graph(&root);
-    spread(&mut view);
+    let mut doc = Document::default();
+    let stays = doc.graph.add_func_node(&probe);
+    let leaves = doc.graph.add_func_node(&probe);
+    doc.graph
+        .set_input_binding(InputPort::new(leaves, 0), Binding::bind(stays, 0));
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -323,7 +337,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut graph_ui = GraphUI::default();
     let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, view: &GraphView| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -338,12 +352,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -351,13 +366,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
                 graph_ui.draw(ui, &ctx, graph, &mut intents);
             });
     };
-    let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, scene: &mut Scene, view: &_| {
-        harness.frame(|ui| draw(ui, graph_ui, scene, view));
+    let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &_| {
+        harness.frame(|ui| draw(ui, graph_ui, scene, doc));
     };
 
     // Both on screen and recorded, so every glyph has a fresh offset cached.
-    frame(&mut harness, &mut graph_ui, &mut scene, &view);
-    frame(&mut harness, &mut graph_ui, &mut scene, &view);
+    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
+    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
     let out_port = PortRef {
         node_id: leaves,
         kind: PortKind::Output,
@@ -371,11 +386,11 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // Scroll it far past the viewport. Two frames: the first still reads the
     // on-screen record, the second is the culled one that has to reconstruct.
-    let before = view.item_placements[&leaves];
+    let before = doc.main_view.item_placements[&leaves];
     let shift = Vec2::new(6000.0, 4000.0);
-    view.item_placements[&leaves] = before + shift;
-    frame(&mut harness, &mut graph_ui, &mut scene, &view);
-    frame(&mut harness, &mut graph_ui, &mut scene, &view);
+    doc.main_view.item_placements[&leaves] = before + shift;
+    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
+    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
 
     let culled = graph_ui
         .geometry
@@ -392,7 +407,12 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let live = scene.graph(GraphRef::Main).expect("projected");
+    let live = Frame {
+        scene: &scene,
+        doc: &doc,
+    }
+    .pane(GraphRef::Main)
+    .expect("projected");
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -421,7 +441,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     );
     // The port offsets went with it, so the next culled rebuild has nothing
     // left to reconstruct from.
-    frame(&mut harness, &mut graph_ui, &mut scene, &view);
+    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
     assert_eq!(
         graph_ui.geometry.ports.center(out_port),
         None,
@@ -457,8 +477,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 Func::new(FuncId::unique(), format!("func{i:02}")).category("Bulk"),
             ));
         }
-        let root = Graph::default();
-        let view = GraphView::for_graph(&root);
+        let doc = Document::default();
         let run_state = RunState::default();
         let mut harness = UiHarness::with_text(UVec2::new(1200, 900));
         restyle(&mut harness.ui().theme);
@@ -480,12 +499,13 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 &run_state,
                 [GraphProjection {
                     target: GraphRef::Main,
-                    source: SceneSource::Entry(&root),
-                    view: &view,
+                    source: SceneSource::Entry(&doc.graph),
+                    view: &doc.main_view,
                 }],
             );
-            graph_ui.prepass(ui, scene, &library, &mut intents);
-            let graph = scene.graph(GraphRef::Main).expect("projected");
+            let frame = Frame { scene, doc: &doc };
+            graph_ui.prepass(ui, frame, &library, &mut intents);
+            let graph = frame.pane(GraphRef::Main).expect("projected");
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
@@ -592,14 +612,18 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
 
     let library = one_func_library();
     let probe = library.by_name("probe").expect("just added").clone();
-    let mut root = Graph::default();
-    let a = root.add_func_node(&probe);
-    let b = root.add_func_node(&probe);
-    let mut view = GraphView::for_graph(&root);
+    let mut doc = Document::default();
+    let a = doc.graph.add_func_node(&probe);
+    let b = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
     // Placed by id, not by `spread`: this case cares *which* node the
     // second band reaches, and `spread` assigns by map iteration order.
-    view.item_placements.insert(a, Vec2::new(40.0, 40.0));
-    view.item_placements.insert(b, Vec2::new(400.0, 40.0));
+    doc.main_view
+        .item_placements
+        .insert(a, Vec2::new(40.0, 40.0));
+    doc.main_view
+        .item_placements
+        .insert(b, Vec2::new(400.0, 40.0));
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -616,19 +640,20 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, scene);
+        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
         scene.rebuild(
             ui,
             &library,
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view: &view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc: &doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -717,10 +742,10 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     let library = one_func_library();
     let probe = library.by_name("probe").expect("just added").clone();
 
-    let mut root = Graph::default();
-    let node = root.add_func_node(&probe);
-    let mut view = GraphView::for_graph(&root);
-    spread(&mut view);
+    let mut doc = Document::default();
+    let node = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -728,9 +753,9 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     let mut graph_ui = GraphUI::default();
     let mut scene = Scene::default();
 
-    // `view` is a parameter, not a capture, so it can be edited between frames
+    // `doc` is a parameter, not a capture, so it can be edited between frames
     // the way an undo would edit the document under a running gesture.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, view: &GraphView| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -745,12 +770,13 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -761,10 +787,10 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     };
 
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &view);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &view);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
     let body = harness
         .rect(node_widget_id(node))
@@ -778,7 +804,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // nowhere near the node, so nothing is marked.
     harness.press_button_at(PointerButton::Right, SCRIBBLE_FROM);
     harness.drag_to(SCRIBBLE_TO);
-    let scribbling = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &view));
+    let scribbling = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     assert!(
         scribbling.is_empty(),
         "a scribble in flight severs nothing until release: {scribbling:?}"
@@ -787,13 +813,13 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // Now move the node onto the scribble, centred on its far end. This frame
     // the document says the node is here while its arranged rect still says it
     // is back there — the divergence the probe has to resolve the new way.
-    view.item_placements[&node] = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
+    doc.main_view.item_placements[&node] = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &view);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
 
     harness.release_button(PointerButton::Right);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &view));
+    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     // The helper carries the pane assertion: a cut commits against the pane
     // the scribble ran on.
     let released = scoped_intents(&released, GraphRef::Main);
@@ -825,9 +851,12 @@ fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() 
     def.body.add(Node::new(NodeKind::GraphOutput));
     let func = def.body.add_func_node(&probe);
 
-    let target = GraphRef::Local(GraphId::unique());
-    let mut view = GraphView::for_graph(&def.body);
-    spread(&mut view);
+    let def_id = GraphId::unique();
+    let target = GraphRef::Local(def_id);
+    let mut doc = Document::default();
+    doc.graph.insert_graph(def_id, def);
+    assert!(doc.ensure_sub_view(def_id), "the def was just inserted");
+    spread(doc.scope_mut(target).expect("the def resolves").view);
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -846,19 +875,20 @@ fn a_node_body_right_click_selects_that_node_and_boundary_nodes_offer_nothing() 
         let mut intents = Intents::default();
         // Navigation phase first — see the two-pane test for why the sweep
         // reads the pre-rebuild scene.
-        graph_ui.hits.scan(ui, scene);
+        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
         scene.rebuild(
             ui,
             &library,
             &run_state,
             [GraphProjection {
                 target,
-                source: SceneSource::Def(&def),
-                view: &view,
+                source: SceneSource::Def(doc.graph.find_graph(def_id).expect("inserted")),
+                view: doc.view(target).expect("interior view"),
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(target).expect("projected");
+        let frame = Frame { scene, doc: &doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(target).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -914,12 +944,12 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let library = one_func_library();
     let probe = library.by_name("probe").expect("just added").clone();
 
-    let mut root = Graph::default();
-    let dragged = root.add_func_node(&probe);
-    let bystander = root.add_func_node(&probe);
-    let mut view = GraphView::for_graph(&root);
-    spread(&mut view);
-    let start = view.item_placements[&dragged];
+    let mut doc = Document::default();
+    let dragged = doc.graph.add_func_node(&probe);
+    let bystander = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
+    let start = doc.main_view.item_placements[&dragged];
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -936,19 +966,20 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, scene);
+        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
         scene.rebuild(
             ui,
             &library,
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view: &view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc: &doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -1021,11 +1052,11 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
 
     // Two unwired nodes, so the drag has a producer to leave and a consumer
     // to land on and nothing to trip the cycle check.
-    let mut root = Graph::default();
-    let producer = root.add_func_node(&probe);
-    let consumer = root.add_func_node(&probe);
-    let mut view = GraphView::for_graph(&root);
-    spread(&mut view);
+    let mut doc = Document::default();
+    let producer = doc.graph.add_func_node(&probe);
+    let consumer = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
 
     let theme = Theme::default();
     let run_state = RunState::default();
@@ -1033,7 +1064,9 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     let mut graph_ui = GraphUI::default();
     let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+    // `doc` is a parameter, not a capture, so the graph can gain the edge the
+    // first drag commits before the second one runs against it.
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -1048,12 +1081,13 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view: &view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -1066,10 +1100,10 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // Two frames to record both nodes, so their port circles have widget ids
     // and `CanvasGeometry` measured centers to hit-test against.
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
 
     let source = port_circle_wid(PortRef {
@@ -1087,17 +1121,17 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
 
     harness.press_on(source);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui, &mut scene, &doc);
     });
     harness.drag_to(drop_at);
-    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     assert!(
         held.is_empty(),
         "a wire still held commits nothing: {held:?}"
     );
 
     harness.release_button(PointerButton::Left);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
 
     // The helper carries the pane assertion: a wire commits against the pane
     // holding its start node, never the focused one.
@@ -1111,6 +1145,43 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
                     && src.port_idx == 0
         ),
         "the release binds the port it snapped to, and nothing else: {released:?}"
+    );
+
+    // Now the same gesture backwards, with the document holding the edge that
+    // release just described: consumer.out0 → producer.in0 would close the
+    // loop, so the wire must not snap and the release must commit nothing.
+    // The filter answers that off `Document::graph_for` — a prepass handed the
+    // wrong graph would go on snapping cycles with every other assertion here
+    // still green.
+    doc.graph
+        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+    let back_source = port_circle_wid(PortRef {
+        node_id: consumer,
+        kind: PortKind::Output,
+        port_idx: 0,
+    });
+    let back_sink = port_circle_wid(PortRef {
+        node_id: producer,
+        kind: PortKind::Input,
+        port_idx: 0,
+    });
+    let back_drop_at = harness.center_of(back_sink);
+    harness.advance_past_double_click(|ui| {
+        draw(ui, &mut graph_ui, &mut scene, &doc);
+    });
+    harness.press_on(back_source);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene, &doc);
+    });
+    harness.drag_to(back_drop_at);
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui, &mut scene, &doc);
+    });
+    harness.release_button(PointerButton::Left);
+    let refused = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    assert!(
+        refused.is_empty(),
+        "a drop that would close a cycle never snaps, so it binds nothing: {refused:?}"
     );
 }
 
@@ -1134,10 +1205,10 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     library.add(preview_func(std::sync::Arc::<PreviewSink>::default()));
     let probe = library.by_name("probe").expect("just added").clone();
 
-    let mut root = Graph::default();
-    let producer = root.add_func_node(&probe);
-    let mut view = GraphView::for_graph(&root);
-    spread(&mut view);
+    let mut doc = Document::default();
+    let producer = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    spread(&mut doc.main_view);
 
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let theme = Theme::default();
@@ -1168,12 +1239,13 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view: &view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc: &doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -1259,14 +1331,15 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
     let library = Library::default();
     let theme = Theme::default();
     let run_state = RunState::default();
-    let mut root = Graph::default();
-    root.insert_graph(GraphId::unique(), GraphDef::new("First").category("Local"));
+    let mut doc = Document::default();
+    doc.graph
+        .insert_graph(GraphId::unique(), GraphDef::new("First").category("Local"));
 
     let mut harness = UiHarness::with_text(UVec2::new(1200, 900));
     let mut graph_ui = GraphUI::default();
     let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, root: &Graph| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -1274,7 +1347,7 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
             status_error: None,
             process_memory: 0,
         };
-        let view = GraphView::for_graph(root);
+        let view = GraphView::for_graph(&doc.graph);
         let mut intents = Intents::default();
         scene.rebuild(
             ui,
@@ -1282,12 +1355,13 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
             &run_state,
             [GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(root),
+                source: SceneSource::Entry(&doc.graph),
                 view: &view,
             }],
         );
-        graph_ui.prepass(ui, scene, &library, &mut intents);
-        let graph = scene.graph(GraphRef::Main).expect("projected");
+        let frame = Frame { scene, doc };
+        graph_ui.prepass(ui, frame, &library, &mut intents);
+        let graph = frame.pane(GraphRef::Main).expect("projected");
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -1296,7 +1370,7 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
             });
     };
 
-    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     assert!(
         graph_ui.gestures.new_node_ui.cached_local_defs().is_empty(),
         "a palette that never opened caches nothing",
@@ -1304,7 +1378,7 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
 
     // First open: the one definition the graph holds.
     harness.right_click_at(Vec2::new(500.0, 400.0));
-    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     assert_eq!(
         graph_ui.gestures.new_node_ui.cached_local_defs(),
         ["First"],
@@ -1317,20 +1391,21 @@ fn the_palette_re_reads_the_graphs_definitions_on_every_open() {
     // it can't blur itself and strand the palette open around a box the
     // user can no longer type in.
     harness.key(Key::Escape);
-    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     assert!(
         harness.rect(search_field_wid()).is_none(),
         "one Esc dismissed the palette",
     );
 
     // The document gains a definition while the palette is down.
-    root.insert_graph(GraphId::unique(), GraphDef::new("Second").category("Local"));
-    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
-    harness.advance_past_double_click(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    doc.graph
+        .insert_graph(GraphId::unique(), GraphDef::new("Second").category("Local"));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    harness.advance_past_double_click(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
 
     // Second open: both, not the first open's list.
     harness.right_click_at(Vec2::new(500.0, 400.0));
-    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &root));
+    harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
     let mut cached = graph_ui.gestures.new_node_ui.cached_local_defs();
     cached.sort_unstable();
     assert_eq!(

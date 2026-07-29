@@ -14,7 +14,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// Fold `owner`'s live pan drag into `pan`: `anchor + delta` while the
 /// drag is held; a missing delta after a latch is the release edge and
@@ -130,7 +130,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 pub(super) fn emit_pan_zoom(
     pan_anchor: &mut PaneSlot<Vec2>,
     ui: &Ui,
-    graph: GraphScene<'_>,
+    graph: Pane<'_>,
     gesture: Option<CanvasGesture>,
     out: &mut Intents,
 ) {
@@ -219,7 +219,7 @@ pub(crate) enum ViewAction {
 pub(crate) fn view_action_intent(
     ui: &Ui,
     geometry: &CanvasGeometry,
-    graph: GraphScene<'_>,
+    graph: Pane<'_>,
     action: ViewAction,
 ) -> Option<Intent> {
     let vp = ui
@@ -241,7 +241,7 @@ pub(crate) fn view_action_intent(
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
-fn reset_target(geometry: &CanvasGeometry, graph: GraphScene<'_>, pane: Vec2) -> Viewport {
+fn reset_target(geometry: &CanvasGeometry, graph: Pane<'_>, pane: Vec2) -> Viewport {
     let pan = match node_bounds(geometry, graph, false) {
         Some(b) => pane * 0.5 - b.center(),
         None => Vec2::ZERO,
@@ -258,11 +258,7 @@ fn reset_target(geometry: &CanvasGeometry, graph: GraphScene<'_>, pane: Vec2) ->
 /// the fold is manual min/max (not `Rect::union`, which treats a
 /// zero-size rect as identity and would discard that point too).
 /// `None` when no node qualifies.
-fn node_bounds(
-    geometry: &CanvasGeometry,
-    graph: GraphScene<'_>,
-    selected_only: bool,
-) -> Option<Rect> {
+fn node_bounds(geometry: &CanvasGeometry, graph: Pane<'_>, selected_only: bool) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in graph.nodes() {
         if selected_only && !graph.is_selected(n.id) {

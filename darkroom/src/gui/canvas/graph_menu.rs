@@ -6,7 +6,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::graph::GraphCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
 use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// Right-click on a graph node's `G` badge → a small popup with
 /// "Publish to library" and "Detach copy". Left-click still opens the
@@ -26,7 +26,7 @@ impl GraphMenuUi {
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         self.menu.latch(ui, hits, graph, MenuTrigger::GraphBadge);

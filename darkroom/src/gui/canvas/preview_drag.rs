@@ -20,7 +20,7 @@ use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::preview_drag_modifier;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
-use crate::gui::scene::Scene;
+use crate::gui::scene::{Frame, Scene};
 
 /// The in-flight spawn-and-place drag, or none.
 #[derive(Default, Debug)]
@@ -35,20 +35,20 @@ impl PreviewDrag {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        frame: Frame<'_>,
         geometry: &CanvasGeometry,
         library: &Library,
         out: &mut Intents,
     ) {
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, scene, out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, frame.scene, out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, scene) else {
+        let Some(port) = scan_output_drag_start(geometry, frame.scene) else {
             return;
         };
-        let Some(graph) = scene.owner(port.node_id) else {
+        let Some(graph) = frame.owner(port.node_id) else {
             return;
         };
         // A preview is `entry_only`, so spawning one in a definition pane would
