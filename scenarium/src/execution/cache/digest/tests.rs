@@ -3,7 +3,6 @@ use crate::graph::identity::FuncId;
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compiled::internals::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
@@ -375,12 +374,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let producer = cache.node_digest(node_idx(0)).unwrap();
         cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
-            hydrate(
-                &mut cache,
-                node_idx(0),
-                OutputSnapshot::new(vec![value]),
-                producer,
-            );
+            cache.hydrate(node_idx(0), OutputSnapshot::new(vec![value]), producer);
         }
         cache.prepare_node_blocking(node_idx(1));
         cache.prepare_node_blocking(node_idx(2));
@@ -476,8 +470,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     cache.reconcile_for_test(&p.program);
     let producer = cache.node_digest(node_idx(0)).unwrap();
     cache[node_idx(0)].current_digest = Some(producer);
-    hydrate(
-        &mut cache,
+    cache.hydrate(
         node_idx(0),
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::FsPath(path))]),
         producer,

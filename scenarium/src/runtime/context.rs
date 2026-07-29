@@ -148,17 +148,21 @@ pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
     use crate::runtime::context::{ContextManager, ContextStore};
 
-    pub fn insert_context<T>(contexts: &mut ContextStore, value: T)
-    where
-        T: Any + Send + Sync,
-    {
-        contexts.store.insert(TypeId::of::<T>(), Box::new(value));
+    impl ContextStore {
+        pub fn insert_context<T>(&mut self, value: T)
+        where
+            T: Any + Send + Sync,
+        {
+            self.store.insert(TypeId::of::<T>(), Box::new(value));
+        }
     }
 
-    /// Stand in for the executor's per-invoke attribution, so a lambda that
-    /// reads [`ContextManager::current_node`] can be tested without a run.
-    pub fn set_current_node(ctx: &mut ContextManager, e_node_id: ExecutionNodeId) {
-        ctx.current_node = Some(e_node_id);
+    impl ContextManager {
+        /// Stand in for the executor's per-invoke attribution, so a lambda that
+        /// reads [`ContextManager::current_node`] can be tested without a run.
+        pub fn set_current_node(&mut self, e_node_id: ExecutionNodeId) {
+            self.current_node = Some(e_node_id);
+        }
     }
 }
 

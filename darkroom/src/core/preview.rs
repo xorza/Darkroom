@@ -102,9 +102,7 @@ pub(crate) fn is_preview(func_id: FuncId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::{
-        AnyState, ContextManager, OutputDemand, SharedAnyState, StaticValue, set_current_node,
-    };
+    use scenarium::{AnyState, ContextManager, OutputDemand, SharedAnyState, StaticValue};
 
     #[test]
     fn the_declaration_is_an_entry_only_sink_that_produces_nothing() {
@@ -139,7 +137,7 @@ mod tests {
 
         let invoke = async |value: i64| {
             let mut ctx = ContextManager::default();
-            set_current_node(&mut ctx, first);
+            ctx.set_current_node(first);
             let mut inputs = [DynamicValue::Static(StaticValue::Int(value))];
             func.lambda
                 .invoke(Invocation {

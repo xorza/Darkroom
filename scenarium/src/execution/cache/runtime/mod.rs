@@ -735,15 +735,17 @@ pub(crate) mod internals {
             self.fs_paths
                 .insert(path.to_string(), FsPathId::file(len, mtime_ns));
         }
-    }
 
-    pub(crate) fn hydrate(
-        cache: &mut RuntimeCache,
-        node_idx: NodeIdx,
-        snapshot: OutputSnapshot,
-        digest: Digest,
-    ) {
-        cache.slots[node_idx].load_output(snapshot, Some(digest));
+        /// Plant a whole snapshot under the digest it is to count as produced
+        /// by, so a reuse test can start from a value no run computed.
+        pub(crate) fn hydrate(
+            &mut self,
+            node_idx: NodeIdx,
+            snapshot: OutputSnapshot,
+            digest: Digest,
+        ) {
+            self.slots[node_idx].load_output(snapshot, Some(digest));
+        }
     }
 }
 
