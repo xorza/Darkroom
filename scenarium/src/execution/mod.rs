@@ -5,14 +5,14 @@
 //!    Runs on the *host's* thread (compile errors are synchronous); the resulting
 //!    [`CompiledGraph`](compile::CompiledGraph) is installed into the engine
 //!    via [`engine::ExecutionEngine::install`], which cannot fail.
-//! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
-//!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
+//! 2. **plan** — the [`Planner`](plan::Planner) turns the program into a
+//!    [`RunSchedule`](plan::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
 //! 3. **execute** — the [`RuntimeCache`](cache::runtime::RuntimeCache) prepares filesystem
-//!    identities on the blocking pool; the [`Resolver`](resolve::Resolver) stamps content
+//!    identities on the blocking pool; [`resolve`](plan::RunSchedule::resolve) stamps content
 //!    digests, then derives cache-aware liveness, exact output demand, and reader counts in
-//!    one consumer-first sweep. The [`Executor`](executor::Executor) walks the surviving
-//!    schedule producer-first.
+//!    one consumer-first sweep, refining that same schedule. The
+//!    [`Executor`](executor::Executor) walks the surviving schedule producer-first.
 
 pub(crate) mod cache;
 pub(crate) mod codec;

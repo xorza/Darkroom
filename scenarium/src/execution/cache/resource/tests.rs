@@ -6,8 +6,8 @@ use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::{ExecutionPlan, NodeState};
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
+use crate::execution::plan::{NodeState, RunSchedule};
+use crate::execution::program::index::NodeIdx;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
@@ -273,7 +273,7 @@ fn file_identity_separates_pre_epoch_mtimes() {
 #[derive(Debug)]
 struct ConstPathFixture {
     program: Program,
-    plan: ExecutionPlan,
+    schedule: RunSchedule,
     first: ExecutionNodeId,
     second: ExecutionNodeId,
 }
@@ -316,25 +316,15 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
             },
         );
     }
-    let mut verdicts = NodeColumn::default();
-    verdicts.reset(program.e_nodes.len(), NodeState::Cut);
-    let mut roots = NodeSet::default();
-    roots.reset(program.e_nodes.len());
-    roots.insert(NodeIdx(0));
-    roots.insert(NodeIdx(1));
-    let mut seeded = NodeSet::default();
-    seeded.reset(program.e_nodes.len());
-    let mut event_sources = NodeSet::default();
-    event_sources.reset(program.e_nodes.len());
+    let mut schedule = RunSchedule::default();
+    schedule.reset_for_program(&program);
+    schedule.process_order.extend([NodeIdx(0), NodeIdx(1)]);
+    schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
+    schedule.roots.insert(NodeIdx(0));
+    schedule.roots.insert(NodeIdx(1));
     ConstPathFixture {
         program,
-        plan: ExecutionPlan {
-            process_order: vec![NodeIdx(0), NodeIdx(1)],
-            states: verdicts,
-            roots,
-            seeded,
-            event_sources,
-        },
+        schedule,
         first,
         second,
     }
@@ -352,7 +342,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache
         .prepare(
             &fixture.program,
-            fixture.plan.executing(),
+            fixture.schedule.executing(),
             CancelToken::never(),
         )
         .await;
@@ -376,7 +366,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache
         .prepare(
             &fixture.program,
-            fixture.plan.executing(),
+            fixture.schedule.executing(),
             CancelToken::never(),
         )
         .await;

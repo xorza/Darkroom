@@ -1,15 +1,15 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
 //! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given an immutable
-//! [`Program`](crate::execution::program::Program), a prepared
-//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `RuntimeCache`,
+//! [`Program`](crate::execution::program::Program), a resolved
+//! [`RunSchedule`](crate::execution::plan::RunSchedule), and that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
-//! **Pre-run resolution.** [`run`](Executor::run) takes the
-//! [`Resolver`](crate::execution::resolve::Resolver) — disposition, output demand,
+//! **Pre-run resolution.** [`run`](Executor::run) takes the schedule after
+//! [`resolve`](crate::execution::plan::RunSchedule::resolve) — disposition, output demand,
 //! and reader counts derived together and authoritative for the whole run. A
-//! [`Disposition::Reuse`] is never re-derived after its producers may have been cut. A cut
+//! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
 //! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported
 //! without probing its cache or retaining its input cone. The one verdict the loop *improves*
@@ -41,16 +41,15 @@ use crate::execution::error::RunError;
 use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
 };
-use crate::execution::plan::{ExecutionPlan, NodeState};
+use crate::execution::plan::{NodeState, RunSchedule};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::execution::resolve::Resolver;
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<DynamicValue>,
-    /// The run's mutable copy of the resolver's live binding counts. Input consumption or
+    /// The run's mutable copy of the resolved live binding counts. Input consumption or
     /// retirement decrements it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
     /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
@@ -65,8 +64,9 @@ pub(crate) struct Executor {
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) program: &'a Program,
-    pub(crate) plan: &'a ExecutionPlan,
-    pub(crate) resolver: &'a Resolver,
+    /// The run, resolved: the schedule, its per-node dispositions, and the output
+    /// demand and reader counts the same sweep derived from them.
+    pub(crate) schedule: &'a RunSchedule,
     pub(crate) cache: &'a mut RuntimeCache,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
@@ -79,8 +79,10 @@ pub(super) struct RemainingOutputReads {
 }
 
 impl RemainingOutputReads {
-    pub(super) fn seed(&mut self, resolver: &Resolver) {
-        self.counts.clone_from(&resolver.outputs.readers);
+    /// Take this run's starting counts from the schedule the loop is about to walk —
+    /// the only source, so the counts can't come from a resolution the run isn't using.
+    pub(super) fn seed(&mut self, schedule: &RunSchedule) {
+        self.counts.clone_from(&schedule.outputs.readers);
     }
 
     fn is_last(&self, output_idx: OutputIdx) -> bool {
@@ -106,7 +108,7 @@ impl RemainingOutputReads {
 }
 
 impl Executor {
-    /// Walk `plan.process_order` (producer-first), giving each node one turn. The loop
+    /// Walk `schedule.process_order` (producer-first), giving each node one turn. The loop
     /// itself owns only the two decisions that end it early or skip it wholesale — the
     /// per-node work is [`ExecutionFrame::run_node`].
     pub(crate) async fn run(
@@ -116,8 +118,7 @@ impl Executor {
     ) {
         let RunRequest {
             program,
-            plan,
-            resolver,
+            schedule,
             cache,
             reporter,
             cancel,
@@ -132,13 +133,12 @@ impl Executor {
         self.ctx_manager.logs.clear();
         self.outcomes
             .reset(program.e_nodes.len(), NodeOutcome::Pending);
-        self.remaining_reads.seed(resolver);
+        self.remaining_reads.seed(schedule);
 
         {
             let mut frame = ExecutionFrame {
                 program,
-                plan,
-                resolver,
+                schedule,
                 cache,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
@@ -150,7 +150,7 @@ impl Executor {
 
             // The producer-first schedule excludes unseeded disabled nodes; the
             // resolved run cuts cache-hidden and blocked cones.
-            for (process_idx, &node_idx) in plan.process_order.iter().enumerate() {
+            for (process_idx, &node_idx) in schedule.process_order.iter().enumerate() {
                 // A schedule of sync-completing lambdas never suspends on its own, so
                 // without this it would hold its executor thread from the first node to the
                 // last — starving everything sharing that thread (event-loop lambdas, and
@@ -166,7 +166,7 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        collect_execution_outcome(program, plan, &self.outcomes, start, outcome);
+        collect_execution_outcome(program, schedule, &self.outcomes, start, outcome);
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
@@ -183,8 +183,7 @@ impl Executor {
 #[derive(Debug)]
 pub(crate) struct ExecutionFrame<'a, 'r> {
     program: &'a Program,
-    plan: &'a ExecutionPlan,
-    resolver: &'a Resolver,
+    schedule: &'a RunSchedule,
     cache: &'a mut RuntimeCache,
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<DynamicValue>,
@@ -196,13 +195,13 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
 }
 
 impl ExecutionFrame<'_, '_> {
-    /// One node's turn. The resolver's disposition decides which of the four things happens,
-    /// and it is authoritative — a [`Disposition::Reuse`] is never re-derived here, since its
-    /// producers may already be pruned (see `resolve.rs`).
+    /// One node's turn. The resolved disposition decides which of the four things happens,
+    /// and it is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its
+    /// producers may already be pruned (see [`resolve`](RunSchedule::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
-        let demand = self.resolver.outputs.demand.slice(e_node.outputs);
-        match self.plan.states[node_idx] {
+        let demand = self.schedule.outputs.demand.slice(e_node.outputs);
+        match self.schedule.states[node_idx] {
             // `process_order` and the state column are written by the same arm
             // of the walk, so a scheduled node without a settled state is a
             // broken plan — not a node to quietly skip.
@@ -240,15 +239,15 @@ impl ExecutionFrame<'_, '_> {
     /// already mid-invoke isn't interrupted, while unreached outcomes stay `Pending` and are
     /// omitted from the outcome.
     fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
-        let plan = self.plan;
-        for &node_idx in &plan.process_order[from_process_idx..] {
-            if plan.states[node_idx] == NodeState::Run {
+        let schedule = self.schedule;
+        for &node_idx in &schedule.process_order[from_process_idx..] {
+            if schedule.states[node_idx] == NodeState::Run {
                 self.abandon_input_reads(node_idx);
             }
         }
     }
 
-    /// Serve a resolved reuse. The resolver only *probed* a disk hit, so the decode happens
+    /// Serve a resolved reuse. The sweep only *probed* a disk hit, so the decode happens
     /// here, at the node's own turn: producer-first order puts it ahead of every consumer
     /// that reads it, and the release below frees it on the same last-read bookkeeping a
     /// computed value gets.
@@ -277,7 +276,7 @@ impl ExecutionFrame<'_, '_> {
     /// that decides it.
     ///
     /// The one verdict the loop *improves*: a `Run` whose stamped digest is `None` because it
-    /// folds a Bind-delivered path value the resolver couldn't read yet
+    /// folds a Bind-delivered path value the sweep could not read yet
     /// (`hash_bound_fs_path`). Its producers settled earlier in this walk — the `Run` verdict
     /// kept them alive — so re-stamp it now and serve the cache on a hit. A genuinely
     /// uncacheable node (an impure cone) just re-folds to `None` and runs as before.
@@ -314,7 +313,7 @@ impl ExecutionFrame<'_, '_> {
             }
             Ok(false) => true,
             Ok(true) => {
-                // It came in as `Run`, so the resolver counted it as a
+                // It came in as `Run`, so the sweep counted it as a
                 // reader of each producer — reads it will now not take.
                 // Handing them back is what lets a producer's value go the
                 // moment its last real reader is gone. A `Reuse` node
@@ -430,7 +429,7 @@ impl ExecutionFrame<'_, '_> {
             return;
         }
 
-        if self.plan.event_sources.contains(node_idx) {
+        if self.schedule.event_sources.contains(node_idx) {
             self.collect_event_triggers(node_idx, &event_state);
         }
         // Persist this node's cache the moment it finishes (durable as the run progresses),
@@ -481,7 +480,7 @@ impl ExecutionFrame<'_, '_> {
                     // can reach here — `input_missing` turns a required
                     // one into a `MissingInputs` verdict, so this node
                     // would not be running at all — and unbound is
-                    // precisely what optional means. The resolver planned
+                    // precisely what optional means. The sweep planned
                     // no read for it either, so none is completed.
                     DynamicValue::Unbound
                 }
@@ -503,10 +502,10 @@ impl ExecutionFrame<'_, '_> {
     }
 
     /// Whether the plan will run `addr`'s producer — the same predicate the
-    /// resolver registers reader counts by, so a read is completed exactly
+    /// sweep registers reader counts by, so a read is completed exactly
     /// when one was planned.
     fn producer_runs(&self, addr: OutputAddr) -> bool {
-        self.plan.states[addr.node_idx].is_runnable()
+        self.schedule.states[addr.node_idx].is_runnable()
     }
 
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
@@ -529,7 +528,7 @@ impl ExecutionFrame<'_, '_> {
         }
     }
 
-    /// Completes one resolver-counted read and releases its producer port or slot when no
+    /// Completes one resolved read and releases its producer port or slot when no
     /// planned reader can still use it.
     fn complete_planned_read(&mut self, address: OutputAddr) {
         let output_idx = self.program.output_idx(address);

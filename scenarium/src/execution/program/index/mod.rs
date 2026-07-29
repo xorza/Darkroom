@@ -34,6 +34,14 @@ impl<T: Clone> OutputColumn<T> {
     }
 }
 
+impl<T> OutputColumn<T> {
+    /// The index space the column spans — what a validator checks before
+    /// reading it by index.
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
+}
+
 impl<T> From<Vec<T>> for OutputColumn<T> {
     fn from(values: Vec<T>) -> Self {
         Self { values }

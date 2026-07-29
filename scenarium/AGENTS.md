@@ -71,8 +71,8 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
 | `execution/program/` | Private flat runtime program and typed packed pools |
-| `execution/plan/` | Structural scheduling and missing-input verdicts |
-| `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
+| `execution/plan/` | The per-run `RunSchedule` (schedule, node states, output demand and readers) and the structural planner that opens it |
+| `execution/resolve/` | The cache-aware sweep refining that schedule: liveness, reuse, output demand, reader counts |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |

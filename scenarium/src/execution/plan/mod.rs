@@ -1,23 +1,27 @@
-//! Scheduling: the per-run schedule ([`ExecutionPlan`]) and the [`Planner`] that builds
-//! it. The planner runs one backward post-order DFS from the run's roots (sinks,
+//! One run's derived state ([`RunSchedule`]) and the [`Planner`] that opens it.
+//! The planner runs one backward post-order DFS from the run's roots (sinks,
 //! event subscribers, event-trigger owners — plus every sink when a fired event
 //! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers) and each node's [`NodeState`]
 //! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
-//! state. The resolver refines that same column in place and the executor reads it;
-//! the plan is reused via a buffer on the engine and the `Planner` owns reusable DFS
-//! scratch, so a repeated plan on an unchanged graph allocates nothing.
+//! state. The cache-aware sweep
+//! ([`resolve`](crate::execution::resolve)) then refines that same column and fills the
+//! schedule's per-output half, and the executor reads both; the schedule is reused via a
+//! buffer on the engine and the `Planner` owns reusable DFS scratch, so a repeated plan on
+//! an unchanged graph allocates nothing.
 
 use crate::execution::error::{Error, Result};
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
+use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
+use crate::node::lambda::OutputDemand;
 use crate::node::special::SpecialNode;
 
 /// What becomes of one node this run — one column, written by two passes.
 ///
 /// The planner establishes the structural three: `Disabled`, `MissingInputs`,
-/// and `Cut`, its positive verdict. The [`Resolver`](crate::execution::resolve::Resolver)
+/// and `Cut`, its positive verdict. The cache-aware sweep
+/// ([`resolve`](RunSchedule::resolve))
 /// then refines only the runnable ones, promoting what a running consumer
 /// reads to `Run`, `Reuse`, or `MissingLambda` and leaving the rest where the
 /// planner put them. That is why "the planner cleared it" and "the cut pruned
@@ -32,10 +36,10 @@ use crate::node::special::SpecialNode;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NodeState {
     /// The backward walk never reached this node, so no pass has decided
-    /// anything about it — the fill [`reset_for_program`](ExecutionPlan::reset_for_program)
+    /// anything about it — the fill [`reset_for_program`](RunSchedule::reset_for_program)
     /// leaves behind. A distinct state rather than a conservative real verdict,
     /// so "unreachable from any root" cannot be read as "visited and blocked":
-    /// [`validate`](ExecutionPlan::validate) checks that exactly the scheduled
+    /// [`validate`](RunSchedule::validate) checks that exactly the scheduled
     /// nodes left it.
     #[default]
     Unvisited,
@@ -46,7 +50,7 @@ pub(crate) enum NodeState {
     /// can't run, and the "missing" verdict propagates to its consumers.
     MissingInputs,
     /// Runnable, and read by nothing that runs — pruned by the cut. Both the
-    /// planner's "this node can run" and the resolver's "and no one needs it",
+    /// planner's "this node can run" and the sweep's "and no one needs it",
     /// since a runnable node the sweep never promotes is exactly that.
     Cut,
     /// An unchanged demanded output is verified *available* — resident, or covered by a
@@ -62,7 +66,7 @@ pub(crate) enum NodeState {
 
 impl NodeState {
     /// Whether the planner found this node structurally able to run. True of
-    /// every state the resolver refines it into, so it answers the same before
+    /// every state the sweep refines it into, so it answers the same before
     /// and after the sweep — which is what lets one column serve both.
     ///
     /// Every caller reads a node the walk settled: a `process_order` member, a
@@ -94,7 +98,7 @@ impl NodeState {
 /// `states` must already hold the producer's state, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
 /// outcome so the two can't drift — and it reads the same in both, since every
-/// state the resolver writes is one that delivers a value.
+/// state the sweep writes is one that delivers a value.
 pub(crate) fn input_missing(input: &ExecutionInput, states: &NodeColumn<NodeState>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,
@@ -114,20 +118,60 @@ pub(crate) fn input_missing(input: &ExecutionInput, states: &NodeColumn<NodeStat
     }
 }
 
+/// The per-output half of one resolved run, filled by the same reverse sweep that
+/// refines the [`NodeState`] column beside it — so a cut, reused, or blocked consumer
+/// contributes neither demand nor a reader to its producers.
 #[derive(Debug, Default)]
-pub(crate) struct ExecutionPlan {
+pub(crate) struct ResolvedOutputs {
+    /// Whether each output must be produced for a live reader or a host pin.
+    pub(crate) demand: OutputColumn<OutputDemand>,
+    /// Consumers which will actually run and read each output.
+    pub(crate) readers: OutputColumn<u32>,
+}
+
+impl ResolvedOutputs {
+    /// Clear both columns to "nothing demanded, nobody reading". Called from
+    /// [`RunSchedule::reset_for_program`], so a planned schedule carries no
+    /// previous run's counts, and again from the sweep that fills them, so
+    /// counting always starts from zero rather than accumulating onto whatever
+    /// was there.
+    pub(crate) fn reset(&mut self, output_count: usize) {
+        self.demand.reset(output_count, OutputDemand::Skip);
+        self.readers.reset(output_count, 0);
+    }
+
+    pub(crate) fn add_reader(&mut self, output_idx: OutputIdx) {
+        let readers = &mut self.readers[output_idx];
+        debug_assert_ne!(*readers, u32::MAX, "output reader count overflowed u32");
+        *readers = readers.wrapping_add(1);
+        self.demand[output_idx] = OutputDemand::Produce;
+    }
+}
+
+/// Everything one run derives from the installed program: the schedule, its per-node
+/// verdicts, the seed sets the backward walk started from, and the per-output demand
+/// and reader counts.
+///
+/// One buffer rather than a plan and a resolution held apart, because the two passes
+/// that write it produce one answer: the sweep already refines the planner's `states`
+/// in place, and `outputs` is the same verdict counted per port. Holding them apart
+/// let a freshly planned schedule carry the previous run's demand, or an executor read
+/// counts resolved against a different one — states the single
+/// [`reset_for_program`](Self::reset_for_program) and the single borrow now rule out.
+#[derive(Debug, Default)]
+pub(crate) struct RunSchedule {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
     /// seeded from the roots. Disabled dependencies stay outside the order unless they
-    /// are explicit node seeds. The resolver refines it into the surviving run before
+    /// are explicit node seeds. The sweep refines it into the surviving run before
     /// execution.
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node [`NodeState`], aligned to the program's dense node vector. The
-    /// planner writes the structural verdict; the resolver refines it in place.
+    /// planner writes the structural verdict; the sweep refines it in place.
     pub(crate) states: NodeColumn<NodeState>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
-    /// the resolver seeds liveness from these and prunes any cone reachable only through
-    /// cache-hit consumers (see [`Resolver`](crate::execution::resolve::Resolver)).
+    /// the sweep seeds liveness from these and prunes any cone reachable only through
+    /// cache-hit consumers (see [`resolve`](Self::resolve)).
     pub(crate) roots: NodeSet,
     /// The node-seeded roots ("run to this node") — a subset of `roots`, carrying a
     /// per-run seed with
@@ -138,13 +182,16 @@ pub(crate) struct ExecutionPlan {
     /// state their event lambdas consume. Unlike ordinary roots, these bypass cache
     /// reuse for the event-loop bootstrap run.
     pub(crate) event_sources: NodeSet,
+    /// Exact per-output demand and live reader counts, written by the sweep
+    /// once the state column above is settled.
+    pub(crate) outputs: ResolvedOutputs,
 }
 
-impl ExecutionPlan {
+impl RunSchedule {
     /// The scheduled nodes that will actually run, producer-first — the
     /// schedule minus the disabled and input-blocked ones. What the digest
     /// pass and the filesystem prefetch each walk, so "runnable this run" is
-    /// stated once rather than re-derived by every consumer of the plan.
+    /// stated once rather than re-derived by every consumer of the schedule.
     pub(crate) fn executing(&self) -> impl Iterator<Item = NodeIdx> + '_ {
         self.process_order
             .iter()
@@ -152,6 +199,9 @@ impl ExecutionPlan {
             .filter(|&node_idx| self.states[node_idx].is_runnable())
     }
 
+    /// Clear every column for a run over `program` — including the output half,
+    /// so a schedule the sweep has not yet filled cannot be read as the previous
+    /// run's demand.
     pub(crate) fn reset_for_program(&mut self, program: &Program) {
         self.process_order.clear();
         self.states
@@ -159,6 +209,7 @@ impl ExecutionPlan {
         self.roots.reset(program.e_nodes.len());
         self.seeded.reset(program.e_nodes.len());
         self.event_sources.reset(program.e_nodes.len());
+        self.outputs.reset(program.outputs.len());
     }
 }
 
@@ -194,25 +245,25 @@ impl Planner {
         self.color.reset(program.e_nodes.len(), Color::White);
     }
 
-    /// Build the per-run schedule into `plan` from the installed program and the run's
+    /// Build the per-run schedule into `schedule` from the installed program and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
     pub(crate) fn plan(
         &mut self,
         program: &Program,
         seeds: &RunSeeds,
-        plan: &mut ExecutionPlan,
+        schedule: &mut RunSchedule,
     ) -> Result<()> {
-        plan.reset_for_program(program);
+        schedule.reset_for_program(program);
         self.reset_for_program(program);
 
-        // Collect the walk roots straight into `plan.roots` — they seed the backward walk
-        // below and the resolver's cache-aware reverse sweep.
-        collect_roots(program, seeds, plan)?;
+        // Collect the walk roots straight into `schedule.roots` — they seed the
+        // backward walk below and the cache-aware reverse sweep.
+        collect_roots(program, seeds, schedule)?;
 
-        let result = self.walk_backward_collect_order(program, plan);
+        let result = self.walk_backward_collect_order(program, schedule);
         if result.is_ok() {
-            plan.validate_debug(program);
+            schedule.validate_debug(program);
         }
         result
     }
@@ -226,9 +277,9 @@ impl Planner {
     fn walk_backward_collect_order(
         &mut self,
         program: &Program,
-        plan: &mut ExecutionPlan,
+        schedule: &mut RunSchedule,
     ) -> Result<()> {
-        for node_idx in plan.roots.iter() {
+        for node_idx in schedule.roots.iter() {
             self.stack.push(Visit::Discover(node_idx));
         }
 
@@ -238,18 +289,18 @@ impl Planner {
                 Visit::Done(node_idx) => {
                     debug_assert_eq!(self.color[node_idx], Color::Gray);
                     self.color[node_idx] = Color::Black;
-                    plan.process_order.push(node_idx);
+                    schedule.process_order.push(node_idx);
                     // Runnable unless a required input is unbound or fed by a
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
                     let missing = program.inputs[program[node_idx].inputs]
                         .iter()
-                        .any(|e_input| input_missing(e_input, &plan.states));
+                        .any(|e_input| input_missing(e_input, &schedule.states));
                     // `Cut` is the planner's *positive* verdict — runnable, and
-                    // nothing has claimed it yet. The resolver's sweep promotes
+                    // nothing has claimed it yet. The cache-aware sweep promotes
                     // the ones a running consumer reads and leaves the rest here.
-                    plan.states[node_idx] = if missing {
+                    schedule.states[node_idx] = if missing {
                         NodeState::MissingInputs
                     } else {
                         NodeState::Cut
@@ -271,9 +322,9 @@ impl Planner {
             let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
             // seed is recorded before this walk and overrides disable for this run.
-            if e_node.disabled && !plan.seeded.contains(node_idx) {
+            if e_node.disabled && !schedule.seeded.contains(node_idx) {
                 self.color[node_idx] = Color::Black;
-                plan.states[node_idx] = NodeState::Disabled;
+                schedule.states[node_idx] = NodeState::Disabled;
                 continue;
             }
 
@@ -291,16 +342,16 @@ impl Planner {
     }
 }
 
-/// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
-/// the executor's cut: exact execution-node seeds, every
+/// Collect the run's walk roots into `schedule.roots` — the seeds for both the backward
+/// walk and the executor's cut: exact execution-node seeds, every
 /// event subscriber, every sink node, and (for the event loop) every node owning a
 /// subscribed event.
 ///
 /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
 /// node — the "when this event fires, re-run the whole graph" trigger.
-fn collect_roots(program: &Program, seeds: &RunSeeds, plan: &mut ExecutionPlan) -> Result<()> {
-    // `plan.reset` already cleared `roots`/`seeded`; this only pushes into them.
+fn collect_roots(program: &Program, seeds: &RunSeeds, schedule: &mut RunSchedule) -> Result<()> {
+    // `schedule.reset` already cleared `roots`/`seeded`; this only pushes into them.
 
     // Node seeds ("run to this node"): each exact execution node is a root and seeded so
     // every output is computed. `seeded` also records the one-run disabled
@@ -309,8 +360,8 @@ fn collect_roots(program: &Program, seeds: &RunSeeds, plan: &mut ExecutionPlan) 
         let Some(&node_idx) = program.e_node_index.get(&e_node_id) else {
             return Err(Error::NodeSeedNotFound { e_node_id });
         };
-        plan.roots.insert(node_idx);
-        plan.seeded.insert(node_idx);
+        schedule.roots.insert(node_idx);
+        schedule.seeded.insert(node_idx);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
@@ -328,7 +379,7 @@ fn collect_roots(program: &Program, seeds: &RunSeeds, plan: &mut ExecutionPlan) 
             if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                 run_sinks = true;
             } else {
-                plan.roots.insert(sub_idx);
+                schedule.roots.insert(sub_idx);
             }
         }
     }
@@ -344,15 +395,15 @@ fn collect_roots(program: &Program, seeds: &RunSeeds, plan: &mut ExecutionPlan) 
             continue;
         }
         if run_sinks && e_node.sink {
-            plan.roots.insert(node_idx);
+            schedule.roots.insert(node_idx);
         }
         if seeds.event_sources
             && program.events[e_node.events]
                 .iter()
                 .any(|event| !event.subscribers.is_empty())
         {
-            plan.roots.insert(node_idx);
-            plan.event_sources.insert(node_idx);
+            schedule.roots.insert(node_idx);
+            schedule.event_sources.insert(node_idx);
         }
     }
     Ok(())

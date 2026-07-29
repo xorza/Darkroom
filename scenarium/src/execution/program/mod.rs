@@ -1,7 +1,7 @@
 //! The compiled, flattened graph: topology + code, immutable across runs.
 //! Built by the compiler through graph flattening and installed as runtime
 //! state; it is deliberately not a persistence format. Mutable state is split
-//! between the per-run plan/resolver/executor and the cross-run runtime cache.
+//! between the per-run schedule/executor and the cross-run runtime cache.
 
 pub(crate) mod index;
 pub(crate) mod pool;
