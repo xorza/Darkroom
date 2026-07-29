@@ -666,7 +666,7 @@ impl ExecutionFrame<'_, '_> {
         {
             self.release_drained_outputs(address.node_idx);
         } else if !self.program[address.node_idx].cache.caches_in_ram() {
-            self.cache.clear_output_port(address);
+            self.cache[address.node_idx].clear_output_port(address.port_idx);
         }
     }
 }

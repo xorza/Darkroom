@@ -139,7 +139,6 @@ mod cache_persistence {
     use super::*;
     use crate::async_lambda;
     use crate::execution::cache::disk_store::DiskStore;
-    use crate::execution::cache::slot::ValueState;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::schedule::NodeState;
     use crate::node::definition::{FuncId, FuncOutput};
@@ -386,13 +385,13 @@ mod cache_persistence {
         );
         for e_node_id in &expected {
             assert!(
-                matches!(engine.slot(*e_node_id).value, ValueState::Empty),
+                engine.slot(*e_node_id).output_values().is_none(),
                 "{e_node_id:?} must release its resident output"
             );
         }
         let get_b_eid = root_execution_node(get_b_id);
         assert!(
-            matches!(engine.slot(get_b_eid).value, ValueState::Resident { .. }),
+            engine.slot(get_b_eid).output_values().is_some(),
             "an upstream sibling outside the consumer cone stays resident"
         );
         assert_eq!(blob_count(&dir), 1, "only get_b's disk blob remains");
@@ -434,15 +433,12 @@ mod cache_persistence {
         let mut expected_successes = reopened.compiled.data_consumer_closure(&[get_a_id]);
         expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
         assert!(
-            matches!(
-                reopened.slot(blocked_eid).value,
-                ValueState::Resident { .. }
-            ),
+            reopened.slot(blocked_eid).output_values().is_some(),
             "a failed disk deletion must leave the matching RAM value resident"
         );
         for e_node_id in &expected_successes {
             assert!(
-                matches!(reopened.slot(*e_node_id).value, ValueState::Empty),
+                reopened.slot(*e_node_id).output_values().is_none(),
                 "{e_node_id:?} must still evict when another target fails"
             );
         }
@@ -717,10 +713,10 @@ mod cache_persistence {
             "the frontier blob is verified from its header during resolution"
         );
         assert!(
-            matches!(
-                engine.slot(root_execution_node(mult_id)).value,
-                ValueState::Empty
-            ),
+            engine
+                .slot(root_execution_node(mult_id))
+                .output_values()
+                .is_none(),
             "...and is not decoded there"
         );
 
@@ -751,10 +747,10 @@ mod cache_persistence {
             .slot(root_execution_node(sum_id))
             .output_values()
             .is_some();
-        let sum_empty = matches!(
-            engine.slot(root_execution_node(sum_id)).value,
-            ValueState::Empty
-        );
+        let sum_empty = engine
+            .slot(root_execution_node(sum_id))
+            .output_values()
+            .is_none();
         assert!(
             !sum_resident,
             "an unneeded upstream disk cache is not hydrated"
@@ -1037,14 +1033,14 @@ mod cache_persistence {
         );
         match mode {
             CacheMode::None => assert!(
-                matches!(slot.value, ValueState::Empty),
+                slot.output_values().is_none(),
                 "None drops its value after the run: {:?}",
-                slot.value
+                slot.output_values()
             ),
             CacheMode::Disk => assert!(
-                matches!(slot.value, ValueState::Empty),
+                slot.output_values().is_none(),
                 "Disk drops its RAM copy after the run: {:?}",
-                slot.value
+                slot.output_values()
             ),
             CacheMode::Ram | CacheMode::Both => assert!(
                 matches!(
@@ -1052,7 +1048,7 @@ mod cache_persistence {
                     Some(DynamicValue::Static(StaticValue::Int(1)))
                 ),
                 "Ram/Both keep the resident value (1*1=1): {:?}",
-                slot.value
+                slot.output_values()
             ),
         }
 
@@ -1312,7 +1308,7 @@ mod cache_persistence {
 
             engine.update(&build(mode), &lib).unwrap();
             assert!(
-                matches!(engine.slot(mult_id).value, ValueState::Empty),
+                engine.slot(mult_id).output_values().is_none(),
                 "{mode:?} releases the old RAM value during install"
             );
         }
@@ -2996,7 +2992,6 @@ mod const_bindings {
 
 mod behavior {
     use super::*;
-    use crate::execution::cache::slot::ValueState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pure_node_skips_on_rerun() -> TestResult {
@@ -3371,7 +3366,7 @@ mod behavior {
 
         let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         assert!(
-            matches!(execution_graph.slot(get_b).value, ValueState::Empty),
+            execution_graph.slot(get_b).output_values().is_none(),
             "an impure value cannot hit on a future run, so the end sweep releases it"
         );
 
