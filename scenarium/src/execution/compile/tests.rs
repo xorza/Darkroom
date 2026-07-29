@@ -11,6 +11,12 @@ use crate::node::definition::{Func, FuncId};
 use crate::node::event::EventLambda;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 
+/// The program of a freshly compiled artifact, which nothing else holds yet —
+/// the corruption these tests inject before asking `validate` to catch it.
+fn program_mut(compiled: &mut CompiledGraph) -> &mut Program {
+    Arc::get_mut(&mut compiled.program).expect("a freshly compiled artifact is unshared")
+}
+
 /// Event edges get the same treatment as bind fixups: an endpoint flatten
 /// never emitted is a flatten bug, so wiring panics instead of dropping the
 /// edge, and the compiled artifact still carries a range backstop.
@@ -39,7 +45,7 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
 
     // An unemitted subscriber is a flatten bug, not drift to absorb.
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        compiled.program.apply_subscriptions(&[PendingSubscription {
+        program_mut(&mut compiled).apply_subscriptions(&[PendingSubscription {
             event: ExecutionEventPort {
                 e_node_id: ExecutionNodeId::from_authoring(&[emitter]),
                 event_idx: 0,
@@ -54,7 +60,7 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
 
     // And the artifact check catches a subscriber index that names no node.
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
-    compiled.program.events[events][0].subscribers[0] = past_the_end;
+    program_mut(&mut compiled).events[events][0].subscribers[0] = past_the_end;
     assert!(
         matches!(
             compiled.validate(&library),
@@ -92,7 +98,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     let mut compiled = compile();
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let input = bound_input(&compiled);
-    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    program_mut(&mut compiled).inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: past_the_end,
         port_idx: 0,
     });
@@ -112,7 +118,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
         unreachable!("bound_input selected a bind")
     };
     let port_idx = compiled.program[address.node_idx].outputs.len;
-    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    program_mut(&mut compiled).inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: address.node_idx,
         port_idx,
     });

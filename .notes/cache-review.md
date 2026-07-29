@@ -16,35 +16,32 @@ reference to it, so each method re-receives it to learn what its own indices
 mean. The single largest source of argument count, and of invariants policed
 rather than represented.
 
-- [ ] `runtime/mod.rs` — **18 of 26** production `RuntimeCache` methods take
-      `program: &Program`: `evict`, `resident_ram_stats`, `reconcile` (as two
-      parameters), `read_output_port`, `stamp_digests`, `stamp_digest`,
-      `node_digest`, `prepare`, `identify`, `request_node_paths`,
-      `restamp_and_hydrate`, `blob_target`, `probe_reuse`, `reuse_source`,
-      `hydrate_reuse`, `store_node`, `release_dead_outputs`.
-- [ ] `runtime/mod.rs:188` — `reconcile(previous, installed)` takes two programs
-      and relies on a `debug_assert_eq!` plus a doc paragraph to state that
-      `previous` must be the one the slots currently belong to. Passing the wrong
-      one is expressible and only caught in debug. Holding the program the slots
-      are aligned to makes `previous` *be* that field, and the invariant
-      unstatable rather than asserted.
-- [ ] `runtime/mod.rs:233` — `read_output_port` takes `&Program` solely to compute
+The cache now holds `aligned_to: Arc<Program>`, shared with the artifact it came
+from, and `reconcile` reads the program it is leaving off that field. The
+remaining methods still receive one per call.
+
+- [ ] `runtime/mod.rs` — **16 of 26** production `RuntimeCache` methods take
+      `program: &Program`: `evict`, `resident_ram_stats`, `read_output_port`,
+      `stamp_digests`, `stamp_digest`, `node_digest`, `prepare`, `identify`,
+      `request_node_paths`, `restamp_and_hydrate`, `blob_target`, `probe_reuse`,
+      `reuse_source`, `hydrate_reuse`, `store_node`, `release_dead_outputs`.
+      Each is free to be handed a program that is not `aligned_to` — the
+      indices then mean something the slots do not.
+- [ ] `runtime/mod.rs:242` — `read_output_port` takes `&Program` solely to compute
       `arity` for a `debug_assert_eq!`; nothing else in the body uses it. The one
       slice of this group that lands standalone.
-- [ ] `runtime/mod.rs:145` — `resident_ram_stats` takes a whole `&Program` for
+- [ ] `runtime/mod.rs:154` — `resident_ram_stats` takes a whole `&Program` for
       `e_nodes.len()`, and asserts the alignment it depends on.
-- [ ] `runtime/mod.rs:534` — `blob_target` re-derives `(e_node_id, e_node, digest)`
+- [ ] `runtime/mod.rs:543` — `blob_target` re-derives `(e_node_id, e_node, digest)`
       from `(program, node_idx)` at two sites per node per run (`reuse_source`,
       `store_node`).
 
-**Cost to weigh before starting.** The obvious shape is an
-`Arc<CompiledGraph>`/`Arc<Program>` field, cloned at `install` — but a `&mut self`
-method cannot also hold `&self.program`, which is plausibly why the parameter is
-threaded in the first place. Either the hot methods bump a refcount into a local,
-or the slots move behind an inner struct the program field can be borrowed
-alongside. Pick that before touching signatures. Storing a duplicate of
-`e_node_ids` beside the slots is *not* the answer — `reconcile`'s doc rejects it
-already.
+**Cost to weigh before starting.** The field exists; what is left is the borrow.
+A `&mut self` method cannot also hold `&self.aligned_to`, which is plausibly why
+the parameter was threaded to begin with. Either the hot methods clone the `Arc`
+into a local (an atomic bump per node per run), or the slots move behind an inner
+struct the program field can be borrowed alongside. Pick that before touching
+signatures.
 
 ## 2. `RuntimeCache` ↔ `RuntimeSlot`: one state, mutated from two layers
 

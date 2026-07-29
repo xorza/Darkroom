@@ -39,6 +39,14 @@ use crate::{DynamicValue, RamUsage};
 /// is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
+    /// The program `slots` is aligned to — what its indices mean, and the ids
+    /// that name them across an install.
+    ///
+    /// Shared with the [`CompiledGraph`](crate::execution::compile::CompiledGraph)
+    /// it came from rather than copied, so holding it duplicates nothing. It is
+    /// written only where `slots` is, which is what makes the alignment a fact
+    /// about the struct instead of a precondition every caller has to honour.
+    aligned_to: Arc<Program>,
     /// Private: the *column* is the cache's own — its length is the alignment
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
@@ -108,6 +116,7 @@ impl RuntimeCache {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.aligned_to = Arc::default();
         self.slots.clear();
         self.fs_paths.clear();
         self.stamp_job.requests.clear();
@@ -181,12 +190,12 @@ impl RuntimeCache {
     /// installed program's RAM-retention policy immediately. The one place ids
     /// are hashed for slot access; every per-run access is an index read.
     ///
-    /// `installed` is the program the slots are aligned to when this returns,
-    /// so it must be called before the engine swaps its artifact — naming the
-    /// two programs is what lets the slots be a bare column rather than one
-    /// carrying a duplicate of `installed.e_node_ids` to interpret itself by.
-    pub(crate) fn reconcile(&mut self, previous: &Program, installed: &Program) {
-        debug_assert_eq!(self.slots.len(), previous.e_nodes.len());
+    /// The program being replaced is [`aligned_to`](Self::aligned_to) — the one
+    /// the slots actually belong to, not one a caller names — so this can run
+    /// either side of the engine's artifact swap, and the pair it walks cannot
+    /// be mismatched.
+    pub(crate) fn reconcile(&mut self, installed: &Arc<Program>) {
+        let previous = std::mem::replace(&mut self.aligned_to, Arc::clone(installed));
         let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> = previous
             .e_node_ids
             .iter()
@@ -685,13 +694,6 @@ pub(crate) mod internals {
     use crate::execution::program::index::NodeIdx;
 
     impl RuntimeCache {
-        /// [`RuntimeCache::reconcile`] onto a cache that holds nothing yet —
-        /// the empty program a `default()` cache belongs to, named once here
-        /// rather than spelled at every fixture that starts from one.
-        pub(crate) fn reconcile_fresh(&mut self, installed: &Program) {
-            self.reconcile(&Program::default(), installed);
-        }
-
         /// [`RuntimeCache::identify`] on this thread — the same queue-then-walk
         /// pass, without the blocking pool a test has no runtime to reach. A
         /// path that will not stamp simply does not land, exactly as in the
