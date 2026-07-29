@@ -4,8 +4,7 @@ use crate::graph::Binding;
 use crate::graph::BindingEntry;
 use crate::graph::Graph;
 use crate::graph::address::{InputPort, NodeId};
-use crate::graph::definition::GraphDef;
-use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::definition::{GraphDef, GraphId, GraphLink};
 use crate::graph::node::definition::{FuncId, FuncInput, FuncOutput};
 use crate::graph::node::{Node, NodeKind};
 
