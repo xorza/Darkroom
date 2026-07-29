@@ -8,28 +8,32 @@ use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::Compiler;
 use crate::execution::compile::artifact::CompiledGraph;
+use crate::execution::error::ExecutionIdentityError;
 use crate::execution::error::{Error, Result as ExecResult, RunError};
-use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::seeds::RunSeeds;
+use crate::graph::Binding;
+use crate::graph::Graph;
 use crate::graph::address::{InputPort, NodeId};
 use crate::graph::definition::GraphDef;
-use crate::graph::entry::Graph;
-use crate::graph::{Binding, Node, NodeSearch};
+use crate::graph::node::error::InvokeError;
+use crate::graph::node::event::EventLambda;
+use crate::graph::node::lambda::FuncLambda;
+use crate::graph::node::{Node, NodeSearch};
 use crate::library::Library;
-use crate::node::event::EventLambda;
-use crate::node::lambda::{FuncLambda, InvokeError};
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-use crate::node::lambda::Invocation;
+use crate::graph::node::lambda::Invocation;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
+use crate::worker::error::WorkerError;
 use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake};
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::status::{
     WorkerActivity, WorkerStatus, WorkerStatusKind, WorkerStatusPublisher,
 };
@@ -753,7 +757,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     use std::sync::atomic::AtomicU64;
 
     use crate::DataType;
-    use crate::node::definition::{FuncInput, FuncOutput};
+    use crate::graph::node::definition::{FuncInput, FuncOutput};
 
     // A → B with trivial sync lambdas, which give the run future no suspension point of
     // their own: nothing but direct reporting can get their progress out mid-run. B records
@@ -839,9 +843,9 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     use std::collections::HashSet;
 
     use crate::DataType;
-    use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
-    use crate::node::definition::FuncOutput;
+    use crate::graph::node::NodeKind;
+    use crate::graph::node::definition::FuncOutput;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     let library = test_func_lib(TestFuncHooks {
@@ -1091,7 +1095,7 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
 /// worker runs only its cone (the sink `Print` panics if reached).
 #[tokio::test]
 async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
-    use crate::graph::CacheMode;
+    use crate::graph::node::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 
     let library = test_func_lib(TestFuncHooks {
@@ -2261,7 +2265,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::execution::cache::disk_store::DiskStore;
-    use crate::graph::CacheMode;
+    use crate::graph::node::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     let dir = temp_dir("diskcache");
@@ -2361,7 +2365,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
 #[tokio::test]
 async fn set_disk_store_flushes_resident_disk_backed_values() {
     use crate::execution::cache::disk_store::DiskStore;
-    use crate::graph::CacheMode;
+    use crate::graph::node::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     let dir = temp_dir("storeswap");

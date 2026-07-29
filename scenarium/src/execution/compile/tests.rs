@@ -2,18 +2,19 @@ use std::sync::Arc;
 
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compile::artifact::CompiledGraphValidationError;
+use crate::execution::compile::error::CompiledGraphValidationError;
+use crate::execution::error::ExecutionIdentityError;
 use crate::execution::flatten::internals::FlatGraphBuilder;
-use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
+use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::NodeIdx;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::graph::NodeSearch;
 use crate::graph::address::NodeId;
 use crate::graph::definition::GraphDef;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::node::definition::{Func, FuncId};
-use crate::node::event::EventLambda;
+use crate::graph::node::NodeSearch;
+use crate::graph::node::definition::{Func, FuncId};
+use crate::graph::node::event::EventLambda;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 
 /// The program of a freshly compiled artifact, which nothing else holds yet —
@@ -192,9 +193,10 @@ struct NestedFixture {
 
 fn nested_fixture() -> NestedFixture {
     use crate::data::type_system::DataType;
+    use crate::graph::Binding;
     use crate::graph::address::InputPort;
-    use crate::graph::{Binding, Node, NodeKind};
-    use crate::node::definition::FuncOutput;
+    use crate::graph::node::definition::FuncOutput;
+    use crate::graph::node::{Node, NodeKind};
 
     let library = test_func_lib(TestFuncHooks::default());
     let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
@@ -308,9 +310,10 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
 #[test]
 fn run_targets_seed_an_exposed_producer_that_an_interior_node_also_reads() {
     use crate::data::type_system::DataType;
+    use crate::graph::Binding;
     use crate::graph::address::InputPort;
-    use crate::graph::{Binding, Node, NodeKind};
-    use crate::node::definition::FuncOutput;
+    use crate::graph::node::definition::FuncOutput;
+    use crate::graph::node::{Node, NodeKind};
 
     let library = test_func_lib(TestFuncHooks::default());
     let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
@@ -392,9 +395,10 @@ fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     // there, it doesn't assume composites are special.
     let plain = {
         use crate::data::type_system::DataType;
+        use crate::graph::Binding;
         use crate::graph::address::InputPort;
-        use crate::graph::{Binding, Node, NodeKind};
-        use crate::node::definition::FuncOutput;
+        use crate::graph::node::definition::FuncOutput;
+        use crate::graph::node::{Node, NodeKind};
 
         let mut nested = GraphDef::new("Plain").output(FuncOutput::new("out", DataType::Int));
         let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));

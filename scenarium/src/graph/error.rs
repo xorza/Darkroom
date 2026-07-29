@@ -1,9 +1,16 @@
+//! What an authoring graph rejects: a document that will not deserialize into
+//! one, and a graph that will not pass [`validate`](crate::graph::Graph::validate).
+//!
+//! Both are *recoverable* — a stale document or an edit a user can undo — so
+//! they are `Result`s rather than panics. Logic errors inside the graph's own
+//! mutations assert instead.
+
 use common::DeserializeError;
 use thiserror::Error;
 
 use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::interface::GraphId;
-use crate::node::definition::FuncId;
+use crate::graph::node::definition::FuncId;
 
 #[derive(Debug, Error)]
 pub enum GraphDeserializeError {

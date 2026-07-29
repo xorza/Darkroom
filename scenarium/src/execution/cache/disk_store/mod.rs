@@ -15,8 +15,8 @@ use crate::execution::codec;
 use crate::execution::codec::Codecs;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
+use crate::graph::node::lambda::OutputDemand;
 use crate::library::Library;
-use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 
 #[derive(Debug, Default)]
@@ -236,7 +236,7 @@ impl DiskStore {
         )
         .await
         {
-            if !matches!(error, codec::Error::UnknownType(_)) {
+            if !matches!(error, codec::error::Error::UnknownType(_)) {
                 tracing::warn!(path = %target.path.display(), %error, "failed to encode output cache");
             }
             return;

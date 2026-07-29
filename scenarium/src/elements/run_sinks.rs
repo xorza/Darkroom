@@ -1,4 +1,4 @@
-//! The [`RunSinks`](crate::node::special::SpecialNode::RunSinks) special
+//! The [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) special
 //! node: a sink event sink with no data ports. It subscribes to another
 //! node's event and, when that event fires, the engine seeds the run with
 //! *every* sink node — i.e. re-runs the whole graph — rather than just its
@@ -16,7 +16,7 @@
 
 use std::sync::OnceLock;
 
-use crate::node::definition::Func;
+use crate::graph::node::definition::Func;
 
 /// Stable `FuncId` standing in for the run-sinks node in the flattened
 /// program (outcome attribution). Not registered in any `Library`.
@@ -47,7 +47,7 @@ fn build_func() -> Func {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::special::SpecialNode;
+    use crate::graph::node::special::SpecialNode;
 
     #[test]
     fn interface_is_a_portless_sink() {

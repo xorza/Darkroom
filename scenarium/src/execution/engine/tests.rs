@@ -1,22 +1,25 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::execution::compile::{CompileError, Compiler};
+use crate::execution::compile::Compiler;
+use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::execution::report::internals::DiscardedReports;
+use crate::graph::Binding;
+use crate::graph::Graph;
 use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::definition::GraphDef;
-use crate::graph::entry::Graph;
-use crate::graph::{Binding, CacheMode, Node, NodeKind, NodeSearch};
+use crate::graph::node::definition::FuncId;
+use crate::graph::node::definition::{Func, FuncBehavior};
+use crate::graph::node::error::InvokeError;
+use crate::graph::node::lambda::Invocation;
+use crate::graph::node::lambda::OutputDemand;
+use crate::graph::node::lambda::internals;
+use crate::graph::node::{CacheMode, Node, NodeKind, NodeSearch};
 use crate::library::Library;
-use crate::node::definition::FuncId;
-use crate::node::definition::{Func, FuncBehavior};
-use crate::node::lambda::Invocation;
-use crate::node::lambda::internals;
-use crate::node::lambda::{InvokeError, OutputDemand};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
@@ -142,7 +145,7 @@ mod cache_persistence {
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::schedule::NodeState;
-    use crate::node::definition::{FuncId, FuncOutput};
+    use crate::graph::node::definition::{FuncId, FuncOutput};
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1546,8 +1549,8 @@ mod cache_persistence {
         use std::sync::Mutex;
 
         use crate::async_lambda;
+        use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
         use crate::library::Library;
-        use crate::node::definition::{Func, FuncInput, FuncOutput};
 
         const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
         const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
@@ -1746,8 +1749,8 @@ mod cache_persistence {
 
         use crate::CustomValueCodec;
         use crate::async_lambda;
+        use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::{Library, TypeEntry};
-        use crate::node::definition::{Func, FuncOutput};
         use crate::runtime::context::{ContextStore, ContextType};
         use crate::{CustomValue, TypeId};
 
@@ -1923,7 +1926,7 @@ mod resource_binds {
 
     use super::*;
     use crate::async_lambda;
-    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};
 
     const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
@@ -3200,10 +3203,10 @@ mod behavior {
         use common::CancelToken;
 
         use crate::async_lambda;
+        use crate::graph::Graph;
         use crate::graph::address::NodeId;
-        use crate::graph::entry::Graph;
+        use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::Library;
-        use crate::node::definition::{Func, FuncOutput};
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
@@ -3292,10 +3295,10 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
+        use crate::graph::Graph;
         use crate::graph::address::NodeId;
-        use crate::graph::entry::Graph;
+        use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::Library;
-        use crate::node::definition::{Func, FuncOutput};
         let library: Library = [
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
                 .category("Debug")
@@ -3390,10 +3393,10 @@ mod behavior {
 
 mod composite_behavior {
     use super::*;
-    use crate::graph::NodeKind;
-    use crate::graph::entry::Graph;
+    use crate::graph::Graph;
     use crate::graph::interface::{GraphId, GraphLink};
-    use crate::node::definition::FuncOutput;
+    use crate::graph::node::NodeKind;
+    use crate::graph::node::definition::FuncOutput;
 
     fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
         let id = library.by_name(func_name).unwrap().id;
@@ -3899,9 +3902,9 @@ mod execution {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
-        use crate::graph::entry::Graph;
+        use crate::graph::Graph;
+        use crate::graph::node::definition::{Func, FuncOutput};
         use crate::library::Library;
-        use crate::node::definition::{Func, FuncOutput};
 
         let invocations = Arc::new(AtomicUsize::new(0));
         let mut library: Library = [Func::new(
@@ -4500,8 +4503,8 @@ mod events {
     use super::*;
     use crate::async_lambda;
     use crate::execution::identity::ExecutionEventPort;
-    use crate::node::definition::{Func, FuncInput, FuncOutput};
-    use crate::node::event::EventLambda;
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::graph::node::event::EventLambda;
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -4745,8 +4748,8 @@ mod events {
     /// not in that cone) does not.
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
-        use crate::graph::NodeKind;
-        use crate::node::special::SpecialNode;
+        use crate::graph::node::NodeKind;
+        use crate::graph::node::special::SpecialNode;
 
         let source_calls = Arc::new(Mutex::new(0i64));
         let sink_values = Arc::new(Mutex::new(Vec::<i64>::new()));
@@ -4901,8 +4904,8 @@ mod events {
 mod output_demand {
     use super::*;
     use crate::async_lambda;
-    use crate::node::definition::{Func, FuncInput, FuncOutput};
-    use crate::node::lambda::OutputDemand;
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::graph::node::lambda::OutputDemand;
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
@@ -5261,11 +5264,11 @@ mod topology {
 
 mod graph {
     use super::*;
-    use crate::graph::NodeKind;
-    use crate::graph::entry::Graph;
+    use crate::graph::Graph;
     use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
-    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
-    use crate::node::event::EventLambda;
+    use crate::graph::node::NodeKind;
+    use crate::graph::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::graph::node::event::EventLambda;
     use std::sync::Mutex as StdMutex;
 
     fn fnode(library: &Library, name: &str) -> Node {
@@ -5826,8 +5829,8 @@ mod mid_run_release {
 
     use super::*;
     use crate::async_lambda;
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::library::{Library, TypeEntry};
-    use crate::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{CustomValue, TypeId};
 
     const TRACKED_TYPE: &str = "7266406a-8083-4e46-b661-de4308bcec96";
@@ -6070,10 +6073,10 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::graph::NodeKind;
-    use crate::graph::entry::Graph;
+    use crate::graph::Graph;
     use crate::graph::interface::{GraphId, GraphLink};
-    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::graph::node::NodeKind;
+    use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Mutex as StdMutex;
 

@@ -1,12 +1,13 @@
 use crate::data::static_value::StaticValue;
 use crate::data::type_system::DataType;
+use crate::graph::Binding;
+use crate::graph::BindingEntry;
+use crate::graph::Graph;
 use crate::graph::address::{InputPort, NodeId};
 use crate::graph::definition::GraphDef;
-use crate::graph::entry::Graph;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::wiring::BindingEntry;
-use crate::graph::{Binding, Node, NodeKind};
-use crate::node::definition::{FuncId, FuncInput, FuncOutput};
+use crate::graph::node::definition::{FuncId, FuncInput, FuncOutput};
+use crate::graph::node::{Node, NodeKind};
 
 fn int_input(name: &str) -> FuncInput {
     FuncInput::optional(name, DataType::Int)

@@ -19,13 +19,14 @@ use hashbrown::HashMap;
 
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
-use crate::execution::cache::resource::{FsPathId, StampError, StampJob};
+use crate::execution::cache::resource::error::StampError;
+use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::node::definition::FuncBehavior;
-use crate::node::lambda::OutputDemand;
+use crate::graph::node::definition::FuncBehavior;
+use crate::graph::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
@@ -655,7 +656,8 @@ pub(crate) mod internals {
 
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::DiskStore;
-    use crate::execution::cache::resource::{FsPathId, StampError};
+    use crate::execution::cache::resource::FsPathId;
+    use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::program::index::NodeIdx;

@@ -1,7 +1,7 @@
 use crate::DynamicValue;
 use crate::execution::cache::digest::Digest;
-use crate::node::definition::FuncId;
-use crate::node::lambda::OutputDemand;
+use crate::graph::node::definition::FuncId;
+use crate::graph::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::shared_any_state::SharedAnyState;
 

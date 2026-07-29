@@ -14,8 +14,8 @@ use crate::execution::cache::disk_store::format::{
     covers_outputs, header_len, read, write,
 };
 use crate::execution::codec;
+use crate::graph::node::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
-use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
 
@@ -340,7 +340,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(error, codec::Error::Frame(_)));
+    assert!(matches!(error, codec::error::Error::Frame(_)));
     assert_eq!(underread_calls.load(Ordering::SeqCst), 1);
 }
 
@@ -471,7 +471,7 @@ async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(error, codec::Error::Frame(_)));
+    assert!(matches!(error, codec::error::Error::Frame(_)));
 
     assert_eq!(DESCRIPTOR_LEN, 32);
 }
