@@ -40,9 +40,9 @@
 use crate::execution::schedule::error::RunScheduleValidationError;
 use ::common::is_debug;
 
+use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::{Error, Result};
-use crate::common::column::{Column, Idx};
 use crate::execution::identity::{NodeIdx, NodeSet, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;

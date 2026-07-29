@@ -4,16 +4,17 @@
 
 use std::sync::Arc;
 
-use common::CancelToken;
+use ::common::CancelToken;
 
 use crate::RamUsage;
+use crate::common::column::Column;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::{CacheEvictionFailure, RuntimeCache};
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
+use crate::execution::identity::NodeIdx;
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::report::RunReporter;
 use crate::execution::schedule::RunSchedule;
 use crate::execution::schedule::planner::Planner;
@@ -48,7 +49,7 @@ pub(crate) struct ExecutionEngine {
     /// What each node's cache holds once a run has released everything dead — filled by
     /// the cache, read by the executor when it reduces the run to status rows. It lives
     /// here because only the engine sees both ends of that handoff.
-    node_ram: NodeColumn<RamUsage>,
+    node_ram: Column<NodeIdx, RamUsage>,
 }
 
 impl ExecutionEngine {
@@ -178,7 +179,7 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 mod internals {
-    use common::CancelToken;
+    use ::common::CancelToken;
 
     use crate::DynamicValue;
     use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
@@ -306,14 +307,14 @@ mod internals {
             self.schedule
                 .outputs
                 .demand
-                .slice(self.compiled.program.by_id(e_node_id).outputs)
+                .slice(self.compiled.program.by_id(e_node_id).outputs.range())
         }
 
         pub(super) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
             self.schedule
                 .outputs
                 .readers
-                .slice(self.compiled.program.by_id(e_node_id).outputs)
+                .slice(self.compiled.program.by_id(e_node_id).outputs.range())
         }
 
         /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.

@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use ::serde::{Deserialize, Serialize};
 use ::common::{SerdeFormat, SerializeError, deserialize, is_debug, serialize};
+use ::serde::{Deserialize, Serialize};
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 

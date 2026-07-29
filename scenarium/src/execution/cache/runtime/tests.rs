@@ -1,13 +1,13 @@
 use crate::graph::identity::FuncId;
 use std::sync::Arc;
 
+use crate::common::column::Column;
+use crate::common::pool::PoolRange;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
 use crate::execution::identity::ExecutionNodeId;
-use crate::common::column::Column;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::common::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;

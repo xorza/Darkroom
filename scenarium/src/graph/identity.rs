@@ -9,8 +9,8 @@
 //! fault touched, and [`identity`](crate::execution::identity) derives the
 //! *execution* identity space from these.
 
-use ::serde::{Deserialize, Serialize};
 use ::common::id_type;
+use ::serde::{Deserialize, Serialize};
 
 // `NodeId` and `GraphId` are unique across a whole document — nested graphs
 // included — so a bare one is an unambiguous address. `FuncId` names a
