@@ -104,7 +104,7 @@ impl ExecutionEngine {
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
         self.cache
-            .prepare_run(&self.compiled.program, &self.plan, cancel.clone())
+            .prepare(&self.compiled.program, &self.plan, cancel.clone())
             .await;
 
         // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,

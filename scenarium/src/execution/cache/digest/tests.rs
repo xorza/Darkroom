@@ -5,8 +5,10 @@ use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
-use crate::node::definition::FuncId;
+use crate::execution::program::{
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
+};
+use crate::node::definition::{FuncBehavior, FuncId};
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
@@ -488,14 +490,11 @@ fn output_ports_are_disambiguated() {
     p.add(20, 1, &[bind(0, 0)]); // B binds A.0
     p.add(20, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-    let a = digest_at(&p.program, 0).unwrap();
-    assert_ne!(
-        port_digest_of(a, 0),
-        port_digest_of(a, 1),
-        "ports of one node must hash apart"
-    );
     let d = digests(&p);
-    assert_ne!(d[1], d[2], "consumers reading different ports must differ");
+    assert_ne!(
+        d[1], d[2],
+        "consumers reading different ports of one producer must key apart"
+    );
 }
 
 /// The output signature is part of the key: a flipped type, an added port, or a

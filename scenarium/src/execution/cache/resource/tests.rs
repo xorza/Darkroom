@@ -345,7 +345,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache.reconcile(&fixture.program);
 
     cache
-        .prepare_run(&fixture.program, &fixture.plan, CancelToken::never())
+        .prepare(&fixture.program, &fixture.plan, CancelToken::never())
         .await;
     cache.stamp_digest(
         &fixture.program,
@@ -365,7 +365,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
 
     let first_run = cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest;
     cache
-        .prepare_run(&fixture.program, &fixture.plan, CancelToken::never())
+        .prepare(&fixture.program, &fixture.plan, CancelToken::never())
         .await;
     cache.stamp_digest(
         &fixture.program,
