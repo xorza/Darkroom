@@ -22,7 +22,6 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::resource::ResourceStamper;
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
@@ -106,28 +105,9 @@ impl Resolver {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
-        resource_stamper: &ResourceStamper,
     ) {
-        stamp_digests(program, cache, resource_stamper, plan);
+        stamp_digests(program, cache, plan);
         resolve_run(program, plan, cache, &mut self.run).await;
-    }
-}
-
-/// Producer-first digest pass, so a consumer folds an already-stamped producer digest.
-/// Reuse is deliberately not probed here because exact demand exists only in the reverse
-/// sweep. A Bind-delivered path value that is not resident yet stamps `None`; the run loop
-/// can improve that node to reuse after its path producer settles.
-fn stamp_digests(
-    program: &ExecutionProgram,
-    cache: &mut RuntimeCache,
-    resource_stamper: &ResourceStamper,
-    plan: &ExecutionPlan,
-) {
-    for &node_idx in &plan.process_order {
-        if !plan.verdicts[node_idx].wants_execute() {
-            continue;
-        }
-        cache.stamp_digest(program, resource_stamper, node_idx);
     }
 }
 
