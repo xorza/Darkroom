@@ -35,7 +35,7 @@ pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
 pub use graph::definition::GraphDef;
 pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
-pub use graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
+pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::node::definition::{
     Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, OutputType, ValueVariant,
 };

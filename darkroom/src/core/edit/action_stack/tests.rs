@@ -8,7 +8,7 @@ use crate::core::edit::intent::apply::{apply_step, commit_doc_intent};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{DocIntent, Intent};
 use scenarium::testing::test_graph;
-use scenarium::{GraphDef, GraphId, GraphInterface, NodeSearch};
+use scenarium::{GraphDef, GraphId, NodeSearch};
 
 /// Three tabs with distinct `Local` targets in the primary group so an
 /// activation/close at a given index is observable. Dock steps are
@@ -506,12 +506,12 @@ fn doc_with_def() -> (Document, GraphRef) {
     (doc, GraphRef::Local(id))
 }
 
-fn interface(doc: &Document, id: GraphId) -> &GraphInterface {
-    &doc.graph.graphs[&id].interface
+fn interface(doc: &Document, id: GraphId) -> &GraphDef {
+    &doc.graph.graphs[&id]
 }
 
-fn interface_mut(doc: &mut Document, id: GraphId) -> &mut GraphInterface {
-    &mut doc.graph.graphs.get_mut(&id).unwrap().interface
+fn interface_mut(doc: &mut Document, id: GraphId) -> &mut GraphDef {
+    doc.graph.graphs.get_mut(&id).unwrap()
 }
 
 #[test]

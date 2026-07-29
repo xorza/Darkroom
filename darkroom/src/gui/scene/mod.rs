@@ -10,8 +10,8 @@ use scenarium::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
     Subscription,
 };
-use scenarium::{DataType, GraphDef, GraphInterface, NodeEvents, RamUsage, StaticValue};
-use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::{DataType, GraphDef, NodeEvents, RamUsage, StaticValue};
+use scenarium::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::{GraphId, GraphLink};
 
 use crate::core::document::{Document, GraphRef, GraphView, PortKind, PortRef, Viewport};
@@ -392,11 +392,12 @@ impl<'a> SceneSource<'a> {
         }
     }
 
-    /// The interface a boundary node mirrors, if this source has one.
-    pub(crate) fn interface(self) -> Option<&'a GraphInterface> {
+    /// The definition a boundary node mirrors the exposed ports of, if this
+    /// source is one.
+    pub(crate) fn definition(self) -> Option<&'a GraphDef> {
         match self {
             SceneSource::Entry(_) => None,
-            SceneSource::Def(def) => Some(&def.interface),
+            SceneSource::Def(def) => Some(def),
         }
     }
 }
@@ -471,7 +472,7 @@ impl Scene {
             source,
             view,
         } = projection;
-        let (graph, interface) = (source.graph(), source.interface());
+        let (graph, definition) = (source.graph(), source.definition());
         // A definition pane is no particular instance of that definition, so
         // a node there has an occurrence per instance and a run raised over
         // the pane has no single one to target — and a preview spawned there
@@ -486,7 +487,8 @@ impl Scene {
             let Some(node) = graph.find(id, NodeSearch::TopLevel) else {
                 continue;
             };
-            let node_interface = NodeInterface::resolve(ui, graph, library, node, interface, empty);
+            let node_interface =
+                NodeInterface::resolve(ui, graph, library, node, definition, empty);
             let ports = self.push_node_ports(
                 ui,
                 library,
@@ -555,9 +557,9 @@ impl Scene {
         self.local_defs
             .extend(graph.graphs.iter().map(|(id, def)| SceneLocalDef {
                 id: *id,
-                name: intern_or_empty(ui, empty, &def.interface.name),
-                category: intern_or_empty(ui, empty, &def.interface.category),
-                origin: def.interface.origin,
+                name: intern_or_empty(ui, empty, &def.name),
+                category: intern_or_empty(ui, empty, &def.category),
+                origin: def.origin,
             }));
         // `Graph::graphs` is a `HashMap`. Its order reaches the palette, whose
         // own sort is by name and stable, so two same-named defs would swap
@@ -861,10 +863,10 @@ struct NodeInterface<'a> {
 
 impl<'a> NodeInterface<'a> {
     /// The interface `node` projects with: read off its func, its referenced
-    /// definition, or — for a boundary node — the enclosing definition's own
-    /// interface, which only a `GraphDef` carries. Scenarium resolves the
-    /// first three into one `NodePorts`; only the boundary pair, whose ports
-    /// the editor synthesizes, is spelled out here.
+    /// definition, or — for a boundary node — the ports the *enclosing*
+    /// definition exposes, which only a `GraphDef` carries. Scenarium
+    /// resolves the first three into one `NodePorts`; only the boundary
+    /// pair, whose ports the editor synthesizes, is spelled out here.
     ///
     /// A func or graph node whose target is absent has no interface to
     /// project. Dropping it would make it invisible — and so impossible to
@@ -883,7 +885,7 @@ impl<'a> NodeInterface<'a> {
         graph: &'a Graph,
         library: &'a Library,
         node: &'a Node,
-        interface: Option<&GraphInterface>,
+        definition: Option<&GraphDef>,
         empty: &InternedStr,
     ) -> Self {
         let resolved = match &node.kind {
@@ -898,21 +900,13 @@ impl<'a> NodeInterface<'a> {
                         NodeKind::Graph(link) => Some(link),
                         _ => None,
                     },
-                    // A composite has no declaration of its own to read, so
-                    // "exposes no outputs" stands in until a compiled program
-                    // can answer for its interior (`Scene::project` folds
-                    // `CompiledGraph::is_sink` over this).
-                    sink: ports
-                        .func
-                        .map_or_else(|| ports.outputs.is_empty(), |func| func.sink),
-                    uncacheable: ports.func.is_some_and(|func| func.uncacheable),
-                    // A composite has no declaration to read, and its interior's
-                    // aggregate purity isn't knowable here — `Scene::project`
-                    // folds `CompiledGraph::is_impure` over this once a program
-                    // exists.
-                    impure: ports
-                        .func
-                        .is_some_and(|func| func.behavior == FuncBehavior::Impure),
+                    // What each of these means for a composite is scenarium's
+                    // answer, not this projection's; `Scene::project` folds
+                    // the compiled program's own reading over `sink` and
+                    // `impure` once a program exists.
+                    sink: ports.sink(),
+                    uncacheable: ports.uncacheable(),
+                    impure: ports.impure(),
                     missing: false,
                 })
             }
@@ -921,9 +915,9 @@ impl<'a> NodeInterface<'a> {
             // placeholder emits `AddBoundaryPort` + `SetInput` as one
             // batch (see `connection_ui::commit_connection`), so a
             // fresh placeholder appears next frame.
-            NodeKind::GraphInput => interface.map(|interface| {
+            NodeKind::GraphInput => definition.map(|definition| {
                 let mut outputs: Vec<FuncOutput> =
-                    interface.inputs.iter().map(boundary_output).collect();
+                    definition.inputs.iter().map(boundary_output).collect();
                 outputs.push(placeholder_output());
                 NodeInterface::synthesized(
                     ui.intern("Input"),
@@ -936,9 +930,9 @@ impl<'a> NodeInterface<'a> {
             // as `FuncInput`s for names + zero defaults), plus a
             // trailing placeholder input. Symmetric to the inbound
             // case — wiring the placeholder grows the definition's outputs.
-            NodeKind::GraphOutput => interface.map(|interface| {
+            NodeKind::GraphOutput => definition.map(|definition| {
                 let mut inputs: Vec<FuncInput> =
-                    interface.outputs.iter().map(boundary_input).collect();
+                    definition.outputs.iter().map(boundary_input).collect();
                 inputs.push(placeholder_input());
                 NodeInterface::synthesized(
                     ui.intern("Output"),
@@ -959,8 +953,8 @@ impl<'a> NodeInterface<'a> {
                     NodeKind::Graph(_) => "missing graph",
                     // A special node's spec always resolves. A boundary
                     // node only exists in a definition body, and
-                    // `SceneSource::Def` carries that body's interface
-                    // inseparably — so neither reaches this branch.
+                    // `SceneSource::Def` carries the definition exposing
+                    // those ports — so neither reaches this branch.
                     NodeKind::Special(_) | NodeKind::GraphInput | NodeKind::GraphOutput => {
                         unreachable!("special and boundary interfaces always resolve")
                     }

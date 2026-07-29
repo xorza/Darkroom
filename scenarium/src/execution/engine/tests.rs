@@ -5615,7 +5615,7 @@ mod graph {
         let emitter = fnode(&library, "ticker");
         let mut def_graph = GraphDef::new("Exposer").category("Test");
         let emitter_id = def_graph.body.add(emitter);
-        def_graph.interface.events.push(GraphEvent {
+        def_graph.events.push(GraphEvent {
             name: "tick".into(),
             emitter: emitter_id,
             emitter_event_idx: 0,

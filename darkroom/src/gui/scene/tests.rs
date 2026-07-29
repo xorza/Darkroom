@@ -617,7 +617,7 @@ fn local_defs_project_per_pane_ordered_by_id() {
     nested.body.insert_graph(buried, GraphDef::new("Buried"));
 
     let mut published = GraphDef::new("Published").category("Document");
-    published.interface.origin = Some(origin);
+    published.origin = Some(origin);
 
     let mut graph = Graph::default();
     let (first, second) = (GraphId::unique(), GraphId::unique());
