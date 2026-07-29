@@ -5,7 +5,7 @@ use common::id_type;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::address::NodeId;
-use crate::node::definition::{FuncInput, FuncOutput};
+use crate::graph::node::definition::{FuncInput, FuncOutput};
 
 id_type!(GraphId);
 
