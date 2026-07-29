@@ -12,19 +12,19 @@
 //!
 //! See `README.md` Part A §5.
 
+pub(super) mod map;
+
 use hashbrown::HashSet;
 
-use crate::execution::identity::{
-    ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort, FlattenMap,
-};
-use crate::execution::program::pool::Pool;
+use crate::execution::flatten::map::FlattenMap;
+use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
     ExecutionProgram, PendingBind, PendingSubscription,
 };
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies};
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
+use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies, declared_accepts_const};
+use crate::graph::{Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput};
 use crate::node::special::SpecialNode;
@@ -35,7 +35,7 @@ use crate::{DataType, StaticValue};
 /// stack lives on `Run` (it borrows the build's graph), keeping this struct
 /// free of borrowed references.
 #[derive(Debug, Default)]
-pub(crate) struct Flattener {
+pub(super) struct Flattener {
     path: Vec<NodeId>,
     /// `FlattenMap` scope indices parallel to the emit-descent in `path` —
     /// the scope each level's nodes live in. Reused across builds.
@@ -60,7 +60,7 @@ impl Flattener {
     /// library, adopt the emitted nodes in id order, then resolve the edge
     /// fixups the walk deferred. Every buffer here is scratch the next build
     /// reuses, so nothing leaves this call but the populated `program`.
-    pub(crate) fn build(
+    pub(super) fn build(
         &mut self,
         program: &mut ExecutionProgram,
         root: &Graph,
@@ -92,9 +92,7 @@ impl Flattener {
                 subs: &mut self.subs,
                 pending_binds: &mut self.pending_binds,
                 e_nodes: &mut self.e_nodes,
-                inputs: &mut program.inputs,
-                outputs: &mut program.outputs,
-                events: &mut program.events,
+                program: &mut *program,
             };
             run.emit(false);
         }
@@ -138,10 +136,9 @@ struct Run<'a> {
     subs: &'a mut Vec<PendingSubscription>,
     pending_binds: &'a mut Vec<PendingBind>,
     e_nodes: &'a mut Vec<(ExecutionNodeId, ExecutionNode)>,
-    /// The inputs pool being built this update.
-    inputs: &'a mut Pool<ExecutionInput>,
-    outputs: &'a mut Pool<ExecutionOutput>,
-    events: &'a mut Pool<ExecutionEvent>,
+    /// Only for the port pools built this update — the walk's nodes reach
+    /// the program through [`Flattener::build`], after the descent.
+    program: &'a mut ExecutionProgram,
 }
 
 impl<'a> Run<'a> {
@@ -199,30 +196,7 @@ impl<'a> Run<'a> {
                 ),
                 NodeKind::Special(s) => (s.func(), Some(*s)),
                 NodeKind::Graph(link) => {
-                    let shared_id = match link {
-                        GraphLink::Shared(id) => Some(*id),
-                        GraphLink::Local(_) => None,
-                    };
-                    if let Some(id) = shared_id
-                        && !self.seen_shared.insert(id)
-                    {
-                        panic!("recursive shared graph {id:?} (it contains itself)");
-                    }
-                    let nested = graph
-                        .resolve_graph(*link, self.library)
-                        .expect("graph node references a missing graph");
-                    self.push_level(node.id, &nested.body);
-                    // Open this instance's scope under the current one; its
-                    // interior nodes record their leaves against it.
-                    let parent = *self.scope_stack.last().unwrap();
-                    let scope = self.flatten.push_scope(node.id, parent);
-                    self.scope_stack.push(scope);
-                    self.emit(disabled);
-                    self.scope_stack.pop();
-                    self.pop_level();
-                    if let Some(id) = shared_id {
-                        self.seen_shared.remove(&id);
-                    }
+                    self.emit_instance(node.id, *link, disabled);
                     continue;
                 }
                 NodeKind::GraphInput | NodeKind::GraphOutput => continue,
@@ -231,9 +205,11 @@ impl<'a> Run<'a> {
             let e_node_id = self.execution_node_id(node.id);
 
             let outputs = self
+                .program
                 .outputs
                 .append((0..func.outputs.len()).map(|_| ExecutionOutput::default()));
             let events = self
+                .program
                 .events
                 .append(func.events.iter().map(|func_event| ExecutionEvent {
                     lambda: func_event.event_lambda.clone(),
@@ -245,6 +221,7 @@ impl<'a> Run<'a> {
             // `required` flag or a grown input list must land here, and the bindings
             // loop below visits every port anyway.
             let inputs = self
+                .program
                 .inputs
                 .append(func.inputs.iter().map(|func_input| ExecutionInput {
                     required: func_input.required,
@@ -282,7 +259,7 @@ impl<'a> Run<'a> {
                 match self.typed_binding(graph, func_input, graph.bindings.get(&port)) {
                     FlatBinding::None => {}
                     FlatBinding::Const(value) => {
-                        self.inputs[inputs_start + port_idx].binding =
+                        self.program.inputs[inputs_start + port_idx].binding =
                             ExecutionBinding::Const(value);
                     }
                     FlatBinding::Bind(producer) => {
@@ -297,6 +274,40 @@ impl<'a> Run<'a> {
 
         if !ancestor_disabled {
             self.collect_subscriptions(graph);
+        }
+    }
+
+    /// Dissolve one composite instance: open its scope, emit its interior in
+    /// place, and leave every stack as it was found.
+    fn emit_instance(&mut self, instance_id: NodeId, link: GraphLink, disabled: bool) {
+        let shared_id = match link {
+            GraphLink::Shared(id) => Some(id),
+            GraphLink::Local(_) => None,
+        };
+        if let Some(id) = shared_id
+            && !self.seen_shared.insert(id)
+        {
+            panic!("recursive shared graph {id:?} (it contains itself)");
+        }
+        let nested = self
+            .current()
+            .resolve_graph(link, self.library)
+            .expect("graph node references a missing graph");
+
+        self.push_level(instance_id, &nested.body);
+        self.record_exposed_outputs(instance_id, nested);
+        // Open this instance's scope under the current one; its interior
+        // nodes record their leaves against it.
+        let parent = *self.scope_stack.last().unwrap();
+        let scope = self.flatten.push_scope(instance_id, parent);
+        self.scope_stack.push(scope);
+
+        self.emit(disabled);
+
+        self.scope_stack.pop();
+        self.pop_level();
+        if let Some(id) = shared_id {
+            self.seen_shared.remove(&id);
         }
     }
 
@@ -322,7 +333,12 @@ impl<'a> Run<'a> {
     /// it ultimately fires, following composite exposed-event mappings inward.
     fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<ExecutionEventPort> {
         let graph = self.current();
-        let node = graph.find(node_id, NodeSearch::TopLevel)?;
+        // Both callers name a validated node: a subscription's emitter, or
+        // an interface event's. `None` below is drift or a deliberate skip,
+        // never an id this graph has no node for.
+        let node = graph
+            .find(node_id, NodeSearch::TopLevel)
+            .expect("subscription emitter resolved by validate_for_execution");
         if node.disabled {
             return None; // a disabled node fires no events
         }
@@ -342,7 +358,10 @@ impl<'a> Run<'a> {
                 })
             }
             NodeKind::Graph(r) => {
-                let nested = graph.resolve_graph(*r, self.library)?;
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                // Drift: the interface may no longer expose this event.
                 let exposed = nested.interface.events.get(event_idx)?;
                 self.push_level(node_id, &nested.body);
                 let resolved = self.resolve_emitter(exposed.emitter, exposed.emitter_event_idx);
@@ -359,9 +378,11 @@ impl<'a> Run<'a> {
     /// trigger.
     fn resolve_subscriber(&mut self, node_id: NodeId, event: ExecutionEventPort) {
         let graph = self.current();
-        let Some(node) = graph.find(node_id, NodeSearch::TopLevel) else {
-            return;
-        };
+        // Every caller names a validated subscriber, at this level or a
+        // nested one.
+        let node = graph
+            .find(node_id, NodeSearch::TopLevel)
+            .expect("subscriber resolved by validate_for_execution");
         // A disabled node runs nothing, so it receives no events.
         if node.disabled {
             return;
@@ -378,9 +399,11 @@ impl<'a> Run<'a> {
                 });
             }
             NodeKind::Graph(r) => {
-                let Some(nested) = graph.resolve_graph(*r, self.library) else {
-                    return;
-                };
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                // A definition with no inbound boundary has nothing to
+                // deliver the event to — authored, not broken.
                 let Some(trigger) = nested.body.boundary_node(NodeKind::GraphInput) else {
                     return;
                 };
@@ -426,12 +449,8 @@ impl<'a> Run<'a> {
                 let nested = graph
                     .resolve_graph(*r, self.library)
                     .expect("graph node references a missing graph");
-                let Some(output) = nested.body.boundary_node(NodeKind::GraphOutput) else {
-                    return FlatBinding::None;
-                };
-                let binding = nested.body.bindings.get(&InputPort::new(output, port_idx));
                 self.push_level(node_id, &nested.body);
-                let source = self.resolve_binding(binding);
+                let source = self.resolve_exposed_output(nested, port_idx);
                 self.pop_level();
                 source
             }
@@ -440,9 +459,28 @@ impl<'a> Run<'a> {
             NodeKind::GraphInput => {
                 let instance_id = *self.path.last().expect("GraphInput at the root level");
                 self.pop_level();
-                let port = InputPort::new(instance_id, port_idx);
-                let binding = self.current().bindings.get(&port);
-                let source = self.resolve_binding(binding);
+                let outer = self.current();
+                let binding = outer.bindings.get(&InputPort::new(instance_id, port_idx));
+                // The level below was descended through this very node, so
+                // it is here and it is a graph — only the port may have
+                // gone, which is drift.
+                let instance = outer
+                    .find(instance_id, NodeSearch::TopLevel)
+                    .expect("the enclosing level was descended through this instance");
+                let NodeKind::Graph(link) = &instance.kind else {
+                    panic!("only a graph node opens a level");
+                };
+                let def = outer
+                    .resolve_graph(*link, self.library)
+                    .expect("graph node references a missing graph");
+                // The instance's own interface declares this port, so the
+                // exterior wire is gated against it — the same `FuncInput`
+                // the interior side would be gated against, picker list and
+                // optionality included.
+                let source = match def.interface.inputs.get(port_idx) {
+                    Some(declared) => self.typed_binding(outer, declared, binding),
+                    None => FlatBinding::None,
+                };
                 self.push_level(instance_id, graph);
                 source
             }
@@ -467,6 +505,79 @@ impl<'a> Run<'a> {
                 .data_type
                 .compatible_with(&graph.resolve_output_type(self.library, *src)),
             Some(Binding::Const(value)) => !const_satisfies(self.library, input, value),
+            None => false,
+        };
+        if mismatched {
+            return FlatBinding::None;
+        }
+        self.resolve_binding(binding)
+    }
+
+    /// Resolve `nested`'s interface output `port_idx` through the interior
+    /// wiring behind it, gated by the declared port type. Call with
+    /// `nested`'s own level pushed.
+    ///
+    /// The single definition of "what comes out of this port", shared by
+    /// the on-demand hop in [`Self::resolve`] and the eager record in
+    /// [`Self::record_exposed_outputs`] — the two must agree, or an
+    /// instance would name a producer its consumers never see.
+    fn resolve_exposed_output(&mut self, nested: &'a GraphDef, port_idx: usize) -> FlatBinding {
+        // Drift can leave the definition without a boundary node, or the
+        // interface without this port at all.
+        let (Some(output_node), Some(declared)) = (
+            nested.body.boundary_node(NodeKind::GraphOutput),
+            nested.interface.outputs.get(port_idx),
+        ) else {
+            return FlatBinding::None;
+        };
+        let declared = declared.ty.declared();
+        let binding = nested
+            .body
+            .bindings
+            .get(&InputPort::new(output_node, port_idx));
+        self.typed_boundary_binding(&nested.body, &declared, binding)
+    }
+
+    /// Note which execution node backs each of `nested`'s interface output
+    /// ports, against the instance `instance_id`. Called with that
+    /// instance's level already pushed.
+    ///
+    /// Eager, and for every instance — not only those something binds to.
+    /// The finished program has no `GraphOutput` edges left, so nothing
+    /// downstream can tell an exposed producer from interior plumbing:
+    /// with an interior reader and no exterior one, its consumer set is
+    /// entirely inside the footprint, exactly like a node the instance
+    /// merely uses. That is the shape `run_targets` used to skip.
+    fn record_exposed_outputs(&mut self, instance_id: NodeId, nested: &'a GraphDef) {
+        for port_idx in 0..nested.interface.outputs.len() {
+            if let FlatBinding::Bind(port) = self.resolve_exposed_output(nested, port_idx) {
+                self.flatten.push_exposed(instance_id, port.e_node_id);
+            }
+        }
+    }
+
+    /// [`Self::typed_binding`] for a **boundary** port, whose declaration is
+    /// a bare [`DataType`] rather than a `FuncInput`.
+    ///
+    /// A composite's interface is a type contract in its own right. The
+    /// outer gate checks the consumer against the *declared* port type and
+    /// passes; crossing the boundary through raw `resolve_binding` then
+    /// ignored that declaration entirely, so a definition declaring an
+    /// `Int` output while wiring it to a `String` producer compiled a
+    /// direct `Bind` from that producer into an `Int` consumer. Nothing
+    /// downstream could see it — the edge that would have shown the
+    /// mismatch is exactly the one flattening dissolves.
+    fn typed_boundary_binding(
+        &mut self,
+        graph: &'a Graph,
+        declared: &DataType,
+        binding: Option<&Binding>,
+    ) -> FlatBinding {
+        let mismatched = match binding {
+            Some(Binding::Bind(src)) => {
+                !declared.compatible_with(&graph.resolve_output_type(self.library, *src))
+            }
+            Some(Binding::Const(value)) => !declared_accepts_const(self.library, declared, value),
             None => false,
         };
         if mismatched {

@@ -1,26 +1,46 @@
 //! Per-run filesystem identity collection.
 //!
-//! Filesystem metadata walks run on Tokio's blocking pool. The resulting
-//! [`RunResourceStamps`] is shared by the producer-first digest pass and late bound-path
-//! restamps, so each path is observed once per run and digest folding itself performs no I/O.
+//! Filesystem metadata walks run on Tokio's blocking pool. One
+//! [`ResourceStamper`] serves the producer-first digest pass and the late bound-path
+//! restamps alike, so each path is observed once per run and digest folding itself
+//! performs no I/O.
 
 use std::future::Future;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use common::CancelToken;
 use hashbrown::{HashMap, HashSet};
 
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::digest::DigestHasher;
+use crate::execution::digest::{Digest, DigestHasher};
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::index::NodeIdx;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::node::definition::FuncBehavior;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Metadata identity of one filesystem entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FileId {
     len: u64,
-    mtime_ns: u128,
+    /// Nanoseconds from the Unix epoch, **negative before it**. Signed
+    /// because `duration_since(..).ok().unwrap_or(0)` gave every pre-1970
+    /// mtime the same `0` as the epoch itself.
+    mtime_ns: i128,
+}
+
+/// Signed nanoseconds between `time` and the Unix epoch.
+///
+/// Split out from [`FileId::from_metadata`] because the pre-epoch arm is
+/// the whole point and setting a real file's mtime to 1969 needs a
+/// syscall this crate has no dependency for.
+fn epoch_offset_ns(time: std::time::SystemTime) -> i128 {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => after.as_nanos() as i128,
+        // Pre-epoch: the error carries the distance the other way.
+        Err(before) => -(before.duration().as_nanos() as i128),
+    }
 }
 
 impl FileId {
