@@ -935,6 +935,40 @@ fn node_remove_test() -> TestResult {
     Ok(())
 }
 
+/// The rule the editor applies before it lets a wire land: a back-edge closes
+/// a loop, a forward or sideways one does not, and a node wired to itself
+/// always does. Direct *and* transitive, since the walk is what tells the two
+/// apart.
+#[test]
+fn produces_cycle_detects_direct_and_transitive_loops() {
+    // A passthrough is both consumer and producer, so it can chain:
+    // a → b → c, with d left unconnected.
+    let relay = passthrough_func();
+    let mut graph = Graph::default();
+    let a = graph.add_func_node(&relay);
+    let b = graph.add_func_node(&relay);
+    let c = graph.add_func_node(&relay);
+    let d = graph.add_func_node(&relay);
+    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
+    graph.set_input_binding(InputPort::new(c, 0), Binding::bind(b, 0));
+
+    assert!(graph.produces_cycle(b, a), "b → a closes a → b");
+    assert!(
+        graph.produces_cycle(c, a),
+        "c → a closes a → b → c transitively"
+    );
+    assert!(graph.produces_cycle(a, a), "a node wired to itself");
+
+    // Forward and sideways edges are fine: a second a → c path is a DAG
+    // diamond, and an unconnected node is reachable from nothing.
+    assert!(
+        !graph.produces_cycle(a, c),
+        "a → c is a second forward path"
+    );
+    assert!(!graph.produces_cycle(c, d), "d reads from nothing");
+    assert!(!graph.produces_cycle(a, d), "d reads from nothing");
+}
+
 #[test]
 fn only_boundary_kinds_are_boundaries() {
     let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
