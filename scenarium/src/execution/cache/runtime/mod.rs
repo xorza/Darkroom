@@ -23,9 +23,9 @@ use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
-use crate::execution::compile::program::{ExecutionBinding, Program};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -49,7 +49,7 @@ pub(crate) struct RuntimeCache {
     /// The program `slots` is aligned to — what its indices mean, and the ids
     /// that name them across an install.
     ///
-    /// Shared with the [`CompiledGraph`](crate::execution::compile::compiled_graph::CompiledGraph)
+    /// Shared with the [`CompiledGraph`](crate::execution::compiled::CompiledGraph)
     /// it came from rather than copied, so holding it duplicates nothing. It is
     /// written only where `slots` is, which is what makes the alignment a fact
     /// about the struct instead of a precondition every caller has to honour.

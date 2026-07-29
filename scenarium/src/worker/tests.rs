@@ -7,7 +7,7 @@ use tokio::time::{Duration, timeout};
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::Compiler;
-use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::compiled::CompiledGraph;
 use crate::execution::error::ExecutionIdentityError;
 use crate::execution::error::{Error, Result as ExecResult, RunError};
 use crate::execution::identity::ExecutionNodeId;

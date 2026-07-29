@@ -6,11 +6,9 @@ use crate::async_lambda;
 use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compile::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
-};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
 use crate::graph::func::FuncBehavior;
