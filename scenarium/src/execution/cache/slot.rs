@@ -141,13 +141,6 @@ impl RuntimeSlot {
             .then_some(snapshot)
     }
 
-    /// [`current_snapshot`](Self::current_snapshot)'s values — rejecting stale
-    /// resident references so they cannot enter a new resource-backed digest.
-    pub(crate) fn current_output_values(&self) -> Option<&[DynamicValue]> {
-        self.current_snapshot()
-            .map(|snapshot| snapshot.values.as_slice())
-    }
-
     /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
     /// borrows of `state` and the output buffer — the lambda writes both at once,
     /// which a single whole-slot borrow couldn't allow. A resident buffer is reused

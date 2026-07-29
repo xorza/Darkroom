@@ -378,10 +378,11 @@ impl RuntimeCache {
     /// and any disk-backed path producer was hydrated (`executor.rs`). A mis-typed delivered
     /// value folds a distinct marker instead.
     fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> {
-        // `current_output_values`, so a value produced under an older digest
+        // The *current* snapshot, so a value produced under an older digest
         // cannot deliver a reference into this key.
         let delivered = self.slots[addr.node_idx]
-            .current_output_values()?
+            .current_snapshot()?
+            .values
             .get(addr.port_idx as usize)?;
         match delivered.as_fs_paths() {
             Some(paths) => {
