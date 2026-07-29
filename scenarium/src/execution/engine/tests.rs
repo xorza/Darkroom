@@ -5521,13 +5521,13 @@ mod graph {
         assert_ne!(sums[0], sums[1]);
     }
 
-    /// The `FlattenMap` maps a flattened interior node back to the
-    /// editor's authoring ids: `attribution` yields the node's own id
-    /// inside the def's graph, then each enclosing composite instance.
-    /// This is what lets the editor show per-node stats inside a graph
-    /// and accumulate them onto the instance node.
+    /// Attribution maps a flattened interior node back to the editor's
+    /// authoring ids: it yields the node's own id inside the def's graph,
+    /// then each enclosing composite instance. This is what lets the editor
+    /// show per-node stats inside a graph and accumulate them onto the
+    /// instance node.
     #[test]
-    fn flatten_map_attributes_interior_to_authoring_ids() {
+    fn attribution_maps_interior_nodes_to_authoring_ids() {
         let library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
         // The id the editor knows the interior node by (in the def graph).
@@ -5565,7 +5565,6 @@ mod graph {
         // Top-level node: id unchanged, attribution is just itself.
         let a_attr: Vec<_> = eg
             .compiled
-            .flatten_map
             .attribution(root_execution_node(a_id))
             .unwrap()
             .collect();

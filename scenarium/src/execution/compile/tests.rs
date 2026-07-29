@@ -1,7 +1,8 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::CompiledGraphValidationError;
-use crate::execution::flatten::map::internals::FlattenMapBuilder;
+use crate::execution::flatten::FlattenRecord;
+use crate::execution::flatten::attribution::internals::AttributionBuilder;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionNode, PendingSubscription};
@@ -421,12 +422,41 @@ fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     assert_eq!(plain, (Some(false), Some(false)));
 }
 
+/// One sort settles two outputs: the program's dense node order, and the leaf
+/// column the walk fills beside it. Ids are uuids, so the order nodes are
+/// authored in says nothing about the order they are adopted in — and a column
+/// shifted against the nodes it names would hand a node another node's authored
+/// id, which every leaf answering for itself rules out.
+#[test]
+fn dense_order_is_id_order_with_attribution_aligned_to_it() {
+    let library = test_func_lib(TestFuncHooks::default());
+    let get_b = library.by_name("get_b").unwrap();
+    let mut graph = Graph::default();
+    let authored: Vec<NodeId> = (0..8).map(|_| graph.add(get_b.into())).collect();
+
+    let compiled = Compiler::default().compile(&graph, &library).unwrap();
+
+    let e_node_ids: Vec<_> = compiled.program.e_node_ids.iter().copied().collect();
+    assert_eq!(e_node_ids.len(), authored.len());
+    assert!(e_node_ids.is_sorted(), "nodes are adopted in id order");
+    for node_id in authored {
+        assert_eq!(
+            compiled
+                .attribution(ExecutionNodeId::from_authoring(&[node_id]))
+                .unwrap()
+                .collect::<Vec<_>>(),
+            vec![node_id],
+            "a top-level node's leaf names the node itself"
+        );
+    }
+}
+
 #[test]
 fn validation_returns_compiled_and_installed_mismatches() {
     let e_node_id = ExecutionNodeId::unique();
     let interior = NodeId::unique();
     let missing_func = FuncId::unique();
-    let mut builder = FlattenMapBuilder::new();
+    let mut builder = AttributionBuilder::new();
     builder.insert_leaf(e_node_id, [], interior);
     let mut program = Program::default();
     program.push(
@@ -436,7 +466,13 @@ fn validation_returns_compiled_and_installed_mismatches() {
             ..Default::default()
         },
     );
-    let compiled = CompiledGraph::indexed(program, builder.build());
+    let compiled = CompiledGraph::indexed(
+        program,
+        FlattenRecord {
+            attribution: builder.build().attribution,
+            exposed: Vec::new(),
+        },
+    );
 
     assert_eq!(
         compiled
