@@ -29,7 +29,7 @@ use ::common::CancelToken;
 use crate::DynamicValue;
 use crate::RamUsage;
 use crate::common::column::Column;
-use crate::execution::event::EventTrigger;
+use crate::execution::outcome::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};

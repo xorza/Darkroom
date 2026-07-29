@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::RamUsage;
-use crate::execution::log::LogEntry;
+use crate::execution::outcome::LogEntry;
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunProgress};
 
