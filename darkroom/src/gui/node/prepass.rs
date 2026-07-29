@@ -24,7 +24,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::gui::UiAction;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::node::set_input;
-use crate::gui::scene::{GraphScene, InputBindingView, Scene};
+use crate::gui::scene::{Frame, InputBindingView, Pane};
 
 /// Prepass scan: surface an `OpenGraph` for the graph node whose `G`
 /// chip was clicked. Detecting the open here — *before* the record — lets
@@ -35,14 +35,14 @@ use crate::gui::scene::{GraphScene, InputBindingView, Scene};
 /// Whole-scene rather than per-pane: the chip is keyed by a
 /// document-unique `NodeId`, so there is one hit to resolve however many
 /// panes are open.
-pub(crate) fn emit_graph_opens(hits: &CanvasHits, scene: &Scene, actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_graph_opens(hits: &CanvasHits, frame: Frame<'_>, actions: &mut Vec<UiAction>) {
     // Instances are always `Local` (library graphs are localized on
     // instance), so the "G" chip opens the graph directly. The badge draws
     // for any link, which is why the `Local` filter is here and not on the
     // scan's draw guard.
     if let Some(node) = hits
         .chip(Chip::OpenGraph)
-        .and_then(|id| scene.nodes.get(&id))
+        .and_then(|id| frame.scene.nodes.get(&id))
         && let Some(GraphLink::Local(id)) = node.graph
     {
         actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
@@ -70,7 +70,7 @@ pub(crate) struct PathPickRequest {
 /// path* is a question about the port's type, and answering it needs the
 /// scene. An editor on any other type has no button to click and falls
 /// out here.
-pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: GraphScene<'_>) -> Option<PathPickRequest> {
+pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: Pane<'_>) -> Option<PathPickRequest> {
     let port = hits.clicked_const_editor()?;
     let node = graph.node(port.node_id)?;
     let input = graph.inputs(node.inputs).get(port.port_idx)?;
@@ -98,14 +98,14 @@ pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: GraphScene<'_>) -> Optio
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, scene: &Scene, out: &mut Intents) {
+pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, frame: Frame<'_>, out: &mut Intents) {
     // Whole-scene: the hit is keyed by a document-unique `PortRef`, so the
     // pane it edits comes off the node it names rather than from a loop
     // over the panes asking each whether it holds it.
     let Some(port) = hits.double_clicked_port() else {
         return;
     };
-    let Some(graph) = scene.owner(port.node_id) else {
+    let Some(graph) = frame.owner(port.node_id) else {
         return;
     };
     let Some(node) = graph.node(port.node_id) else {
@@ -136,15 +136,15 @@ pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, scene: &Scene, out: &mut In
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
-            for c in graph.connections() {
-                if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
+            for (consumer, producer) in graph.connections() {
+                if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
                     out.push(
                         target,
                         set_input(
                             PortRef {
-                                node_id: c.tgt.node_id,
+                                node_id: consumer.node_id,
                                 kind: PortKind::Input,
-                                port_idx: c.tgt.port_idx,
+                                port_idx: consumer.port_idx,
                             },
                             None,
                         ),

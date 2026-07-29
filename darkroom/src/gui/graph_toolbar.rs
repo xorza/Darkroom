@@ -21,7 +21,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
@@ -56,7 +56,7 @@ fn show_selected_wid(graph: GraphRef) -> WidgetId {
 pub(crate) fn show(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    graph: GraphScene<'_>,
+    graph: Pane<'_>,
     geometry: &CanvasGeometry,
     out: &mut Intents,
 ) -> Option<AppCommand> {
@@ -220,7 +220,6 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::GraphView;
     use crate::core::edit::intent::sink::Queued;
     use crate::core::edit::intent::types::Intent;
     use crate::gui::canvas::outer_canvas_widget_id;
@@ -229,7 +228,10 @@ mod tests {
     use crate::gui::theme::Theme;
     use glam::UVec2;
     use palantir::internals::UiHarness;
-    use scenarium::{Graph, GraphDef, GraphId, Library};
+    use scenarium::{GraphDef, GraphId, Library};
+
+    use crate::core::document::Document;
+    use crate::gui::scene::Frame;
 
     /// Run and the event loop compile the *document root*, so a subgraph
     /// pane offering them would silently act on another graph — the run
@@ -241,11 +243,11 @@ mod tests {
     /// arrangement that surfaced both bugs.
     #[test]
     fn the_run_pill_is_main_only_while_framing_is_per_pane() {
-        let root = Graph::default();
-        let def = GraphDef::new("Adder");
-        let local = GraphRef::Local(GraphId::unique());
-        let root_view = GraphView::for_graph(&root);
-        let def_view = GraphView::for_graph(&def.body);
+        let def_id = GraphId::unique();
+        let local = GraphRef::Local(def_id);
+        let mut doc = Document::default();
+        doc.graph.insert_graph(def_id, GraphDef::new("Adder"));
+        assert!(doc.ensure_sub_view(def_id), "the def was just inserted");
         let theme = Theme::default();
         let library = Library::default();
         let run_state = RunState::default();
@@ -269,18 +271,23 @@ mod tests {
                 [
                     GraphProjection {
                         target: GraphRef::Main,
-                        source: SceneSource::Entry(&root),
-                        view: &root_view,
+                        source: SceneSource::Entry(&doc.graph),
+                        view: &doc.main_view,
                     },
                     GraphProjection {
                         target: local,
-                        source: SceneSource::Def(&def),
-                        view: &def_view,
+                        source: SceneSource::Def(doc.graph.find_graph(def_id).unwrap()),
+                        view: doc.view(local).unwrap(),
                     },
                 ],
             );
             for target in [GraphRef::Main, local] {
-                let graph = scene.graph(target).expect("projected");
+                let graph = Frame {
+                    scene: &scene,
+                    doc: &doc,
+                }
+                .pane(target)
+                .expect("projected");
                 // The framing actions size their fit against the pane's outer
                 // canvas, which `GraphUI::draw` records around this toolbar;
                 // stand in for it so a click resolves to an intent.

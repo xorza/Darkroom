@@ -37,3 +37,5 @@ A Pure node with an unset path input now errors per run. DataType::FsPath's defa
 investigate dependencies skill
 
 fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> - what is option
+
+remove scene?

@@ -19,7 +19,7 @@ use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::prepass::emit_graph_opens;
 use crate::gui::preferences_view;
-use crate::gui::scene::Scene;
+use crate::gui::scene::Frame;
 use crate::gui::status_bar;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
@@ -77,20 +77,19 @@ impl MainWindow {
     pub(crate) fn scan_navigation(
         &mut self,
         ui: &mut Ui,
-        doc: &Document,
-        scene: &Scene,
+        frame: Frame<'_>,
         actions: &mut Vec<UiAction>,
     ) {
-        self.dock.scan(ui, doc, actions);
+        self.dock.scan(ui, frame.doc, actions);
         // One sweep of last frame's node responses, before anything reads
         // one: the canvas's own passes read it later in the frame, and the
         // two chip opens below are why it has to happen this early.
-        self.graph_ui.hits.scan(ui, scene);
+        self.graph_ui.hits.scan(ui, frame);
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
         }
-        emit_graph_opens(hits, scene, actions);
+        emit_graph_opens(hits, frame, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -98,20 +97,19 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        frame: Frame<'_>,
         library: &Library,
         out: &mut Intents,
     ) {
-        self.graph_ui.prepass(ui, scene, library, out);
+        self.graph_ui.prepass(ui, frame, library, out);
     }
 
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &Scene,
+        frame: Frame<'_>,
         prefs: &mut Preferences,
-        doc: &Document,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         let mut command = None;
@@ -131,6 +129,7 @@ impl MainWindow {
         // and nothing signals a rename cheaply enough to cache against. The
         // cost is proportional to *open viewer tabs*, which is normally zero,
         // so it stays off the common path on its own.
+        let doc = frame.doc;
         let viewer_labels: HashMap<NodeId, String> = doc
             .viewer_nodes()
             .map(|node_id| (node_id, image_viewer::node_label(doc, node_id)))
@@ -165,7 +164,7 @@ impl MainWindow {
                         // A graph tab whose projection is missing means the
                         // pane's graph died this frame; `reconcile_with_graph`
                         // prunes the tab before the next one.
-                        let Some(graph) = scene.graph(target) else {
+                        let Some(graph) = frame.pane(target) else {
                             return;
                         };
                         // Overlay the run/cancel toggle on the canvas's

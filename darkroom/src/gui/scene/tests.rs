@@ -1,5 +1,5 @@
 use super::*;
-use crate::gui::scene::internals::scene_node_stub;
+use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
 use palantir::internals::UiHarness;
 use scenarium::DataType;
 use scenarium::testing;
@@ -11,23 +11,24 @@ fn finput(name: &str, ty: DataType) -> FuncInput {
 }
 
 /// Project one root graph, the common single-pane case.
-fn rebuild_entry<'a>(
-    scene: &mut Scene,
-    ui: &mut Ui,
-    library: &Library,
-    graph: &'a Graph,
-    view: &'a GraphView,
-) {
+fn rebuild_entry(scene: &mut Scene, ui: &mut Ui, library: &Library, doc: &Document) {
     scene.rebuild(
         ui,
         library,
         &RunState::default(),
         [GraphProjection {
             target: GraphRef::Main,
-            source: SceneSource::Entry(graph),
-            view,
+            source: SceneSource::Entry(&doc.graph),
+            view: &doc.main_view,
         }],
     );
+}
+
+/// The sole pane of a single-pane scene, over both halves it reads.
+fn entry_pane<'a>(scene: &'a Scene, doc: &'a Document) -> Pane<'a> {
+    Frame { scene, doc }
+        .pane(GraphRef::Main)
+        .expect("the entry pane is projected")
 }
 
 #[test]
@@ -46,8 +47,8 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     );
 
     node.missing = false;
-    let definition_pane = Scene::with_nodes([node]).without_run_target();
-    let pane = definition_pane.only_graph();
+    let definition_pane = SceneFixture::with_nodes([node]).without_run_target();
+    let pane = definition_pane.only_pane();
     let node = pane.nodes().next().expect("the stub is projected");
     assert!(
         !pane.runnable(node),
@@ -90,14 +91,14 @@ fn a_graph_instance_runs_like_any_other_node_in_the_entry_graph() {
     // inside a definition, which is no particular instance of itself.
     let mut runnable = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
     runnable.graph = Some(GraphLink::Local(GraphId::unique()));
-    let entry = Scene::with_nodes([runnable]);
-    let entry_pane = entry.only_graph();
+    let entry = SceneFixture::with_nodes([runnable]);
+    let entry_pane = entry.only_pane();
     assert!(entry_pane.runnable(entry_pane.nodes().next().unwrap()));
 
     let mut interior = scene_node_stub(arena.ui(), NodeId::unique(), Vec2::ZERO);
     interior.graph = Some(GraphLink::Local(GraphId::unique()));
-    let definition = Scene::with_nodes([interior]).without_run_target();
-    let definition_pane = definition.only_graph();
+    let definition = SceneFixture::with_nodes([interior]).without_run_target();
+    let definition_pane = definition.only_pane();
     assert!(
         !definition_pane.runnable(definition_pane.nodes().next().unwrap()),
         "the pane, not the node kind, is what withholds a run inside a definition"
@@ -139,21 +140,30 @@ fn adder_graph() -> AdderGraph {
 #[test]
 fn boundary_nodes_mirror_graph_interface() {
     let fixture = adder_graph();
-    let view = GraphView::for_graph(&fixture.graph.body);
+    let def_id = GraphId::unique();
+    let local = GraphRef::Local(def_id);
+    let mut doc = Document::default();
+    doc.graph.insert_graph(def_id, fixture.graph);
+    assert!(doc.ensure_sub_view(def_id), "the def was just inserted");
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    let def_id = GraphId::unique();
     scene.rebuild(
         arena.ui(),
         &Library::default(),
         &RunState::default(),
         [GraphProjection {
-            target: GraphRef::Local(def_id),
-            source: SceneSource::Def(&fixture.graph),
-            view: &view,
+            target: local,
+            source: SceneSource::Def(doc.graph.find_graph(def_id).unwrap()),
+            view: doc.view(local).unwrap(),
         }],
     );
-    let graph = scene.graph(GraphRef::Local(def_id)).expect("projected");
+    let view = doc.view(local).unwrap();
+    let graph = Frame {
+        scene: &scene,
+        doc: &doc,
+    }
+    .pane(local)
+    .expect("projected");
 
     assert_eq!(graph.nodes().count(), 2, "both boundary nodes render");
     let expected_node_order = view.item_placements.keys().copied().collect::<Vec<_>>();
@@ -224,10 +234,10 @@ fn boundary_nodes_mirror_graph_interface() {
     assert_eq!(out_in_names, ["Sum", "+"]);
 
     // The interior wire shows up as a connection between the boundaries.
-    assert_eq!(graph.connections().len(), 1);
-    let c = &graph.connections()[0];
-    assert_eq!(c.src, OutputPort::new(fixture.input, 0));
-    assert_eq!(c.tgt, InputPort::new(fixture.output, 0));
+    assert_eq!(graph.connections().count(), 1);
+    let (consumer, producer) = graph.connections().next().unwrap();
+    assert_eq!(producer, OutputPort::new(fixture.input, 0));
+    assert_eq!(consumer, InputPort::new(fixture.output, 0));
 }
 
 #[test]
@@ -246,14 +256,15 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     root.set_input_binding(InputPort::new(root_b, 0), Binding::bind(root_a, 0));
     root.insert_graph(def_id, fixture.graph);
 
-    let mut root_view = GraphView::for_graph(&root);
-    root_view.viewport = Viewport {
+    let mut doc = Document::from(root);
+    doc.main_view.viewport = Viewport {
         pan: Vec2::new(11.0, 22.0),
         zoom: 2.0,
     };
-    root_view.selected.insert(root_b);
-    let def = root.find_graph(def_id).unwrap();
-    let mut def_view = GraphView::for_graph(&def.body);
+    doc.main_view.selected.insert(root_b);
+    let local = GraphRef::Local(def_id);
+    assert!(doc.ensure_sub_view(def_id), "the def is in the document");
+    let def_view = doc.scope_mut(local).expect("the def resolves").view;
     def_view.viewport = Viewport {
         pan: Vec2::new(-5.0, 0.0),
         zoom: 0.5,
@@ -269,30 +280,34 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
         [
             GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&root),
-                view: &root_view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             },
             GraphProjection {
-                target: GraphRef::Local(def_id),
-                source: SceneSource::Def(def),
-                view: &def_view,
+                target: local,
+                source: SceneSource::Def(doc.graph.find_graph(def_id).unwrap()),
+                view: doc.view(local).unwrap(),
             },
         ],
     );
+    let frame = Frame {
+        scene: &scene,
+        doc: &doc,
+    };
 
     // One pool holds every node; each pane slices exactly its own.
     assert_eq!(scene.nodes.len(), 4, "2 root nodes + 2 boundary nodes");
     assert_eq!(
-        scene.graphs().map(|g| g.target()).collect::<Vec<_>>(),
+        frame.panes().map(|g| g.target()).collect::<Vec<_>>(),
         [GraphRef::Main, GraphRef::Local(def_id)],
         "panes project in the order given"
     );
-    let main = scene.graph(GraphRef::Main).unwrap();
-    let nested = scene.graph(GraphRef::Local(def_id)).unwrap();
+    let main = frame.pane(GraphRef::Main).unwrap();
+    let nested = frame.pane(local).unwrap();
     // Each pane's span covers exactly its own nodes. Membership, not
     // order: a pane's paint order is its view's item order, which
     // `boundary_nodes_mirror_graph_interface` pins down separately.
-    let ids = |g: GraphScene<'_>| {
+    let ids = |g: Pane<'_>| {
         let mut ids: Vec<NodeId> = g.nodes().map(|n| n.id).collect();
         ids.sort();
         ids
@@ -307,28 +322,25 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     // A pane resolves only its own ids, and `owner` routes the other way.
     assert!(main.contains(root_a) && !main.contains(fixture.input));
     assert!(nested.contains(fixture.input) && !nested.contains(root_a));
-    assert_eq!(scene.owner(root_a).unwrap().target(), GraphRef::Main);
-    assert_eq!(
-        scene.owner(fixture.input).unwrap().target(),
-        GraphRef::Local(def_id)
-    );
+    assert_eq!(frame.owner(root_a).unwrap().target(), GraphRef::Main);
+    assert_eq!(frame.owner(fixture.input).unwrap().target(), local);
 
     // Viewport, selection, and wiring stay per pane.
     assert_eq!(main.viewport().zoom, 2.0);
     assert_eq!(nested.viewport().zoom, 0.5);
-    assert_eq!(main.selected(), [root_b]);
-    assert_eq!(nested.selected(), [fixture.input]);
+    assert_eq!(main.selected(), &BTreeSet::from([root_b]));
+    assert_eq!(nested.selected(), &BTreeSet::from([fixture.input]));
     assert!(main.is_selected(root_b));
     assert!(
         !main.is_selected(fixture.input),
         "the other pane's selection is not this pane's"
     );
-    assert_eq!(main.connections().len(), 1, "root's one wire");
-    assert_eq!(nested.connections().len(), 1, "the definition's one wire");
+    assert_eq!(main.connections().count(), 1, "root's one wire");
+    assert_eq!(nested.connections().count(), 1, "the definition's one wire");
     assert_eq!(
-        main.connections()[0].tgt,
+        main.connections().next().unwrap().0,
         InputPort::new(root_b, 0),
-        "each pane's wire slice is its own"
+        "each pane reads its own wiring"
     );
 
     // Run availability follows the target, not the pane order.
@@ -336,10 +348,14 @@ fn two_graphs_project_into_one_pool_and_slice_back_apart() {
     assert!(!nested.run_available());
 
     // A second rebuild with only the root drops the closed pane wholesale.
-    rebuild_entry(&mut scene, arena.ui(), &library, &root, &root_view);
-    assert!(scene.graph(GraphRef::Local(def_id)).is_none());
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let frame = Frame {
+        scene: &scene,
+        doc: &doc,
+    };
+    assert!(frame.pane(local).is_none());
     assert_eq!(scene.nodes.len(), 2, "the closed pane's nodes are gone");
-    assert_eq!(scene.graph(GraphRef::Main).unwrap().nodes().count(), 2);
+    assert_eq!(frame.pane(GraphRef::Main).unwrap().nodes().count(), 2);
 }
 
 #[test]
@@ -365,11 +381,11 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
     let ghost_func_id = graph.add(ghost_func);
     let ghost_graph_id = graph.add(ghost_graph);
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let projected = scene.graph(GraphRef::Main).unwrap();
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let projected = entry_pane(&scene, &doc);
 
     // Every node renders, not silently dropped — so the unresolvable ones
     // stay selectable and deletable to repair the document.
@@ -418,22 +434,33 @@ fn missing_func_and_graph_render_as_deletable_stubs() {
     // The same graph projected as a local definition pane instead: run
     // availability is a property of the target, so the resolved func loses
     // its play chip.
-    let def = GraphDef {
-        body: graph,
-        ..Default::default()
-    };
     let def_id = GraphId::unique();
+    let local = GraphRef::Local(def_id);
+    let mut def_doc = Document::default();
+    def_doc.graph.insert_graph(
+        def_id,
+        GraphDef {
+            body: doc.graph.clone_verbatim(),
+            ..Default::default()
+        },
+    );
+    assert!(def_doc.ensure_sub_view(def_id), "the def was just inserted");
     scene.rebuild(
         arena.ui(),
         &library,
         &RunState::default(),
         [GraphProjection {
-            target: GraphRef::Local(def_id),
-            source: SceneSource::Def(&def),
-            view: &view,
+            target: local,
+            source: SceneSource::Def(def_doc.graph.find_graph(def_id).unwrap()),
+            view: def_doc.view(local).unwrap(),
         }],
     );
-    let definition_pane = scene.graph(GraphRef::Local(def_id)).unwrap();
+    let definition_pane = Frame {
+        scene: &scene,
+        doc: &def_doc,
+    }
+    .pane(local)
+    .unwrap();
     assert!(
         !definition_pane.runnable(definition_pane.node(known_id).unwrap()),
         "a local-definition projection hides the run affordance from resolved functions"
@@ -452,11 +479,11 @@ fn func_events_project_in_order_alongside_outputs() {
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let projected = scene.graph(GraphRef::Main).unwrap();
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let projected = entry_pane(&scene, &doc);
 
     let n = projected.node(node_id).unwrap();
     let event_names: Vec<String> = projected
@@ -492,12 +519,12 @@ fn subscriptions_project_from_graph() {
     let subscriber_id = graph.add(subscriber);
     graph.subscribe(emitter_id, 1, subscriber_id);
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
 
-    let subs = scene.graph(GraphRef::Main).unwrap().subscriptions();
+    let subs: Vec<_> = entry_pane(&scene, &doc).subscriptions().collect();
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].emitter, emitter_id);
     assert_eq!(subs[0].event_idx, 1);
@@ -530,14 +557,14 @@ fn a_composites_marker_flags_come_from_its_interior_once_compiled() {
     let mut graph = Graph::default();
     let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
     graph.insert_graph(nested_id, nested);
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
 
     // Nothing compiled yet: the projection keeps the port-arity reading, so
     // the node still draws before the first run instead of losing markers.
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let node = scene.graph(GraphRef::Main).unwrap().node(instance).unwrap();
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let node = entry_pane(&scene, &doc).node(instance).unwrap();
     assert!(
         !node.sink,
         "with no program to fold, an instance with outputs reads as a non-sink"
@@ -549,7 +576,7 @@ fn a_composites_marker_flags_come_from_its_interior_once_compiled() {
 
     // Compiled, the interior answers instead.
     let run_state = crate::gui::run_state::internals::with_compiled(Arc::new(
-        Compiler::default().compile(&graph, &library).unwrap(),
+        Compiler::default().compile(&doc.graph, &library).unwrap(),
     ));
     scene.rebuild(
         arena.ui(),
@@ -557,11 +584,11 @@ fn a_composites_marker_flags_come_from_its_interior_once_compiled() {
         &run_state,
         [GraphProjection {
             target: GraphRef::Main,
-            source: SceneSource::Entry(&graph),
-            view: &view,
+            source: SceneSource::Entry(&doc.graph),
+            view: &doc.main_view,
         }],
     );
-    let node = scene.graph(GraphRef::Main).unwrap().node(instance).unwrap();
+    let node = entry_pane(&scene, &doc).node(instance).unwrap();
     assert!(node.sink, "the interior sink makes the instance one");
     assert!(
         node.can_disable(),
@@ -597,8 +624,9 @@ fn local_defs_project_per_pane_ordered_by_id() {
     graph.insert_graph(first, published);
     graph.insert_graph(second, nested);
 
-    let view = GraphView::for_graph(&graph);
-    let nested_view = GraphView::default();
+    let mut doc = Document::from(graph);
+    let inner_pane = GraphRef::Local(second);
+    assert!(doc.ensure_sub_view(second), "the def is in the document");
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
     let ui = arena.ui();
@@ -609,18 +637,22 @@ fn local_defs_project_per_pane_ordered_by_id() {
         [
             GraphProjection {
                 target: GraphRef::Main,
-                source: SceneSource::Entry(&graph),
-                view: &view,
+                source: SceneSource::Entry(&doc.graph),
+                view: &doc.main_view,
             },
             GraphProjection {
-                target: GraphRef::Local(second),
-                source: SceneSource::Def(&graph.graphs[&second]),
-                view: &nested_view,
+                target: inner_pane,
+                source: SceneSource::Def(&doc.graph.graphs[&second]),
+                view: doc.view(inner_pane).unwrap(),
             },
         ],
     );
+    let frame = Frame {
+        scene: &scene,
+        doc: &doc,
+    };
 
-    let root = scene.graph(GraphRef::Main).unwrap().local_defs();
+    let root = entry_pane(&scene, &doc).local_defs();
     assert_eq!(root.len(), 2, "root sees its own two definitions only");
     // Ordered by id, not by `HashMap` iteration order.
     let (lo, hi) = if first < second {
@@ -643,7 +675,7 @@ fn local_defs_project_per_pane_ordered_by_id() {
 
     // The nested pane sees only what *it* holds — its parent's siblings are
     // not instanceable from inside it.
-    let inner = scene.graph(GraphRef::Local(second)).unwrap().local_defs();
+    let inner = frame.pane(inner_pane).unwrap().local_defs();
     assert_eq!(inner.len(), 1);
     assert_eq!(inner[0].id, buried);
     assert_eq!(&*inner[0].name.borrow_str(), "Buried");
@@ -675,11 +707,11 @@ fn cache_mode_projects_verbatim_per_node() {
         ids.push((node_id, mode));
     }
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let projected = scene.graph(GraphRef::Main).unwrap();
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let projected = entry_pane(&scene, &doc);
 
     for (id, mode) in ids {
         let node = projected.node(id).unwrap();
@@ -699,16 +731,12 @@ fn graph_instances_can_evict_but_have_no_direct_cache_storage_controls() {
     let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
     graph.insert_graph(nested_id, nested);
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
 
-    let instance = scene
-        .graph(GraphRef::Main)
-        .unwrap()
-        .node(instance_id)
-        .unwrap();
+    let instance = entry_pane(&scene, &doc).node(instance_id).unwrap();
     assert!(
         instance.can_evict_cache,
         "an instance can evict its flattened interior"
@@ -749,11 +777,11 @@ fn impure_flag_projects_from_func_behavior() {
     let impure_id = graph.add_func_node(library.by_name("impure_src").unwrap());
     let self_cached_id = graph.add_func_node(library.by_name("self_cached").unwrap());
 
-    let view = GraphView::for_graph(&graph);
+    let doc = Document::from(graph);
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
-    rebuild_entry(&mut scene, arena.ui(), &library, &graph, &view);
-    let projected = scene.graph(GraphRef::Main).unwrap();
+    rebuild_entry(&mut scene, arena.ui(), &library, &doc);
+    let projected = entry_pane(&scene, &doc);
 
     let pure = projected.node(pure_id).unwrap();
     let impure = projected.node(impure_id).unwrap();
