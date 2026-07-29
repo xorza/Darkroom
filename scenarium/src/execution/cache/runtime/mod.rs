@@ -14,7 +14,7 @@ use std::future::Future;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
-use common::CancelToken;
+use ::common::CancelToken;
 use hashbrown::HashMap;
 
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
@@ -23,7 +23,8 @@ use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
+use crate::common::column::Column;
+use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -31,7 +32,7 @@ use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a
-/// [`NodeColumn`] aligned to the installed program, so every run-loop access is
+/// [`Column`] aligned to the installed program, so every run-loop access is
 /// an array read; cross-install survival happens at [`reconcile`](Self::reconcile),
 /// which re-pairs the slots with the new index order by stable id.
 ///
@@ -57,7 +58,7 @@ pub(crate) struct RuntimeCache {
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
     /// [`Index<NodeIdx>`], the same way a node is reached on [`Program`].
-    slots: NodeColumn<RuntimeSlot>,
+    slots: Column<NodeIdx, RuntimeSlot>,
     /// Private for the same reason as the slots: the worker replaces it
     /// wholesale between runs, and going through
     /// [`set_disk_store`](Self::set_disk_store) is what makes that a thing the
@@ -169,7 +170,10 @@ impl RuntimeCache {
     /// `by_node` is filled from scratch, aligned like the slots themselves — dense
     /// rather than sparse so the caller can pair a node's RAM with its run result by
     /// index, without hashing an id or merging two orders.
-    pub(crate) fn resident_ram_stats(&mut self, by_node: &mut NodeColumn<RamUsage>) -> RamUsage {
+    pub(crate) fn resident_ram_stats(
+        &mut self,
+        by_node: &mut Column<NodeIdx, RamUsage>,
+    ) -> RamUsage {
         self.ram_seen.clear();
         by_node.reset(self.slots.len(), RamUsage::default());
         let mut total = RamUsage::default();
@@ -652,7 +656,7 @@ impl RuntimeCache {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::CancelToken;
+    use ::common::CancelToken;
 
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::DiskStore;
@@ -660,7 +664,7 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::program::index::NodeIdx;
+    use crate::execution::identity::NodeIdx;
 
     impl RuntimeCache {
         /// The attached store, for the tests that read its I/O counters or

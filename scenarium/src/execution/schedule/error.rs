@@ -10,7 +10,7 @@
 use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::NodeIdx;
+use crate::execution::identity::NodeIdx;
 use crate::execution::schedule::NodeState;
 
 #[derive(Debug, Error)]

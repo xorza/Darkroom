@@ -7,7 +7,7 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeIdx, OutputAddr};
+use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };

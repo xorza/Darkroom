@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
-use common::id_type;
+use ::common::id_type;
 
 use crate::StaticValue;
 

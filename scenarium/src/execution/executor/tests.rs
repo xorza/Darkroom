@@ -6,7 +6,8 @@ use crate::async_lambda;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
+use crate::common::column::{Column, Idx};
+use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
@@ -105,8 +106,8 @@ fn run_with_readers(program: &Program, readers: Vec<u32>) -> RunSchedule {
     // `resolve.rs`.
     schedule.states.reset(program.e_nodes.len(), NodeState::Run);
     schedule.outputs = ResolvedOutputs {
-        demand: OutputColumn::from(demand),
-        readers: OutputColumn::from(readers),
+        demand: Column::from(demand),
+        readers: Column::from(readers),
     };
     schedule
 }
@@ -172,13 +173,13 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
 
     if let Ok(index) = usize::try_from(u64::from(u32::MAX) + 1) {
         assert!(
-            catch_unwind(|| OutputIdx::from(index)).is_err(),
+            catch_unwind(|| OutputIdx::from_idx(index)).is_err(),
             "the output pool cannot exceed its u32 index representation"
         );
     }
 
     let mut reads = RemainingOutputReads {
-        counts: OutputColumn::from(vec![0]),
+        counts: Column::from(vec![0]),
     };
     assert!(
         catch_unwind(AssertUnwindSafe(|| reads.consume(OutputIdx(0)))).is_err(),
@@ -195,7 +196,7 @@ fn collect(
     schedule: &RunSchedule,
     outcome: &mut ExecutionOutcome,
 ) {
-    let mut node_ram = NodeColumn::default();
+    let mut node_ram = Column::default();
     node_ram.reset(program.e_nodes.len(), RamUsage::default());
     executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 
-use common::CancelToken;
+use ::common::CancelToken;
 
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
@@ -371,7 +371,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-    use common::CancelToken;
+    use ::common::CancelToken;
 
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::outcome::NodeExecutionStatus;

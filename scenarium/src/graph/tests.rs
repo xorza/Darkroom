@@ -10,7 +10,7 @@ use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, StaticValue};
-use common::{SerdeFormat, deserialize, serialize};
+use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

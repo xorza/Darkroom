@@ -5,7 +5,7 @@
 //! they are `Result`s rather than panics. Logic errors inside the graph's own
 //! mutations assert instead.
 
-use common::DeserializeError;
+use ::common::DeserializeError;
 use thiserror::Error;
 
 /// Every graph validation returns this.

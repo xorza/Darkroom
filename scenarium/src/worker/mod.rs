@@ -2,7 +2,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 
-use common::CancelToken;
+use ::common::CancelToken;
 
 use crate::worker::error::WorkerExited;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};

@@ -38,7 +38,7 @@ mod tests {
     use crate::graph::Binding;
     use crate::graph::identity::InputPort;
     use crate::graph::identity::NodeId;
-    use common::{SerdeFormat, deserialize, serialize};
+    use ::common::{SerdeFormat, deserialize, serialize};
 
     #[derive(Debug, Serialize)]
     #[serde(transparent)]
