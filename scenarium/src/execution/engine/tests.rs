@@ -4395,7 +4395,7 @@ mod error_propagation {
 mod stats {
     use super::*;
 
-    use crate::execution::outcome::NodeExecutionStatus;
+    use crate::execution::report::NodeExecutionStatus;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_inputs_reported() -> TestResult {

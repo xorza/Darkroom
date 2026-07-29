@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::RamUsage;
-use crate::execution::outcome::LogEntry;
-use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::LogEntry;
+use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunProgress};
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
