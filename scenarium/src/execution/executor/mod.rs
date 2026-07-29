@@ -36,8 +36,8 @@ use crate::node::lambda::{Invocation, InvokeError, OutputDemand};
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
+use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::disk_store::StorePolicy;
 use crate::execution::error::RunError;
 use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
@@ -74,6 +74,38 @@ pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) cancel: CancelToken,
 }
 
+#[derive(Default, Debug)]
+pub(super) struct RemainingOutputReads {
+    pub(super) counts: OutputColumn<u32>,
+}
+
+impl RemainingOutputReads {
+    pub(super) fn seed(&mut self, resolved: &ResolvedRun) {
+        self.counts.clone_from(&resolved.outputs.readers);
+    }
+
+    fn is_last(&self, output_idx: OutputIdx) -> bool {
+        self.counts[output_idx] == 1
+    }
+
+    pub(super) fn consume(&mut self, output_idx: OutputIdx) -> bool {
+        let remaining = &mut self.counts[output_idx];
+        debug_assert!(
+            *remaining > 0,
+            "read an output more often than the resolved run counted"
+        );
+        *remaining = remaining.wrapping_sub(1);
+        *remaining == 0
+    }
+
+    fn node_drained(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> bool {
+        self.counts
+            .slice(program[node_idx].outputs)
+            .iter()
+            .all(|remaining| *remaining == 0)
+    }
+}
+
 impl Executor {
     /// Walk `plan.process_order` (producer-first), giving each node one turn. The loop
     /// itself owns only the two decisions that end it early or skip it wholesale — the
@@ -88,7 +120,6 @@ impl Executor {
             plan,
             resolved,
             cache,
-            resource_stamper,
             reporter,
             cancel,
         } = request;
@@ -110,7 +141,6 @@ impl Executor {
                 plan,
                 resolved,
                 cache,
-                resource_stamper,
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
                 node_outcomes: &mut self.outcomes,
@@ -148,9 +178,6 @@ impl Executor {
 /// taking a node index rather than a closure over ten borrows — and so the disjoint-field
 /// borrows the run needs (cache vs. contexts vs. outcomes) are expressed once, here.
 ///
-/// Value movement — input collection, pinned delivery, and the last-read releases — lives in
-/// [`value_flow`].
-///
 /// `'r` is the reporter's own lifetime, kept separate from the frame's `'a`: a
 /// `&mut dyn Trait` is invariant, so sharing one lifetime would extend every borrow here to
 /// the caller's.
@@ -160,7 +187,6 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
     plan: &'a ExecutionPlan,
     resolved: &'a ResolvedRun,
     cache: &'a mut RuntimeCache,
-    resource_stamper: &'a mut ResourceStamper,
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
@@ -240,7 +266,8 @@ impl ExecutionFrame<'_, '_> {
             mark_skipped(self.cache, self.node_outcomes, node_idx, error);
             return;
         }
-        self.deliver_reused(node_idx);
+        self.node_outcomes[node_idx] = NodeOutcome::Reused;
+        self.release_drained_outputs(node_idx);
     }
 
     /// Whether this node's lambda still has to run — and the late second chance at reuse
@@ -265,40 +292,37 @@ impl ExecutionFrame<'_, '_> {
         }
         let program = self.program;
         let cancel = self.ctx.cancel.clone();
-        if let Err(error) = self
-            .resource_stamper
-            .prepare_node(program, self.cache, node_idx, cancel)
-            .await
-        {
+        let hydrated = self
+            .cache
+            .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
+            .await;
+        match hydrated {
             // Attributable to exactly this node, so it fails as one rather
             // than taking the run down — and the invoke is skipped because
             // the node is already marked, and running it would report a
             // second, less specific failure for the same cause.
-            let run_error = RunError::ResourceUnavailable {
-                func_id: program[node_idx].func_id,
-                message: error.to_string(),
-            };
-            mark_skipped(self.cache, self.node_outcomes, node_idx, run_error);
-            return false;
+            Err(error) => {
+                let run_error = RunError::ResourceUnavailable {
+                    func_id: program[node_idx].func_id,
+                    message: error.to_string(),
+                };
+                mark_skipped(self.cache, self.node_outcomes, node_idx, run_error);
+                false
+            }
+            Ok(false) => true,
+            Ok(true) => {
+                // It came in as `Run`, so the resolver counted it as a
+                // reader of each producer — reads it will now not take.
+                // Handing them back is what lets a producer's value go the
+                // moment its last real reader is gone. A `Reuse` node
+                // never owned them, which is why `serve_reuse` has no
+                // such line.
+                self.abandon_input_reads(node_idx);
+                self.node_outcomes[node_idx] = NodeOutcome::Reused;
+                self.release_drained_outputs(node_idx);
+                false
+            }
         }
-        self.cache
-            .stamp_digest(program, self.resource_stamper, node_idx);
-        if !self
-            .cache
-            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
-            .await
-        {
-            return true;
-        }
-        self.abandon_input_reads(node_idx);
-        self.deliver_reused(node_idx);
-        false
-    }
-
-    /// The tail both reuse paths share, once the value is readable.
-    fn deliver_reused(&mut self, node_idx: NodeIdx) {
-        self.node_outcomes[node_idx] = NodeOutcome::Reused;
-        self.release_drained_outputs(node_idx);
     }
 
     /// Invoke the node's lambda and record what came of it, persisting a success to disk
@@ -440,6 +464,85 @@ impl ExecutionFrame<'_, '_> {
                     state: event_state.clone(),
                 }),
         );
+    }
+
+    pub(super) fn collect_inputs(&mut self, node_idx: NodeIdx) {
+        self.inputs.clear();
+        for input in &self.program.inputs[self.program[node_idx].inputs] {
+            let binding = &input.binding;
+            let value = match binding {
+                ExecutionBinding::None => DynamicValue::Unbound,
+                ExecutionBinding::Const(value) => value.into(),
+                ExecutionBinding::Bind(addr) if !self.producer_runs(*addr) => {
+                    // Nothing will produce this. Only an *optional* input
+                    // can reach here — `input_missing` turns a required
+                    // one into a `MissingInputs` verdict, so this node
+                    // would not be running at all — and unbound is
+                    // precisely what optional means. The resolver planned
+                    // no read for it either, so none is completed.
+                    DynamicValue::Unbound
+                }
+                ExecutionBinding::Bind(addr) => {
+                    let address = *addr;
+                    let output_idx = self.program.output_idx(address);
+                    let take = self.remaining_reads.is_last(output_idx)
+                        && !self.program[address.node_idx].cache.caches_in_ram();
+                    let value = self
+                        .cache
+                        .read_output_port(self.program, address, take)
+                        .expect("a resolved producer output must be resident when consumed");
+                    self.complete_planned_read(address);
+                    value
+                }
+            };
+            self.inputs.push(value);
+        }
+    }
+
+    /// Whether the plan will run `addr`'s producer — the same predicate the
+    /// resolver registers reader counts by, so a read is completed exactly
+    /// when one was planned.
+    fn producer_runs(&self, addr: OutputAddr) -> bool {
+        self.plan.verdicts[addr.node_idx].wants_execute()
+    }
+
+    /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
+    /// non-RAM producer values to be released as soon as their remaining readers disappear.
+    pub(super) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
+        for input in &self.program.inputs[self.program[consumer_idx].inputs] {
+            if let ExecutionBinding::Bind(address) = &input.binding
+                && self.producer_runs(*address)
+            {
+                self.complete_planned_read(*address);
+            }
+        }
+    }
+
+    pub(super) fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
+        if !self.program[node_idx].cache.caches_in_ram()
+            && self.remaining_reads.node_drained(self.program, node_idx)
+        {
+            self.cache.slots[node_idx].clear_output();
+        }
+    }
+
+    /// Completes one resolver-counted read and releases its producer port or slot when no
+    /// planned reader can still use it.
+    fn complete_planned_read(&mut self, address: OutputAddr) {
+        let output_idx = self.program.output_idx(address);
+        if !self.remaining_reads.consume(output_idx)
+            || self.cache.slots[address.node_idx].output_values().is_none()
+        {
+            return;
+        }
+        if self
+            .remaining_reads
+            .node_drained(self.program, address.node_idx)
+        {
+            self.release_drained_outputs(address.node_idx);
+        } else if !self.program[address.node_idx].cache.caches_in_ram() {
+            self.cache.clear_output_port(address);
+        }
     }
 }
 
