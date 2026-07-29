@@ -139,8 +139,8 @@ fn digested_cache(program: &Arc<Program>, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     for idx in 0..=through {
-        cache.prepare_node_blocking(program, node_idx(idx));
-        cache.stamp_digest(program, node_idx(idx));
+        cache.prepare_node_blocking(node_idx(idx));
+        cache.stamp_digest(node_idx(idx));
     }
     cache
 }
@@ -316,7 +316,7 @@ fn fs_path_folds_file_identity_and_path() {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
         cache.stamp_file(path, 4, 7);
-        cache.node_digest(&p.program, node_idx(0))
+        cache.node_digest(node_idx(0))
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -374,7 +374,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
+        let producer = cache.node_digest(node_idx(0)).unwrap();
         cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
@@ -384,11 +384,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 producer,
             );
         }
-        cache.prepare_node_blocking(&p.program, node_idx(1));
-        cache.prepare_node_blocking(&p.program, node_idx(2));
+        cache.prepare_node_blocking(node_idx(1));
+        cache.prepare_node_blocking(node_idx(2));
         DigestPair {
-            typed: cache.node_digest(&p.program, node_idx(1)),
-            plain: cache.node_digest(&p.program, node_idx(2)),
+            typed: cache.node_digest(node_idx(1)),
+            plain: cache.node_digest(node_idx(2)),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -476,7 +476,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
+    let producer = cache.node_digest(node_idx(0)).unwrap();
     cache[node_idx(0)].current_digest = Some(producer);
     hydrate(
         &mut cache,
@@ -485,9 +485,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         producer,
     );
     cache[node_idx(0)].current_digest = Some(Digest([9; 32]));
-    cache.prepare_node_blocking(&p.program, node_idx(1));
+    cache.prepare_node_blocking(node_idx(1));
     assert_eq!(
-        cache.node_digest(&p.program, node_idx(1)),
+        cache.node_digest(node_idx(1)),
         None,
         "a path value produced under an old producer digest is unreadable"
     );

@@ -515,10 +515,6 @@ impl<'a> Scheduled<'a> {
         Scheduled { program, schedule }
     }
 
-    pub(crate) fn program(&self) -> &'a Program {
-        self.program
-    }
-
     /// The scheduled nodes that will actually run — what the filesystem prefetch walks
     /// between the two passes.
     pub(crate) fn executing(&self) -> impl Iterator<Item = NodeIdx> + '_ {
@@ -554,7 +550,7 @@ impl<'a> Scheduled<'a> {
     /// reach time once its producers have settled, possibly improving `Run` to a reuse.
     pub(crate) async fn resolve(self, cache: &mut RuntimeCache) -> Resolved<'a> {
         let Scheduled { program, schedule } = self;
-        cache.stamp_digests(program, schedule.executing());
+        cache.stamp_digests(schedule.executing());
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
         schedule.outputs.reset(program.outputs.len());
@@ -603,9 +599,7 @@ impl<'a> Scheduled<'a> {
                     .fill(OutputDemand::Produce);
             }
             let demand = outputs.demand.slice(output_range);
-            if !event_sources.contains(node_idx)
-                && cache.probe_reuse(program, node_idx, demand).await
-            {
+            if !event_sources.contains(node_idx) && cache.probe_reuse(node_idx, demand).await {
                 states[node_idx] = NodeState::Reuse;
                 continue;
             }
