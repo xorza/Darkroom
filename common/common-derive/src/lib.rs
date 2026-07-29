@@ -1,13 +1,13 @@
 //! `#[derive(Introspect)]` — generic struct introspection (see
 //! `common::introspect`).
 //!
-//! Generates `impl common::Introspect`: `fields()` (a [`common::FieldDesc`] per
+//! Generates `impl common::Introspect`: `fields()` (a `common::FieldDesc` per
 //! struct field — name, label, kind, default, required) and `from_fields()`
-//! (rebuild `Self` from neutral [`common::FieldValue`]s, checking numeric
+//! (rebuild `Self` from neutral `common::FieldValue`s, checking numeric
 //! conversions and falling back to the field's `Default` on a
 //! missing/mismatched value).
 //!
-//! Field types map to a [`common::FieldKind`]: integers → `Int`, floats →
+//! Field types map to a `common::FieldKind`: integers → `Int`, floats →
 //! `Float`, `bool` → `Bool`, `String` → `Str`, `Option<T>` → `T` but not
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides

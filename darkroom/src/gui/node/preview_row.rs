@@ -88,7 +88,7 @@ pub(super) fn preview_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
 
 /// The image's info footer: resolution, pixel format (channel layout + bit
 /// depth), and original source size — styled like a node body's memory footer
-/// ([`crate::gui::node::memory_row`]), so every read-only fact strip in the app
+/// ([`memory_row`](fn@crate::gui::node::memory_row)), so every read-only fact strip in the app
 /// reads as the same kind of thing.
 fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
     Panel::hstack()

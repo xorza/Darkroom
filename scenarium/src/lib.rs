@@ -29,14 +29,12 @@ pub use execution::identity::{
 };
 pub use execution::log::{LogEntry, LogLevel};
 pub use execution::seeds::RunSeeds;
+pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
 pub use graph::boundary::{DetachedGraphInput, DetachedGraphOutput};
 pub use graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
 pub use graph::query::{NodeEvents, NodePorts};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
-pub use graph::{
-    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeRef, NodeSearch,
-    OutputPort, Subscription,
-};
+pub use graph::{Binding, CacheMode, Graph, GraphDef, Node, NodeKind, NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};
 pub use node::definition::{
     Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, FuncValidationError, OutputType,

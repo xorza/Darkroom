@@ -1,4 +1,4 @@
-//! Durable storage for [`GraphLibrary`](crate::core::graph_library::GraphLibrary).
+//! Durable storage for [`GraphLibrary`].
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};

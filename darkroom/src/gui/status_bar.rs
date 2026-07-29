@@ -1,6 +1,6 @@
 //! The window's bottom status bar: a thin chrome strip carrying the last
 //! failed action's message (left, error-colored — compile/run/save/load
-//! failures parked in the engine's [`StatusLog`](crate::core::status::StatusLog)
+//! failures parked in the engine's `StatusLog`
 //! error slot until a subsequent success clears it) and the memory readout
 //! (right): this process's own resident footprint, plus the runtime cache's
 //! system + GPU bytes under one `Cache` clause, mirrored from the last

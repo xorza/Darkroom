@@ -17,7 +17,7 @@
 //! Invariants (checked by [`DockLayout::validate`]):
 //! - the vec is canonical pre-order, fully reachable from slot 0;
 //! - exactly one group holds the `Main` graph tab (the *primary* group,
-//!   successor of the old "tabs[0] is Main" rule);
+//!   successor of the old `tabs[0] is Main` rule);
 //! - no group is empty, no tab appears twice, group ids are unique,
 //!   per-group `active` is in range, `focused` names a live group,
 //!   ratios stay in `RATIO_MIN..=RATIO_MAX`.

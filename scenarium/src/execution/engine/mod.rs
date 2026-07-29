@@ -17,7 +17,7 @@ use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunReporter;
 use crate::execution::resolve::Resolver;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::NodeId;
+use crate::graph::address::NodeId;
 
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `plan` buffer, the `planner`
@@ -191,7 +191,7 @@ mod internals {
     use crate::execution::program::ExecutionBinding;
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::seeds::RunSeeds;
-    use crate::graph::NodeId;
+    use crate::graph::address::NodeId;
     use crate::node::lambda::OutputDemand;
 
     #[derive(Debug, Default)]

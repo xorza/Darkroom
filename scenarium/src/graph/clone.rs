@@ -1,7 +1,8 @@
 use hashbrown::HashMap;
 
+use crate::graph::address::{InputPort, NodeId, Subscription};
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, Subscription};
+use crate::graph::{Binding, Graph, GraphDef, NodeKind};
 
 /// A remapped clone alongside the node mapping that produced it, so a caller
 /// holding ids into the original — a definition's exposed-event emitters —

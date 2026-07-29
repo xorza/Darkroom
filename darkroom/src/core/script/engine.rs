@@ -330,7 +330,7 @@ fn wire_debug_hook(engine: &mut Engine) {
     });
 }
 
-/// Compile [`prelude.rhai`] once and register the resulting functions
+/// Compile `prelude.rhai` once and register the resulting functions
 /// as a global module. Every helper defined there (`create_node`,
 /// `connect`, `move_node`, …) becomes callable from any user script.
 /// Adding a new ergonomic helper is a one-function edit to that file —

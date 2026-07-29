@@ -82,7 +82,7 @@ impl StepSignals {
 #[derive(Debug)]
 pub(crate) struct Editor {
     /// Unsaved-changes flag: set whenever a content-changing step is
-    /// applied (via [`Document`]'s edit paths — new edits, undo/redo
+    /// applied (via [`Document`](crate::core::document::Document)'s edit paths — new edits, undo/redo
     /// replay, and the direct graph mutations), cleared on save. Only
     /// steps that alter saved content flip it — pure navigation (camera,
     /// selection, tab focus) doesn't (see [`UndoStep::dirties_document`]).
@@ -655,7 +655,7 @@ impl Editor {
 
     /// Open the [`TabRef::Preferences`] settings tab in the focused group
     /// and focus it (reusing the existing tab wherever it lives). Mirrors
-    /// [`open_graph`]: adding the tab is the non-undoable part; the focus
+    /// [`Self::open_graph`]: adding the tab is the non-undoable part; the focus
     /// routes through a recorded activation. Called from the File ▸
     /// Preferences menu via `App`, so it records the switch and drains it
     /// immediately like every external edit.

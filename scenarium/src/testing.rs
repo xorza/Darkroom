@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use crate::DataType;
 use crate::async_lambda;
-use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId};
+use crate::graph::address::{InputPort, NodeId};
+use crate::graph::{Binding, CacheMode, Graph, Node};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput, FuncOutput};
 use crate::node::lambda::Invocation;

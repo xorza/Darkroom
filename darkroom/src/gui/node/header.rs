@@ -2,7 +2,7 @@
 //! `G` graph-open, `D` sink-disable, `↻` evict, `R`/`↓` cache, `i` inspect,
 //! and the `■`/`~` markers — and what each one means is this module's
 //! business; how a chip *looks* belongs to
-//! [`Badge`](crate::gui::widgets::badge::Badge).
+//! [`Badge`].
 //!
 //! The markers ride in the [`header`] band beside the title; the run-time
 //! label (left) and the interactive controls (right) share the [`status_row`]
@@ -452,7 +452,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
 }
 
 /// The run-to-node play chip. `pub(super)` so the prepass scan
-/// ([`crate::gui::node::prepass::emit_play_clicks`]) can poll the click from
+/// ([`prepass`](crate::gui::node::prepass)) can poll the click from
 /// last frame's response.
 pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
     node_wid("play_badge", node_id)

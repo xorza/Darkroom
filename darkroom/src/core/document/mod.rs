@@ -351,7 +351,7 @@ impl Document {
     /// Whether `node_id` is a live preview node in the entry graph — what
     /// retains the value it published.
     ///
-    /// Top-level only, because [`Func::entry_only`] is what makes a preview's
+    /// Top-level only, because [`Func::entry_only`](scenarium::Func::entry_only) is what makes a preview's
     /// identity answer for exactly one on-screen card; a node id found deeper
     /// would not be one.
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {

@@ -6,7 +6,7 @@ use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Error;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::NodeId;
+use crate::graph::address::NodeId;
 use crate::worker::status::WorkerStatus;
 
 #[derive(Debug, thiserror::Error)]

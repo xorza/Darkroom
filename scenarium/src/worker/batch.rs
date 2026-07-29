@@ -8,7 +8,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::NodeId;
+use crate::graph::address::NodeId;
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]

@@ -2,9 +2,9 @@
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
 //! ([`crate::gui::node::header`]) and the graph boundary-port names
-//! ([`crate::gui::node::port_rename`]); each maps the returned
+//! (`gui::node::port_rename`); each maps the returned
 //! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
-//! [`crate::gui::node::value_editor`]; both share the blur-edge /
+//! `gui::node::value_editor`; both share the blur-edge /
 //! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
 use palantir::{
@@ -21,7 +21,7 @@ use crate::gui::widgets::buffered_edit::EditBuffer;
 struct RenameState {
     active: bool,
     /// The in-progress draft plus blur-edge tracking, shared with
-    /// [`crate::gui::node::value_editor`]'s buffered fields — see
+    /// `gui::node::value_editor`'s buffered fields — see
     /// [`EditBuffer`] for why the latch needs to survive the
     /// `request_focus` → focus-landing gap this widget opens.
     edit: EditBuffer,

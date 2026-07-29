@@ -31,7 +31,7 @@ use shell::ShellCommand;
 /// UI never touches `Workspace` / `Theme` / runtime services directly.
 #[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
-    /// Document file lifecycle — [`file`].
+    /// Document file lifecycle — [`file`](mod@file).
     File(FileCommand),
     /// Graph → library publishing — [`graph`].
     Graph(GraphCommand),

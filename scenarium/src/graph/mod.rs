@@ -8,16 +8,15 @@ use hashbrown::hash_map::Entry;
 
 use crate::StaticValue;
 use crate::error::GraphDeserializeError;
+use crate::graph::address::{InputPort, NodeId, OutputPort, Subscription};
 use crate::graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
 use crate::graph::query::NodePorts;
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
 use crate::node::definition::{FuncInput, FuncOutput};
 use crate::node::special::SpecialNode;
-use common::id_type;
 
-id_type!(NodeId);
-
+pub(crate) mod address;
 pub(crate) mod boundary;
 pub(crate) mod clone;
 pub(crate) mod interface;
@@ -26,56 +25,12 @@ mod serde;
 pub(crate) mod validate;
 pub(crate) mod wiring;
 
-/// Address of a producer node's output port — the source side of a data
-/// binding (`Binding::Bind`).
-#[derive(
-    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
-pub struct OutputPort {
-    pub node_id: NodeId,
-    pub port_idx: usize,
-}
-
-impl OutputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
-        Self { node_id, port_idx }
-    }
-}
-
-/// Address of a consumer node's input port. Keys a node's data binding in
-/// `Graph.bindings`, and reports unsatisfied inputs
-/// (the execution outcome's missing-input list) / edges the editor's breaker severs.
-/// Distinct from `OutputPort` so source/sink intent can't be confused.
-#[derive(
-    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
-pub struct InputPort {
-    pub node_id: NodeId,
-    pub port_idx: usize,
-}
-
-impl InputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
-        Self { node_id, port_idx }
-    }
-}
-
 /// What a consumer input port is wired to. Stored sparsely: `Graph.bindings`
 /// only holds these values, and an absent port is unbound.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
     Const(StaticValue),
     Bind(OutputPort),
-}
-
-/// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so a
-/// `BTreeSet` ranges over one emitter-event's subscribers contiguously.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Subscription {
-    pub emitter: NodeId,
-    pub event_idx: usize,
-    pub subscriber: NodeId,
 }
 
 /// Where a node's computed output is cached — the two orthogonal storage bits

@@ -14,7 +14,8 @@ use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::pool::{Pool, PoolRange};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::graph::{Graph, NodeId};
+use crate::graph::Graph;
+use crate::graph::address::NodeId;
 use crate::library::Library;
 use crate::node::definition::FuncBehavior;
 
@@ -357,7 +358,7 @@ pub(crate) mod internals {
     use crate::execution::flatten::map::internals::FlattenMapBuilder;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::Program;
-    use crate::graph::NodeId;
+    use crate::graph::address::NodeId;
 
     impl CompiledGraph {
         /// Every execution node an authored node covers, in ascending id

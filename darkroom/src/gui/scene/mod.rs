@@ -242,7 +242,7 @@ pub(crate) struct SceneNode {
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
     pub(crate) kind_label: InternedStr,
-    /// The func's [`Func::description`] (empty for graph/boundary nodes).
+    /// The func's [`Func::description`](scenarium::Func::description) (empty for graph/boundary nodes).
     /// Shown by the inspection panel and the new-node palette tooltip.
     pub(crate) description: InternedStr,
     /// Span into [`Scene::inputs`].
