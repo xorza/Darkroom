@@ -13,7 +13,9 @@ use scenarium::NodeId;
 use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
-use crate::gui::scene::{GraphScene, Scene, selection_holds};
+use std::collections::BTreeSet;
+
+use crate::gui::scene::{Pane, Scene};
 
 /// One in-flight group drag, or none.
 ///
@@ -144,10 +146,10 @@ impl Anchor {
 /// shared by both callers, so the group moves the same way regardless of
 /// which kind of member's press started it.
 pub(crate) fn selected_group_positions(
-    graph: GraphScene<'_>,
-    selected: &[NodeId],
+    graph: Pane<'_>,
+    selected: &BTreeSet<NodeId>,
 ) -> Vec<(NodeId, Vec2)> {
-    let holds = |key: NodeId| selection_holds(selected, key);
+    let holds = |key: NodeId| selected.contains(&key);
     let positions: Vec<(NodeId, Vec2)> = graph
         .nodes()
         .filter(|n| holds(n.id))
@@ -162,7 +164,7 @@ mod tests {
     use palantir::internals::UiHarness;
     use scenarium::NodeId;
 
-    use crate::gui::scene::internals::scene_node_stub;
+    use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
 
     fn wid() -> WidgetId {
         WidgetId::from_hash("group_drag_test_widget")
@@ -170,8 +172,8 @@ mod tests {
 
     /// A scene holding just `id`, so a drag grabbing something on it passes
     /// the owner check.
-    fn scene_with(ui: &mut Ui, id: NodeId) -> Scene {
-        Scene::with_nodes([scene_node_stub(ui, id, Vec2::ZERO)])
+    fn scene_with(ui: &mut Ui, id: NodeId) -> SceneFixture {
+        SceneFixture::with_nodes([scene_node_stub(ui, id, Vec2::ZERO)])
     }
 
     #[test]
@@ -236,7 +238,7 @@ mod tests {
 
         let mut out = Intents::default();
         assert!(
-            !drag.advance(arena.ui(), &scene, &mut out),
+            !drag.advance(arena.ui(), &scene.scene, &mut out),
             "the drag is over"
         );
         assert!(out.is_empty(), "a stale anchor emits nothing");
@@ -258,7 +260,7 @@ mod tests {
         assert!(drag.anchor.is_some(), "latched");
 
         let mut out = Intents::default();
-        assert!(!drag.advance(arena.ui(), &scene, &mut out));
+        assert!(!drag.advance(arena.ui(), &scene.scene, &mut out));
         assert!(out.is_empty(), "a release commits nothing of its own");
         assert!(drag.anchor.is_none(), "the slot is free for the next press");
     }

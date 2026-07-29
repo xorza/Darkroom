@@ -21,7 +21,7 @@ pub(crate) enum Queued {
 /// target is an argument of every push rather than state on the sink. Each
 /// site names the pane it belongs to from what it already holds:
 /// `SceneNode::owner` in a node body,
-/// [`GraphScene::target`](crate::gui::scene::GraphScene::target) in a
+/// [`Pane::target`](crate::gui::scene::Pane::target) in a
 /// per-pane draw, the latched `GraphRef` in a gesture that outlives its
 /// frame. A whole-scene scan names each hit's owner as it goes.
 ///

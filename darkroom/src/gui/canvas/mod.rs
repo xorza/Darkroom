@@ -50,7 +50,7 @@ use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
 use crate::gui::node::prepass::{emit_path_picks, emit_port_dblclicks};
 use crate::gui::node::{NodeUI, RecordCtx};
-use crate::gui::scene::{GraphScene, Scene};
+use crate::gui::scene::{Frame, Pane};
 
 /// Canvas-level UI scope, shared by **every** graph pane on screen: the
 /// port-widget-id cache, the `NodeUI` that renders graph nodes, the
@@ -61,7 +61,7 @@ use crate::gui::scene::{GraphScene, Scene};
 /// inspectors) or inherently singular (there is one pointer, so one drag,
 /// one rubber band, one open popup). What *is* per-pane — the canvas
 /// widget ids, the viewport, the paint stack — comes from the
-/// [`GraphScene`] handed to [`Self::draw`], and each gesture that spans
+/// [`Pane`] handed to [`Self::draw`], and each gesture that spans
 /// frames records the [`GraphRef`] it latched on so the other panes'
 /// passes leave it alone.
 ///
@@ -210,7 +210,7 @@ impl GraphUI {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        frame: Frame<'_>,
         library: &Library,
         out: &mut Intents,
     ) {
@@ -223,44 +223,44 @@ impl GraphUI {
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
         self.cancelled = ui.escape_pressed();
-        for graph in scene.graphs() {
-            let target = graph.target();
+        for pane in frame.panes() {
+            let target = pane.target();
             let gesture = classify_canvas_gesture(ui, target);
             if let Some(gesture) = gesture {
                 self.gesture = Some(PaneGesture { target, gesture });
             }
-            pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, graph, gesture, out);
+            pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, pane, gesture, out);
         }
-        self.gestures.node_ui.prepass(ui, scene, out);
-        self.geometry.rebuild(ui, scene, &mut self.hits);
+        self.gestures.node_ui.prepass(ui, frame.scene, out);
+        self.geometry.rebuild(ui, frame.scene, &mut self.hits);
         // After the rebuild, which is where the port half of `hits` fills:
         // a port double-click rides the same response read as that port's
         // center, so there is nothing to act on before it.
-        emit_port_dblclicks(&self.hits, scene, out);
+        emit_port_dblclicks(&self.hits, frame, out);
         // Both port-drag claimants sit *after* the rebuild so they read this
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
         self.gestures
             .preview_drag
-            .apply(ui, scene, &self.geometry, library, out);
+            .apply(ui, frame, &self.geometry, library, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         let resume = self.gestures.new_node_ui.take_resume_floating();
         self.gestures
             .connection_ui
-            .apply(ui, scene, &self.geometry, resume, self.cancelled, out);
+            .apply(ui, frame, &self.geometry, resume, self.cancelled, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the connection gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
         self.gestures
             .subscription_ui
-            .apply(ui, scene, &self.geometry, self.cancelled, out);
+            .apply(ui, frame, &self.geometry, self.cancelled, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
         // off this frame's swept hits. Whole scene, so a panel pinned on a
         // pane that just closed is pruned.
-        self.inspectors.apply(ui, &self.hits, scene);
+        self.inspectors.apply(ui, &self.hits, frame);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so every
         // pane's draw reads the same finished geometry.
@@ -280,7 +280,7 @@ impl GraphUI {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         // Pan/zoom was already folded into the document in `prepass`
@@ -305,7 +305,7 @@ impl GraphUI {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         gesture: Option<CanvasGesture>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
@@ -394,7 +394,7 @@ impl GraphUI {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         out: &mut Intents,
     ) {
         let target = graph.target();
@@ -626,7 +626,7 @@ fn classify_canvas_gesture(ui: &mut Ui, target: GraphRef) -> Option<CanvasGestur
 /// in `node`. All three are pure reads over [`CanvasHits`], which is why
 /// [`GraphUI::draw`] can skip the whole group once something else has
 /// claimed the frame.
-fn emit_chip_command(hits: &CanvasHits, graph: GraphScene<'_>) -> Option<AppCommand> {
+fn emit_chip_command(hits: &CanvasHits, graph: Pane<'_>) -> Option<AppCommand> {
     // A hit is keyed by a document-unique `NodeId`, so it can belong to a
     // neighbouring pane — or to a node this pane no longer holds, since the
     // sweep ran against last frame's projection. Both fall out here.
@@ -655,7 +655,7 @@ fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.
 /// Where an in-flight wire's free end sits before it snaps to a target;
 /// `canvas_origin` is the inner canvas's pre-transform origin.
-fn pointer_world(ui: &mut Ui, graph: GraphScene<'_>, canvas_origin: Vec2) -> Option<Vec2> {
+fn pointer_world(ui: &mut Ui, graph: Pane<'_>, canvas_origin: Vec2) -> Option<Vec2> {
     ui.pointer_pos()
         .map(|p| to_world(p - canvas_origin, &graph.viewport()))
 }

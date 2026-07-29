@@ -18,7 +18,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// One row of a category's palette list: a library `Func`, a built-in special
 /// node, a library graph, or one of the open graph's own local definitions.
@@ -74,7 +74,7 @@ struct LocalDefRow {
 
 /// The open graph's own local definitions, read out of the scene once per
 /// frame the palette is up.
-fn local_def_rows(graph: GraphScene<'_>) -> Vec<LocalDefRow> {
+fn local_def_rows(graph: Pane<'_>) -> Vec<LocalDefRow> {
     graph
         .local_defs()
         .iter()
@@ -143,7 +143,7 @@ impl NewNodeUi {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         gesture: Option<CanvasGesture>,
         pending_source: Option<PortRef>,
         out: &mut Intents,

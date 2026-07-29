@@ -10,7 +10,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::pane::PaneSlot;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// The active gesture, threaded through node and wire rendering so
 /// intersection tests run inline with the draw that knows the geometry.
@@ -268,7 +268,7 @@ impl BreakerUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         gesture: Option<CanvasGesture>,
         cancelled: bool,
         out: &mut Intents,

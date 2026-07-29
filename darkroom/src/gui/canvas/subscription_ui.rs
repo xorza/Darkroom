@@ -10,7 +10,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pane::{Held, PaneSlot};
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::node::port_color::event_color;
-use crate::gui::scene::{GraphScene, Scene, SceneNode};
+use crate::gui::scene::{Frame, Pane, SceneNode};
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -60,7 +60,7 @@ impl SubscriptionUI {
     /// pane** — feeds that pane's wire-fade tier. Scoped, so dragging an
     /// event wire in one pane doesn't dim every other pane's wires.
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
-    pub(super) fn dragging_in(&self, graph: GraphScene<'_>) -> bool {
+    pub(super) fn dragging_in(&self, graph: Pane<'_>) -> bool {
         self.state.get(graph.target()).is_some()
     }
 
@@ -76,7 +76,7 @@ impl SubscriptionUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
+        frame: Frame<'_>,
         geometry: &CanvasGeometry,
         cancelled: bool,
         out: &mut Intents,
@@ -85,10 +85,10 @@ impl SubscriptionUI {
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = scene.nodes.values().flat_map(SceneNode::events);
+            let emitters = frame.scene.nodes.values().flat_map(SceneNode::events);
             // Only sink nodes render a pin, so only they can start a reverse
             // event drag.
-            let pins = scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
+            let pins = frame.scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
             let latched = GlyphDrag::latch(&geometry.events, emitters)
                 .map(InFlight::FromEmitter)
                 .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
@@ -97,7 +97,7 @@ impl SubscriptionUI {
             // the commit lands on. Resolved here, once, then it rides the
             // slot.
             if let Some(latched) = latched
-                && let Some(graph) = scene.owner(latched.node())
+                && let Some(graph) = frame.owner(latched.node())
             {
                 self.state.latch(graph.target(), latched);
             }
@@ -114,9 +114,9 @@ impl SubscriptionUI {
         };
         // A pane closed mid-drag, or a fixed end deleted under it, drops
         // the wire — not re-latching is how.
-        let Some(graph) = scene
-            .graph(target)
-            .filter(|graph| graph.contains(state.node()))
+        let Some(graph) = frame
+            .pane(target)
+            .filter(|pane| pane.contains(state.node()))
         else {
             return;
         };
@@ -192,7 +192,7 @@ impl SubscriptionUI {
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
@@ -255,7 +255,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         if pass.draw_wire(ui, &wire, hover, || {
             WireTint::flat(event_color(theme, false))
         }) {
-            pass.probe.mark_broken_subscription(*s);
+            pass.probe.mark_broken_subscription(s);
         }
     }
 }
@@ -267,7 +267,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 fn scan_sub_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    graph: GraphScene<'_>,
+    graph: Pane<'_>,
     emitter: EventRef,
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
@@ -285,7 +285,7 @@ fn scan_sub_target(
 fn scan_emitter_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    graph: GraphScene<'_>,
+    graph: Pane<'_>,
     subscriber: NodeId,
 ) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;

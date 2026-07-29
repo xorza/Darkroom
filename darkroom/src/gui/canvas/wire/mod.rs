@@ -27,7 +27,7 @@ use crate::gui::canvas::geometry::{GlyphKey, PortLayer};
 use crate::gui::canvas::pointer_world;
 use crate::gui::color::toward;
 use crate::gui::node::RecordCtx;
-use crate::gui::scene::GraphScene;
+use crate::gui::scene::Pane;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
@@ -181,7 +181,7 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
     pub(super) fn free_end(
         self,
         ui: &mut Ui,
-        graph: GraphScene<'_>,
+        graph: Pane<'_>,
         canvas_origin: Vec2,
         layer: &PortLayer<B>,
     ) -> Option<Vec2> {

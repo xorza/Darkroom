@@ -2,7 +2,7 @@ use palantir::internals::UiHarness;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::{Binding, DataType, GraphDef, GraphId, InputPort, Node, NodeId, NodeKind};
 
-use crate::core::document::{BoundarySide, GraphRef, GraphView, PortKind, PortRef};
+use crate::core::document::{BoundarySide, Document, GraphRef, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::connection_ui::{
@@ -11,11 +11,15 @@ use crate::gui::canvas::connection_ui::{
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::GlyphDrag;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{GraphProjection, GraphScene, Scene, SceneSource};
+use crate::gui::scene::{Frame, GraphProjection, Pane, Scene, SceneSource};
 
 #[derive(Debug)]
 struct Fixture {
     scene: Scene,
+    /// The document the scene was projected from — the prepass resolves the
+    /// pane's authoring graph out of it to answer the snap filter's cycle
+    /// question.
+    doc: Document,
     target: GraphRef,
     boundary_in: NodeId,
     boundary_out: NodeId,
@@ -24,9 +28,16 @@ struct Fixture {
 
 impl Fixture {
     /// The fixture's sole projected pane.
-    fn graph(&self) -> GraphScene<'_> {
-        self.scene
-            .graph(self.target)
+    fn frame(&self) -> Frame<'_> {
+        Frame {
+            scene: &self.scene,
+            doc: &self.doc,
+        }
+    }
+
+    fn graph(&self) -> Pane<'_> {
+        self.frame()
+            .pane(self.target)
             .expect("fixture pane projected")
     }
 }
@@ -46,8 +57,11 @@ fn fixture() -> Fixture {
         .body
         .set_input_binding(InputPort::new(mult, 0), Binding::bind(boundary_in, 0));
 
-    let view = GraphView::for_graph(&graph.body);
     let def_id = GraphId::unique();
+    let target = GraphRef::Local(def_id);
+    let mut doc = Document::default();
+    doc.graph.insert_graph(def_id, graph);
+    assert!(doc.ensure_sub_view(def_id), "the def was just inserted");
     let mut scene = Scene::default();
     let mut arena = UiHarness::arena();
     scene.rebuild(
@@ -55,14 +69,15 @@ fn fixture() -> Fixture {
         &library,
         &RunState::default(),
         [GraphProjection {
-            target: GraphRef::Local(def_id),
-            source: SceneSource::Def(&graph),
-            view: &view,
+            target,
+            source: SceneSource::Def(doc.graph.find_graph(def_id).expect("inserted")),
+            view: doc.view(target).expect("interior view"),
         }],
     );
     Fixture {
         scene,
-        target: GraphRef::Local(def_id),
+        doc,
+        target,
         boundary_in,
         boundary_out,
         mult,
@@ -240,11 +255,12 @@ fn wiring_a_placeholder_adds_the_interface_port_before_the_binding() {
 /// release edge off the port geometry, which a bare fixture has none
 /// of) — and the more exposed one: no button is held, so it can sit
 /// across an arbitrary number of undos.
-fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
+fn prepass_with_wire_from(fixture: &Fixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
+    let frame = fixture.frame();
     // The fixture is one pane, and it isn't `Main` — latch on whichever
     // it built, the way the production latch resolves it from the node.
-    let target = scene.graphs().next().expect("fixture has a pane").target();
+    let target = frame.panes().next().expect("fixture has a pane").target();
     let mut connections = ConnectionUI::default();
     connections.state.latch(
         target,
@@ -256,7 +272,7 @@ fn prepass_with_wire_from(scene: &Scene, start: PortRef) -> Option<InFlight> {
     let mut out = Intents::default();
     connections.apply(
         arena.ui(),
-        scene,
+        frame,
         &CanvasGeometry::default(),
         None,
         false,
@@ -282,7 +298,7 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
         port_idx: 0,
     };
     assert!(
-        prepass_with_wire_from(&f.scene, live).is_some(),
+        prepass_with_wire_from(&f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
@@ -291,7 +307,7 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
         ..live
     };
     assert!(
-        prepass_with_wire_from(&f.scene, gone).is_none(),
+        prepass_with_wire_from(&f, gone).is_none(),
         "a wire from a vanished node drops"
     );
 }
