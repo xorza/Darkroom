@@ -18,6 +18,7 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::DataType;
 use crate::StaticValue;
+use crate::data::output_type_resolver::{OutputTypeResolver, OutputTypeSource};
 use crate::graph::definition::{GraphDef, GraphLink};
 use crate::graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 use crate::graph::error::ValidationResult;
@@ -26,7 +27,6 @@ use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{GraphId, InputPort, OutputPort};
 use crate::graph::interface::NodePorts;
-use crate::graph::node::output_resolver::{OutputResolver, OutputSource};
 use crate::graph::node::{Node, NodeKind};
 use crate::library::Library;
 
@@ -314,23 +314,23 @@ impl Graph {
     /// binding cycle is hit. Used by the editor for port-type display, connection
     /// compatibility, graph-interface inference, and compile-time validation.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
-        OutputResolver::new().resolve(port, &|output| self.output_source(library, output))
+        OutputTypeResolver::new().resolve(port, &|output| self.output_source(library, output))
     }
-    fn output_source(&self, library: &Library, port: OutputPort) -> OutputSource<OutputPort> {
+    fn output_source(&self, library: &Library, port: OutputPort) -> OutputTypeSource<OutputPort> {
         let Some(out) = self.output_spec(library, port) else {
-            return OutputSource::Unresolved;
+            return OutputTypeSource::Unresolved;
         };
         let OutputType::Wildcard { mirrors } = &out.ty else {
-            return OutputSource::Fixed(out.ty.declared());
+            return OutputTypeSource::Fixed(out.ty.declared());
         };
         let mirror = InputPort::new(port.node_id, *mirrors);
         match self.bindings.get(&mirror) {
-            Some(Binding::Bind(source)) => OutputSource::Bind(*source),
-            Some(Binding::Const(value)) => OutputSource::Const {
+            Some(Binding::Bind(source)) => OutputTypeSource::Bind(*source),
+            Some(Binding::Const(value)) => OutputTypeSource::Const {
                 declared: self.input_type(library, mirror).unwrap_or_default(),
                 value: value.clone(),
             },
-            None => OutputSource::Unresolved,
+            None => OutputTypeSource::Unresolved,
         }
     }
     /// The declared [`FuncOutput`] of output `port` — its name + [`OutputType`],

@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution::compile::error::CompiledGraphValidationError;
-use crate::execution::compile::flatten::internals::FlatGraphBuilder;
+use crate::execution::compile::flat::internals::FlatGraphBuilder;
 use crate::execution::error::ExecutionIdentityError;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
