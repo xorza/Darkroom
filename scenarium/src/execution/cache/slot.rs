@@ -1,5 +1,5 @@
 use crate::DynamicValue;
-use crate::execution::digest::Digest;
+use crate::execution::cache::digest::Digest;
 use crate::node::definition::FuncId;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;

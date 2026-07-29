@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
-use crate::execution::digest::Digest;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
