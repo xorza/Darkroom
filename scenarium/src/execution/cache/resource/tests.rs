@@ -6,13 +6,13 @@ use ::common::CancelToken;
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compiled::internals::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::execution::schedule::{NodeState, RunSchedule};
-use crate::execution::test_support::TestCompiledGraph;
 use crate::graph::func::FuncBehavior;
 use crate::{DataType, StaticValue};
 
