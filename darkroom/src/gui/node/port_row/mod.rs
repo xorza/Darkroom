@@ -279,12 +279,12 @@ fn input_label_cell(
     let theme = rcx.theme;
     let allow_const = !node.boundary;
     let tip = tip_for(rcx, opts.tips, &input.description.borrow_str(), &input.ty);
-    // Flag a required input's port only once a run actually failed on it (the
-    // node is `MissingInputs`) — not on every unbound edit — so the port keeps
-    // its data-type color while editing instead of flipping as you bind/unbind.
-    let missing = matches!(node.exec_status, ExecStatus::MissingInputs)
-        && input.required
-        && matches!(input.binding, InputBindingView::None);
+    // Flag a port only once a run actually failed on it — not on every unbound edit — so
+    // the port keeps its data-type color while editing instead of flipping as you
+    // bind/unbind. The run named the exact ports it could not feed, so only those light
+    // up; the node-level check is what stops a live re-run's stale verdict from lingering
+    // once the node reaches a new status.
+    let missing = matches!(node.exec_status, ExecStatus::MissingInputs) && input.missing;
     let fill = if missing {
         theme.colors.exec_missing_glow
     } else {

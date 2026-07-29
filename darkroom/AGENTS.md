@@ -460,10 +460,12 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   while `R` and `↓` flip the two bits of
   `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `NodeProperty::RuntimeCache`), `port_row` (the two port
-  columns + circles + binding menu; a required input's port paints in the
-  missing/warning color only once a run flagged its node `MissingInputs` —
-  `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the
-  port keeps its data-type color while editing), `port_rename` (inline
+  columns + circles + binding menu; a port paints in the missing/warning color
+  only once a run flagged its node `MissingInputs` *and* named that exact port —
+  `node.exec_status` + `SceneInput::missing` + `exec_missing_glow`, where
+  `missing` comes from the run's own port list (`RunState::missing_inputs`), so a
+  port wired to a disabled producer counts too and a merely unbound one does not
+  glow while you edit), `port_rename` (inline
   boundary-port rename in graph
   interiors), and `value_editor` (inline `Const` editing; an input with
   `value_variants` renders a preset dropdown over them regardless of type — carried

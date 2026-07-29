@@ -1,11 +1,8 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::RamUsage;
-use crate::execution::error::RunError;
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::log::LogEntry;
-use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunProgress};
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -43,22 +40,6 @@ pub enum WorkerStatusKind {
         executed_node_count: usize,
         cancelled: bool,
     },
-}
-
-#[derive(Clone, Debug)]
-pub enum NodeExecutionStatus {
-    Running { at: Instant },
-    Cached,
-    Executed { elapsed_secs: f64 },
-    MissingInputs,
-    Errored { error: RunError },
-}
-
-#[derive(Clone, Debug)]
-pub struct NodeStatus {
-    pub e_node_id: ExecutionNodeId,
-    pub status: Option<NodeExecutionStatus>,
-    pub ram: Option<RamUsage>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -115,59 +96,14 @@ impl WorkerStatusPublisher {
     ) -> Arc<WorkerStatus> {
         let kind = WorkerStatusKind::Completed {
             elapsed_secs: outcome.elapsed_secs,
-            executed_node_count: outcome.executed_nodes.len(),
+            executed_node_count: outcome.ran_node_count,
             cancelled: outcome.cancelled,
         };
-        let node_count = outcome.executed_nodes.len()
-            + outcome.cached_nodes.len()
-            + outcome.missing_inputs.len()
-            + outcome.node_errors.len()
-            + outcome.node_ram.len();
         let update = self.prepare(activity, kind);
-        update.nodes.reserve(node_count);
-        update
-            .nodes
-            .extend(outcome.executed_nodes.drain(..).map(|node| NodeStatus {
-                e_node_id: node.e_node_id,
-                status: Some(NodeExecutionStatus::Executed {
-                    elapsed_secs: node.elapsed_secs,
-                }),
-                ram: None,
-            }));
-        update
-            .nodes
-            .extend(outcome.cached_nodes.drain(..).map(|e_node_id| NodeStatus {
-                e_node_id,
-                status: Some(NodeExecutionStatus::Cached),
-                ram: None,
-            }));
-        update
-            .nodes
-            .extend(outcome.missing_inputs.drain(..).map(|port| NodeStatus {
-                e_node_id: port.e_node_id,
-                status: Some(NodeExecutionStatus::MissingInputs),
-                ram: None,
-            }));
-        update.nodes.extend(
-            outcome
-                .node_errors
-                .drain(..)
-                .filter(|failure| !matches!(&failure.error, RunError::Cancelled { .. }))
-                .map(|failure| NodeStatus {
-                    e_node_id: failure.e_node_id,
-                    status: Some(NodeExecutionStatus::Errored {
-                        error: failure.error,
-                    }),
-                    ram: None,
-                }),
-        );
-        update
-            .nodes
-            .extend(outcome.node_ram.drain(..).map(|node| NodeStatus {
-                e_node_id: node.e_node_id,
-                status: None,
-                ram: Some(node.usage),
-            }));
+        // The run already reduced itself to one row per node, so publishing is a move:
+        // nothing here decides what a node's result was, and nothing downstream has to
+        // reconcile a node that arrived twice.
+        update.nodes.append(&mut outcome.nodes);
         update.logs.append(&mut outcome.logs);
         update.cache_ram = outcome.cache_ram;
         Arc::clone(&self.status)
@@ -191,7 +127,7 @@ impl WorkerStatusPatch<'_> {
         update.nodes.push(NodeStatus {
             e_node_id: progress.e_node_id,
             status: Some(status),
-            ram: None,
+            ram: RamUsage::default(),
         });
     }
 

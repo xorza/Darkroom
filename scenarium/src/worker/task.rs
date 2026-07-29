@@ -373,13 +373,12 @@ mod tests {
     use common::CancelToken;
 
     use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::outcome::NodeExecutionStatus;
     use crate::execution::report::{RunPhase, RunProgress, RunReporter};
     use crate::execution::seeds::RunSeeds;
     use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
     use crate::worker::protocol::{WorkerMessage, WorkerReport};
-    use crate::worker::status::{
-        NodeExecutionStatus, WorkerActivity, WorkerStatusKind, WorkerStatusPublisher,
-    };
+    use crate::worker::status::{WorkerActivity, WorkerStatusKind, WorkerStatusPublisher};
     use crate::worker::task::{EventLoopTransition, PendingRun, WorkerRunReporter, WorkerTask};
 
     #[tokio::test]

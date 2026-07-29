@@ -24,7 +24,6 @@ use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::execution::ram::NodeRamUsage;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -138,20 +137,21 @@ impl RuntimeCache {
 
     /// The total and per-node RAM held by resident values. The global total deduplicates
     /// shared custom values by pointer identity, while each node reports the full size of
-    /// every value it holds. `Empty` slots and zero-byte nodes are omitted.
+    /// every value it holds. `Empty` slots read as zero.
     ///
-    /// `program` names the slots: they are index-aligned to it by
-    /// [`reconcile`](Self::reconcile), so its id column is the cache's too.
+    /// `by_node` is filled from scratch, aligned to `program` like the slots themselves —
+    /// dense rather than sparse so the caller can pair a node's RAM with its run result by
+    /// index, without hashing an id or merging two orders.
     pub(crate) fn resident_ram_stats(
         &mut self,
         program: &Program,
-        by_node: &mut Vec<NodeRamUsage>,
+        by_node: &mut NodeColumn<RamUsage>,
     ) -> RamUsage {
         debug_assert_eq!(self.slots.len(), program.e_nodes.len());
         self.ram_seen.clear();
-        by_node.clear();
+        by_node.reset(program.e_nodes.len(), RamUsage::default());
         let mut total = RamUsage::default();
-        for (e_node_id, slot) in program.e_node_ids.iter().zip(self.slots.iter()) {
+        for (node_idx, slot) in self.slots.iter_indexed() {
             let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
@@ -169,12 +169,7 @@ impl RuntimeCache {
                     total += usage;
                 }
             }
-            if node_usage.total() > 0 {
-                by_node.push(NodeRamUsage {
-                    e_node_id: *e_node_id,
-                    usage: node_usage,
-                });
-            }
+            by_node[node_idx] = node_usage;
         }
         total
     }

@@ -24,10 +24,9 @@ pub use execution::codec::{CodecError, CustomValueCodec};
 pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
 pub use execution::error::{Error, Result, RunError};
-pub use execution::identity::{
-    ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
-};
+pub use execution::identity::{ExecutionEventPort, ExecutionIdentityError, ExecutionNodeId};
 pub use execution::log::{LogEntry, LogLevel};
+pub use execution::outcome::{NodeExecutionStatus, NodeStatus};
 pub use execution::seeds::RunSeeds;
 pub use graph::address::{InputPort, NodeId, OutputPort, Subscription};
 pub use graph::boundary::{DetachedGraphInput, DetachedGraphOutput};
@@ -52,6 +51,4 @@ pub use runtime::context::{ContextManager, ContextStore, ContextType};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
 pub use worker::protocol::{WorkerError, WorkerExited, WorkerMessage, WorkerReport};
-pub use worker::status::{
-    NodeExecutionStatus, NodeStatus, WorkerActivity, WorkerStatus, WorkerStatusKind,
-};
+pub use worker::status::{WorkerActivity, WorkerStatus, WorkerStatusKind};

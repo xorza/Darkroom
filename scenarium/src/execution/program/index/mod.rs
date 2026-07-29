@@ -220,11 +220,19 @@ impl<T> OutputColumn<T> {
 
 #[cfg(test)]
 mod internals {
-    use crate::execution::program::index::{OutputColumn, OutputIdx};
+    use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
 
     impl<T> OutputColumn<T> {
         pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
             self.values.iter()
+        }
+    }
+
+    impl<T> NodeColumn<T> {
+        /// The backing allocation, for tests asserting a per-run column is refilled
+        /// rather than reallocated.
+        pub(crate) fn capacity(&self) -> usize {
+            self.values.capacity()
         }
     }
 

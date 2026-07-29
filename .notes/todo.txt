@@ -35,3 +35,5 @@ A Pure node with an unset path input now errors per run. DataType::FsPath's defa
  sink: run_state.is_sink(id).unwrap_or(node_interface.sink), impure: run_state.is_impure(id).unwrap_or(node_interface.impure),
 
 investigate dependencies skill
+
+fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> - what is option

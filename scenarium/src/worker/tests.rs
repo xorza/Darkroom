@@ -8,9 +8,8 @@ use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::error::{Error, Result as ExecResult, RunError};
-use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId};
-use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
-use crate::execution::ram::NodeRamUsage;
+use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
+use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::address::{InputPort, NodeId};
 use crate::graph::{Binding, Graph, GraphDef, Node, NodeSearch};
@@ -29,7 +28,7 @@ use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake};
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
 use crate::worker::status::{
-    NodeExecutionStatus, WorkerActivity, WorkerStatus, WorkerStatusKind, WorkerStatusPublisher,
+    WorkerActivity, WorkerStatus, WorkerStatusKind, WorkerStatusPublisher,
 };
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -185,62 +184,34 @@ async fn start_single_event_loop(
     (active, e_node_id)
 }
 
+/// Recover the outcome a completed status was published from. The status *is* the
+/// outcome's rows, so this only unpacks the whole-run facts the kind carries.
 fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
     let WorkerStatusKind::Completed {
         elapsed_secs,
+        executed_node_count,
         cancelled,
-        ..
     } = status.kind
     else {
         panic!("only completed statuses have an execution outcome");
     };
-    let mut outcome = ExecutionOutcome {
+    assert!(
+        !status
+            .nodes
+            .iter()
+            .any(|node| matches!(node.status, Some(NodeExecutionStatus::Running { .. }))),
+        "completed status contains a running node"
+    );
+    ExecutionOutcome {
         elapsed_secs,
-        executed_nodes: Vec::new(),
-        missing_inputs: Vec::new(),
-        cached_nodes: Vec::new(),
+        nodes: status.nodes.clone(),
+        ran_node_count: executed_node_count,
         triggered_events: Vec::new(),
         event_triggers: Vec::new(),
-        node_errors: Vec::new(),
         logs: status.logs.clone(),
         cancelled,
         cache_ram: status.cache_ram,
-        node_ram: Vec::new(),
-    };
-    for node in &status.nodes {
-        match &node.status {
-            Some(NodeExecutionStatus::Running { .. }) => {
-                panic!("completed status contains a running node")
-            }
-            Some(NodeExecutionStatus::Cached) => outcome.cached_nodes.push(node.e_node_id),
-            Some(NodeExecutionStatus::Executed { elapsed_secs }) => {
-                outcome.executed_nodes.push(ExecutedNodeOutcome {
-                    e_node_id: node.e_node_id,
-                    elapsed_secs: *elapsed_secs,
-                });
-            }
-            Some(NodeExecutionStatus::MissingInputs) => {
-                outcome.missing_inputs.push(ExecutionInputPort {
-                    e_node_id: node.e_node_id,
-                    port_idx: 0,
-                });
-            }
-            Some(NodeExecutionStatus::Errored { error }) => {
-                outcome.node_errors.push(NodeError {
-                    e_node_id: node.e_node_id,
-                    error: error.clone(),
-                });
-            }
-            None => {}
-        }
-        if let Some(usage) = node.ram {
-            outcome.node_ram.push(NodeRamUsage {
-                e_node_id: node.e_node_id,
-                usage,
-            });
-        }
     }
-    outcome
 }
 
 /// A worker whose callback forwards only completed statuses into a fresh
@@ -357,7 +328,7 @@ async fn test_worker() -> TestResult {
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
-        assert_eq!(executed.executed_nodes.len(), 3);
+        assert_eq!(executed.ran_node_count, 3);
         assert_eq!(messages(&executed), [expected]);
     }
 
@@ -495,42 +466,49 @@ async fn lambda_panic_is_captured_not_unwound() {
     assert!(active.stop().await.is_empty());
 }
 
+/// Publishing a completed run is a move, not a reduction: the rows the run produced
+/// reach the GUI in the order and shape the run gave them, and the only thing the
+/// publisher adds is the whole-run header.
 #[test]
-fn completed_status_contains_the_full_gui_snapshot() {
+fn completed_status_publishes_the_runs_rows_verbatim() {
     let executed = ExecutionNodeId::unique();
-    let cached = ExecutionNodeId::unique();
     let missing = ExecutionNodeId::unique();
     let failed = ExecutionNodeId::unique();
-    let cancelled = ExecutionNodeId::unique();
     let resident = ExecutionNodeId::unique();
-    let mut outcome = ExecutionOutcome {
-        elapsed_secs: 1.25,
-        executed_nodes: vec![ExecutedNodeOutcome {
+    let rows = vec![
+        NodeStatus {
             e_node_id: executed,
-            elapsed_secs: 0.5,
-        }],
-        missing_inputs: vec![ExecutionInputPort {
+            status: Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 }),
+            ram: RamUsage { cpu: 3, gpu: 0 },
+        },
+        NodeStatus {
             e_node_id: missing,
-            port_idx: 3,
-        }],
-        cached_nodes: vec![cached],
-        triggered_events: Vec::new(),
-        event_triggers: Vec::new(),
-        node_errors: vec![
-            NodeError {
-                e_node_id: failed,
+            status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1, 3] }),
+            ram: RamUsage::default(),
+        },
+        NodeStatus {
+            e_node_id: failed,
+            status: Some(NodeExecutionStatus::Errored {
+                elapsed_secs: Some(0.25),
                 error: RunError::Invoke {
                     func_id: FuncId::unique(),
                     message: "failed".into(),
                 },
-            },
-            NodeError {
-                e_node_id: cancelled,
-                error: RunError::Cancelled {
-                    func_id: FuncId::unique(),
-                },
-            },
-        ],
+            }),
+            ram: RamUsage::default(),
+        },
+        NodeStatus {
+            e_node_id: resident,
+            status: None,
+            ram: RamUsage { cpu: 5, gpu: 7 },
+        },
+    ];
+    let mut outcome = ExecutionOutcome {
+        elapsed_secs: 1.25,
+        nodes: rows.clone(),
+        ran_node_count: 2,
+        triggered_events: Vec::new(),
+        event_triggers: Vec::new(),
         logs: vec![LogEntry {
             e_node_id: executed,
             level: LogLevel::Warn,
@@ -538,54 +516,57 @@ fn completed_status_contains_the_full_gui_snapshot() {
         }],
         cancelled: true,
         cache_ram: RamUsage { cpu: 13, gpu: 17 },
-        node_ram: vec![NodeRamUsage {
-            e_node_id: resident,
-            usage: RamUsage { cpu: 5, gpu: 7 },
-        }],
     };
     let mut publisher = WorkerStatusPublisher::default();
     let status = publisher.completed(WorkerActivity::EventLoop, &mut outcome);
+
     assert_eq!(status.activity, WorkerActivity::EventLoop);
     assert_eq!(
         status.kind,
         WorkerStatusKind::Completed {
             elapsed_secs: 1.25,
-            executed_node_count: 1,
+            executed_node_count: 2,
             cancelled: true,
         }
     );
     assert_eq!(status.cache_ram, RamUsage { cpu: 13, gpu: 17 });
     assert_eq!(status.logs.len(), 1);
     assert_eq!(status.logs[0].message, "warning");
-    assert_eq!(status.nodes.len(), 5);
-    assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == executed
-            && matches!(
-                node.status,
-                Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 })
-            )
-    }));
-    assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == cached && matches!(node.status, Some(NodeExecutionStatus::Cached))
-    }));
-    assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == missing && matches!(node.status, Some(NodeExecutionStatus::MissingInputs))
-    }));
-    assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == failed
-            && matches!(
-                &node.status,
+
+    assert_eq!(status.nodes.len(), rows.len());
+    for (published, produced) in status.nodes.iter().zip(&rows) {
+        assert_eq!(published.e_node_id, produced.e_node_id);
+        assert_eq!(published.ram, produced.ram);
+        match (&published.status, &produced.status) {
+            (
+                Some(NodeExecutionStatus::Executed { elapsed_secs: a }),
+                Some(NodeExecutionStatus::Executed { elapsed_secs: b }),
+            ) => assert_eq!(a, b),
+            (
+                Some(NodeExecutionStatus::MissingInputs { ports: a }),
+                Some(NodeExecutionStatus::MissingInputs { ports: b }),
+            ) => assert_eq!(a, b, "the exact unfed ports survive publication"),
+            (
                 Some(NodeExecutionStatus::Errored {
-                    error: RunError::Invoke { message, .. }
-                }) if message == "failed"
-            )
-    }));
-    assert!(!status.nodes.iter().any(|node| node.e_node_id == cancelled));
-    assert!(status.nodes.iter().any(|node| {
-        node.e_node_id == resident
-            && node.status.is_none()
-            && node.ram == Some(RamUsage { cpu: 5, gpu: 7 })
-    }));
+                    elapsed_secs: a,
+                    error: ea,
+                }),
+                Some(NodeExecutionStatus::Errored {
+                    elapsed_secs: b,
+                    error: eb,
+                }),
+            ) => {
+                assert_eq!(a, b, "a failure keeps the time its attempt cost");
+                assert_eq!(ea.to_string(), eb.to_string());
+            }
+            (None, None) => {}
+            (published, produced) => panic!("row changed shape: {produced:?} → {published:?}"),
+        }
+    }
+    assert!(
+        outcome.nodes.is_empty(),
+        "the rows moved out of the outcome rather than being copied"
+    );
 }
 
 #[tokio::test]
@@ -657,7 +638,7 @@ async fn execute_sinks_triggers_sink_nodes() {
         .expect("Missing compute completion")
         .expect("Unsuccessful compute");
 
-    assert_eq!(executed.executed_nodes.len(), 1);
+    assert_eq!(executed.ran_node_count, 1);
     assert_eq!(messages(&executed), ["hello"]);
 }
 
@@ -744,7 +725,7 @@ async fn worker_streams_node_patches_before_completion() {
                 assert_eq!(status.activity, WorkerActivity::Idle);
                 assert_eq!(started, 1);
                 assert_eq!(node_finished, 1);
-                assert_eq!(execution_outcome(&status).executed_nodes.len(), 1);
+                assert_eq!(execution_outcome(&status).ran_node_count, 1);
                 break;
             }
             WorkerReport::Status(status) => panic!("unexpected worker status: {status:?}"),
@@ -905,12 +886,11 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
     let finished = next_completed_run(&mut rx).await;
     let stats = finished.result.unwrap();
     let attributions: HashSet<_> = stats
-        .executed_nodes
-        .iter()
-        .map(|stats| {
+        .ran_nodes()
+        .map(|e_node_id| {
             finished
                 .compiled
-                .attribution(stats.e_node_id)
+                .attribution(e_node_id)
                 .unwrap()
                 .collect::<Vec<_>>()
         })
@@ -950,7 +930,7 @@ async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
         .expect("worker channel closed")
         .expect("compute ok");
     assert!(!stats.cancelled, "an idle cancel affected the next run");
-    assert_eq!(stats.executed_nodes.len(), 1, "the run completed in full");
+    assert_eq!(stats.ran_node_count, 1, "the run completed in full");
 }
 
 #[tokio::test]
@@ -966,7 +946,7 @@ async fn start_stop_event_loop() {
         .expect("event loop did not produce a callback")
         .expect("callback channel closed")
         .expect("event loop execution failed");
-    assert_eq!(event.executed_nodes.len(), 3);
+    assert_eq!(event.ran_node_count, 3);
     assert_eq!(event.logs.len(), 1);
 
     sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
@@ -1154,11 +1134,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
         .expect("worker timed out")
         .expect("worker channel closed")
         .expect("run ok");
-    let mut executed = stats
-        .executed_nodes
-        .iter()
-        .map(|node| node.e_node_id)
-        .collect::<Vec<_>>();
+    let mut executed = stats.ran_nodes().collect::<Vec<_>>();
     executed.sort();
     let mut expected = vec![
         root_execution_node(get_a_id),
@@ -1210,8 +1186,8 @@ async fn disabled_sink_stays_out_of_sink_runs() {
         .expect("worker timed out")
         .expect("worker channel closed")
         .expect("run ok");
-    assert!(stats.executed_nodes.is_empty());
-    assert!(stats.missing_inputs.is_empty());
+    assert!(stats.ran_node_count == 0);
+    assert!(stats.missing_input_nodes().count() == 0);
 }
 
 #[tokio::test]
@@ -1241,7 +1217,7 @@ async fn update_restarts_event_loop_if_running() {
         .expect("restarted event loop did not produce a callback")
         .expect("callback channel closed")
         .expect("event loop execution failed");
-    assert_eq!(event.executed_nodes.len(), 3);
+    assert_eq!(event.ran_node_count, 3);
 }
 
 // Stale-event filtering is now structural: each start_event_loop
@@ -1332,7 +1308,7 @@ async fn clear_then_update_in_same_batch_applies_update() {
         .expect("Missing compute completion")
         .expect("Unsuccessful compute");
 
-    assert_eq!(executed.executed_nodes.len(), 3);
+    assert_eq!(executed.ran_node_count, 3);
     assert_eq!(messages(&executed), ["1"]);
 }
 
@@ -2079,7 +2055,7 @@ async fn fired_event_does_not_reinitialize_event_sources() {
         .unwrap();
 
     let initialized = completion_rx.recv().await.unwrap().unwrap();
-    assert_eq!(initialized.executed_nodes.len(), 2);
+    assert_eq!(initialized.ran_node_count, 2);
     assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
     assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
     assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
@@ -2090,7 +2066,7 @@ async fn fired_event_does_not_reinitialize_event_sources() {
         .expect("notified event did not execute")
         .expect("worker callback channel closed")
         .expect("event execution failed");
-    assert_eq!(fired.executed_nodes.len(), 1);
+    assert_eq!(fired.ran_node_count, 1);
     assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
     assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
     assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
@@ -2349,11 +2325,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
 
     // Cold cache: all three nodes compute; mult is stored to disk.
     let stats = run(&dir.0, graph.clone_verbatim(), Arc::new(make_lib())).await;
-    assert_eq!(
-        stats.executed_nodes.len(),
-        3,
-        "cold run computes every node"
-    );
+    assert_eq!(stats.ran_node_count, 3, "cold run computes every node");
     assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
     // Reopen on a fresh worker over the same store: mult loads from disk and is reused. Its
@@ -2366,21 +2338,15 @@ async fn disk_cache_persists_node_across_worker_restart() {
         "the cut prunes the Memory input feeding only a disk-cache hit"
     );
     assert!(
-        !stats
-            .executed_nodes
-            .iter()
-            .any(|n| n.e_node_id == root_execution_node(get_a_id)),
+        !stats.ran(root_execution_node(get_a_id)),
         "get_a was cut, not recomputed"
     );
     assert!(
-        stats.cached_nodes.contains(&root_execution_node(mult_id)),
+        stats.cached(root_execution_node(mult_id)),
         "mult is served from the disk cache"
     );
     assert!(
-        !stats
-            .executed_nodes
-            .iter()
-            .any(|n| n.e_node_id == root_execution_node(mult_id)),
+        !stats.ran(root_execution_node(mult_id)),
         "mult itself is not recomputed"
     );
 }

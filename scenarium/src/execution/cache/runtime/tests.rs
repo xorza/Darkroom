@@ -4,10 +4,9 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeIdx, OutputAddr};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
-use crate::execution::ram::NodeRamUsage;
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::OutputDemand;
@@ -650,35 +649,32 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     }
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
-    let mut by_node = Vec::new();
+    let mut by_node = NodeColumn::default();
     let total = cache.resident_ram_stats(&program, &mut by_node);
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);
 
-    // Per-node: no cross-slot dedup — each node reports what it holds. Slot A holds
-    // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
-    // the empty slot C is omitted.
-    assert_eq!(by_node.len(), 2);
-    assert!(by_node.contains(&NodeRamUsage {
-        e_node_id: ExecutionNodeId::from_u128(1),
-        usage: RamUsage { cpu: 105, gpu: 10 },
-    }));
-    assert!(by_node.contains(&NodeRamUsage {
-        e_node_id: ExecutionNodeId::from_u128(2),
-        usage: RamUsage { cpu: 100, gpu: 10 },
-    }));
+    // Per-node: no cross-slot dedup — each node reports what it holds. The column spans
+    // the program, so the empty slot C reads zero rather than going unlisted. Slot A holds
+    // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10.
+    assert_eq!(by_node.len(), 3);
+    assert_eq!(by_node[NodeIdx(0)], RamUsage { cpu: 105, gpu: 10 });
+    assert_eq!(by_node[NodeIdx(1)], RamUsage { cpu: 100, gpu: 10 });
+    assert_eq!(by_node[NodeIdx(2)], RamUsage::default());
     assert_eq!(shared_calls.load(Ordering::Relaxed), 2);
     assert_eq!(distinct_calls.load(Ordering::Relaxed), 1);
 
-    let allocation = by_node.as_ptr();
     let capacity = by_node.capacity();
     let seen_capacity = cache.ram_seen.capacity();
     assert_eq!(
         cache.resident_ram_stats(&program, &mut by_node),
         RamUsage { cpu: 105, gpu: 10 }
     );
-    assert_eq!(by_node.as_ptr(), allocation);
-    assert_eq!(by_node.capacity(), capacity);
+    assert_eq!(
+        by_node.capacity(),
+        capacity,
+        "the column is refilled in place"
+    );
     assert_eq!(cache.ram_seen.capacity(), seen_capacity);
     assert_eq!(shared_calls.load(Ordering::Relaxed), 4);
     assert_eq!(distinct_calls.load(Ordering::Relaxed), 2);

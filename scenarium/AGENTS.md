@@ -76,7 +76,7 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
 | `execution/report.rs` | Internal live progress and pinned-output transport |
-| `execution/outcome.rs` | Private completed-run outcome |
+| `execution/outcome.rs` | Completed-run outcome and the public per-node status row it carries |
 | `worker/protocol.rs` | Host/worker messages and reports |
 | `worker/status.rs` | Shared worker activity and node-status snapshots |
 | `worker/batch.rs` | Ordered batch reduction |
@@ -142,6 +142,11 @@ batched live node patches, or an authoritative completed-run snapshot. The
 `WorkerStatusPublisher` retains one status allocation and updates it through `Arc::make_mut`;
 the GUI consumes and drops published snapshots, allowing subsequent reports to
 reuse their vectors when no older snapshot is still queued.
+A completed run reaches the GUI as the rows the executor produced, unchanged:
+`collect_outcome` reduces the per-node verdict column to exactly one `NodeStatus`
+per node — its status, the ports it went unfed on, the error and time a failure
+cost, and the RAM it kept — so publishing is an `append` and no consumer's fold
+order can decide what a node's result was.
 `WorkerTask` likewise retains one `ExecutionOutcome`; the engine clears and
 repopulates its buffers for each run, then completion drains them into the
 status publisher without discarding their capacities.

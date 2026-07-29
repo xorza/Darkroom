@@ -498,7 +498,11 @@ pub(crate) struct Scheduled<'a> {
 /// One resolved run: dispositions, demand, and reader counts derived together, over the
 /// program they were derived from. Only [`Scheduled::resolve`] mints one, so holding it
 /// *is* the proof that this schedule was planned and swept against this program.
-#[derive(Debug)]
+///
+/// `Copy` because that proof is the whole value: both halves are shared borrows, so a copy
+/// vouches for exactly what the original did. The run loop takes one to walk the schedule,
+/// and the engine keeps one to name the same pair when it closes the run out.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Resolved<'a> {
     program: &'a Program,
     schedule: &'a RunSchedule,
