@@ -11,6 +11,7 @@
 
 use std::collections::HashSet;
 use std::future::Future;
+use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 use common::CancelToken;
@@ -39,7 +40,11 @@ use crate::{DynamicValue, RamUsage};
 /// is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
-    pub(crate) slots: NodeColumn<RuntimeSlot>,
+    /// Private: the *column* is the cache's own — its length is the alignment
+    /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
+    /// may push, drain, or resize it. Individual slots are reached by
+    /// [`Index<NodeIdx>`], the same way a node is reached on [`Program`].
+    slots: NodeColumn<RuntimeSlot>,
     pub(crate) disk_store: DiskStore,
     /// What each path this run reads *was*, identified once. Held beside the
     /// slots rather than inside the walker that fills it, because the digest
@@ -58,7 +63,32 @@ pub(crate) struct CacheEvictionFailure {
     pub(crate) message: String,
 }
 
+impl Index<NodeIdx> for RuntimeCache {
+    type Output = RuntimeSlot;
+
+    fn index(&self, node_idx: NodeIdx) -> &RuntimeSlot {
+        &self.slots[node_idx]
+    }
+}
+
+impl IndexMut<NodeIdx> for RuntimeCache {
+    fn index_mut(&mut self, node_idx: NodeIdx) -> &mut RuntimeSlot {
+        &mut self.slots[node_idx]
+    }
+}
+
 impl RuntimeCache {
+    /// The span of the slot column — the program node count it is aligned to.
+    pub(crate) fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// The slots in index order, for a walk that pairs them with the program
+    /// they belong to.
+    pub(crate) fn slots(&self) -> impl Iterator<Item = &RuntimeSlot> {
+        self.slots.iter()
+    }
+
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
         self.fs_paths.clear();

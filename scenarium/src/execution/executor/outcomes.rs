@@ -53,7 +53,7 @@ pub(super) fn mark_skipped(
     node_idx: NodeIdx,
     error: RunError,
 ) {
-    cache.slots[node_idx].clear_output();
+    cache[node_idx].clear_output();
     outcomes[node_idx] = NodeOutcome::Skipped { error };
 }
 

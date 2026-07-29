@@ -290,7 +290,7 @@ impl ExecutionFrame<'_, '_> {
     /// Loading *before* retiring this node's input reads is what lets a failed load fall
     /// through to a normal invoke here, unlike [`serve_reuse`](Self::serve_reuse).
     async fn needs_invoke(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
-        if self.cache.slots[node_idx].current_digest.is_some() {
+        if self.cache[node_idx].current_digest.is_some() {
             return true;
         }
         let program = self.program;
@@ -348,7 +348,7 @@ impl ExecutionFrame<'_, '_> {
         // satisfies. A disk-reused producer was decoded at its own earlier turn.
         self.collect_inputs(node_idx);
 
-        let event_state = self.cache.slots[node_idx].event_state.clone();
+        let event_state = self.cache[node_idx].event_state.clone();
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
@@ -360,7 +360,7 @@ impl ExecutionFrame<'_, '_> {
         });
 
         let result = {
-            let slot = self.cache.slots[node_idx].invoke_slot(e_node.outputs.len as usize);
+            let slot = self.cache[node_idx].invoke_slot(e_node.outputs.len as usize);
             e_node
                 .lambda
                 .invoke(Invocation {
@@ -391,14 +391,14 @@ impl ExecutionFrame<'_, '_> {
         // error stands on its own, even mid-cancel.
         let result = match result {
             Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled { func_id }),
-            Ok(()) => match self.cache.slots[node_idx].unbound_demanded_outputs(demand) {
+            Ok(()) => match self.cache[node_idx].unbound_demanded_outputs(demand) {
                 outputs if outputs.is_empty() => Ok(()),
                 outputs => Err(RunError::OutputsNotProduced { func_id, outputs }),
             },
             other => other,
         };
         let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
-        let slot = &mut self.cache.slots[node_idx];
+        let slot = &mut self.cache[node_idx];
         let succeeded = match result {
             // The fresh output now corresponds to this node's current digest; record it so
             // the next run's reuse check is a RAM hit.
@@ -525,7 +525,7 @@ impl ExecutionFrame<'_, '_> {
         if !self.program[node_idx].cache.caches_in_ram()
             && self.remaining_reads.node_drained(self.program, node_idx)
         {
-            self.cache.slots[node_idx].clear_output();
+            self.cache[node_idx].clear_output();
         }
     }
 
@@ -534,7 +534,7 @@ impl ExecutionFrame<'_, '_> {
     fn complete_planned_read(&mut self, address: OutputAddr) {
         let output_idx = self.program.output_idx(address);
         if !self.remaining_reads.consume(output_idx)
-            || self.cache.slots[address.node_idx].output_values().is_none()
+            || self.cache[address.node_idx].output_values().is_none()
         {
             return;
         }
