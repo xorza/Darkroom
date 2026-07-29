@@ -2,11 +2,11 @@
 //! it. The planner runs one backward post-order DFS from the run's roots (sinks,
 //! event subscribers, event-trigger owners — plus every sink when a fired event
 //! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
-//! producing `process_order` (deps before consumers) and each node's [`NodeVerdict`]
+//! producing `process_order` (deps before consumers) and each node's [`NodeState`]
 //! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
-//! state. The resolver and executor consume the plan; it is reused via a buffer on the
-//! engine and the `Planner` owns reusable DFS scratch, so a repeated plan on an
-//! unchanged graph allocates nothing.
+//! state. The resolver refines that same column in place and the executor reads it;
+//! the plan is reused via a buffer on the engine and the `Planner` owns reusable DFS
+//! scratch, so a repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::error::{Error, Result};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
@@ -14,48 +14,74 @@ use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
 use crate::node::special::SpecialNode;
 
-/// The planner's structural verdict for one node this run.
-/// The planner decides whether it is runnable, disabled, or blocked on inputs;
-/// *cached vs recompute* is a resolver call after planning. The default
-/// (`MissingInputs`) is the conservative "not yet established as runnable" value;
-/// disabled dependencies outside `process_order` receive the explicit
-/// [`Disabled`](NodeVerdict::Disabled) verdict instead.
+/// What becomes of one node this run — one column, written by two passes.
+///
+/// The planner establishes the structural three: `Disabled`, `MissingInputs`,
+/// and `Cut`, its positive verdict. The [`Resolver`](crate::execution::resolve::Resolver)
+/// then refines only the runnable ones, promoting what a running consumer
+/// reads to `Run`, `Reuse`, or `MissingLambda` and leaving the rest where the
+/// planner put them. That is why "the planner cleared it" and "the cut pruned
+/// it" are one state rather than two: a node that could run and that nothing
+/// this run reads *is* a cut node, and holding the two apart meant a column
+/// each, kept in step by hand.
+///
+/// Authoritative once resolved: a `Reuse` is never re-derived after the cut may
+/// have pruned its producers. The safe direction is allowed once — the run loop
+/// re-stamps a `Run` whose bound path value was not readable in time and may
+/// serve its cache after all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum NodeVerdict {
-    /// Runnable this round; the resolver then selects reuse or execution.
-    Execute,
+pub(crate) enum NodeState {
     /// Disabled for this run. Consumers treat it like an unbound input:
     /// required inputs fail while optional inputs remain runnable.
     Disabled,
     /// A required input is unsatisfied (unbound, or fed by a non-runnable producer);
-    /// can't run, and the "missing" verdict propagates to its consumers.
+    /// can't run, and the "missing" verdict propagates to its consumers. The
+    /// default: the conservative "not yet established as runnable" value.
     #[default]
     MissingInputs,
+    /// Runnable, and read by nothing that runs — pruned by the cut. Both the
+    /// planner's "this node can run" and the resolver's "and no one needs it",
+    /// since a runnable node the sweep never promotes is exactly that.
+    Cut,
+    /// An unchanged demanded output is verified *available* — resident, or covered by a
+    /// digest-matched blob the run loop decodes when it reaches the node. Serve it without
+    /// running the lambda.
+    Reuse,
+    /// Reached, but its func has no implementation. Report the error without probing its cache
+    /// or keeping its input cone alive.
+    MissingLambda,
+    /// The node must run and owns one pending read for each bound input.
+    Run,
 }
 
-impl NodeVerdict {
-    pub(crate) fn wants_execute(self) -> bool {
-        self == NodeVerdict::Execute
+impl NodeState {
+    /// Whether the planner found this node structurally able to run. True of
+    /// every state the resolver refines it into, so it answers the same before
+    /// and after the sweep — which is what lets one column serve both.
+    pub(crate) fn is_runnable(self) -> bool {
+        !matches!(self, NodeState::Disabled | NodeState::MissingInputs)
     }
+
     pub(crate) fn missing_required_inputs(self) -> bool {
-        self == NodeVerdict::MissingInputs
+        self == NodeState::MissingInputs
     }
 }
 
 /// Whether one input is unsatisfied: an unbound *required* port, or a bind to a
 /// producer that itself can't run (missing propagates only through non-runnable
 /// producers — a cached or executing one delivers a value, optional or not).
-/// `verdicts` must already hold the producer's verdict, which the planner's
+/// `states` must already hold the producer's state, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
-/// outcome so the two can't drift.
-pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVerdict>) -> bool {
+/// outcome so the two can't drift — and it reads the same in both, since every
+/// state the resolver writes is one that delivers a value.
+pub(crate) fn input_missing(input: &ExecutionInput, states: &NodeColumn<NodeState>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => match verdicts[addr.node_idx] {
-            NodeVerdict::Execute => false,
-            NodeVerdict::Disabled => input.required,
-            NodeVerdict::MissingInputs => true,
+        ExecutionBinding::Bind(addr) => match states[addr.node_idx] {
+            NodeState::Disabled => input.required,
+            NodeState::MissingInputs => true,
+            NodeState::Cut | NodeState::Reuse | NodeState::MissingLambda | NodeState::Run => false,
         },
     }
 }
@@ -67,9 +93,9 @@ pub(crate) struct ExecutionPlan {
     /// are explicit node seeds. The resolver refines it into the surviving run before
     /// execution.
     pub(crate) process_order: Vec<NodeIdx>,
-    /// Per-node verdict (execute / disabled / missing-inputs), aligned to the
-    /// program's dense node vector.
-    pub(crate) verdicts: NodeColumn<NodeVerdict>,
+    /// Per-node [`NodeState`], aligned to the program's dense node vector. The
+    /// planner writes the structural verdict; the resolver refines it in place.
+    pub(crate) states: NodeColumn<NodeState>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
     /// the resolver seeds liveness from these and prunes any cone reachable only through
@@ -95,13 +121,13 @@ impl ExecutionPlan {
         self.process_order
             .iter()
             .copied()
-            .filter(|&node_idx| self.verdicts[node_idx].wants_execute())
+            .filter(|&node_idx| self.states[node_idx].is_runnable())
     }
 
     pub(crate) fn reset_for_program(&mut self, program: &Program) {
         self.process_order.clear();
-        self.verdicts
-            .reset(program.e_nodes.len(), NodeVerdict::default());
+        self.states
+            .reset(program.e_nodes.len(), NodeState::default());
         self.roots.reset(program.e_nodes.len());
         self.seeded.reset(program.e_nodes.len());
         self.event_sources.reset(program.e_nodes.len());
@@ -191,11 +217,14 @@ impl Planner {
                     // reused from cache is decided at execution, not here.
                     let missing = program.inputs[program[node_idx].inputs]
                         .iter()
-                        .any(|e_input| input_missing(e_input, &plan.verdicts));
-                    plan.verdicts[node_idx] = if missing {
-                        NodeVerdict::MissingInputs
+                        .any(|e_input| input_missing(e_input, &plan.states));
+                    // `Cut` is the planner's *positive* verdict — runnable, and
+                    // nothing has claimed it yet. The resolver's sweep promotes
+                    // the ones a running consumer reads and leaves the rest here.
+                    plan.states[node_idx] = if missing {
+                        NodeState::MissingInputs
                     } else {
-                        NodeVerdict::Execute
+                        NodeState::Cut
                     };
                     continue;
                 }
@@ -216,7 +245,7 @@ impl Planner {
             // seed is recorded before this walk and overrides disable for this run.
             if e_node.disabled && !plan.seeded.contains(node_idx) {
                 self.color[node_idx] = Color::Black;
-                plan.verdicts[node_idx] = NodeVerdict::Disabled;
+                plan.states[node_idx] = NodeState::Disabled;
                 continue;
             }
 

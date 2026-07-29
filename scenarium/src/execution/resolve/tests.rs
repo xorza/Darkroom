@@ -2,7 +2,7 @@ use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::NodeVerdict;
+use crate::execution::plan::NodeState;
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputAddr, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -58,11 +58,13 @@ impl Fix {
         seeded: &[ExecutionNodeId],
         missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
-    ) -> Resolver {
-        let mut verdicts = NodeColumn::default();
-        verdicts.reset(self.program.e_nodes.len(), NodeVerdict::Execute);
+    ) -> Resolved {
+        // `Cut` is the planner's positive verdict, so this is the schedule as
+        // it arrives at the sweep: everything runnable but nothing claimed.
+        let mut states = NodeColumn::default();
+        states.reset(self.program.e_nodes.len(), NodeState::Cut);
         for e_node_id in missing {
-            verdicts[nx(*e_node_id)] = NodeVerdict::MissingInputs;
+            states[nx(*e_node_id)] = NodeState::MissingInputs;
         }
         let mut root_set = NodeSet::default();
         root_set.reset(self.program.e_nodes.len());
@@ -76,9 +78,9 @@ impl Fix {
         }
         let mut event_sources = NodeSet::default();
         event_sources.reset(self.program.e_nodes.len());
-        let plan = ExecutionPlan {
+        let mut plan = ExecutionPlan {
             process_order: self.order.iter().map(|id| nx(*id)).collect(),
-            verdicts,
+            states,
             roots: root_set,
             seeded: seeded_set,
             event_sources,
@@ -94,9 +96,20 @@ impl Fix {
             };
         }
         let mut resolver = Resolver::default();
-        resolver.resolve(&self.program, &plan, &mut cache).await;
-        resolver
+        resolver.resolve(&self.program, &mut plan, &mut cache).await;
+        Resolved {
+            plan,
+            outputs: resolver.outputs,
+        }
     }
+}
+
+/// One resolved run as the tests read it: the plan whose state column the
+/// sweep refined, plus the per-output columns it produced alongside.
+#[derive(Debug)]
+struct Resolved {
+    plan: ExecutionPlan,
+    outputs: ResolvedOutputs,
 }
 
 /// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
@@ -150,9 +163,9 @@ async fn reuse_hit_prunes_its_whole_upstream_cone() {
         )
         .await;
 
-    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
-    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
-    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
+    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[0]
@@ -185,10 +198,10 @@ async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() 
         )
         .await;
 
-    assert_eq!(run.disposition[nx(source)], Disposition::Reuse);
-    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
-    assert_eq!(run.disposition[nx(live)], Disposition::Run);
-    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
+    assert_eq!(run.plan.states[nx(source)], NodeState::Reuse);
+    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.plan.states[nx(live)], NodeState::Run);
+    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Produce, OutputDemand::Skip]
@@ -210,8 +223,13 @@ async fn missing_input_stops_liveness_before_its_producer() {
 
     let run = fix.resolve(&[blocked], &[], &[blocked], Vec::new()).await;
 
-    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
-    assert_eq!(run.disposition[nx(blocked)], Disposition::Cut);
+    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
+    assert_eq!(
+        run.plan.states[nx(blocked)],
+        NodeState::MissingInputs,
+        "a blocked root keeps the planner's verdict — the sweep refines only \
+         runnable nodes, so the reason it did not run survives to the outcome"
+    );
     assert_eq!(
         run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Skip]
@@ -242,13 +260,13 @@ async fn missing_lambda_stops_liveness_before_its_producer() {
         )
         .await;
 
-    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
+    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
     assert_eq!(
-        run.disposition[nx(missing)],
-        Disposition::MissingLambda,
+        run.plan.states[nx(missing)],
+        NodeState::MissingLambda,
         "a matching cache cannot hide a reached missing implementation"
     );
-    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
+    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Skip]
@@ -313,8 +331,8 @@ async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         )
         .await;
 
-    assert_eq!(run.disposition[nx(deep)], Disposition::Cut);
-    assert_eq!(run.disposition[nx(source)], Disposition::Cut);
-    assert_eq!(run.disposition[nx(cached)], Disposition::Reuse);
-    assert_eq!(run.disposition[nx(sink)], Disposition::Run);
+    assert_eq!(run.plan.states[nx(deep)], NodeState::Cut);
+    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
 }

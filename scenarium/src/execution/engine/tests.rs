@@ -97,7 +97,7 @@ fn execution_node_names_in_order(
         .iter()
         .filter(|&&node_idx| {
             let e_node_id = execution_graph.compiled.program.e_node_ids[node_idx];
-            execution_graph.plan.verdicts[node_idx].wants_execute()
+            execution_graph.plan.states[node_idx].is_runnable()
                 && execution_graph.node_ran(e_node_id)
         })
         .map(|&node_idx| {
@@ -141,8 +141,8 @@ mod cache_persistence {
     use crate::async_lambda;
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::slot::ValueState;
+    use crate::execution::plan::NodeState;
     use crate::execution::report::internals::CollectingReporter;
-    use crate::execution::resolve::Disposition;
     use crate::node::definition::{FuncId, FuncOutput};
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -743,8 +743,8 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         engine.prepare_execution(true, false, &[]).await.unwrap();
         assert_eq!(
-            engine.node_disposition(root_execution_node(mult_id)),
-            Disposition::Reuse,
+            engine.node_state(root_execution_node(mult_id)),
+            NodeState::Reuse,
             "the frontier blob is verified from its header during resolution"
         );
         assert!(
@@ -878,8 +878,8 @@ mod cache_persistence {
             .corrupt_payload(root_execution_node(mult_id), 1);
         engine.prepare_execution(true, false, &[]).await.unwrap();
         assert_eq!(
-            engine.node_disposition(root_execution_node(mult_id)),
-            Disposition::Reuse,
+            engine.node_state(root_execution_node(mult_id)),
+            NodeState::Reuse,
             "a header-only probe cannot see a corrupt payload"
         );
 
@@ -2440,13 +2440,11 @@ mod graph_structure {
         assert_eq!(execution_graph.plan.process_order.len(), 5);
         assert!(
             (0..execution_graph.compiled.program.e_nodes.len())
-                .all(
-                    |i| !execution_graph.plan.verdicts[NodeIdx(i as u32)].missing_required_inputs()
-                )
+                .all(|i| !execution_graph.plan.states[NodeIdx(i as u32)].missing_required_inputs())
         );
         assert!(
             (0..execution_graph.compiled.program.e_nodes.len())
-                .all(|i| execution_graph.plan.verdicts[NodeIdx(i as u32)].wants_execute())
+                .all(|i| execution_graph.plan.states[NodeIdx(i as u32)].is_runnable())
         );
 
         let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
@@ -2588,21 +2586,19 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&get_b]]
+            !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.plan.verdicts
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.plan.verdicts
-                    [execution_graph.compiled.program.e_node_index[&gated]]
-                    .wants_execute()
+                !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&gated]]
+                    .is_runnable()
             );
         }
 
@@ -2637,14 +2633,12 @@ mod missing_inputs {
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.plan.verdicts
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.plan.verdicts
-                    [execution_graph.compiled.program.e_node_index[&gated]]
-                    .wants_execute()
+                !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&gated]]
+                    .is_runnable()
             );
         }
 
@@ -2673,11 +2667,11 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
+            !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&print]]
+            !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2723,7 +2717,7 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
+            execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2737,7 +2731,7 @@ mod missing_inputs {
 
 mod disabled_nodes {
     use super::*;
-    use crate::execution::plan::NodeVerdict;
+    use crate::execution::plan::NodeState;
 
     /// Disabling `sum` retains it in the compiled program but excludes it from
     /// the plan. Its consumer `mult` sees the disabled producer as unavailable,
@@ -2767,9 +2761,8 @@ mod disabled_nodes {
                 .plan
                 .process_order
                 .contains(&execution_graph.compiled.program.e_node_index[&sum])
-                && execution_graph.plan.verdicts
-                    [execution_graph.compiled.program.e_node_index[&sum]]
-                    == NodeVerdict::Disabled,
+                && execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&sum]]
+                    == NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
 
@@ -2779,15 +2772,15 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&get_b]]
+            !execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&mult]]
+            execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&print]]
+            execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
 
@@ -3903,7 +3896,7 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.plan.verdicts[execution_graph.compiled.program.e_node_index[&sum]]
+            execution_graph.plan.states[execution_graph.compiled.program.e_node_index[&sum]]
                 .missing_required_inputs()
         );
 

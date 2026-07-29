@@ -41,9 +41,9 @@ use crate::execution::error::RunError;
 use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
 };
-use crate::execution::plan::ExecutionPlan;
+use crate::execution::plan::{ExecutionPlan, NodeState};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::execution::resolve::{Disposition, Resolver};
+use crate::execution::resolve::Resolver;
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -200,31 +200,31 @@ impl ExecutionFrame<'_, '_> {
     /// and it is authoritative — a [`Disposition::Reuse`] is never re-derived here, since its
     /// producers may already be pruned (see `resolve.rs`).
     async fn run_node(&mut self, node_idx: NodeIdx) {
-        if !self.plan.verdicts[node_idx].wants_execute() {
-            return;
-        }
         let e_node = &self.program[node_idx];
         let demand = self.resolver.outputs.demand.slice(e_node.outputs);
-        match self.resolver.disposition[node_idx] {
+        match self.plan.states[node_idx] {
+            // The planner excluded it, so it holds no result this run and its
+            // outcome stays `Pending`.
+            NodeState::Disabled | NodeState::MissingInputs => {}
             // Pruned by the pre-run cut: every consumer that would read this node reused a
             // cache, so its output is never read. Report only a current resident value;
             // unneeded disk blobs remain unprobed.
-            Disposition::Cut => {
+            NodeState::Cut => {
                 self.node_outcomes[node_idx] = NodeOutcome::Cut {
                     cached: self.cache.is_resident_current(node_idx),
                 };
             }
-            Disposition::MissingLambda => {
+            NodeState::MissingLambda => {
                 let error = RunError::MissingLambda {
                     func_id: e_node.func_id,
                 };
                 mark_skipped(self.cache, self.node_outcomes, node_idx, error);
             }
-            Disposition::Reuse => self.serve_reuse(node_idx, demand).await,
+            NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
             // digest-valid cached value stays valid even when an upstream re-ran for another
             // consumer and failed, so it must not be cleared as skipped.
-            Disposition::Run => {
+            NodeState::Run => {
                 if self.needs_invoke(node_idx, demand).await {
                     self.invoke_node(node_idx, demand).await;
                 }
@@ -238,7 +238,7 @@ impl ExecutionFrame<'_, '_> {
     fn retire_cancelled_tail(&mut self, from_process_idx: usize) {
         let plan = self.plan;
         for &node_idx in &plan.process_order[from_process_idx..] {
-            if self.resolver.disposition[node_idx] == Disposition::Run {
+            if plan.states[node_idx] == NodeState::Run {
                 self.abandon_input_reads(node_idx);
             }
         }
@@ -502,7 +502,7 @@ impl ExecutionFrame<'_, '_> {
     /// resolver registers reader counts by, so a read is completed exactly
     /// when one was planned.
     fn producer_runs(&self, addr: OutputAddr) -> bool {
-        self.plan.verdicts[addr.node_idx].wants_execute()
+        self.plan.states[addr.node_idx].is_runnable()
     }
 
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing

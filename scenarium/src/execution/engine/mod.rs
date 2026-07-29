@@ -117,7 +117,7 @@ impl ExecutionEngine {
         // exact output demand, and live readers together. The resolved run is authoritative:
         // a cache-hit or blocked consumer contributes no upstream demand.
         self.resolver
-            .resolve(&self.compiled.program, &self.plan, &mut self.cache)
+            .resolve(&self.compiled.program, &mut self.plan, &mut self.cache)
             .await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
@@ -186,10 +186,10 @@ mod internals {
     use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::outcome::ExecutionOutcome;
+    use crate::execution::plan::NodeState;
     use crate::execution::program;
     use crate::execution::program::ExecutionBinding;
     use crate::execution::report::internals::DiscardedReports;
-    use crate::execution::resolve::Disposition;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::NodeId;
     use crate::node::lambda::OutputDemand;
@@ -281,14 +281,14 @@ mod internals {
             self.planner
                 .plan(&self.compiled.program, &seeds, &mut self.plan)?;
             self.resolver
-                .resolve(&self.compiled.program, &self.plan, &mut self.cache)
+                .resolve(&self.compiled.program, &mut self.plan, &mut self.cache)
                 .await;
             Ok(())
         }
 
-        /// The resolved disposition for a stable id — test introspection.
-        pub(super) fn node_disposition(&self, e_node_id: ExecutionNodeId) -> Disposition {
-            self.resolver.disposition[self.compiled.program.e_node_index[&e_node_id]]
+        /// The resolved state for a stable id — test introspection.
+        pub(super) fn node_state(&self, e_node_id: ExecutionNodeId) -> NodeState {
+            self.plan.states[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
