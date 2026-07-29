@@ -41,9 +41,10 @@ use crate::execution::schedule::error::RunScheduleValidationError;
 use ::common::is_debug;
 
 use crate::common::column::{Column, Idx};
+use crate::common::set::IdxSet;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::{Error, Result};
-use crate::execution::identity::{NodeIdx, NodeSet, OutputIdx};
+use crate::execution::identity::{NodeIdx, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
@@ -185,16 +186,16 @@ pub(crate) struct RunSchedule {
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
     /// the sweep seeds liveness from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Scheduled::resolve`]).
-    pub(crate) roots: NodeSet,
+    pub(crate) roots: IdxSet<NodeIdx>,
     /// The node-seeded roots ("run to this node") — a subset of `roots`, carrying a
     /// per-run seed with
     /// no persisted counterpart. Every output is demanded from the lambda and delivered
     /// to the host, while the node's cache mode remains the sole RAM-retention policy.
-    pub(crate) seeded: NodeSet,
+    pub(crate) seeded: IdxSet<NodeIdx>,
     /// Event-owning roots that must execute successfully to initialize the shared
     /// state their event lambdas consume. Unlike ordinary roots, these bypass cache
     /// reuse for the event-loop bootstrap run.
-    pub(crate) event_sources: NodeSet,
+    pub(crate) event_sources: IdxSet<NodeIdx>,
     /// Exact per-output demand and live reader counts, written by the sweep
     /// once the state column above is settled.
     pub(crate) outputs: ResolvedOutputs,
@@ -360,7 +361,7 @@ impl RunSchedule {
             }
         }
 
-        let mut seen_in_order = NodeSet::default();
+        let mut seen_in_order = IdxSet::default();
         seen_in_order.reset(program.e_nodes.len());
         for &node_idx in &self.process_order {
             let e_node = program

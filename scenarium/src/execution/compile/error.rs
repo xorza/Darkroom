@@ -75,8 +75,8 @@ pub(crate) enum CompiledGraphValidationError {
 
 #[derive(Debug, Error)]
 pub(crate) enum InstalledGraphValidationError {
-    #[error("runtime cache node set does not match the compiled program")]
-    NodeSet,
+    #[error("runtime cache spans {slots} nodes, not the compiled program's {expected}")]
+    NodeCount { slots: usize, expected: usize },
     #[error("runtime cache output arity does not match node {e_node_id:?}")]
     OutputArity { e_node_id: ExecutionNodeId },
     #[error("runtime cache state owner does not match node {e_node_id:?}")]

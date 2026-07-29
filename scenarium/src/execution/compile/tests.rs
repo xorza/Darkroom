@@ -462,7 +462,7 @@ fn validation_returns_compiled_and_installed_mismatches() {
             .validate_installed(&RuntimeCache::default())
             .unwrap_err()
             .to_string(),
-        "runtime cache node set does not match the compiled program"
+        "runtime cache spans 0 nodes, not the compiled program's 1"
     );
 
     assert_eq!(

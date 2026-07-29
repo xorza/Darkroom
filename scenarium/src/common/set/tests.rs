@@ -1,9 +1,10 @@
-use crate::execution::identity::{NodeIdx, NodeSet};
+use crate::common::set::IdxSet;
+use crate::execution::identity::NodeIdx;
 
 /// 70 nodes span two words, so this covers the low word, both sides of the
 /// 64-bit boundary, and a bit inside the trailing partial word.
-fn spanning_two_words() -> NodeSet {
-    let mut set = NodeSet::default();
+fn spanning_two_words() -> IdxSet<NodeIdx> {
+    let mut set = IdxSet::default();
     set.reset(70);
     for i in [0, 63, 64, 69] {
         set.insert(NodeIdx(i));
@@ -54,10 +55,10 @@ fn reset_clears_every_word_and_resizes() {
 /// Word-granular indexing would silently accept an index landing in the last
 /// word's padding; the length check is what keeps that a panic.
 #[test]
-#[should_panic(expected = "node index out of range")]
+#[should_panic(expected = "index out of range")]
 #[cfg(debug_assertions)]
 fn insert_past_the_length_panics_inside_the_trailing_word() {
-    let mut set = NodeSet::default();
+    let mut set = IdxSet::default();
     // 3 bits of a 64-bit word: index 40 is in-bounds for the word, not the set.
     set.reset(3);
     set.insert(NodeIdx(40));
