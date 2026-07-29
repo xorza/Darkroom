@@ -41,9 +41,13 @@ whose slots are re-paired with the new index order by stable id at each
 install — so runs walk arrays without hashing ids. Top-level nodes retain
 the UUID value of their authoring `NodeId` behind the distinct
 `ExecutionNodeId` type; nested execution ids are derived with domain-separated
-BLAKE3 from the enclosing instance ids and interior node id. `FlattenMap`
-retains only the compact scope ancestry needed to attribute each execution id
-to its authored node and enclosing instances. Targeted runs and runtime reports
+BLAKE3 from the enclosing instance ids and interior node id. Flatten records
+each node's authored origin beside the node itself as it emits, so the one sort
+that gives the program its dense order settles the `Attribution` column with it:
+one leaf per node, dense in the program's index space, over the compact scope
+ancestry naming its enclosing instances. Nothing is keyed by execution id in
+between, and the program's `e_node_index` is the artifact's only stable-id
+index. Targeted runs and runtime reports
 use exact `ExecutionNodeId`s at the host boundary (`NodeIdx` is install-local
 and never enters a digest, persisted byte, or report); the host projects them
 through the installed `CompiledGraph` when it needs authoring identities.

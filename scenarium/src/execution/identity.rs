@@ -1,8 +1,8 @@
 //! Strongly typed identities for one flattened compiled graph.
 //!
-//! The scope map attributing these ids back to authored nodes is
-//! flattening's own record, so it lives with the walk that builds it in
-//! [`crate::execution::flatten::map`].
+//! The attribution taking these ids back to authored nodes is flattening's own
+//! record, so it lives with the walk that builds it in
+//! [`crate::execution::flatten::attribution`].
 //!
 //! Naming convention: `Execution`-prefixed types are the **stable identity
 //! space** — they survive installs, cross the host boundary, and may enter

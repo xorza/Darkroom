@@ -4,9 +4,11 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, PendingBind, Program,
 };
 
-/// Flatten's emit-order buffer: three producers with two output ports each, then
-/// a consumer with two inputs. Ids are emitted high-first so adoption has to
-/// re-order them.
+/// Flatten's buffer as adoption receives it: three producers with two output
+/// ports each, then a consumer with two inputs. The *pools* are filled in emit
+/// order (ids high-first) while the nodes arrive sorted, which is the state
+/// [`Flattener::build`](crate::execution::flatten::Flattener::build) hands over
+/// — a node's index and its port ranges are therefore unrelated.
 fn emitted_nodes(program: &mut Program) -> Vec<(ExecutionNodeId, ExecutionNode)> {
     let mut e_nodes: Vec<_> = [3_u128, 1, 2]
         .into_iter()
@@ -33,13 +35,14 @@ fn emitted_nodes(program: &mut Program) -> Vec<(ExecutionNodeId, ExecutionNode)>
             ..Default::default()
         },
     ));
+    e_nodes.sort_unstable_by_key(|&(id, _)| id);
     e_nodes
 }
 
-/// Dense indices follow id order rather than flatten's walk order, and draining
-/// leaves the caller's buffer empty with its allocation intact.
+/// Dense indices follow the order nodes are adopted in, and draining leaves the
+/// caller's buffer empty with its allocation intact.
 #[test]
-fn adopt_nodes_orders_by_id_and_drains_the_flattener_buffer() {
+fn adopt_nodes_indexes_in_order_and_drains_the_flattener_buffer() {
     let mut program = Program::default();
     let mut e_nodes = emitted_nodes(&mut program);
     let capacity = e_nodes.capacity();
@@ -54,7 +57,7 @@ fn adopt_nodes_orders_by_id_and_drains_the_flattener_buffer() {
     assert_eq!(
         program.e_node_ids.iter().copied().collect::<Vec<_>>(),
         (1..=4).map(ExecutionNodeId::from_u128).collect::<Vec<_>>(),
-        "ids 1..=4 take indices 0..=3 despite id 3 being emitted first"
+        "ids 1..=4 take indices 0..=3, the order they were handed over in"
     );
     for (i, id) in (1..=4).enumerate() {
         assert_eq!(

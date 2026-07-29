@@ -1,8 +1,9 @@
 # Scenarium architecture and simplification analysis
 
-Snapshot: `2da5975d` (`Refresh documentation and issue tracking notes`).
-Re-verified against the source on 2026-07-29: every finding below was re-read
-in the current code, landed ones were deleted, and line anchors are current.
+Snapshot: `2da5975d` (`Refresh documentation and issue tracking notes`) plus the
+uncommitted attribution densification. Re-verified against the source on
+2026-07-29: every finding below was re-read in the current code, landed ones
+were deleted, and line anchors are current.
 
 Scope: static source analysis of `scenarium`, with the `darkroom` host and GUI
 consumers followed where they define the runtime boundary. This is a structural
@@ -28,16 +29,11 @@ carries the whole derived run, two passes write it, and the `Scheduled` /
 per-node verdict column to exactly one `NodeStatus` per node, which the worker
 publishes verbatim (`scenarium/src/execution/executor/mod.rs:191`).
 
-What remains is concentrated in two places:
-
-1. **Compile-time identity is still kept twice.** `CompiledGraph` retains the
-   whole `FlattenMap`, including an `ExecutionNodeId`-keyed leaf map and an
-   `exposed` vector already packed into the artifact's own index, so a host
-   attribution query hashes a stable id in a second stable-id index.
-2. **The published status payload is still a struct plus a discriminator.**
-   `WorkerStatus { kind, nodes, logs, cache_ram }` permits combinations no
-   producer emits, and the same `NodeStatus` type serves both live patches and
-   completion rows with `Option` fields that mean different things in each.
+The one structural gap left is the **published status payload**:
+`WorkerStatus { kind, nodes, logs, cache_ram }` is a struct plus a
+discriminator, so it permits combinations no producer emits, and the same
+`NodeStatus` type serves both live patches and completion rows with `Option`
+fields that mean different things in each.
 
 Everything else is smaller: one duplicated compile-time type walk, one mirrored
 authoring transaction, and a handful of isolated cleanups. None of it requires
@@ -110,7 +106,7 @@ flowchart TD
 | Authoring | `Graph`, `Library` | validated graph/library pair | `NodeId`, `GraphId`, port indices | editor/host |
 | Flatten | nested graph definitions | flat nodes plus ID-based edge fixups and attribution | `ExecutionNodeId` | `Flattener` scratch |
 | Program adoption | emitted nodes and fixups | sorted node/output pools and dense edges | stable ID at boundary, `NodeIdx`/`OutputIdx` inside | `Program` during compile |
-| Compile indexing | `Program`, `FlattenMap` | immutable `CompiledGraph` query indices | both, with dense ranges internally | `Compiler` |
+| Compile indexing | `Program`, `FlattenRecord` | immutable `CompiledGraph` query indices | dense, with authored ids as the map keys | `Compiler` |
 | Plan | run seeds and program | process order, roots, structural node states | dense | worker's engine |
 | Resolve | plan and cache | refined node states, output demand, reader counts — same buffer | dense | the `Scheduled::resolve` pass |
 | Execute | resolved run and cache | cache mutations, per-node verdicts, event triggers | dense internally | executor |
@@ -122,8 +118,10 @@ The stable-to-dense conversion is a particularly good boundary. Stable IDs
 survive documents, installs, messages, and reports; dense indices exist only
 inside one installed artifact. `Program::intern_bindings` pays the hash lookup
 once (`scenarium/src/execution/program/mod.rs:196`), and all hot graph walks
-afterwards use array reads. Compile-time *attribution* is the one relation that
-still lives outside that rule — see item A1.
+afterwards use array reads. Authored attribution obeys the same rule: flatten's
+id-keyed record is re-keyed into a dense column at compile indexing and the
+builder dropped, so the program's `e_node_index` is the artifact's only
+stable-id index.
 
 ## Ownership graph
 
@@ -251,93 +249,15 @@ and the path memo private. That is the right ownership boundary.
 Ranked by impact; grouped so that items touching the same files travel
 together.
 
-### A. Compile-time identity and type resolution
-
-Files: `execution/flatten/{mod.rs, map.rs}`, `execution/compile/mod.rs`,
-`execution/program/mod.rs`, `graph/query.rs`.
-
-#### A1. Densify flatten attribution and discard the persistent builder map
-
-**Priority:** highest · **Risk:** medium · **Behavior change:** none
-
-`Program` already owns both directions of the installed identity mapping:
-`NodeIdx -> ExecutionNodeId` and `ExecutionNodeId -> NodeIdx`
-(`scenarium/src/execution/program/mod.rs:114`). `FlattenMap` separately keeps a
-`HashMap<ExecutionNodeId, Leaf>` for the full compiled-graph lifetime
-(`scenarium/src/execution/flatten/map.rs:20`).
-
-`CompiledGraph::indexed` consumes the map to build dense footprints and exposed
-producer ranges, then stores the whole map anyway, solely for later attribution
-(`scenarium/src/execution/compile/mod.rs:106` and `:165`). Two consequences: a
-host attribution query hashes a stable id in a second stable-id index, and the
-map's `exposed: Vec<(NodeId, ExecutionNodeId)>` stays resident after
-`CompiledGraph::exposed` has already packed the same relation
-(`scenarium/src/execution/flatten/map.rs:30`).
-
-At compile indexing:
-
-1. use `program.e_node_index` to convert every leaf to a
-   `NodeColumn<AttributionLeaf>`;
-2. build footprints and exposed ranges as today;
-3. move the scope parent table and dense leaf column into `CompiledGraph`;
-4. drop the builder's leaf hash map and exposed pair vector.
-
-`CompiledGraph::attribution(e_node_id)` then does one program ID lookup followed
-by dense column and scope-parent reads. The temporary flatten record can remain
-a builder type, but it should not be the installed representation.
-
-One thing to design for first: `CompiledGraphBuilder`
-(`scenarium/src/execution/compile/mod.rs:596`, used by darkroom's `run_state`
-tests) currently builds attribution over an *empty* `Program`. A dense leaf
-column has no room for a leaf whose node the program does not contain, so the
-builder must either mint stub program entries or the test fixture must move to a
-real compile.
-
-#### A2. Reuse authored output-type resolution during compile
-
-**Priority:** medium · **Risk:** medium; composite boundaries and drift
-tolerance are subtle · **Behavior change:** none
-
-Every `Graph::resolve_output_type` call creates a fresh
-`OutputTypeResolver::new(0)` (`scenarium/src/graph/query.rs:161`), and flatten
-calls that method for each bound input type gate and for composite boundary
-gates (`scenarium/src/execution/flatten/mod.rs:507` and `:579`). Repeated
-wildcard chains are therefore traversed repeatedly during one compile — the
-resolver's memo is thrown away between every call.
-
-After flattening, `Program::resolve_output_types` performs another memoized walk
-over every flat output (`scenarium/src/execution/program/mod.rs:253`, resolver
-at `:281`). The two passes have different responsibilities — authored-edge
-acceptance versus final runtime metadata — but they duplicate resolution work
-and can drift in their treatment of equivalent paths.
-
-First, introduce a compile-local resolver/cache per authored graph and have all
-flatten type gates query it. Then consider carrying the accepted resolved output
-type into the emitted output metadata so the final program pass only resolves
-cases that cross a flattened boundary.
-
-Do not replace drift tolerance with eager rejection. A mismatched authored wire
-intentionally flattens as unbound and can revive when library types line up
-again.
-
-#### A3. Scalar flatten scope instead of a stack
-
-**Priority:** low, isolated · **Risk:** low · **Behavior change:** none
-
-`Flattener::scope_stack: Vec<u32>` uses only `last`/`push`/`pop`
-(`scenarium/src/execution/flatten/mod.rs:43`, used at `:255`, `:302`–`:308`),
-and recursive `emit_instance` already provides the save/restore stack. A scalar
-current scope replaces it. Worth doing in passing by whoever touches A1 or A2.
-
-### B. Host-facing run status
+### A. Host-facing run status
 
 Files: `worker/status.rs`, `worker/task.rs`, plus darkroom's
 `gui/run_state.rs`, `gui/app/mod.rs`, `core/worker.rs`,
 `core/terminal_session/mod.rs`.
 
-#### B1. Make the status payload a sum type
+#### A1. Make the status payload a sum type
 
-**Priority:** high · **Risk:** medium; public shape change with several host
+**Priority:** highest · **Risk:** medium; public shape change with several host
 call sites · **Behavior change:** public worker-status shape changes
 
 The per-node half of this is done: the executor reduces its verdict column to
@@ -372,6 +292,47 @@ payload schema needs to change. Note that the completion summary fields are
 genuinely read (`darkroom/src/core/terminal_session/mod.rs:83`,
 `darkroom/src/gui/app/mod.rs:172`), so they move into the variant rather than
 disappearing.
+
+### B. Compile-time type resolution
+
+Files: `execution/flatten/mod.rs`, `execution/program/mod.rs`,
+`graph/query.rs`.
+
+#### B1. Reuse authored output-type resolution during compile
+
+**Priority:** medium · **Risk:** medium; composite boundaries and drift
+tolerance are subtle · **Behavior change:** none
+
+Every `Graph::resolve_output_type` call creates a fresh
+`OutputTypeResolver::new(0)` (`scenarium/src/graph/query.rs:161`), and flatten
+calls that method for each bound input type gate and for composite boundary
+gates (`scenarium/src/execution/flatten/mod.rs:507` and `:579`). Repeated
+wildcard chains are therefore traversed repeatedly during one compile — the
+resolver's memo is thrown away between every call.
+
+After flattening, `Program::resolve_output_types` performs another memoized walk
+over every flat output (`scenarium/src/execution/program/mod.rs:253`, resolver
+at `:281`). The two passes have different responsibilities — authored-edge
+acceptance versus final runtime metadata — but they duplicate resolution work
+and can drift in their treatment of equivalent paths.
+
+First, introduce a compile-local resolver/cache per authored graph and have all
+flatten type gates query it. Then consider carrying the accepted resolved output
+type into the emitted output metadata so the final program pass only resolves
+cases that cross a flattened boundary.
+
+Do not replace drift tolerance with eager rejection. A mismatched authored wire
+intentionally flattens as unbound and can revive when library types line up
+again.
+
+#### B2. Scalar flatten scope instead of a stack
+
+**Priority:** low, isolated · **Risk:** low · **Behavior change:** none
+
+`Flattener::scope_stack: Vec<u32>` uses only `last`/`push`/`pop`
+(`scenarium/src/execution/flatten/mod.rs:43`, used at `:255`, `:302`–`:308`),
+and recursive `emit_instance` already provides the save/restore stack. A scalar
+current scope replaces it. Worth doing in passing by whoever touches B1.
 
 ### C. Consolidate graph-boundary port transactions privately
 
@@ -480,19 +441,16 @@ Files: `execution/engine/mod.rs`, `execution/executor/mod.rs`,
 - **Do not flatten `CompiledGraph` into `Program` wholesale.** Host-facing
   authored attribution, footprints, exposed producers, and consumer closures are
   legitimate compile indices, and `Program` is now shared with the runtime cache
-  as the alignment authority. Only duplicate representations should go (A1).
+  as the alignment authority.
 
 ## Recommended sequence
 
 1. Take the isolated cleanups whenever their files are open: the duplicate
-   `clear` (E) and the scalar flatten scope (A3).
-2. Densify compile attribution and drop the persistent flatten builder map
-   (A1). Settle the `CompiledGraphBuilder` fixture question first.
-3. Reshape the worker status payload into a sum type (B1). Independent of A, so
-   the two can proceed in either order or in parallel.
-4. Add compile-local authored type memoization (A2); then measure whether
+   `clear` (E) and the scalar flatten scope (B2).
+2. Reshape the worker status payload into a sum type (A1).
+3. Add compile-local authored type memoization (B1); then measure whether
    carrying types through flatten makes the final program pass redundant.
-5. Consolidate boundary transactions (C) and the dense columns (E) only if the
+4. Consolidate boundary transactions (C) and the dense columns (E) only if the
    result is smaller at the call sites as well as in their defining modules.
-6. Split the engine tests (D) alongside whichever runtime change first requires
+5. Split the engine tests (D) alongside whichever runtime change first requires
    broad fixture edits.
