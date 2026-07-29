@@ -57,6 +57,25 @@ pub(crate) struct RuntimeCache {
     ram_seen: HashSet<usize>,
 }
 
+/// Where a reuse would come from, if one is possible at all — the front half
+/// of [`probe_reuse`](RuntimeCache::probe_reuse) and
+/// [`hydrate_reuse`](RuntimeCache::hydrate_reuse), which ask the same question
+/// and differ only in what they do with the answer.
+///
+/// Naming the answer is what stops the verdict and the load that acts on it
+/// from deriving their own: both now name *one* blob. What it cannot rule out
+/// is the blob changing between the two — the header is checked when the
+/// verdict is given and the body read later, with no lock in between, which is
+/// what [`RunError::CacheLoadFailed`](crate::execution::error::RunError) exists
+/// for.
+#[derive(Debug)]
+enum ReuseSource {
+    /// Already in RAM under the node's current digest, covering the demand.
+    Resident,
+    /// Not in RAM; this blob is the only candidate.
+    Blob(BlobTarget),
+}
+
 #[derive(Debug)]
 pub(crate) struct CacheEvictionFailure {
     pub(crate) e_node_id: ExecutionNodeId,
@@ -562,13 +581,25 @@ impl RuntimeCache {
         node_idx: NodeIdx,
         demand: &[OutputDemand],
     ) -> bool {
-        if self.is_resident_hit(node_idx, demand) {
-            return true;
+        match self.reuse_source(program, node_idx, demand) {
+            None => false,
+            Some(ReuseSource::Resident) => true,
+            Some(ReuseSource::Blob(target)) => self.disk_store.covers_demand(&target, demand).await,
         }
-        let Some(target) = self.blob_target(program, node_idx) else {
-            return false;
-        };
-        self.disk_store.covers_demand(&target, demand).await
+    }
+
+    /// Whether this node could be served without running it, and from where.
+    /// Shared by the verdict and the load so neither derives its own target.
+    fn reuse_source(
+        &self,
+        program: &Program,
+        node_idx: NodeIdx,
+        demand: &[OutputDemand],
+    ) -> Option<ReuseSource> {
+        if self.is_resident_hit(node_idx, demand) {
+            return Some(ReuseSource::Resident);
+        }
+        self.blob_target(program, node_idx).map(ReuseSource::Blob)
     }
 
     /// [`probe_reuse`](Self::probe_reuse)'s verdict, but leaving the value readable by the
@@ -588,11 +619,10 @@ impl RuntimeCache {
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
     ) -> bool {
-        if self.is_resident_hit(node_idx, demand) {
-            return true;
-        }
-        let Some(target) = self.blob_target(program, node_idx) else {
-            return false;
+        let target = match self.reuse_source(program, node_idx, demand) {
+            None => return false,
+            Some(ReuseSource::Resident) => return true,
+            Some(ReuseSource::Blob(target)) => target,
         };
         let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
             return false;
