@@ -77,13 +77,6 @@ pub struct ExecutionEventPort {
     pub event_idx: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-/// A failed lookup from an execution identity to its authoring attribution.
-pub enum ExecutionIdentityError {
-    #[error("execution node {e_node_id:?} has no authoring attribution in this compiled graph")]
-    NodeNotFound { e_node_id: ExecutionNodeId },
-}
-
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;

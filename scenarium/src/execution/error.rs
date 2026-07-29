@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::node::definition::FuncId;
+use crate::graph::node::definition::FuncId;
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
@@ -14,7 +14,7 @@ use crate::node::definition::FuncId;
 /// panic is caught. A *single node's* run failure is a [`RunError`], carried by that
 /// node's [`NodeStatus`](crate::execution::outcome::NodeStatus) row,
 /// never one of these; a graph that won't compile is a
-/// [`CompileError`](crate::execution::compile::CompileError), produced on the host before anything
+/// [`CompileError`](crate::execution::compile::error::CompileError), produced on the host before anything
 /// reaches the engine — the phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
@@ -47,7 +47,7 @@ pub enum RunError {
     // is already paired with its `ExecutionNodeId` in the node's status row, so these
     // surface to the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
-    /// ([`FuncLambda::None`](crate::node::lambda::FuncLambda)), so the node
+    /// ([`FuncLambda::None`](crate::graph::node::lambda::FuncLambda)), so the node
     /// can't execute. A host/library configuration error, reported per-node
     /// (its consumers skip as errored-upstream) rather than crashing the run.
     #[error("the node's function has no implementation attached")]
@@ -77,3 +77,10 @@ pub enum RunError {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+/// A failed lookup from an execution identity to its authoring attribution.
+pub enum ExecutionIdentityError {
+    #[error("execution node {e_node_id:?} has no authoring attribution in this compiled graph")]
+    NodeNotFound { e_node_id: ExecutionNodeId },
+}
