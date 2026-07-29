@@ -19,7 +19,6 @@
 //! reach time, and serves the cache on a hit.
 
 mod outcomes;
-mod value_flow;
 
 use std::time::Instant;
 
@@ -31,7 +30,7 @@ use crate::DynamicValue;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::program::index::{NodeColumn, NodeIdx};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::node::lambda::{Invocation, InvokeError, OutputDemand};
 use crate::runtime::context::ContextManager;
@@ -43,11 +42,9 @@ use crate::execution::error::RunError;
 use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
 };
-use crate::execution::executor::value_flow::RemainingOutputReads;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::ExecutionProgram;
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::resolve::{Disposition, ResolvedRun};
-use crate::execution::resource::ResourceStamper;
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -72,7 +69,6 @@ pub(crate) struct RunRequest<'a, 'r> {
     pub(crate) plan: &'a ExecutionPlan,
     pub(crate) resolved: &'a ResolvedRun,
     pub(crate) cache: &'a mut RuntimeCache,
-    pub(crate) resource_stamper: &'a mut ResourceStamper,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
     pub(crate) cancel: CancelToken,
