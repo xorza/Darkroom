@@ -129,7 +129,7 @@ fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
     // fact (`GraphDef` vs `Graph`), so only the *boundary-node* half of the
     // distinction is still checkable at runtime.
     let entry = Graph::default();
-    assert!(entry.validate_for_execution(&Library::default()).is_ok());
+    assert!(entry.validate_with(&Library::default()).is_ok());
 
     let mut def = GraphDef::new("reusable")
         .input(FuncInput::optional("value", DataType::Int))
@@ -143,10 +143,7 @@ fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
 
     // The boundary nodes that make it a definition are exactly what an
     // execution entry may not contain.
-    let error = def
-        .body
-        .validate_for_execution(&Default::default())
-        .unwrap_err();
+    let error = def.body.validate_with(&Default::default()).unwrap_err();
     assert!(matches!(error, GraphValidationError::EntryBoundaryNodes));
 }
 
@@ -164,10 +161,7 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
-    let error = graph
-        .validate_for_execution(&library)
-        .unwrap_err()
-        .to_string();
+    let error = graph.validate_with(&library).unwrap_err().to_string();
     assert!(error.contains("recursive"));
 
     let graph_id = GraphId::unique();
@@ -181,10 +175,7 @@ fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
-    let error = graph
-        .validate_for_execution(&library)
-        .unwrap_err()
-        .to_string();
+    let error = graph.validate_with(&library).unwrap_err().to_string();
     assert!(error.contains("at most one GraphInput"));
 }
 
@@ -208,7 +199,7 @@ fn entry_only_funcs_are_rejected_inside_every_definition_body() {
     // At the top level it validates like any other func.
     let mut graph = Graph::default();
     graph.add_func_node(&entry_only);
-    assert!(graph.validate_for_execution(&library).is_ok());
+    assert!(graph.validate_with(&library).is_ok());
 
     // Inside a local definition — rejected, naming the offending node and func.
     let local_id = GraphId::unique();
@@ -217,7 +208,7 @@ fn entry_only_funcs_are_rejected_inside_every_definition_body() {
     let mut graph = Graph::default();
     graph.add_graph_node(&local, GraphLink::Local(local_id));
     graph.insert_graph(local_id, local);
-    let error = graph.validate_for_execution(&library).unwrap_err();
+    let error = graph.validate_with(&library).unwrap_err();
     let GraphValidationError::LocalGraph { name, source } = &error else {
         panic!("a local body reports through LocalGraph: {error:?}");
     };
@@ -239,7 +230,7 @@ fn entry_only_funcs_are_rejected_inside_every_definition_body() {
     graph.add_graph_node(&shared, GraphLink::Shared(shared_id));
     let mut library = library;
     library.register_graph(shared_id, shared);
-    let error = graph.validate_for_execution(&library).unwrap_err();
+    let error = graph.validate_with(&library).unwrap_err();
     let GraphValidationError::SharedGraph { name, source } = &error else {
         panic!("a shared body reports through SharedGraph: {error:?}");
     };
@@ -269,7 +260,7 @@ fn entry_only_funcs_are_rejected_inside_every_definition_body() {
     let mut graph = Graph::default();
     graph.add_graph_node(&local, GraphLink::Local(plain_id));
     graph.insert_graph(plain_id, local);
-    assert!(graph.validate_for_execution(&library).is_ok());
+    assert!(graph.validate_with(&library).is_ok());
 }
 
 #[test]
@@ -396,7 +387,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
         let producer = graph.add_func_node(&func);
         let consumer = graph.add_func_node(&func);
         graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-        graph.validate_for_execution(&library)
+        graph.validate_with(&library)
     };
 
     assert!(
@@ -460,7 +451,7 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     // Validation always accepts; the compiled program's flat input shows
     // whether the binding survived the type gate or degraded to unbound.
     let flat_input = |g: &Graph, node: NodeId| {
-        assert!(g.validate_for_execution(&library).is_ok());
+        assert!(g.validate_with(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
         let e_node = &compiled.program
             [compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[node])]];
@@ -528,7 +519,7 @@ fn validate_for_execution_tolerates_library_range_drift() {
 
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
-    assert!(graph.validate_for_execution(&library).is_ok());
+    assert!(graph.validate_with(&library).is_ok());
 
     // Wiring the current library can't resolve — a binding, subscription, and
     // exposed event past the declared ranges — stays valid: drift is tolerated
@@ -544,7 +535,7 @@ fn validate_for_execution_tolerates_library_range_drift() {
         emitter_event_idx: 9,
     });
     graph.insert_graph(GraphId::unique(), child);
-    assert!(graph.validate_for_execution(&library).is_ok());
+    assert!(graph.validate_with(&library).is_ok());
 
     // `Null` consts ("explicitly unset") are tolerated on both sides:
     // meaningful on an optional input, degrading to a missing input on a
@@ -559,12 +550,12 @@ fn validate_for_execution_tolerates_library_range_drift() {
     let node = graph.add_func_node(&nullable);
     graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
     graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
-    assert!(graph.validate_for_execution(&library).is_ok());
+    assert!(graph.validate_with(&library).is_ok());
 }
 
 #[test]
 fn validate_caps_graph_nesting_depth() {
-    use crate::graph::validate::MAX_NESTING_DEPTH;
+    use crate::graph::MAX_NESTING_DEPTH;
 
     let nest = |levels: usize| {
         let mut graph = GraphDef::new("leaf");
