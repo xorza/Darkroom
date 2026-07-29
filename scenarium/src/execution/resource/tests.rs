@@ -333,26 +333,18 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
     cache.reconcile(&fixture.program);
-    let mut resource_stamper = ResourceStamper::default();
 
-    resource_stamper
-        .prepare_run(
-            &fixture.program,
-            &fixture.plan,
-            &cache,
-            CancelToken::never(),
-        )
+    cache
+        .prepare_run(&fixture.program, &fixture.plan, CancelToken::never())
         .await;
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamper,
         fixture.program.e_node_index[&fixture.first],
     );
 
     std::fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamper,
         fixture.program.e_node_index[&fixture.second],
     );
     assert_eq!(
@@ -362,17 +354,11 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     );
 
     let first_run = cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest;
-    resource_stamper
-        .prepare_run(
-            &fixture.program,
-            &fixture.plan,
-            &cache,
-            CancelToken::never(),
-        )
+    cache
+        .prepare_run(&fixture.program, &fixture.plan, CancelToken::never())
         .await;
     cache.stamp_digest(
         &fixture.program,
-        &resource_stamper,
         fixture.program.e_node_index[&fixture.first],
     );
     assert_ne!(

@@ -105,10 +105,12 @@ and prepares triggers only for sources that complete successfully. The worker
 takes those exact runtime triggers from `ExecutionOutcome` and moves them into
 event tasks; fired-event runs do not rebuild unrelated triggers.
 
-Before resolution, `ResourceStamper` collects filesystem identities on Tokio's
-blocking pool. It memoizes each path for one run and is reused by late bound-path
-restamps after producers settle, keeping `node_digest` itself synchronous and
-I/O-free.
+Before resolution, the `RuntimeCache` collects filesystem identities on Tokio's
+blocking pool, through the `ResourceStamper` it owns. It memoizes each path for one
+run and is reused by late bound-path restamps after producers settle, keeping
+`node_digest` itself synchronous and I/O-free. The stamper lives on the cache
+because the two are always read together: a digest needs a path's identity, and a
+path is identified off a producer's slot.
 
 A cache slot is valid only when its digest matches and its
 `OutputSnapshot` coverage contains every currently demanded output. Invocation

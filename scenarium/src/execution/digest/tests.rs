@@ -1,12 +1,11 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionOutput};
-use crate::execution::resource::ResourceStamper;
-use crate::execution::resource::internals::{prepare_node, stamp_file};
 use crate::node::definition::FuncId;
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
@@ -121,16 +120,14 @@ struct DigestPair {
 
 /// Fold node digests into a fresh cache the way the executor does — producer-first
 /// in fixture index order, each node reading its
-/// producers' just-stamped `current_digest` — stopping after `through`. Prepares a fresh
-/// resource stamps each call. Returns the cache, holding every computed digest.
+/// producers' just-stamped `current_digest` — stopping after `through`. The cache
+/// identifies its own paths each call. Returns it, holding every computed digest.
 fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
-    let mut resource_stamper = ResourceStamper::default();
     for idx in 0..=through {
-        prepare_node(&mut resource_stamper, program, &cache, node_idx(idx));
-        let digest = node_digest(program, node_idx(idx), &cache, &resource_stamper);
-        cache.slots[node_idx(idx)].current_digest = digest;
+        cache.prepare_node_blocking(program, node_idx(idx));
+        cache.stamp_digest(program, node_idx(idx));
     }
     cache
 }
@@ -305,9 +302,8 @@ fn fs_path_folds_file_identity_and_path() {
         p.add(10, 1, &[konst(value)]);
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let mut stamps = ResourceStamper::default();
-        stamp_file(&mut stamps, path, 4, 7);
-        node_digest(&p.program, node_idx(0), &cache, &stamps)
+        cache.stamp_file(path, 4, 7);
+        cache.digest_of(&p.program, node_idx(0))
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -365,8 +361,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let mut resource_stamper = ResourceStamper::default();
-        let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamper).unwrap();
+        let producer = cache.digest_of(&p.program, node_idx(0)).unwrap();
         cache.slots[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
@@ -376,11 +371,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 producer,
             );
         }
-        prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(1));
-        prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(2));
+        cache.prepare_node_blocking(&p.program, node_idx(1));
+        cache.prepare_node_blocking(&p.program, node_idx(2));
         DigestPair {
-            typed: node_digest(&p.program, node_idx(1), &cache, &resource_stamper),
-            plain: node_digest(&p.program, node_idx(2), &cache, &resource_stamper),
+            typed: cache.digest_of(&p.program, node_idx(1)),
+            plain: cache.digest_of(&p.program, node_idx(2)),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -468,8 +463,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
 
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
-    let mut resource_stamper = ResourceStamper::default();
-    let producer = node_digest(&p.program, node_idx(0), &cache, &resource_stamper).unwrap();
+    let producer = cache.digest_of(&p.program, node_idx(0)).unwrap();
     cache.slots[node_idx(0)].current_digest = Some(producer);
     hydrate(
         &mut cache,
@@ -478,9 +472,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         producer,
     );
     cache.slots[node_idx(0)].current_digest = Some(Digest([9; 32]));
-    prepare_node(&mut resource_stamper, &p.program, &cache, node_idx(1));
+    cache.prepare_node_blocking(&p.program, node_idx(1));
     assert_eq!(
-        node_digest(&p.program, node_idx(1), &cache, &resource_stamper),
+        cache.digest_of(&p.program, node_idx(1)),
         None,
         "a path value produced under an old producer digest is unreadable"
     );
