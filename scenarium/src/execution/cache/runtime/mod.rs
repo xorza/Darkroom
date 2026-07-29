@@ -13,16 +13,17 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
+use common::CancelToken;
 use hashbrown::HashMap;
 
-use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
-use crate::execution::digest::node_digest;
-use crate::execution::disk_store::{BlobTarget, DiskStore, StorePolicy};
+use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
+use crate::execution::cache::resource::{ResourceStamper, StampError};
+use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, StateOwner, ValueState};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
+use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
-use crate::execution::resource::ResourceStamper;
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -45,6 +46,11 @@ pub(crate) struct RuntimeCache {
     /// can compare alignment element-wise instead of by length.
     pub(crate) e_node_ids: NodeColumn<ExecutionNodeId>,
     pub(crate) disk_store: DiskStore,
+    /// The run's filesystem identities, which exist only to be folded into
+    /// the digests stamped above. Held here because the two are read
+    /// together everywhere: a digest needs a path's identity, and a path
+    /// is identified from a producer's slot.
+    stamper: ResourceStamper,
     ram_seen: HashSet<usize>,
 }
 
@@ -58,6 +64,7 @@ impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
         self.e_node_ids.clear();
+        self.stamper.reset();
     }
 
     /// Append the slot for the next dense index, paired with the id it belongs
@@ -153,36 +160,33 @@ impl RuntimeCache {
         self.release_dead_outputs(program);
     }
 
-    /// Whether `e_node_id` holds a *resident* output valid for its current digest:
-    /// the value is in RAM and was produced under this digest. A `None` current
-    /// digest (impure cone) never hits, and a value produced under a *different*
-    /// digest (a changed input) misses too. The executor's input read and the
-    /// disk-store rely on this being the true "bytes are here" predicate.
-    pub(crate) fn is_resident_current(&self, node_idx: NodeIdx) -> bool {
-        match (
-            &self.slots[node_idx].value,
-            self.slots[node_idx].current_digest,
-        ) {
-            (ValueState::Resident { produced_under, .. }, Some(d)) => *produced_under == Some(d),
-            _ => false,
-        }
+    /// This node's resident values, but only where they were produced under
+    /// the digest it currently carries — the one definition of "the bytes
+    /// are here", which the executor's input read and the disk store both
+    /// rely on. A `None` current digest (an impure cone) never qualifies,
+    /// nor does a value produced under a *different* digest, which is what
+    /// a changed input leaves behind.
+    fn current_snapshot(&self, node_idx: NodeIdx) -> Option<&OutputSnapshot> {
+        let slot = &self.slots[node_idx];
+        let ValueState::Resident {
+            snapshot,
+            produced_under,
+        } = &slot.value
+        else {
+            return None;
+        };
+        (slot.current_digest.is_some() && *produced_under == slot.current_digest)
+            .then_some(snapshot)
     }
 
+    pub(crate) fn is_resident_current(&self, node_idx: NodeIdx) -> bool {
+        self.current_snapshot(node_idx).is_some()
+    }
+
+    /// Current *and* holding every output this run demands.
     fn is_resident_hit(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
-        match (
-            &self.slots[node_idx].value,
-            self.slots[node_idx].current_digest,
-        ) {
-            (
-                ValueState::Resident {
-                    produced_under,
-                    snapshot,
-                    ..
-                },
-                Some(d),
-            ) => *produced_under == Some(d) && snapshot.covers_demand(demand),
-            _ => false,
-        }
+        self.current_snapshot(node_idx)
+            .is_some_and(|snapshot| snapshot.covers_demand(demand))
     }
 
     /// Read a producer output for a consumer: a clone of the value, or — with
@@ -223,17 +227,85 @@ impl RuntimeCache {
         snapshot.values[address.port_idx as usize] = DynamicValue::Unbound;
     }
 
-    /// Stamp `e_node_id`'s structural content digest into its slot. The producer-first resolver
-    /// pass calls this before exact output demand is known; cache coverage is probed later by
-    /// [`probe_reuse`](Self::probe_reuse).
-    pub(crate) fn stamp_digest(
+    /// Producer-first digest pass over the whole schedule, so a consumer
+    /// folds an already-stamped producer digest. Reuse is deliberately not
+    /// probed here because exact demand exists only in the resolver's
+    /// reverse sweep. A Bind-delivered path value that is not resident yet
+    /// stamps `None`; the run loop can improve that node to reuse once its
+    /// path producer settles.
+    pub(crate) fn stamp_digests(&mut self, program: &ExecutionProgram, plan: &ExecutionPlan) {
+        for &node_idx in &plan.process_order {
+            if plan.verdicts[node_idx].wants_execute() {
+                self.stamp_digest(program, node_idx);
+            }
+        }
+    }
+
+    /// Stamp one node's structural content digest into its slot. The resolver's
+    /// pass calls this before exact output demand is known; cache coverage is
+    /// probed later by [`probe_reuse`](Self::probe_reuse).
+    pub(crate) fn stamp_digest(&mut self, program: &ExecutionProgram, node_idx: NodeIdx) {
+        // Folded whole before the write, so the fold's read of the slots ends
+        // before the slot it stamps is borrowed mutably. The cache is what
+        // pairs the two halves the fold needs — its slots and its stamper.
+        let digest = self.stamper.node_digest(program, node_idx, &self.slots);
+        self.slots[node_idx].current_digest = digest;
+    }
+
+    /// Identify every executing node's filesystem paths in one off-thread
+    /// pass, before the digests that fold them are stamped.
+    ///
+    /// **A prefetch, not a decision.** A path this fails to stamp simply
+    /// does not land, which leaves its node's digest `None` — and a node
+    /// with no digest is re-stamped at its own turn by
+    /// [`Self::restamp_and_hydrate`], where the failure belongs to exactly one
+    /// node and is reported as that node's. So nothing is lost here but
+    /// the batching, and no failure is decided at a point that cannot say
+    /// which node it concerns.
+    pub(crate) async fn prepare(
         &mut self,
         program: &ExecutionProgram,
-        resource_stamper: &ResourceStamper,
-        node_idx: NodeIdx,
+        plan: &ExecutionPlan,
+        cancel: CancelToken,
     ) {
-        let digest = node_digest(program, node_idx, self, resource_stamper);
-        self.slots[node_idx].current_digest = digest;
+        let Self { slots, stamper, .. } = self;
+        stamper.reset();
+        let executing = plan
+            .process_order
+            .iter()
+            .copied()
+            .filter(|&node_idx| plan.verdicts[node_idx].wants_execute());
+        let _ = stamper.identify(program, slots, executing, cancel).await;
+    }
+
+    /// Identify one node's paths, stamp the digest they complete, and
+    /// hydrate its value if that digest now hits — the whole late second
+    /// chance at reuse, for a node whose digest the pre-run pass could not
+    /// fold because a wired path had no value yet.
+    ///
+    /// Returns what [`Self::hydrate_reuse`] does, and means it the same
+    /// way: `true` once the value is resident under the new digest and
+    /// ready to serve, `false` when there was nothing to serve and the
+    /// lambda still has to run. Every path here is declared by `node_idx`
+    /// alone, so a stamping failure is that node's — the caller fails it
+    /// and the ordinary errored-upstream cascade takes its dependents,
+    /// rather than a run-wide abort blaming nobody.
+    pub(crate) async fn restamp_and_hydrate(
+        &mut self,
+        program: &ExecutionProgram,
+        node_idx: NodeIdx,
+        demand: &[OutputDemand],
+        contexts: &mut ContextStore,
+        cancel: CancelToken,
+    ) -> Result<bool, StampError> {
+        let Self { slots, stamper, .. } = self;
+        stamper
+            .identify(program, slots, std::iter::once(node_idx), cancel)
+            .await?;
+        self.stamp_digest(program, node_idx);
+        Ok(self
+            .hydrate_reuse(program, node_idx, demand, contexts)
+            .await)
     }
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
@@ -265,9 +337,6 @@ impl RuntimeCache {
         node_idx: NodeIdx,
         demand: &[OutputDemand],
     ) -> bool {
-        if self.slots[node_idx].current_digest.is_none() {
-            return false;
-        }
         if self.is_resident_hit(node_idx, demand) {
             return true;
         }
@@ -331,12 +400,7 @@ impl RuntimeCache {
         ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.blob_target(program, node_idx);
-        let resident = self.is_resident_current(node_idx).then(|| {
-            let ValueState::Resident { snapshot, .. } = &self.slots[node_idx].value else {
-                unreachable!("a current resident slot must contain resident values")
-            };
-            snapshot
-        });
+        let resident = self.current_snapshot(node_idx);
         let disk = &self.disk_store;
         async move {
             let (Some(target), Some(snapshot)) = (target, resident) else {
@@ -378,10 +442,43 @@ impl RuntimeCache {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::execution::cache::digest::Digest;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{OutputSnapshot, ValueState};
-    use crate::execution::digest::Digest;
+    use crate::execution::program::ExecutionProgram;
     use crate::execution::program::index::NodeIdx;
+
+    impl RuntimeCache {
+        /// [`RuntimeCache::stamp_digest`]'s fold without the store — the
+        /// only way a test reaches the stamper this cache keeps private.
+        pub(crate) fn digest_of(
+            &self,
+            program: &ExecutionProgram,
+            node_idx: NodeIdx,
+        ) -> Option<Digest> {
+            self.stamper.node_digest(program, node_idx, &self.slots)
+        }
+
+        /// [`RuntimeCache::restamp_and_hydrate`]'s stamping half on this
+        /// thread — the same pass,
+        /// without the blocking pool a test has no runtime to reach. A
+        /// path that will not stamp simply does not land, exactly as in
+        /// the batched pre-run pass.
+        pub(crate) fn prepare_node_blocking(
+            &mut self,
+            program: &ExecutionProgram,
+            node_idx: NodeIdx,
+        ) {
+            let Self { slots, stamper, .. } = self;
+            stamper.identify_blocking(program, slots, node_idx);
+        }
+
+        /// Plant a file identity without touching a filesystem, so a
+        /// digest folding a path can be pinned to a constant.
+        pub(crate) fn stamp_file(&mut self, path: &str, len: u64, mtime_ns: i128) {
+            self.stamper.stamp_file(path, len, mtime_ns);
+        }
+    }
 
     pub(crate) fn hydrate(
         cache: &mut RuntimeCache,
