@@ -18,7 +18,7 @@ pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_lib
 pub use execution::cache::disk_store::DiskStore;
 pub use execution::codec::{CodecError, CustomValueCodec};
 pub use execution::compile::Compiler;
-pub use execution::compile::artifact::CompiledGraph;
+pub use execution::compile::compiled_graph::CompiledGraph;
 pub use execution::compile::error::CompileError;
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;

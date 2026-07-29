@@ -76,7 +76,8 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `graph/boundary/` | `Shift`: how an interface-port edit renumbers the ports around it |
 | `graph/query.rs` | The `NodePorts`/`NodeEvents` views a node's declaration resolves to |
 | `graph/interface/` | Graph identity, instance links, exposed events, and the `GraphInterface` they compose |
-| `execution/compile/` | Host-side compiler, linking (flat graph → program + indices), and the compiled artifact |
+| `execution/compile/` | Host-side compiler and linking (flat graph → program + indices) |
+| `execution/compile/compiled_graph.rs` | The `CompiledGraph` artifact and every host query against it |
 | `execution/compile/error.rs` | `CompileError` plus the artifact's self-consistency verdicts |
 | `execution/error.rs` | Run-phase failures: whole-operation `Error`, per-node `RunError`, `ExecutionIdentityError` |
 | `execution/flatten/` | Composite lowering into a stable-id `FlatGraph` |
