@@ -5,7 +5,7 @@
 //! it instantiates. Shared by compile-time validation and the editor.
 
 use crate::graph::definition::GraphEvent;
-use crate::graph::node::definition::{Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput};
+use crate::graph::func::{Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput};
 use crate::graph::{Binding, InputPort, NodeId};
 
 /// The ports a node declares, borrowed from whatever declares them: a [`Func`]

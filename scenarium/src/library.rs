@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
 use crate::graph::definition::GraphDef;
-use crate::graph::node::definition::{Func, FuncInput, OutputType};
+use crate::graph::func::{Func, FuncInput, OutputType};
 use crate::{DataType, EnumVariants, FsPathMode, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
@@ -409,9 +409,9 @@ mod tests {
     use crate::FuncOutput;
     use crate::Invocation;
     use crate::graph::definition::GraphDef;
-    use crate::graph::node::definition::{Func, FuncInput};
-    use crate::graph::node::error::InvokeError;
-    use crate::graph::node::lambda::OutputDemand;
+    use crate::graph::func::error::InvokeError;
+    use crate::graph::func::lambda::OutputDemand;
+    use crate::graph::func::{Func, FuncInput};
     use crate::library::{Library, TypeEntry};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::{ContextManager, ContextStore};

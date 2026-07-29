@@ -1,9 +1,9 @@
 use crate::graph::Graph;
 use crate::graph::definition::{GraphDef, GraphEvent, GraphLink};
 use crate::graph::error::{GraphDeserializeError, GraphValidationError};
+use crate::graph::func::event::EventLambda;
+use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, GraphId};
-use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
-use crate::graph::node::event::EventLambda;
 use crate::graph::node::{CacheMode, Node, NodeKind, NodeSearch};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort};
 use crate::library::Library;
@@ -983,7 +983,8 @@ fn binding_conversions() {
     assert_eq!(from_port, Binding::bind(nid, 1));
     assert_eq!(from_port, Binding::Bind(OutputPort::new(nid, 1)));
 
-    assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
+    let from_value: Binding = StaticValue::Int(7).into();
+    assert_eq!(from_value, Binding::Const(StaticValue::Int(7)));
 }
 
 #[test]

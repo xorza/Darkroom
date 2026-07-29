@@ -14,7 +14,7 @@ use crate::execution::cache::disk_store::format::{
     covers_outputs, header_len, read, write,
 };
 use crate::execution::codec;
-use crate::graph::node::lambda::OutputDemand;
+use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};

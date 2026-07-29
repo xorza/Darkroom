@@ -11,9 +11,9 @@ use hashbrown::HashSet;
 
 use crate::graph::Graph;
 use crate::graph::error::{GraphValidationError, ValidationResult};
+use crate::graph::func::{FuncInput, FuncOutput};
 use crate::graph::identity::{GraphId, NodeId};
 use crate::graph::interface::{NodeEvents, NodePorts};
-use crate::graph::node::definition::{FuncInput, FuncOutput};
 use crate::library::Library;
 
 /// A reusable graph definition: what it exposes — identity in a palette,

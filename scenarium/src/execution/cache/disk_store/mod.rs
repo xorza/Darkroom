@@ -15,7 +15,7 @@ use crate::execution::codec;
 use crate::execution::codec::Codecs;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionNode;
-use crate::graph::node::lambda::OutputDemand;
+use crate::graph::func::lambda::OutputDemand;
 use crate::library::Library;
 use crate::runtime::context::ContextStore;
 

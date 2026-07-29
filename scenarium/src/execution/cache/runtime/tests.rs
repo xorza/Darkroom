@@ -8,9 +8,9 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
+use crate::graph::func::FuncBehavior;
+use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
-use crate::graph::node::definition::FuncBehavior;
-use crate::graph::node::lambda::OutputDemand;
 use crate::{DataType, DynamicValue, RamUsage, StaticValue};
 
 fn out() -> Vec<DynamicValue> {

@@ -9,7 +9,7 @@ use tokio::io::{
 use crate::execution::cache::digest::Digest;
 use crate::execution::codec;
 use crate::execution::codec::Codecs;
-use crate::graph::node::lambda::OutputDemand;
+use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue, TypeId};
 

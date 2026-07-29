@@ -16,11 +16,11 @@ use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
 use crate::graph::Graph;
 use crate::graph::definition::GraphDef;
+use crate::graph::func::error::InvokeError;
+use crate::graph::func::event::EventLambda;
+use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::InputPort;
 use crate::graph::identity::NodeId;
-use crate::graph::node::error::InvokeError;
-use crate::graph::node::event::EventLambda;
-use crate::graph::node::lambda::FuncLambda;
 use crate::graph::node::{Node, NodeSearch};
 use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -28,7 +28,7 @@ use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambd
 
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
-use crate::graph::node::lambda::Invocation;
+use crate::graph::func::lambda::Invocation;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
@@ -141,7 +141,10 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let print_node: Node = print_func.into();
     graph.insert(print_node_id, print_node);
 
-    graph.set_input_binding(InputPort::new(frame_event_node_id, 0), Binding::from(1i64));
+    graph.set_input_binding(
+        InputPort::new(frame_event_node_id, 0),
+        Binding::from(StaticValue::Int(1)),
+    );
     graph.subscribe(frame_event_node_id, 0, print_node_id);
     graph.set_input_binding(
         InputPort::new(to_string_node_id, 0),
@@ -758,7 +761,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     use std::sync::atomic::AtomicU64;
 
     use crate::DataType;
-    use crate::graph::node::definition::{FuncInput, FuncOutput};
+    use crate::graph::func::{FuncInput, FuncOutput};
 
     // A → B with trivial sync lambdas, which give the run future no suspension point of
     // their own: nothing but direct reporting can get their progress out mid-run. B records
@@ -845,9 +848,9 @@ async fn installed_program_distinguishes_repeated_definition_instances() {
 
     use crate::DataType;
     use crate::graph::definition::GraphLink;
+    use crate::graph::func::FuncOutput;
     use crate::graph::identity::GraphId;
     use crate::graph::node::NodeKind;
-    use crate::graph::node::definition::FuncOutput;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     let library = test_func_lib(TestFuncHooks {

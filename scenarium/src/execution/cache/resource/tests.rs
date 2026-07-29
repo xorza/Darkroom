@@ -13,7 +13,7 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::execution::schedule::{NodeState, RunSchedule};
-use crate::graph::node::definition::FuncBehavior;
+use crate::graph::func::FuncBehavior;
 use crate::{DataType, StaticValue};
 
 #[derive(Debug)]

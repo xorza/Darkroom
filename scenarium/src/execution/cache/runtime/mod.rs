@@ -25,8 +25,8 @@ use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::graph::node::definition::FuncBehavior;
-use crate::graph::node::lambda::OutputDemand;
+use crate::graph::func::FuncBehavior;
+use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
