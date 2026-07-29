@@ -108,11 +108,25 @@ impl DiskStore {
         }
     }
 
-    async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {
-        let Ok(mut file) = tokio::fs::File::open(&target.path).await else {
-            return false;
+    /// Open a blob and measure it, the one way all three readers below start.
+    ///
+    /// The two `None`s are different answers, which is why this is not a bare
+    /// `Option`: `Ok(None)` is the ordinary absence — nothing written under this
+    /// target yet — while `Err` is a filesystem that would not answer. Both mean
+    /// "cannot serve" to every caller; only whether that is worth reporting
+    /// differs, and that is the caller's to decide.
+    async fn open_blob(&self, target: &BlobTarget) -> io::Result<Option<(tokio::fs::File, u64)>> {
+        let file = match tokio::fs::File::open(&target.path).await {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
         };
-        let Some(file_len) = file.metadata().await.ok().map(|metadata| metadata.len()) else {
+        let file_len = file.metadata().await?.len();
+        Ok(Some((file, file_len)))
+    }
+
+    async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {
+        let Ok(Some((mut file, file_len))) = self.open_blob(target).await else {
             return false;
         };
         format::covers_outputs(&mut file, file_len, target.digest, outputs, &self.codecs)
@@ -127,10 +141,7 @@ impl DiskStore {
     /// read or framing failure reads as "cannot serve" — the node then runs and republishes
     /// the blob.
     pub(crate) async fn covers_demand(&self, target: &BlobTarget, demand: &[OutputDemand]) -> bool {
-        let Ok(mut file) = tokio::fs::File::open(&target.path).await else {
-            return false;
-        };
-        let Ok(file_len) = file.metadata().await.map(|metadata| metadata.len()) else {
+        let Ok(Some((mut file, file_len))) = self.open_blob(target).await else {
             return false;
         };
         format::covers_demand(&mut file, file_len, target.digest, &self.codecs, demand)
@@ -144,18 +155,14 @@ impl DiskStore {
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
     ) -> Option<OutputSnapshot> {
-        let mut file = match tokio::fs::File::open(&target.path).await {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+        // Unlike the two coverage checks, this runs after something already
+        // promised the blob is there, so a filesystem that will not answer is
+        // worth reporting; a plain absence still is not.
+        let (mut file, file_len) = match self.open_blob(target).await {
+            Ok(Some(opened)) => opened,
+            Ok(None) => return None,
             Err(error) => {
-                tracing::warn!(path = %target.path.display(), %error, "cache read failed; treating as miss");
-                return None;
-            }
-        };
-        let file_len = match file.metadata().await {
-            Ok(metadata) => metadata.len(),
-            Err(error) => {
-                tracing::warn!(path = %target.path.display(), %error, "cache metadata read failed; treating as miss");
+                tracing::warn!(path = %target.path.display(), %error, "cache blob could not be read; treating as miss");
                 return None;
             }
         };

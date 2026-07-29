@@ -62,23 +62,21 @@ written twice, and wrapped in a three-deep accessor chain on one side.
       `covers_demand` call, and is the only caller of
       `OutputSnapshot::covers_demand`.
 
-## The reuse path is written three times over
+## One reuse function serves two contracts, told apart only by the caller
 
-Probe, hydrate, and store each repeat the same open-and-classify sequence, and
-the disk layer repeats it again with different error handling per copy.
+`hydrate_reuse` has two callers with opposite preconditions: from `serve_reuse`
+a probe already promised the blob loads and the producer cone is **cut**, so
+failure is unrecoverable (`RunError::CacheLoadFailed`); from
+`restamp_and_hydrate` no probe happened and the cone is **alive**, so failure
+just runs the node. Nothing in the signature distinguishes them. See
+`cache-reuse-path.md` for the full call-graph analysis.
 
-- [ ] `runtime/mod.rs:529,554` — `probe_reuse` and `hydrate_reuse` share an
-      identical three-step preamble (`is_resident_hit` → `blob_target` → disk
-      call) and diverge only at the last line. A probe and the hydrate that
-      follows it can disagree about what is reusable; `RunError::CacheLoadFailed`
-      exists to absorb that disagreement.
-- [ ] `disk_store/mod.rs:111,129,141` — `covers`, `covers_demand`, and `read` each
-      open the file, fetch `metadata().len()`, and dispatch into `format`. The
-      three copies handle failure differently: two return `false` silently, one
-      warns and returns `None`.
-- [ ] `disk_store/format/mod.rs:124,148` — `covers_outputs` and `covers_demand` are
-      two wrappers over `scan_header` differing only in their `accept` closure.
-- [ ] `runtime/mod.rs:490` — `restamp_and_hydrate` is a 5-argument orchestration of
+- [ ] `resolve/mod.rs:126` — the resolver cuts a producer cone on `probe_reuse`'s
+      bare `bool`, discarding the evidence behind it (which blob, which digest,
+      which descriptors). `NodeState::Reuse` therefore records a promise without
+      recording what justified it, and the hydrate that must keep the promise
+      re-derives everything.
+- [ ] `runtime/mod.rs:520` — `restamp_and_hydrate` is a 5-argument orchestration of
       `identify` + `stamp_digest` + `hydrate_reuse` with one call site.
 
 ## `StorePolicy` exists to carry one caller's knowledge into the store
