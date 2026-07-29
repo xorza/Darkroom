@@ -24,14 +24,15 @@ use std::time::Instant;
 
 use tokio::task;
 
-use common::CancelToken;
+use ::common::CancelToken;
 
 use crate::DynamicValue;
 use crate::RamUsage;
+use crate::common::column::Column;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
+use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
@@ -55,7 +56,7 @@ pub(crate) struct Executor {
     remaining_reads: RemainingOutputReads,
     /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
     /// dense node vector. Reused across runs and rebuilt each run.
-    outcomes: NodeColumn<NodeOutcome>,
+    outcomes: Column<NodeIdx, NodeOutcome>,
 }
 
 /// Everything one run borrows from the engine. A parameter struct rather than eight
@@ -78,7 +79,7 @@ pub(crate) struct RunRequest<'a, 'r> {
 
 #[derive(Default, Debug)]
 pub(super) struct RemainingOutputReads {
-    pub(super) counts: OutputColumn<u32>,
+    pub(super) counts: Column<OutputIdx, u32>,
 }
 
 impl RemainingOutputReads {
@@ -104,7 +105,7 @@ impl RemainingOutputReads {
 
     fn node_drained(&self, program: &Program, node_idx: NodeIdx) -> bool {
         self.counts
-            .slice(program[node_idx].outputs)
+            .slice(program[node_idx].outputs.range())
             .iter()
             .all(|remaining| *remaining == 0)
     }
@@ -192,7 +193,7 @@ impl Executor {
     pub(crate) fn collect_outcome(
         &self,
         run: Resolved<'_>,
-        node_ram: &NodeColumn<RamUsage>,
+        node_ram: &Column<NodeIdx, RamUsage>,
         outcome: &mut ExecutionOutcome,
     ) {
         let (program, schedule) = (run.program(), run.schedule());
@@ -291,7 +292,7 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
     remaining_reads: &'a mut RemainingOutputReads,
     inputs: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
-    node_outcomes: &'a mut NodeColumn<NodeOutcome>,
+    node_outcomes: &'a mut Column<NodeIdx, NodeOutcome>,
     ctx: &'a mut ContextManager,
     reporter: &'a mut (dyn RunReporter + 'r),
     outcome: &'a mut ExecutionOutcome,
@@ -303,7 +304,7 @@ impl ExecutionFrame<'_, '_> {
     /// producers may already be pruned (see [`resolve`](crate::execution::schedule::Scheduled::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
-        let demand = self.schedule.outputs.demand.slice(e_node.outputs);
+        let demand = self.schedule.outputs.demand.slice(e_node.outputs.range());
         match self.schedule.states[node_idx] {
             // `process_order` and the state column are written by the same arm
             // of the walk, so a scheduled node without a settled state is a

@@ -630,7 +630,9 @@ mod resolving {
         assert_eq!(run.states[nx(cached)], NodeState::Reuse);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .readers
+                .slice(fix.program.by_id(source).outputs.range()),
             &[0]
         );
     }
@@ -666,11 +668,15 @@ mod resolving {
         assert_eq!(run.states[nx(live)], NodeState::Run);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .demand
+                .slice(fix.program.by_id(source).outputs.range()),
             &[OutputDemand::Produce, OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .readers
+                .slice(fix.program.by_id(source).outputs.range()),
             &[1, 0]
         );
     }
@@ -694,11 +700,15 @@ mod resolving {
              runnable nodes, so the reason it did not run survives to the outcome"
         );
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .demand
+                .slice(fix.program.by_id(source).outputs.range()),
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .readers
+                .slice(fix.program.by_id(source).outputs.range()),
             &[0]
         );
     }
@@ -731,17 +741,21 @@ mod resolving {
         );
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .demand
+                .slice(fix.program.by_id(source).outputs.range()),
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
+            run.outputs
+                .readers
+                .slice(fix.program.by_id(source).outputs.range()),
             &[0]
         );
         assert_eq!(
             run.outputs
                 .readers
-                .slice(fix.program.by_id(missing.range()).outputs),
+                .slice(fix.program.by_id(missing).outputs.range()),
             &[1],
             "the downstream skip still owns one read to retire"
         );
@@ -763,12 +777,14 @@ mod resolving {
         assert_eq!(
             run.outputs
                 .demand
-                .slice(fix.program.by_id(unseeded.range()).outputs),
+                .slice(fix.program.by_id(unseeded).outputs.range()),
             &[OutputDemand::Skip, OutputDemand::Skip],
             "a root nobody reads and nobody seeded produces nothing"
         );
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(seeded.range()).outputs),
+            run.outputs
+                .demand
+                .slice(fix.program.by_id(seeded).outputs.range()),
             &[OutputDemand::Produce, OutputDemand::Produce]
         );
         assert!(run.outputs.readers.iter().all(|readers| *readers == 0));

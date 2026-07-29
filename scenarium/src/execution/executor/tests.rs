@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::async_lambda;
+use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
-use crate::common::column::{Column, Idx};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;

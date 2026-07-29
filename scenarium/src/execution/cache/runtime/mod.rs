@@ -17,13 +17,13 @@ use std::sync::Arc;
 use ::common::CancelToken;
 use hashbrown::HashMap;
 
+use crate::common::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
 use crate::execution::identity::ExecutionNodeId;
-use crate::common::column::Column;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::func::FuncBehavior;
