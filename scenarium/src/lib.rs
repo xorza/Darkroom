@@ -31,6 +31,7 @@ pub use execution::seeds::RunSeeds;
 pub use graph::Binding;
 pub use graph::BindingEntry;
 pub use graph::Graph;
+pub use graph::Subscription;
 pub use graph::definition::{GraphDef, GraphEvent, GraphLink};
 pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
@@ -40,10 +41,11 @@ pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation
 pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
-pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort, Subscription};
+pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
 pub use graph::interface::{NodeEvents, NodePorts};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{CacheMode, Node, NodeKind, NodeRef, NodeSearch};
+pub use graph::node::{CacheMode, Node, NodeKind};
+pub use graph::{NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]

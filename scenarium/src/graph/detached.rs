@@ -17,9 +17,10 @@ use ::serde::{Deserialize, Serialize};
 
 use crate::graph::Binding;
 use crate::graph::BindingEntry;
+use crate::graph::Subscription;
 use crate::graph::func::{FuncInput, FuncOutput};
 use crate::graph::identity::NodeId;
-use crate::graph::identity::{InputPort, OutputPort, Subscription};
+use crate::graph::identity::{InputPort, OutputPort};
 use crate::graph::node::Node;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

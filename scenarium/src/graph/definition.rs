@@ -259,8 +259,9 @@ impl GraphLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::NodeSearch;
     use crate::graph::identity::FuncId;
-    use crate::graph::node::{Node, NodeKind, NodeSearch};
+    use crate::graph::node::{Node, NodeKind};
 
     /// The link of the one graph-instance node `graph` holds.
     fn instance_link(graph: &Graph) -> Option<GraphLink> {
