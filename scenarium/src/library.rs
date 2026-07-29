@@ -6,8 +6,8 @@ use crate::CustomValueCodec;
 use crate::execution::codec::Codecs;
 use crate::graph::definition::GraphDef;
 use crate::graph::interface::GraphId;
-use crate::graph::node::definition::{Func, FuncId, OutputType};
-use crate::{DataType, EnumVariants, StaticValue, TypeId};
+use crate::graph::node::definition::{Func, FuncId, FuncInput, OutputType};
+use crate::{DataType, EnumVariants, FsPathMode, StaticValue, TypeId};
 use hashbrown::HashMap as GraphMap;
 
 #[derive(Clone, Debug)]
@@ -275,6 +275,63 @@ impl Library {
         }
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
+        }
+    }
+
+    /// Whether a `Const` literal `value` may sit on `input` — the `Const` half of
+    /// the flatten-time type degrade (the `Bind` half uses
+    /// [`DataType::compatible_with`]); a literal that doesn't satisfy its port
+    /// flattens as unbound. Matched directly rather than via
+    /// `compatible_with` because a bare `StaticValue` can't be turned back into a
+    /// `DataType` (it lacks the `FsPathConfig`, and the enum's variant list lives in
+    /// `library`).
+    ///
+    /// An input carrying `value_variants` is a *pick-or-wire* port (e.g. lens's
+    /// preset-or-config inputs, which are `Custom`-typed for the wired case yet
+    /// hold an `Enum` preset literal): its constant must be exactly one of the
+    /// offered picks. Otherwise the literal must match the declared type — scalar
+    /// numerics coerce, an `Enum` literal must name a registered variant, and a
+    /// `Custom` port has no literal form.
+    pub(crate) fn const_satisfies(&self, input: &FuncInput, value: &StaticValue) -> bool {
+        if !input.value_variants.is_empty() {
+            return input.value_variants.iter().any(|v| v.value == *value);
+        }
+        // `Null` is "explicitly unset": lens's config machinery authors it on
+        // optional (`Option`-field) inputs and reads it back as `None`. Keep in
+        // lockstep with `FuncInput::default_fits`, the declaration-time twin.
+        if matches!(value, StaticValue::Null) {
+            return !input.required;
+        }
+        self.declared_accepts_const(&input.data_type, value)
+    }
+
+    /// Whether `value` is a valid literal for a port declared `declared`.
+    ///
+    /// The type half of [`const_satisfies`](Self::const_satisfies), without the
+    /// picker list and
+    /// optionality only a [`FuncInput`] carries — a graph interface's *output*
+    /// ports declare a bare [`DataType`], and the flattener's boundary gate
+    /// needs the same table rather than a second copy of it.
+    pub(crate) fn declared_accepts_const(&self, declared: &DataType, value: &StaticValue) -> bool {
+        match declared {
+            DataType::Any => true,
+            DataType::Float | DataType::Int | DataType::Bool => matches!(
+                value,
+                StaticValue::Float(_) | StaticValue::Int(_) | StaticValue::Bool(_)
+            ),
+            DataType::String => matches!(value, StaticValue::String(_)),
+            DataType::FsPath(config) => match config.mode {
+                FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                    matches!(value, StaticValue::FsPath(_))
+                }
+            },
+            DataType::Enum(type_id) => matches!(
+                value,
+                StaticValue::Enum(name)
+                    if self.enum_variants(*type_id).is_some_and(|vs| vs.iter().any(|v| v == name))
+            ),
+            DataType::Custom(_) => false,
         }
     }
 }
