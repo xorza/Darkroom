@@ -27,7 +27,7 @@ use crate::graph::identity::NodeId;
 /// owned [`DiskStore`](crate::execution::cache::disk_store::DiskStore) file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler));
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`Program`](crate::execution::program::Program) alone.
+/// persistent form is the [`Program`](crate::execution::compile::program::Program) alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed shared compile artifact: the program plus its compact
@@ -184,12 +184,12 @@ mod internals {
     use crate::DynamicValue;
     use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;
+    use crate::execution::compile::program;
+    use crate::execution::compile::program::ExecutionBinding;
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
     use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program;
-    use crate::execution::program::ExecutionBinding;
     use crate::execution::report::ExecutionOutcome;
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::schedule::NodeState;

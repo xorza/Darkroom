@@ -41,9 +41,9 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compile::program::{ExecutionBinding, Program};
 use crate::execution::error::RunError;
 use crate::execution::executor::node_outcome::NodeOutcome;
-use crate::execution::program::{ExecutionBinding, Program};
 use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
 
 #[derive(Default, Debug)]
@@ -670,10 +670,10 @@ impl ExecutionFrame<'_, '_> {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::execution::compile::program::Program;
     use crate::execution::executor::Executor;
     use crate::execution::executor::node_outcome::NodeOutcome;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::Program;
 
     impl Executor {
         /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e.

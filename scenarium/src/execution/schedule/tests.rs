@@ -3,12 +3,12 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
+    use crate::execution::compile::program::{
+        ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
+    };
     use crate::execution::error::Error;
     use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
     use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
-    use crate::execution::program::{
-        ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
-    };
     use crate::execution::schedule::planner::Planner;
     use crate::execution::schedule::{NodeState, ResolvedOutputs, RunSchedule};
     use crate::execution::seeds::RunSeeds;
@@ -485,11 +485,11 @@ mod resolving {
 
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::identity::{NodeIdx, OutputAddr};
-    use crate::execution::program::{
+    use crate::execution::compile::program::{
         ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
+    use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::identity::{NodeIdx, OutputAddr};
     use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::{FuncLambda, OutputDemand};
