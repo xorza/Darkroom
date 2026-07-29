@@ -17,7 +17,6 @@
 pub(crate) mod cache;
 pub(crate) mod codec;
 pub(crate) mod compile;
-pub(crate) mod digest;
 pub(crate) mod disk_store;
 pub(crate) mod engine;
 pub(crate) mod error;
@@ -30,6 +29,5 @@ pub(crate) mod plan;
 pub(crate) mod program;
 pub(crate) mod report;
 pub(crate) mod resolve;
-pub(crate) mod resource;
 pub(crate) mod seeds;
 pub(crate) mod validate;

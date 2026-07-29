@@ -6,9 +6,9 @@ use tokio::io::{
     AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
 };
 
+use crate::execution::cache::digest::Digest;
 use crate::execution::codec;
 use crate::execution::codec::Codecs;
-use crate::execution::digest::Digest;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, StaticValue, TypeId};
