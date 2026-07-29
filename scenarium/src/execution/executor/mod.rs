@@ -109,14 +109,14 @@ pub(crate) struct RunRequest<'a, 'r> {
 }
 
 #[derive(Default, Debug)]
-pub(super) struct RemainingOutputReads {
-    pub(super) counts: Column<OutputIdx, u32>,
+struct RemainingOutputReads {
+    counts: Column<OutputIdx, u32>,
 }
 
 impl RemainingOutputReads {
     /// Take this run's starting counts from the schedule the loop is about to walk —
     /// the only source, so the counts can't come from a resolution the run isn't using.
-    pub(super) fn seed(&mut self, schedule: &RunSchedule) {
+    fn seed(&mut self, schedule: &RunSchedule) {
         self.counts.clone_from(&schedule.outputs.readers);
     }
 
@@ -124,7 +124,7 @@ impl RemainingOutputReads {
         self.counts[output_idx] == 1
     }
 
-    pub(super) fn consume(&mut self, output_idx: OutputIdx) -> bool {
+    fn consume(&mut self, output_idx: OutputIdx) -> bool {
         let remaining = &mut self.counts[output_idx];
         debug_assert!(
             *remaining > 0,
@@ -316,7 +316,7 @@ impl Executor {
 /// `&mut dyn Trait` is invariant, so sharing one lifetime would extend every borrow here to
 /// the caller's.
 #[derive(Debug)]
-pub(crate) struct ExecutionFrame<'a, 'r> {
+struct ExecutionFrame<'a, 'r> {
     program: &'a Program,
     schedule: &'a RunSchedule,
     cache: &'a mut RuntimeCache,
@@ -619,7 +619,7 @@ impl ExecutionFrame<'_, '_> {
         );
     }
 
-    pub(super) fn collect_inputs(&mut self, node_idx: NodeIdx) {
+    fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
         for input in &self.program.inputs[self.program[node_idx].inputs] {
             let binding = &input.binding;
@@ -661,7 +661,7 @@ impl ExecutionFrame<'_, '_> {
 
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
-    pub(super) fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
+    fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
             if let ExecutionBinding::Bind(address) = &input.binding
                 && self.producer_runs(*address)
@@ -671,7 +671,7 @@ impl ExecutionFrame<'_, '_> {
         }
     }
 
-    pub(super) fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
+    fn release_drained_outputs(&mut self, node_idx: NodeIdx) {
         if !self.program[node_idx].cache.caches_in_ram()
             && self.remaining_reads.node_drained(self.program, node_idx)
         {

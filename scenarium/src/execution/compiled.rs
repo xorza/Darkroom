@@ -319,29 +319,20 @@ impl CompiledGraph {
     }
 }
 
-#[cfg(test)]
-impl CompiledGraph {
-    /// Build an artifact around a hand-built program for execution-layer unit
-    /// tests. Production
-    /// artifacts can only be created by the linker, which supplies the source
-    /// relations alongside the program.
-    pub(crate) fn from_program_for_test(program: Program) -> Self {
-        Self {
-            program,
-            attribution: Attribution::default(),
-            node_lists: Pool::default(),
-            footprints: HashMap::default(),
-            consumers: Column::default(),
-            exposed: HashMap::default(),
-        }
-    }
-}
-
 #[cfg(any(test, feature = "internals"))]
 mod internals {
     use crate::execution::compiled::CompiledGraph;
     use crate::execution::identity::ExecutionNodeId;
     use crate::graph::identity::NodeId;
+
+    // Only the fixture constructor below needs these, and it is narrower than
+    // the mod: an `internals` build without `cfg(test)` has no caller for it.
+    #[cfg(test)]
+    use {
+        crate::common::column::Column, crate::common::pool::Pool,
+        crate::execution::program::Program, crate::execution::source_map::Attribution,
+        hashbrown::HashMap,
+    };
 
     impl CompiledGraph {
         /// Every execution node an authored node covers, in ascending id
@@ -356,6 +347,22 @@ mod internals {
                 .iter()
                 .map(|&node_idx| self.program.e_node_ids[node_idx])
                 .collect()
+        }
+
+        /// Build an artifact around a hand-built program for execution-layer unit
+        /// tests. Production
+        /// artifacts can only be created by the linker, which supplies the source
+        /// relations alongside the program.
+        #[cfg(test)]
+        pub(crate) fn from_program_for_test(program: Program) -> Self {
+            Self {
+                program,
+                attribution: Attribution::default(),
+                node_lists: Pool::default(),
+                footprints: HashMap::default(),
+                consumers: Column::default(),
+                exposed: HashMap::default(),
+            }
         }
     }
 }

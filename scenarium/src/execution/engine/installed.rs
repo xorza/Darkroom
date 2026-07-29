@@ -28,13 +28,6 @@ impl InstalledGraph {
             .is_none_or(|compiled| compiled.program.e_nodes.is_empty())
     }
 
-    #[cfg(test)]
-    pub(super) fn compiled(&self) -> &CompiledGraph {
-        self.compiled
-            .as_deref()
-            .expect("execution requires an installed compiled graph")
-    }
-
     pub(super) fn clear(&mut self) {
         self.compiled = None;
         self.cache.clear();
@@ -110,6 +103,24 @@ enum InstalledGraphValidationError {
     OutputArity { e_node_id: ExecutionNodeId },
     #[error("runtime cache state owner does not match node {e_node_id:?}")]
     StateOwner { e_node_id: ExecutionNodeId },
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::execution::compiled::CompiledGraph;
+    use crate::execution::engine::installed::InstalledGraph;
+
+    impl InstalledGraph {
+        /// The installed artifact itself, for the engine's test-only
+        /// introspection. Production reaches the pair through the methods
+        /// above, which is what keeps the artifact and its cache moving
+        /// together.
+        pub(crate) fn compiled(&self) -> &CompiledGraph {
+            self.compiled
+                .as_deref()
+                .expect("execution requires an installed compiled graph")
+        }
+    }
 }
 
 #[cfg(test)]
