@@ -112,7 +112,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
         DocStep::RenameGraph { id, to, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.interface.name = to.clone();
+                graph.name = to.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -122,13 +122,12 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             name,
             data_type,
         } => {
-            if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = &mut graph.interface;
+            if let Some(def) = doc.graph.find_graph_mut(*graph_id) {
                 match side {
-                    BoundarySide::Input => definition
+                    BoundarySide::Input => def
                         .inputs
                         .insert(*idx, FuncInput::optional(name.clone(), data_type.clone())),
-                    BoundarySide::Output => definition
+                    BoundarySide::Output => def
                         .outputs
                         .insert(*idx, FuncOutput::new(name.clone(), data_type.clone())),
                 }
@@ -310,7 +309,7 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
         } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
         DocStep::RenameGraph { id, from, .. } => {
             if let Some(graph) = doc.graph.find_graph_mut(*id) {
-                graph.interface.name = from.clone();
+                graph.name = from.clone();
             }
         }
         DocStep::AddBoundaryPort {
@@ -319,14 +318,13 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             idx,
             ..
         } => {
-            if let Some(graph) = doc.graph.find_graph_mut(*graph_id) {
-                let definition = &mut graph.interface;
+            if let Some(def) = doc.graph.find_graph_mut(*graph_id) {
                 match side {
                     BoundarySide::Input => {
-                        definition.inputs.remove(*idx);
+                        def.inputs.remove(*idx);
                     }
                     BoundarySide::Output => {
-                        definition.outputs.remove(*idx);
+                        def.outputs.remove(*idx);
                     }
                 }
             }

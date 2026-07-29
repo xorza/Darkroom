@@ -272,7 +272,7 @@ mod tests {
     use std::io::Read as _;
 
     use common::internals::test_output_path;
-    use scenarium::{GraphDef, GraphId, GraphInterface};
+    use scenarium::{GraphDef, GraphId};
 
     use super::*;
 
@@ -343,10 +343,7 @@ mod tests {
         bad.graph.insert_graph(
             GraphId::unique(),
             GraphDef {
-                interface: GraphInterface {
-                    origin: Some(GraphId::nil()),
-                    ..Default::default()
-                },
+                origin: Some(GraphId::nil()),
                 ..Default::default()
             },
         );
@@ -403,10 +400,7 @@ mod tests {
         document.graph.insert_graph(
             GraphId::unique(),
             GraphDef {
-                interface: GraphInterface {
-                    origin: Some(GraphId::nil()),
-                    ..Default::default()
-                },
+                origin: Some(GraphId::nil()),
                 ..Default::default()
             },
         );

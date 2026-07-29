@@ -24,8 +24,8 @@ use crate::core::preview;
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
 /// Palette category a graph created in the editor starts in. A
-/// [`GraphInterface`](scenarium::GraphInterface) with no category lands in
-/// a nameless palette column, and nothing in the editor can set one
+/// [`GraphDef`](scenarium::GraphDef) with no category lands in a nameless
+/// palette column, and nothing in the editor can set one
 /// afterwards, so a fresh graph names its own.
 pub(crate) const NEW_GRAPH_CATEGORY: &str = "Document";
 
@@ -497,7 +497,7 @@ impl Document {
         side: BoundarySide,
         idx: usize,
     ) -> Option<&str> {
-        let interface = &self.graph.find_graph(graph_id)?.interface;
+        let interface = &self.graph.find_graph(graph_id)?;
         let name = match side {
             BoundarySide::Input => &interface.inputs.get(idx)?.name,
             BoundarySide::Output => &interface.outputs.get(idx)?.name,
@@ -520,13 +520,9 @@ impl Document {
         let Some(def) = self.graph.find_graph_mut(graph_id) else {
             return;
         };
-        let interface = &mut def.interface;
         let slot = match side {
-            BoundarySide::Input => interface.inputs.get_mut(idx).map(|input| &mut input.name),
-            BoundarySide::Output => interface
-                .outputs
-                .get_mut(idx)
-                .map(|output| &mut output.name),
+            BoundarySide::Input => def.inputs.get_mut(idx).map(|input| &mut input.name),
+            BoundarySide::Output => def.outputs.get_mut(idx).map(|output| &mut output.name),
         };
         if let Some(slot) = slot
             && *slot == expected
@@ -555,8 +551,8 @@ mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
 
+    use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
-    use scenarium::{FuncId, GraphInterface};
 
     fn leaf_graph(name: &str) -> CoreGraphDef {
         CoreGraphDef::new(name)
@@ -596,7 +592,7 @@ mod tests {
         // one undoable `AddLocalGraph`.
         let lib_id = GraphId::unique();
         let mut local = leaf_graph("Lib").clone_mapped();
-        local.interface.origin = Some(lib_id);
+        local.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node_id = NodeId::unique();
 
@@ -619,7 +615,7 @@ mod tests {
             "local graph added alongside the instance"
         );
         assert_eq!(
-            doc.graph.graphs.get(&local_id).unwrap().interface.origin,
+            doc.graph.graphs.get(&local_id).unwrap().origin,
             Some(lib_id),
             "copy records its library origin"
         );
@@ -652,7 +648,7 @@ mod tests {
         let mut local = leaf_graph("Lib")
             .input(FuncInput::optional("gain", DataType::Float).default(StaticValue::Float(1.5)))
             .clone_mapped();
-        local.interface.origin = Some(lib_id);
+        local.origin = Some(lib_id);
         let local_id = GraphId::unique();
         let node_id = NodeId::unique();
         let step = build_step(
@@ -721,7 +717,7 @@ mod tests {
         let lib_id = GraphId::unique();
         let mut doc = Document::default();
         let mut local = leaf_graph("Lib");
-        local.interface.origin = Some(lib_id);
+        local.origin = Some(lib_id);
         let local_id = GraphId::unique();
         doc.graph.insert_graph(local_id, local);
         let node = Node::graph_instance(
@@ -743,7 +739,7 @@ mod tests {
         };
         assert_ne!(new_id, local_id, "node now points at the fork");
         assert_eq!(
-            doc.graph.graphs.get(&new_id).unwrap().interface.origin,
+            doc.graph.graphs.get(&new_id).unwrap().origin,
             None,
             "detach clears the library lineage"
         );
@@ -837,7 +833,7 @@ mod tests {
                 .count(),
             1
         );
-        let interface = &def.interface;
+        let interface = &def;
         assert!(interface.inputs.is_empty() && interface.outputs.is_empty());
         // A category, so the palette has a named column to list it under —
         // nothing in the editor can set one after the fact.
@@ -970,8 +966,7 @@ mod tests {
             &mut doc,
             BatchScope::Graph(GraphRef::Local(inner)),
         );
-        let input_count =
-            |doc: &Document| doc.graph.find_graph(inner).unwrap().interface.inputs.len();
+        let input_count = |doc: &Document| doc.graph.find_graph(inner).unwrap().inputs.len();
         assert_eq!(input_count(&doc), 1);
         let inst_port = InputPort::new(inst_id, 0);
         let bound = Binding::Const(StaticValue::Float(4.0));
@@ -1031,7 +1026,7 @@ mod tests {
             &mut doc,
         )
         .expect("rename applies at depth");
-        assert_eq!(doc.graph.find_graph(inner).unwrap().interface.name, "deep");
+        assert_eq!(doc.graph.find_graph(inner).unwrap().name, "deep");
         doc.validate()
             .expect("document still validates after edits");
     }
@@ -1275,7 +1270,7 @@ mod tests {
         // target's `EditScope` and can't touch the map. An orphaned view
         // fails `validate`, which save now refuses to write past.
         let mut local = leaf_graph("Lib").clone_mapped();
-        local.interface.origin = Some(GraphId::unique());
+        local.origin = Some(GraphId::unique());
         let local_id = GraphId::unique();
 
         let mut doc = Document::default();
@@ -1340,10 +1335,7 @@ mod tests {
         invalid.graph.insert_graph(
             GraphId::unique(),
             CoreGraphDef {
-                interface: GraphInterface {
-                    origin: Some(GraphId::nil()),
-                    ..Default::default()
-                },
+                origin: Some(GraphId::nil()),
                 ..Default::default()
             },
         );

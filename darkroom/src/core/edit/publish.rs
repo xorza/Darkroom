@@ -39,7 +39,7 @@ pub(crate) fn resolve_publication(
     let local = scope.graph.graphs.get(&local_id)?;
     Some(Publication {
         local_id,
-        origin: local.interface.origin,
+        origin: local.origin,
         graph: local.clone_mapped(),
     })
 }
@@ -55,7 +55,7 @@ pub(crate) fn link_origin(
     if let Some(graph) = document.graph_mut(parent)
         && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
-        nested.interface.origin = Some(origin);
+        nested.origin = Some(origin);
     }
 }
 
@@ -87,12 +87,12 @@ mod tests {
 
     fn graph(name: &str, origin: Option<GraphId>) -> GraphDef {
         let mut graph = GraphDef::new(name);
-        graph.interface.origin = origin;
+        graph.origin = origin;
         graph
     }
 
     fn origin_of(doc: &Document, graph_id: GraphId) -> Option<GraphId> {
-        doc.graph.graphs.get(&graph_id).unwrap().interface.origin
+        doc.graph.graphs.get(&graph_id).unwrap().origin
     }
 
     #[test]
@@ -113,7 +113,7 @@ mod tests {
             Some(lib_id),
             "a linked graph carries its lineage forward for the commit to reuse"
         );
-        assert_eq!(publication.graph.interface.name, "Linked");
+        assert_eq!(publication.graph.name, "Linked");
         assert_eq!(
             origin_of(&doc, linked.graph_id),
             Some(lib_id),

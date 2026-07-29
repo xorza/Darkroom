@@ -373,12 +373,7 @@ fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     // interior is what a sinks run reaches, what disabling it suppresses, and
     // what stops its result being reusable.
     assert!(
-        !f.graph
-            .find_graph(f.nested_id)
-            .unwrap()
-            .interface
-            .outputs
-            .is_empty(),
+        !f.graph.find_graph(f.nested_id).unwrap().outputs.is_empty(),
         "the fixture instance exposes an output, or this proves nothing"
     );
     assert_eq!(compiled.is_sink(f.instance), Some(true));

@@ -64,11 +64,7 @@ pub(crate) fn build_step(
         let GraphRef::Local(graph_id) = target else {
             return Err(Refusal::Quiet);
         };
-        let interface = &doc
-            .graph
-            .find_graph(graph_id)
-            .ok_or(Refusal::Quiet)?
-            .interface;
+        let interface = &doc.graph.find_graph(graph_id).ok_or(Refusal::Quiet)?;
         let idx = match side {
             BoundarySide::Input => interface.inputs.len(),
             BoundarySide::Output => interface.outputs.len(),
@@ -146,7 +142,6 @@ pub(crate) fn build_step(
             // graph already holds rather than forking another — at which
             // point there is no definition to add and this *is* an instance.
             match def
-                .interface
                 .origin
                 .and_then(|origin| local_graph_from(graph, origin))
             {
@@ -322,7 +317,7 @@ pub(crate) fn build_step(
                 .get(&from_id)
                 .ok_or(Refusal::Quiet)?
                 .clone_mapped();
-            copy.interface.origin = None;
+            copy.origin = None;
             GraphStep::DetachGraph {
                 node_id,
                 from_id,
@@ -401,13 +396,7 @@ pub(crate) fn build_doc_step(intent: DocIntent, doc: &Document) -> Result<DocSte
             })
         }
         DocIntent::RenameGraph { id, to } => {
-            let from = doc
-                .graph
-                .find_graph(id)
-                .ok_or(Refusal::Quiet)?
-                .interface
-                .name
-                .clone();
+            let from = doc.graph.find_graph(id).ok_or(Refusal::Quiet)?.name.clone();
             Ok(DocStep::RenameGraph { id, from, to })
         }
     }
@@ -445,6 +434,6 @@ fn local_graph_from(graph: &Graph, origin: GraphId) -> Option<GraphId> {
     graph
         .graphs
         .iter()
-        .find(|(_, def)| def.interface.origin == Some(origin))
+        .find(|(_, def)| def.origin == Some(origin))
         .map(|(id, _)| *id)
 }

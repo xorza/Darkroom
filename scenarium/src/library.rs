@@ -466,10 +466,7 @@ mod tests {
             library.register_graph(graph_id, GraphDef::new("After"));
         }));
         assert!(duplicate_graph.is_err());
-        assert_eq!(
-            library.graph_by_id(graph_id).unwrap().interface.name,
-            "Before"
-        );
+        assert_eq!(library.graph_by_id(graph_id).unwrap().name, "Before");
 
         let type_id = TypeId::unique();
         library.register_type(type_id, TypeEntry::custom("Before"));

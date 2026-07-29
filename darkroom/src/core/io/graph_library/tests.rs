@@ -84,7 +84,7 @@ fn structurally_invalid_graph_is_quarantined() {
     let path = test_output_path("darkroom_graph_library/invalid-graph.json");
     let _ = std::fs::remove_file(&path);
     let mut bad = graph("dangling");
-    bad.interface.events.push(GraphEvent {
+    bad.events.push(GraphEvent {
         name: "tick".into(),
         emitter: NodeId::unique(),
         emitter_event_idx: 0,
@@ -155,8 +155,8 @@ fn committing_merges_into_the_file_rather_than_overwriting_it() {
 
     let on_disk = load_from(&path).unwrap();
     assert_eq!(on_disk.graphs.len(), 2, "both entries survive");
-    assert_eq!(on_disk.graphs[&ours.id].interface.name, "ours");
-    assert_eq!(on_disk.graphs[&theirs.id].interface.name, "theirs");
+    assert_eq!(on_disk.graphs[&ours.id].name, "ours");
+    assert_eq!(on_disk.graphs[&theirs.id].name, "theirs");
     assert_eq!(
         theirs.library.graphs.len(),
         2,
@@ -176,7 +176,7 @@ fn an_origin_is_reused_only_while_the_file_still_holds_it() {
     let second = commit_entry_to(&path, entry(Some(first.id), "v2")).unwrap();
     assert_eq!(second.id, first.id, "a live origin is updated in place");
     assert_eq!(second.library.graphs.len(), 1, "no duplicate entry");
-    assert_eq!(second.library.graphs[&second.id].interface.name, "v2");
+    assert_eq!(second.library.graphs[&second.id].name, "v2");
 
     let stale = GraphId::unique();
     let third = commit_entry_to(&path, entry(Some(stale), "v3")).unwrap();

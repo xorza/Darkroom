@@ -40,7 +40,7 @@ impl<'a> PaletteEntry<'a> {
         match *self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Graph(_, graph) => &graph.interface.name,
+            PaletteEntry::Graph(_, graph) => &graph.name,
             PaletteEntry::LocalGraph(local) => &local.name,
         }
     }
@@ -49,7 +49,7 @@ impl<'a> PaletteEntry<'a> {
         match *self {
             PaletteEntry::Func(f) => &f.category,
             PaletteEntry::Special(s) => &s.func().category,
-            PaletteEntry::Graph(_, graph) => &graph.interface.category,
+            PaletteEntry::Graph(_, graph) => &graph.category,
             PaletteEntry::LocalGraph(local) => &local.category,
         }
     }
@@ -517,17 +517,16 @@ impl PaletteEntry<'_> {
             // A library graph localizes on instance: the copy records its
             // `origin` so it stays linked for a later publish, but it is the
             // document's to edit from here on.
-            PaletteEntry::Graph(shared_id, graph) => menu_item(ui, popup, &graph.interface.name)
-                .then(|| {
-                    let mut local = graph.clone_mapped();
-                    local.interface.origin = Some(shared_id);
-                    Intent::AddLocalGraph {
-                        pos,
-                        node_id: NodeId::unique(),
-                        graph_id: GraphId::unique(),
-                        def: Box::new(local),
-                    }
-                }),
+            PaletteEntry::Graph(shared_id, graph) => menu_item(ui, popup, &graph.name).then(|| {
+                let mut local = graph.clone_mapped();
+                local.origin = Some(shared_id);
+                Intent::AddLocalGraph {
+                    pos,
+                    node_id: NodeId::unique(),
+                    graph_id: GraphId::unique(),
+                    def: Box::new(local),
+                }
+            }),
             // No copy: a second instance of a definition this graph already
             // holds, so editing either instance's interior edits the one
             // definition.
