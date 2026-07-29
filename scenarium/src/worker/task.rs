@@ -13,11 +13,12 @@ use crate::execution::outcome::ExecutionOutcome;
 use crate::execution::report::{RunProgress, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
+use crate::worker::error::WorkerError;
 use crate::worker::event_loop::{
     ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, EventLoopWake, LambdaPanic,
 };
 use crate::worker::pause_gate::PauseGate;
-use crate::worker::protocol::{WorkerError, WorkerMessage, WorkerReport};
+use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::status::{WorkerActivity, WorkerStatusPublisher};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
