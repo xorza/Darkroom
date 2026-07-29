@@ -18,8 +18,6 @@
 //! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
-mod node_outcome;
-
 use std::time::Instant;
 
 use tokio::task;
@@ -43,8 +41,41 @@ use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::program::{ExecutionBinding, Program};
 use crate::execution::error::RunError;
-use crate::execution::executor::node_outcome::NodeOutcome;
 use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
+
+/// What became of a node this run — the single per-node result map, so the run-time
+/// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
+/// also flagged errored). Carries its own `RunError`/elapsed, so nothing lives in a side
+/// map.
+#[derive(Debug, Clone, Default)]
+enum NodeOutcome {
+    /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
+    #[default]
+    Pending,
+    /// Served from a RAM/disk cache under an unchanged digest — counted as cached.
+    Reused,
+    /// Pruned by the pre-run cut: every consumer that would read this node reused a cache,
+    /// so its output is never read and its lambda is skipped. `cached` is whether its output
+    /// remains resident; unprobed disk blobs are not runtime cache state.
+    Cut { cached: bool },
+    /// Its lambda ran and succeeded, taking `secs`.
+    Ran { secs: f64 },
+    /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
+    Failed { secs: f64, error: RunError },
+    /// Never ran — an upstream dependency errored, its func has no implementation attached,
+    /// or the cached output it was resolved to reuse failed to load.
+    Skipped { error: RunError },
+}
+
+impl NodeOutcome {
+    /// The run error the node carries — a failed run, or a node skipped for an error.
+    fn error(&self) -> Option<&RunError> {
+        match self {
+            NodeOutcome::Failed { error, .. } | NodeOutcome::Skipped { error } => Some(error),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -671,8 +702,7 @@ impl ExecutionFrame<'_, '_> {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::compile::program::Program;
-    use crate::execution::executor::Executor;
-    use crate::execution::executor::node_outcome::NodeOutcome;
+    use crate::execution::executor::{Executor, NodeOutcome};
     use crate::execution::identity::ExecutionNodeId;
 
     impl Executor {
