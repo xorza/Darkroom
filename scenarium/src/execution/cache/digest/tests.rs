@@ -1,3 +1,4 @@
+use crate::graph::identity::FuncId;
 use std::sync::Arc;
 
 use super::*;
@@ -10,7 +11,7 @@ use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
-use crate::graph::node::definition::{FuncBehavior, FuncId};
+use crate::graph::node::definition::FuncBehavior;
 
 /// Minimal hand-built `Program` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types

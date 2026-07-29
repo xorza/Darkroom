@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::FuncId;
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a

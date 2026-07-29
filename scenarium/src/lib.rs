@@ -31,19 +31,19 @@ pub use execution::seeds::RunSeeds;
 pub use graph::Binding;
 pub use graph::BindingEntry;
 pub use graph::Graph;
-pub use graph::address::{InputPort, OutputPort, Subscription};
-pub use graph::definition::{GraphDef, GraphEvent, GraphId, GraphLink};
+pub use graph::definition::{GraphDef, GraphEvent, GraphLink};
 pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
+pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort, Subscription};
+pub use graph::interface::{NodeEvents, NodePorts};
 pub use graph::node::definition::{
-    Func, FuncBehavior, FuncEvent, FuncId, FuncInput, FuncOutput, OutputType, ValueVariant,
+    Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
 pub use graph::node::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::node::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::node::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{CacheMode, Node, NodeId, NodeKind, NodeRef, NodeSearch};
-pub use graph::query::{NodeEvents, NodePorts};
+pub use graph::node::{CacheMode, Node, NodeKind, NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
 #[cfg(any(test, feature = "internals"))]

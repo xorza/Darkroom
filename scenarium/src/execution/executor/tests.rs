@@ -1,3 +1,4 @@
+use crate::graph::identity::FuncId;
 use std::sync::Arc;
 
 use super::*;
@@ -10,7 +11,7 @@ use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode,
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
 use crate::graph::node::CacheMode;
-use crate::graph::node::definition::{FuncBehavior, FuncId};
+use crate::graph::node::definition::FuncBehavior;
 use crate::graph::node::lambda::Invocation;
 use crate::graph::node::lambda::internals;
 use crate::graph::node::lambda::{FuncLambda, OutputDemand};

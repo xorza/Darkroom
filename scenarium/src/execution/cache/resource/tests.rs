@@ -1,3 +1,4 @@
+use crate::graph::identity::FuncId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -12,7 +13,7 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::execution::schedule::{NodeState, RunSchedule};
-use crate::graph::node::definition::{FuncBehavior, FuncId};
+use crate::graph::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
 
 #[derive(Debug)]

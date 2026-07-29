@@ -1,3 +1,4 @@
+use crate::graph::identity::FuncId;
 use std::sync::Arc;
 
 use crate::execution::cache::digest::Digest;
@@ -8,7 +9,7 @@ use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
 use crate::graph::node::CacheMode;
-use crate::graph::node::definition::{FuncBehavior, FuncId};
+use crate::graph::node::definition::FuncBehavior;
 use crate::graph::node::lambda::OutputDemand;
 use crate::{DataType, DynamicValue, RamUsage, StaticValue};
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::DataType;
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::FuncId;
 use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
 use crate::graph::node::error::InvokeError;
 use crate::graph::node::error::InvokeResult;

@@ -18,7 +18,7 @@ use crate::execution::report::RunReporter;
 use crate::execution::schedule::RunSchedule;
 use crate::execution::schedule::planner::Planner;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::node::NodeId;
+use crate::graph::identity::NodeId;
 
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `schedule` buffer, the `planner`
@@ -193,7 +193,7 @@ mod internals {
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
-    use crate::graph::node::NodeId;
+    use crate::graph::identity::NodeId;
     use crate::graph::node::lambda::OutputDemand;
 
     #[derive(Debug, Default)]
