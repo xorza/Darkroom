@@ -13,7 +13,7 @@
 use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeIdx, OutputAddr};
+use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::identity::FuncId;
 
 /// The graph won't compile against the library: a document can be stale

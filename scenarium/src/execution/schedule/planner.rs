@@ -4,7 +4,8 @@
 //! across runs, so a repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::error::{Error, Result};
-use crate::execution::program::index::{NodeColumn, NodeIdx};
+use crate::common::column::Column;
+use crate::execution::identity::NodeIdx;
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
 use crate::execution::seeds::RunSeeds;
@@ -30,7 +31,7 @@ enum Visit {
 #[derive(Debug, Default)]
 pub(crate) struct Planner {
     /// DFS coloring for the backward pass.
-    color: NodeColumn<Color>,
+    color: Column<NodeIdx, Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
 }

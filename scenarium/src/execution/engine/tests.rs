@@ -22,7 +22,7 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
-use common::FloatExt;
+use ::common::FloatExt;
 use tokio::sync::Mutex;
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -3145,7 +3145,7 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_honors_cancel_flag_and_marks_cancelled() -> TestResult {
-        use common::CancelToken;
+        use ::common::CancelToken;
 
         let graph = test_graph();
         let library = test_func_lib(default_hooks());
@@ -3200,7 +3200,7 @@ mod behavior {
     async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> TestResult {
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        use common::CancelToken;
+        use ::common::CancelToken;
 
         use crate::async_lambda;
         use crate::graph::Graph;
@@ -5030,7 +5030,7 @@ mod output_demand {
 
 mod topology {
     use super::*;
-    use common::FloatExt;
+    use ::common::FloatExt;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn removing_node_rebuilds_id_keyed_edges() -> TestResult {

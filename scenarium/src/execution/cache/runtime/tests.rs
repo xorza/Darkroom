@@ -5,8 +5,9 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
-use crate::execution::program::pool::PoolRange;
+use crate::common::column::Column;
+use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::common::pool::PoolRange;
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -599,7 +600,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     );
 
     // shared (100/10) counted once + the 5/0 value; scalar and Empty add nothing.
-    let mut by_node = NodeColumn::default();
+    let mut by_node = Column::default();
     let total = cache.resident_ram_stats(&mut by_node);
     assert_eq!(total, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(total.total(), 115);

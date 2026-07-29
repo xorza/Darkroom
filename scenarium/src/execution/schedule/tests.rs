@@ -5,7 +5,7 @@
 mod planning {
     use crate::execution::error::Error;
     use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-    use crate::execution::program::index::{NodeIdx, OutputAddr, OutputIdx};
+    use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::program::{
         ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
@@ -486,7 +486,7 @@ mod resolving {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::index::{NodeIdx, OutputAddr};
+    use crate::execution::identity::{NodeIdx, OutputAddr};
     use crate::execution::program::{
         ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
@@ -630,7 +630,7 @@ mod resolving {
         assert_eq!(run.states[nx(cached)], NodeState::Reuse);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source).outputs),
+            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
             &[0]
         );
     }
@@ -666,11 +666,11 @@ mod resolving {
         assert_eq!(run.states[nx(live)], NodeState::Run);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source).outputs),
+            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
             &[OutputDemand::Produce, OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source).outputs),
+            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
             &[1, 0]
         );
     }
@@ -694,11 +694,11 @@ mod resolving {
              runnable nodes, so the reason it did not run survives to the outcome"
         );
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source).outputs),
+            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source).outputs),
+            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
             &[0]
         );
     }
@@ -731,17 +731,17 @@ mod resolving {
         );
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(source).outputs),
+            run.outputs.demand.slice(fix.program.by_id(source.range()).outputs),
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs.readers.slice(fix.program.by_id(source).outputs),
+            run.outputs.readers.slice(fix.program.by_id(source.range()).outputs),
             &[0]
         );
         assert_eq!(
             run.outputs
                 .readers
-                .slice(fix.program.by_id(missing).outputs),
+                .slice(fix.program.by_id(missing.range()).outputs),
             &[1],
             "the downstream skip still owns one read to retire"
         );
@@ -763,12 +763,12 @@ mod resolving {
         assert_eq!(
             run.outputs
                 .demand
-                .slice(fix.program.by_id(unseeded).outputs),
+                .slice(fix.program.by_id(unseeded.range()).outputs),
             &[OutputDemand::Skip, OutputDemand::Skip],
             "a root nobody reads and nobody seeded produces nothing"
         );
         assert_eq!(
-            run.outputs.demand.slice(fix.program.by_id(seeded).outputs),
+            run.outputs.demand.slice(fix.program.by_id(seeded.range()).outputs),
             &[OutputDemand::Produce, OutputDemand::Produce]
         );
         assert!(run.outputs.readers.iter().all(|readers| *readers == 0));

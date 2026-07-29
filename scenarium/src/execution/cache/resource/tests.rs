@@ -2,13 +2,13 @@ use crate::graph::identity::FuncId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use common::CancelToken;
+use ::common::CancelToken;
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::index::NodeIdx;
+use crate::execution::identity::NodeIdx;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };

@@ -38,11 +38,12 @@
 //! allocates nothing — the handles borrow that buffer, they do not own a copy of it.
 
 use crate::execution::schedule::error::RunScheduleValidationError;
-use common::is_debug;
+use ::common::is_debug;
 
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::{Error, Result};
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputColumn, OutputIdx};
+use crate::common::column::{Column, Idx};
+use crate::execution::identity::{NodeIdx, NodeSet, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
@@ -132,9 +133,9 @@ impl NodeState {
 #[derive(Debug, Default)]
 pub(crate) struct ResolvedOutputs {
     /// Whether each output must be produced for a live reader or a host pin.
-    pub(crate) demand: OutputColumn<OutputDemand>,
+    pub(crate) demand: Column<OutputIdx, OutputDemand>,
     /// Consumers which will actually run and read each output.
-    pub(crate) readers: OutputColumn<u32>,
+    pub(crate) readers: Column<OutputIdx, u32>,
 }
 
 impl ResolvedOutputs {
@@ -179,7 +180,7 @@ pub(crate) struct RunSchedule {
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node [`NodeState`], aligned to the program's dense node vector. The
     /// planner writes the structural verdict; the sweep refines it in place.
-    pub(crate) states: NodeColumn<NodeState>,
+    pub(crate) states: Column<NodeIdx, NodeState>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds. The schedule's "must be available" set:
     /// the sweep seeds liveness from these and prunes any cone reachable only through
@@ -563,10 +564,10 @@ impl<'a> Scheduled<'a> {
             if seeded.contains(node_idx) {
                 outputs
                     .demand
-                    .slice_mut(output_range)
+                    .slice_mut(output_range.range())
                     .fill(OutputDemand::Produce);
             }
-            let demand = outputs.demand.slice(output_range);
+            let demand = outputs.demand.slice(output_range.range());
             if !event_sources.contains(node_idx) && cache.probe_reuse(node_idx, demand).await {
                 states[node_idx] = NodeState::Reuse;
                 continue;

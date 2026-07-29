@@ -1,4 +1,4 @@
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
+use crate::execution::identity::{NodeIdx, NodeSet};
 
 /// 70 nodes span two words, so this covers the low word, both sides of the
 /// 64-bit boundary, and a bit inside the trailing partial word.
@@ -49,34 +49,6 @@ fn reset_clears_every_word_and_resizes() {
 
     set.insert(NodeIdx(64));
     assert_eq!(set.iter().collect::<Vec<_>>(), [NodeIdx(64)]);
-}
-
-/// `iter_indexed` is what lets a walk carry the index without reconstructing it
-/// from a counter, so it must agree with indexing on every entry.
-#[test]
-fn iter_indexed_pairs_each_entry_with_the_index_that_addresses_it() {
-    let mut column = NodeColumn::default();
-    for value in ["a", "b", "c"] {
-        column.push(value);
-    }
-
-    let pairs: Vec<_> = column.iter_indexed().collect();
-    assert_eq!(
-        pairs,
-        [(NodeIdx(0), &"a"), (NodeIdx(1), &"b"), (NodeIdx(2), &"c")]
-    );
-    for (node_idx, value) in pairs {
-        assert_eq!(column[node_idx], *value, "the pair addresses its own entry");
-    }
-
-    assert_eq!(column.get(NodeIdx(2)), Some(&"c"));
-    assert_eq!(column.get(NodeIdx(3)), None, "one past the last entry");
-    assert!(
-        NodeColumn::<&str>::default()
-            .iter_indexed()
-            .next()
-            .is_none()
-    );
 }
 
 /// Word-granular indexing would silently accept an index landing in the last
