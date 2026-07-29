@@ -114,7 +114,7 @@ pub(super) enum InputTag {
 /// ([`DigestPod`]), and variable-length data is length-prefixed
 /// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
 #[derive(Clone, Debug)]
-pub(crate) struct DigestHasher(Hasher);
+pub(super) struct DigestHasher(Hasher);
 
 impl DigestHasher {
     pub(super) fn new() -> Self {
@@ -160,70 +160,72 @@ impl DigestHasher {
     pub(super) fn finish(&self) -> Digest {
         Digest(self.0.finalize().into())
     }
+
+    /// Fold one constant's *own value*: a discriminant tag plus a
+    /// length-prefixed payload (so `"ab"`+`"c"` can't collide with
+    /// `"a"`+`"bc"`).
+    ///
+    /// Filesystem-path values fold only their authored path string(s) here — the
+    /// external files/dirs they point at are a separate concern, folded by the
+    /// caller through [`ResourceStamper::hash_fs_paths`], so this stays a pure,
+    /// no-I/O structural fold.
+    pub(super) fn write_static(&mut self, value: &StaticValue) {
+        match value {
+            StaticValue::Null => {
+                self.write_bytes(&[0]);
+            }
+            StaticValue::Float(v) => {
+                self.write_bytes(&[1]).write_pod(*v);
+            }
+            StaticValue::Int(v) => {
+                self.write_bytes(&[2]).write_pod(*v);
+            }
+            StaticValue::Bool(v) => {
+                self.write_bytes(&[3]).write_pod(*v);
+            }
+            StaticValue::String(s) => {
+                self.write_bytes(&[4]).write_str(s);
+            }
+            StaticValue::FsPath(path) => {
+                self.write_bytes(&[5]).write_str(path);
+            }
+            StaticValue::FsPaths(paths) => {
+                self.write_bytes(&[6]).write_pod(paths.len() as u64);
+                for path in paths {
+                    self.write_str(path);
+                }
+            }
+            StaticValue::Enum(name) => {
+                self.write_bytes(&[7]).write_str(name);
+            }
+        }
+    }
+
+    /// Fold a declared port type: a discriminant tag, plus the nominal type id
+    /// for `Custom`/`Enum` (so two distinct custom types don't collide). The
+    /// `FsPath` config is identity-irrelevant to the cached bytes, so only the
+    /// tag is hashed.
+    pub(super) fn write_data_type(&mut self, ty: &DataType) {
+        let tag: u8 = match ty {
+            DataType::Any => 0,
+            DataType::Float => 1,
+            DataType::Int => 2,
+            DataType::Bool => 3,
+            DataType::String => 4,
+            DataType::FsPath(_) => 5,
+            DataType::Custom(_) => 6,
+            DataType::Enum(_) => 7,
+        };
+        self.write_bytes(&[tag]);
+        if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
+            self.write_pod(type_id.as_u128());
+        }
+    }
 }
 
 impl Default for DigestHasher {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Fold one constant's *own value* into `hasher`: a discriminant tag plus
-/// length-prefixed payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`).
-/// Filesystem-path values fold only their authored path string(s) here — the external
-/// files/dirs they point at are a separate concern, folded by the caller through
-/// [`ResourceStamper::hash_fs_paths`], so this stays a pure, no-I/O structural fold.
-/// A free helper like [`hash_data_type`].
-pub(super) fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
-    match value {
-        StaticValue::Null => {
-            hasher.write_bytes(&[0]);
-        }
-        StaticValue::Float(v) => {
-            hasher.write_bytes(&[1]).write_pod(*v);
-        }
-        StaticValue::Int(v) => {
-            hasher.write_bytes(&[2]).write_pod(*v);
-        }
-        StaticValue::Bool(v) => {
-            hasher.write_bytes(&[3]).write_pod(*v);
-        }
-        StaticValue::String(s) => {
-            hasher.write_bytes(&[4]).write_str(s);
-        }
-        StaticValue::FsPath(path) => {
-            hasher.write_bytes(&[5]).write_str(path);
-        }
-        StaticValue::FsPaths(paths) => {
-            hasher.write_bytes(&[6]).write_pod(paths.len() as u64);
-            for path in paths {
-                hasher.write_str(path);
-            }
-        }
-        StaticValue::Enum(name) => {
-            hasher.write_bytes(&[7]).write_str(name);
-        }
-    }
-}
-
-/// Fold a declared port type into `hasher`: a discriminant tag, plus the nominal
-/// type id for `Custom`/`Enum` (so two distinct custom types don't collide). The
-/// `FsPath` config is identity-irrelevant to the cached bytes, so only the tag is
-/// hashed.
-pub(super) fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
-    let tag: u8 = match ty {
-        DataType::Any => 0,
-        DataType::Float => 1,
-        DataType::Int => 2,
-        DataType::Bool => 3,
-        DataType::String => 4,
-        DataType::FsPath(_) => 5,
-        DataType::Custom(_) => 6,
-        DataType::Enum(_) => 7,
-    };
-    hasher.write_bytes(&[tag]);
-    if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
-        hasher.write_pod(type_id.as_u128());
     }
 }
 
