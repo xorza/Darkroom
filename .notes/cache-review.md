@@ -43,40 +43,6 @@ into a local (an atomic bump per node per run), or the slots move behind an inne
 struct the program field can be borrowed alongside. Pick that before touching
 signatures.
 
-## 2. `RuntimeCache` ↔ `StampJob`: buffers owned by one type, driven by another
-
-`StampJob` was split off so the walk can cross to the blocking pool, but its
-queue and result buffers are `pub(super)` and manipulated from the cache, so
-neither type owns the pass end to end.
-
-- [ ] `resource/mod.rs:113,116` — `requests` and `stamped` are `pub(super)`; the
-      cache inserts into `requests` (`runtime/mod.rs:462`), clears it (`:122,418`),
-      tests emptiness (`:477`), and drains `stamped` (`:488,683`). Three methods
-      on `StampJob` — request, is-queued, drain-stamped — close it, and the fields
-      go private.
-
-## 3. `RuntimeCache` ↔ `DiskStore`: boundaries
-
-- [ ] `runtime/mod.rs:55` — `pub(crate) disk_store` is public and the worker
-      replaces it wholesale (`worker/task.rs:174`). The swap happens in
-      `apply_intent`, between runs, so no verdict is actually in flight — but the
-      cache cannot see it happen, and a setter costs nothing. Tests assign the
-      field directly in ~10 places and would need a gated helper.
-- [ ] `disk_store/mod.rs:68` — `DiskStore::new` takes `&Library` to call
-      `library.codecs()` once, making the cache subtree depend on the library
-      registry for a single extraction. Take the `Codecs`.
-
-## 4. `OutputSnapshot`: the buffer is public to everyone holding one
-
-- [ ] `slot.rs:10` — `OutputSnapshot::values` is `pub(crate)`, read directly at
-      `disk_store/mod.rs:204,233` (the whole slice, into `covers` and
-      `format::write`) and `runtime/mod.rs:367` (one indexed port, in
-      `hash_bound_fs_path`). One level below the slot field that just went
-      private, and the same shape of leak — but read-only: nothing outside
-      `slot.rs` writes through it, so an accessor closes it and no invariant is
-      at risk meanwhile. Lowest-value item here; worth folding into whichever
-      change next touches the disk store.
-
 ---
 
 ## Settled — do not re-open
@@ -107,6 +73,11 @@ mistake; the doc comment beside each in the source is the real record.
   undeduplicated per-node column in one pass — one walk, two outputs, and the
   `&mut NodeColumn` out-parameter is dense-alignment plus allocation reuse.
   `ram_seen` is that pass's reused scratch, like `stamp_job`'s buffers.
+- `DiskStore::new` taking `&Library` rather than the `Codecs` it extracts. It is
+  a **public** constructor and `Codecs` is `pub(crate)`, so "take the codecs"
+  means publishing `Codecs` and `Library::codecs()` — trading one internal
+  dependency for a wider API, and making every host do the extraction itself.
+  A host holds a `Library`; that is the right thing to hand it.
 - `node_digest` living on the cache while `digest/` holds only the encoding: the
   fold reads the slots, the producer digests, and the `fs_paths` memo — all three
   are the cache's. Recorded at `runtime/mod.rs:309-311`.

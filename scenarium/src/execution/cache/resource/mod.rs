@@ -110,10 +110,10 @@ pub(crate) enum StampError {
 pub(super) struct StampJob {
     /// Paths queued for this pass, deduplicated — a path fifty nodes read
     /// is stamped once.
-    pub(super) requests: HashSet<String>,
+    requests: HashSet<String>,
     /// What the pass identified, drained into the cache's memo when the
     /// job comes home.
-    pub(super) stamped: Vec<(String, FsPathId)>,
+    stamped: Vec<(String, FsPathId)>,
     /// Files anywhere beneath the directory being walked, relative to it,
     /// kept as **raw bytes**.
     ///
@@ -127,6 +127,32 @@ pub(super) struct StampJob {
 }
 
 impl StampJob {
+    /// Queue `path` for the next pass, unless it is already queued.
+    pub(super) fn request(&mut self, path: &str) {
+        if !self.requests.contains(path) {
+            self.requests.insert(path.to_string());
+        }
+    }
+
+    /// Whether [`run`](Self::run) has anything to do — the check that keeps an
+    /// all-const run off the blocking pool entirely.
+    pub(super) fn is_queued(&self) -> bool {
+        !self.requests.is_empty()
+    }
+
+    /// Drop the queue without walking it, for a cache that is starting a fresh
+    /// run or being emptied. The capacity stays.
+    pub(super) fn clear_queue(&mut self) {
+        self.requests.clear();
+    }
+
+    /// Hand over what the last pass identified, leaving the buffer empty for the
+    /// next one. The results live here only between the walk and the cache's
+    /// memo; nothing reads them from the job afterwards.
+    pub(super) fn drain_stamped(&mut self) -> impl Iterator<Item = (String, FsPathId)> + '_ {
+        self.stamped.drain(..)
+    }
+
     /// Stamp every queued path, draining the queue. The first path with no
     /// determinate identity stops the pass and takes its error with it —
     /// a node whose inputs cannot be identified has no sound cache key,

@@ -52,7 +52,11 @@ pub(crate) struct RuntimeCache {
     /// may push, drain, or resize it. Individual slots are reached by
     /// [`Index<NodeIdx>`], the same way a node is reached on [`Program`].
     slots: NodeColumn<RuntimeSlot>,
-    pub(crate) disk_store: DiskStore,
+    /// Private for the same reason as the slots: the worker replaces it
+    /// wholesale between runs, and going through
+    /// [`set_disk_store`](Self::set_disk_store) is what makes that a thing the
+    /// cache is told about rather than one done to it.
+    disk_store: DiskStore,
     /// What each path this run reads *was*, identified once. Held beside the
     /// slots rather than inside the walker that fills it, because the digest
     /// fold reads both together — a path's identity, and the producer slot
@@ -115,11 +119,19 @@ impl RuntimeCache {
         self.slots.iter()
     }
 
+    /// Attach the store this cache persists to and serves from. Called between
+    /// runs, when a document gains or changes its cache root: every reuse
+    /// verdict already given was answered from the *previous* store, so this
+    /// must not land mid-run.
+    pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
+        self.disk_store = disk_store;
+    }
+
     pub(crate) fn clear(&mut self) {
         self.aligned_to = Arc::default();
         self.slots.clear();
         self.fs_paths.clear();
-        self.stamp_job.requests.clear();
+        self.stamp_job.clear_queue();
     }
 
     pub(crate) async fn evict(
@@ -364,7 +376,7 @@ impl RuntimeCache {
         // cannot deliver a reference into this key.
         let delivered = self.slots[addr.node_idx]
             .current_snapshot()?
-            .values
+            .values()
             .get(addr.port_idx as usize)?;
         match delivered.as_fs_paths() {
             Some(paths) => {
@@ -415,7 +427,7 @@ impl RuntimeCache {
     ) {
         // A fresh run identifies afresh.
         self.fs_paths.clear();
-        self.stamp_job.requests.clear();
+        self.stamp_job.clear_queue();
         let _ = self.identify(program, executing, cancel).await;
     }
 
@@ -459,7 +471,7 @@ impl RuntimeCache {
             let Some(paths) = paths else { continue };
             for path in paths {
                 if !self.fs_paths.contains_key(path) {
-                    self.stamp_job.requests.insert(path.clone());
+                    self.stamp_job.request(path);
                 }
             }
         }
@@ -474,7 +486,7 @@ impl RuntimeCache {
     /// run that hits one unreadable path from re-walking every directory it had
     /// already identified.
     async fn walk_queued(&mut self, cancel: CancelToken) -> Result<(), StampError> {
-        if self.stamp_job.requests.is_empty() {
+        if !self.stamp_job.is_queued() {
             return Ok(());
         }
         let mut job = std::mem::take(&mut self.stamp_job);
@@ -485,7 +497,7 @@ impl RuntimeCache {
         .await
         .expect("resource stamping task panicked");
         self.stamp_job = job;
-        self.fs_paths.extend(self.stamp_job.stamped.drain(..));
+        self.fs_paths.extend(self.stamp_job.drain_stamped());
         resolved
     }
 
@@ -662,6 +674,7 @@ pub(crate) mod internals {
     use common::CancelToken;
 
     use crate::execution::cache::digest::Digest;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::resource::{FsPathId, StampError};
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
@@ -669,6 +682,12 @@ pub(crate) mod internals {
     use crate::execution::program::index::NodeIdx;
 
     impl RuntimeCache {
+        /// The attached store, for the tests that read its I/O counters or
+        /// corrupt a blob behind the cache's back.
+        pub(crate) fn disk_store(&self) -> &DiskStore {
+            &self.disk_store
+        }
+
         /// [`RuntimeCache::identify`] on this thread — the same queue-then-walk
         /// pass, without the blocking pool a test has no runtime to reach. A
         /// path that will not stamp simply does not land, exactly as in the
@@ -680,7 +699,7 @@ pub(crate) mod internals {
 
         pub(crate) fn stamp_queued(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
             let resolved = self.stamp_job.run(cancel);
-            self.fs_paths.extend(self.stamp_job.stamped.drain(..));
+            self.fs_paths.extend(self.stamp_job.drain_stamped());
             resolved
         }
 
