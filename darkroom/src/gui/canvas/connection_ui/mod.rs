@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{CurveBrush, InternedStr, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
-use scenarium::{Binding, InputPort, closes_data_cycle};
+use scenarium::{Binding, InputPort};
 
 use crate::core::document::{BoundarySide, PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
@@ -432,17 +432,11 @@ fn accepts_wire(graph: GraphScene<'_>, start: PortRef, port: PortRef) -> bool {
     // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
     // refuses to commit one, so the wire must never latch. `start.kind` fixes
     // which side is the producer (output) and which the consumer (input).
-    // The pane's connection slice is that graph's edge mirror, fed to the
-    // same scenarium check the intent layer uses.
     let (producer, consumer) = match start.kind {
         PortKind::Output => (start.node_id, port.node_id),
         PortKind::Input => (port.node_id, start.node_id),
     };
-    let edges = graph
-        .connections()
-        .iter()
-        .map(|c| (c.src.node_id, c.tgt.node_id));
-    compatible && !closes_data_cycle(edges, producer, consumer)
+    compatible && !graph.closes_data_cycle(producer, consumer)
 }
 
 /// "Set const" gesture: an input-port drag released over its own
