@@ -71,7 +71,7 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Execution identities and compact authoring attribution |
 | `execution/program/` | Private flat runtime program and typed packed pools |
-| `execution/schedule/` | The per-run `RunSchedule` and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
+| `execution/schedule/` | The per-run `RunSchedule`, the `Scheduled`/`Resolved` phase handles, and every pass over it: the structural plan, the cache-aware sweep (liveness, reuse, demand, reader counts), and validation |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
 | `execution/cache/` | The whole caching subsystem: cross-run values and output coverage, the content digests keying them, the filesystem identities those fold, and the on-disk blob store |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
@@ -95,7 +95,11 @@ selects exact execution-node roots, treats those seeds as one-run disable
 overrides, orders dependencies before consumers, and detects missing inputs.
 Resolution refines that same
 `RunSchedule` in place: it stamps content digests, then derives cache-aware
-liveness, exact `OutputDemand`, and binding-reader counts together. Execution invokes the surviving nodes in plan
+liveness, exact `OutputDemand`, and binding-reader counts together. The phases
+hand each other typed handles rather than the buffer — `plan` returns a
+`Scheduled`, `resolve` consumes it and returns a `Resolved`, and the executor
+accepts only the latter — so phase order and program/schedule alignment are
+compile-time facts rather than sequencing the engine has to get right. Execution invokes the surviving nodes in plan
 order. Event-loop bootstrap marks subscribed event owners as event sources,
 forces their initialization lambdas to run instead of reusing output caches,
 and prepares triggers only for sources that complete successfully. The worker

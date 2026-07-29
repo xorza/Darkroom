@@ -97,25 +97,23 @@ impl ExecutionEngine {
         // Phase 2: schedule into the reusable buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
-        self.planner
+        //
+        // Each phase below consumes the previous one's handle, so the order these three
+        // run in is the only order that type-checks.
+        let scheduled = self
+            .planner
             .plan(&self.compiled.program, &seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
         self.cache
-            .prepare(
-                &self.compiled.program,
-                self.schedule.executing(),
-                cancel.clone(),
-            )
+            .prepare(scheduled.program(), scheduled.executing(), cancel.clone())
             .await;
 
         // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
         // disposition, exact output demand, and live readers together. The resolved run is
         // authoritative: a cache-hit or blocked consumer contributes no upstream demand.
-        self.schedule
-            .resolve(&self.compiled.program, &mut self.cache)
-            .await;
+        let resolved = scheduled.resolve(&mut self.cache).await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -123,8 +121,7 @@ impl ExecutionEngine {
         self.executor
             .run(
                 RunRequest {
-                    program: &self.compiled.program,
-                    schedule: &self.schedule,
+                    run: resolved,
                     cache: &mut self.cache,
                     reporter,
                     cancel,
@@ -275,9 +272,8 @@ mod internals {
                 e_node_ids: Vec::new(),
             };
             self.planner
-                .plan(&self.compiled.program, &seeds, &mut self.schedule)?;
-            self.schedule
-                .resolve(&self.compiled.program, &mut self.cache)
+                .plan(&self.compiled.program, &seeds, &mut self.schedule)?
+                .resolve(&mut self.cache)
                 .await;
             Ok(())
         }

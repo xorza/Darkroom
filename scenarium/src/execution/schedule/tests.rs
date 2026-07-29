@@ -488,7 +488,7 @@ mod resolving {
     use crate::execution::program::{
         ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
-    use crate::execution::schedule::{NodeState, RunSchedule};
+    use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
     use crate::node::definition::{FuncBehavior, FuncId};
     use crate::node::lambda::{FuncLambda, OutputDemand};
     use crate::{DynamicValue, StaticValue, async_lambda};
@@ -573,7 +573,9 @@ mod resolving {
                     produced_under: Some(digest),
                 };
             }
-            schedule.resolve(&self.program, &mut cache).await;
+            Scheduled::assume(&self.program, &mut schedule)
+                .resolve(&mut cache)
+                .await;
             schedule
         }
     }
