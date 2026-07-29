@@ -8,9 +8,8 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::ExecutionBinding;
 use crate::execution::program::ExecutionNode;
 use crate::execution::report::internals::DiscardedReports;
-use crate::graph::{
-    Binding, CacheMode, Graph, GraphDef, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
-};
+use crate::graph::address::{InputPort, NodeId, OutputPort};
+use crate::graph::{Binding, CacheMode, Graph, GraphDef, Node, NodeKind, NodeSearch};
 use crate::library::Library;
 use crate::node::definition::FuncId;
 use crate::node::definition::{Func, FuncBehavior};
@@ -3279,7 +3278,8 @@ mod behavior {
 
         use crate::async_lambda;
         use crate::execution::outcome::NodeError;
-        use crate::graph::{Graph, NodeId};
+        use crate::graph::Graph;
+        use crate::graph::address::NodeId;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
 
@@ -3374,7 +3374,8 @@ mod behavior {
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
         use crate::execution::outcome::NodeError;
-        use crate::graph::{Graph, NodeId};
+        use crate::graph::Graph;
+        use crate::graph::address::NodeId;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncOutput};
         let library: Library = [

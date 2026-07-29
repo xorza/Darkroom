@@ -70,7 +70,7 @@ pub struct DefectMap {
     /// Flat indices of hot pixels (above `median + kσ` in the background-subtracted dark),
     /// ascending.
     pub hot_indices: Vec<usize>,
-    /// Flat indices of cold/dead pixels (below [`DEAD_PIXEL_FRACTION`] of their same-color
+    /// Flat indices of cold/dead pixels (below `DEAD_PIXEL_FRACTION` of their same-color
     /// local-neighbourhood median in the flat), ascending.
     pub cold_indices: Vec<usize>,
     /// Sensor dimensions the indices apply to — `None` until the first `detect_*` call records them.
@@ -105,7 +105,7 @@ impl DefectMap {
         Ok(self)
     }
 
-    /// Detect **cold/dead** pixels from a master flat — those reading below [`DEAD_PIXEL_FRACTION`]
+    /// Detect **cold/dead** pixels from a master flat — those reading below `DEAD_PIXEL_FRACTION`
     /// of their same-color local-neighbourhood median — and store them. The local reference makes
     /// this robust to vignetting and dust, where a global cut cannot be.
     ///

@@ -114,7 +114,7 @@ impl Scnr {
         }
     }
 
-    /// Additive Mask with blend `amount` ∈ [0,1] (0 = no change, 1 = full strength): attenuates
+    /// Additive Mask with blend `amount` ∈ `[0,1]` (0 = no change, 1 = full strength): attenuates
     /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
     /// `G' = G·(1−amount)·(1−m) + m·G`.
     pub fn additive_mask(amount: f32) -> Self {

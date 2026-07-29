@@ -22,9 +22,10 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, PendingBind,
     PendingSubscription, Program,
 };
+use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies, declared_accepts_const};
-use crate::graph::{Binding, Graph, GraphDef, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
+use crate::graph::{Binding, Graph, GraphDef, NodeKind, NodeSearch};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncInput};
 use crate::node::special::SpecialNode;

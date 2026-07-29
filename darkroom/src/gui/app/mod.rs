@@ -32,11 +32,11 @@ pub(crate) struct AppContext<'a> {
     /// latest published values read by preview cards and viewers.
     pub(crate) run_state: &'a RunState,
     /// The last failed action's message (the engine's
-    /// [`StatusLog::error`](crate::core::status::StatusLog) slot), shown in
+    /// `StatusLog::error` slot), shown in
     /// the status bar until a subsequent success clears it.
     pub(crate) status_error: Option<&'a str>,
     /// This process's resident bytes (see
-    /// [`ProcessMemory`](crate::gui::process_memory::ProcessMemory)),
+    /// [`ProcessMemory`]),
     /// rendered as the status bar's `MEM` clause.
     pub(crate) process_memory: u64,
 }

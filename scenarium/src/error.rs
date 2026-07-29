@@ -1,8 +1,8 @@
 use common::DeserializeError;
 use thiserror::Error;
 
+use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::interface::GraphId;
-use crate::graph::{InputPort, NodeId, OutputPort};
 use crate::node::definition::FuncId;
 
 #[derive(Debug, Error)]

@@ -195,7 +195,8 @@ struct NestedFixture {
 
 fn nested_fixture() -> NestedFixture {
     use crate::data::type_system::DataType;
-    use crate::graph::{Binding, InputPort, Node, NodeKind};
+    use crate::graph::address::InputPort;
+    use crate::graph::{Binding, Node, NodeKind};
     use crate::node::definition::FuncOutput;
 
     let library = test_func_lib(TestFuncHooks::default());
@@ -310,7 +311,8 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
 #[test]
 fn run_targets_seed_an_exposed_producer_that_an_interior_node_also_reads() {
     use crate::data::type_system::DataType;
-    use crate::graph::{Binding, InputPort, Node, NodeKind};
+    use crate::graph::address::InputPort;
+    use crate::graph::{Binding, Node, NodeKind};
     use crate::node::definition::FuncOutput;
 
     let library = test_func_lib(TestFuncHooks::default());
@@ -393,7 +395,8 @@ fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     // there, it doesn't assume composites are special.
     let plain = {
         use crate::data::type_system::DataType;
-        use crate::graph::{Binding, InputPort, Node, NodeKind};
+        use crate::graph::address::InputPort;
+        use crate::graph::{Binding, Node, NodeKind};
         use crate::node::definition::FuncOutput;
 
         let mut nested = GraphDef::new("Plain").output(FuncOutput::new("out", DataType::Int));

@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::NodeId;
+use crate::graph::address::NodeId;
 
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
@@ -93,7 +93,7 @@ pub enum ExecutionIdentityError {
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
-    use crate::graph::NodeId;
+    use crate::graph::address::NodeId;
 
     impl ExecutionNodeId {
         pub fn unique() -> Self {

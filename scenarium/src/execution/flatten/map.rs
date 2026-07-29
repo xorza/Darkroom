@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
-use crate::graph::NodeId;
+use crate::graph::address::NodeId;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FlattenMap {
@@ -137,7 +137,7 @@ impl FlattenMap {
 pub(crate) mod internals {
     use crate::execution::flatten::map::FlattenMap;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::graph::NodeId;
+    use crate::graph::address::NodeId;
 
     /// The one way to hand-build a [`FlattenMap`] outside the walk —
     /// including for the [`CompiledGraphBuilder`](crate::CompiledGraphBuilder)
@@ -184,7 +184,7 @@ pub(crate) mod internals {
 mod tests {
     use crate::execution::flatten::map::FlattenMap;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::graph::NodeId;
+    use crate::graph::address::NodeId;
 
     #[test]
     fn attributes_nested_execution_nodes_without_materializing_paths() {

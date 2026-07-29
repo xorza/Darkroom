@@ -5,8 +5,9 @@ use common::is_debug;
 use hashbrown::HashSet;
 
 use crate::error::GraphValidationError;
+use crate::graph::address::NodeId;
 use crate::graph::interface::{GraphId, GraphLink};
-use crate::graph::{Binding, Graph, GraphDef, NodeId, NodeKind};
+use crate::graph::{Binding, Graph, GraphDef, NodeKind};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
 use crate::{DataType, FsPathMode, StaticValue};

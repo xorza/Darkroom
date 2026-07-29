@@ -92,7 +92,7 @@ impl PreviewStore {
     /// Store one preview node's freshly published value, replacing whatever it
     /// was showing.
     ///
-    /// No retention filter on the way in, unlike [`Self::ingest`]: a value
+    /// No retention filter on the way in, unlike [`Self::ingest_preview`]: a value
     /// arrives keyed by the node that published it, and a node that published
     /// exists. `reconcile` still drops it once that stops being true.
     pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch, Subscription};
+use crate::graph::address::{InputPort, NodeId, Subscription};
+use crate::graph::{Binding, Graph, Node, NodeSearch};
 
 fn binding_touches(port: InputPort, binding: &Binding, node_id: NodeId) -> bool {
     port.node_id == node_id || matches!(binding, Binding::Bind(src) if src.node_id == node_id)

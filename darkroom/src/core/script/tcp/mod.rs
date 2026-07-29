@@ -95,7 +95,7 @@ impl Default for TcpTimeouts {
 }
 
 /// TCP script transport. Constructed via [`TcpTransport::bind`] so the
-/// caller can inspect [`local_addr`] (useful when `port = 0`) before the
+/// caller can inspect [`Self::local_addr`] (useful when `port = 0`) before the
 /// accept loop starts.
 #[derive(Debug)]
 pub(super) struct TcpTransport {

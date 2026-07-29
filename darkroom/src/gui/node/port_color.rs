@@ -10,7 +10,7 @@
 //! falls back to the positional input/output port colors from the theme.
 //!
 //! The hue rosters themselves live on the theme
-//! ([`TypeColors`](crate::gui::theme::TypeColors), serialized like every
+//! ([`TypeColors`], serialized like every
 //! other swatch); this module owns only the type → slot mapping and the
 //! hover emphasis.
 

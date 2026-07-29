@@ -13,9 +13,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::graph::address::{InputPort, NodeId, OutputPort};
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::wiring::BindingEntry;
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, OutputPort};
+use crate::graph::{Binding, Graph, NodeKind};
 use crate::node::definition::{FuncInput, FuncOutput};
 
 /// A subgraph *input* removed from the interface at `idx`: its spec, the

@@ -12,7 +12,8 @@ use crate::execution::identity::{ExecutionIdentityError, ExecutionInputPort, Exe
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::ram::NodeRamUsage;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::{Binding, Graph, GraphDef, InputPort, Node, NodeId, NodeSearch};
+use crate::graph::address::{InputPort, NodeId};
+use crate::graph::{Binding, Graph, GraphDef, Node, NodeSearch};
 use crate::library::Library;
 use crate::node::event::EventLambda;
 use crate::node::lambda::{FuncLambda, InvokeError};

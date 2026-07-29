@@ -46,7 +46,7 @@ and running Tarjan over it — see `.tmp/modules/analyze.py`.
 |---|---|---|---|
 | common | 8 | 8 | — |
 | lens | 22 | 40 | — |
-| scenarium | 58 | 292 | **24** |
+| scenarium | 58 | 292 | **24** → **11** (see below) |
 | lumos | 133 | 484 | **15** |
 | darkroom | 103 | 452 | **43** |
 
@@ -66,8 +66,16 @@ For every intra-SCC edge, how many modules leave the SCC if it is removed:
 
 Both top edges are single narrow type imports. `LogEntry`/`LogLevel` are logging
 primitives sitting in `execution::outcome`; `NodeRamUsage` is a leaf value type sitting
-in `execution::cache::runtime`. Relocating those two types to leaf modules takes the
-SCC from 24 → 9 without touching any logic.
+in `execution::cache::runtime`.
+
+**Done** — extracted to `execution/log.rs` and `execution/ram.rs`. Scenarium's SCC went
+24 → 16; the whole `execution::cache::*` + `program` + `outcome` + `error` + `event`
+cluster left the knot. A second, isolated 2-cycle (`program` ↔ `program::index`) is now
+visible where it was previously buried inside the 24. Full workspace suite green.
+
+The predicted −9/−6 assumed deleting the edges outright; the replacement modules import
+`execution::identity`, which still reaches `graph`, so the realised drop is 8 rather
+than 15. That residual is the next item.
 
 **darkroom** (43-module SCC — essentially all of `gui`)
 
@@ -109,11 +117,56 @@ Ranked by fan-in × fan-out.
 `core::document` at 47 inbound is the single most concentrated dependency in the
 workspace.
 
+## Scenarium after the relocations
+
+60 modules, 294 edges. Two cycles: **16** and **2**.
+
+Re-scored leverage on the 16:
+
+| gain | edge | actual import |
+|---|---|---|
+| −5 | `execution::identity` → `graph` | `identity.rs:16` — only `NodeId` |
+| −2 | `graph` → `node::special` | `graph/mod.rs:16` — only `SpecialNode` |
+| −1 | each of nine others | parent↔child `use` pairs |
+
+### Extract `graph::address` — done
+
+`graph/mod.rs` mixed two unrelated things: **address primitives** (`NodeId`, `OutputPort`,
+`InputPort`, `Subscription` — pure value types) and **the authoring model** (`Graph`,
+`GraphDef`, `Node`, `NodeKind`, `NodeRef`, `NodeSearch`, `CacheMode`). Everything reaching
+into `graph` from the execution side wanted only the first group.
+
+The four moved to `graph/address.rs`, a leaf with **zero outgoing edges** and 17 importers.
+20 files repointed (no re-export shim, per the one-canonical-path rule) plus `lib.rs`.
+
+**SCC 16 → 11.** `error` ↔ `graph` and `graph` ↔ `graph::interface` both gone. The knot is
+now purely authoring — no `execution::*`, no `runtime::context`. `graph`'s fan-in dropped
+19 → 12.
+
+### Where scenarium stands
+
+61 modules, 304 edges (edge count rises when a module splits; the cycle is the metric).
+
+Largest SCC is 11: `graph` + `graph::{boundary,clone,interface,query,wiring}` + `library` +
+`node::{definition,special}` + `error` + `elements::run_sinks`. Seven surviving 2-cycles,
+five of them `graph` ↔ its own children.
+
+Under the crate's no-`super::` rule those parent/child `use` pairs are close to structural,
+so 11 is near the floor without splitting `Graph` itself. The two non-structural ones left
+are `graph` ↔ `library` and `graph` ↔ `node::definition` — both real coupling
+(`node::definition` has 20 inbound), but untangling them is a design question, not a move.
+
+### Minor: `program` ↔ `program::index`
+
+One import: `execution/program/index/mod.rs:10` takes `OutputRange` (a
+`PoolRange<ExecutionOutput>` alias declared at `program/mod.rs:69`) for two method
+signatures. Isolated and low value — noted for completeness.
+
 ## Suggested order
 
-1. Move `LogEntry`/`LogLevel` and `NodeRamUsage` out of their current modules —
-   scenarium SCC 24 → 9, mechanical.
-2. Move `impl ThemeChoice` into `core::theme_pref` — removes darkroom's `core` → `gui` edge.
+1. ~~Move `LogEntry`/`LogLevel` and `NodeRamUsage` out of their current modules.~~ **Done.**
+2. ~~Extract `graph::address`.~~ **Done** — scenarium 24 → 11 overall.
+3. Move `impl ThemeChoice` into `core::theme_pref` — removes darkroom's `core` → `gui` edge.
 3. Move `MainWindow` out of `gui::main_window` or invert the `editor` dependency —
    darkroom SCC 43 → 35.
 4. Fix `lumos` `io` → `stacking` inversion at `io/image/linear.rs:18`.

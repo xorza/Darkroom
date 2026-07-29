@@ -54,7 +54,7 @@ fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppComm
 /// Top of darkroom's UI tree: the chrome (menu bar, status bar) around
 /// the dock, plus the per-view state the dock's panes render into. The
 /// pane *machinery* — strips, splits, drag-docking — is
-/// [`DockUi`](crate::gui::dock::DockUi)'s; this file only says what
+/// [`DockUi`]'s; this file only says what
 /// each tab kind looks like (the `content` closure in [`Self::frame`]).
 /// Adding a new pane *kind* is a new arm there.
 #[derive(Default, Debug)]

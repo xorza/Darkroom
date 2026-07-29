@@ -12,7 +12,7 @@
 //! [`parse_any`]).
 //!
 //! Numeric fields (`Int`/`Float`) render as an editable `DragValue`
-//! ([`numeric_edit`]): drag horizontally to scrub, click to type an exact
+//! (a `DragValue` field): drag horizontally to scrub, click to type an exact
 //! value. `Any` stays a plain smart text field — its editing reinterprets
 //! the literal's kind, which the numeric-only `DragValue` can't do.
 //!

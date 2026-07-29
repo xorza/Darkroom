@@ -176,7 +176,7 @@ impl InboundSender {
 /// Cap on the `print(...)` output one request accumulates. This *is* the
 /// reply's `print` field, so it bounds the outbound frame as well as host
 /// memory; past it, output is dropped and the reply says so. Generous for
-/// diagnostics, comfortably inside [`tcp::MAX_FRAME_BYTES`].
+/// diagnostics, comfortably inside `tcp::MAX_FRAME_BYTES`.
 const MAX_PRINT_BYTES: usize = 64 * 1024;
 
 /// Cap on what one request may queue on the host's inbound channel —
