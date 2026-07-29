@@ -3,12 +3,17 @@
 //!
 //! A node's output is a pure function of its function identity and version, its resolved input
 //! values, the outputs of its upstream producers, and the prepared identities of
-//! external resources it reads. [`node_digest`] folds that into a 256-bit
+//! external resources it reads.
+//! [`RuntimeCache::node_digest`](crate::execution::cache::runtime::RuntimeCache::node_digest)
+//! folds that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
-//! needed). External identities come from one memoized per-run
-//! [`ResourceStamper`](crate::execution::cache::resource::ResourceStamper), keeping this fold
-//! I/O-free. Equal digests ⇒ identical computation, so the digest is at once the cache key
+//! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
+//! versioning them; the fold itself is a cache method, since all three things it reads
+//! (slots, the path memo, the program) are the cache's. External identities come from that
+//! memo, filled once per run by a [`StampJob`](crate::execution::cache::resource::StampJob),
+//! keeping this fold I/O-free.
+//! Equal digests ⇒ identical computation, so the digest is at once the cache key
 //! and the invalidation signal: change anything upstream and every downstream digest
 //! changes — on this machine or any other. See `README.md` Part B.
 //!

@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use common::CancelToken;
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
-use crate::execution::cache::resource::{
-    FileId, FsPathId, ResourceStamper, StampJob, epoch_offset_ns,
-};
+use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeState};
@@ -71,10 +69,10 @@ fn directory_identity_tracks_entry_changes() {
         let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
         // The whole pass fails with it, rather than dropping the path and
         // leaving the node silently uncached forever.
-        let mut stamps = ResourceStamper::default();
-        stamps.job.requests.insert(path.clone());
-        stamps.job.requests.insert("never-queued-twice".to_string());
-        let resolved = stamps.stamp_queued(&CancelToken::never());
+        let mut job = StampJob::default();
+        job.requests.insert(path.clone());
+        job.requests.insert("never-queued-twice".to_string());
+        let resolved = job.run(&CancelToken::never());
         std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
 
         assert!(
@@ -85,12 +83,14 @@ fn directory_identity_tracks_entry_changes() {
             resolved.is_err(),
             "one unstampable path must fail the pass: {resolved:?}",
         );
-        assert!(stamps.fs_paths.is_empty(), "and stamp nothing");
+        // The cache's memo receives exactly what the pass stamped, so an
+        // empty `stamped` is the same "identified nothing" one step earlier.
+        assert!(job.stamped.is_empty(), "and stamp nothing");
         // The pass drains as it walks, so a failure part-way leaves nothing
         // queued behind it — which is why queueing a node's paths never has
         // to clear the queue first.
         assert!(
-            stamps.job.requests.is_empty(),
+            job.requests.is_empty(),
             "a failed pass must still empty its queue, including paths it never reached",
         );
         assert_eq!(
