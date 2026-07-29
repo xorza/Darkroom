@@ -88,7 +88,7 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 
 ## Dependencies of note
 
-`wgpu` 29 (optional, metal/vulkan/dx12), `glam` 0.33 (`Affine2`/`Vec2`), `rayon` (parallel rows/pixels), `bytemuck` (Pod casts), `aligned-vec` (`AVec` 16-byte alignment), `atomic_refcell` (`ImageBuffer` interior mutability), `arc-swap` + `tokio` (optional, `Slot`/async GPU), `image` 0.25 + `tiff` 0.11 (I/O), `thiserror`, `strum`. Dev: `quickbench` (`../quickbench`, by relative path).
+`wgpu` 29 (optional, metal/vulkan/dx12), `glam` 0.33 (`Affine2`/`Vec2`), `rayon` (parallel rows/pixels), `bytemuck` (Pod casts), `atomic_refcell` (`ImageBuffer` interior mutability), `arc-swap` + `tokio` (optional, `Slot`/async GPU), `image` 0.25 + `tiff` 0.11 (I/O), `thiserror`, `strum`. Dev: `quickbench` (`../quickbench`, by relative path).
 
 ## Build & test
 
