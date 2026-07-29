@@ -84,7 +84,7 @@ pub(crate) struct ExecutionNode {
     pub behavior: FuncBehavior,
 
     /// The authoring node's cache mode, copied from
-    /// [`CacheMode`](crate::graph::CacheMode) at flatten. Its two bits
+    /// [`CacheMode`] at flatten. Its two bits
     /// ([`caches_in_ram`](crate::graph::CacheMode::caches_in_ram) /
     /// [`persists_to_disk`](crate::graph::CacheMode::persists_to_disk)) gate RAM retention
     /// and the disk load/store; disk is honored only when the node has a
