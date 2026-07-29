@@ -5,9 +5,9 @@ use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::{Id, JoinSet};
 
-use crate::execution::outcome::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
+use crate::execution::outcome::EventTrigger;
 use crate::worker::pause_gate::PauseGate;
 
 pub(crate) const EVENT_LOOP_BACKPRESSURE: usize = 10;
