@@ -11,8 +11,8 @@ use crate::node::definition::FuncId;
 /// panicked ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the
 /// `Result`-returning entry points on both sides of the worker boundary — the engine's
 /// plan/execute, and the worker operations around them, which is where the event-loop
-/// panic is caught. A *single node's* run failure is a [`RunError`]
-/// (collected into `ExecutionOutcome::node_errors`),
+/// panic is caught. A *single node's* run failure is a [`RunError`], carried by that
+/// node's [`NodeStatus`](crate::execution::outcome::NodeStatus) row,
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](crate::execution::compile::CompileError), produced on the host before anything
 /// reaches the engine — the phases can't be confused at the type level.
@@ -33,18 +33,19 @@ pub enum Error {
     },
 }
 
-/// A **single node's** run-time failure, collected per-node into
-/// `ExecutionOutcome::node_errors`. Distinct
-/// from [`Error`](enum@Error) (whole-operation failures): a `RunError` always concerns exactly one
-/// node, so it can't carry a compile/plan failure, and a caller reading `node_errors`
-/// can't mistake a setup failure for a node's outcome.
+/// A **single node's** run-time failure, reported in that node's one
+/// [`NodeStatus`](crate::execution::outcome::NodeStatus) row as
+/// [`NodeExecutionStatus::Errored`](crate::execution::outcome::NodeExecutionStatus::Errored).
+/// Distinct from [`Error`](enum@Error) (whole-operation failures): a `RunError` always
+/// concerns exactly one node, so it can't carry a compile/plan failure, and a caller
+/// reading a node's row can't mistake a setup failure for a node's outcome.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum RunError {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
     // The messages omit `func_id` (kept as machine-readable data): a `RunError`
-    // is already paired with its `ExecutionNodeId` in `node_errors`, so these surface to
-    // the editor attributed to the node — a raw id in the text would be noise.
+    // is already paired with its `ExecutionNodeId` in the node's status row, so these
+    // surface to the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
     /// ([`FuncLambda::None`](crate::node::lambda::FuncLambda)), so the node
     /// can't execute. A host/library configuration error, reported per-node

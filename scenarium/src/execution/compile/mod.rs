@@ -520,7 +520,7 @@ impl CompiledGraph {
 /// The compile entry point, owning reusable `Flattener` traversal scratch.
 /// Hosts keep one per compile site (e.g. darkroom's `Engine`); the produced
 /// [`CompiledGraph`] is always fresh and can be shared with the worker in an
-/// [`Arc`](std::sync::Arc).
+/// [`Arc`].
 #[derive(Debug, Default)]
 pub struct Compiler {
     flattener: Flattener,

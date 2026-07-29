@@ -1,7 +1,7 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
-//! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given a
-//! [`Resolved`](crate::execution::schedule::Resolved) run — the program and the schedule
+//! the [`RuntimeCache`]. Given a
+//! [`Resolved`] run — the program and the schedule
 //! swept against it — plus that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
