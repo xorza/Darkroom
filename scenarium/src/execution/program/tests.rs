@@ -7,7 +7,7 @@ use crate::execution::program::{
 /// Flatten's buffer as adoption receives it: three producers with two output
 /// ports each, then a consumer with two inputs. The *pools* are filled in emit
 /// order (ids high-first) while the nodes arrive sorted, which is the state
-/// [`Flattener::build`](crate::execution::flatten::Flattener::build) hands over
+/// [`Flattener::flatten`](crate::execution::flatten::Flattener::flatten) hands over
 /// — a node's index and its port ranges are therefore unrelated.
 fn emitted_nodes(program: &mut Program) -> Vec<(ExecutionNodeId, ExecutionNode)> {
     let mut e_nodes: Vec<_> = [3_u128, 1, 2]

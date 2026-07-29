@@ -49,10 +49,6 @@ impl<T> Pool<T> {
         let end = u32::try_from(self.values.len()).expect("program pool length exceeds u32");
         PoolRange::new(start, end - start)
     }
-
-    pub(crate) fn clear(&mut self) {
-        self.values.clear();
-    }
 }
 
 impl<T> Deref for Pool<T> {
@@ -118,14 +114,5 @@ mod tests {
         pool[0] = 15;
         pool[first][1] = 25;
         assert_eq!(&*pool, [15, 25, 30]);
-
-        let capacity = pool.values.capacity();
-        pool.clear();
-        assert!(pool.is_empty());
-        assert_eq!(pool.values.capacity(), capacity);
-        let rebuilt = pool.append([40]);
-        assert_eq!(rebuilt.start, 0);
-        assert_eq!(rebuilt.len, 1);
-        assert_eq!(pool[0], 40);
     }
 }

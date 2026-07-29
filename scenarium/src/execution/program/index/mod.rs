@@ -88,9 +88,19 @@ pub(crate) struct OutputAddr {
 
 /// A column aligned to the program's dense node vector — the per-run state shape:
 /// resets are memsets and lookups are array reads, with no id hashing anywhere.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct NodeColumn<T> {
     values: Vec<T>,
+}
+
+/// An empty column, for any `T`. Derived, this would demand `T: Default` — a
+/// bound the empty vector does not need, and one a column filled by
+/// [`push`](Self::push) rather than [`reset`](Self::reset) has no value to
+/// satisfy it with.
+impl<T> Default for NodeColumn<T> {
+    fn default() -> Self {
+        Self { values: Vec::new() }
+    }
 }
 
 impl<T: Clone> NodeColumn<T> {

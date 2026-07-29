@@ -1,7 +1,7 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::CompiledGraphValidationError;
-use crate::execution::flatten::FlattenRecord;
+use crate::execution::flatten::Flattened;
 use crate::execution::flatten::attribution::internals::AttributionBuilder;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::program::index::OutputAddr;
@@ -466,13 +466,11 @@ fn validation_returns_compiled_and_installed_mismatches() {
             ..Default::default()
         },
     );
-    let compiled = CompiledGraph::indexed(
+    let compiled = CompiledGraph::indexed(Flattened {
         program,
-        FlattenRecord {
-            attribution: builder.build().attribution,
-            exposed: Vec::new(),
-        },
-    );
+        attribution: builder.build().attribution,
+        exposed: Vec::new(),
+    });
 
     assert_eq!(
         compiled
