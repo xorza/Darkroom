@@ -1,10 +1,11 @@
 use crate::graph::Graph;
+use crate::graph::NodeSearch;
 use crate::graph::definition::{GraphDef, GraphEvent, GraphLink};
 use crate::graph::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, GraphId};
-use crate::graph::node::{CacheMode, Node, NodeKind, NodeSearch};
+use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};

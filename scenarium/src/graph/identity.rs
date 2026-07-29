@@ -1,6 +1,6 @@
 //! How an authored graph names things: the uuid identities ([`NodeId`],
-//! [`GraphId`], [`FuncId`]) and the addresses that pair one with a port or
-//! event index ([`InputPort`], [`OutputPort`], [`Subscription`]).
+//! [`GraphId`], [`FuncId`]) and the addresses that pair one with a port index
+//! ([`InputPort`], [`OutputPort`]).
 //!
 //! Gathered here rather than each sitting with the type it names, so "what
 //! can this model address?" is one file. They carry no authoring state, so
@@ -50,24 +50,5 @@ pub struct InputPort {
 impl InputPort {
     pub fn new(node_id: NodeId, port_idx: usize) -> Self {
         Self { node_id, port_idx }
-    }
-}
-
-/// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so a
-/// `BTreeSet` ranges over one emitter-event's subscribers contiguously.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Subscription {
-    pub emitter: NodeId,
-    pub event_idx: usize,
-    pub subscriber: NodeId,
-}
-
-impl Subscription {
-    /// Whether this edge touches `node_id` from either end — it emits to that
-    /// node, or that node emits it. [`Binding::touches`](crate::Binding) for
-    /// an event edge.
-    pub(crate) fn touches(&self, node_id: NodeId) -> bool {
-        self.emitter == node_id || self.subscriber == node_id
     }
 }
