@@ -9,11 +9,11 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::NodeIdx;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionBinding, Program};
+use crate::graph::NodeSearch;
 use crate::graph::definition::{GraphDef, GraphLink};
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
 use crate::graph::identity::{FuncId, GraphId, NodeId};
-use crate::graph::node::NodeSearch;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 
 /// The program of a freshly compiled artifact, which nothing else holds yet —
