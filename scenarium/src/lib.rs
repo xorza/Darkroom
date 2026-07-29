@@ -22,7 +22,7 @@ pub use execution::codec::{CodecError, CustomValueCodec};
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::compile::{CompileError, CompiledGraph, Compiler};
-pub use execution::disk_store::DiskStore;
+pub use execution::cache::disk_store::DiskStore;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::identity::{
     ExecutionEventPort, ExecutionIdentityError, ExecutionInputPort, ExecutionNodeId,
