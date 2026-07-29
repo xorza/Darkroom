@@ -1,7 +1,7 @@
 use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::execution::plan::{ExecutionPlan, NodeState, Planner};
-use crate::execution::program::index::{NodeIdx, OutputAddr};
+use crate::execution::plan::{ExecutionPlan, NodeState, Planner, input_missing};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
@@ -107,7 +107,23 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         "a disabled verdict cannot hide an enabled dependency"
     );
     p.process_order.swap(0, 1);
-    p.states[nx(a)] = NodeState::default();
+    // Back to what the planner actually wrote — not `default()`, which is the
+    // `Unvisited` fill and would leave a scheduled node undecided.
+    p.states[nx(a)] = NodeState::Cut;
+    p.validate(&f.program).expect("restored to a valid plan");
+
+    // Scheduling a node and deciding its state are one act, so a state may not
+    // be decided for a node the schedule left out.
+    let dropped = p
+        .process_order
+        .pop()
+        .expect("the chain scheduled three nodes");
+    assert_eq!(dropped, nx(c));
+    assert_eq!(
+        p.validate(&f.program).unwrap_err().to_string(),
+        format!("unscheduled node {c:?} was decided Cut")
+    );
+    p.process_order.push(dropped);
 
     // The validator reports corruption rather than faulting on it: a binding
     // target past the last node used to index `seen_in_order` out of range.
@@ -128,6 +144,28 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     assert_eq!(
         p.validate(&f.program).unwrap_err().to_string(),
         "plan seeded spans 0 nodes, not the program's 3"
+    );
+}
+
+/// The other direction of the same invariant: reading a state the walk never
+/// settled is a broken schedule, so it fails loudly instead of answering as if
+/// the node were merely blocked. Checked on `input_missing`, the one such read
+/// that takes the column directly.
+#[test]
+fn reading_an_unvisited_producer_panics() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut f = Fix::default();
+    let producer = f.node(false, &[], 1);
+    let consumer = f.node(false, &[(false, bind(producer, 0))], 1);
+
+    let mut states = NodeColumn::default();
+    states.reset(f.program.e_nodes.len(), NodeState::Unvisited);
+    let consumer_input = &f.program.inputs[f.program[nx(consumer)].inputs][0];
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| input_missing(consumer_input, &states))).is_err(),
+        "an unvisited producer is a broken schedule, not an unsatisfied input"
     );
 }
 
@@ -273,7 +311,11 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
     assert!(p.states[nx(a)].is_runnable());
     assert!(p.states[nx(b)].is_runnable());
-    assert!(!p.states[nx(c)].is_runnable(), "C never verdicted");
+    assert_eq!(
+        p.states[nx(c)],
+        NodeState::Unvisited,
+        "C is upstream of nothing seeded, so the walk never reached it"
+    );
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays seeded.

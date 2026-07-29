@@ -203,6 +203,10 @@ impl ExecutionFrame<'_, '_> {
         let e_node = &self.program[node_idx];
         let demand = self.resolver.outputs.demand.slice(e_node.outputs);
         match self.plan.states[node_idx] {
+            // `process_order` and the state column are written by the same arm
+            // of the walk, so a scheduled node without a settled state is a
+            // broken plan — not a node to quietly skip.
+            NodeState::Unvisited => unreachable!("a scheduled node has a settled state"),
             // The planner excluded it, so it holds no result this run and its
             // outcome stays `Pending`.
             NodeState::Disabled | NodeState::MissingInputs => {}

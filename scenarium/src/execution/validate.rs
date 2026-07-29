@@ -90,6 +90,11 @@ pub(crate) enum ExecutionPlanValidationError {
     },
     #[error("execution node {e_node_id:?} appears more than once")]
     DuplicateNode { e_node_id: ExecutionNodeId },
+    #[error("unscheduled node {e_node_id:?} was decided {state:?}")]
+    UnscheduledNodeDecided {
+        e_node_id: ExecutionNodeId,
+        state: NodeState,
+    },
     #[error("seeded node {e_node_id:?} is not an execution root")]
     SeededNodeNotRoot { e_node_id: ExecutionNodeId },
     #[error("event source {e_node_id:?} is not an execution root")]
@@ -309,6 +314,21 @@ impl ExecutionPlan {
                 return Err(ExecutionPlanValidationError::DuplicateNode { e_node_id });
             }
             seen_in_order.insert(node_idx);
+        }
+
+        // A state decided for a node the schedule left out. The other direction
+        // — a scheduled node still holding the `Unvisited` fill — needs no check
+        // here: every site that reads one panics on it outright.
+        for (node_idx, _) in program.e_nodes.iter_indexed() {
+            let state = self.states[node_idx];
+            if !seen_in_order.contains(node_idx)
+                && !matches!(state, NodeState::Unvisited | NodeState::Disabled)
+            {
+                return Err(ExecutionPlanValidationError::UnscheduledNodeDecided {
+                    e_node_id: program.e_node_ids[node_idx],
+                    state,
+                });
+            }
         }
 
         // A set bit in the last word's padding survives a release-build

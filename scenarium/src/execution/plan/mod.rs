@@ -31,13 +31,19 @@ use crate::node::special::SpecialNode;
 /// serve its cache after all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NodeState {
+    /// The backward walk never reached this node, so no pass has decided
+    /// anything about it — the fill [`reset_for_program`](ExecutionPlan::reset_for_program)
+    /// leaves behind. A distinct state rather than a conservative real verdict,
+    /// so "unreachable from any root" cannot be read as "visited and blocked":
+    /// [`validate`](ExecutionPlan::validate) checks that exactly the scheduled
+    /// nodes left it.
+    #[default]
+    Unvisited,
     /// Disabled for this run. Consumers treat it like an unbound input:
     /// required inputs fail while optional inputs remain runnable.
     Disabled,
     /// A required input is unsatisfied (unbound, or fed by a non-runnable producer);
-    /// can't run, and the "missing" verdict propagates to its consumers. The
-    /// default: the conservative "not yet established as runnable" value.
-    #[default]
+    /// can't run, and the "missing" verdict propagates to its consumers.
     MissingInputs,
     /// Runnable, and read by nothing that runs — pruned by the cut. Both the
     /// planner's "this node can run" and the resolver's "and no one needs it",
@@ -58,8 +64,23 @@ impl NodeState {
     /// Whether the planner found this node structurally able to run. True of
     /// every state the resolver refines it into, so it answers the same before
     /// and after the sweep — which is what lets one column serve both.
+    ///
+    /// Every caller reads a node the walk settled: a `process_order` member, a
+    /// root, or a `Bind` producer of one. `Unvisited` is the same broken
+    /// schedule the exhaustive matches on this enum panic outright on — but
+    /// those arms cost nothing, having to answer for the state either way,
+    /// while this predicate has a total answer already and runs per node and
+    /// per edge. So it asserts in debug and keeps the conservative `false`.
     pub(crate) fn is_runnable(self) -> bool {
-        !matches!(self, NodeState::Disabled | NodeState::MissingInputs)
+        debug_assert_ne!(
+            self,
+            NodeState::Unvisited,
+            "only a settled node is asked whether it runs"
+        );
+        !matches!(
+            self,
+            NodeState::Unvisited | NodeState::Disabled | NodeState::MissingInputs
+        )
     }
 
     pub(crate) fn missing_required_inputs(self) -> bool {
@@ -79,6 +100,13 @@ pub(crate) fn input_missing(input: &ExecutionInput, states: &NodeColumn<NodeStat
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
         ExecutionBinding::Bind(addr) => match states[addr.node_idx] {
+            // The walk pushes every `Bind` producer before settling its
+            // consumer, so an unvisited producer here means the schedule is
+            // broken — not an input to answer for. Free to state: the arm
+            // exists either way.
+            NodeState::Unvisited => {
+                unreachable!("post-order settles a producer before its consumer is verdicted")
+            }
             NodeState::Disabled => input.required,
             NodeState::MissingInputs => true,
             NodeState::Cut | NodeState::Reuse | NodeState::MissingLambda | NodeState::Run => false,
