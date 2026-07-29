@@ -19,7 +19,7 @@ use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::{DataType, FsPathMode, Func, NodePorts};
+use scenarium::{DataType, FsPathMode, Func};
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{GraphRef, PortKind, PortRef};
@@ -515,7 +515,7 @@ pub(crate) fn add_preview_intents(
             pos,
             node_id,
             node: func.into(),
-            bindings: NodePorts::from(func).default_bindings(node_id).collect(),
+            bindings: func.ports().default_bindings(node_id).collect(),
         },
         Intent::SetInput {
             input: InputPort::new(node_id, 0),

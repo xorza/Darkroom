@@ -11,8 +11,9 @@ use thiserror::Error;
 /// Every graph validation returns this.
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
-use crate::graph::address::{InputPort, NodeId, OutputPort};
+use crate::graph::address::{InputPort, OutputPort};
 use crate::graph::definition::GraphId;
+use crate::graph::node::NodeId;
 use crate::graph::node::definition::FuncId;
 
 #[derive(Debug, Error)]

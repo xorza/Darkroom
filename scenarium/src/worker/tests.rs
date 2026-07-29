@@ -15,8 +15,9 @@ use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatu
 use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
 use crate::graph::Graph;
-use crate::graph::address::{InputPort, NodeId};
+use crate::graph::address::InputPort;
 use crate::graph::definition::GraphDef;
+use crate::graph::node::NodeId;
 use crate::graph::node::error::InvokeError;
 use crate::graph::node::event::EventLambda;
 use crate::graph::node::lambda::FuncLambda;
