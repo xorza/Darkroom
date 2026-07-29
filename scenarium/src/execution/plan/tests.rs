@@ -1,6 +1,6 @@
 use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::execution::plan::{ExecutionPlan, NodeVerdict, Planner};
+use crate::execution::plan::{ExecutionPlan, NodeState, Planner};
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
@@ -91,8 +91,8 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     p.validate(&f.program).unwrap();
     assert_eq!(p.process_order, [a, b, c].map(nx), "post-order: deps first");
     for idx in [a, b, c] {
-        assert!(p.verdicts[nx(idx)].wants_execute());
-        assert!(!p.verdicts[nx(idx)].missing_required_inputs());
+        assert!(p.states[nx(idx)].is_runnable());
+        assert!(!p.states[nx(idx)].missing_required_inputs());
     }
 
     p.process_order.swap(0, 1);
@@ -100,14 +100,14 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
         p.validate(&f.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}")
     );
-    p.verdicts[nx(a)] = NodeVerdict::Disabled;
+    p.states[nx(a)] = NodeState::Disabled;
     assert_eq!(
         p.validate(&f.program).unwrap_err().to_string(),
         format!("execution node {b:?} appears before dependency {a:?}"),
         "a disabled verdict cannot hide an enabled dependency"
     );
     p.process_order.swap(0, 1);
-    p.verdicts[nx(a)] = NodeVerdict::default();
+    p.states[nx(a)] = NodeState::default();
 
     // The validator reports corruption rather than faulting on it: a binding
     // target past the last node used to index `seen_in_order` out of range.
@@ -141,11 +141,11 @@ fn missing_required_input_blocks_node_and_dependents() {
     let p = plan(&f);
     for idx in [a, b] {
         assert!(
-            p.verdicts[nx(idx)].missing_required_inputs(),
+            p.states[nx(idx)].missing_required_inputs(),
             "node {idx:?} missing"
         );
         assert!(
-            !p.verdicts[nx(idx)].wants_execute(),
+            !p.states[nx(idx)].is_runnable(),
             "node {idx:?} not runnable"
         );
     }
@@ -158,8 +158,8 @@ fn optional_unbound_input_does_not_block() {
     let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
     let p = plan(&f);
-    assert!(!p.verdicts[nx(a)].missing_required_inputs());
-    assert!(p.verdicts[nx(a)].wants_execute());
+    assert!(!p.states[nx(a)].missing_required_inputs());
+    assert!(p.states[nx(a)].is_runnable());
     assert_eq!(p.process_order, [a].map(nx));
 }
 
@@ -183,9 +183,9 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
             &mut plan,
         )
         .unwrap();
-    assert_eq!(plan.verdicts[nx(producer)], NodeVerdict::Disabled);
-    assert_eq!(plan.verdicts[nx(required)], NodeVerdict::MissingInputs);
-    assert_eq!(plan.verdicts[nx(optional)], NodeVerdict::Execute);
+    assert_eq!(plan.states[nx(producer)], NodeState::Disabled);
+    assert_eq!(plan.states[nx(required)], NodeState::MissingInputs);
+    assert_eq!(plan.states[nx(optional)], NodeState::Cut);
 
     planner
         .plan(
@@ -200,8 +200,8 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
         .unwrap();
     for e_node_id in [producer, required, optional] {
         assert_eq!(
-            plan.verdicts[nx(e_node_id)],
-            NodeVerdict::Execute,
+            plan.states[nx(e_node_id)],
+            NodeState::Cut,
             "the explicit producer seed makes every consumer runnable"
         );
     }
@@ -271,9 +271,9 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.process_order, [a, b].map(nx), "only B's cone, deps first");
     assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(b)]);
     assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
-    assert!(p.verdicts[nx(a)].wants_execute());
-    assert!(p.verdicts[nx(b)].wants_execute());
-    assert!(!p.verdicts[nx(c)].wants_execute(), "C never verdicted");
+    assert!(p.states[nx(a)].is_runnable());
+    assert!(p.states[nx(b)].is_runnable());
+    assert!(!p.states[nx(c)].is_runnable(), "C never verdicted");
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays seeded.

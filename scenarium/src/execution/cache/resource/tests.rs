@@ -8,7 +8,7 @@ use crate::execution::cache::resource::{
 };
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::{ExecutionPlan, NodeVerdict};
+use crate::execution::plan::{ExecutionPlan, NodeState};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
@@ -317,7 +317,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         );
     }
     let mut verdicts = NodeColumn::default();
-    verdicts.reset(program.e_nodes.len(), NodeVerdict::Execute);
+    verdicts.reset(program.e_nodes.len(), NodeState::Cut);
     let mut roots = NodeSet::default();
     roots.reset(program.e_nodes.len());
     roots.insert(NodeIdx(0));
@@ -330,7 +330,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         program,
         plan: ExecutionPlan {
             process_order: vec![NodeIdx(0), NodeIdx(1)],
-            verdicts,
+            states: verdicts,
             roots,
             seeded,
             event_sources,

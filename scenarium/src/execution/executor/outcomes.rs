@@ -104,11 +104,11 @@ pub(super) fn collect_execution_outcome(
             }
             _ => {}
         }
-        if plan.verdicts[node_idx].missing_required_inputs() {
+        if plan.states[node_idx].missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with the
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.inputs[e_node.inputs].iter().enumerate() {
-                if input_missing(input, &plan.verdicts) {
+                if input_missing(input, &plan.states) {
                     outcome.missing_inputs.push(ExecutionInputPort {
                         e_node_id,
                         port_idx: i,

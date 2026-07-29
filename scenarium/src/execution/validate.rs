@@ -11,7 +11,7 @@ use crate::execution::cache::slot::StateOwner;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::flatten::map::FlattenMapValidationError;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::{ExecutionPlan, NodeVerdict};
+use crate::execution::plan::{ExecutionPlan, NodeState};
 use crate::execution::program::index::{NodeIdx, NodeSet, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::library::Library;
@@ -259,7 +259,7 @@ impl ExecutionPlan {
         // index reads below rely on it — a validator must report the corruption
         // it finds, never fault on it.
         for (set, len) in [
-            ("verdicts", self.verdicts.len()),
+            ("states", self.states.len()),
             ("roots", self.roots.len()),
             ("seeded", self.seeded.len()),
             ("event sources", self.event_sources.len()),
@@ -295,8 +295,8 @@ impl ExecutionPlan {
                             node_idx: addr.node_idx,
                         },
                     )?;
-                    let disabled_dependency = dependency.disabled
-                        && self.verdicts[addr.node_idx] == NodeVerdict::Disabled;
+                    let disabled_dependency =
+                        dependency.disabled && self.states[addr.node_idx] == NodeState::Disabled;
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(ExecutionPlanValidationError::BeforeDependency {
                             e_node_id,

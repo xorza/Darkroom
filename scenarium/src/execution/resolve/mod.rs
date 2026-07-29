@@ -6,8 +6,10 @@
 //!
 //! This is the split a build system draws between its dependency graph and its dirty /
 //! up-to-date analysis (Ninja/Bazel), or a compiler between the CFG and a liveness / dead-code
-//! pass: the schedule is structural and reusable across runs, while liveness is per-run and
-//! cache-dependent. The reverse sweep visits consumers before producers, probes each needed
+//! pass: the schedule is structural, the liveness cache-dependent. The two are *passes*, not
+//! two pieces of state — every run re-plans, so the refinement happens in the plan's own
+//! [`NodeState`] column rather than a second one shadowing it. The reverse sweep visits
+//! consumers before producers, probes each needed
 //! node against the demand accumulated from running consumers, and stops at cache hits,
 //! missing-input nodes, and funcs without an implementation.
 //!
@@ -19,34 +21,10 @@
 //! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
+use crate::execution::plan::{ExecutionPlan, NodeState};
+use crate::execution::program::index::{OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::node::lambda::OutputDemand;
-
-/// What the run loop does with one node — the resolver's single exposed column, merging the
-/// reuse verdict with the backward cut so the states are mutually exclusive by
-/// construction (a pruned reuse hit can't also read as `Reuse`). Authoritative for the whole
-/// run: a `Reuse` is never re-derived after the cut may have pruned its producers. The safe
-/// direction is allowed once: the run loop prepares and re-stamps a `Run` node whose bound
-/// path value was not yet readable — its cone was kept alive, so improving it to reuse
-/// at reach time contradicts nothing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Disposition {
-    /// Pruned by the cut: no running node reads this node this run. The default — a node
-    /// the sweep never promotes stays cut.
-    #[default]
-    Cut,
-    /// An unchanged demanded output is verified *available* — resident, or covered by a
-    /// digest-matched blob the run loop decodes when it reaches the node. Serve it without
-    /// running the lambda.
-    Reuse,
-    /// Reached, but its func has no implementation. Report the error without probing its cache
-    /// or keeping its input cone alive.
-    MissingLambda,
-    /// The node must run and owns one pending read for each bound input.
-    Run,
-}
 
 #[derive(Debug, Default)]
 pub(crate) struct ResolvedOutputs {
@@ -70,12 +48,12 @@ impl ResolvedOutputs {
     }
 }
 
-/// The cache-aware, authoritative shape of one run. All three columns are produced by
-/// the same reverse sweep, so a cut/reused/blocked consumer contributes neither demand
-/// nor a reader to its producers.
+/// The per-output half of one resolved run — the per-node half is the plan's
+/// own [`NodeState`] column, which this sweep refines in place. All three are
+/// produced by the same reverse pass, so a cut/reused/blocked consumer
+/// contributes neither demand nor a reader to its producers.
 #[derive(Debug, Default)]
 pub(crate) struct Resolver {
-    pub(crate) disposition: NodeColumn<Disposition>,
     pub(crate) outputs: ResolvedOutputs,
 }
 
@@ -95,46 +73,58 @@ impl Resolver {
     pub(crate) async fn resolve(
         &mut self,
         program: &Program,
-        plan: &ExecutionPlan,
+        plan: &mut ExecutionPlan,
         cache: &mut RuntimeCache,
     ) {
         cache.stamp_digests(program, plan.executing());
-
-        self.disposition
-            .reset(program.e_nodes.len(), Disposition::Cut);
         self.outputs.reset(program.outputs.len());
 
-        for node_idx in plan.roots.iter() {
-            self.disposition[node_idx] = Disposition::Run;
+        // Destructured so the sweep can read the schedule and the seed sets
+        // while writing the state column — disjoint fields of the one plan.
+        let ExecutionPlan {
+            process_order,
+            states,
+            roots,
+            seeded,
+            event_sources,
+        } = plan;
+
+        for node_idx in roots.iter() {
+            // Only a root the planner cleared. Promoting a `Disabled` or
+            // `MissingInputs` root would overwrite the verdict the run's
+            // outcome reports it by — and claim a node the schedule may not
+            // even contain.
+            if states[node_idx].is_runnable() {
+                states[node_idx] = NodeState::Run;
+            }
         }
 
-        for &node_idx in plan.process_order.iter().rev() {
-            if self.disposition[node_idx] != Disposition::Run {
-                continue;
-            }
-            if !plan.verdicts[node_idx].wants_execute() {
-                self.disposition[node_idx] = Disposition::Cut;
+        for &node_idx in process_order.iter().rev() {
+            // `Run` is written only through an `is_runnable` gate — here and
+            // at the producer promotion below — so reaching this body already
+            // means the planner cleared the node. There is no second check.
+            if states[node_idx] != NodeState::Run {
                 continue;
             }
             let e_node = &program[node_idx];
             if e_node.lambda.is_none() {
-                self.disposition[node_idx] = Disposition::MissingLambda;
+                states[node_idx] = NodeState::MissingLambda;
                 continue;
             }
             let outputs = e_node.outputs;
             // A node seed ("run to this node") demands every output the node has:
             // the host asked for the node itself, not for what a consumer reads.
-            if plan.seeded.contains(node_idx) {
+            if seeded.contains(node_idx) {
                 self.outputs
                     .demand
                     .slice_mut(outputs)
                     .fill(OutputDemand::Produce);
             }
             let demand = self.outputs.demand.slice(outputs);
-            if !plan.event_sources.contains(node_idx)
+            if !event_sources.contains(node_idx)
                 && cache.probe_reuse(program, node_idx, demand).await
             {
-                self.disposition[node_idx] = Disposition::Reuse;
+                states[node_idx] = NodeState::Reuse;
                 continue;
             }
             for input in &program.inputs[e_node.inputs] {
@@ -150,10 +140,15 @@ impl Resolver {
                     // nothing would ever produce: a panic on a cold cache,
                     // and on a warm one the value from before it was
                     // disabled, served as if it were this run's.
-                    if !plan.verdicts[addr.node_idx].wants_execute() {
+                    //
+                    // Reverse order also means a producer is promoted before
+                    // it is classified, so this only ever overwrites the
+                    // planner's `Cut` or an earlier consumer's `Run` — never
+                    // a `Reuse` this sweep already settled.
+                    if !states[addr.node_idx].is_runnable() {
                         continue;
                     }
-                    self.disposition[addr.node_idx] = Disposition::Run;
+                    states[addr.node_idx] = NodeState::Run;
                     self.outputs.add_reader(program.output_idx(*addr));
                 }
             }
