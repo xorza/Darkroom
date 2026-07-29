@@ -26,20 +26,37 @@ that fixture is the lever. If it does not, this whole tier is noise.
 
 ## Production knot: `layout` ↔ `scene` (15 modules)
 
-`layout` + 11 of its submodules + `scene`, `scene::tree`, `scene::shapes`.
+> **Correction.** An earlier revision of this file called this knot "densely tangled, no
+> cheap fix, best edge −2." That was a **bug in the scoring**, not a property of the code:
+> the scorer compared each cut against the *globally* largest SCC rather than against the
+> component the cut edge belongs to. Because an unrelated 13-module `widgets` cycle exists,
+> every layout cut appeared capped at 15 − 13 = 2. Scored per-component, the top edge is
+> worth **−4**. Scenarium's numbers were unaffected — its only other cycle is 2 modules, so
+> the global max was always the component of interest.
 
-**No cheap fix.** The best single edge removal is worth −2, and there are three of them:
+### Actual structure
+
+The 15 decomposes cleanly:
+
+- **11 modules** — `layout::{engine, cache, canvas, grid, intrinsic, scroll, scrollbars,
+  stack, support, wrapstack, zstack}`, a driver↔engine mesh. Inherent (see below).
+- **`layout`** (the parent module) — in the SCC only via a path through `scene`.
+- **`scene`, `scene::tree`** — attached by exactly **one** back-edge.
+- **`text::system`** — attached by exactly **one** back-edge.
+
+Everything else is one-directional: 11 driver modules import `scene::tree`, and nothing
+in `scene` imports them back except that single edge.
+
+### The two back-edges, scored per component
 
 | gain | edge | import |
 |---|---|---|
-| −2 | `layout` → `scene::tree` | `layout/mod.rs:22` — `use crate::scene::tree::Tree;` |
-| −2 | `scene::tree` → `layout::scrollbars` | `scene/tree/mod.rs:29` — `use crate::layout::scrollbars::ScrollBarsDef;` |
-| −2 | `layout::scrollbars` → `layout::engine` | `layout/scrollbars/mod.rs:24` — `use crate::layout::engine::LayoutEngine;` |
+| **−4** | `scene::tree` → `layout::scrollbars` | `scene/tree/mod.rs:29` — `use crate::layout::scrollbars::ScrollBarsDef;` |
+| −1 | `text::system` → `layout` | `text/system.rs:22` — `use crate::layout::ShapedText;` |
 
-This is a *densely tangled* knot, not a hinged one — the lumos shape, not the scenarium
-shape. Scenarium had single imports worth −9/−6/−5; nothing here comes close. Layout and
-scene are mutually recursive by design (layout reads the tree, the tree carries layout
-definitions), so this may be inherent rather than accidental.
+Cutting the first removes `layout`, `scene`, `scene::tree` **and** `text::system` — the
+last because its only route into the cycle ran through `layout`. So the second edge is
+structurally redundant once the first is fixed.
 
 Remaining production cycles: 13 (`app`/`ui`/`widgets`/`widgets::theme::*`), 8 (`text::*`),
 5, 4, 3, 3, 3, 2, 2.
@@ -61,25 +78,75 @@ Remaining production cycles: 13 (`app`/`ui`/`widgets`/`widgets::theme::*`), 8 (`
 `ui` at 47/47 is the immediate-mode context; central by design, but it is both the most
 depended-on and most depending module in the crate, which is worth watching.
 
+## The fix: move `ScrollBarsDef` into `layout::types`
+
+**`GridDef` is the exact precedent.** The two are structurally identical — a
+record pushed onto the `Tree` at record time and read by a driver during layout — but
+they live in different places:
+
+| | definition | id | on the tree | cycle? |
+|---|---|---|---|---|
+| grid | `layout/types/track.rs:94` | `layout::types::layout_mode` | `scene/tree/mod.rs:96` | no |
+| scrollbars | **`layout/scrollbars/mod.rs:51`** | `layout::types::layout_mode` | `scene/tree/mod.rs:99` | **yes** |
+
+`ScrollBarsDefId` already lives in the leaf vocabulary module. Only the `ScrollBarsDef`
+struct was left behind in the driver, and that is the whole cycle.
+
+### Feasibility — verified
+
+The struct's fields need only `NodeId`, `Vec2`, `BVec2`, `Spacing`. The driver module's
+other imports (`LayerLayout`, `Axis`, `LayoutEngine`, `Tree`, `Rect`, `Size`,
+`InternedText`) belong to its *functions*, not the struct, and stay put.
+
+- `scene/tree/node.rs` (home of `NodeId`) imports only `primitives::*` and
+  `scene::node::columns` — it cannot reach `layout`, so no new cycle.
+- `layout/types/layout_mode.rs:3` already imports `crate::scene::visibility::Visibility`,
+  so `layout::types` → `scene::*` is established precedent.
+
+Three call sites move: `widgets/scroll/mod.rs:697` (constructs), `scene/tree/mod.rs:29`
+(stores), `layout/scrollbars/mod.rs:131,196` (reads). The `impl ScrollBarsDef` visual-hash
+block moves with the struct.
+
+**Result: layout SCC 15 → 11**, and `layout`, `scene`, `scene::tree`, `text::system` all
+leave. Simulated on the graph; the residual 11 is the driver↔engine mesh below.
+
+## What stays, and why
+
+The remaining 11 is `layout::engine` ↔ the nine drivers ↔ `layout::cache`/`support`/
+`intrinsic`. This is **genuine mutual recursion**, not misplacement:
+
+`LayoutEngine` (`layout/engine.rs:201`) is `{ scratch, cache_rebuild, text, cache }` — a
+recursion *context*. The engine dispatches by `LayoutMode` to a driver; the driver
+recurses into its children by calling back through the engine (`layout: &mut LayoutEngine`
+at `stack/mod.rs:117,158,282,395`). A tree-walking layout algorithm with pluggable
+drivers has this shape by construction.
+
+Breaking it would mean splitting the context from the dispatcher and threading a
+recursion callback through every driver signature — `stack/mod.rs:122-123` already shows
+that pattern with `impl FnMut(&mut LayoutEngine, NodeId)` closures, so it is *possible*
+and would stay monomorphized. But it rewrites the crate's hottest path for module-graph
+tidiness inside a single subsystem. **Not worth it.** Recommend leaving.
+
+## Optional, independent of the above
+
+`ShapedText` (`layout/mod.rs:73`) is `{ measured: Size, key: TextShapeKey }` — produced by
+`text::system`, stored by `layout`. Once `ScrollBarsDef` moves, this edge buys **no**
+structural improvement. It is still arguably misfiled (a two-field handoff record forcing
+`text` → `layout`), and `layout/types/` would take it — `text/key.rs` imports
+`layout::types::align` already, so the direction is established. Purely cosmetic; do it
+only if the boundary bothers you.
+
+An earlier revision of this file rejected the `ShapedText` finding outright on the grounds
+that `layout/mod.rs:39` and `layout/cache/mod.rs` consume it. Those consumers are real, but
+they argue for a *leaf* home, not for the current one.
+
 ## Actionable items
 
-Ranked honestly. Palantir has no scenarium-style cheap wins.
-
-1. **Decide whether the `internals` graph matters.** If yes, `ui::bench_fixture`'s 42
-   outbound edges are the single biggest structural lever in the crate. If no, ignore
-   tiers below 3 entirely.
-2. **`layout::scrollbars` → `layout::engine`** (`layout/scrollbars/mod.rs:24`) — the only
-   one of the three −2 edges that is *intra*-`layout`, so it does not cross a subsystem
-   boundary and is the least likely to be inherent. Cheapest thing to try.
-3. **Leave `layout` ↔ `scene` alone** unless you already believe it is wrong. The graph
-   says tangled, not misplaced, and no mechanical move fixes it.
-
-### Checked and rejected
-
-`ShapedText` (declared `layout/mod.rs:73`, imported by `text/system.rs:22`) looked like a
-text type parked in `layout`. It is not — `layout/mod.rs:39` stores `text_shapes:
-Vec<ShapedText>` on the layout result and `layout/cache/mod.rs` uses it in four places.
-It is a legitimate shared type at the layout/text boundary. No action.
+1. **Move `ScrollBarsDef` to `layout/types/`**, mirroring `GridDef`. Three call sites.
+   Layout SCC 15 → 11. This is the whole fix.
+2. **Decide whether the `internals` graph matters.** If yes, `ui::bench_fixture`'s 42
+   outbound edges are the biggest remaining lever. If no, ignore that tier.
+3. **Leave the driver↔engine mesh alone.**
 
 ## Methodology caveat
 

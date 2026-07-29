@@ -26,3 +26,10 @@
 
 - `scenarium/src/execution/cache/digest/mod.rs:32` — the cache digest
   documentation links to a `ResourceStamper` type that no longer exists.
+
+- `AGENTS.md:7` — the `common` crate summary lists `Buffer2`, `BitBuffer2`,
+  `Slot`, `PauseGate`, and `ReadyState`, none of which exist in that crate.
+
+- `scenarium/src/execution/executor/mod.rs:12` — execution documentation links
+  to a nonexistent `Disposition::Reuse`; `execution/plan/mod.rs:222` similarly
+  links to a nonexistent `NodeVerdict`.
