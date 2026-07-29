@@ -4,7 +4,7 @@
 //! worker that consumes them.
 
 use crate::execution::identity::ExecutionEventPort;
-use crate::node::event::EventLambda;
+use crate::graph::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One `(event, lambda, state)` triple spawned as a looping task.
