@@ -31,9 +31,9 @@ invariants that must be policed rather than represented.
       `e_node_ids` alone, and asserts the alignment it depends on.
 - [ ] `runtime/mod.rs:207` — `read_output_port` takes `&Program` solely to compute
       `arity` for a `debug_assert_eq!`; nothing else in the body uses it.
-- [ ] `runtime/mod.rs:507` — `blob_target` re-derives `(e_node_id, e_node, digest)`
-      from `(program, node_idx)` on every call, and is called three times per node
-      per run (`probe_reuse`, `hydrate_reuse`, `store_node`).
+- [ ] `runtime/mod.rs` — `blob_target` re-derives `(e_node_id, e_node, digest)`
+      from `(program, node_idx)` on every call, at two sites per node per run
+      (`reuse_source`, `store_node`).
 
 ## The cache's own state is also a public field, so callers bypass its methods
 
@@ -44,23 +44,6 @@ invariants that must be policed rather than represented.
 - [ ] `runtime/mod.rs:43` — `pub(crate) disk_store` is public and the worker
       replaces it wholesale (`worker/task.rs:174`), so the cache cannot observe
       the swap that invalidates every reuse verdict it has already given.
-
-## "Is this value current?" has three implementations
-
-The predicate `current_digest.is_some() && produced_under == current_digest` is
-written twice, and wrapped in a three-deep accessor chain on one side.
-
-- [ ] `runtime/mod.rs:178` `current_snapshot` and `slot.rs:124`
-      `current_output_values` encode the same condition independently — one on the
-      cache, one on the slot.
-- [ ] `slot.rs:116,124` — `output_values` returns `Option<&Vec<DynamicValue>>` and
-      `current_output_values` returns `Option<&[DynamicValue]>`: the same concept
-      at two return types.
-- [ ] `runtime/mod.rs:191` — `is_resident_current` is a one-line proxy for
-      `current_snapshot(..).is_some()`.
-- [ ] `runtime/mod.rs:196` — `is_resident_hit` is `current_snapshot` plus one
-      `covers_demand` call, and is the only caller of
-      `OutputSnapshot::covers_demand`.
 
 ## One reuse function serves two contracts, told apart only by the caller
 
@@ -103,11 +86,11 @@ neither type owns the pass end to end.
 - [ ] `resource/mod.rs:114,117` — `requests` and `stamped` are `pub(super)`;
       the cache inserts into `requests` (`runtime/mod.rs:448`), clears it
       (`:65,404`), tests emptiness (`:463`), and drains `stamped` (`:474`).
-- [ ] `runtime/mod.rs:396,411` — `prepare` is `clear` + `identify` and has one
-      call site; `identify` has two. The two-step split is not visible to either
-      caller.
-- [ ] `runtime/mod.rs:248` — `stamp_digests` is a three-line loop over
-      `stamp_digest` with one call site.
+- [ ] `runtime/mod.rs` — `prepare` and `identify` differ only in whether the
+      run's memo is reset first, and nothing in either name says so; `prepare`
+      also repeats two of `clear`'s three field-clears verbatim.
+- [ ] `runtime/mod.rs` — `stamp_digests` is a three-line loop over `stamp_digest`
+      with one call site.
 
 ## RAM accounting mixes two aggregations and parks its scratch on the cache
 
@@ -119,18 +102,6 @@ neither type owns the pass end to end.
       total) and reports them two different ways (return value, `&mut Vec`
       out-parameter).
 
-## Borrow workarounds surfaced in signatures
-
-- [ ] `runtime/mod.rs:590` — `store_node` returns `impl Future + 'a` with a manual
-      `async move` block instead of being an `async fn`, to end the cache borrow
-      before the await. The reason is load-bearing but invisible at the call site.
-- [ ] `runtime/mod.rs:529` — `probe_reuse` takes `&mut self` while mutating
-      nothing, because a shared borrow held across its await would make the worker
-      future non-`Send`. Documented, but the signature states the opposite of what
-      the method does.
-- [ ] `slot.rs:87` — `InvokeSlot` is a two-field struct whose only purpose is to
-      return two disjoint `&mut` borrows of one slot.
-
 ## Module boundary leaks
 
 - [ ] `disk_store/mod.rs:68` — `DiskStore::new` takes `&Library` to call
@@ -140,5 +111,15 @@ neither type owns the pass end to end.
       `InputTag` from `digest` to perform the fold, while `digest` holds only the
       encoding primitives. The module named for the digest contains no code that
       computes one.
-- [ ] `resource/mod.rs:1-6` — the module doc opens with a duplicated line
-      ("One\n//! One job serves…") left by an earlier edit.
+
+## Deliberate, recorded so they are not "fixed" by mistake
+
+Not findings — correct answers to real constraints, listed because each looks
+like an accident at the call site. Leave them; the doc comment beside each is
+the fix.
+
+- `store_node` returns `impl Future + 'a` from a manual `async move` block so the
+  cache borrow ends before the await.
+- `probe_reuse` takes `&mut self` while mutating nothing: a shared borrow held
+  across its await would make the worker future non-`Send`.
+- `InvokeSlot` exists to hand out two disjoint `&mut` borrows of one slot.

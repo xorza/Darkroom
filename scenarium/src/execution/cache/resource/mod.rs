@@ -1,9 +1,8 @@
 //! Per-run filesystem identity collection.
 //!
-//! Filesystem metadata walks run on Tokio's blocking pool. One
-//! One job serves the producer-first digest pass and the late bound-path
-//! restamps alike, so each path is observed once per run and digest folding itself
-//! performs no I/O.
+//! Filesystem metadata walks run on Tokio's blocking pool. One job serves the
+//! producer-first digest pass and the late bound-path restamps alike, so each
+//! path is observed once per run and digest folding itself performs no I/O.
 
 use std::io;
 use std::path::{Path, PathBuf};

@@ -20,7 +20,7 @@ use hashbrown::HashMap;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::{FsPathId, StampError, StampJob};
-use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, StateOwner, ValueState};
+use crate::execution::cache::slot::{RuntimeSlot, StateOwner, ValueState};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
@@ -218,32 +218,14 @@ impl RuntimeCache {
         self.release_dead_outputs(installed);
     }
 
-    /// This node's resident values, but only where they were produced under
-    /// the digest it currently carries — the one definition of "the bytes
-    /// are here", which the executor's input read and the disk store both
-    /// rely on. A `None` current digest (an impure cone) never qualifies,
-    /// nor does a value produced under a *different* digest, which is what
-    /// a changed input leaves behind.
-    fn current_snapshot(&self, node_idx: NodeIdx) -> Option<&OutputSnapshot> {
-        let slot = &self.slots[node_idx];
-        let ValueState::Resident {
-            snapshot,
-            produced_under,
-        } = &slot.value
-        else {
-            return None;
-        };
-        (slot.current_digest.is_some() && *produced_under == slot.current_digest)
-            .then_some(snapshot)
-    }
-
     pub(crate) fn is_resident_current(&self, node_idx: NodeIdx) -> bool {
-        self.current_snapshot(node_idx).is_some()
+        self.slots[node_idx].current_snapshot().is_some()
     }
 
     /// Current *and* holding every output this run demands.
     fn is_resident_hit(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
-        self.current_snapshot(node_idx)
+        self.slots[node_idx]
+            .current_snapshot()
             .is_some_and(|snapshot| snapshot.covers_demand(demand))
     }
 
@@ -655,7 +637,7 @@ impl RuntimeCache {
         ctx: &'a mut ContextStore,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.blob_target(program, node_idx);
-        let resident = self.current_snapshot(node_idx);
+        let resident = self.slots[node_idx].current_snapshot();
         let disk = &self.disk_store;
         async move {
             let (Some(target), Some(snapshot)) = (target, resident) else {
@@ -670,7 +652,7 @@ impl RuntimeCache {
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
     pub(crate) fn release_dead_outputs(&mut self, program: &Program) {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            let Some(resident_len) = self.slots[node_idx].output_values().map(Vec::len) else {
+            let Some(resident_len) = self.slots[node_idx].output_values().map(<[_]>::len) else {
                 continue;
             };
             // A snapshot holding a different number of values cannot

@@ -4029,7 +4029,7 @@ mod execution {
         let outputs = eg
             .slot(e_node_id)
             .output_values()
-            .cloned()
+            .map(<[_]>::to_vec)
             .expect("the node ran, so it holds outputs");
         assert!(
             matches!(outputs[0], DynamicValue::Static(StaticValue::Int(100)))
@@ -4048,7 +4048,7 @@ mod execution {
         let outputs = eg
             .slot(e_node_id)
             .output_values()
-            .cloned()
+            .map(<[_]>::to_vec)
             .expect("the invalidated pure node re-ran");
         assert!(
             matches!(outputs[0], DynamicValue::Static(StaticValue::Int(101))),
@@ -4434,7 +4434,7 @@ mod error_propagation {
             execution_graph
                 .slot(execution_node_id(&execution_graph, &graph, &library, name).unwrap())
                 .output_values()
-                .cloned()
+                .map(<[_]>::to_vec)
         };
 
         // get_a fails with error, no outputs.
