@@ -13,7 +13,7 @@ use crate::execution::flatten::map::FlattenMapValidationError;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::index::{NodeIdx, NodeSet, OutputAddr};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::library::Library;
 use crate::node::definition::FuncId;
 
@@ -264,10 +264,7 @@ impl CompiledGraph {
 impl ExecutionPlan {
     /// A planned schedule is a unique post-order DFS whose bindings name valid outputs;
     /// disabled dependencies may remain outside the order.
-    pub(crate) fn validate(
-        &self,
-        program: &ExecutionProgram,
-    ) -> Result<(), ExecutionPlanValidationError> {
+    pub(crate) fn validate(&self, program: &Program) -> Result<(), ExecutionPlanValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
             return Err(ExecutionPlanValidationError::OrderTooLong);
         }
@@ -355,7 +352,7 @@ impl ExecutionPlan {
     }
 
     /// Debug-only assert form of [`Self::validate`].
-    pub(crate) fn validate_debug(&self, program: &ExecutionProgram) {
+    pub(crate) fn validate_debug(&self, program: &Program) {
         if !is_debug() {
             return;
         }

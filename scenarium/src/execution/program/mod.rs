@@ -50,7 +50,7 @@ pub(crate) struct ExecutionOutput {
 /// A resolved data edge awaiting interning: the input-pool slot to write, and
 /// the id-based producer it binds to. Flatten records these instead of dense
 /// addresses because a `Bind` can name a node emitted later in the walk —
-/// [`ExecutionProgram::intern_bindings`] resolves them once the node set is adopted.
+/// [`Program::intern_bindings`] resolves them once the node set is adopted.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PendingBind {
     pub(crate) input_idx: u32,
@@ -58,7 +58,7 @@ pub(crate) struct PendingBind {
 }
 
 /// A resolved event edge awaiting wiring — the [`PendingBind`] counterpart for
-/// subscriptions, applied by [`ExecutionProgram::apply_subscriptions`].
+/// subscriptions, applied by [`Program::apply_subscriptions`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PendingSubscription {
     pub(crate) event: ExecutionEventPort,
@@ -111,7 +111,7 @@ pub(crate) struct ExecutionNode {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct ExecutionProgram {
+pub(crate) struct Program {
     /// The dense node column — every per-run column and set aligns to it.
     /// Ordered by `ExecutionNodeId` (see [`Self::adopt_nodes`]) so compiled
     /// artifacts and program walks are deterministic.
@@ -134,7 +134,7 @@ pub(crate) struct ExecutionProgram {
     pub(crate) outputs: Pool<ExecutionOutput>,
 }
 
-impl std::ops::Index<NodeIdx> for ExecutionProgram {
+impl std::ops::Index<NodeIdx> for Program {
     type Output = ExecutionNode;
 
     fn index(&self, index: NodeIdx) -> &ExecutionNode {
@@ -142,7 +142,7 @@ impl std::ops::Index<NodeIdx> for ExecutionProgram {
     }
 }
 
-impl ExecutionProgram {
+impl Program {
     /// Append one node, assigning the next dense index. Panics on a duplicate
     /// id — flattened ids are unique by construction.
     pub(crate) fn push(&mut self, id: ExecutionNodeId, e_node: ExecutionNode) -> NodeIdx {
@@ -291,11 +291,11 @@ impl ExecutionProgram {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::{ExecutionNode, ExecutionProgram};
+    use crate::execution::program::{ExecutionNode, Program};
 
     /// Test-facing id lookups: tests and engine introspection address nodes by
     /// their stable id; production paths carry `NodeIdx` instead.
-    impl ExecutionProgram {
+    impl Program {
         pub(crate) fn by_id(&self, id: ExecutionNodeId) -> &ExecutionNode {
             &self[self.e_node_index[&id]]
         }

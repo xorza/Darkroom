@@ -1,7 +1,7 @@
 //! Node-graph execution as an explicit three-phase pipeline:
 //!
 //! 1. **compile** — the [`Compiler`](compile::Compiler) flattens the authoring
-//!    `Graph` into an immutable [`ExecutionProgram`](program::ExecutionProgram).
+//!    `Graph` into an immutable [`Program`](program::Program).
 //!    Runs on the *host's* thread (compile errors are synchronous); the resulting
 //!    [`CompiledGraph`](compile::CompiledGraph) is installed into the engine
 //!    via [`engine::ExecutionEngine::install`], which cannot fail.

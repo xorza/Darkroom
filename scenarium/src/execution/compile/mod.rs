@@ -13,7 +13,7 @@ use crate::execution::flatten::map::FlattenMap;
 use crate::execution::identity::{ExecutionIdentityError, ExecutionNodeId};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::pool::{Pool, PoolRange};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 use crate::node::definition::FuncBehavior;
@@ -37,7 +37,7 @@ pub struct CompileError {
 /// program (the engine's pre-install / cleared state).
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
-    pub(crate) program: ExecutionProgram,
+    pub(crate) program: Program,
     pub(crate) flatten_map: FlattenMap,
     /// The packed backing of all three relations below: each of them owns
     /// runs of this one buffer rather than a `Vec` of its own per key.
@@ -97,7 +97,7 @@ impl CompiledGraph {
     /// buffer, so all three cost one allocation between them rather than a
     /// `Vec` per authored node and per producer — in a structure the host
     /// holds for as long as the compiled graph lives.
-    fn indexed(program: ExecutionProgram, flatten_map: FlattenMap) -> Self {
+    fn indexed(program: Program, flatten_map: FlattenMap) -> Self {
         let mut node_lists = Pool::default();
 
         let mut occurrences = Vec::new();
@@ -335,7 +335,7 @@ impl Compiler {
 
         // Flatten graphs straight into execution nodes — no intermediate
         // `Graph`. Everything downstream is boundary-agnostic (func nodes only).
-        let mut program = ExecutionProgram::default();
+        let mut program = Program::default();
         let mut flatten_map = FlattenMap::default();
         self.flattener
             .build(&mut program, graph, library, &mut flatten_map);
@@ -356,7 +356,7 @@ pub(crate) mod internals {
     use crate::execution::compile::CompiledGraph;
     use crate::execution::flatten::map::internals::FlattenMapBuilder;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::ExecutionProgram;
+    use crate::execution::program::Program;
     use crate::graph::NodeId;
 
     impl CompiledGraph {
@@ -401,7 +401,7 @@ pub(crate) mod internals {
 
         pub fn build(self) -> Arc<CompiledGraph> {
             Arc::new(CompiledGraph::indexed(
-                ExecutionProgram::default(),
+                Program::default(),
                 self.flatten_map.build(),
             ))
         }

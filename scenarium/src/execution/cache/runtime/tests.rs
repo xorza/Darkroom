@@ -7,7 +7,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::pool::PoolRange;
-use crate::execution::program::{ExecutionNode, ExecutionOutput, ExecutionProgram};
+use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::OutputDemand;
@@ -23,7 +23,7 @@ fn out() -> Vec<DynamicValue> {
 /// `release_dead_outputs` compares a resident snapshot's length against
 /// the node's declared port count, so a fixture node declaring none while
 /// holding a value is not a shape any real program produces.
-fn one_output(program: &mut ExecutionProgram) -> PoolRange<ExecutionOutput> {
+fn one_output(program: &mut Program) -> PoolRange<ExecutionOutput> {
     program.outputs.append([ExecutionOutput {
         data_type: DataType::Int,
     }])
@@ -64,7 +64,7 @@ async fn eviction_clears_only_the_output_cache() {
     let mut cache = RuntimeCache::default();
     let node_idx = insert_slot(&mut cache, slot);
     let e_node_id = ExecutionNodeId::from_u128(1);
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     program.push(e_node_id, ExecutionNode::default());
     let failures = cache.evict(&program, &[e_node_id]).await;
 
@@ -210,7 +210,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
     ];
     let mut cache = RuntimeCache::default();
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
 
     for (index, (_, mode, behavior, current_digest, produced_under, _)) in cases.iter().enumerate()
     {
@@ -259,7 +259,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
         (CacheMode::Both, true),
     ];
     let mut cache = RuntimeCache::default();
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
 
     for (index, _) in cases.iter().enumerate() {
         let e_node_id = ExecutionNodeId::from_u128(index as u128 + 1);
@@ -305,7 +305,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 #[tokio::test]
 async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let func_id = FuncId::from_u128(77);
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     let outputs = one_output(&mut program);
     let node = move |func_id, version| ExecutionNode {
         func_id,
@@ -370,7 +370,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 #[test]
 fn reconcile_follows_ids_when_the_index_space_shifts() {
     let build = |ids: &[u128]| {
-        let mut program = ExecutionProgram::default();
+        let mut program = Program::default();
         for id in ids {
             program.push(
                 ExecutionNodeId::from_u128(*id),
@@ -515,7 +515,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
 
     let e_node_id = ExecutionNodeId::from_u128(1);
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     let outputs = program
         .outputs
         .append([ExecutionOutput::default(), ExecutionOutput::default()]);

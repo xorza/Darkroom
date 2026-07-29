@@ -30,7 +30,7 @@ uniqueness across the whole reachable authoring tree. Node removal and restorati
 use `DetachedNode`, which keeps the id, node, all touching wiring, subscriptions,
 and pins together.
 
-Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
+Compilation produces a private, immutable `Program`. Composite nodes
 are dissolved into flat function nodes stored in a dense, id-sorted vector
 (`NodeIdx` positions) plus packed input, output-metadata, and event pools.
 Each node stores typed ranges into those shared vectors, avoiding per-node

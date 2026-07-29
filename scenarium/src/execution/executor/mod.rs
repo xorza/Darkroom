@@ -1,7 +1,7 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
 //! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given an immutable
-//! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
+//! [`Program`](crate::execution::program::Program), a prepared
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
@@ -42,7 +42,7 @@ use crate::execution::executor::outcomes::{
     NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
 };
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::execution::resolve::{Disposition, Resolver};
 
 #[derive(Default, Debug)]
@@ -64,7 +64,7 @@ pub(crate) struct Executor {
 /// [`ExecutionFrame`].
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
-    pub(crate) program: &'a ExecutionProgram,
+    pub(crate) program: &'a Program,
     pub(crate) plan: &'a ExecutionPlan,
     pub(crate) resolver: &'a Resolver,
     pub(crate) cache: &'a mut RuntimeCache,
@@ -97,7 +97,7 @@ impl RemainingOutputReads {
         *remaining == 0
     }
 
-    fn node_drained(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> bool {
+    fn node_drained(&self, program: &Program, node_idx: NodeIdx) -> bool {
         self.counts
             .slice(program[node_idx].outputs)
             .iter()
@@ -182,7 +182,7 @@ impl Executor {
 /// the caller's.
 #[derive(Debug)]
 pub(crate) struct ExecutionFrame<'a, 'r> {
-    program: &'a ExecutionProgram,
+    program: &'a Program,
     plan: &'a ExecutionPlan,
     resolver: &'a Resolver,
     cache: &'a mut RuntimeCache,
@@ -550,14 +550,14 @@ pub(crate) mod internals {
     use crate::execution::executor::Executor;
     use crate::execution::executor::outcomes::NodeOutcome;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::ExecutionProgram;
+    use crate::execution::program::Program;
 
     impl Executor {
         /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e.
         /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
-        pub(crate) fn ran(&self, program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> bool {
+        pub(crate) fn ran(&self, program: &Program, e_node_id: ExecutionNodeId) -> bool {
             let node_idx = program.e_node_index[&e_node_id];
             self.outcomes.get(node_idx).is_none_or(|outcome| {
                 matches!(

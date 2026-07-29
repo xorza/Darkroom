@@ -23,7 +23,7 @@ use crate::{DynamicValue, StaticValue};
 /// planner gates required ones; these tests drive the executor directly).
 #[derive(Default)]
 struct Prog {
-    program: ExecutionProgram,
+    program: Program,
 }
 
 impl Prog {
@@ -86,7 +86,7 @@ struct TestRun {
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
-fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
+fn run_with_readers(program: &Program, readers: Vec<u32>) -> TestRun {
     assert_eq!(readers.len(), program.outputs.len());
     let demand: Vec<OutputDemand> = readers
         .iter()
@@ -112,36 +112,36 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
     }
 }
 
-fn demand_output(program: &ExecutionProgram, run: &mut TestRun, address: OutputAddr) {
+fn demand_output(program: &Program, run: &mut TestRun, address: OutputAddr) {
     let output_idx = program.output_idx(address);
     run.resolver.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 /// These tests name nodes by their stable id; the program owns the id ↔ index
 /// mapping the production paths carry directly.
-fn nx(program: &ExecutionProgram, e_node_id: ExecutionNodeId) -> NodeIdx {
+fn nx(program: &Program, e_node_id: ExecutionNodeId) -> NodeIdx {
     program.e_node_index[&e_node_id]
 }
 
-fn output(program: &ExecutionProgram, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
+fn output(program: &Program, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
     OutputAddr {
         node_idx: nx(program, e_node_id),
         port_idx: port_idx as u32,
     }
 }
 
-fn bind(program: &ExecutionProgram, e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+fn bind(program: &Program, e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(output(program, e_node_id, port))
 }
 
 /// A resolved run that runs every node in index order, each output marked needed. These tests
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
-fn straight_run(program: &ExecutionProgram) -> TestRun {
+fn straight_run(program: &Program) -> TestRun {
     run_with_readers(program, vec![1; program.outputs.len()])
 }
 
-fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
+fn structural_plan(program: &Program) -> ExecutionPlan {
     let process_order: Vec<_> = (0..program.e_nodes.len())
         .map(|idx| NodeIdx(idx as u32))
         .collect();
@@ -196,7 +196,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     );
 }
 
-async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
+async fn run(program: &Program, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
@@ -221,7 +221,7 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
 /// Like [`run`] but over a caller-owned cache, for multi-run tests (a reuse hit
 /// needs the prior run's stamped digests and resident values).
 async fn run_with(
-    program: &ExecutionProgram,
+    program: &Program,
     plan: &ExecutionPlan,
     cache: &mut RuntimeCache,
 ) -> ExecutionOutcome {

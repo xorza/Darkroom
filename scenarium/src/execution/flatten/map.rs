@@ -109,7 +109,7 @@ impl FlattenMap {
             seen += 1;
         }
         // Every id had a leaf, so a count mismatch means leaves the program
-        // has no node for. Ids are unique (`ExecutionProgram::push` rejects a
+        // has no node for. Ids are unique (`Program::push` rejects a
         // repeat), so counting them is the same as collecting them.
         if self.leaves.len() != seen {
             return Err(FlattenMapValidationError::LeafCount);

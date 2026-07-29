@@ -6,7 +6,7 @@ use crate::execution::identity::ExecutionInputPort;
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::index::{NodeColumn, NodeIdx};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -58,7 +58,7 @@ pub(super) fn mark_skipped(
 }
 
 pub(super) fn has_errored_dependency(
-    program: &ExecutionProgram,
+    program: &Program,
     outcomes: &NodeColumn<NodeOutcome>,
     node_idx: NodeIdx,
 ) -> bool {
@@ -70,7 +70,7 @@ pub(super) fn has_errored_dependency(
 }
 
 pub(super) fn collect_execution_outcome(
-    program: &ExecutionProgram,
+    program: &Program,
     plan: &ExecutionPlan,
     outcomes: &NodeColumn<NodeOutcome>,
     start: Instant,

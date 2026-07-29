@@ -420,7 +420,7 @@ fn validation_returns_compiled_and_installed_mismatches() {
     let missing_func = FuncId::unique();
     let mut builder = FlattenMapBuilder::new();
     builder.insert_leaf(e_node_id, [], interior);
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     program.push(
         e_node_id,
         ExecutionNode {

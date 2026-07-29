@@ -16,7 +16,7 @@ use crate::DynamicValue;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::node::definition::FuncBehavior;
 
 /// Metadata identity of one filesystem entry.
@@ -281,7 +281,7 @@ impl ResourceStamper {
     /// spawns this one.
     pub(super) fn identify<'a>(
         &'a mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         slots: &NodeColumn<RuntimeSlot>,
         nodes: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
@@ -296,7 +296,7 @@ impl ResourceStamper {
     /// queued — [`Self::prepare`] is what empties the queue.
     fn request_node_paths(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         slots: &NodeColumn<RuntimeSlot>,
         node_idx: NodeIdx,
     ) {
@@ -376,7 +376,7 @@ impl ResourceStamper {
     /// versions it.
     pub(super) fn node_digest(
         &self,
-        program: &ExecutionProgram,
+        program: &Program,
         node_idx: NodeIdx,
         slots: &NodeColumn<RuntimeSlot>,
     ) -> Option<Digest> {
@@ -495,7 +495,7 @@ pub(crate) mod internals {
 
     use crate::execution::cache::resource::{FileId, FsPathId, ResourceStamper, StampError};
     use crate::execution::cache::slot::RuntimeSlot;
-    use crate::execution::program::ExecutionProgram;
+    use crate::execution::program::Program;
     use crate::execution::program::index::{NodeColumn, NodeIdx};
 
     impl ResourceStamper {
@@ -503,7 +503,7 @@ pub(crate) mod internals {
         /// without the blocking pool a test has no runtime to reach.
         pub(crate) fn identify_blocking(
             &mut self,
-            program: &ExecutionProgram,
+            program: &Program,
             slots: &NodeColumn<RuntimeSlot>,
             node_idx: NodeIdx,
         ) {
