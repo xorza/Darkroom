@@ -6,7 +6,7 @@ use crate::common::color_format::{ChannelSize, ChannelType, ColorFormat};
 use crate::image::{Image, ImageDesc};
 
 /// Area-averages `input` to `params`' target size, fused with the conversion to
-/// `RGBA_U8`. See [`Preview`](super::Preview) for the algorithm.
+/// `RGBA_U8`. See [`Preview`] for the algorithm.
 pub(super) fn generate(params: &Preview, input: &Image) -> Image {
     let dst_w = params.width.max(1);
     let dst_h = params.height.max(1);
