@@ -37,7 +37,11 @@ fn execution_node_name<'a>(
     library: &'a Library,
     e_node_id: ExecutionNodeId,
 ) -> &'a str {
-    let mut attribution = execution_graph.compiled.attribution(e_node_id).unwrap();
+    let mut attribution = execution_graph
+        .installed
+        .compiled
+        .attribution(e_node_id)
+        .unwrap();
     let node_id = attribution.next().unwrap();
     let instances = attribution.collect::<Vec<_>>();
     let mut current = graph;
@@ -58,6 +62,7 @@ fn execution_node_id(
     name: &str,
 ) -> Option<ExecutionNodeId> {
     execution_graph
+        .installed
         .compiled
         .program
         .e_node_ids
@@ -73,6 +78,7 @@ fn execution_node_ids(
     name: &str,
 ) -> Vec<ExecutionNodeId> {
     execution_graph
+        .installed
         .compiled
         .program
         .e_node_ids
@@ -99,12 +105,12 @@ fn execution_node_names_in_order(
         .process_order
         .iter()
         .filter(|&&node_idx| {
-            let e_node_id = execution_graph.compiled.program.e_node_ids[node_idx];
+            let e_node_id = execution_graph.installed.compiled.program.e_node_ids[node_idx];
             execution_graph.schedule.states[node_idx].is_runnable()
                 && execution_graph.node_ran(e_node_id)
         })
         .map(|&node_idx| {
-            let e_node_id = execution_graph.compiled.program.e_node_ids[node_idx];
+            let e_node_id = execution_graph.installed.compiled.program.e_node_ids[node_idx];
             execution_node_name(execution_graph, graph, library, e_node_id).to_owned()
         })
         .collect()
@@ -181,6 +187,7 @@ mod cache_persistence {
         use crate::library::Library;
         let mut engine = ExecutionEngine::default();
         engine
+            .installed
             .cache
             .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
@@ -231,6 +238,7 @@ mod cache_persistence {
         assert!(first.ran(e_node_id));
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -241,6 +249,7 @@ mod cache_persistence {
         );
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -252,6 +261,7 @@ mod cache_persistence {
         engine.store_resident_caches().await;
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -262,6 +272,7 @@ mod cache_persistence {
         );
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -299,6 +310,7 @@ mod cache_persistence {
         );
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -309,6 +321,7 @@ mod cache_persistence {
         );
         assert_eq!(
             engine
+                .installed
                 .cache
                 .disk_store()
                 .store_io
@@ -436,7 +449,10 @@ mod cache_persistence {
                 .message
                 .starts_with(&format!("failed to remove {}:", blocked_path.display()))
         );
-        let mut expected_successes = reopened.compiled.data_consumer_closure(&[get_a_id]);
+        let mut expected_successes = reopened
+            .installed
+            .compiled
+            .data_consumer_closure(&[get_a_id]);
         expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
         assert!(
             reopened.slot(blocked_eid).output_values().is_some(),
@@ -767,7 +783,7 @@ mod cache_persistence {
         );
 
         let empty_dir = TempDir::new("chain-empty");
-        engine.cache.set_disk_store(DiskStore::new(
+        engine.installed.cache.set_disk_store(DiskStore::new(
             &Library::default(),
             Some(empty_dir.0.clone()),
         ));
@@ -844,6 +860,7 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
         engine
+            .installed
             .cache
             .disk_store()
             .corrupt_payload(root_execution_node(mult_id), 1);
@@ -953,7 +970,7 @@ mod cache_persistence {
 
         // An empty replacement store proves the later hit comes from retained RAM, not disk.
         let empty_dir = TempDir::new("both-retained-empty");
-        engine.cache.set_disk_store(DiskStore::new(
+        engine.installed.cache.set_disk_store(DiskStore::new(
             &Library::default(),
             Some(empty_dir.0.clone()),
         ));
@@ -1613,7 +1630,8 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.cache
+            eg.installed
+                .cache
                 .set_disk_store(DiskStore::new(&lib, Some(dir.0.clone())));
             eg
         };
@@ -1849,6 +1867,7 @@ mod cache_persistence {
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
             let mut engine = ExecutionEngine::default();
             engine
+                .installed
                 .cache
                 .set_disk_store(DiskStore::new(&library, Some(dir.0.clone())));
             engine
@@ -1974,6 +1993,7 @@ mod resource_binds {
         use crate::execution::cache::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
         engine
+            .installed
             .cache
             .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
@@ -2361,15 +2381,15 @@ mod graph_structure {
             ["sum", "mult", "Print"]
         );
 
-        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.installed.compiled.program.e_nodes.len(), 5);
         assert_eq!(execution_graph.schedule.process_order.len(), 5);
         assert!(
-            (0..execution_graph.compiled.program.e_nodes.len())
+            (0..execution_graph.installed.compiled.program.e_nodes.len())
                 .all(|i| !execution_graph.schedule.states[NodeIdx(i as u32)]
                     .missing_required_inputs())
         );
         assert!(
-            (0..execution_graph.compiled.program.e_nodes.len())
+            (0..execution_graph.installed.compiled.program.e_nodes.len())
                 .all(|i| execution_graph.schedule.states[NodeIdx(i as u32)].is_runnable())
         );
 
@@ -2401,7 +2421,7 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_readers(sum), &[1]);
         assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
-        assert!(execution_graph.compiled.program.by_id(print).sink);
+        assert!(execution_graph.installed.compiled.program.by_id(print).sink);
 
         Ok(())
     }
@@ -2472,7 +2492,7 @@ mod graph_structure {
 
         // A good compile establishes a program.
         execution_graph.update(&graph, &library).unwrap();
-        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.installed.compiled.program.e_nodes.len(), 5);
 
         // Re-compiling the same graph against a library that defines none of
         // its funcs is rejected with a message naming a missing func.
@@ -2486,7 +2506,7 @@ mod graph_structure {
 
         // The rejection happens before any mutation, so the prior program is
         // left intact rather than torn down.
-        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.installed.compiled.program.e_nodes.len(), 5);
     }
 }
 
@@ -2512,7 +2532,8 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&get_b]]
+            !execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
@@ -2520,12 +2541,12 @@ mod missing_inputs {
         for gated in [sum, mult, print] {
             assert!(
                 execution_graph.schedule.states
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                    [execution_graph.installed.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
                 !execution_graph.schedule.states
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                    [execution_graph.installed.compiled.program.e_node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2562,12 +2583,12 @@ mod missing_inputs {
         for gated in [sum, mult, print] {
             assert!(
                 execution_graph.schedule.states
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                    [execution_graph.installed.compiled.program.e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
                 !execution_graph.schedule.states
-                    [execution_graph.compiled.program.e_node_index[&gated]]
+                    [execution_graph.installed.compiled.program.e_node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2597,11 +2618,13 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&mult]]
+            !execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&print]]
+            !execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2647,7 +2670,8 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&mult]]
+            execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2683,16 +2707,21 @@ mod disabled_nodes {
 
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.compiled.program.by_id(sum).disabled,
+            execution_graph
+                .installed
+                .compiled
+                .program
+                .by_id(sum)
+                .disabled,
             "the compiled node retains its authored disabled state"
         );
         assert!(
             !execution_graph
                 .schedule
                 .process_order
-                .contains(&execution_graph.compiled.program.e_node_index[&sum])
+                .contains(&execution_graph.installed.compiled.program.e_node_index[&sum])
                 && execution_graph.schedule.states
-                    [execution_graph.compiled.program.e_node_index[&sum]]
+                    [execution_graph.installed.compiled.program.e_node_index[&sum]]
                     == NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
@@ -2703,15 +2732,18 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&get_b]]
+            !execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&mult]]
+            execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&print]]
+            execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&print]]
                 .missing_required_inputs()
         );
 
@@ -3716,16 +3748,37 @@ mod invalidation {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        assert!(!execution_graph.compiled.program.e_nodes.is_empty());
+        assert!(
+            !execution_graph
+                .installed
+                .compiled
+                .program
+                .e_nodes
+                .is_empty()
+        );
 
         execution_graph.clear();
 
-        assert!(execution_graph.compiled.program.e_nodes.is_empty());
+        assert!(
+            execution_graph
+                .installed
+                .compiled
+                .program
+                .e_nodes
+                .is_empty()
+        );
         assert!(execution_graph.schedule.process_order.is_empty());
         // The packed pools are emptied too (not just the node list).
-        assert!(execution_graph.compiled.program.inputs.is_empty());
-        assert!(execution_graph.compiled.program.outputs.is_empty());
-        assert!(execution_graph.compiled.program.events.is_empty());
+        assert!(execution_graph.installed.compiled.program.inputs.is_empty());
+        assert!(
+            execution_graph
+                .installed
+                .compiled
+                .program
+                .outputs
+                .is_empty()
+        );
+        assert!(execution_graph.installed.compiled.program.events.is_empty());
 
         Ok(())
     }
@@ -3815,7 +3868,8 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled.program.e_node_index[&sum]]
+            execution_graph.schedule.states
+                [execution_graph.installed.compiled.program.e_node_index[&sum]]
                 .missing_required_inputs()
         );
 
@@ -4835,9 +4889,9 @@ mod events {
         // alongside the promoted sinks — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
         assert!(
-            eg.schedule
-                .process_order
-                .contains(&eg.compiled.program.e_node_index[&root_execution_node(trigger_id)]),
+            eg.schedule.process_order.contains(
+                &eg.installed.compiled.program.e_node_index[&root_execution_node(trigger_id)]
+            ),
             "the RunSinks sink runs as a sink"
         );
 
@@ -5045,7 +5099,7 @@ mod topology {
         let mut graph = test_graph();
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.compiled.program.e_nodes.len(), 5);
+        assert_eq!(eg.installed.compiled.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // The surviving direct-ID bindings remain valid.
@@ -5057,7 +5111,7 @@ mod topology {
         graph.validate_debug();
 
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.compiled.program.e_nodes.len(), 4);
+        assert_eq!(eg.installed.compiled.program.e_nodes.len(), 4);
         assert!(execution_node_id(&eg, &graph, &library, "get_b").is_none());
 
         eg.execute_sinks().await?;
@@ -5236,7 +5290,11 @@ mod topology {
             graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
             graph.validate_debug();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.compiled.program.e_nodes.len(), 4, "round {round} grow");
+            assert_eq!(
+                eg.installed.compiled.program.e_nodes.len(),
+                4,
+                "round {round} grow"
+            );
             printed.lock().await.clear();
             eg.execute_sinks().await?;
             let mut got = printed.lock().await.clone();
@@ -5248,7 +5306,11 @@ mod topology {
             graph.detach_node(pb);
             graph.validate_debug();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
+            assert_eq!(
+                eg.installed.compiled.program.e_nodes.len(),
+                2,
+                "round {round} shrink"
+            );
             printed.lock().await.clear();
             eg.execute_sinks().await?;
             assert_eq!(
@@ -5432,7 +5494,7 @@ mod graph {
         input_idx: usize,
     ) -> ExecutionNodeId {
         match &eg.node_inputs(e_node_id)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => eg.compiled.program.e_node_ids[addr.node_idx],
+            ExecutionBinding::Bind(addr) => eg.installed.compiled.program.e_node_ids[addr.node_idx],
             other => panic!("expected Bind, got {other:?}"),
         }
     }
@@ -5463,7 +5525,7 @@ mod graph {
         eg.update(&graph, &library).unwrap();
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
-        assert_eq!(eg.compiled.program.e_nodes.len(), 4);
+        assert_eq!(eg.installed.compiled.program.e_nodes.len(), 4);
         let sum = execution_node_id(&eg, &graph, &library, "sum").unwrap();
         assert_eq!(bind_target(&eg, sum, 0), root_execution_node(a_id));
         assert_eq!(bind_target(&eg, sum, 1), root_execution_node(b_id));
@@ -5485,17 +5547,19 @@ mod graph {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        assert_eq!(eg.compiled.program.e_nodes.len(), graph.len());
+        assert_eq!(eg.installed.compiled.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
             assert!(
-                eg.compiled
+                eg.installed
+                    .compiled
                     .program
                     .e_node_index
                     .contains_key(&root_execution_node(node.id)),
                 "id preserved"
             );
             assert_eq!(
-                eg.compiled
+                eg.installed
+                    .compiled
                     .attribution(root_execution_node(node.id))
                     .unwrap()
                     .collect::<Vec<_>>(),
@@ -5568,6 +5632,7 @@ mod graph {
 
         // Top-level node: id unchanged, attribution is just itself.
         let a_attr: Vec<_> = eg
+            .installed
             .compiled
             .attribution(root_execution_node(a_id))
             .unwrap()
@@ -5600,7 +5665,7 @@ mod graph {
         eg.node_events(e_node_id)[event_idx]
             .subscribers
             .iter()
-            .map(|&node_idx| eg.compiled.program.e_node_ids[node_idx])
+            .map(|&node_idx| eg.installed.compiled.program.e_node_ids[node_idx])
             .collect()
     }
 
@@ -6131,13 +6196,15 @@ mod compile_regressions {
         let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
         let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine.compiled.program.outputs[engine.compiled.program.by_id(make_int).outputs][0]
+            engine.installed.compiled.program.outputs
+                [engine.installed.compiled.program.by_id(make_int).outputs][0]
                 .data_type,
             DataType::Int,
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.compiled.program.outputs[engine.compiled.program.by_id(make_str).outputs][0]
+            engine.installed.compiled.program.outputs
+                [engine.installed.compiled.program.by_id(make_str).outputs][0]
                 .data_type,
             DataType::String,
             "make_str reads its own type, not its neighbor's"
@@ -6193,7 +6260,7 @@ mod compile_regressions {
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
-        let program = &engine.compiled.program;
+        let program = &engine.installed.compiled.program;
         let cases = [
             (fixed_id, DataType::Int),
             (long_chain_id, DataType::Int),
@@ -6420,7 +6487,8 @@ mod compile_regressions {
         eg.execute_sinks().await.unwrap();
 
         assert!(
-            !eg.compiled
+            !eg.installed
+                .compiled
                 .program
                 .e_node_index
                 .contains_key(&root_execution_node(sum_interior_id)),

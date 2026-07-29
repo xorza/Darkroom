@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::error::CompiledGraphValidationError;
 use crate::execution::compile::flatten::internals::FlatGraphBuilder;
 use crate::execution::error::ExecutionIdentityError;
@@ -440,7 +439,7 @@ fn dense_order_is_id_order_with_attribution_aligned_to_it() {
 }
 
 #[test]
-fn validation_returns_compiled_and_installed_mismatches() {
+fn validation_returns_compiled_mismatches() {
     let e_node_id = ExecutionNodeId::unique();
     let interior = NodeId::unique();
     let missing_func = FuncId::unique();
@@ -457,14 +456,6 @@ fn validation_returns_compiled_and_installed_mismatches() {
             .to_string(),
         format!("execution node {e_node_id:?} references missing func {missing_func:?}")
     );
-    assert_eq!(
-        compiled
-            .validate_installed(&RuntimeCache::default())
-            .unwrap_err()
-            .to_string(),
-        "runtime cache spans 0 nodes, not the compiled program's 1"
-    );
-
     assert_eq!(
         compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
         vec![interior]
