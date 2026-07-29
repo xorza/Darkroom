@@ -1,10 +1,10 @@
 use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compile::CompiledGraphValidationError;
 use crate::execution::flatten::map::internals::FlattenMapBuilder;
 use crate::execution::identity::ExecutionEventPort;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionNode, PendingSubscription};
-use crate::execution::validate::CompiledGraphValidationError;
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{GraphDef, NodeSearch};
 use crate::node::definition::{Func, FuncId};

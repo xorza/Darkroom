@@ -140,8 +140,8 @@ mod cache_persistence {
     use crate::async_lambda;
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::slot::ValueState;
-    use crate::execution::plan::NodeState;
     use crate::execution::report::internals::CollectingReporter;
+    use crate::execution::schedule::NodeState;
     use crate::node::definition::{FuncId, FuncOutput};
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -2735,7 +2735,7 @@ mod missing_inputs {
 
 mod disabled_nodes {
     use super::*;
-    use crate::execution::plan::NodeState;
+    use crate::execution::schedule::NodeState;
 
     /// Disabling `sum` retains it in the compiled program but excludes it from
     /// the plan. Its consumer `mult` sees the disabled producer as unavailable,

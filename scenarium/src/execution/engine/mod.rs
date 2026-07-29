@@ -12,9 +12,10 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::plan::{Planner, RunSchedule};
 use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunReporter;
+use crate::execution::schedule::RunSchedule;
+use crate::execution::schedule::planner::Planner;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::address::NodeId;
 
@@ -181,10 +182,10 @@ mod internals {
     use crate::execution::identity::ExecutionEventPort;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::outcome::ExecutionOutcome;
-    use crate::execution::plan::NodeState;
     use crate::execution::program;
     use crate::execution::program::ExecutionBinding;
     use crate::execution::report::internals::DiscardedReports;
+    use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::address::NodeId;
     use crate::node::lambda::OutputDemand;

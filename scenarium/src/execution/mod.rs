@@ -5,13 +5,13 @@
 //!    Runs on the *host's* thread (compile errors are synchronous); the resulting
 //!    [`CompiledGraph`](compile::CompiledGraph) is installed into the engine
 //!    via [`engine::ExecutionEngine::install`], which cannot fail.
-//! 2. **plan** — the [`Planner`](plan::Planner) turns the program into a
-//!    [`RunSchedule`](plan::RunSchedule). Purely structural —
+//! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
+//!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
 //! 3. **execute** — the [`RuntimeCache`](cache::runtime::RuntimeCache) prepares filesystem
-//!    identities on the blocking pool; [`resolve`](plan::RunSchedule::resolve) stamps content
-//!    digests, then derives cache-aware liveness, exact output demand, and reader counts in
-//!    one consumer-first sweep, refining that same schedule. The
+//!    identities on the blocking pool; [`resolve`](schedule::RunSchedule::resolve) stamps
+//!    content digests, then derives cache-aware liveness, exact output demand, and reader
+//!    counts in one consumer-first sweep, refining that same schedule. The
 //!    [`Executor`](executor::Executor) walks the surviving schedule producer-first.
 
 pub(crate) mod cache;
@@ -25,10 +25,8 @@ mod flatten;
 pub(crate) mod identity;
 pub(crate) mod log;
 pub(crate) mod outcome;
-pub(crate) mod plan;
 pub(crate) mod program;
 pub(crate) mod ram;
 pub(crate) mod report;
-pub(crate) mod resolve;
+pub(crate) mod schedule;
 pub(crate) mod seeds;
-pub(crate) mod validate;

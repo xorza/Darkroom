@@ -6,11 +6,11 @@ use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::{NodeState, RunSchedule};
 use crate::execution::program::index::NodeIdx;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
+use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
 

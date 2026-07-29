@@ -2,12 +2,12 @@
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
 //! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given an immutable
 //! [`Program`](crate::execution::program::Program), a resolved
-//! [`RunSchedule`](crate::execution::plan::RunSchedule), and that `RuntimeCache`,
+//! [`RunSchedule`](crate::execution::schedule::RunSchedule), and that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the schedule after
-//! [`resolve`](crate::execution::plan::RunSchedule::resolve) — disposition, output demand,
+//! [`resolve`](crate::execution::schedule::RunSchedule::resolve) — disposition, output demand,
 //! and reader counts derived together and authoritative for the whole run. A
 //! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
@@ -17,7 +17,7 @@
 //! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
-mod outcomes;
+mod node_outcome;
 
 use std::time::Instant;
 
@@ -27,8 +27,8 @@ use common::CancelToken;
 
 use crate::DynamicValue;
 use crate::execution::event::EventTrigger;
-use crate::execution::identity::ExecutionEventPort;
-use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::identity::{ExecutionEventPort, ExecutionInputPort};
+use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::node::lambda::{Invocation, InvokeError, OutputDemand};
@@ -38,11 +38,9 @@ use crate::runtime::shared_any_state::SharedAnyState;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::RunError;
-use crate::execution::executor::outcomes::{
-    NodeOutcome, collect_execution_outcome, has_errored_dependency, mark_skipped,
-};
-use crate::execution::plan::{NodeState, RunSchedule};
+use crate::execution::executor::node_outcome::NodeOutcome;
 use crate::execution::program::{ExecutionBinding, Program};
+use crate::execution::schedule::{NodeState, RunSchedule};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -166,9 +164,69 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        collect_execution_outcome(program, schedule, &self.outcomes, start, outcome);
+        self.collect_outcome(program, schedule, start, outcome);
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
+    }
+    /// Reduce this run's per-node column into the caller's outcome.
+    fn collect_outcome(
+        &self,
+        program: &Program,
+        schedule: &RunSchedule,
+        start: Instant,
+        outcome: &mut ExecutionOutcome,
+    ) {
+        // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
+        // the sole source of truth; a node the run never reached (a cancelled run's tail, or
+        // skipped for missing inputs) is `Pending` and contributes to no list here.
+        for &node_idx in &schedule.process_order {
+            let e_node = &program[node_idx];
+            let e_node_id = program.e_node_ids[node_idx];
+            match &self.outcomes[node_idx] {
+                // A reuse hit, or a node the cut pruned that still holds a resident value, are
+                // both "available, not recomputed" — reported cached. A pruned node
+                // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
+                NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
+                    outcome.cached_nodes.push(e_node_id);
+                }
+                NodeOutcome::Ran { secs } => outcome.executed_nodes.push(ExecutedNodeOutcome {
+                    e_node_id,
+                    elapsed_secs: *secs,
+                }),
+                // A cancelled invoke didn't complete — omit it from the executed set so the
+                // consumer doesn't paint it as executed (its error still lands below). A
+                // genuine failure did run; it appears in both lists.
+                NodeOutcome::Failed { secs, error }
+                    if !matches!(error, RunError::Cancelled { .. }) =>
+                {
+                    outcome.executed_nodes.push(ExecutedNodeOutcome {
+                        e_node_id,
+                        elapsed_secs: *secs,
+                    });
+                }
+                _ => {}
+            }
+            if schedule.states[node_idx].missing_required_inputs() {
+                // Recompute which ports are unsatisfied (the schedule's own predicate,
+                // shared with the planner) — only for the rare missing node, so it isn't
+                // worth a stored column.
+                for (i, input) in program.inputs[e_node.inputs].iter().enumerate() {
+                    if schedule.input_missing(input) {
+                        outcome.missing_inputs.push(ExecutionInputPort {
+                            e_node_id,
+                            port_idx: i,
+                        });
+                    }
+                }
+            }
+            if let Some(err) = self.outcomes[node_idx].error() {
+                outcome.node_errors.push(NodeError {
+                    e_node_id,
+                    error: err.clone(),
+                });
+            }
+        }
+        outcome.elapsed_secs = start.elapsed().as_secs_f64();
     }
 }
 
@@ -221,7 +279,7 @@ impl ExecutionFrame<'_, '_> {
                 let error = RunError::MissingLambda {
                     func_id: e_node.func_id,
                 };
-                mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+                self.mark_skipped(node_idx, error);
             }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
@@ -265,7 +323,7 @@ impl ExecutionFrame<'_, '_> {
             let error = RunError::CacheLoadFailed {
                 func_id: program[node_idx].func_id,
             };
-            mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+            self.mark_skipped(node_idx, error);
             return;
         }
         self.node_outcomes[node_idx] = NodeOutcome::Reused;
@@ -308,7 +366,7 @@ impl ExecutionFrame<'_, '_> {
                     func_id: program[node_idx].func_id,
                     message: error.to_string(),
                 };
-                mark_skipped(self.cache, self.node_outcomes, node_idx, run_error);
+                self.mark_skipped(node_idx, run_error);
                 false
             }
             Ok(false) => true,
@@ -336,10 +394,10 @@ impl ExecutionFrame<'_, '_> {
         let func_id = e_node.func_id;
         debug_assert!(!e_node.lambda.is_none());
 
-        if has_errored_dependency(program, self.node_outcomes, node_idx) {
+        if self.has_errored_dependency(node_idx) {
             self.abandon_input_reads(node_idx);
             let error = RunError::SkippedUpstream { func_id };
-            mark_skipped(self.cache, self.node_outcomes, node_idx, error);
+            self.mark_skipped(node_idx, error);
             return;
         }
 
@@ -447,6 +505,27 @@ impl ExecutionFrame<'_, '_> {
         self.release_drained_outputs(node_idx);
     }
 
+    /// Drop `e_node_id` from this run: clear any stale cached output so it isn't served as
+    /// this run's result, and record the outcome under the caller's reason —
+    /// [`RunError::SkippedUpstream`] for an errored dependency,
+    /// [`RunError::MissingLambda`] for a func with no implementation, or
+    /// [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
+    fn mark_skipped(&mut self, node_idx: NodeIdx, error: RunError) {
+        self.cache[node_idx].clear_output();
+        self.node_outcomes[node_idx] = NodeOutcome::Skipped { error };
+    }
+
+    /// Whether any node this one binds an input to already failed or was skipped for
+    /// an error — the check that turns an upstream failure into a skipped consumer.
+    fn has_errored_dependency(&self, node_idx: NodeIdx) -> bool {
+        let program = self.program;
+        program.inputs[program[node_idx].inputs]
+            .iter()
+            .any(|input| {
+                matches!(&input.binding, ExecutionBinding::Bind(addr) if self.node_outcomes[addr.node_idx].error().is_some())
+            })
+    }
+
     /// Hand the run's outcome the triggers a freshly initialized event source owns — only
     /// events that have a subscriber and an implementation can fire.
     fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
@@ -551,7 +630,7 @@ impl ExecutionFrame<'_, '_> {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::executor::Executor;
-    use crate::execution::executor::outcomes::NodeOutcome;
+    use crate::execution::executor::node_outcome::NodeOutcome;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::Program;
 
