@@ -10,11 +10,9 @@
 //!
 //! What a func node instantiates — the [`Func`](crate::graph::func::Func)
 //! declaration and the ABIs it runs through — is
-//! [`func`](crate::graph::func)'s. The modules below are the rest of the node
-//! side: how a wildcard output resolves ([`output_resolver`]), and the
-//! built-in [`special`] nodes.
+//! [`func`](crate::graph::func)'s. The module below owns the built-in
+//! [`special`] nodes.
 
-pub(crate) mod output_resolver;
 pub(crate) mod special;
 
 use ::serde::{Deserialize, Serialize};

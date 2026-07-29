@@ -1,3 +1,12 @@
+//! Resolve effective output types through fixed declarations, bindings,
+//! constants, and wildcard chains.
+//!
+//! The algorithm is independent of both authoring nodes and compiled programs:
+//! callers supply their own output-address key and describe each output as a
+//! [`OutputTypeSource`]. Keeping it in the data layer gives the authoring graph
+//! and compile linker one canonical implementation without either depending on
+//! the other.
+
 use std::hash::Hash;
 
 use hashbrown::HashMap;
@@ -5,7 +14,7 @@ use hashbrown::HashMap;
 use crate::{DataType, StaticValue};
 
 #[derive(Debug)]
-pub(crate) enum OutputSource<K> {
+pub(crate) enum OutputTypeSource<K> {
     Fixed(DataType),
     Bind(K),
     Const {
@@ -22,12 +31,12 @@ enum ResolutionState {
 }
 
 #[derive(Debug)]
-pub(crate) struct OutputResolver<K> {
+pub(crate) struct OutputTypeResolver<K> {
     states: HashMap<K, ResolutionState>,
     path: Vec<K>,
 }
 
-impl<K> OutputResolver<K> {
+impl<K> OutputTypeResolver<K> {
     pub(crate) fn new() -> Self {
         Self {
             states: HashMap::new(),
@@ -36,14 +45,14 @@ impl<K> OutputResolver<K> {
     }
 }
 
-impl<K> OutputResolver<K>
+impl<K> OutputTypeResolver<K>
 where
     K: Copy + Eq + Hash,
 {
     pub(crate) fn resolve(
         &mut self,
         output: K,
-        source: &impl Fn(K) -> OutputSource<K>,
+        source: &impl Fn(K) -> OutputTypeSource<K>,
     ) -> DataType {
         self.path.clear();
         let mut current = output;
@@ -56,12 +65,12 @@ where
             self.states.insert(current, ResolutionState::Resolving);
             self.path.push(current);
             match source(current) {
-                OutputSource::Fixed(data_type) => break data_type,
-                OutputSource::Bind(bound) => current = bound,
-                OutputSource::Const { declared, value } => {
+                OutputTypeSource::Fixed(data_type) => break data_type,
+                OutputTypeSource::Bind(bound) => current = bound,
+                OutputTypeSource::Const { declared, value } => {
                     break constant_output_type(declared, value);
                 }
-                OutputSource::Unresolved => break DataType::Any,
+                OutputTypeSource::Unresolved => break DataType::Any,
             }
         };
         for output in self.path.drain(..) {
