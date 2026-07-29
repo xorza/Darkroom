@@ -20,8 +20,6 @@ use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::{ResourceStamper, StampError};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, StateOwner, ValueState};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::outcome::NodeRamUsage;
-use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::Program;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::node::definition::FuncBehavior;
@@ -58,6 +56,16 @@ pub(crate) struct RuntimeCache {
 pub(crate) struct CacheEvictionFailure {
     pub(crate) e_node_id: ExecutionNodeId,
     pub(crate) message: String,
+}
+
+/// One node's share of the resident RAM, as
+/// [`resident_ram_stats`](RuntimeCache::resident_ram_stats) measures it. Lives
+/// with the cache that owns the values rather than with the run outcome that
+/// collects it — the cache is what knows what is resident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NodeRamUsage {
+    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) usage: RamUsage,
 }
 
 impl RuntimeCache {
@@ -233,11 +241,16 @@ impl RuntimeCache {
     /// reverse sweep. A Bind-delivered path value that is not resident yet
     /// stamps `None`; the run loop can improve that node to reuse once its
     /// path producer settles.
-    pub(crate) fn stamp_digests(&mut self, program: &Program, plan: &ExecutionPlan) {
-        for &node_idx in &plan.process_order {
-            if plan.verdicts[node_idx].wants_execute() {
-                self.stamp_digest(program, node_idx);
-            }
+    /// `executing` is the run's schedule in producer-first order
+    /// ([`ExecutionPlan::executing`](crate::execution::plan::ExecutionPlan::executing));
+    /// the cache reads the nodes, not the plan that selected them.
+    pub(crate) fn stamp_digests(
+        &mut self,
+        program: &Program,
+        executing: impl IntoIterator<Item = NodeIdx>,
+    ) {
+        for node_idx in executing {
+            self.stamp_digest(program, node_idx);
         }
     }
 
@@ -265,16 +278,11 @@ impl RuntimeCache {
     pub(crate) async fn prepare(
         &mut self,
         program: &Program,
-        plan: &ExecutionPlan,
+        executing: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) {
         let Self { slots, stamper, .. } = self;
         stamper.reset();
-        let executing = plan
-            .process_order
-            .iter()
-            .copied()
-            .filter(|&node_idx| plan.verdicts[node_idx].wants_execute());
         let _ = stamper.identify(program, slots, executing, cancel).await;
     }
 

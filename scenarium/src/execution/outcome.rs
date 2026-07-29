@@ -1,4 +1,5 @@
 use crate::RamUsage;
+use crate::execution::cache::runtime::NodeRamUsage;
 use crate::execution::error::RunError;
 use crate::execution::event::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
@@ -28,12 +29,6 @@ pub struct LogEntry {
     pub e_node_id: ExecutionNodeId,
     pub level: LogLevel,
     pub message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NodeRamUsage {
-    pub(crate) e_node_id: ExecutionNodeId,
-    pub(crate) usage: RamUsage,
 }
 
 #[derive(Debug, Default)]
