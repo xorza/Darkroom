@@ -1,14 +1,15 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
-//! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given an immutable
-//! [`Program`](crate::execution::program::Program), a resolved
-//! [`RunSchedule`](crate::execution::schedule::RunSchedule), and that `RuntimeCache`,
+//! the [`RuntimeCache`](crate::execution::cache::runtime::RuntimeCache). Given a
+//! [`Resolved`](crate::execution::schedule::Resolved) run — the program and the schedule
+//! swept against it — plus that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
-//! **Pre-run resolution.** [`run`](Executor::run) takes the schedule after
-//! [`resolve`](crate::execution::schedule::RunSchedule::resolve) — disposition, output demand,
-//! and reader counts derived together and authoritative for the whole run. A
+//! **Pre-run resolution.** The loop cannot be entered any other way: `Resolved` is minted
+//! only by [`resolve`](crate::execution::schedule::Scheduled::resolve), so the disposition,
+//! output demand,
+//! and reader counts it reads were derived together and are authoritative for the whole run. A
 //! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
 //! recomputed on reopen) gets [`NodeOutcome::Cut`]. A missing implementation is reported
@@ -40,7 +41,7 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::RunError;
 use crate::execution::executor::node_outcome::NodeOutcome;
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::execution::schedule::{NodeState, RunSchedule};
+use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -61,10 +62,12 @@ pub(crate) struct Executor {
 /// [`ExecutionFrame`].
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
-    pub(crate) program: &'a Program,
-    /// The run, resolved: the schedule, its per-node dispositions, and the output
-    /// demand and reader counts the same sweep derived from them.
-    pub(crate) schedule: &'a RunSchedule,
+    /// The run, resolved: the program, the schedule planned against it, and the
+    /// dispositions, demand, and reader counts one sweep derived from both. One value
+    /// because only [`Scheduled::resolve`](crate::execution::schedule::Scheduled::resolve)
+    /// mints it — the loop cannot be handed a schedule nothing resolved, or one resolved
+    /// against a different program.
+    pub(crate) run: Resolved<'a>,
     pub(crate) cache: &'a mut RuntimeCache,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
@@ -115,12 +118,14 @@ impl Executor {
         outcome: &mut ExecutionOutcome,
     ) {
         let RunRequest {
-            program,
-            schedule,
+            run,
             cache,
             reporter,
             cancel,
         } = request;
+        // The handle's job is done the moment the loop has it: it proved these two
+        // belong together, and every step below reads them as the pair it vouched for.
+        let (program, schedule) = (run.program(), run.schedule());
 
         outcome.clear();
         let start = Instant::now();
@@ -255,7 +260,7 @@ pub(crate) struct ExecutionFrame<'a, 'r> {
 impl ExecutionFrame<'_, '_> {
     /// One node's turn. The resolved disposition decides which of the four things happens,
     /// and it is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its
-    /// producers may already be pruned (see [`resolve`](RunSchedule::resolve)).
+    /// producers may already be pruned (see [`resolve`](crate::execution::schedule::Scheduled::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
         let demand = self.schedule.outputs.demand.slice(e_node.outputs);

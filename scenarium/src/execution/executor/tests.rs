@@ -8,7 +8,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
-use crate::execution::schedule::{NodeState, ResolvedOutputs, RunSchedule};
+use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::Invocation;
@@ -185,8 +185,7 @@ async fn run(program: &Program, run: &RunSchedule) -> (RuntimeCache, ExecutionOu
     executor
         .run(
             RunRequest {
-                program,
-                schedule: run,
+                run: Resolved::assume(program, run),
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -206,14 +205,13 @@ async fn run_with(
 ) -> ExecutionOutcome {
     let mut executor = Executor::default();
     // Refine the schedule like the engine does. `straight_run` roots every node, so
-    // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
-    schedule.resolve(program, cache).await;
+    // the cut prunes nothing here — the cut itself is unit-tested in the sweep tests.
+    let resolved = Scheduled::assume(program, schedule).resolve(cache).await;
     let mut outcome = ExecutionOutcome::default();
     executor
         .run(
             RunRequest {
-                program,
-                schedule,
+                run: resolved,
                 cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -342,8 +340,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     executor
         .run(
             RunRequest {
-                program: &p.program,
-                schedule: &run,
+                run: Resolved::assume(&p.program, &run),
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
@@ -560,8 +557,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     executor
         .run(
             RunRequest {
-                program: &p.program,
-                schedule: &run,
+                run: Resolved::assume(&p.program, &run),
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),

@@ -6,7 +6,7 @@
 use crate::execution::error::{Error, Result};
 use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::program::{ExecutionBinding, Program};
-use crate::execution::schedule::{NodeState, RunSchedule};
+use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
 use crate::execution::seeds::RunSeeds;
 
 /// DFS coloring for the backward pass. White = unvisited, Gray = on
@@ -44,12 +44,17 @@ impl Planner {
     /// Build the per-run schedule into `schedule` from the installed program and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
-    pub(crate) fn plan(
+    ///
+    /// The [`Scheduled`] handed back is the only way to reach
+    /// [`resolve`](Scheduled::resolve), and it borrows `schedule` for as long as it
+    /// lives — so nothing can read a half-filled buffer, and the program the columns
+    /// are aligned to travels with them rather than being passed again downstream.
+    pub(crate) fn plan<'a>(
         &mut self,
-        program: &Program,
+        program: &'a Program,
         seeds: &RunSeeds,
-        schedule: &mut RunSchedule,
-    ) -> Result<()> {
+        schedule: &'a mut RunSchedule,
+    ) -> Result<Scheduled<'a>> {
         schedule.reset_for_program(program);
         self.reset_for_program(program);
 
@@ -57,11 +62,9 @@ impl Planner {
         // backward walk below and the cache-aware reverse sweep.
         schedule.collect_roots(program, seeds)?;
 
-        let result = self.walk_backward_collect_order(program, schedule);
-        if result.is_ok() {
-            schedule.validate_debug(program);
-        }
-        result
+        self.walk_backward_collect_order(program, schedule)?;
+        schedule.validate_debug(program);
+        Ok(Scheduled::new(program, schedule))
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
