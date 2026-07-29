@@ -93,8 +93,12 @@ impl StaticValue {
         }
     }
 
+    /// The paths this value names, one variant or many — a single path
+    /// answers as a one-element slice, so a caller that works over a
+    /// selection never has to special-case the singular form.
     pub fn as_fs_paths(&self) -> Option<&[String]> {
         match self {
+            StaticValue::FsPath(path) => Some(std::slice::from_ref(path)),
             StaticValue::FsPaths(paths) => Some(paths),
             _ => None,
         }
@@ -196,15 +200,23 @@ mod tests {
         assert_eq!(StaticValue::String("x".into()).as_f64(), None);
         assert_eq!(StaticValue::String("hi".into()).as_string(), Some("hi"));
         assert_eq!(StaticValue::Enum("Add".into()).as_enum(), Some("Add"));
+        // `as_fs_paths` spans both variants — a caller reading a selection
+        // sees one path as a selection of one — while `as_fs_path` stays
+        // exact about which variant it was handed.
         let one_path = StaticValue::FsPath("x".into());
         assert_eq!(one_path.as_fs_path(), Some("x"));
-        assert_eq!(one_path.as_fs_paths(), None);
+        assert_eq!(
+            one_path.as_fs_paths(),
+            Some(["x".to_string()].as_slice()),
+            "a single path answers as a one-element selection"
+        );
         let paths = StaticValue::FsPaths(vec!["x".into(), "y".into()]);
         assert_eq!(paths.as_fs_path(), None);
         assert_eq!(
             paths.as_fs_paths(),
             Some(["x".to_string(), "y".to_string()].as_slice())
         );
+        assert_eq!(StaticValue::Int(7).as_fs_paths(), None);
     }
 
     #[test]
