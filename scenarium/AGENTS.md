@@ -74,11 +74,10 @@ through the installed `CompiledGraph` when it needs authoring identities.
 | `execution/plan/` | Structural scheduling and missing-input verdicts |
 | `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
 | `execution/executor/` | Invocation, delivery, reclamation, and outcomes |
-| `execution/cache/` | Cross-run values and output coverage |
+| `execution/cache/` | Cross-run values and output coverage, the content digests keying them, and the filesystem identities those fold |
 | `execution/codec.rs` | Streaming downstream custom-value codec API |
 | `execution/disk_store/` | Indexed on-disk cache format and atomic persistence |
 | `execution/report.rs` | Internal live progress and pinned-output transport |
-| `execution/resource/` | Off-thread, memoized per-run filesystem identities |
 | `execution/outcome.rs` | Private completed-run outcome |
 | `worker/protocol.rs` | Host/worker messages and reports |
 | `worker/status.rs` | Shared worker activity and node-status snapshots |
