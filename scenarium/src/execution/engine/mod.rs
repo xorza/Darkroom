@@ -16,7 +16,6 @@ use crate::execution::plan::{ExecutionPlan, Planner};
 use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunReporter;
 use crate::execution::resolve::Resolver;
-use crate::execution::resource::ResourceStamper;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::NodeId;
 
@@ -46,7 +45,6 @@ pub(crate) struct ExecutionEngine {
     resolver: Resolver,
     /// Per-run filesystem identities, collected off-thread and shared by initial
     /// resolution and late bound-path restamps.
-    resource_stamper: ResourceStamper,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
 }
@@ -60,7 +58,6 @@ impl ExecutionEngine {
         self.compiled = Arc::default();
         self.plan.reset_for_program(&self.compiled.program);
         self.cache.clear();
-        self.resource_stamper = ResourceStamper::default();
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program.
@@ -106,25 +103,15 @@ impl ExecutionEngine {
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
-        self.resource_stamper
-            .prepare_run(
-                &self.compiled.program,
-                &self.plan,
-                &self.cache,
-                cancel.clone(),
-            )
+        self.cache
+            .prepare_run(&self.compiled.program, &self.plan, cancel.clone())
             .await;
 
         // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,
         // exact output demand, and live readers together. The resolved run is authoritative:
         // a cache-hit or blocked consumer contributes no upstream demand.
         self.resolver
-            .resolve(
-                &self.compiled.program,
-                &self.plan,
-                &mut self.cache,
-                &self.resource_stamper,
-            )
+            .resolve(&self.compiled.program, &self.plan, &mut self.cache)
             .await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
@@ -137,7 +124,6 @@ impl ExecutionEngine {
                     plan: &self.plan,
                     resolved: &self.resolver.run,
                     cache: &mut self.cache,
-                    resource_stamper: &mut self.resource_stamper,
                     reporter,
                     cancel,
                 },
@@ -196,7 +182,6 @@ mod internals {
     use crate::execution::program::ExecutionBinding;
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::resolve::Disposition;
-    use crate::execution::resource::ResourceStamper;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::NodeId;
     use crate::node::lambda::OutputDemand;
@@ -286,14 +271,8 @@ mod internals {
                 e_node_ids: Vec::new(),
             };
             self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
-            self.resource_stamper = ResourceStamper::default();
             self.resolver
-                .resolve(
-                    &self.compiled.program,
-                    &self.plan,
-                    &mut self.cache,
-                    &self.resource_stamper,
-                )
+                .resolve(&self.compiled.program, &self.plan, &mut self.cache)
                 .await;
             Ok(())
         }
