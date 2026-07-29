@@ -86,6 +86,28 @@ impl DigestPod for bool {
     }
 }
 
+/// One input's discriminant in a node digest.
+///
+/// The whole space in one place, because it is written from two folds —
+/// the per-input match and the bound-path fold beneath it — and a value
+/// repeated between them would silently make two different inputs key
+/// alike. Written through [`DigestHasher::write_input_tag`], so the byte
+/// each name stands for is decided once.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum InputTag {
+    /// Nothing bound.
+    Unbound = 0,
+    /// An authored constant, its value following.
+    Const = 1,
+    /// A producer port, its digest and port index following.
+    Bind = 2,
+    /// A resource input, the referent's identity following.
+    BoundPaths = 3,
+    /// A resource input handed something that is not a path — the marker
+    /// stands alone.
+    BoundMistyped = 4,
+}
+
 /// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with
 /// digest-friendly writers, used by the framework's structural fold. Deterministic and
 /// cross-architecture stable: PODs fold little-endian
@@ -104,6 +126,12 @@ impl DigestHasher {
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
         self.0.update(bytes);
         self
+    }
+
+    /// Fold one input's discriminant — the one place an [`InputTag`] name
+    /// becomes a byte.
+    pub(super) fn write_input_tag(&mut self, tag: InputTag) -> &mut Self {
+        self.write_bytes(&[tag as u8])
     }
 
     /// Fold a fixed-size plain-old-data value ([`DigestPod`]) as its little-endian bytes.
