@@ -11,7 +11,7 @@ use thiserror::Error;
 use std::error;
 use std::fmt;
 
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::FuncId;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FuncValidationError {
