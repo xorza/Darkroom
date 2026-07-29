@@ -84,7 +84,7 @@ impl Fix {
             event_sources,
         };
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&self.program);
+        cache.reconcile_fresh(&self.program);
         cache.stamp_digests(&self.program, plan.executing());
         for cached in cached {
             let digest = cache.slots[nx(cached.e_node_id)].current_digest.unwrap();
