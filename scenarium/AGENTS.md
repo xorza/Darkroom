@@ -107,11 +107,12 @@ takes those exact runtime triggers from `ExecutionOutcome` and moves them into
 event tasks; fired-event runs do not rebuild unrelated triggers.
 
 Before resolution, the `RuntimeCache` collects filesystem identities on Tokio's
-blocking pool, through the `ResourceStamper` it owns. It memoizes each path for one
-run and is reused by late bound-path restamps after producers settle, keeping
-`node_digest` itself synchronous and I/O-free. The stamper lives on the cache
-because the two are always read together: a digest needs a path's identity, and a
-path is identified off a producer's slot.
+blocking pool, through the `StampJob` it owns — a queue-then-walk pass that moves to
+the pool and back, so nothing of the cache is borrowed across the boundary. The cache
+memoizes each path for one run and reuses it for late bound-path restamps after
+producers settle, keeping `node_digest` itself synchronous and I/O-free. The memo lives
+on the cache because the two are always read together: a digest needs a path's
+identity, and a path is identified off a producer's slot.
 
 A cache slot is valid only when its digest matches and its
 `OutputSnapshot` coverage contains every currently demanded output. Invocation

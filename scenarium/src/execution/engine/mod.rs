@@ -23,10 +23,10 @@ use crate::graph::address::NodeId;
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `schedule` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
-/// owned [`disk_store::DiskStore`] file persistence and the caching policy), and the `executor`
-/// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
+/// owned [`DiskStore`](crate::execution::cache::disk_store::DiskStore) file persistence and the caching policy), and the `executor`
+/// (run loop + context). Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler));
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`Program`] alone.
+/// persistent form is the [`Program`](crate::execution::program::Program) alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed shared compile artifact: the program plus its compact
@@ -34,7 +34,7 @@ pub(crate) struct ExecutionEngine {
     /// Replaced wholesale by [`Self::install`].
     compiled: Arc<CompiledGraph>,
     /// Per-node cross-run cache (output values, digests, node state) plus the
-    /// [`disk_store::DiskStore`]
+    /// [`DiskStore`](crate::execution::cache::disk_store::DiskStore)
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
     /// The RAM slots are reconciled to the node set at each `install`; the disk store is set
     /// by the worker and kept across installs.
@@ -64,7 +64,7 @@ impl ExecutionEngine {
 
     /// Install a host-compiled [`CompiledGraph`] as the current program.
     /// Infallible: everything that can go wrong went wrong at compile
-    /// ([`compile::Compiler`]), on the host's thread.
+    /// ([`Compiler`](crate::execution::compile::Compiler)), on the host's thread.
     ///
     /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable buffer between an install and the next run.
@@ -153,7 +153,8 @@ impl ExecutionEngine {
     }
 
     /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
-    /// values when the worker attaches a new [`disk_store::DiskStore`]. This makes values computed
+    /// values when the worker attaches a new
+    /// [`DiskStore`](crate::execution::cache::disk_store::DiskStore). This makes values computed
     /// while the store was memory-only durable once a document receives a cache root.
     ///
     /// The attached store has no reuse verdict for these values, so each current resident

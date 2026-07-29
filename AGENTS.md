@@ -4,7 +4,7 @@ AI coding rules for Rust projects.
 
 Scenarium is a Cargo workspace for a node-based data processing pipeline framework with a visual editor. Workspace members:
 
-- **`common`** — pure leaf crate of shared utilities: 2D buffers (`Buffer2`, bit-packed `BitBuffer2`), strongly-typed UUID IDs, serialization + file-format detection, async sync primitives (`Slot`, `PauseGate`, `ReadyState`), and small extension traits. Depended on by everything, depends on nothing in-tree.
+- **`common`** — pure leaf crate of shared utilities: strongly-typed UUID ids (`id_type!`), cancellation (`CancelToken`), serialization + file-format detection (`SerdeFormat`, `serialize`/`deserialize`), atomic file publication (`AtomicFile`), an insertion-ordered map, runtime introspection, `Span`, and small extension traits. Depended on by everything, depends on nothing in-tree.
 - **`scenarium`** — the node-graph framework: an authoring graph model plus a compile→plan→execute pipeline that flattens composites and schedules async node functions on a tokio worker. Depends only on `common`.
 - **`darkroom`** — the editor app and `default-member`; the Palantir-based UI (its own conventions in `darkroom/AGENTS.md`).
 - **`lens`** — image-processing function library that adapts `imaginarium` operations into `scenarium`'s node-based workflow.
