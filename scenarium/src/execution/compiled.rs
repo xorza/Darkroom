@@ -319,20 +319,20 @@ impl CompiledGraph {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
-mod internals {
+#[cfg(test)]
+pub(crate) mod internals {
+    use std::ops::Deref;
+    use std::sync::Arc;
+
+    use hashbrown::HashMap;
+
+    use crate::common::column::Column;
+    use crate::common::pool::Pool;
     use crate::execution::compiled::CompiledGraph;
     use crate::execution::identity::ExecutionNodeId;
+    use crate::execution::program::Program;
+    use crate::execution::source_map::Attribution;
     use crate::graph::identity::NodeId;
-
-    // Only the fixture constructor below needs these, and it is narrower than
-    // the mod: an `internals` build without `cfg(test)` has no caller for it.
-    #[cfg(test)]
-    use {
-        crate::common::column::Column, crate::common::pool::Pool,
-        crate::execution::program::Program, crate::execution::source_map::Attribution,
-        hashbrown::HashMap,
-    };
 
     impl CompiledGraph {
         /// Every execution node an authored node covers, in ascending id
@@ -342,19 +342,19 @@ mod internals {
         /// it (`run_targets`, `is_sink`, `is_impure`, `data_consumer_closure`),
         /// so this exists to test the relation those four share once rather
         /// than four times through their filters.
-        pub fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
+        pub(crate) fn occurrences(&self, node_id: NodeId) -> Vec<ExecutionNodeId> {
             self.footprint(node_id)
                 .iter()
                 .map(|&node_idx| self.program.e_node_ids[node_idx])
                 .collect()
         }
 
-        /// Build an artifact around a hand-built program for execution-layer unit
-        /// tests. Production
-        /// artifacts can only be created by the linker, which supplies the source
-        /// relations alongside the program.
-        #[cfg(test)]
-        pub(crate) fn from_program_for_test(program: Program) -> Self {
+        /// Build an artifact around a hand-built program, leaving every host
+        /// index empty. Production artifacts can only be created by the
+        /// linker, which supplies the source relations alongside the program —
+        /// so this is reached through [`TestCompiledGraph`] rather than
+        /// standing on its own.
+        fn from_program(program: Program) -> Self {
             Self {
                 program,
                 attribution: Attribution::default(),
@@ -363,6 +363,45 @@ mod internals {
                 consumers: Column::default(),
                 exposed: HashMap::default(),
             }
+        }
+    }
+
+    /// Convenience owner for tests that hand-build a [`Program`] but still install
+    /// the same outer artifact production uses.
+    #[derive(Debug)]
+    pub(crate) struct TestCompiledGraph {
+        compiled: Arc<CompiledGraph>,
+    }
+
+    impl TestCompiledGraph {
+        pub(crate) fn new(program: Program) -> Self {
+            Self {
+                compiled: Arc::new(CompiledGraph::from_program(program)),
+            }
+        }
+
+        pub(crate) fn program_mut(&mut self) -> &mut Program {
+            &mut Arc::get_mut(&mut self.compiled)
+                .expect("the fixture is built before its artifact is shared")
+                .program
+        }
+
+        pub(crate) fn shared(&self) -> &Arc<CompiledGraph> {
+            &self.compiled
+        }
+    }
+
+    impl Default for TestCompiledGraph {
+        fn default() -> Self {
+            Self::new(Program::default())
+        }
+    }
+
+    impl Deref for TestCompiledGraph {
+        type Target = Program;
+
+        fn deref(&self) -> &Self::Target {
+            &self.compiled.program
         }
     }
 }
