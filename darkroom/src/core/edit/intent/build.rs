@@ -266,7 +266,7 @@ pub(crate) fn build_step(
                 // the edit must never land. The GUI snap filter normally stops
                 // this earlier; this is the authoritative guard covering every
                 // binding path, including any that bypass the canvas.
-                if graph.would_create_cycle(src.node_id, input.node_id) {
+                if graph.produces_cycle(src.node_id, input.node_id) {
                     return Err(Refusal::Quiet);
                 }
             }
