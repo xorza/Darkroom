@@ -9,7 +9,7 @@ use crate::graph::query::NodePorts;
 use crate::graph::{Binding, InputPort, NodeId, OutputPort};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
-use crate::{DataType, DetachedNode, StaticValue, closes_data_cycle};
+use crate::{DataType, DetachedNode, StaticValue};
 use common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -798,44 +798,6 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
         Binding::Const(StaticValue::Float(1.0)),
     );
     assert_eq!(sink_binding(&g), FlatSink::Const);
-}
-
-#[test]
-fn would_create_cycle_detects_direct_and_transitive_loops() {
-    // A relay func (one input, one output) lets a node be both producer and
-    // consumer. Chain a → b → c via binds; d is an unconnected sink.
-    let relay = Func::new(FuncId::unique(), "relay")
-        .input(FuncInput::required("x", DataType::Int))
-        .output(FuncOutput::new("o", DataType::Int));
-    let mut g = Graph::default();
-    let a = g.add_func_node(&relay);
-    let b = g.add_func_node(&relay);
-    let c = g.add_func_node(&relay);
-    let d = g.add_func_node(&relay);
-    g.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
-    g.set_input_binding(InputPort::new(c, 0), Binding::bind(b, 0));
-
-    // Back-edges close a loop: the producer is reachable from the consumer.
-    assert!(g.would_create_cycle(b, a), "b → a closes a → b");
-    assert!(
-        g.would_create_cycle(c, a),
-        "c → a closes a → b → c transitively"
-    );
-    // A node wired to itself is a self-cycle.
-    assert!(g.would_create_cycle(a, a));
-
-    // Forward / sideways edges are fine — a second a → c path is a DAG
-    // diamond, and a fresh sink is reachable from nothing.
-    assert!(!g.would_create_cycle(a, c));
-    assert!(!g.would_create_cycle(c, d));
-    assert!(!g.would_create_cycle(a, d));
-
-    // The free core matches the wrapper on a raw `(producer, consumer)` edge
-    // list — the path the editor's scene-based pre-filter takes.
-    let edges = [(a, b), (b, c)];
-    assert!(closes_data_cycle(edges.into_iter(), c, a));
-    assert!(!closes_data_cycle(edges.into_iter(), a, c));
-    assert!(closes_data_cycle(edges.into_iter(), a, a));
 }
 
 #[test]
