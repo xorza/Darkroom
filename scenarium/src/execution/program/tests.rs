@@ -1,13 +1,13 @@
 use crate::execution::identity::{ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram, PendingBind,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, PendingBind, Program,
 };
 
 /// Flatten's emit-order buffer: three producers with two output ports each, then
 /// a consumer with two inputs. Ids are emitted high-first so adoption has to
 /// re-order them.
-fn emitted_nodes(program: &mut ExecutionProgram) -> Vec<(ExecutionNodeId, ExecutionNode)> {
+fn emitted_nodes(program: &mut Program) -> Vec<(ExecutionNodeId, ExecutionNode)> {
     let mut e_nodes: Vec<_> = [3_u128, 1, 2]
         .into_iter()
         .map(|id| {
@@ -40,7 +40,7 @@ fn emitted_nodes(program: &mut ExecutionProgram) -> Vec<(ExecutionNodeId, Execut
 /// leaves the caller's buffer empty with its allocation intact.
 #[test]
 fn adopt_nodes_orders_by_id_and_drains_the_flattener_buffer() {
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     let mut e_nodes = emitted_nodes(&mut program);
     let capacity = e_nodes.capacity();
     program.adopt_nodes(e_nodes.drain(..));
@@ -69,7 +69,7 @@ fn adopt_nodes_orders_by_id_and_drains_the_flattener_buffer() {
 /// pools keep emit order, so a node's index and its output range are unrelated.
 #[test]
 fn intern_bindings_resolves_ids_to_dense_addresses_over_emit_ordered_pools() {
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     let mut e_nodes = emitted_nodes(&mut program);
     program.adopt_nodes(e_nodes.drain(..));
 

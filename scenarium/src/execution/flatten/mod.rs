@@ -19,8 +19,8 @@ use hashbrown::HashSet;
 use crate::execution::flatten::map::FlattenMap;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
-    ExecutionProgram, PendingBind, PendingSubscription,
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, PendingBind,
+    PendingSubscription, Program,
 };
 use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::validate::{MAX_NESTING_DEPTH, const_satisfies, declared_accepts_const};
@@ -62,7 +62,7 @@ impl Flattener {
     /// reuses, so nothing leaves this call but the populated `program`.
     pub(super) fn build(
         &mut self,
-        program: &mut ExecutionProgram,
+        program: &mut Program,
         root: &Graph,
         library: &Library,
         flatten: &mut FlattenMap,
@@ -138,7 +138,7 @@ struct Run<'a> {
     e_nodes: &'a mut Vec<(ExecutionNodeId, ExecutionNode)>,
     /// Only for the port pools built this update — the walk's nodes reach
     /// the program through [`Flattener::build`], after the descent.
-    program: &'a mut ExecutionProgram,
+    program: &'a mut Program,
 }
 
 impl<'a> Run<'a> {
@@ -231,7 +231,7 @@ impl<'a> Run<'a> {
             let inputs_start = inputs.start as usize;
 
             // Id uniqueness is enforced when the program adopts these
-            // (`ExecutionProgram::push`), so the walk just appends.
+            // (`Program::push`), so the walk just appends.
             self.e_nodes.push((
                 e_node_id,
                 ExecutionNode {

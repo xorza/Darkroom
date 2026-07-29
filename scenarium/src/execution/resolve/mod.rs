@@ -21,7 +21,7 @@
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, Program};
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
@@ -94,7 +94,7 @@ impl Resolver {
     /// over-approximation.
     pub(crate) async fn resolve(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
     ) {

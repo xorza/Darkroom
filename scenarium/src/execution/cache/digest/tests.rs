@@ -6,17 +6,17 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::node::definition::{FuncBehavior, FuncId};
 
-/// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
+/// Minimal hand-built `Program` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
 /// go straight into the packed output metadata — each output defaults to `Int`,
 /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
 #[derive(Debug, Default)]
 struct Prog {
-    program: ExecutionProgram,
+    program: Program,
 }
 
 impl Prog {
@@ -124,7 +124,7 @@ struct DigestPair {
 /// in fixture index order, each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. The cache
 /// identifies its own paths each call. Returns it, holding every computed digest.
-fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
+fn digested_cache(program: &Program, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     for idx in 0..=through {
@@ -135,7 +135,7 @@ fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
 }
 
 /// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &ExecutionProgram, idx: usize) -> Option<Digest> {
+fn digest_at(program: &Program, idx: usize) -> Option<Digest> {
     digested_cache(program, idx).slots[node_idx(idx)].current_digest
 }
 

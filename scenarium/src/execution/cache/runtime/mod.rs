@@ -22,7 +22,7 @@ use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, StateOwner, Val
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::outcome::NodeRamUsage;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::ExecutionProgram;
+use crate::execution::program::Program;
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
 use crate::node::definition::FuncBehavior;
 use crate::node::lambda::OutputDemand;
@@ -76,7 +76,7 @@ impl RuntimeCache {
 
     pub(crate) async fn evict(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         e_node_ids: &[ExecutionNodeId],
     ) -> Vec<CacheEvictionFailure> {
         let mut failures = Vec::new();
@@ -137,7 +137,7 @@ impl RuntimeCache {
     /// version) changed — default new nodes, trim removed ones, and apply the
     /// installed program's RAM-retention policy immediately. The one place ids
     /// are hashed for slot access; every per-run access is an index read.
-    pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
+    pub(crate) fn reconcile(&mut self, program: &Program) {
         let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> =
             self.e_node_ids.drain().zip(self.slots.drain()).collect();
         for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
@@ -197,7 +197,7 @@ impl RuntimeCache {
     /// `None` when the slot holds no resident values.
     pub(crate) fn read_output_port(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         address: OutputAddr,
         take: bool,
     ) -> Option<DynamicValue> {
@@ -233,7 +233,7 @@ impl RuntimeCache {
     /// reverse sweep. A Bind-delivered path value that is not resident yet
     /// stamps `None`; the run loop can improve that node to reuse once its
     /// path producer settles.
-    pub(crate) fn stamp_digests(&mut self, program: &ExecutionProgram, plan: &ExecutionPlan) {
+    pub(crate) fn stamp_digests(&mut self, program: &Program, plan: &ExecutionPlan) {
         for &node_idx in &plan.process_order {
             if plan.verdicts[node_idx].wants_execute() {
                 self.stamp_digest(program, node_idx);
@@ -244,7 +244,7 @@ impl RuntimeCache {
     /// Stamp one node's structural content digest into its slot. The resolver's
     /// pass calls this before exact output demand is known; cache coverage is
     /// probed later by [`probe_reuse`](Self::probe_reuse).
-    pub(crate) fn stamp_digest(&mut self, program: &ExecutionProgram, node_idx: NodeIdx) {
+    pub(crate) fn stamp_digest(&mut self, program: &Program, node_idx: NodeIdx) {
         // Folded whole before the write, so the fold's read of the slots ends
         // before the slot it stamps is borrowed mutably. The cache is what
         // pairs the two halves the fold needs — its slots and its stamper.
@@ -264,7 +264,7 @@ impl RuntimeCache {
     /// which node it concerns.
     pub(crate) async fn prepare(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         plan: &ExecutionPlan,
         cancel: CancelToken,
     ) {
@@ -292,7 +292,7 @@ impl RuntimeCache {
     /// rather than a run-wide abort blaming nobody.
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         contexts: &mut ContextStore,
@@ -309,7 +309,7 @@ impl RuntimeCache {
     }
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
-    fn blob_target(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> Option<BlobTarget> {
+    fn blob_target(&self, program: &Program, node_idx: NodeIdx) -> Option<BlobTarget> {
         self.disk_store.blob_target(
             program.e_node_ids[node_idx],
             &program[node_idx],
@@ -333,7 +333,7 @@ impl RuntimeCache {
     /// worker future non-`Send`.
     pub(crate) async fn probe_reuse(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
     ) -> bool {
@@ -358,7 +358,7 @@ impl RuntimeCache {
     /// and recomputes.
     pub(crate) async fn hydrate_reuse(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
@@ -394,7 +394,7 @@ impl RuntimeCache {
     /// disk store is attached.
     pub(crate) fn store_node<'a>(
         &'a self,
-        program: &ExecutionProgram,
+        program: &Program,
         node_idx: NodeIdx,
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
@@ -413,7 +413,7 @@ impl RuntimeCache {
     /// Release resident values that cannot be a future RAM hit under the installed program.
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
-    pub(crate) fn release_dead_outputs(&mut self, program: &ExecutionProgram) {
+    pub(crate) fn release_dead_outputs(&mut self, program: &Program) {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let Some(resident_len) = self.slots[node_idx].output_values().map(Vec::len) else {
                 continue;
@@ -445,17 +445,13 @@ pub(crate) mod internals {
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::{OutputSnapshot, ValueState};
-    use crate::execution::program::ExecutionProgram;
+    use crate::execution::program::Program;
     use crate::execution::program::index::NodeIdx;
 
     impl RuntimeCache {
         /// [`RuntimeCache::stamp_digest`]'s fold without the store — the
         /// only way a test reaches the stamper this cache keeps private.
-        pub(crate) fn digest_of(
-            &self,
-            program: &ExecutionProgram,
-            node_idx: NodeIdx,
-        ) -> Option<Digest> {
+        pub(crate) fn digest_of(&self, program: &Program, node_idx: NodeIdx) -> Option<Digest> {
             self.stamper.node_digest(program, node_idx, &self.slots)
         }
 
@@ -464,11 +460,7 @@ pub(crate) mod internals {
         /// without the blocking pool a test has no runtime to reach. A
         /// path that will not stamp simply does not land, exactly as in
         /// the batched pre-run pass.
-        pub(crate) fn prepare_node_blocking(
-            &mut self,
-            program: &ExecutionProgram,
-            node_idx: NodeIdx,
-        ) {
+        pub(crate) fn prepare_node_blocking(&mut self, program: &Program, node_idx: NodeIdx) {
             let Self { slots, stamper, .. } = self;
             stamper.identify_blocking(program, slots, node_idx);
         }

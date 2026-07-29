@@ -6183,7 +6183,7 @@ mod compile_regressions {
     use super::*;
     use crate::async_lambda;
     use crate::execution::program::index::{NodeIdx, OutputAddr};
-    use crate::execution::program::{ExecutionInput, ExecutionOutput, ExecutionProgram};
+    use crate::execution::program::{ExecutionInput, ExecutionOutput, Program};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
@@ -6344,7 +6344,7 @@ mod compile_regressions {
             DataType::Any
         );
 
-        let mut program = ExecutionProgram::default();
+        let mut program = Program::default();
         let e_node_id = root_execution_node(node_id);
         let inputs = program.inputs.append([ExecutionInput {
             required: true,

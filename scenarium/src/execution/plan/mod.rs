@@ -8,10 +8,9 @@
 //! engine and the `Planner` owns reusable DFS scratch, so a repeated plan on an
 //! unchanged graph allocates nothing.
 
-use crate::execution::compile::CompiledGraph;
 use crate::execution::error::{Error, Result};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
 use crate::node::special::SpecialNode;
 
@@ -88,7 +87,7 @@ pub(crate) struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    pub(crate) fn reset_for_program(&mut self, program: &ExecutionProgram) {
+    pub(crate) fn reset_for_program(&mut self, program: &Program) {
         self.process_order.clear();
         self.verdicts
             .reset(program.e_nodes.len(), NodeVerdict::default());
@@ -125,27 +124,26 @@ pub(crate) struct Planner {
 }
 
 impl Planner {
-    fn reset_for_program(&mut self, program: &ExecutionProgram) {
+    fn reset_for_program(&mut self, program: &Program) {
         self.stack.clear();
         self.color.reset(program.e_nodes.len(), Color::White);
     }
 
-    /// Build the per-run schedule into `plan` from the compiled artifact and the run's
+    /// Build the per-run schedule into `plan` from the installed program and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
     pub(crate) fn plan(
         &mut self,
-        compiled: &CompiledGraph,
+        program: &Program,
         seeds: &RunSeeds,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        let program = &compiled.program;
         plan.reset_for_program(program);
         self.reset_for_program(program);
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below and the resolver's cache-aware reverse sweep.
-        collect_roots(compiled, seeds, plan)?;
+        collect_roots(program, seeds, plan)?;
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -162,7 +160,7 @@ impl Planner {
     /// separate `resolve_verdicts` pass asserted, now structural).
     fn walk_backward_collect_order(
         &mut self,
-        program: &ExecutionProgram,
+        program: &Program,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         for node_idx in plan.roots.iter() {
@@ -233,12 +231,7 @@ impl Planner {
 /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
 /// node — the "when this event fires, re-run the whole graph" trigger.
-fn collect_roots(
-    compiled: &CompiledGraph,
-    seeds: &RunSeeds,
-    plan: &mut ExecutionPlan,
-) -> Result<()> {
-    let program = &compiled.program;
+fn collect_roots(program: &Program, seeds: &RunSeeds, plan: &mut ExecutionPlan) -> Result<()> {
     // `plan.reset` already cleared `roots`/`seeded`; this only pushes into them.
 
     // Node seeds ("run to this node"): each exact execution node is a root and seeded so

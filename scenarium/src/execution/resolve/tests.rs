@@ -17,7 +17,7 @@ struct CachedNode {
 
 #[derive(Default)]
 struct Fix {
-    program: ExecutionProgram,
+    program: Program,
     order: Vec<ExecutionNodeId>,
 }
 

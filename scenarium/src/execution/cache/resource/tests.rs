@@ -11,7 +11,7 @@ use crate::execution::identity::ExecutionNodeId;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet};
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionProgram,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{DataType, StaticValue};
@@ -267,7 +267,7 @@ fn file_identity_separates_pre_epoch_mtimes() {
 
 #[derive(Debug)]
 struct ConstPathFixture {
-    program: ExecutionProgram,
+    program: Program,
     plan: ExecutionPlan,
     first: ExecutionNodeId,
     second: ExecutionNodeId,
@@ -276,7 +276,7 @@ struct ConstPathFixture {
 fn const_path_fixture(path: &str) -> ConstPathFixture {
     let first = ExecutionNodeId::from_u128(1);
     let second = ExecutionNodeId::from_u128(2);
-    let mut program = ExecutionProgram::default();
+    let mut program = Program::default();
     let input_ranges = [
         program.inputs.append([ExecutionInput {
             binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),

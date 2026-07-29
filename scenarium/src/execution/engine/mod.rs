@@ -25,7 +25,7 @@ use crate::graph::NodeId;
 /// owned [`disk_store::DiskStore`] file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`ExecutionProgram`] alone.
+/// persistent form is the [`Program`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed shared compile artifact: the program plus its compact
@@ -99,7 +99,8 @@ impl ExecutionEngine {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
-        self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
+        self.planner
+            .plan(&self.compiled.program, &seeds, &mut self.plan)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
@@ -270,7 +271,8 @@ mod internals {
                 events: events.to_vec(),
                 e_node_ids: Vec::new(),
             };
-            self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
+            self.planner
+                .plan(&self.compiled.program, &seeds, &mut self.plan)?;
             self.resolver
                 .resolve(&self.compiled.program, &self.plan, &mut self.cache)
                 .await;
