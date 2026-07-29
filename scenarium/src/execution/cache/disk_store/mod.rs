@@ -38,7 +38,7 @@ pub(crate) enum StorePolicy {
 #[derive(Debug)]
 pub(crate) struct BlobTarget {
     path: PathBuf,
-    pub(crate) digest: Digest,
+    pub(super) digest: Digest,
 }
 
 impl BlobTarget {
@@ -74,7 +74,7 @@ impl DiskStore {
         }
     }
 
-    pub(crate) fn blob_target(
+    pub(super) fn blob_target(
         &self,
         e_node_id: ExecutionNodeId,
         e_node: &ExecutionNode,
@@ -248,7 +248,7 @@ impl DiskStore {
 pub(crate) mod internals {
     use std::sync::atomic::AtomicU64;
 
-    use crate::execution::disk_store::{DiskStore, format};
+    use crate::execution::cache::disk_store::{DiskStore, format};
     use crate::execution::identity::ExecutionNodeId;
 
     #[derive(Debug, Default)]

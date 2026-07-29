@@ -140,7 +140,7 @@ mod cache_persistence {
     use super::*;
     use crate::async_lambda;
     use crate::execution::cache::slot::ValueState;
-    use crate::execution::disk_store::DiskStore;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::resolve::Disposition;
     use crate::node::definition::{FuncId, FuncOutput};
@@ -2023,7 +2023,7 @@ mod resource_binds {
     }
 
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        use crate::execution::disk_store::DiskStore;
+        use crate::execution::cache::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
         engine.cache.disk_store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
         engine

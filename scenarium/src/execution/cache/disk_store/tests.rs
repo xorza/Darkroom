@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::disk_store::{BlobTarget, DiskStore, StorePolicy};
+use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::library::{Library, TypeEntry};
 use crate::node::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;

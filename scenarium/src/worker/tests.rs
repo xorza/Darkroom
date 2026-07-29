@@ -1809,7 +1809,7 @@ async fn successful_cache_eviction_is_fire_and_forget_before_batch_acknowledgeme
 
 #[tokio::test]
 async fn cache_eviction_failure_uses_general_worker_error_report() {
-    use crate::execution::disk_store::DiskStore;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 
     let dir = temp_dir("eviction-error");
@@ -2279,7 +2279,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::execution::disk_store::DiskStore;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
@@ -2389,7 +2389,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
 /// stores — and silently recompute on reopen.
 #[tokio::test]
 async fn set_disk_store_flushes_resident_disk_backed_values() {
-    use crate::execution::disk_store::DiskStore;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 

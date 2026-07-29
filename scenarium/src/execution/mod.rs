@@ -17,7 +17,6 @@
 pub(crate) mod cache;
 pub(crate) mod codec;
 pub(crate) mod compile;
-pub(crate) mod disk_store;
 pub(crate) mod engine;
 pub(crate) mod error;
 pub(crate) mod event;
