@@ -1,7 +1,7 @@
 //! Cache-aware refinement of the structural schedule — the "up-to-date check" between
 //! [`plan`](crate::execution::plan) and [`execute`](crate::execution::executor). The plan is
 //! the static dependency DAG (*what could run*); the [`Resolver`] folds in the current cache
-//! state to produce one exact [`ResolvedRun`]: which nodes run or reuse, which outputs they
+//! state to produce one exact resolved run: which nodes run or reuse, which outputs they
 //! demand, and how many live consumers read each output.
 //!
 //! This is the split a build system draws between its dependency graph and its dirty /
@@ -74,32 +74,24 @@ impl ResolvedOutputs {
 /// the same reverse sweep, so a cut/reused/blocked consumer contributes neither demand
 /// nor a reader to its producers.
 #[derive(Debug, Default)]
-pub(crate) struct ResolvedRun {
+pub(crate) struct Resolver {
     pub(crate) disposition: NodeColumn<Disposition>,
     pub(crate) outputs: ResolvedOutputs,
 }
 
-impl ResolvedRun {
-    fn reset_for_program(&mut self, program: &ExecutionProgram) {
-        self.disposition
-            .reset(program.e_nodes.len(), Disposition::Cut);
-        self.outputs.reset(program.outputs.len());
-    }
-}
-
-/// Reusable scratch owning the resolved run, so a repeated resolve on an unchanged run
-/// allocates nothing — mirroring [`Planner`](crate::execution::plan::Planner). The engine
-/// holds one and calls [`resolve`](Self::resolve) each run, between plan and execute.
-#[derive(Default, Debug)]
-pub(crate) struct Resolver {
-    pub(crate) run: ResolvedRun,
-}
-
 impl Resolver {
-    /// Stamp the structural schedule, then resolve exact liveness and cache reuse.
+    /// Stamp the structural schedule, then sweep it in reverse for exact liveness and
+    /// cache reuse.
+    ///
     /// **Mutates `cache`** only to stamp each runnable node's `current_digest`: a live
     /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
     /// run loop, when it reaches the node.
+    ///
+    /// In the sweep, a running consumer marks exactly the producer ports it reads; reuse,
+    /// missing-input nodes, and missing lambdas stop the walk. Producer classification
+    /// happens only after every downstream consumer has contributed, so cache coverage is
+    /// checked against exact demand rather than the planner's structural
+    /// over-approximation.
     pub(crate) async fn resolve(
         &mut self,
         program: &ExecutionProgram,
@@ -107,58 +99,63 @@ impl Resolver {
         cache: &mut RuntimeCache,
     ) {
         cache.stamp_digests(program, plan);
-        resolve_run(program, plan, cache, &mut self.run).await;
-    }
-}
 
-/// Reverse cache-aware sweep. A running consumer marks exactly the producer ports it reads;
-/// reuse, missing-input nodes, and missing lambdas stop the walk. Producer classification
-/// happens only after every downstream consumer has contributed, so cache coverage is checked
-/// against exact demand rather than the planner's former structural over-approximation.
-async fn resolve_run(
-    program: &ExecutionProgram,
-    plan: &ExecutionPlan,
-    cache: &mut RuntimeCache,
-    run: &mut ResolvedRun,
-) {
-    run.reset_for_program(program);
-    for node_idx in plan.roots.iter() {
-        run.disposition[node_idx] = Disposition::Run;
-    }
+        self.disposition
+            .reset(program.e_nodes.len(), Disposition::Cut);
+        self.outputs.reset(program.outputs.len());
 
-    for &node_idx in plan.process_order.iter().rev() {
-        if run.disposition[node_idx] != Disposition::Run {
-            continue;
+        for node_idx in plan.roots.iter() {
+            self.disposition[node_idx] = Disposition::Run;
         }
-        if !plan.verdicts[node_idx].wants_execute() {
-            run.disposition[node_idx] = Disposition::Cut;
-            continue;
-        }
-        if program[node_idx].lambda.is_none() {
-            run.disposition[node_idx] = Disposition::MissingLambda;
-            continue;
-        }
-        let outputs = program[node_idx].outputs;
-        // A node seed ("run to this node") demands every output the node has:
-        // the host asked for the node itself, not for what a consumer reads.
-        if plan.seeded.contains(node_idx) {
-            run.outputs
-                .demand
-                .slice_mut(outputs)
-                .fill(OutputDemand::Produce);
-        }
-        let demand = run.outputs.demand.slice(outputs);
-        if !plan.event_sources.contains(node_idx)
-            && cache.probe_reuse(program, node_idx, demand).await
-        {
-            run.disposition[node_idx] = Disposition::Reuse;
-            continue;
-        }
-        run.disposition[node_idx] = Disposition::Run;
-        for input in &program.inputs[program[node_idx].inputs] {
-            if let ExecutionBinding::Bind(addr) = &input.binding {
-                run.disposition[addr.node_idx] = Disposition::Run;
-                run.outputs.add_reader(program.output_idx(*addr));
+
+        for &node_idx in plan.process_order.iter().rev() {
+            if self.disposition[node_idx] != Disposition::Run {
+                continue;
+            }
+            if !plan.verdicts[node_idx].wants_execute() {
+                self.disposition[node_idx] = Disposition::Cut;
+                continue;
+            }
+            let e_node = &program[node_idx];
+            if e_node.lambda.is_none() {
+                self.disposition[node_idx] = Disposition::MissingLambda;
+                continue;
+            }
+            let outputs = e_node.outputs;
+            // A node seed ("run to this node") demands every output the node has:
+            // the host asked for the node itself, not for what a consumer reads.
+            if plan.seeded.contains(node_idx) {
+                self.outputs
+                    .demand
+                    .slice_mut(outputs)
+                    .fill(OutputDemand::Produce);
+            }
+            let demand = self.outputs.demand.slice(outputs);
+            if !plan.event_sources.contains(node_idx)
+                && cache.probe_reuse(program, node_idx, demand).await
+            {
+                self.disposition[node_idx] = Disposition::Reuse;
+                continue;
+            }
+            for input in &program.inputs[e_node.inputs] {
+                if let ExecutionBinding::Bind(addr) = &input.binding {
+                    // Only a producer the plan will actually run can deliver
+                    // a value. A **disabled** producer feeding an *optional*
+                    // input leaves the consumer perfectly schedulable —
+                    // `input_missing` treats an optional port fed by a
+                    // disabled producer as satisfied — but the producer
+                    // itself never enters `process_order`. Marking it live
+                    // here put a node the schedule does not contain into the
+                    // run, and the consumer's read then demanded an output
+                    // nothing would ever produce: a panic on a cold cache,
+                    // and on a warm one the value from before it was
+                    // disabled, served as if it were this run's.
+                    if !plan.verdicts[addr.node_idx].wants_execute() {
+                        continue;
+                    }
+                    self.disposition[addr.node_idx] = Disposition::Run;
+                    self.outputs.add_reader(program.output_idx(*addr));
+                }
             }
         }
     }
