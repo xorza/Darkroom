@@ -11,10 +11,10 @@ use thiserror::Error;
 /// Every graph validation returns this.
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
-use crate::graph::address::{InputPort, OutputPort};
-use crate::graph::definition::GraphId;
-use crate::graph::node::NodeId;
-use crate::graph::node::definition::FuncId;
+use crate::graph::identity::FuncId;
+use crate::graph::identity::GraphId;
+use crate::graph::identity::NodeId;
+use crate::graph::identity::{InputPort, OutputPort};
 
 #[derive(Debug, Error)]
 pub enum GraphDeserializeError {
