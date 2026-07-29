@@ -4,7 +4,7 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::error::RunError;
 use crate::execution::identity::ExecutionInputPort;
 use crate::execution::outcome::{ExecutedNodeOutcome, ExecutionOutcome, NodeError};
-use crate::execution::plan::{ExecutionPlan, input_missing};
+use crate::execution::plan::{RunSchedule, input_missing};
 use crate::execution::program::index::{NodeColumn, NodeIdx};
 use crate::execution::program::{ExecutionBinding, Program};
 
@@ -71,7 +71,7 @@ pub(super) fn has_errored_dependency(
 
 pub(super) fn collect_execution_outcome(
     program: &Program,
-    plan: &ExecutionPlan,
+    schedule: &RunSchedule,
     outcomes: &NodeColumn<NodeOutcome>,
     start: Instant,
     outcome: &mut ExecutionOutcome,
@@ -79,7 +79,7 @@ pub(super) fn collect_execution_outcome(
     // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
     // the sole source of truth; a node the run never reached (a cancelled run's tail, or
     // skipped for missing inputs) is `Pending` and contributes to no list here.
-    for &node_idx in &plan.process_order {
+    for &node_idx in &schedule.process_order {
         let e_node = &program[node_idx];
         let e_node_id = program.e_node_ids[node_idx];
         match &outcomes[node_idx] {
@@ -104,11 +104,11 @@ pub(super) fn collect_execution_outcome(
             }
             _ => {}
         }
-        if plan.states[node_idx].missing_required_inputs() {
+        if schedule.states[node_idx].missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with the
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.inputs[e_node.inputs].iter().enumerate() {
-                if input_missing(input, &plan.states) {
+                if input_missing(input, &schedule.states) {
                     outcome.missing_inputs.push(ExecutionInputPort {
                         e_node_id,
                         port_idx: i,

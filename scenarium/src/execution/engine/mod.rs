@@ -1,5 +1,5 @@
-//! [`ExecutionEngine`] owns the run-side pieces (program, plan, planner, the
-//! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
+//! [`ExecutionEngine`] owns the run-side pieces (program, the run schedule, planner,
+//! the cross-run cache, and executor) and exposes `install` (phase 1's artifact)
 //! and `execute` (phases 2–3, run back-to-back).
 
 use std::sync::Arc;
@@ -12,15 +12,14 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::outcome::ExecutionOutcome;
-use crate::execution::plan::{ExecutionPlan, Planner};
+use crate::execution::plan::{Planner, RunSchedule};
 use crate::execution::program::index::NodeIdx;
 use crate::execution::report::RunReporter;
-use crate::execution::resolve::Resolver;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::address::NodeId;
 
 /// The run-side pipeline container. Shares the installed program and its
-/// execution-attribution map, the reusable `plan` buffer, the `planner`
+/// execution-attribution map, the reusable `schedule` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
 /// owned [`disk_store::DiskStore`] file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
@@ -40,13 +39,10 @@ pub(crate) struct ExecutionEngine {
     pub(crate) cache: RuntimeCache,
     executor: Executor,
     planner: Planner,
-    /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
-    /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
-    resolver: Resolver,
-    /// Per-run filesystem identities, collected off-thread and shared by initial
-    /// resolution and late bound-path restamps.
-    /// Reusable plan buffer, recycled across runs to avoid reallocation.
-    plan: ExecutionPlan,
+    /// The one per-run state buffer: the schedule the planner builds and the
+    /// dispositions, demand, and reader counts the cache-aware sweep refines it into.
+    /// Recycled across runs to avoid reallocation.
+    schedule: RunSchedule,
 }
 
 impl ExecutionEngine {
@@ -56,7 +52,7 @@ impl ExecutionEngine {
 
     pub(crate) fn clear(&mut self) {
         self.compiled = Arc::default();
-        self.plan.reset_for_program(&self.compiled.program);
+        self.schedule.reset_for_program(&self.compiled.program);
         self.cache.clear();
     }
 
@@ -64,8 +60,8 @@ impl ExecutionEngine {
     /// Infallible: everything that can go wrong went wrong at compile
     /// ([`compile::Compiler`]), on the host's thread.
     ///
-    /// The plan isn't cleared here: every `execute` re-`plan`s from scratch and nothing
-    /// reads the reusable plan buffer between an install and the next run.
+    /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
+    /// reads the reusable buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
         // Realign the runtime cache to the new node set (preserve by id,
         // default new, trim gone) — before the swap, while the program its
@@ -97,27 +93,27 @@ impl ExecutionEngine {
     ) -> Result<()> {
         outcome.clear();
 
-        // Phase 2: schedule into the reusable plan buffer. Purely structural —
+        // Phase 2: schedule into the reusable buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
         self.planner
-            .plan(&self.compiled.program, &seeds, &mut self.plan)?;
+            .plan(&self.compiled.program, &seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
         self.cache
             .prepare(
                 &self.compiled.program,
-                self.plan.executing(),
+                self.schedule.executing(),
                 cancel.clone(),
             )
             .await;
 
-        // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,
-        // exact output demand, and live readers together. The resolved run is authoritative:
-        // a cache-hit or blocked consumer contributes no upstream demand.
-        self.resolver
-            .resolve(&self.compiled.program, &mut self.plan, &mut self.cache)
+        // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
+        // disposition, exact output demand, and live readers together. The resolved run is
+        // authoritative: a cache-hit or blocked consumer contributes no upstream demand.
+        self.schedule
+            .resolve(&self.compiled.program, &mut self.cache)
             .await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
@@ -127,8 +123,7 @@ impl ExecutionEngine {
             .run(
                 RunRequest {
                     program: &self.compiled.program,
-                    plan: &self.plan,
-                    resolver: &self.resolver,
+                    schedule: &self.schedule,
                     cache: &mut self.cache,
                     reporter,
                     cancel,
@@ -279,16 +274,16 @@ mod internals {
                 e_node_ids: Vec::new(),
             };
             self.planner
-                .plan(&self.compiled.program, &seeds, &mut self.plan)?;
-            self.resolver
-                .resolve(&self.compiled.program, &mut self.plan, &mut self.cache)
+                .plan(&self.compiled.program, &seeds, &mut self.schedule)?;
+            self.schedule
+                .resolve(&self.compiled.program, &mut self.cache)
                 .await;
             Ok(())
         }
 
         /// The resolved state for a stable id — test introspection.
         pub(super) fn node_state(&self, e_node_id: ExecutionNodeId) -> NodeState {
-            self.plan.states[self.compiled.program.e_node_index[&e_node_id]]
+            self.schedule.states[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[program::ExecutionInput] {
@@ -302,14 +297,14 @@ mod internals {
         }
 
         pub(super) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
-            self.resolver
+            self.schedule
                 .outputs
                 .demand
                 .slice(self.compiled.program.by_id(e_node_id).outputs)
         }
 
         pub(super) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
-            self.resolver
+            self.schedule
                 .outputs
                 .readers
                 .slice(self.compiled.program.by_id(e_node_id).outputs)

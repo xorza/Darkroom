@@ -5,13 +5,10 @@ use crate::async_lambda;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::NodeState;
-use crate::execution::program::index::{
-    NodeColumn, NodeIdx, NodeSet, OutputAddr, OutputColumn, OutputIdx,
-};
+use crate::execution::plan::{NodeState, ResolvedOutputs, RunSchedule};
+use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
-use crate::execution::resolve::{ResolvedOutputs, Resolver};
 use crate::graph::CacheMode;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::Invocation;
@@ -76,17 +73,11 @@ impl Prog {
     }
 }
 
-#[derive(Debug)]
-struct TestRun {
-    plan: ExecutionPlan,
-    resolver: Resolver,
-}
-
 /// A `straight_run` with an explicit per-output consumer count (indexed by output-pool
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
-fn run_with_readers(program: &Program, readers: Vec<u32>) -> TestRun {
+fn run_with_readers(program: &Program, readers: Vec<u32>) -> RunSchedule {
     assert_eq!(readers.len(), program.outputs.len());
     let demand: Vec<OutputDemand> = readers
         .iter()
@@ -98,25 +89,21 @@ fn run_with_readers(program: &Program, readers: Vec<u32>) -> TestRun {
             }
         })
         .collect();
-    let mut plan = structural_plan(program);
+    let mut schedule = structural_plan(program);
     // Drive the run loop with every node already resolved to `Run` — the cut
     // and reuse verdicts the sweep would write here are unit-tested in
     // `resolve.rs`.
-    plan.states.reset(program.e_nodes.len(), NodeState::Run);
-    TestRun {
-        plan,
-        resolver: Resolver {
-            outputs: ResolvedOutputs {
-                demand: OutputColumn::from(demand),
-                readers: OutputColumn::from(readers),
-            },
-        },
-    }
+    schedule.states.reset(program.e_nodes.len(), NodeState::Run);
+    schedule.outputs = ResolvedOutputs {
+        demand: OutputColumn::from(demand),
+        readers: OutputColumn::from(readers),
+    };
+    schedule
 }
 
-fn demand_output(program: &Program, run: &mut TestRun, address: OutputAddr) {
+fn demand_output(program: &Program, run: &mut RunSchedule, address: OutputAddr) {
     let output_idx = program.output_idx(address);
-    run.resolver.outputs.demand[output_idx] = OutputDemand::Produce;
+    run.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 /// These tests name nodes by their stable id; the program owns the id ↔ index
@@ -139,34 +126,23 @@ fn bind(program: &Program, e_node_id: ExecutionNodeId, port: usize) -> Execution
 /// A resolved run that runs every node in index order, each output marked needed. These tests
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
-fn straight_run(program: &Program) -> TestRun {
+fn straight_run(program: &Program) -> RunSchedule {
     run_with_readers(program, vec![1; program.outputs.len()])
 }
 
-fn structural_plan(program: &Program) -> ExecutionPlan {
-    let process_order: Vec<_> = (0..program.e_nodes.len())
-        .map(|idx| NodeIdx(idx as u32))
-        .collect();
+fn structural_plan(program: &Program) -> RunSchedule {
+    let mut schedule = RunSchedule::default();
+    schedule.reset_for_program(program);
+    schedule
+        .process_order
+        .extend((0..program.e_nodes.len()).map(|idx| NodeIdx(idx as u32)));
     // `Cut` is the planner's positive verdict: every node runnable, none
     // claimed yet.
-    let mut states = NodeColumn::default();
-    states.reset(program.e_nodes.len(), NodeState::Cut);
-    let mut roots = NodeSet::default();
-    roots.reset(program.e_nodes.len());
-    for &node_idx in &process_order {
-        roots.insert(node_idx);
+    schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
+    for &node_idx in &schedule.process_order {
+        schedule.roots.insert(node_idx);
     }
-    let mut seeded = NodeSet::default();
-    seeded.reset(program.e_nodes.len());
-    let mut event_sources = NodeSet::default();
-    event_sources.reset(program.e_nodes.len());
-    ExecutionPlan {
-        process_order,
-        states,
-        roots,
-        seeded,
-        event_sources,
-    }
+    schedule
 }
 
 #[test]
@@ -200,7 +176,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     );
 }
 
-async fn run(program: &Program, run: &TestRun) -> (RuntimeCache, ExecutionOutcome) {
+async fn run(program: &Program, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
     cache.reconcile_fresh(program);
@@ -210,8 +186,7 @@ async fn run(program: &Program, run: &TestRun) -> (RuntimeCache, ExecutionOutcom
         .run(
             RunRequest {
                 program,
-                plan: &run.plan,
-                resolver: &run.resolver,
+                schedule: run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -226,22 +201,19 @@ async fn run(program: &Program, run: &TestRun) -> (RuntimeCache, ExecutionOutcom
 /// needs the prior run's stamped digests and resident values).
 async fn run_with(
     program: &Program,
-    plan: &mut ExecutionPlan,
+    schedule: &mut RunSchedule,
     cache: &mut RuntimeCache,
 ) -> ExecutionOutcome {
     let mut executor = Executor::default();
-    // Refine the plan's states like the engine does. `straight_run` roots every node, so
+    // Refine the schedule like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
-    let mut resolver = Resolver::default();
-    resolver.resolve(program, plan, cache).await;
-    let plan = &*plan;
+    schedule.resolve(program, cache).await;
     let mut outcome = ExecutionOutcome::default();
     executor
         .run(
             RunRequest {
                 program,
-                plan,
-                resolver: &resolver,
+                schedule,
                 cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -371,8 +343,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
         .run(
             RunRequest {
                 program: &p.program,
-                plan: &run.plan,
-                resolver: &run.resolver,
+                schedule: &run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
@@ -550,7 +521,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
 
     let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, output(&p.program, a, 0));
-    plan.plan.seeded.insert(nx(&p.program, a));
+    plan.seeded.insert(nx(&p.program, a));
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
@@ -575,7 +546,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
 
     let mut run = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut run, output(&p.program, a, 0));
-    run.plan.states[nx(&p.program, a)] = NodeState::Reuse;
+    run.states[nx(&p.program, a)] = NodeState::Reuse;
 
     let mut cache = RuntimeCache::default();
     cache.reconcile_fresh(&p.program);
@@ -590,8 +561,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
         .run(
             RunRequest {
                 program: &p.program,
-                plan: &run.plan,
-                resolver: &run.resolver,
+                schedule: &run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -826,7 +796,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     cache.reconcile_fresh(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
-    let stats1 = run_with(&p.program, &mut plan.plan, &mut cache).await;
+    let stats1 = run_with(&p.program, &mut plan, &mut cache).await;
     assert_eq!(stats1.executed_nodes.len(), 3);
     assert_eq!(
         cache[nx(&p.program, b)].output_values().unwrap()[0].as_i64(),
@@ -836,7 +806,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // Run 2: A re-runs (nothing cached it) and fails. B's digest is unchanged, so it
     // is served as cached — not skipped — and its resident 6 survives. C recomputes,
     // sees the errored upstream, and is skipped.
-    let stats2 = run_with(&p.program, &mut plan.plan, &mut cache).await;
+    let stats2 = run_with(&p.program, &mut plan, &mut cache).await;
     let (a_id, b_id, c_id) = (a, b, c);
     assert!(
         stats2.cached_nodes.contains(&b_id),

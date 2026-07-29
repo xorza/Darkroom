@@ -1,5 +1,5 @@
 //! Self-consistency checks for the compiled program, runtime cache, and per-run
-//! plan. Each fallible `validate` method has an `is_debug()`-gated `validate_debug`
+//! schedule. Each fallible `validate` method has an `is_debug()`-gated `validate_debug`
 //! wrapper, so production call sites pay nothing while tests can inspect exact
 //! validation errors.
 
@@ -11,7 +11,7 @@ use crate::execution::cache::slot::StateOwner;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::flatten::map::FlattenMapValidationError;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::{ExecutionPlan, NodeState};
+use crate::execution::plan::{NodeState, RunSchedule};
 use crate::execution::program::index::{NodeIdx, NodeSet, OutputAddr};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::library::Library;
@@ -70,10 +70,10 @@ pub(crate) enum InstalledGraphValidationError {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ExecutionPlanValidationError {
+pub(crate) enum RunScheduleValidationError {
     #[error("execution order contains more entries than the program")]
     OrderTooLong,
-    #[error("plan {set} spans {len} nodes, not the program's {expected}")]
+    #[error("schedule {set} spans {len} entries, not the program's {expected}")]
     SetLength {
         set: &'static str,
         len: usize,
@@ -252,29 +252,40 @@ impl CompiledGraph {
     }
 }
 
-impl ExecutionPlan {
+impl RunSchedule {
     /// A planned schedule is a unique post-order DFS whose bindings name valid outputs;
     /// disabled dependencies may remain outside the order.
-    pub(crate) fn validate(&self, program: &Program) -> Result<(), ExecutionPlanValidationError> {
+    pub(crate) fn validate(&self, program: &Program) -> Result<(), RunScheduleValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
-            return Err(ExecutionPlanValidationError::OrderTooLong);
+            return Err(RunScheduleValidationError::OrderTooLong);
         }
 
         // Establish that every column and set spans the program before the
         // index reads below rely on it — a validator must report the corruption
-        // it finds, never fault on it.
-        for (set, len) in [
-            ("states", self.states.len()),
-            ("roots", self.roots.len()),
-            ("seeded", self.seeded.len()),
-            ("event sources", self.event_sources.len()),
+        // it finds, never fault on it. The output columns span the flat output
+        // pool rather than the node vector, hence the per-entry expectation.
+        for (set, len, expected) in [
+            ("states", self.states.len(), program.e_nodes.len()),
+            ("roots", self.roots.len(), program.e_nodes.len()),
+            ("seeded", self.seeded.len(), program.e_nodes.len()),
+            (
+                "event sources",
+                self.event_sources.len(),
+                program.e_nodes.len(),
+            ),
+            (
+                "output demand",
+                self.outputs.demand.len(),
+                program.outputs.len(),
+            ),
+            (
+                "output readers",
+                self.outputs.readers.len(),
+                program.outputs.len(),
+            ),
         ] {
-            if len != program.e_nodes.len() {
-                return Err(ExecutionPlanValidationError::SetLength {
-                    set,
-                    len,
-                    expected: program.e_nodes.len(),
-                });
+            if len != expected {
+                return Err(RunScheduleValidationError::SetLength { set, len, expected });
             }
         }
 
@@ -284,26 +295,26 @@ impl ExecutionPlan {
             let e_node = program
                 .e_nodes
                 .get(node_idx)
-                .ok_or(ExecutionPlanValidationError::NodeOutOfRange { node_idx })?;
+                .ok_or(RunScheduleValidationError::NodeOutOfRange { node_idx })?;
             let e_node_id = program.e_node_ids[node_idx];
             let inputs = program
                 .inputs
                 .get(e_node.inputs.range())
-                .ok_or(ExecutionPlanValidationError::InputRange { e_node_id })?;
+                .ok_or(RunScheduleValidationError::InputRange { e_node_id })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     // Resolve the dependency before probing the sets: an
                     // out-of-range target is the corruption to report, not a
                     // reason to index past `seen_in_order` and `e_node_ids`.
                     let dependency = program.e_nodes.get(addr.node_idx).ok_or(
-                        ExecutionPlanValidationError::NodeOutOfRange {
+                        RunScheduleValidationError::NodeOutOfRange {
                             node_idx: addr.node_idx,
                         },
                     )?;
                     let disabled_dependency =
                         dependency.disabled && self.states[addr.node_idx] == NodeState::Disabled;
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
-                        return Err(ExecutionPlanValidationError::BeforeDependency {
+                        return Err(RunScheduleValidationError::BeforeDependency {
                             e_node_id,
                             dependency: program.e_node_ids[addr.node_idx],
                         });
@@ -311,7 +322,7 @@ impl ExecutionPlan {
                 }
             }
             if seen_in_order.contains(node_idx) {
-                return Err(ExecutionPlanValidationError::DuplicateNode { e_node_id });
+                return Err(RunScheduleValidationError::DuplicateNode { e_node_id });
             }
             seen_in_order.insert(node_idx);
         }
@@ -324,7 +335,7 @@ impl ExecutionPlan {
             if !seen_in_order.contains(node_idx)
                 && !matches!(state, NodeState::Unvisited | NodeState::Disabled)
             {
-                return Err(ExecutionPlanValidationError::UnscheduledNodeDecided {
+                return Err(RunScheduleValidationError::UnscheduledNodeDecided {
                     e_node_id: program.e_node_ids[node_idx],
                     state,
                 });
@@ -335,20 +346,20 @@ impl ExecutionPlan {
         // out-of-range `insert`, so an iterated index is checked like any other.
         for node_idx in self.seeded.iter() {
             if node_idx.idx() >= program.e_nodes.len() {
-                return Err(ExecutionPlanValidationError::NodeOutOfRange { node_idx });
+                return Err(RunScheduleValidationError::NodeOutOfRange { node_idx });
             }
             if !self.roots.contains(node_idx) {
-                return Err(ExecutionPlanValidationError::SeededNodeNotRoot {
+                return Err(RunScheduleValidationError::SeededNodeNotRoot {
                     e_node_id: program.e_node_ids[node_idx],
                 });
             }
         }
         for node_idx in self.event_sources.iter() {
             if node_idx.idx() >= program.e_nodes.len() {
-                return Err(ExecutionPlanValidationError::NodeOutOfRange { node_idx });
+                return Err(RunScheduleValidationError::NodeOutOfRange { node_idx });
             }
             if !self.roots.contains(node_idx) {
-                return Err(ExecutionPlanValidationError::EventSourceNotRoot {
+                return Err(RunScheduleValidationError::EventSourceNotRoot {
                     e_node_id: program.e_node_ids[node_idx],
                 });
             }
@@ -363,6 +374,6 @@ impl ExecutionPlan {
             return;
         }
         self.validate(program)
-            .expect("execution plan invariant violated");
+            .expect("run schedule invariant violated");
     }
 }

@@ -1,12 +1,13 @@
 use crate::execution::error::Error;
 use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::execution::plan::{ExecutionPlan, NodeState, Planner, input_missing};
-use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr};
+use crate::execution::plan::{NodeState, Planner, ResolvedOutputs, RunSchedule, input_missing};
+use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
 };
 use crate::execution::seeds::RunSeeds;
 use crate::node::definition::FuncId;
+use crate::node::lambda::OutputDemand;
 
 /// Hand-built program for planner tests — scheduling is structural, so it
 /// needs no compile artifact and no authoring attribution. Inputs are
@@ -65,9 +66,9 @@ fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
 
 /// Plan `sinks` over `fix`. Purely structural — no cache state; the executor
 /// decides cached-vs-recompute at run time.
-fn plan(fix: &Fix) -> ExecutionPlan {
+fn plan(fix: &Fix) -> RunSchedule {
     let mut planner = Planner::default();
-    let mut plan = ExecutionPlan::default();
+    let mut plan = RunSchedule::default();
     let seeds = RunSeeds {
         sinks: true,
         ..Default::default()
@@ -76,6 +77,63 @@ fn plan(fix: &Fix) -> ExecutionPlan {
         .plan(&fix.program, &seeds, &mut plan)
         .expect("no cycle");
     plan
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn reader_overflow_trips_the_debug_invariant() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut outputs = ResolvedOutputs::default();
+    outputs.reset(1);
+    outputs.readers[OutputIdx(0)] = u32::MAX;
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| outputs.add_reader(OutputIdx(0)))).is_err(),
+        "a graph cannot have more readers than the counter represents"
+    );
+}
+
+/// The planner opens the output half too: a schedule it just filled carries a
+/// zeroed demand and reader column spanning the program's output pool, so no
+/// previous run's counts can survive into one the sweep has not touched.
+#[test]
+fn planning_resets_the_output_half_to_the_programs_pool() {
+    let mut f = Fix::default();
+    let a = f.node(false, &[], 2);
+    f.node(true, &[(false, bind(a, 0))], 1);
+
+    let mut planner = Planner::default();
+    let mut schedule = RunSchedule::default();
+    // A stale resolution from an earlier, differently shaped run.
+    schedule.outputs.reset(1);
+    schedule.outputs.add_reader(OutputIdx(0));
+
+    planner
+        .plan(
+            &f.program,
+            &RunSeeds {
+                sinks: true,
+                ..Default::default()
+            },
+            &mut schedule,
+        )
+        .expect("no cycle");
+
+    assert_eq!(
+        schedule.outputs.demand.len(),
+        3,
+        "two outputs plus the sink's"
+    );
+    assert_eq!(schedule.outputs.readers.len(), 3);
+    assert!(
+        schedule
+            .outputs
+            .demand
+            .iter()
+            .all(|demand| *demand == OutputDemand::Skip)
+    );
+    assert!(schedule.outputs.readers.iter().all(|readers| *readers == 0));
 }
 
 #[test]
@@ -143,7 +201,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     p.seeded.reset(0);
     assert_eq!(
         p.validate(&f.program).unwrap_err().to_string(),
-        "plan seeded spans 0 nodes, not the program's 3"
+        "schedule seeded spans 0 entries, not the program's 3"
     );
 }
 
@@ -210,7 +268,7 @@ fn explicit_seed_overrides_disabled_dependency_for_this_run() {
     let optional = f.node(true, &[(false, bind(producer, 0))], 1);
 
     let mut planner = Planner::default();
-    let mut plan = ExecutionPlan::default();
+    let mut plan = RunSchedule::default();
     planner
         .plan(
             &f.program,
@@ -251,7 +309,7 @@ fn node_seed_is_both_a_root_and_seeded() {
     let a = f.node(false, &[], 1);
 
     let mut planner = Planner::default();
-    let mut p = ExecutionPlan::default();
+    let mut p = RunSchedule::default();
     let seeds = RunSeeds {
         e_node_ids: vec![a],
         ..Default::default()
@@ -278,7 +336,7 @@ fn dependency_cycle_is_rejected() {
     f.node(false, &[(false, bind(ExecutionNodeId::from_u128(1), 0))], 1);
 
     let mut planner = Planner::default();
-    let mut plan = ExecutionPlan::default();
+    let mut plan = RunSchedule::default();
     let seeds = RunSeeds {
         sinks: true,
         ..Default::default()
@@ -299,7 +357,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let c = f.node(true, &[(false, bind(b, 0))], 1);
 
     let mut planner = Planner::default();
-    let mut p = ExecutionPlan::default();
+    let mut p = RunSchedule::default();
     let seeds = RunSeeds {
         e_node_ids: vec![b],
         ..Default::default()
@@ -355,7 +413,7 @@ fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
         event_idx: 0,
     };
     let mut planner = Planner::default();
-    let mut plan = ExecutionPlan::default();
+    let mut plan = RunSchedule::default();
     planner
         .plan(
             &f.program,

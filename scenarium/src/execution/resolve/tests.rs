@@ -2,8 +2,7 @@ use super::*;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, ValueState};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::plan::NodeState;
-use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputAddr, OutputIdx};
+use crate::execution::program::index::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::node::lambda::FuncLambda;
@@ -52,42 +51,36 @@ impl Fix {
         e_node_id
     }
 
+    /// The schedule as it arrives at the sweep — what the planner would have left
+    /// behind — swept to the one resolved run the executor reads.
     async fn resolve(
         &self,
         roots: &[ExecutionNodeId],
         seeded: &[ExecutionNodeId],
         missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
-    ) -> Resolved {
-        // `Cut` is the planner's positive verdict, so this is the schedule as
-        // it arrives at the sweep: everything runnable but nothing claimed.
-        let mut states = NodeColumn::default();
-        states.reset(self.program.e_nodes.len(), NodeState::Cut);
+    ) -> RunSchedule {
+        let mut schedule = RunSchedule::default();
+        schedule.reset_for_program(&self.program);
+        schedule
+            .process_order
+            .extend(self.order.iter().map(|id| nx(*id)));
+        // `Cut` is the planner's positive verdict: everything runnable but nothing claimed.
+        schedule
+            .states
+            .reset(self.program.e_nodes.len(), NodeState::Cut);
         for e_node_id in missing {
-            states[nx(*e_node_id)] = NodeState::MissingInputs;
+            schedule.states[nx(*e_node_id)] = NodeState::MissingInputs;
         }
-        let mut root_set = NodeSet::default();
-        root_set.reset(self.program.e_nodes.len());
         for root in roots {
-            root_set.insert(nx(*root));
+            schedule.roots.insert(nx(*root));
         }
-        let mut seeded_set = NodeSet::default();
-        seeded_set.reset(self.program.e_nodes.len());
         for seed in seeded {
-            seeded_set.insert(nx(*seed));
+            schedule.seeded.insert(nx(*seed));
         }
-        let mut event_sources = NodeSet::default();
-        event_sources.reset(self.program.e_nodes.len());
-        let mut plan = ExecutionPlan {
-            process_order: self.order.iter().map(|id| nx(*id)).collect(),
-            states,
-            roots: root_set,
-            seeded: seeded_set,
-            event_sources,
-        };
         let mut cache = RuntimeCache::default();
         cache.reconcile_fresh(&self.program);
-        cache.stamp_digests(&self.program, plan.executing());
+        cache.stamp_digests(&self.program, schedule.executing());
         for cached in cached {
             let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
             cache[nx(cached.e_node_id)].value = ValueState::Resident {
@@ -95,21 +88,9 @@ impl Fix {
                 produced_under: Some(digest),
             };
         }
-        let mut resolver = Resolver::default();
-        resolver.resolve(&self.program, &mut plan, &mut cache).await;
-        Resolved {
-            plan,
-            outputs: resolver.outputs,
-        }
+        schedule.resolve(&self.program, &mut cache).await;
+        schedule
     }
-}
-
-/// One resolved run as the tests read it: the plan whose state column the
-/// sweep refined, plus the per-output columns it produced alongside.
-#[derive(Debug)]
-struct Resolved {
-    plan: ExecutionPlan,
-    outputs: ResolvedOutputs,
 }
 
 /// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
@@ -127,21 +108,6 @@ fn bind(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
 
 fn value(value: i64) -> DynamicValue {
     DynamicValue::Static(StaticValue::Int(value))
-}
-
-#[test]
-#[cfg(debug_assertions)]
-fn reader_overflow_trips_the_debug_invariant() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    let mut outputs = ResolvedOutputs::default();
-    outputs.reset(1);
-    outputs.readers[OutputIdx(0)] = u32::MAX;
-
-    assert!(
-        catch_unwind(AssertUnwindSafe(|| outputs.add_reader(OutputIdx(0)))).is_err(),
-        "a graph cannot have more readers than the counter represents"
-    );
 }
 
 #[tokio::test]
@@ -163,9 +129,9 @@ async fn reuse_hit_prunes_its_whole_upstream_cone() {
         )
         .await;
 
-    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
-    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
-    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
+    assert_eq!(run.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.readers.slice(fix.program.by_id(source).outputs),
         &[0]
@@ -198,10 +164,10 @@ async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() 
         )
         .await;
 
-    assert_eq!(run.plan.states[nx(source)], NodeState::Reuse);
-    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
-    assert_eq!(run.plan.states[nx(live)], NodeState::Run);
-    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
+    assert_eq!(run.states[nx(source)], NodeState::Reuse);
+    assert_eq!(run.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.states[nx(live)], NodeState::Run);
+    assert_eq!(run.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Produce, OutputDemand::Skip]
@@ -223,9 +189,9 @@ async fn missing_input_stops_liveness_before_its_producer() {
 
     let run = fix.resolve(&[blocked], &[], &[blocked], Vec::new()).await;
 
-    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.states[nx(source)], NodeState::Cut);
     assert_eq!(
-        run.plan.states[nx(blocked)],
+        run.states[nx(blocked)],
         NodeState::MissingInputs,
         "a blocked root keeps the planner's verdict — the sweep refines only \
          runnable nodes, so the reason it did not run survives to the outcome"
@@ -260,13 +226,13 @@ async fn missing_lambda_stops_liveness_before_its_producer() {
         )
         .await;
 
-    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.states[nx(source)], NodeState::Cut);
     assert_eq!(
-        run.plan.states[nx(missing)],
+        run.states[nx(missing)],
         NodeState::MissingLambda,
         "a matching cache cannot hide a reached missing implementation"
     );
-    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
+    assert_eq!(run.states[nx(sink)], NodeState::Run);
     assert_eq!(
         run.outputs.demand.slice(fix.program.by_id(source).outputs),
         &[OutputDemand::Skip]
@@ -331,8 +297,8 @@ async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         )
         .await;
 
-    assert_eq!(run.plan.states[nx(deep)], NodeState::Cut);
-    assert_eq!(run.plan.states[nx(source)], NodeState::Cut);
-    assert_eq!(run.plan.states[nx(cached)], NodeState::Reuse);
-    assert_eq!(run.plan.states[nx(sink)], NodeState::Run);
+    assert_eq!(run.states[nx(deep)], NodeState::Cut);
+    assert_eq!(run.states[nx(source)], NodeState::Cut);
+    assert_eq!(run.states[nx(cached)], NodeState::Reuse);
+    assert_eq!(run.states[nx(sink)], NodeState::Run);
 }

@@ -1,14 +1,15 @@
 //! Cache-aware refinement of the structural schedule — the "up-to-date check" between
 //! [`plan`](crate::execution::plan) and [`execute`](crate::execution::executor). The plan is
-//! the static dependency DAG (*what could run*); the [`Resolver`] folds in the current cache
+//! the static dependency DAG (*what could run*); this sweep folds in the current cache
 //! state to produce one exact resolved run: which nodes run or reuse, which outputs they
 //! demand, and how many live consumers read each output.
 //!
 //! This is the split a build system draws between its dependency graph and its dirty /
 //! up-to-date analysis (Ninja/Bazel), or a compiler between the CFG and a liveness / dead-code
 //! pass: the schedule is structural, the liveness cache-dependent. The two are *passes*, not
-//! two pieces of state — every run re-plans, so the refinement happens in the plan's own
-//! [`NodeState`] column rather than a second one shadowing it. The reverse sweep visits
+//! two pieces of state — every run re-plans, so the refinement happens in the
+//! [`RunSchedule`]'s own [`NodeState`] column and output columns rather than in a second
+//! buffer shadowing them. The reverse sweep visits
 //! consumers before producers, probes each needed
 //! node against the demand accumulated from running consumers, and stops at cache hits,
 //! missing-input nodes, and funcs without an implementation.
@@ -21,45 +22,14 @@
 //! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::plan::{ExecutionPlan, NodeState};
-use crate::execution::program::index::{OutputColumn, OutputIdx};
+use crate::execution::plan::{NodeState, RunSchedule};
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::node::lambda::OutputDemand;
 
-#[derive(Debug, Default)]
-pub(crate) struct ResolvedOutputs {
-    /// Whether each output must be produced for a live reader or a host pin.
-    pub(crate) demand: OutputColumn<OutputDemand>,
-    /// Consumers which will actually run and read each output.
-    pub(crate) readers: OutputColumn<u32>,
-}
-
-impl ResolvedOutputs {
-    fn reset(&mut self, output_count: usize) {
-        self.demand.reset(output_count, OutputDemand::Skip);
-        self.readers.reset(output_count, 0);
-    }
-
-    fn add_reader(&mut self, output_idx: OutputIdx) {
-        let readers = &mut self.readers[output_idx];
-        debug_assert_ne!(*readers, u32::MAX, "output reader count overflowed u32");
-        *readers = readers.wrapping_add(1);
-        self.demand[output_idx] = OutputDemand::Produce;
-    }
-}
-
-/// The per-output half of one resolved run — the per-node half is the plan's
-/// own [`NodeState`] column, which this sweep refines in place. All three are
-/// produced by the same reverse pass, so a cut/reused/blocked consumer
-/// contributes neither demand nor a reader to its producers.
-#[derive(Debug, Default)]
-pub(crate) struct Resolver {
-    pub(crate) outputs: ResolvedOutputs,
-}
-
-impl Resolver {
-    /// Stamp the structural schedule, then sweep it in reverse for exact liveness and
-    /// cache reuse.
+impl RunSchedule {
+    /// Stamp the planned schedule, then sweep it in reverse for exact liveness and
+    /// cache reuse, writing the result into this same buffer: the [`NodeState`] column
+    /// the planner opened, plus the `outputs` half beside it.
     ///
     /// **Mutates `cache`** only to stamp each runnable node's `current_digest`: a live
     /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
@@ -70,24 +40,23 @@ impl Resolver {
     /// happens only after every downstream consumer has contributed, so cache coverage is
     /// checked against exact demand rather than the planner's structural
     /// over-approximation.
-    pub(crate) async fn resolve(
-        &mut self,
-        program: &Program,
-        plan: &mut ExecutionPlan,
-        cache: &mut RuntimeCache,
-    ) {
-        cache.stamp_digests(program, plan.executing());
+    pub(crate) async fn resolve(&mut self, program: &Program, cache: &mut RuntimeCache) {
+        cache.stamp_digests(program, self.executing());
+        // The sweep *accumulates* demand and readers, so it starts from zero of
+        // its own accord rather than trusting whoever opened the schedule.
         self.outputs.reset(program.outputs.len());
 
         // Destructured so the sweep can read the schedule and the seed sets
-        // while writing the state column — disjoint fields of the one plan.
-        let ExecutionPlan {
+        // while writing the state and output columns — disjoint fields of the
+        // one buffer.
+        let RunSchedule {
             process_order,
             states,
             roots,
             seeded,
             event_sources,
-        } = plan;
+            outputs,
+        } = self;
 
         for node_idx in roots.iter() {
             // Only a root the planner cleared. Promoting a `Disabled` or
@@ -111,16 +80,16 @@ impl Resolver {
                 states[node_idx] = NodeState::MissingLambda;
                 continue;
             }
-            let outputs = e_node.outputs;
+            let output_range = e_node.outputs;
             // A node seed ("run to this node") demands every output the node has:
             // the host asked for the node itself, not for what a consumer reads.
             if seeded.contains(node_idx) {
-                self.outputs
+                outputs
                     .demand
-                    .slice_mut(outputs)
+                    .slice_mut(output_range)
                     .fill(OutputDemand::Produce);
             }
-            let demand = self.outputs.demand.slice(outputs);
+            let demand = outputs.demand.slice(output_range);
             if !event_sources.contains(node_idx)
                 && cache.probe_reuse(program, node_idx, demand).await
             {
@@ -149,7 +118,7 @@ impl Resolver {
                         continue;
                     }
                     states[addr.node_idx] = NodeState::Run;
-                    self.outputs.add_reader(program.output_idx(*addr));
+                    outputs.add_reader(program.output_idx(*addr));
                 }
             }
         }
