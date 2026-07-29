@@ -27,8 +27,8 @@ use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
-use crate::execution::outcome::EventTrigger;
 use crate::execution::identity::ExecutionEventPort;
+use crate::execution::outcome::EventTrigger;
 use crate::graph::func::lambda::Invocation;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
