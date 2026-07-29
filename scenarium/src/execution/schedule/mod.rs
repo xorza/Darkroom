@@ -45,7 +45,7 @@ use crate::execution::error::{Error, Result};
 use crate::execution::program::index::{NodeColumn, NodeIdx, NodeSet, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
-use crate::graph::node::lambda::OutputDemand;
+use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
 
 pub(crate) mod error;

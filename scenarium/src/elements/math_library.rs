@@ -1,9 +1,9 @@
 use crate::DataType;
 use crate::DynamicValue;
 use crate::async_lambda;
-use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
-use crate::graph::node::error::InvokeError;
-use crate::graph::node::lambda::Invocation;
+use crate::graph::func::error::InvokeError;
+use crate::graph::func::lambda::Invocation;
+use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::library::Library;
 
 #[derive(Debug, Clone, Copy)]
@@ -356,7 +356,7 @@ fn divide_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::node::lambda::OutputDemand;
+    use crate::graph::func::lambda::OutputDemand;
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;

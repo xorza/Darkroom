@@ -193,8 +193,8 @@ mod internals {
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
+    use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::NodeId;
-    use crate::graph::node::lambda::OutputDemand;
 
     #[derive(Debug, Default)]
     pub(super) struct ArgumentValues {

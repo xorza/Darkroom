@@ -34,14 +34,14 @@ pub use graph::Graph;
 pub use graph::definition::{GraphDef, GraphEvent, GraphLink};
 pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
-pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort, Subscription};
-pub use graph::interface::{NodeEvents, NodePorts};
-pub use graph::node::definition::{
+pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
+pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
+pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
+pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
-pub use graph::node::error::{FuncValidationError, InvokeError, InvokeResult};
-pub use graph::node::event::{AsyncEvent, AsyncEventFn, EventLambda};
-pub use graph::node::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
+pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort, Subscription};
+pub use graph::interface::{NodeEvents, NodePorts};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind, NodeRef, NodeSearch};
 pub use library::{Library, TypeEntry};

@@ -16,10 +16,10 @@
 use ::serde::{Deserialize, Serialize};
 
 use crate::graph::Binding;
+use crate::graph::func::{FuncInput, FuncOutput};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort, Subscription};
 use crate::graph::node::Node;
-use crate::graph::node::definition::{FuncInput, FuncOutput};
 use crate::graph::{BindingEntry, binding_touches, subscription_touches};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

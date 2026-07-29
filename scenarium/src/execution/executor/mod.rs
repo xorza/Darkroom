@@ -33,8 +33,8 @@ use crate::execution::identity::ExecutionEventPort;
 use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::program::index::{NodeColumn, NodeIdx, OutputAddr, OutputColumn, OutputIdx};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
-use crate::graph::node::error::InvokeError;
-use crate::graph::node::lambda::{Invocation, OutputDemand};
+use crate::graph::func::error::InvokeError;
+use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 

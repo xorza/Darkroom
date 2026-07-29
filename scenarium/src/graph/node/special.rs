@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::elements::run_sinks::run_sinks_func;
-use crate::graph::node::definition::Func;
+use crate::graph::func::Func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
 /// come from [`func`](SpecialNode::func); the engine gives it special behavior.

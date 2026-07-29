@@ -12,8 +12,8 @@ mod planning {
     use crate::execution::schedule::planner::Planner;
     use crate::execution::schedule::{NodeState, ResolvedOutputs, RunSchedule};
     use crate::execution::seeds::RunSeeds;
+    use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::FuncId;
-    use crate::graph::node::lambda::OutputDemand;
 
     /// Hand-built program for planner tests — scheduling is structural, so it
     /// needs no compile artifact and no authoring attribution. Inputs are
@@ -491,9 +491,9 @@ mod resolving {
         ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
     };
     use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
+    use crate::graph::func::FuncBehavior;
+    use crate::graph::func::lambda::{FuncLambda, OutputDemand};
     use crate::graph::identity::FuncId;
-    use crate::graph::node::definition::FuncBehavior;
-    use crate::graph::node::lambda::{FuncLambda, OutputDemand};
     use crate::{DynamicValue, StaticValue, async_lambda};
 
     #[derive(Debug)]

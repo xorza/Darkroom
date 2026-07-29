@@ -10,10 +10,10 @@ use crate::execution::program::index::NodeIdx;
 use crate::execution::program::index::OutputAddr;
 use crate::execution::program::{ExecutionBinding, Program};
 use crate::graph::definition::{GraphDef, GraphLink};
+use crate::graph::func::Func;
+use crate::graph::func::event::EventLambda;
 use crate::graph::identity::{FuncId, GraphId, NodeId};
 use crate::graph::node::NodeSearch;
-use crate::graph::node::definition::Func;
-use crate::graph::node::event::EventLambda;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 
 /// The program of a freshly compiled artifact, which nothing else holds yet —
@@ -193,8 +193,8 @@ struct NestedFixture {
 fn nested_fixture() -> NestedFixture {
     use crate::data::type_system::DataType;
     use crate::graph::Binding;
+    use crate::graph::func::FuncOutput;
     use crate::graph::identity::InputPort;
-    use crate::graph::node::definition::FuncOutput;
     use crate::graph::node::{Node, NodeKind};
 
     let library = test_func_lib(TestFuncHooks::default());
@@ -310,8 +310,8 @@ fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
 fn run_targets_seed_an_exposed_producer_that_an_interior_node_also_reads() {
     use crate::data::type_system::DataType;
     use crate::graph::Binding;
+    use crate::graph::func::FuncOutput;
     use crate::graph::identity::InputPort;
-    use crate::graph::node::definition::FuncOutput;
     use crate::graph::node::{Node, NodeKind};
 
     let library = test_func_lib(TestFuncHooks::default());
@@ -390,8 +390,8 @@ fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
     let plain = {
         use crate::data::type_system::DataType;
         use crate::graph::Binding;
+        use crate::graph::func::FuncOutput;
         use crate::graph::identity::InputPort;
-        use crate::graph::node::definition::FuncOutput;
         use crate::graph::node::{Node, NodeKind};
 
         let mut nested = GraphDef::new("Plain").output(FuncOutput::new("out", DataType::Int));

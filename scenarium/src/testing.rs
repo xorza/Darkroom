@@ -8,11 +8,11 @@ use crate::DataType;
 use crate::async_lambda;
 use crate::graph::Binding;
 use crate::graph::Graph;
+use crate::graph::func::error::InvokeResult;
+use crate::graph::func::lambda::Invocation;
+use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::InputPort;
 use crate::graph::identity::NodeId;
-use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
-use crate::graph::node::error::InvokeResult;
-use crate::graph::node::lambda::Invocation;
 use crate::graph::node::{CacheMode, Node};
 use crate::library::Library;
 
