@@ -7,7 +7,7 @@
 //! stars routinely exceed 1). Every curve clamps its output, so the result is always a valid
 //! display image in `[0, 1]`.
 //!
-//! Three curve families (see `docs/image-stretching.md` and `ghs.md` for the full derivations):
+//! Three curve families:
 //! - **STF / MTF auto-stretch** (PixInsight/Siril): a linear black-point clip-rescale followed by
 //!   the Midtones Transfer Function `MTF(m,x) = (m−1)x / ((2m−1)x − m)` — a rational (Möbius)
 //!   curve, *not* a gamma curve. The black point (`median − k·σ`) and midtones `m` are derived
@@ -82,7 +82,7 @@ pub enum StretchMethod {
     AutoAsinh { target_background: f32 },
     /// Normalized arcsinh with an explicit softening `β` (smaller = stronger stretch).
     Asinh { beta: f32 },
-    /// Generalized Hyperbolic Stretch — an explicit *designer* curve (see `ghs.md`). `d` is the
+    /// Generalized Hyperbolic Stretch — an explicit *designer* curve. `d` is the
     /// stretch strength (0 = identity); `b` selects the curve family (`0` exponential, `b < 0`
     /// logarithmic-like with `b ≈ −1.4` ≈ asinh, `b > 0` hyperbolic); `sp` is the symmetry point
     /// (most contrast); `lp`/`hp` are the shadow/highlight protection points (linear outside them).
@@ -140,7 +140,7 @@ impl Stretch {
         }
     }
 
-    /// Color-preserving Generalized Hyperbolic Stretch (see `ghs.md`) with no shadow/highlight
+    /// Color-preserving Generalized Hyperbolic Stretch with no shadow/highlight
     /// protection (`lp = 0`, `hp = 1`). `d` = strength, `b` = curve family, `sp` = symmetry point.
     pub fn ghs(d: f32, b: f32, sp: f32) -> Self {
         Self {
@@ -375,7 +375,7 @@ impl ToneCurve for AsinhCurve {
 /// genuine limits where the general forms divide by `b` or `b + 1`.
 const GHS_EPS: f32 = 1e-6;
 
-/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b` (see `ghs.md`). `T(0) = 0` in
+/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in
 /// every case, which is what makes the curve continuous at the symmetry point.
 fn ghs_base_t(d: f32, b: f32, u: f32) -> f32 {
     if (b + 1.0).abs() < GHS_EPS {
@@ -404,7 +404,7 @@ fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
 
 /// Generalized Hyperbolic Stretch: the base curve [`ghs_base_t`] mirrored about `sp`, with linear
 /// shadow (`< lp`) and highlight (`> hp`) protection, normalized to map `[0, 1] → [0, 1]`. C¹ and
-/// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel. See `ghs.md`.
+/// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
 #[derive(Debug, Clone, Copy)]
 struct GhsCurve {
     /// `d ≈ 0` ⇒ the transform is the identity; short-circuit (the normalization would be `0/0`).

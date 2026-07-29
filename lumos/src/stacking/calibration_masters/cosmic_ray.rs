@@ -8,8 +8,7 @@
 //! multi-pixel hits are fully removed.
 //!
 //! Runs on the calibrated, linear `CfaImage` before demosaic/registration (warping or demosaic
-//! would smear a hit across pixels). See `docs/pipeline/02-calibration.md §4.2` and
-//! `docs/pipeline/cosmic-ray-rejection-plan.md`.
+//! would smear a hit across pixels).
 //!
 //! Dispatches per CFA type: **Mono** = textbook subsampled L.A.Cosmic; **Bayer** = deinterleave the
 //! four 2×2 phases and reuse the mono detector per dense same-color plane; **X-Trans** = same-color
