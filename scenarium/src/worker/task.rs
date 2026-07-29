@@ -172,7 +172,7 @@ where
         }
 
         if let Some(cache) = self.intent.disk_store.take() {
-            self.engine.cache.set_disk_store(cache);
+            self.engine.set_disk_store(cache);
             self.engine.store_resident_caches().await;
         }
 

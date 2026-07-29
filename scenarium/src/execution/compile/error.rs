@@ -5,10 +5,11 @@
 //! type-mismatched binding — which a document can reach simply by being older
 //! than the library. It is recoverable, and never enters the worker.
 //!
-//! The rest are *self-consistency* verdicts on an artifact linking has already
-//! produced. Nothing but a bug in this crate can raise one, so they surface only
-//! through the `is_debug()`-gated `validate_debug` wrappers — as values rather
-//! than panics, so a test can assert on exactly which invariant broke.
+//! The crate-private errors are *self-consistency* verdicts on an artifact
+//! linking has already produced. Nothing but a bug in this crate can raise one,
+//! so they surface only through the `is_debug()`-gated `validate_debug` wrappers
+//! — as values rather than panics, so a test can assert on exactly which
+//! invariant broke.
 
 use thiserror::Error;
 
@@ -71,16 +72,6 @@ pub(crate) enum CompiledGraphValidationError {
         e_node_id: ExecutionNodeId,
         target: OutputAddr,
     },
-}
-
-#[derive(Debug, Error)]
-pub(crate) enum InstalledGraphValidationError {
-    #[error("runtime cache spans {slots} nodes, not the compiled program's {expected}")]
-    NodeCount { slots: usize, expected: usize },
-    #[error("runtime cache output arity does not match node {e_node_id:?}")]
-    OutputArity { e_node_id: ExecutionNodeId },
-    #[error("runtime cache state owner does not match node {e_node_id:?}")]
-    StateOwner { e_node_id: ExecutionNodeId },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
