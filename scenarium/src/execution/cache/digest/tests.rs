@@ -1,11 +1,11 @@
 use crate::graph::identity::FuncId;
-use std::sync::Arc;
 
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::internals::hydrate;
 use crate::execution::cache::slot::OutputSnapshot;
+use crate::execution::compiled::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::program::{
@@ -19,17 +19,14 @@ use crate::graph::func::FuncBehavior;
 /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
 #[derive(Debug, Default)]
 struct Prog {
-    /// Shared like the compile artifact's, so it can be handed to
-    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
-    program: Arc<Program>,
+    /// A real outer compiled artifact around the hand-built program.
+    program: TestCompiledGraph,
 }
 
 impl Prog {
-    /// The program while it is still exclusively this fixture's — every
-    /// mutation below goes through here, and it stops being available the
-    /// moment a cache is reconciled onto it.
+    /// The program while the fixture is still the artifact's sole holder.
     fn building(&mut self) -> &mut Program {
-        Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+        self.program.program_mut()
     }
 
     /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
@@ -136,9 +133,9 @@ struct DigestPair {
 /// in fixture index order, each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. The cache
 /// identifies its own paths each call. Returns it, holding every computed digest.
-fn digested_cache(program: &Arc<Program>, through: usize) -> RuntimeCache {
+fn digested_cache(program: &TestCompiledGraph, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(program);
+    cache.reconcile_for_test(program);
     for idx in 0..=through {
         cache.prepare_node_blocking(node_idx(idx));
         cache.stamp_digest(node_idx(idx));
@@ -147,7 +144,7 @@ fn digested_cache(program: &Arc<Program>, through: usize) -> RuntimeCache {
 }
 
 /// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &Arc<Program>, idx: usize) -> Option<Digest> {
+fn digest_at(program: &TestCompiledGraph, idx: usize) -> Option<Digest> {
     digested_cache(program, idx)[node_idx(idx)].current_digest
 }
 
@@ -315,7 +312,7 @@ fn fs_path_folds_file_identity_and_path() {
         let mut p = Prog::default();
         p.add(10, 1, &[konst(value)]);
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&p.program);
+        cache.reconcile_for_test(&p.program);
         cache.stamp_file(path, 4, 7);
         cache.node_digest(node_idx(0))
     };
@@ -374,7 +371,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&p.program);
+        cache.reconcile_for_test(&p.program);
         let producer = cache.node_digest(node_idx(0)).unwrap();
         cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
@@ -476,7 +473,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program);
+    cache.reconcile_for_test(&p.program);
     let producer = cache.node_digest(node_idx(0)).unwrap();
     cache[node_idx(0)].current_digest = Some(producer);
     hydrate(

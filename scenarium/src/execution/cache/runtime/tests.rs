@@ -6,6 +6,7 @@ use crate::common::pool::PoolRange;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::{RuntimeCache, internals};
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
+use crate::execution::compiled::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
@@ -59,13 +60,13 @@ fn keyed_slot(current_digest: Option<Digest>) -> RuntimeSlot {
 
 /// A program of `nodes`, ids `from_u128(idx + 1)` in order, one `Int` output
 /// each — the shape the slot fixtures above hold values for.
-fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> Arc<Program> {
+fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> TestCompiledGraph {
     let mut program = Program::default();
     for (index, mut e_node) in nodes.into_iter().enumerate() {
         e_node.outputs = one_output(&mut program);
         program.push(ExecutionNodeId::from_u128(index as u128 + 1), e_node);
     }
-    Arc::new(program)
+    TestCompiledGraph::new(program)
 }
 
 /// A `Pure` node retained in RAM — the default the residency fixtures assume.
@@ -82,10 +83,10 @@ fn ram_node() -> ExecutionNode {
 /// together, so a fixture cannot leave the cache describing itself wrongly.
 fn install(
     cache: &mut RuntimeCache,
-    program: &Arc<Program>,
+    program: &TestCompiledGraph,
     slots: impl IntoIterator<Item = RuntimeSlot>,
 ) {
-    cache.reconcile(program);
+    cache.reconcile_for_test(program);
     for (index, slot) in slots.into_iter().enumerate() {
         cache.slots[NodeIdx(index as u32)] = slot;
     }
@@ -266,18 +267,18 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
                 },
             );
         }
-        Arc::new(program)
+        TestCompiledGraph::new(program)
     };
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&build([CacheMode::Ram; 4]));
+    cache.reconcile_for_test(&build([CacheMode::Ram; 4]));
     for (index, _) in cases.iter().enumerate() {
         let slot = &mut cache.slots[NodeIdx(index as u32)];
         slot.current_digest = Some(digest);
         slot.load_output(complete_snapshot(out()), Some(digest));
     }
 
-    cache.reconcile(&build(cases.map(|(mode, _)| mode)));
+    cache.reconcile_for_test(&build(cases.map(|(mode, _)| mode)));
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -308,11 +309,11 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
                 ..Default::default()
             },
         );
-        Arc::new(program)
+        TestCompiledGraph::new(program)
     };
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&build(func_id, 0));
+    cache.reconcile_for_test(&build(func_id, 0));
     let digest = Digest([5u8; 32]);
     let node_idx = NodeIdx(0);
     let slot = &mut cache.slots[node_idx];
@@ -322,7 +323,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     slot.load_output(complete_snapshot(out()), Some(digest));
 
     // Same (func, version): everything survives.
-    cache.reconcile(&build(func_id, 0));
+    cache.reconcile_for_test(&build(func_id, 0));
     assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
         cache.slots[node_idx].event_state.lock().await.get::<u32>(),
@@ -332,7 +333,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Bumped version: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the version.
-    cache.reconcile(&build(func_id, 1));
+    cache.reconcile_for_test(&build(func_id, 1));
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a version bump must drop the predecessor's state"
@@ -345,7 +346,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Changed func id at the same version: state drops too.
     cache.slots[node_idx].state.set(31_u32);
-    cache.reconcile(&build(FuncId::from_u128(78), 1));
+    cache.reconcile_for_test(&build(FuncId::from_u128(78), 1));
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a func change must drop the predecessor's state"
@@ -369,13 +370,13 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
                 },
             );
         }
-        Arc::new(program)
+        TestCompiledGraph::new(program)
     };
     let digest = |id: u128| Digest([id as u8; 32]);
 
     // Ids 1, 2, 3 at indices 0, 1, 2 — each slot stamped with its own digest.
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&build(&[1, 2, 3]));
+    cache.reconcile_for_test(&build(&[1, 2, 3]));
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
         slot.current_digest = Some(digest(i as u128 + 1));
@@ -386,7 +387,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
     // surviving node slides down one index. Only the new program is named —
     // the one being left is the cache's own.
-    cache.reconcile(&build(&[2, 3, 4]));
+    cache.reconcile_for_test(&build(&[2, 3, 4]));
 
     assert_eq!(
         cache.slots[NodeIdx(0)].current_digest,
@@ -500,7 +501,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     let mut cache = RuntimeCache::default();
     install(
         &mut cache,
-        &Arc::new(program),
+        &TestCompiledGraph::new(program),
         [resident_slot(None, None, vec![DynamicValue::Unbound])],
     );
     assert!(

@@ -481,10 +481,9 @@ mod planning {
 }
 
 mod resolving {
-    use std::sync::Arc;
-
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
+    use crate::execution::compiled::TestCompiledGraph;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::identity::{NodeIdx, OutputAddr};
     use crate::execution::program::{
@@ -504,18 +503,15 @@ mod resolving {
 
     #[derive(Default)]
     struct Fix {
-        /// Shared like the compile artifact's, so it can be handed to
-        /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
-        program: Arc<Program>,
+        /// A real outer compiled artifact around the hand-built program.
+        program: TestCompiledGraph,
         order: Vec<ExecutionNodeId>,
     }
 
     impl Fix {
-        /// The program while it is still exclusively this fixture's — every
-        /// mutation below goes through here, and it stops being available the
-        /// moment a cache is reconciled onto it.
+        /// The program while the fixture is still the artifact's sole holder.
         fn building(&mut self) -> &mut Program {
-            Arc::get_mut(&mut self.program).expect("the fixture is built before it is shared")
+            self.program.program_mut()
         }
 
         fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
@@ -576,7 +572,7 @@ mod resolving {
                 schedule.seeded.insert(nx(*seed));
             }
             let mut cache = RuntimeCache::default();
-            cache.reconcile(&self.program);
+            cache.reconcile_for_test(&self.program);
             cache.stamp_digests(schedule.executing());
             for cached in cached {
                 let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();

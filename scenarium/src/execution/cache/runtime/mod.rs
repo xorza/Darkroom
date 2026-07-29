@@ -23,9 +23,10 @@ use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
+use crate::execution::compiled::CompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::execution::program::{ExecutionBinding, Program};
+use crate::execution::program::ExecutionBinding;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -36,7 +37,8 @@ use crate::{DynamicValue, RamUsage};
 /// an array read; cross-install survival happens at [`reconcile`](Self::reconcile),
 /// which re-pairs the slots with the new index order by stable id.
 ///
-/// The program those indices mean something in is held here, not passed in: a
+/// The compiled artifact those indices mean something in is held here, not
+/// passed in: a
 /// `NodeIdx` reaching one of these methods is read against
 /// [`aligned_to`](Self::aligned_to), so there is no program a caller could name
 /// that the slots do not belong to. The resolver stamps
@@ -46,18 +48,18 @@ use crate::{DynamicValue, RamUsage};
 /// is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
-    /// The program `slots` is aligned to — what its indices mean, and the ids
-    /// that name them across an install.
+    /// The canonical artifact `slots` is aligned to — its program says what
+    /// the indices mean and which stable ids name them across an install.
     ///
-    /// Shared with the [`CompiledGraph`](crate::execution::compiled::CompiledGraph)
-    /// it came from rather than copied, so holding it duplicates nothing. It is
-    /// written only where `slots` is, which is what makes the alignment a fact
-    /// about the struct instead of a precondition every caller has to honour.
-    aligned_to: Arc<Program>,
+    /// This is another handle to the same outer artifact installed by the
+    /// engine, not an independently shared `Program`. The artifact remains the
+    /// program's single owner.
+    aligned_to: Option<Arc<CompiledGraph>>,
     /// Private: the *column* is the cache's own — its length is the alignment
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
-    /// [`Index<NodeIdx>`], the same way a node is reached on [`Program`].
+    /// [`Index<NodeIdx>`], the same way a node is reached on
+    /// [`Program`](crate::execution::program::Program).
     slots: Column<NodeIdx, RuntimeSlot>,
     /// Private for the same reason as the slots: the worker replaces it
     /// wholesale between runs, and going through
@@ -126,6 +128,14 @@ impl RuntimeCache {
         self.slots.iter()
     }
 
+    /// Whether the slots name this exact outer artifact, not merely a program
+    /// with the same shape.
+    pub(crate) fn is_aligned_to(&self, compiled: &Arc<CompiledGraph>) -> bool {
+        self.aligned_to
+            .as_ref()
+            .is_some_and(|aligned| Arc::ptr_eq(aligned, compiled))
+    }
+
     /// Attach the store this cache persists to and serves from. Called between
     /// runs, when a document gains or changes its cache root: every reuse
     /// verdict already given was answered from the *previous* store, so this
@@ -135,7 +145,7 @@ impl RuntimeCache {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.aligned_to = Arc::default();
+        self.aligned_to = None;
         self.slots.clear();
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
@@ -149,6 +159,9 @@ impl RuntimeCache {
         for e_node_id in e_node_ids {
             let node_idx = *self
                 .aligned_to
+                .as_deref()
+                .expect("eviction requires an installed compiled graph")
+                .program
                 .e_node_index
                 .get(e_node_id)
                 .expect("an eviction target belongs to the installed program");
@@ -211,15 +224,15 @@ impl RuntimeCache {
     /// the slots actually belong to, not one a caller names — so this can run
     /// either side of the engine's artifact swap, and the pair it walks cannot
     /// be mismatched.
-    pub(crate) fn reconcile(&mut self, installed: &Arc<Program>) {
-        let previous = std::mem::replace(&mut self.aligned_to, Arc::clone(installed));
+    pub(crate) fn reconcile(&mut self, installed: &Arc<CompiledGraph>) {
+        let previous = self.aligned_to.replace(Arc::clone(installed));
         let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> = previous
-            .e_node_ids
             .iter()
-            .copied()
+            .flat_map(|compiled| compiled.program.e_node_ids.iter().copied())
             .zip(self.slots.drain())
             .collect();
-        for (e_node_id, e_node) in installed.e_node_ids.iter().zip(installed.e_nodes.iter()) {
+        let program = &installed.program;
+        for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
             let owner = StateOwner {
                 func_id: e_node.func_id,
                 version: e_node.version,
@@ -255,7 +268,13 @@ impl RuntimeCache {
         address: OutputAddr,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = self.aligned_to[address.node_idx].outputs.len as usize;
+        let arity = self
+            .aligned_to
+            .as_deref()
+            .expect("cache reads require an installed compiled graph")
+            .program[address.node_idx]
+            .outputs
+            .len as usize;
         let slot = &mut self.slots[address.node_idx];
         debug_assert!(
             slot.output_values()
@@ -309,7 +328,11 @@ impl RuntimeCache {
     /// reads producer digests and delivered values from, and the `fs_paths` memo behind every
     /// external identity. The *encoding* stays in `digest`, beside the [`DOMAIN`] versioning it.
     pub(crate) fn node_digest(&self, node_idx: NodeIdx) -> Option<Digest> {
-        let program = &self.aligned_to;
+        let program = &self
+            .aligned_to
+            .as_deref()
+            .expect("digesting requires an installed compiled graph")
+            .program;
         let e_node = &program[node_idx];
 
         // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
@@ -448,7 +471,11 @@ impl RuntimeCache {
     /// Queue the paths `node_idx` reads, on top of whatever is already queued,
     /// skipping any this run already identified.
     fn request_node_paths(&mut self, node_idx: NodeIdx) {
-        let program = &self.aligned_to;
+        let program = &self
+            .aligned_to
+            .as_deref()
+            .expect("resource preparation requires an installed compiled graph")
+            .program;
         let e_node = &program[node_idx];
         if e_node.behavior != FuncBehavior::Pure {
             return;
@@ -527,9 +554,14 @@ impl RuntimeCache {
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
     fn blob_target(&self, node_idx: NodeIdx) -> Option<BlobTarget> {
+        let program = &self
+            .aligned_to
+            .as_deref()
+            .expect("blob lookup requires an installed compiled graph")
+            .program;
         self.disk_store.blob_target(
-            self.aligned_to.e_node_ids[node_idx],
-            &self.aligned_to[node_idx],
+            program.e_node_ids[node_idx],
+            &program[node_idx],
             self.slots[node_idx].current_digest,
         )
     }
@@ -627,7 +659,11 @@ impl RuntimeCache {
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
     pub(crate) fn release_dead_outputs(&mut self) {
-        let program = &self.aligned_to;
+        let program = &self
+            .aligned_to
+            .as_deref()
+            .expect("cache release requires an installed compiled graph")
+            .program;
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let Some(resident_len) = self.slots[node_idx].output_values().map(<[_]>::len) else {
                 continue;
@@ -664,9 +700,14 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
+    use crate::execution::compiled::TestCompiledGraph;
     use crate::execution::identity::NodeIdx;
 
     impl RuntimeCache {
+        pub(crate) fn reconcile_for_test(&mut self, installed: &TestCompiledGraph) {
+            self.reconcile(installed.shared());
+        }
+
         /// The attached store, for the tests that read its I/O counters or
         /// corrupt a blob behind the cache's back.
         pub(crate) fn disk_store(&self) -> &DiskStore {

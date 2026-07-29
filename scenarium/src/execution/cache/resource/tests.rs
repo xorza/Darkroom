@@ -1,5 +1,4 @@
 use crate::graph::identity::FuncId;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ::common::CancelToken;
@@ -7,6 +6,7 @@ use ::common::CancelToken;
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compiled::TestCompiledGraph;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
 use crate::execution::program::{
@@ -274,9 +274,8 @@ fn file_identity_separates_pre_epoch_mtimes() {
 
 #[derive(Debug)]
 struct ConstPathFixture {
-    /// Shared like the compile artifact's, so it can be handed to
-    /// [`RuntimeCache::reconcile`]; every read of it derefs to a `&Program`.
-    program: Arc<Program>,
+    /// A real outer compiled artifact around the hand-built program.
+    program: TestCompiledGraph,
     schedule: RunSchedule,
     first: ExecutionNodeId,
     second: ExecutionNodeId,
@@ -327,7 +326,7 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     schedule.roots.insert(NodeIdx(0));
     schedule.roots.insert(NodeIdx(1));
     ConstPathFixture {
-        program: Arc::new(program),
+        program: TestCompiledGraph::new(program),
         schedule,
         first,
         second,
@@ -341,7 +340,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     std::fs::write(&file, b"x").unwrap();
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&fixture.program);
+    cache.reconcile_for_test(&fixture.program);
 
     cache
         .prepare(fixture.schedule.executing(), CancelToken::never())
