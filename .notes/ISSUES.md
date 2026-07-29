@@ -23,3 +23,6 @@
 - `lumos/src/io/image/linear.rs:18` — the I/O-layer `linear` module imports
   `StackableImage` from `stacking::frame_store`, inverting the io → stacking
   layering.
+
+- `scenarium/src/execution/cache/digest/mod.rs:32` — the cache digest
+  documentation links to a `ResourceStamper` type that no longer exists.

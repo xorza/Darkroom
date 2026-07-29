@@ -211,7 +211,7 @@ impl CompiledGraph {
         &self,
         cache: &RuntimeCache,
     ) -> Result<(), InstalledGraphValidationError> {
-        if cache.slots.len() != self.program.e_nodes.len() {
+        if cache.slot_count() != self.program.e_nodes.len() {
             return Err(InstalledGraphValidationError::NodeSet);
         }
 
@@ -220,7 +220,7 @@ impl CompiledGraph {
             .e_node_ids
             .iter()
             .zip(self.program.e_nodes.iter())
-            .zip(cache.slots.iter())
+            .zip(cache.slots())
         {
             if let Some(output_values) = slot.output_values()
                 && output_values.len() != e_node.outputs.len as usize

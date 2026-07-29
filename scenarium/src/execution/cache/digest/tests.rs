@@ -136,7 +136,7 @@ fn digested_cache(program: &Program, through: usize) -> RuntimeCache {
 
 /// One node's content digest, computing only the producer-first prefix it needs.
 fn digest_at(program: &Program, idx: usize) -> Option<Digest> {
-    digested_cache(program, idx).slots[node_idx(idx)].current_digest
+    digested_cache(program, idx)[node_idx(idx)].current_digest
 }
 
 /// Every node's content digest, indexed by position.
@@ -144,7 +144,7 @@ fn digests(prog: &Prog) -> Vec<Option<Digest>> {
     let last = prog.program.e_nodes.len().saturating_sub(1);
     let cache = digested_cache(&prog.program, last);
     (0..prog.program.e_nodes.len())
-        .map(|idx| cache.slots[node_idx(idx)].current_digest)
+        .map(|idx| cache[node_idx(idx)].current_digest)
         .collect()
 }
 
@@ -364,7 +364,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let mut cache = RuntimeCache::default();
         cache.reconcile_fresh(&p.program);
         let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
-        cache.slots[node_idx(0)].current_digest = Some(producer);
+        cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
                 &mut cache,
@@ -466,14 +466,14 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let mut cache = RuntimeCache::default();
     cache.reconcile_fresh(&p.program);
     let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
-    cache.slots[node_idx(0)].current_digest = Some(producer);
+    cache[node_idx(0)].current_digest = Some(producer);
     hydrate(
         &mut cache,
         node_idx(0),
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::FsPath(path))]),
         producer,
     );
-    cache.slots[node_idx(0)].current_digest = Some(Digest([9; 32]));
+    cache[node_idx(0)].current_digest = Some(Digest([9; 32]));
     cache.prepare_node_blocking(&p.program, node_idx(1));
     assert_eq!(
         cache.node_digest(&p.program, node_idx(1)),

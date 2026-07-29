@@ -342,14 +342,14 @@ mod internals {
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(value) => Some(DynamicValue::from(value)),
-                    ExecutionBinding::Bind(address) => self.cache.slots[address.node_idx]
+                    ExecutionBinding::Bind(address) => self.cache[address.node_idx]
                         .output_values()
                         .and_then(|outputs| outputs.get(address.port_idx as usize))
                         .cloned(),
                 })
                 .collect();
 
-            let outputs = self.cache.slots[self.compiled.program.e_node_index[&e_node_id]]
+            let outputs = self.cache[self.compiled.program.e_node_index[&e_node_id]]
                 .output_values()
                 .map(|outputs| outputs.to_vec())
                 .unwrap_or_default();
@@ -359,7 +359,7 @@ mod internals {
 
         /// The runtime slot for a stable id — test introspection.
         pub(super) fn slot(&self, e_node_id: ExecutionNodeId) -> &RuntimeSlot {
-            &self.cache.slots[self.compiled.program.e_node_index[&e_node_id]]
+            &self.cache[self.compiled.program.e_node_index[&e_node_id]]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
@@ -370,7 +370,7 @@ mod internals {
             values: Vec<DynamicValue>,
         ) {
             let node_idx = self.compiled.program.e_node_index[&e_node_id];
-            let slot = &mut self.cache.slots[node_idx];
+            let slot = &mut self.cache[node_idx];
             slot.value = ValueState::Resident {
                 snapshot: OutputSnapshot::new(values),
                 produced_under: slot.current_digest,

@@ -367,12 +367,12 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         fixture.program.e_node_index[&fixture.second],
     );
     assert_eq!(
-        cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest,
-        cache.slots[fixture.program.e_node_index[&fixture.second]].current_digest,
+        cache[fixture.program.e_node_index[&fixture.first]].current_digest,
+        cache[fixture.program.e_node_index[&fixture.second]].current_digest,
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest;
+    let first_run = cache[fixture.program.e_node_index[&fixture.first]].current_digest;
     cache
         .prepare(
             &fixture.program,
@@ -385,7 +385,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
         fixture.program.e_node_index[&fixture.first],
     );
     assert_ne!(
-        cache.slots[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
+        cache[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
         "the next run refreshes resource identity"
     );
 }
