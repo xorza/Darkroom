@@ -1,12 +1,13 @@
-use crate::error::{GraphDeserializeError, GraphValidationError};
+use crate::graph::Graph;
 use crate::graph::definition::GraphDef;
-use crate::graph::entry::Graph;
+use crate::graph::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::interface::{GraphEvent, GraphId, GraphInterface, GraphLink};
+use crate::graph::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+use crate::graph::node::event::EventLambda;
+use crate::graph::node::{CacheMode, Node, NodeKind, NodeSearch};
 use crate::graph::query::NodePorts;
-use crate::graph::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
+use crate::graph::{Binding, InputPort, NodeId, OutputPort};
 use crate::library::Library;
-use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
-use crate::node::event::EventLambda;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, StaticValue, closes_data_cycle};
 use common::{SerdeFormat, deserialize, serialize};
@@ -375,8 +376,8 @@ fn validate_rejects_dangling_binding() {
 
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
+    use crate::graph::node::definition::FuncId;
     use crate::library::Library;
-    use crate::node::definition::FuncId;
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
     // valid — only the `const_only` flag decides whether validation accepts it.

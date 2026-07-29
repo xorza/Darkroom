@@ -9,11 +9,11 @@ use crate::execution::program::index::{NodeIdx, OutputAddr, OutputColumn, Output
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
-use crate::graph::CacheMode;
-use crate::node::definition::{FuncBehavior, FuncId};
-use crate::node::lambda::Invocation;
-use crate::node::lambda::internals;
-use crate::node::lambda::{FuncLambda, OutputDemand};
+use crate::graph::node::CacheMode;
+use crate::graph::node::definition::{FuncBehavior, FuncId};
+use crate::graph::node::lambda::Invocation;
+use crate::graph::node::lambda::internals;
+use crate::graph::node::lambda::{FuncLambda, OutputDemand};
 use crate::{DynamicValue, StaticValue};
 
 /// Hand-built program with real lambdas. Inputs are all optional here (the

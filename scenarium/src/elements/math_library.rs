@@ -1,10 +1,10 @@
 use crate::DataType;
 use crate::DynamicValue;
 use crate::async_lambda;
+use crate::graph::node::definition::{Func, FuncInput, FuncOutput};
+use crate::graph::node::error::InvokeError;
+use crate::graph::node::lambda::Invocation;
 use crate::library::Library;
-use crate::node::definition::{Func, FuncInput, FuncOutput};
-use crate::node::lambda::Invocation;
-use crate::node::lambda::InvokeError;
 
 #[derive(Debug, Clone, Copy)]
 struct FloatInputSpec {
@@ -356,7 +356,7 @@ fn divide_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::lambda::OutputDemand;
+    use crate::graph::node::lambda::OutputDemand;
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;

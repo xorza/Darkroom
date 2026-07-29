@@ -1,8 +1,8 @@
+use crate::graph::Graph;
 use crate::graph::definition::GraphDef;
-use crate::graph::entry::Graph;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
-use crate::graph::{Node, NodeKind, NodeSearch};
-use crate::node::definition::FuncId;
+use crate::graph::node::definition::FuncId;
+use crate::graph::node::{Node, NodeKind, NodeSearch};
 
 /// The link of the one graph-instance node `graph` holds.
 fn instance_link(graph: &Graph) -> Option<GraphLink> {
