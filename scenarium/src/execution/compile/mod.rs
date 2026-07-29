@@ -111,8 +111,16 @@ impl CompiledGraph {
 
         let exposed_producers = flatten_map
             .exposed_producers()
-            .filter_map(|(instance, producer)| {
-                Some((instance, *program.e_node_index.get(&producer)?))
+            .map(|(instance, producer)| {
+                // Every producer recorded is a node the same walk emitted.
+                // Dropping one it could not find would leave the instance
+                // without the record `run_targets` exists to read — the
+                // silent miss the record was added to end.
+                let node_idx = *program
+                    .e_node_index
+                    .get(&producer)
+                    .expect("flatten records exposed producers it emitted");
+                (instance, node_idx)
             })
             .collect();
         let exposed = pack_groups(exposed_producers, &mut node_lists);
@@ -346,7 +354,7 @@ pub(crate) mod internals {
     use std::sync::Arc;
 
     use crate::execution::compile::CompiledGraph;
-    use crate::execution::flatten::map::FlattenMap;
+    use crate::execution::flatten::map::internals::FlattenMapBuilder;
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::program::ExecutionProgram;
     use crate::graph::NodeId;
@@ -367,16 +375,19 @@ pub(crate) mod internals {
         }
     }
 
+    /// A [`CompiledGraph`] over an empty program, carrying only attribution
+    /// — the published half of [`FlattenMapBuilder`], which owns the
+    /// leaf-building itself.
     #[derive(Debug)]
     pub struct CompiledGraphBuilder {
-        flatten_map: FlattenMap,
+        flatten_map: FlattenMapBuilder,
     }
 
     impl CompiledGraphBuilder {
         pub fn new() -> Self {
-            let mut flatten_map = FlattenMap::default();
-            flatten_map.reset();
-            Self { flatten_map }
+            Self {
+                flatten_map: FlattenMapBuilder::new(),
+            }
         }
 
         pub fn insert_leaf(
@@ -385,17 +396,13 @@ pub(crate) mod internals {
             instances: impl IntoIterator<Item = NodeId>,
             node_id: NodeId,
         ) {
-            let mut scope = 0;
-            for instance in instances {
-                scope = self.flatten_map.push_scope(instance, scope);
-            }
-            self.flatten_map.set_leaf(e_node_id, scope, node_id);
+            self.flatten_map.insert_leaf(e_node_id, instances, node_id);
         }
 
         pub fn build(self) -> Arc<CompiledGraph> {
             Arc::new(CompiledGraph::indexed(
                 ExecutionProgram::default(),
-                self.flatten_map,
+                self.flatten_map.build(),
             ))
         }
     }

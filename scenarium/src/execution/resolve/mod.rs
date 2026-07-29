@@ -22,7 +22,7 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::index::{NodeColumn, OutputColumn, OutputIdx};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::ResourceStamper;
 use crate::node::lambda::OutputDemand;
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
@@ -106,9 +106,9 @@ impl Resolver {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
-        resource_stamps: &RunResourceStamps,
+        resource_stamper: &ResourceStamper,
     ) {
-        stamp_digests(program, cache, resource_stamps, plan);
+        stamp_digests(program, cache, resource_stamper, plan);
         resolve_run(program, plan, cache, &mut self.run).await;
     }
 }
@@ -120,14 +120,14 @@ impl Resolver {
 fn stamp_digests(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
-    resource_stamps: &RunResourceStamps,
+    resource_stamper: &ResourceStamper,
     plan: &ExecutionPlan,
 ) {
     for &node_idx in &plan.process_order {
         if !plan.verdicts[node_idx].wants_execute() {
             continue;
         }
-        cache.stamp_digest(program, resource_stamps, node_idx);
+        cache.stamp_digest(program, resource_stamper, node_idx);
     }
 }
 
