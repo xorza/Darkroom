@@ -58,7 +58,7 @@ impl Fix {
         seeded: &[ExecutionNodeId],
         missing: &[ExecutionNodeId],
         cached: Vec<CachedNode>,
-    ) -> ResolvedRun {
+    ) -> Resolver {
         let mut verdicts = NodeColumn::default();
         verdicts.reset(self.program.e_nodes.len(), NodeVerdict::Execute);
         for e_node_id in missing {
@@ -95,7 +95,7 @@ impl Fix {
         }
         let mut resolver = Resolver::default();
         resolver.resolve(&self.program, &plan, &mut cache).await;
-        resolver.run
+        resolver
     }
 }
 
