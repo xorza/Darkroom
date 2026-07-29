@@ -85,7 +85,7 @@ impl Fix {
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);
-        cache.stamp_digests(&self.program, &plan);
+        cache.stamp_digests(&self.program, plan.executing());
         for cached in cached {
             let digest = cache.slots[nx(cached.e_node_id)].current_digest.unwrap();
             cache.slots[nx(cached.e_node_id)].value = ValueState::Resident {

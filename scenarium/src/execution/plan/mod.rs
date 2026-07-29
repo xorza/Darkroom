@@ -87,6 +87,17 @@ pub(crate) struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
+    /// The scheduled nodes that will actually run, producer-first — the
+    /// schedule minus the disabled and input-blocked ones. What the digest
+    /// pass and the filesystem prefetch each walk, so "runnable this run" is
+    /// stated once rather than re-derived by every consumer of the plan.
+    pub(crate) fn executing(&self) -> impl Iterator<Item = NodeIdx> + '_ {
+        self.process_order
+            .iter()
+            .copied()
+            .filter(|&node_idx| self.verdicts[node_idx].wants_execute())
+    }
+
     pub(crate) fn reset_for_program(&mut self, program: &Program) {
         self.process_order.clear();
         self.verdicts

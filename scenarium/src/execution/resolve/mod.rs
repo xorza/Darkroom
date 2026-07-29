@@ -98,7 +98,7 @@ impl Resolver {
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
     ) {
-        cache.stamp_digests(program, plan);
+        cache.stamp_digests(program, plan.executing());
 
         self.disposition
             .reset(program.e_nodes.len(), Disposition::Cut);
