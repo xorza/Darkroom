@@ -12,7 +12,7 @@ use crate::graph::identity::FuncId;
 /// `Result`-returning entry points on both sides of the worker boundary — the engine's
 /// plan/execute, and the worker operations around them, which is where the event-loop
 /// panic is caught. A *single node's* run failure is a [`RunError`], carried by that
-/// node's [`NodeStatus`](crate::execution::outcome::NodeStatus) row,
+/// node's [`NodeStatus`](crate::execution::report::NodeStatus) row,
 /// never one of these; a graph that won't compile is a
 /// [`CompileError`](crate::execution::compile::error::CompileError), produced on the host before anything
 /// reaches the engine — the phases can't be confused at the type level.
@@ -34,8 +34,8 @@ pub enum Error {
 }
 
 /// A **single node's** run-time failure, reported in that node's one
-/// [`NodeStatus`](crate::execution::outcome::NodeStatus) row as
-/// [`NodeExecutionStatus::Errored`](crate::execution::outcome::NodeExecutionStatus::Errored).
+/// [`NodeStatus`](crate::execution::report::NodeStatus) row as
+/// [`NodeExecutionStatus::Errored`](crate::execution::report::NodeExecutionStatus::Errored).
 /// Distinct from [`Error`](enum@Error) (whole-operation failures): a `RunError` always
 /// concerns exactly one node, so it can't carry a compile/plan failure, and a caller
 /// reading a node's row can't mistake a setup failure for a node's outcome.

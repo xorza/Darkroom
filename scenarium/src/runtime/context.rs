@@ -5,7 +5,7 @@ use ::common::CancelToken;
 use hashbrown::HashMap;
 
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::outcome::{LogEntry, LogLevel};
+use crate::execution::report::{LogEntry, LogLevel};
 
 /// Typed handle declaring one persistent runtime context. The payload type is
 /// the identity — the store is keyed by `TypeId::of::<T>()` — so a handle can

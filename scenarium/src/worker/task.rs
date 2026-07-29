@@ -9,7 +9,7 @@ use ::common::CancelToken;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::identity::ExecutionEventPort;
-use crate::execution::outcome::ExecutionOutcome;
+use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::{RunProgress, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
@@ -374,7 +374,7 @@ mod tests {
     use ::common::CancelToken;
 
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::outcome::NodeExecutionStatus;
+    use crate::execution::report::NodeExecutionStatus;
     use crate::execution::report::{RunPhase, RunProgress, RunReporter};
     use crate::execution::seeds::RunSeeds;
     use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};

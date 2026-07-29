@@ -11,7 +11,7 @@ use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::ExecutionIdentityError;
 use crate::execution::error::{Error, Result as ExecResult, RunError};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::outcome::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
 use crate::graph::Graph;
@@ -28,7 +28,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
 use crate::execution::identity::ExecutionEventPort;
-use crate::execution::outcome::EventTrigger;
+use crate::execution::report::EventTrigger;
 use crate::graph::func::lambda::Invocation;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
