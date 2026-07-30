@@ -103,7 +103,7 @@ impl UndoStep {
     /// Whether applying or reverting this step changes *saved* document
     /// content — graph data or node layout — as opposed to pure
     /// navigation (camera, selection, tab focus), which isn't worth
-    /// prompting to save on exit. Drives `Editor::dirty`. Exhaustive so a
+    /// prompting to save on exit. Drives `OpenDocument::dirty`. Exhaustive so a
     /// new step variant must declare which side it's on rather than
     /// silently defaulting.
     pub(crate) fn dirties_document(&self) -> bool {

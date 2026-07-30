@@ -96,7 +96,6 @@ impl App {
     fn save_document(&mut self, path: &Path) {
         match self.workspace.save_to(path) {
             Ok(()) => {
-                self.editor.dirty = false;
                 self.remember_document_path();
                 self.workspace.runtime.status.error = None;
             }

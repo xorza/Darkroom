@@ -9,6 +9,16 @@ use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 pub(crate) struct OpenDocument {
     pub(crate) document: Document,
     pub(crate) path: Option<PathBuf>,
+    /// Whether `document` differs from what is at `path` — the pair that
+    /// gives the flag its meaning, which is why it lives here rather than on
+    /// a frontend. Set by any content-changing edit (new edits, undo/redo
+    /// replay, direct graph mutations), cleared by [`Self::save_to`]. Pure
+    /// navigation (camera, selection, pane arrangement) leaves it alone; see
+    /// [`UndoStep::dirties_document`](crate::core::edit::intent::types::UndoStep::dirties_document).
+    ///
+    /// It can read "dirty" after an undo returns the document to its saved
+    /// state — the safe direction (prompt rather than silently discard).
+    pub(crate) dirty: bool,
 }
 
 impl OpenDocument {
@@ -17,12 +27,17 @@ impl OpenDocument {
         Ok(Self {
             document,
             path: Some(path),
+            dirty: false,
         })
     }
 
+    /// Write the document to `path` and adopt it. Clears
+    /// [`dirty`](Self::dirty) — only on success, so a failed save leaves the
+    /// unsaved work still flagged.
     pub(crate) fn save_to(&mut self, path: &Path) -> Result<(), DocumentSaveError> {
         document::save(&self.document, path)?;
         self.path = Some(path.to_path_buf());
+        self.dirty = false;
         Ok(())
     }
 }

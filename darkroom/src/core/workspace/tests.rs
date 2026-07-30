@@ -35,6 +35,7 @@ fn stale_wiring_survives_install_and_still_compiles() {
     workspace.replace_document(OpenDocument {
         document: Document::from(graph),
         path: None,
+        dirty: false,
     });
     assert_eq!(
         workspace.open.document.graph.bindings.get(&dangling),

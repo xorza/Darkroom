@@ -225,7 +225,7 @@ impl App {
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
     fn needs_discard_confirmation(&self) -> bool {
-        self.editor.dirty && self.preferences.confirm_unsaved_changes
+        self.workspace.open.dirty && self.preferences.confirm_unsaved_changes
     }
 
     /// Carry out `action`, or raise the unsaved-changes prompt first when
@@ -277,7 +277,7 @@ impl App {
         if outcome.choice == DiscardChoice::Save {
             self.save_current();
         }
-        let resolution = outcome.resolve(self.editor.dirty);
+        let resolution = outcome.resolve(self.workspace.open.dirty);
         if resolution.silence_prompt {
             self.set_confirm_unsaved(false);
         }
