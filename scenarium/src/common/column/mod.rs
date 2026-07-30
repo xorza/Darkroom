@@ -1,8 +1,15 @@
 //! A dense column and the index space it is keyed by.
 //!
-//! Two things share the shape: the installed program's per-node and per-output
-//! state. Both want array reads with no id hashing, and neither may be read
-//! with the other's index — which is what the [`Idx`] parameter enforces.
+//! Everything the execution side keeps per index shares this shape: per-node
+//! and per-output run state, the program's port declarations, the artifact's
+//! packed node lists. All of them want array reads with no id hashing, and none
+//! may be read with another space's index — which is what the [`Idx`] parameter
+//! enforces.
+//!
+//! A column is addressed two ways over the same space: by one [`Idx`], and by a
+//! [`Span`] an owner holds when its entries are a packed run rather than one
+//! slot. The second is what keeps a per-node input list out of a `Vec` per node
+//! without inventing a second container.
 
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Range};
@@ -19,6 +26,77 @@ pub(crate) trait Idx: Copy {
     /// names the slot it is at.
     fn from_idx(i: usize) -> Self;
 }
+
+/// A contiguous run of one dense space — one owner's slice of a [`Column`],
+/// held by the owner while the entries stay packed in the column.
+///
+/// The span carries the *space*, not the element type, which is what lets one
+/// span address two columns over the same space: linking rebuilds each of
+/// flatten's columns into the program's slot for slot, so the run of ports a
+/// flat node owns is the run the placed node owns, with nothing to convert.
+#[derive(Debug)]
+pub(crate) struct Span<I> {
+    pub(crate) start: u32,
+    pub(crate) len: u32,
+    space: PhantomData<I>,
+}
+
+impl<I> Span<I> {
+    /// The run of `len` entries at `start` — how [`Column::append`] names what
+    /// it just wrote, and how a stage that knows a run's size before its
+    /// contents reserves one for a later stage to fill.
+    pub(crate) fn new(start: u32, len: u32) -> Self {
+        Self {
+            start,
+            len,
+            space: PhantomData,
+        }
+    }
+
+    /// The run's bounds in the column's flat space, for a caller slicing
+    /// something else aligned to that space.
+    pub(crate) fn range(self) -> Range<usize> {
+        let start = self.start as usize;
+        start..start + self.len as usize
+    }
+}
+
+impl<I: Idx> Span<I> {
+    /// The index `offset` entries into the run — how a caller holding an
+    /// owner-local port number reaches the flat position it names.
+    pub(crate) fn nth(self, offset: u32) -> I {
+        debug_assert!(offset < self.len, "span offset is out of range");
+        debug_assert!(
+            self.start.checked_add(offset).is_some(),
+            "a column index must fit in u32"
+        );
+        I::from_idx(self.start.wrapping_add(offset) as usize)
+    }
+}
+
+/// Hand-written, like the three below: deriving would demand the same of `I`,
+/// which is a space marker no span ever stores.
+impl<I> Clone for Span<I> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<I> Copy for Span<I> {}
+
+impl<I> Default for Span<I> {
+    fn default() -> Self {
+        Self::new(0, 0)
+    }
+}
+
+impl<I> PartialEq for Span<I> {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start && self.len == other.len
+    }
+}
+
+impl<I> Eq for Span<I> {}
 
 /// A dense column of `T` aligned to the space `I` indexes — the per-run state
 /// shape: resets are memsets and lookups are array reads, with no id hashing
@@ -100,6 +178,23 @@ impl<I: Idx, T> Column<I, T> {
         self.values.get(index.idx())
     }
 
+    /// The run `span` names, or `None` when it reaches past the column — the
+    /// checked form of indexing by a span, for a validator holding one it has
+    /// not yet proven belongs to this column.
+    pub(crate) fn get_span(&self, span: Span<I>) -> Option<&[T]> {
+        self.values.get(span.range())
+    }
+
+    /// Pack `values` at the end and hand back the run they occupy — how an
+    /// owner of a variable-length list gets one without a `Vec` of its own.
+    /// Build-time only, like [`push`](Self::push).
+    pub(crate) fn append(&mut self, values: impl IntoIterator<Item = T>) -> Span<I> {
+        let start = u32::try_from(self.values.len()).expect("column span start exceeds u32");
+        self.values.extend(values);
+        let end = u32::try_from(self.values.len()).expect("column length exceeds u32");
+        Span::new(start, end - start)
+    }
+
     /// Entries paired with the index they sit at, so a walk that needs both
     /// doesn't rebuild the index from an enumeration counter.
     pub(crate) fn iter_indexed(&self) -> impl Iterator<Item = (I, &T)> {
@@ -124,16 +219,17 @@ impl<I: Idx, T> IndexMut<I> for Column<I, T> {
     }
 }
 
-impl<I, T> Column<I, T> {
-    /// A contiguous run of the column. The caller resolves the run from
-    /// whatever names it — a node's compiled output range, say — so the
-    /// column itself stays free of any one space's vocabulary.
-    pub(crate) fn slice(&self, range: Range<usize>) -> &[T] {
-        &self.values[range]
-    }
+impl<I, T> Index<Span<I>> for Column<I, T> {
+    type Output = [T];
 
-    pub(crate) fn slice_mut(&mut self, range: Range<usize>) -> &mut [T] {
-        &mut self.values[range]
+    fn index(&self, span: Span<I>) -> &[T] {
+        &self.values[span.range()]
+    }
+}
+
+impl<I, T> IndexMut<Span<I>> for Column<I, T> {
+    fn index_mut(&mut self, span: Span<I>) -> &mut [T] {
+        &mut self.values[span.range()]
     }
 }
 
