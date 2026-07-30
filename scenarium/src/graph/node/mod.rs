@@ -3,10 +3,9 @@
 //! A [`Node`] is authored data and nothing else — it does not store its own id,
 //! which lives only in the key that reaches it, so a node can be moved or
 //! remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
-//! func instance, a graph instance, a boundary port, or a built-in special.
-//! What it does with its result is [`CacheMode`]. How a caller reaches one is
-//! [`NodeSearch`] (this graph, or the whole nested tree) and what comes back is
-//! a [`NodeRef`], which re-attaches the id the lookup found it by.
+//! func instance or a built-in special. What it does with its result is
+//! [`CacheMode`]. What comes back from a lookup is a [`NodeRef`], which
+//! re-attaches the id the lookup found it by.
 //!
 //! What a func node instantiates — the [`Func`](crate::graph::func::Func)
 //! declaration and the ABIs it runs through — is
@@ -15,12 +14,10 @@
 
 pub(crate) mod special;
 
-use ::serde::{Deserialize, Serialize};
-
-use crate::graph::definition::{GraphDef, GraphLink};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::special::SpecialNode;
+use ::serde::{Deserialize, Serialize};
 
 /// Where a node's computed output is cached — the two orthogonal storage bits
 /// *keep in RAM* ([`caches_in_ram`](Self::caches_in_ram)) and *persist to disk*
@@ -76,26 +73,18 @@ impl CacheMode {
     }
 }
 
-/// What a node *is*. A plain `Func` instance, a nested `Graph`
-/// instance, a built-in [`SpecialNode`] (hardcoded declaration, recognized by
-/// the engine), or one of the two graph-interface boundary nodes.
+/// What a node *is*. A plain `Func` instance, or a built-in [`SpecialNode`]
+/// (hardcoded declaration, recognized by the engine).
+///
+/// Both resolve to a [`Func`] declaration — the only difference is where that
+/// declaration comes from — so every node in a graph is a leaf, and a graph is
+/// exactly the nodes it holds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
     Func(FuncId),
-    Graph(GraphLink),
     /// A built-in special node; its interface comes from
     /// [`SpecialNode::func`].
     Special(SpecialNode),
-    /// Inbound boundary: outputs = the graph's exposed inputs.
-    GraphInput,
-    /// Outbound boundary: inputs = the graph's exposed outputs.
-    GraphOutput,
-}
-
-impl NodeKind {
-    pub fn is_boundary(&self) -> bool {
-        matches!(self, NodeKind::GraphInput | NodeKind::GraphOutput)
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,29 +104,19 @@ pub struct Node {
 }
 
 impl Node {
-    /// A fresh node of the given kind with no inputs/events. Callers fill in
-    /// wiring, or use `From<&Func>` / `graph_instance` for a node shaped
-    /// from its definition. A `Special` node copies its hardcoded func's
-    /// `default_cache_mode`; every other kind seeds `None`.
+    /// A fresh node of the given kind with no wiring. Callers fill that in, or
+    /// use `From<&Func>` for a node shaped from its declaration. A `Special`
+    /// node copies its hardcoded func's `default_cache_mode`; a `Func` node
+    /// seeds `None`, since `From<&Func>` is the constructor that reads one.
     pub fn new(kind: NodeKind) -> Self {
         let cache = match &kind {
             NodeKind::Special(s) => s.func().default_cache_mode,
-            _ => CacheMode::None,
+            NodeKind::Func(_) => CacheMode::None,
         };
         Node {
             kind,
             name: String::new(),
             cache,
-            disabled: false,
-        }
-    }
-
-    /// A graph instance node shaped from the referenced definition.
-    pub fn graph_instance(def: &GraphDef, link: GraphLink) -> Self {
-        Node {
-            kind: NodeKind::Graph(link),
-            name: def.name.clone(),
-            cache: CacheMode::None,
             disabled: false,
         }
     }

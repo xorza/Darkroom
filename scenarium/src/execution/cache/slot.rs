@@ -63,22 +63,16 @@ enum ValueState {
     },
 }
 
-/// The implementation identity that owns a slot's `state`/`event_state`. Output
-/// values are digest-keyed (the digest folds func id and version), but state
-/// survives installs untouched — so [`RuntimeSlot::reown`] drops it when the
-/// installed node's implementation no longer matches.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-pub(crate) struct StateOwner {
-    pub(crate) func_id: FuncId,
-    pub(crate) version: u32,
-}
-
 /// One node's cross-run runtime state: the [`value`](RuntimeSlot::value) cache and
 /// the node's persistent `state`/`event_state`, owned by the implementation
 /// recorded in [`owner`](RuntimeSlot::owner).
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeSlot {
-    pub(crate) owner: StateOwner,
+    /// The func whose implementation owns this slot's `state`/`event_state`.
+    /// Output values are digest-keyed (the digest folds the func id), but state
+    /// survives installs untouched — so [`RuntimeSlot::reown`] drops it when the
+    /// installed node's implementation no longer matches.
+    pub(crate) owner: FuncId,
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
     /// The node's current content digest — its cache-validity key (`None` when not
@@ -104,7 +98,7 @@ pub(crate) struct InvokeSlot<'a> {
 impl RuntimeSlot {
     /// The slot a node gains when an install first brings it in: no value, no
     /// digest, owned by the implementation compiled for it.
-    pub(super) fn new(owner: StateOwner) -> Self {
+    pub(super) fn new(owner: FuncId) -> Self {
         Self {
             owner,
             ..Default::default()
@@ -115,7 +109,7 @@ impl RuntimeSlot {
     /// and `event_state` when a different one owned them — a changed function must
     /// not inherit state written by its predecessor. The output value stays: its
     /// validity is digest-keyed and the digest already folds the owner.
-    pub(super) fn reown(&mut self, owner: StateOwner) {
+    pub(super) fn reown(&mut self, owner: FuncId) {
         if self.owner == owner {
             return;
         }

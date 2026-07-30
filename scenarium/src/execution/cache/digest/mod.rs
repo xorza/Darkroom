@@ -1,7 +1,7 @@
 //! Content digests for node outputs — the validity key for the per-slot RAM cache
 //! and the node-keyed disk cache.
 //!
-//! A node's output is a pure function of its function identity and version, its resolved input
+//! A node's output is a pure function of its function identity, its resolved input
 //! values, the outputs of its upstream producers, and the prepared identities of
 //! external resources it reads.
 //! [`RuntimeCache::node_digest`](crate::execution::cache::runtime::RuntimeCache::node_digest)
@@ -19,12 +19,13 @@
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
-//! - **`Func::version` is the implementation contract.** Bump it when a lambda can return
-//!   different values for the same inputs; leaving it unchanged can reuse an old digest.
-//!   A bump also drops the node's persistent `state`/`event_state` at the next install
+//! - **A [`FuncId`](crate::FuncId) is the implementation contract.** The fold reads the func
+//!   identity and interface, never the lambda behind it, so rewriting a lambda to return
+//!   different values for the same inputs reuses every digest it already produced. Give the
+//!   changed implementation a new id — that also drops the node's persistent
+//!   `state`/`event_state` at the next install
 //!   ([`RuntimeCache::reconcile`](crate::execution::cache::runtime::RuntimeCache::reconcile)),
-//!   so a new implementation never inherits its
-//!   predecessor's state.
+//!   so a new implementation never inherits its predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
@@ -48,10 +49,10 @@ use crate::{DataType, StaticValue};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v4";
+pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v5";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
-/// digests mean the same function identity and version, params, upstream outputs, and file inputs.
+/// digests mean the same function identity, params, upstream outputs, and file inputs.
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

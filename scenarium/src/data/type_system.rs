@@ -72,6 +72,40 @@ pub enum DataType {
 }
 
 impl DataType {
+    /// This type when it is definite, or the type `value` itself carries when it
+    /// is `Any`.
+    ///
+    /// The rule a wildcard output resolves a *constant* through: a declared type
+    /// wins, because it carries what a literal cannot — an `FsPathConfig`, an
+    /// enum's id. Only a polymorphic declaration falls back to the literal.
+    ///
+    /// **`Any` here means "the literal cannot say", not "unhandled".** Reaching
+    /// it takes nothing but an authored const on an `Any`-declared input, so it
+    /// is ordinary data rather than a broken contract, and the arms below spell
+    /// out which literals describe no type of their own and why. The match is
+    /// deliberately exhaustive: a new [`StaticValue`] variant must fail to
+    /// compile here rather than fall into `Any` unexamined.
+    pub(crate) fn or_const_type(self, value: &StaticValue) -> DataType {
+        if !matches!(self, DataType::Any) {
+            return self;
+        }
+        match value {
+            StaticValue::Float(_) => DataType::Float,
+            StaticValue::Int(_) => DataType::Int,
+            StaticValue::Bool(_) => DataType::Bool,
+            StaticValue::String(_) => DataType::String,
+            // Null is typeless by nature — there is no type it could report.
+            StaticValue::Null => DataType::Any,
+            // A path literal is a bare string; [`DataType::FsPath`] needs the
+            // mode and extension list, which only a declaration carries.
+            StaticValue::FsPath(_) | StaticValue::FsPaths(_) => DataType::Any,
+            // An enum literal is a variant *name*; [`DataType::Enum`] needs the
+            // enum's `TypeId`, which a name cannot supply. The same asymmetry
+            // [`Self::default_value`] hits in the other direction.
+            StaticValue::Enum(_) => DataType::Any,
+        }
+    }
+
     pub fn default_value(&self) -> Option<StaticValue> {
         Some(match self {
             DataType::Any => StaticValue::Null,
