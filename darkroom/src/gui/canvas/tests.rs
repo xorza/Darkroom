@@ -13,7 +13,7 @@ use crate::gui::canvas::GraphUI;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::{Frame, Scene};
+use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
 
 /// One func with an input and an output, so a node projected from it
@@ -89,9 +89,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         };
         let mut intents = Intents::default();
         scene.rebuild(ui, &library, &run_state, doc);
-        let frame = Frame { scene, doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -140,12 +139,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let live = Frame {
-        scene: &scene,
-        doc: &doc,
-    }
-    .pane()
-    .expect("projected");
+    let live = scene.pane(&doc).expect("projected");
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -227,9 +221,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             };
             let mut intents = Intents::default();
             scene.rebuild(ui, &library, &run_state, &doc);
-            let frame = Frame { scene, doc: &doc };
-            graph_ui.prepass(ui, frame, &library, &mut intents);
-            let graph = frame.pane().expect("projected");
+            let graph = scene.pane(&doc).expect("projected");
+            graph_ui.prepass(ui, graph, &library, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
@@ -364,11 +357,10 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
+        graph_ui.hits.scan(ui, scene.pane(&doc));
         scene.rebuild(ui, &library, &run_state, &doc);
-        let frame = Frame { scene, doc: &doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(&doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -480,9 +472,8 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         };
         let mut intents = Intents::default();
         scene.rebuild(ui, &library, &run_state, doc);
-        let frame = Frame { scene, doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -571,11 +562,10 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
         let mut intents = Intents::default();
         // Navigation phase first — see the two-pane test for why the sweep
         // reads the pre-rebuild scene.
-        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
+        graph_ui.hits.scan(ui, scene.pane(&doc));
         scene.rebuild(ui, &library, &run_state, &doc);
-        let frame = Frame { scene, doc: &doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(&doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -642,11 +632,10 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, Frame { scene, doc: &doc });
+        graph_ui.hits.scan(ui, scene.pane(&doc));
         scene.rebuild(ui, &library, &run_state, &doc);
-        let frame = Frame { scene, doc: &doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(&doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -741,9 +730,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         };
         let mut intents = Intents::default();
         scene.rebuild(ui, &library, &run_state, doc);
-        let frame = Frame { scene, doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -889,9 +877,8 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         };
         let mut intents = Intents::default();
         scene.rebuild(ui, &library, &run_state, &doc);
-        let frame = Frame { scene, doc: &doc };
-        graph_ui.prepass(ui, frame, &library, &mut intents);
-        let graph = frame.pane().expect("projected");
+        let graph = scene.pane(&doc).expect("projected");
+        graph_ui.prepass(ui, graph, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))

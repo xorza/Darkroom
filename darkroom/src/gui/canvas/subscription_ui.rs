@@ -10,7 +10,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::node::port_color::event_color;
-use crate::gui::scene::{Frame, Pane, SceneNode};
+use crate::gui::scene::{Pane, SceneNode};
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -76,7 +76,7 @@ impl SubscriptionUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        pane: Pane<'_>,
         geometry: &CanvasGeometry,
         cancelled: bool,
         out: &mut Intents,
@@ -85,19 +85,15 @@ impl SubscriptionUI {
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = frame.scene.nodes.values().flat_map(SceneNode::events);
+            let emitters = pane.scene().nodes.values().flat_map(SceneNode::events);
             // Only sink nodes render a pin, so only they can start a reverse
             // event drag.
-            let pins = frame.scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
+            let pins = pane.scene().nodes.values().filter(|n| n.sink).map(|n| n.id);
             let latched = GlyphDrag::latch(&geometry.events, emitters)
                 .map(InFlight::FromEmitter)
                 .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
-            // The pane holding the drag's fixed end owns the gesture — its
-            // nodes are the only snap candidates, and its target is what
-            // the commit lands on. Resolved here, once, then it rides the
-            // slot.
             if let Some(latched) = latched
-                && frame.projects(latched.node())
+                && pane.contains(latched.node())
             {
                 self.state.latch(latched);
             }
@@ -110,9 +106,10 @@ impl SubscriptionUI {
         };
         // A pane closed mid-drag, or a fixed end deleted under it, drops
         // the wire — not re-latching is how.
-        let Some(graph) = frame.pane().filter(|pane| pane.contains(state.node())) else {
+        if !pane.contains(state.node()) {
             return;
-        };
+        }
+        let graph = pane;
         // Refresh the snapped opposite end, then read the source glyph's drag
         // state off its own layer: its transition out of `dragging` is the
         // release edge.

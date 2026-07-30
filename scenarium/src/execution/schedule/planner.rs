@@ -4,9 +4,9 @@
 //! across runs, so a repeated plan on an unchanged graph allocates nothing.
 
 use crate::common::column::Column;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::NodeIdx;
-use crate::execution::program::{ExecutionBinding, Program};
 use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
 use crate::execution::seeds::RunSeeds;
 
@@ -37,7 +37,7 @@ pub(crate) struct Planner {
 }
 
 impl Planner {
-    fn reset_for_program(&mut self, program: &Program) {
+    fn reset_for_program(&mut self, program: &CompiledGraph) {
         self.stack.clear();
         self.color.reset(program.e_nodes.len(), Color::White);
     }
@@ -52,7 +52,7 @@ impl Planner {
     /// are aligned to travels with them rather than being passed again downstream.
     pub(crate) fn plan<'a>(
         &mut self,
-        program: &'a Program,
+        program: &'a CompiledGraph,
         seeds: &RunSeeds,
         schedule: &'a mut RunSchedule,
     ) -> Result<Scheduled<'a>> {
@@ -77,10 +77,10 @@ impl Planner {
     /// separate `resolve_verdicts` pass asserted, now structural).
     fn walk_backward_collect_order(
         &mut self,
-        program: &Program,
+        program: &CompiledGraph,
         schedule: &mut RunSchedule,
     ) -> Result<()> {
-        for node_idx in schedule.roots.iter() {
+        for &node_idx in schedule.roots() {
             self.stack.push(Visit::Discover(node_idx));
         }
 
@@ -123,7 +123,7 @@ impl Planner {
             let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
             // seed is recorded before this walk and overrides disable for this run.
-            if e_node.disabled && !schedule.seeded.contains(node_idx) {
+            if e_node.disabled && !schedule.root_flags(node_idx).is_seeded() {
                 self.color[node_idx] = Color::Black;
                 schedule.states[node_idx] = NodeState::Disabled;
                 continue;

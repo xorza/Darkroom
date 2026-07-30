@@ -36,7 +36,7 @@ use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::format::fmt_elapsed;
 use crate::gui::node::{RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{Frame, InputBindingView, SceneNode};
+use crate::gui::scene::{InputBindingView, Pane, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
@@ -94,7 +94,7 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, frame: Frame<'_>) {
+    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, pane: Pane<'_>) {
         if let Some(node) = hits.chip(Chip::Inspect) {
             match cycle(self.modes.get(&node).copied()) {
                 Some(m) => {
@@ -105,11 +105,11 @@ impl Inspectors {
                 }
             }
         }
-        if outside_action(ui, hits, frame) {
+        if outside_action(ui, hits) {
             self.close_unpinned();
         }
-        self.modes
-            .retain(|id, _| frame.scene.nodes.contains_key(id));
+        // A panel outlives its node only until the next sweep.
+        self.modes.retain(|id, _| pane.contains(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -283,23 +283,17 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// node body, clicking bare canvas, or panning/zooming the canvas all
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
-fn outside_action(ui: &Ui, hits: &CanvasHits, frame: Frame<'_>) -> bool {
-    // Only while a graph is on screen: with no canvas recorded, its widget
-    // response is the default and would read as "no action" anyway.
-    let canvas_acted = frame.pane().is_some_and(|_| {
-        let oc = ui.response_for(outer_canvas_widget_id());
-        // Any-button drag: left rubber-bands, middle pans, right scribbles
-        // the breaker — all of them count as "acted on the canvas".
-        let dragged =
-            oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
-        oc.left.clicked()
-            || dragged
-            || oc.scroll.lines != Vec2::ZERO
-            || oc.scroll.pixels != Vec2::ZERO
-            || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON
-    });
-    // The node half comes off the frame's sweep — any pane's node counts,
-    // same as any pane's canvas does above.
+fn outside_action(ui: &Ui, hits: &CanvasHits) -> bool {
+    let oc = ui.response_for(outer_canvas_widget_id());
+    // Any-button drag: left rubber-bands, middle pans, right scribbles
+    // the breaker — all of them count as "acted on the canvas".
+    let dragged = oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
+    let canvas_acted = oc.left.clicked()
+        || dragged
+        || oc.scroll.lines != Vec2::ZERO
+        || oc.scroll.pixels != Vec2::ZERO
+        || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
+    // The node half comes off this frame's sweep.
     canvas_acted || hits.body_acted().is_some()
 }
 

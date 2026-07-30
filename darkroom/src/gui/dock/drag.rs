@@ -8,25 +8,18 @@
 //! `Ui`.
 
 use glam::Vec2;
-use palantir::{Rect, WidgetId};
+use palantir::Rect;
 
 use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
 
-/// A tab mid-drag: armed when one of the tab's drag handles latches,
-/// cleared on release or Esc. Nothing here is positional — `tab` and
-/// `handle` are both keyed by identity, never by strip slot, so an undo
-/// that rearranges the strip mid-drag can't strand the gesture on a slot
-/// the tab has left.
+/// A tab mid-drag: armed when the tab's chip latches, cleared on release or
+/// Esc. Nothing here is positional — `tab` is keyed by identity, never by strip
+/// slot, so an undo that rearranges the strip mid-drag can't strand the gesture
+/// on a slot the tab has left.
 #[derive(Debug)]
 pub(super) struct TabDrag {
     pub(super) tab: TabRef,
-    /// The widget that actually caught the press — the chip, or a
-    /// renamable tab's inline-rename label, which swallows it (see
-    /// [`strip::drag_handles`](super::strip::drag_handles)). The release
-    /// edge only fires on this one, so it's captured at arm time rather
-    /// than re-derived.
-    pub(super) handle: WidgetId,
     /// Label for the ghost chip, snapshotted at arm time.
     pub(super) text: String,
 }

@@ -20,7 +20,7 @@ use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::preview_drag_modifier;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
-use crate::gui::scene::{Frame, Scene};
+use crate::gui::scene::{Pane, Scene};
 
 /// The in-flight spawn-and-place drag, or none.
 #[derive(Default, Debug)]
@@ -35,20 +35,20 @@ impl PreviewDrag {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        pane: Pane<'_>,
         geometry: &CanvasGeometry,
         library: &Library,
         out: &mut Intents,
     ) {
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, frame.scene, out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, pane.scene(), out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, frame.scene) else {
+        let Some(port) = scan_output_drag_start(geometry, pane.scene()) else {
             return;
         };
-        if !frame.projects(port.node_id) {
+        if !pane.contains(port.node_id) {
             return;
         }
         let Some(func) = preview::registered(library) else {

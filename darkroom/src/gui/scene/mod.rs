@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use common::Span;
@@ -6,28 +5,22 @@ use glam::Vec2;
 use indexmap::IndexMap;
 use palantir::{InternedStr, Ui};
 use scenarium::Library;
-use scenarium::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
-    Subscription,
-};
-use scenarium::{DataType, GraphDef, NodeEvents, RamUsage, StaticValue};
-use scenarium::{FuncInput, FuncOutput, OutputType, ValueVariant};
-use scenarium::{GraphId, GraphLink};
+use scenarium::NodePorts;
+use scenarium::{Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, OutputPort, Subscription};
+use scenarium::{DataType, OutputTypes, RamUsage, StaticValue};
+use scenarium::{FuncInput, OutputType, ValueVariant};
 
-use crate::core::document::{Document, GraphRef, GraphView, PortKind, PortRef, Viewport};
+use crate::core::document::{Document, GraphView, PortKind, PortRef, Viewport};
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::run_state::{ExecStatus, RunState};
 
-/// The per-record projection of **every graph currently on screen** — one
-/// entry in `graphs` per visible graph pane.
+/// The per-record projection of the graph currently on screen.
 ///
-/// Everything a graph owns lives in a pool shared with all the others and
-/// is sliced by a [`Span`] on its [`SceneGraph`]: paint stack, node
-/// projections, and the per-port pools under those. Two panes therefore
-/// cost one set of allocations, not two, and the steady-state rebuild still
-/// allocates nothing (every `Vec` retains capacity across the per-frame
-/// `clear` + re-`extend`).
+/// Everything the graph owns lives in a flat pool sliced by a [`Span`] on each
+/// [`SceneNode`]: node projections and the per-port pools under them. The
+/// steady-state rebuild allocates nothing — every `Vec` retains capacity across
+/// the per-frame `clear` + re-`extend`.
 ///
 /// **Only what the projection transforms.** A node's ports carry interned
 /// names, wildcard output types resolved through the graph, and the last
@@ -36,30 +29,19 @@ use crate::gui::run_state::{ExecStatus, RunState};
 /// off the document through [`Pane`], because copying them would buy
 /// nothing but a second source of truth to keep in step.
 ///
-/// Reads go through [`Pane`], resolved from a [`Frame`] —
-/// `frame.pane(target)` for a named pane, `frame.owner(node_id)` for
-/// whichever pane a node sits in.
+/// Reads go through [`Pane`], resolved by [`Scene::pane`].
 #[derive(Debug, Default)]
 pub(crate) struct Scene {
-    /// One projected graph per visible graph pane, in dock-pane order.
-    /// Every field below is a pool this slices into.
-    graphs: IndexMap<GraphRef, SceneGraph>,
-    /// Each graph's paint stack, mirrored from its `GraphView::item_placements`
-    /// order: later entries drawn in front. The canvas draw pass iterates its
-    /// own graph's slice; everything else looks items up through `nodes`.
+    /// The paint stack, mirrored from `GraphView::item_placements` order: later
+    /// entries drawn in front. The canvas draw pass iterates it; everything
+    /// else looks items up through `nodes`.
     z_order: Vec<NodeId>,
-    /// Keyed node projections in relative paint order, **spanning every
-    /// projected graph**. Node ids are unique across the whole document
-    /// (upheld by `Graph::clone_mapped` at every copy boundary and enforced
-    /// by `Document::validate`), so one map can hold them all without
-    /// collision: a by-id lookup stays a single hash however many panes are
-    /// open, and `SceneNode::owner` names the graph a hit belongs to.
-    /// Interaction scans use this order to resolve overlapping node and port
-    /// hits.
+    /// Keyed node projections in paint order. Interaction scans use this order
+    /// to resolve overlapping node and port hits.
     pub(crate) nodes: IndexMap<NodeId, SceneNode>,
-    /// One flat pool of [`SceneInput`] across every node of every graph,
-    /// sliced by the single `SceneNode::inputs` span. A struct-per-port (not
-    /// parallel columns) so the per-port fields can't desync.
+    /// One flat pool of [`SceneInput`] across every node, sliced by the single
+    /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so
+    /// the per-port fields can't desync.
     inputs: Vec<SceneInput>,
     /// One flat pool of [`SceneOutput`], sliced by `SceneNode::outputs`.
     outputs: Vec<SceneOutput>,
@@ -70,105 +52,32 @@ pub(crate) struct Scene {
     /// One flat pool of every input's picker options, sliced per input by
     /// [`SceneInput::value_variants`].
     value_variants_pool: Vec<ValueVariant>,
-    /// Each graph's own local definitions, sliced by
-    /// [`SceneGraph::local_defs`]. Only the palette reads these — a pane's
-    /// defs are what its "add node" popup can instance without materializing
-    /// a copy.
-    local_defs: Vec<SceneLocalDef>,
+    /// Output types for the graph being projected, refreshed by
+    /// [`Scene::project`]. Not a pool: a lookup table read by
+    /// `push_node_ports`, refilled before the nodes are walked, so no frame can
+    /// read a type resolved against an older graph.
+    output_types: OutputTypes,
 }
 
-/// One local [`GraphDef`] held by a projected graph — enough to list it in
-/// the palette and raise the intent that instances it, no more. The
-/// definition itself stays in the document: `build_step` resolves the id
-/// against it, so the projection never carries an interface.
-#[derive(Debug)]
-pub(crate) struct SceneLocalDef {
-    pub(crate) id: GraphId,
-    pub(crate) name: InternedStr,
-    pub(crate) category: InternedStr,
-    /// Library entry this definition was copied from, if any. The palette
-    /// drops the library's own row for it: clicking either one instances
-    /// *this* definition (`build::local_graph_from`), so two rows would
-    /// offer one outcome under one name.
-    pub(crate) origin: Option<GraphId>,
-}
-
-/// One projected graph: `Span`s into [`Scene`]'s pools plus the small
-/// per-graph view state the canvas reads directly. No owned collections, so
-/// opening a second graph pane costs nothing beyond the pools growing.
-#[derive(Debug)]
-pub(crate) struct SceneGraph {
-    /// Which graph this pane shows — the target every intent raised over it
-    /// is committed against.
-    target: GraphRef,
-    /// Live viewport, mirrored from this graph's `GraphView` each
-    /// `rebuild`. Read by the canvas transform and the pointer↔world
-    /// mapping; the pan/zoom gesture writes it back here, and `App` copies
-    /// it onto the document so it persists (single owner = `Document`).
-    viewport: Viewport,
-    /// Slice of [`Scene::nodes`] holding exactly this graph's nodes. The
-    /// projection fills one graph at a time, so each graph's nodes are
-    /// contiguous.
-    nodes: Span,
-    z_order: Span,
-    /// Slice of [`Scene::local_defs`] holding this graph's own local
-    /// definitions — the ones a `GraphLink::Local` raised over this pane can
-    /// resolve (`validate::insertable_kind` accepts no others).
-    local_defs: Span,
-    /// Whether a run raised over this pane resolves to one occurrence. False
-    /// in a definition pane, which is no particular instance of that
-    /// definition — so a run there has no single occurrence to target.
-    ///
-    /// A fact about the *pane*, so it lives here rather than being copied
-    /// onto each of its nodes; readers reach it through
-    /// [`Pane::runnable`], which is always called with the pane in hand
-    /// anyway.
-    run_available: bool,
-}
-
-/// One graph to project this record pass: which target it is, where its
-/// nodes and wiring come from, and the view metadata positioning them.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct GraphProjection<'a> {
-    pub(crate) target: GraphRef,
-    pub(crate) source: SceneSource<'a>,
-    pub(crate) view: &'a GraphView,
-}
-
-/// This frame's two read-only halves: the projection, and the document it
-/// was projected from. The handle every pane is resolved through — panes
-/// come out of here, so one can't be obtained without both halves.
-///
-/// `Copy` (two shared refs). The whole-scene sweeps keyed by
-/// document-unique ids — `CanvasGeometry`'s rebuild, a drag's
-/// owner-still-alive check — take the `scene` field directly.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Frame<'a> {
-    pub(crate) scene: &'a Scene,
-    pub(crate) doc: &'a Document,
-}
-
-/// One graph pane for this frame: its projection, and the authoring state
-/// that projection was built from. The read handle every per-pane widget
-/// takes. `Copy` (four shared refs), so it threads through the draw chain
-/// like `RecordCtx`.
+/// The graph pane for this frame: the projection, and the authoring state it
+/// was built from. The read handle every per-pane widget takes. `Copy` (two
+/// shared refs), so it threads through the draw chain like `RecordCtx`.
 ///
 /// Both halves, deliberately. A widget reads *rendering* facts — resolved
 /// port types, interned names, run status — off the projection, which is
 /// where the expensive resolution was done once; it reads *authoring* facts
-/// — wiring, selection, placements — off `body`/`view`, which is where they
+/// — wiring, selection, placements — off the document, which is where they
 /// actually live. A pane carrying only the first half is what made the
-/// projection grow verbatim copies of the second, and made a gesture that
-/// needed the graph thread a second handle alongside this one.
+/// projection grow verbatim copies of the second.
+///
+/// Holding one is the proof that a pane *is* showing the graph:
+/// [`Scene::pane`] is the only way to obtain one and it checks that once, so
+/// no reader has to. A pass that runs whether or not a graph is on screen
+/// takes `Option<Pane>` and says so in its signature.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Pane<'a> {
-    pub(crate) scene: &'a Scene,
-    projected: &'a SceneGraph,
-    /// The authoring graph this pane shows — an entry graph or a local
-    /// definition's body.
-    pub(crate) body: &'a Graph,
-    /// Its view metadata: placements, viewport, committed selection.
-    pub(crate) view: &'a GraphView,
+    scene: &'a Scene,
+    doc: &'a Document,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -228,8 +137,8 @@ pub(crate) struct SceneInput {
 #[derive(Debug)]
 pub(crate) struct SceneOutput {
     pub(crate) name: InternedStr,
-    /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
-    /// port declares none.
+    /// Port tooltip from the func's output declaration; empty when the port
+    /// declares none.
     pub(crate) description: InternedStr,
     pub(crate) ty: DataType,
 }
@@ -244,19 +153,14 @@ pub(crate) struct SceneEvent {
 #[derive(Debug)]
 pub(crate) struct SceneNode {
     pub(crate) id: NodeId,
-    /// Which projected graph this node belongs to — how a whole-scene scan
-    /// (a port drag, a chip click, a context menu) routes the intent it
-    /// raises to the right editing target now that several graphs share one
-    /// projection.
-    pub(crate) owner: GraphRef,
     pub(crate) pos: Vec2,
     pub(crate) name: InternedStr,
-    /// Human-readable type identity: the func name, the graph
-    /// name, or the boundary role (`Input`/`Output`). Shown by the
-    /// inspection panel.
+    /// Human-readable type identity: the func's name, or "missing func" for a
+    /// stub. Shown by the inspection panel.
     pub(crate) kind_label: InternedStr,
-    /// The func's [`Func::description`](scenarium::Func::description) (empty for graph/boundary nodes).
-    /// Shown by the inspection panel and the new-node palette tooltip.
+    /// The func's [`Func::description`](scenarium::Func::description) (empty
+    /// for a missing stub). Shown by the inspection panel and the new-node
+    /// palette tooltip.
     pub(crate) description: InternedStr,
     /// Span into [`Scene::inputs`].
     pub(crate) inputs: Span,
@@ -264,10 +168,6 @@ pub(crate) struct SceneNode {
     pub(crate) outputs: Span,
     /// Span into [`Scene::events`]. Listed under the output ports.
     pub(crate) events: Span,
-    /// `Some` for a composite (`NodeKind::Graph`) instance — carries
-    /// the ref so the header's open-in-tab action knows which graph to
-    /// target. `None` for a plain func node.
-    pub(crate) graph: Option<GraphLink>,
     /// Sink node (its func is `sink` — no outputs feed downstream).
     pub(crate) sink: bool,
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
@@ -279,25 +179,14 @@ pub(crate) struct SceneNode {
     /// Whether this node has an executable slot whose RAM/disk storage policy can
     /// be changed directly.
     pub(crate) cache_controls: bool,
-    /// Whether the header offers runtime cache eviction for this node. A graph
-    /// instance evicts its flattened interior; a func needs a reproducible
-    /// output. Boundary and impure nodes have no reusable output to evict.
+    /// Whether the header offers runtime cache eviction for this node — it
+    /// needs a reproducible output, which an impure or portless node has not.
     pub(crate) can_evict_cache: bool,
     /// The node holds work that recomputes every run. An impure node has no
     /// content digest, so no cache mode is ever honored (folded into the cache
     /// controls); the header paints the `~` marker off this flag.
     ///
-    /// A composite inherits it from its interior — one impure node in there is
-    /// enough — so the marker reads "this isn't reusable", not "this is why
-    /// there are no storage chips". A composite has no chips for its own
-    /// reason ([`NodeInterface::cache_controls`]: its storage is the
-    /// interior's business), impure or not.
     pub(crate) impure: bool,
-    /// A `GraphInput`/`GraphOutput` interface boundary node. Its
-    /// ports route the graph interface rather than carry literal
-    /// values, so the const-value affordances (inline editor, "Set
-    /// constant" menu, drag-to-own-body) are suppressed on them.
-    pub(crate) boundary: bool,
     /// Outcome of the last graph run, mirrored from `WorkerStatus`. Drives the
     /// node's status-glow shadow and (for
     /// `Executed`) the header time label; `None` (the default) paints
@@ -312,10 +201,10 @@ pub(crate) struct SceneNode {
     /// from `run_state`. Non-zero only for nodes that retain a value; drives the
     /// node body's memory readout, hidden when zero.
     pub(crate) ram: RamUsage,
-    /// The node's func/graph is absent from the library (e.g. a
-    /// document saved against an older library), so its interface can't be
-    /// resolved. Rendered as a portless error stub the user can still
-    /// select and delete — never silently dropped.
+    /// The node's func is absent from the library (e.g. a document saved
+    /// against an older library), so its interface can't be resolved. Rendered
+    /// as a portless error stub the user can still select and delete — never
+    /// silently dropped.
     pub(crate) missing: bool,
 }
 
@@ -346,87 +235,50 @@ impl SceneNode {
         })
     }
 
-    /// Whether this node covers any compiled work at all. A boundary node is
-    /// wiring — flatten resolves *through* it and emits nothing — and a
-    /// `missing` stub resolves to nothing. Everything else does, graph
-    /// instances included: a composite dissolves into its interior rather
-    /// than vanishing, which is what
-    /// [`CompiledGraph::run_targets`](scenarium::CompiledGraph::run_targets)
-    /// resolves it to.
-    ///
-    /// Deliberately an authoring-side fact, not a lookup in a compiled
-    /// program: the palette and the header record every frame, including
-    /// before the first compile, so an affordance can't wait on one.
-    pub(crate) fn executable_kind(&self) -> bool {
-        !self.boundary && !self.missing
-    }
-
     /// Whether Darkroom exposes the disable toggle for this node. Limiting it
     /// to runnable sinks keeps disabled nodes directly runnable with their
     /// upstream cone intact.
     pub(crate) fn can_disable(&self) -> bool {
-        self.sink && self.executable_kind()
-    }
-}
-
-/// What one graph's rebuild projects. An enum rather than a graph + optional
-/// interface, so a definition body separated from its interface — which
-/// would strand its boundary nodes with nothing to mirror — can't be
-/// spelled at all.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum SceneSource<'a> {
-    /// The document root: no interface, and no boundary nodes to want one
-    /// (`validate_for_execution` rejects them there).
-    Entry(&'a Graph),
-    /// A local definition: the body on the canvas, plus the interface its
-    /// boundary nodes mirror.
-    Def(&'a GraphDef),
-}
-
-impl<'a> SceneSource<'a> {
-    /// The graph whose nodes and wiring the scene projects.
-    pub(crate) fn graph(self) -> &'a Graph {
-        match self {
-            SceneSource::Entry(graph) => graph,
-            SceneSource::Def(def) => &def.body,
-        }
-    }
-
-    /// The definition a boundary node mirrors the exposed ports of, if this
-    /// source is one.
-    pub(crate) fn definition(self) -> Option<&'a GraphDef> {
-        match self {
-            SceneSource::Entry(_) => None,
-            SceneSource::Def(def) => Some(def),
-        }
+        self.sink && !self.missing
     }
 }
 
 impl Scene {
-    /// Project every graph in `projections`, replacing the previous pass's
-    /// contents.
+    /// The pane showing `doc`'s graph, or `None` when no pane is this frame.
+    /// At most one exists — `TabRef::Graph` is a single tab — and holding the
+    /// result is the proof that it does, so no reader re-checks.
+    ///
+    /// Asked of the *document*, not of the pools: a graph with no nodes on an
+    /// active tab is a legitimate pane, and one that answered "empty pools, so
+    /// no pane" would leave a fresh document with no canvas to place its first
+    /// node on. The pools agree by construction — `Editor` rebuilds this
+    /// projection after every mutation, so the same predicate gated the fill.
+    pub(crate) fn pane<'a>(&'a self, doc: &'a Document) -> Option<Pane<'a>> {
+        doc.shows_graph().then_some(Pane { scene: self, doc })
+    }
+
+    /// Project the document's graph, replacing the previous pass's contents.
     ///
     /// Names are arena-backed handles authored through this record pass's
     /// `Ui`. Rebuilding keeps the projection synchronized with the document
     /// and lets the previous pass's text arena be recycled. `App::record`
     /// enforces this before widgets consume the scene.
-    pub(crate) fn rebuild<'a>(
+    pub(crate) fn rebuild(
         &mut self,
         ui: &mut Ui,
         library: &Library,
         run_state: &RunState,
-        projections: impl IntoIterator<Item = GraphProjection<'a>>,
+        doc: &Document,
     ) {
         self.clear_pools();
-
+        if !doc.shows_graph() {
+            return;
+        }
         // One handle for the empty string, cloned wherever a port declares no
         // description or a node carries no authored name — see
         // `intern_or_empty`.
         let empty = ui.intern("");
-        for projection in projections {
-            let graph = self.project(ui, library, run_state, projection, &empty);
-            self.graphs.insert(projection.target, graph);
-        }
+        self.project(ui, library, run_state, doc, &empty);
     }
 
     /// Empty every pool, keeping its capacity, so the projection can be
@@ -438,140 +290,101 @@ impl Scene {
     /// that from a silent bug into a compile error naming the missing field.
     fn clear_pools(&mut self) {
         let Self {
-            graphs,
             z_order,
             nodes,
             inputs,
             outputs,
             events,
             value_variants_pool,
-            local_defs,
+            // Not a pool this slices into: a lookup table `project` refreshes
+            // per graph.
+            output_types: _,
         } = self;
-        graphs.clear();
         z_order.clear();
         nodes.clear();
         inputs.clear();
         outputs.clear();
         events.clear();
         value_variants_pool.clear();
-        local_defs.clear();
     }
 
-    /// Project one graph's nodes, wiring, and view state onto the end of
-    /// every pool, returning the [`SceneGraph`] that slices them back out.
+    /// Project the document's graph — its nodes, wiring, and view state — into
+    /// the pools above.
     fn project(
         &mut self,
         ui: &mut Ui,
         library: &Library,
         run_state: &RunState,
-        projection: GraphProjection<'_>,
+        doc: &Document,
         empty: &InternedStr,
-    ) -> SceneGraph {
-        let GraphProjection {
-            target,
-            source,
-            view,
-        } = projection;
-        let (graph, definition) = (source.graph(), source.definition());
-        // A definition pane is no particular instance of that definition, so
-        // a node there has an occurrence per instance and a run raised over
-        // the pane has no single one to target — and a preview spawned there
-        // would be an entry-only func in a definition body, a compile error.
-        let run_available = target == GraphRef::Main;
-
-        let z_start = self.z_order.len();
-        let nodes_start = self.nodes.len();
+    ) {
+        let (graph, view) = (&doc.graph, &doc.main_view);
+        // Every wildcard port of this graph, resolved once here rather than
+        // walked once per port below.
+        self.output_types.update(graph, library);
 
         for (key, position) in &view.item_placements {
             let id = *key;
-            let Some(node) = graph.find(id, NodeSearch::TopLevel) else {
+            let Some(node) = graph.find(id) else {
                 continue;
             };
-            let node_interface =
-                NodeInterface::resolve(ui, graph, library, node, definition, empty);
-            let ports = self.push_node_ports(
+            // The declaration scenarium resolves for the node — a library func
+            // or a special node's hardcoded spec. `None` is a node whose func
+            // the library no longer holds: it projects as a portless `missing`
+            // stub rather than vanishing, so the user can still select and
+            // delete it instead of the document silently losing a node.
+            let ports = graph.node_ports(node, library);
+            debug_assert!(
+                ports.is_some() || matches!(node.kind, NodeKind::Func(_)),
+                "a special node's interface always resolves"
+            );
+            let spans = self.push_node_ports(
                 ui,
                 library,
-                projection,
+                doc,
                 id,
-                &node_interface,
+                ports,
                 run_state.missing_inputs(id),
                 empty,
             );
-            let boundary = matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput);
-            // Resolved before the literal below, which moves `description`
-            // out of `node_interface` and so ends the borrow these need.
-            let cache_controls = node_interface.cache_controls();
-            let can_evict_cache = node_interface.can_evict_cache(boundary);
-            // Boundary nodes carry no name in the model; label them by
-            // role so the interior header isn't a blank bar.
-            let name = match (&node.kind, node.name.is_empty()) {
-                (NodeKind::GraphInput, true) => ui.intern("Inputs"),
-                (NodeKind::GraphOutput, true) => ui.intern("Outputs"),
-                _ => intern_or_empty(ui, empty, &node.name),
-            };
+            let name = intern_or_empty(ui, empty, &node.name);
             let previous = self.nodes.insert(
                 id,
                 SceneNode {
                     id,
-                    owner: target,
                     pos: *position,
                     name,
-                    kind_label: node_interface.kind_label,
-                    description: node_interface.description,
-                    inputs: ports.inputs,
-                    outputs: ports.outputs,
-                    events: ports.events,
-                    graph: node_interface.graph,
-                    // The compiled program is the authority here: a composite
-                    // dissolves, so whether it performs sink work is a fact
-                    // about its interior, not about its own port arity. With
-                    // nothing compiled to fold — before the first run, or a
-                    // definition no instance reaches — the interface's own
-                    // reading stands.
-                    sink: run_state.is_sink(id).unwrap_or(node_interface.sink),
+                    kind_label: ui.intern(ports.map_or(MISSING_FUNC_LABEL, |p| p.name)),
+                    description: intern_or_empty(
+                        ui,
+                        empty,
+                        ports.and_then(|p| p.description).unwrap_or_default(),
+                    ),
+                    inputs: spans.inputs,
+                    outputs: spans.outputs,
+                    events: spans.events,
+                    // The compiled program is the authority once one exists;
+                    // before the first compile the declaration's own reading
+                    // stands.
+                    sink: run_state
+                        .is_sink(id)
+                        .unwrap_or_else(|| ports.is_some_and(|p| p.sink())),
                     disabled: node.disabled,
                     cache: node.cache,
-                    cache_controls,
-                    can_evict_cache,
-                    impure: run_state.is_impure(id).unwrap_or(node_interface.impure),
-                    boundary,
+                    cache_controls: cache_controls(ports),
+                    can_evict_cache: can_evict_cache(ports),
+                    impure: run_state
+                        .is_impure(id)
+                        .unwrap_or_else(|| ports.is_some_and(|p| p.impure())),
                     exec_status: run_state.status(id),
                     ram: run_state.ram(id),
-                    missing: node_interface.missing,
-                    preview: !node_interface.missing
+                    missing: ports.is_none(),
+                    preview: ports.is_some()
                         && matches!(node.kind, NodeKind::Func(func_id) if preview::is_preview(func_id)),
                 },
             );
-            // A repeat would silently overwrite the earlier graph's entry and
-            // leave both node spans short — the one way the shared pool could
-            // misbehave, and exactly what `Document::validate` rules out.
-            debug_assert!(
-                previous.is_none(),
-                "node ids are document-unique, so one pool spans every graph"
-            );
+            debug_assert!(previous.is_none(), "node ids are unique within a graph");
             self.z_order.push(*key);
-        }
-
-        let local_defs_start = self.local_defs.len();
-        self.local_defs
-            .extend(graph.graphs.iter().map(|(id, def)| SceneLocalDef {
-                id: *id,
-                name: intern_or_empty(ui, empty, &def.name),
-                category: intern_or_empty(ui, empty, &def.category),
-                origin: def.origin,
-            }));
-        // `Graph::graphs` is a `HashMap`. Its order reaches the palette, whose
-        // own sort is by name and stable, so two same-named defs would swap
-        // rows between frames unless the span itself is ordered.
-        self.local_defs[local_defs_start..].sort_unstable_by_key(|def| def.id);
-        SceneGraph {
-            target,
-            viewport: view.viewport,
-            nodes: span_since(nodes_start, self.nodes.len()),
-            z_order: span_since(z_start, self.z_order.len()),
-            local_defs: span_since(local_defs_start, self.local_defs.len()),
-            run_available,
         }
     }
 
@@ -586,19 +399,19 @@ impl Scene {
         &mut self,
         ui: &mut Ui,
         library: &Library,
-        projection: GraphProjection<'_>,
+        doc: &Document,
         id: NodeId,
-        node_interface: &NodeInterface<'_>,
+        ports: Option<NodePorts<'_>>,
         missing_inputs: &[usize],
         empty: &InternedStr,
     ) -> NodePortSpans {
-        let graph = projection.source.graph();
+        let graph = &doc.graph;
         // One `SceneInput` per input port. Each input's value_variants are
         // flattened into the shared pool, the input recording its span
         // (empty for the common no-options case) — so this one can't go
         // through `extend_pool`, which would borrow two pools at once.
         let inputs_start = self.inputs.len();
-        for (port_idx, input) in node_interface.inputs.iter().enumerate() {
+        for (port_idx, input) in declared(ports, |p| p.inputs).iter().enumerate() {
             let value_variants = extend_pool(
                 &mut self.value_variants_pool,
                 input.value_variants.iter().cloned(),
@@ -621,10 +434,12 @@ impl Scene {
             });
         }
         let inputs = span_since(inputs_start, self.inputs.len());
+        // Shared borrow of the table `project` filled, so reading a port's type
+        // and filling the output pool stay two disjoint borrows of `self`.
+        let output_types = &self.output_types;
         let outputs = extend_pool(
             &mut self.outputs,
-            node_interface
-                .outputs
+            declared(ports, |p| p.outputs)
                 .iter()
                 .enumerate()
                 .map(|(i, o)| SceneOutput {
@@ -638,22 +453,28 @@ impl Scene {
                     // resolved through the input it mirrors; a fixed output uses
                     // its declared type.
                     ty: match &o.ty {
-                        OutputType::Wildcard { .. } => {
-                            graph.resolve_output_type(library, OutputPort::new(id, i))
-                        }
+                        // `project` resolved every wildcard port of this
+                        // graph before walking its nodes, and only a node whose
+                        // interface came from `Graph::node_ports` — the same set
+                        // `update` walks — can declare one. A miss is that
+                        // invariant broken, and defaulting it would paint the
+                        // port `Any`, which accepts *any* connection.
+                        OutputType::Wildcard { .. } => output_types
+                            .get(OutputPort::new(id, i))
+                            .expect("every wildcard port of the projected graph is resolved")
+                            .clone(),
                         OutputType::Fixed(dt) => dt.clone(),
                     },
                 }),
         );
-        let events = match node_interface.events {
-            None => Span::default(),
-            Some(events) => extend_pool(
-                &mut self.events,
-                events.names().map(|name| SceneEvent {
-                    name: ui.intern(name),
+        let events = extend_pool(
+            &mut self.events,
+            declared(ports, |p| p.events)
+                .iter()
+                .map(|event| SceneEvent {
+                    name: ui.intern(&event.name),
                 }),
-            ),
-        };
+        );
         NodePortSpans {
             inputs,
             outputs,
@@ -662,85 +483,54 @@ impl Scene {
     }
 }
 
-impl<'a> Frame<'a> {
-    /// Every projected pane, in dock-pane order — the per-pane loop the
-    /// canvas prepass and the editor's target bookkeeping both walk.
-    ///
-    /// A projection whose graph the document no longer holds is skipped:
-    /// the pane's tab died this frame and `reconcile_with_graph` prunes it
-    /// before the next one.
-    pub(crate) fn panes(self) -> impl Iterator<Item = Pane<'a>> {
-        self.scene
-            .graphs
-            .keys()
-            .filter_map(move |target| self.pane(*target))
-    }
-
-    /// The named pane, or `None` when that graph isn't on screen this frame
-    /// (or is already gone from the document).
-    pub(crate) fn pane(self, target: GraphRef) -> Option<Pane<'a>> {
-        Some(Pane {
-            scene: self.scene,
-            projected: self.scene.graphs.get(&target)?,
-            body: self.doc.graph_for(target)?,
-            view: self.doc.view(target)?,
-        })
-    }
-
-    /// The pane `node_id` lives in — how a whole-scene scan turns a node hit
-    /// back into the graph whose edit target the intent belongs to.
-    pub(crate) fn owner(self, node_id: NodeId) -> Option<Pane<'a>> {
-        self.pane(self.scene.nodes.get(&node_id)?.owner)
-    }
-}
-
 impl<'a> Pane<'a> {
-    /// The editing target every intent raised over this pane commits
-    /// against.
-    pub(crate) fn target(self) -> GraphRef {
-        self.projected.target
+    /// The whole-scene projection behind this pane. For the sweeps keyed by
+    /// document-unique ids — `CanvasGeometry`'s rebuild, a drag's
+    /// owner-still-alive check — which walk every node rather than asking
+    /// about one.
+    pub(crate) fn scene(self) -> &'a Scene {
+        self.scene
+    }
+
+    /// The authoring graph this pane shows.
+    pub(crate) fn body(self) -> &'a Graph {
+        &self.doc.graph
+    }
+
+    /// Its view metadata: placements, viewport, committed selection.
+    pub(crate) fn view(self) -> &'a GraphView {
+        &self.doc.main_view
     }
 
     pub(crate) fn viewport(self) -> Viewport {
-        self.projected.viewport
-    }
-
-    /// Whether a run raised over this pane resolves to one occurrence — see
-    /// [`SceneGraph::run_available`]. Gates the affordances that need a
-    /// single target: the header play chip, the context menu's "Run to this
-    /// node", and the port menu's "Add preview".
-    pub(crate) fn run_available(self) -> bool {
-        self.projected.run_available
+        self.doc.main_view.viewport
     }
 
     /// Whether `node` can seed a "run to this node" — drives the header play
-    /// chip and the context-menu item. Both halves
-    /// have to hold: the pane resolves to one occurrence, and the node itself
-    /// covers compiled work. Disabled nodes remain valid because a targeted
-    /// run overrides that flag temporarily.
+    /// chip, the context-menu item, and the port menu's "Add preview".
+    ///
+    /// Everything but a `missing` stub qualifies: the stub resolves to no
+    /// compiled work, while a *disabled* node still runs, because a targeted
+    /// run overrides that flag for the run. Deliberately an authoring-side
+    /// fact, not a lookup in a compiled program — the palette and the header
+    /// record every frame, including before the first compile, so an
+    /// affordance can't wait on one.
     ///
     /// A method on the pane, not the node: "is a run targetable here" is a
     /// fact about the pane, and every caller already has one in hand.
     pub(crate) fn runnable(self, node: &SceneNode) -> bool {
-        self.run_available() && node.executable_kind()
+        !node.missing
     }
 
     /// This graph's nodes, in relative paint order.
     pub(crate) fn nodes(self) -> impl Iterator<Item = &'a SceneNode> {
-        self.scene
-            .nodes
-            .get_range(self.projected.nodes.range())
-            .into_iter()
-            .flat_map(|slice| slice.values())
+        self.scene.nodes.values()
     }
 
     /// A node of *this* graph by id. Filtered by owner, so a pane never
     /// resolves an id belonging to another open pane.
     pub(crate) fn node(self, node_id: NodeId) -> Option<&'a SceneNode> {
-        self.scene
-            .nodes
-            .get(&node_id)
-            .filter(|n| n.owner == self.projected.target)
+        self.scene.nodes.get(&node_id)
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
@@ -750,35 +540,30 @@ impl<'a> Pane<'a> {
     /// This graph's paint stack: node bodies
     /// interleaved, later entries in front.
     pub(crate) fn z_order(self) -> &'a [NodeId] {
-        slice_pool(&self.scene.z_order, self.projected.z_order)
+        &self.scene.z_order
     }
 
     /// This graph's data edges, as `(consumer input ← producer output)`.
     /// Read off the authoring graph: the projection would only be holding a
     /// copy of it.
     pub(crate) fn connections(self) -> impl Iterator<Item = (InputPort, OutputPort)> + 'a {
-        self.body.edges()
+        self.body().edges()
     }
 
     /// This graph's event-subscription edges, likewise straight off the
     /// authoring graph.
     pub(crate) fn subscriptions(self) -> impl Iterator<Item = Subscription> + 'a {
-        self.body.subscriptions()
-    }
-
-    /// This graph's own local definitions, ordered by id.
-    pub(crate) fn local_defs(self) -> &'a [SceneLocalDef] {
-        slice_pool(&self.scene.local_defs, self.projected.local_defs)
+        self.body().subscriptions()
     }
 
     /// This graph's committed selection.
     pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
-        &self.view.selected
+        &self.view().selected
     }
 
     /// Whether `key` is in this graph's committed selection.
     pub(crate) fn is_selected(self, key: NodeId) -> bool {
-        self.view.selected.contains(&key)
+        self.view().selected.contains(&key)
     }
 
     /// A node's input ports, sliced by its `inputs` span. The per-port
@@ -825,194 +610,33 @@ fn span_since(start: usize, end: usize) -> Span {
     Span::new(start as u32, (end - start) as u32)
 }
 
-/// View of a node's interface during a single rebuild: the input ports
-/// (whole `FuncInput`, for names + defaults) and the output port names.
-/// Inputs are usually borrowed from a func/graph; the `GraphOutput`
-/// boundary node synthesizes them from the graph's `FuncOutput`s, hence
-/// `Cow`.
-#[derive(Debug)]
-struct NodeInterface<'a> {
-    kind_label: InternedStr,
-    /// The func's description (empty for graphs/boundaries/missing stubs).
-    description: InternedStr,
-    inputs: Cow<'a, [FuncInput]>,
-    outputs: Cow<'a, [FuncOutput]>,
-    /// Event (emitter) ports, in declaration order. `FuncEvent` and
-    /// `GraphEvent` differ in type, so they can't share a slice — but
-    /// [`NodeEvents`] is a `Copy` borrow of either, which is all the UI
-    /// needs to read the names off at pool-fill time. Borrowed rather than
-    /// eagerly interned into a `Vec`, which cost one heap allocation per
-    /// node per frame for a list that was copied into `Scene::events` and
-    /// dropped immediately. `None` for boundary and missing-stub nodes,
-    /// which expose no events at all.
-    events: Option<NodeEvents<'a>>,
-    graph: Option<GraphLink>,
-    sink: bool,
-    /// Node manages its own caching (or has no output to cache), so the editor's
-    /// cache chips are hidden — see [`SceneNode::cache_controls`].
-    uncacheable: bool,
-    /// The func is `Impure`, so it has no content digest and no cache mode is
-    /// honored — the editor hides its cache chips (see
-    /// [`SceneNode::impure`]). Only set from a func spec; `false` for composites
-    /// (aggregate purity isn't known here) and boundary/stub nodes.
-    impure: bool,
-    /// Nothing in the library answered to this node's func/graph, so what's
-    /// here is the portless error stub — see [`SceneNode::missing`].
-    missing: bool,
+/// The `kind_label` a node projects with when the library holds no func for it
+/// — see [`SceneNode::missing`].
+const MISSING_FUNC_LABEL: &str = "missing func";
+
+/// One port list off a node's declaration, empty for a `missing` stub. The stub
+/// declares nothing, so every pool it contributes to is empty rather than
+/// special-cased.
+fn declared<'a, T>(
+    ports: Option<NodePorts<'a>>,
+    which: impl Fn(&NodePorts<'a>) -> &'a [T],
+) -> &'a [T] {
+    ports.map_or(&[][..], |p| which(&p))
 }
 
-impl<'a> NodeInterface<'a> {
-    /// The interface `node` projects with: read off its func, its referenced
-    /// definition, or — for a boundary node — the ports the *enclosing*
-    /// definition exposes, which only a `GraphDef` carries. Scenarium
-    /// resolves the first three into one `NodePorts`; only the boundary
-    /// pair, whose ports the editor synthesizes, is spelled out here.
-    ///
-    /// A func or graph node whose target is absent has no interface to
-    /// project. Dropping it would make it invisible — and so impossible to
-    /// select and delete — silently corrupting the document, so it comes
-    /// back as a portless `missing` stub instead.
-    ///
-    /// Reads nothing off `Scene`: an interface is a pure function of the
-    /// node and the library, and only the pooling that follows it needs the
-    /// projection's mutable state.
-    ///
-    /// `graph`, `library`, and `node` share `'a`: a resolved `NodePorts`
-    /// borrows its port slices from all three, and they land in the `Cow`s
-    /// below unchanged.
-    fn resolve(
-        ui: &mut Ui,
-        graph: &'a Graph,
-        library: &'a Library,
-        node: &'a Node,
-        definition: Option<&GraphDef>,
-        empty: &InternedStr,
-    ) -> Self {
-        let resolved = match &node.kind {
-            NodeKind::Func(_) | NodeKind::Graph(_) | NodeKind::Special(_) => {
-                graph.node_ports(node, library).map(|ports| NodeInterface {
-                    kind_label: ui.intern(ports.name),
-                    description: intern_or_empty(ui, empty, ports.description.unwrap_or_default()),
-                    inputs: Cow::Borrowed(ports.inputs),
-                    outputs: Cow::Borrowed(ports.outputs),
-                    events: Some(ports.events),
-                    graph: match node.kind {
-                        NodeKind::Graph(link) => Some(link),
-                        _ => None,
-                    },
-                    // What each of these means for a composite is scenarium's
-                    // answer, not this projection's; `Scene::project` folds
-                    // the compiled program's own reading over `sink` and
-                    // `impure` once a program exists.
-                    sink: ports.sink(),
-                    uncacheable: ports.uncacheable(),
-                    impure: ports.impure(),
-                    missing: false,
-                })
-            }
-            // Inbound boundary: no inputs; one output per graph input,
-            // plus a trailing placeholder output. Wiring the
-            // placeholder emits `AddBoundaryPort` + `SetInput` as one
-            // batch (see `connection_ui::commit_connection`), so a
-            // fresh placeholder appears next frame.
-            NodeKind::GraphInput => definition.map(|definition| {
-                let mut outputs: Vec<FuncOutput> =
-                    definition.inputs.iter().map(boundary_output).collect();
-                outputs.push(placeholder_output());
-                NodeInterface::synthesized(
-                    ui.intern("Input"),
-                    empty.clone(),
-                    Cow::Borrowed(&[]),
-                    Cow::Owned(outputs),
-                )
-            }),
-            // Outbound boundary: one input per graph output (synthesized
-            // as `FuncInput`s for names + zero defaults), plus a
-            // trailing placeholder input. Symmetric to the inbound
-            // case — wiring the placeholder grows the definition's outputs.
-            NodeKind::GraphOutput => definition.map(|definition| {
-                let mut inputs: Vec<FuncInput> =
-                    definition.outputs.iter().map(boundary_input).collect();
-                inputs.push(placeholder_input());
-                NodeInterface::synthesized(
-                    ui.intern("Output"),
-                    empty.clone(),
-                    Cow::Owned(inputs),
-                    Cow::Borrowed(&[]),
-                )
-            }),
-        };
-        // A `match` rather than `unwrap_or_else`: the stub borrows nothing
-        // from `node` or `library`, but a closure returning `Self<'a>` makes
-        // the compiler tie their lifetimes to `'a` anyway.
-        match resolved {
-            Some(resolved) => resolved,
-            None => {
-                let kind_label = match node.kind {
-                    NodeKind::Func(_) => "missing func",
-                    NodeKind::Graph(_) => "missing graph",
-                    // A special node's spec always resolves. A boundary
-                    // node only exists in a definition body, and
-                    // `SceneSource::Def` carries the definition exposing
-                    // those ports — so neither reaches this branch.
-                    NodeKind::Special(_) | NodeKind::GraphInput | NodeKind::GraphOutput => {
-                        unreachable!("special and boundary interfaces always resolve")
-                    }
-                };
-                NodeInterface {
-                    missing: true,
-                    ..NodeInterface::synthesized(
-                        ui.intern(kind_label),
-                        empty.clone(),
-                        Cow::Borrowed(&[]),
-                        Cow::Borrowed(&[]),
-                    )
-                }
-            }
-        }
-    }
+/// Whether the header offers the RAM/disk storage chips — see
+/// [`SceneNode::cache_controls`]. An impure func has no content digest to key a
+/// cache on, and a func that declares itself uncacheable or exposes no outputs
+/// has nothing to store — a `missing` stub for both reasons at once.
+fn cache_controls(ports: Option<NodePorts<'_>>) -> bool {
+    ports.is_some_and(|p| !p.uncacheable() && !p.outputs.is_empty() && !p.impure())
+}
 
-    /// An interface the editor synthesizes rather than reads off a func or a
-    /// definition: the two boundary nodes, and the stub standing in for a
-    /// node whose target is gone. None of them emits events, instantiates a
-    /// graph, sinks, or has anything cacheable — only the label, the ports,
-    /// and (for the stub) `missing` differ between the three.
-    fn synthesized(
-        kind_label: InternedStr,
-        description: InternedStr,
-        inputs: Cow<'a, [FuncInput]>,
-        outputs: Cow<'a, [FuncOutput]>,
-    ) -> Self {
-        Self {
-            kind_label,
-            description,
-            inputs,
-            outputs,
-            events: None,
-            graph: None,
-            sink: false,
-            uncacheable: true,
-            impure: false,
-            missing: false,
-        }
-    }
-
-    /// Whether the header offers the RAM/disk storage chips — see
-    /// [`SceneNode::cache_controls`]. A composite's storage is its interior's
-    /// business, an impure func has no content digest to key a cache on, and
-    /// a func that declares itself uncacheable or exposes no outputs has
-    /// nothing to store.
-    fn cache_controls(&self) -> bool {
-        self.graph.is_none() && !self.uncacheable && !self.outputs.is_empty() && !self.impure
-    }
-
-    /// Whether the header offers runtime cache eviction — see
-    /// [`SceneNode::can_evict_cache`]. A graph instance always can, evicting
-    /// its flattened interior; anything else needs a reproducible output,
-    /// which rules out impure funcs, portless nodes, and the boundary pair.
-    fn can_evict_cache(&self, boundary: bool) -> bool {
-        self.graph.is_some() || (!self.outputs.is_empty() && !self.impure && !boundary)
-    }
+/// Whether the header offers runtime cache eviction — see
+/// [`SceneNode::can_evict_cache`]. Needs a reproducible output, which rules out
+/// impure funcs and portless nodes.
+fn can_evict_cache(ports: Option<NodePorts<'_>>) -> bool {
+    ports.is_some_and(|p| !p.outputs.is_empty() && !p.impure())
 }
 
 /// The literal a port falls back to when given a const binding: its declared
@@ -1035,37 +659,6 @@ fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticVa
             ty => ty.default_value(),
         }
     })
-}
-
-/// Synthesize a `FuncInput` for a `GraphOutput`'s input port from the
-/// graph output it mirrors — name + type carry over; it's not user-set, so
-/// it has no declared default and no value options.
-fn boundary_input(output: &FuncOutput) -> FuncInput {
-    FuncInput::optional(output.name.clone(), output.ty.declared())
-}
-
-/// Synthesize a `FuncOutput` for a `GraphInput`'s output port from the
-/// graph input it mirrors — name + type carry over.
-fn boundary_output(input: &FuncInput) -> FuncOutput {
-    FuncOutput::new(input.name.clone(), input.data_type.clone())
-}
-
-/// The trailing "connect here to add a port" placeholder output on the
-/// `GraphInput` boundary node: untyped until something connects.
-fn placeholder_output() -> FuncOutput {
-    FuncOutput::new(PLACEHOLDER_PORT, DataType::default())
-}
-
-/// Label for the trailing "connect here to add a port" placeholder on a
-/// boundary node.
-const PLACEHOLDER_PORT: &str = "+";
-
-/// The placeholder input port for a `GraphOutput`: unbound, untyped
-/// until something connects (at which point the commit's
-/// `AddBoundaryPort` materializes a real definition output typed from
-/// the wired producer).
-fn placeholder_input() -> FuncInput {
-    FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }
 
 fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span {
@@ -1097,7 +690,6 @@ pub(crate) mod internals {
     pub(crate) fn scene_node_stub(ui: &mut Ui, id: NodeId, pos: Vec2) -> SceneNode {
         SceneNode {
             id,
-            owner: GraphRef::Main,
             pos,
             name: ui.intern(""),
             kind_label: ui.intern(""),
@@ -1105,14 +697,12 @@ pub(crate) mod internals {
             inputs: Span::default(),
             outputs: Span::default(),
             events: Span::default(),
-            graph: None,
             sink: false,
             disabled: false,
             cache: CacheMode::None,
             cache_controls: false,
             can_evict_cache: false,
             impure: false,
-            boundary: false,
             exec_status: ExecStatus::None,
             ram: RamUsage::default(),
             missing: false,
@@ -1120,14 +710,9 @@ pub(crate) mod internals {
         }
     }
 
-    /// A one-pane fixture at `GraphRef::Main`: a hand-built projection plus
-    /// the document it stands for, so a gesture test takes a [`Frame`] and a
-    /// [`Pane`] the way production code does. No `Library` behind it — the
-    /// nodes are stubs, not projected from one.
-    ///
-    /// The two halves are kept consistent for whatever the builders set:
-    /// [`Self::with_selection`] writes the document's view, which is where a
-    /// pane reads its selection from.
+    /// A sealed one-pane projection over a hand-built node set, plus the
+    /// document its [`Pane`] resolves against. The harness every canvas test
+    /// that needs a `Pane` builds on.
     #[derive(Debug, Default)]
     pub(crate) struct SceneFixture {
         pub(crate) scene: Scene,
@@ -1141,7 +726,6 @@ pub(crate) mod internals {
                 fixture.scene.z_order.push(node.id);
                 fixture.scene.nodes.insert(node.id, node);
             }
-            fixture.reseal();
             fixture
         }
 
@@ -1151,40 +735,13 @@ pub(crate) mod internals {
             self
         }
 
-        /// Mark the sole pane as a definition pane: no single occurrence for
-        /// a run to target, so [`Pane::runnable`] answers `false` whatever
-        /// the node is.
-        pub(crate) fn without_run_target(mut self) -> Self {
-            let graph = self.scene.graphs.get_mut(&GraphRef::Main).expect("sealed");
-            graph.run_available = false;
-            self
-        }
-
-        /// Seal the sole graph's spans over whatever the pools hold.
-        fn reseal(&mut self) {
-            self.scene.graphs.insert(
-                GraphRef::Main,
-                SceneGraph {
-                    target: GraphRef::Main,
-                    viewport: Viewport::default(),
-                    nodes: Span::new(0, self.scene.nodes.len() as u32),
-                    z_order: Span::new(0, self.scene.z_order.len() as u32),
-                    local_defs: Span::new(0, self.scene.local_defs.len() as u32),
-                    run_available: true,
-                },
-            );
-        }
-
-        pub(crate) fn frame(&self) -> Frame<'_> {
-            Frame {
-                scene: &self.scene,
-                doc: &self.doc,
-            }
-        }
-
-        /// The sole pane of a single-pane test fixture.
+        /// The fixture's sole pane.
         pub(crate) fn only_pane(&self) -> Pane<'_> {
-            self.frame().pane(GraphRef::Main).expect("fixture has Main")
+            self.pane().expect("the fixture seals one pane")
+        }
+
+        pub(crate) fn pane(&self) -> Option<Pane<'_>> {
+            self.scene.pane(&self.doc)
         }
     }
 }

@@ -146,15 +146,14 @@ impl ImageViewer {
                     ),
                     FullImage::Failed(message) => (None, Some(message.as_str())),
                     FullImage::Deferred(_) => {
-                        // This pane is its group's visible tab, so the reconcile
-                        // pass covered it — unless something changed which tab is
-                        // visible, or pushed a value, without asking the store to
-                        // reconcile (`UndoStep::requires_reconcile` and the
-                        // non-undoable tab-open path are the signal sites).
+                        // This pane is its group's visible tab, and the
+                        // reconcile pass runs every frame ahead of the record,
+                        // so it covered this viewer — unless the tab became
+                        // visible after that pass, within this same frame.
                         debug_assert!(
                             false,
                             "visible image viewer source was not materialized: \
-                             a reconcile request is missing"
+                             the frame's reconcile pass did not cover it"
                         );
                         (None, Some("image is being prepared"))
                     }

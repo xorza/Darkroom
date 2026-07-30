@@ -46,7 +46,7 @@ use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
 use crate::gui::node::prepass::{emit_path_picks, emit_port_dblclicks};
 use crate::gui::node::{NodeUI, RecordCtx};
-use crate::gui::scene::{Frame, Pane};
+use crate::gui::scene::Pane;
 
 /// Canvas-level UI scope, shared by **every** graph pane on screen: the
 /// port-widget-id cache, the `NodeUI` that renders graph nodes, the
@@ -195,7 +195,7 @@ impl GraphUI {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        pane: Pane<'_>,
         library: &Library,
         out: &mut Intents,
     ) {
@@ -208,41 +208,39 @@ impl GraphUI {
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
         self.cancelled = ui.escape_pressed();
-        if let Some(pane) = frame.pane() {
-            let gesture = classify_canvas_gesture(ui);
-            self.gesture = gesture;
-            pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, pane, gesture, out);
-        }
-        self.gestures.node_ui.prepass(ui, frame.scene, out);
-        self.geometry.rebuild(ui, frame.scene, &mut self.hits);
+        let gesture = classify_canvas_gesture(ui);
+        self.gesture = gesture;
+        pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, pane, gesture, out);
+        self.gestures.node_ui.prepass(ui, pane.scene(), out);
+        self.geometry.rebuild(ui, pane.scene(), &mut self.hits);
         // After the rebuild, which is where the port half of `hits` fills:
         // a port double-click rides the same response read as that port's
         // center, so there is nothing to act on before it.
-        emit_port_dblclicks(&self.hits, frame, out);
+        emit_port_dblclicks(&self.hits, pane, out);
         // Both port-drag claimants sit *after* the rebuild so they read this
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
         self.gestures
             .preview_drag
-            .apply(ui, frame, &self.geometry, library, out);
+            .apply(ui, pane, &self.geometry, library, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         let resume = self.gestures.new_node_ui.take_resume_floating();
         self.gestures
             .connection_ui
-            .apply(ui, frame, &self.geometry, resume, self.cancelled, out);
+            .apply(ui, pane, &self.geometry, resume, self.cancelled, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the connection gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
         self.gestures
             .subscription_ui
-            .apply(ui, frame, &self.geometry, self.cancelled, out);
+            .apply(ui, pane, &self.geometry, self.cancelled, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
         // off this frame's swept hits. Whole scene, so a panel pinned on a
         // pane that just closed is pruned.
-        self.inspectors.apply(ui, &self.hits, frame);
+        self.inspectors.apply(ui, &self.hits, pane);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so every
         // pane's draw reads the same finished geometry.

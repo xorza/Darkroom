@@ -9,6 +9,8 @@
 //! back — so RAM eviction lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
+pub(crate) mod error;
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::ops::{Index, IndexMut};
@@ -22,11 +24,11 @@ use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
-use crate::execution::cache::slot::{RuntimeSlot, StateOwner};
-use crate::execution::compiled::CompiledGraph;
+use crate::execution::cache::runtime::error::CacheEvictionFailure;
+use crate::execution::cache::slot::RuntimeSlot;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::execution::program::ExecutionBinding;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -37,29 +39,27 @@ use crate::{DynamicValue, RamUsage};
 /// an array read; cross-install survival happens at [`reconcile`](Self::reconcile),
 /// which re-pairs the slots with the new index order by stable id.
 ///
-/// The compiled artifact those indices mean something in is held here, not
-/// passed in: a
-/// `NodeIdx` reaching one of these methods is read against
-/// [`aligned_to`](Self::aligned_to), so there is no program a caller could name
-/// that the slots do not belong to. The resolver stamps
-/// each node's digest and decides cache reuse,
-/// while the executor mutates outputs/state and consumes that decision. `disk_store`
-/// persists outputs and serves them back; it is kept across graph updates while only `slots`
-/// is reconciled or cleared.
+/// **The program is not held here — it arrives with each call.** A `NodeIdx`
+/// means nothing without the program it indexes, so every method that reads one
+/// takes that program alongside it. The pairing is established by
+/// [`ExecutionEngine`](crate::execution::engine::ExecutionEngine), which owns both
+/// halves and is the only caller of [`reconcile`](Self::reconcile) — so there is
+/// no run in which the cache and the program it is asked about can be different
+/// installs. The cache holding a second handle to the artifact instead made that
+/// an invariant to validate rather than one to establish, and left every method
+/// unwrapping an `Option` it could not be reached without.
+///
+/// The resolver stamps each node's digest and decides cache reuse, while the
+/// executor mutates outputs/state and consumes that decision. `disk_store`
+/// persists outputs and serves them back; it is kept across graph updates while
+/// only `slots` is reconciled or cleared.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
-    /// The canonical artifact `slots` is aligned to — its program says what
-    /// the indices mean and which stable ids name them across an install.
-    ///
-    /// This is another handle to the same outer artifact installed by the
-    /// engine, not an independently shared `Program`. The artifact remains the
-    /// program's single owner.
-    aligned_to: Option<Arc<CompiledGraph>>,
     /// Private: the *column* is the cache's own — its length is the alignment
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
     /// [`Index<NodeIdx>`], the same way a node is reached on
-    /// [`Program`](crate::execution::program::Program).
+    /// [`CompiledGraph`](crate::execution::compiled::CompiledGraph).
     slots: Column<NodeIdx, RuntimeSlot>,
     /// Private for the same reason as the slots: the worker replaces it
     /// wholesale between runs, and going through
@@ -96,12 +96,6 @@ enum ReuseSource {
     Blob(BlobTarget),
 }
 
-#[derive(Debug)]
-pub(crate) struct CacheEvictionFailure {
-    pub(crate) e_node_id: ExecutionNodeId,
-    pub(crate) message: String,
-}
-
 impl Index<NodeIdx> for RuntimeCache {
     type Output = RuntimeSlot;
 
@@ -128,14 +122,6 @@ impl RuntimeCache {
         self.slots.iter()
     }
 
-    /// Whether the slots name this exact outer artifact, not merely a program
-    /// with the same shape.
-    pub(crate) fn is_aligned_to(&self, compiled: &Arc<CompiledGraph>) -> bool {
-        self.aligned_to
-            .as_ref()
-            .is_some_and(|aligned| Arc::ptr_eq(aligned, compiled))
-    }
-
     /// Attach the store this cache persists to and serves from. Called between
     /// runs, when a document gains or changes its cache root: every reuse
     /// verdict already given was answered from the *previous* store, so this
@@ -145,7 +131,6 @@ impl RuntimeCache {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.aligned_to = None;
         self.slots.clear();
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
@@ -153,15 +138,12 @@ impl RuntimeCache {
 
     pub(crate) async fn evict(
         &mut self,
+        program: &CompiledGraph,
         e_node_ids: &[ExecutionNodeId],
     ) -> Vec<CacheEvictionFailure> {
         let mut failures = Vec::new();
         for e_node_id in e_node_ids {
-            let node_idx = *self
-                .aligned_to
-                .as_deref()
-                .expect("eviction requires an installed compiled graph")
-                .program
+            let node_idx = *program
                 .e_node_index
                 .get(e_node_id)
                 .expect("an eviction target belongs to the installed program");
@@ -215,28 +197,28 @@ impl RuntimeCache {
 
     /// Realign the slots from the program they currently belong to onto a newly
     /// installed one: re-pair them with the new index order by stable id —
-    /// dropping persistent state whose owning implementation (func id +
-    /// version) changed — default new nodes, trim removed ones, and apply the
+    /// dropping persistent state whose owning func changed — default new nodes,
+    /// trim removed ones, and apply the
     /// installed program's RAM-retention policy immediately. The one place ids
     /// are hashed for slot access; every per-run access is an index read.
     ///
-    /// The program being replaced is [`aligned_to`](Self::aligned_to) — the one
-    /// the slots actually belong to, not one a caller names — so this can run
-    /// either side of the engine's artifact swap, and the pair it walks cannot
-    /// be mismatched.
-    pub(crate) fn reconcile(&mut self, installed: &Arc<CompiledGraph>) {
-        let previous = self.aligned_to.replace(Arc::clone(installed));
+    /// `previous` is the program the slots currently belong to, `None` before
+    /// anything was installed. It is named rather than remembered because the
+    /// only caller —
+    /// [`ExecutionEngine::install`](crate::execution::engine::ExecutionEngine) —
+    /// holds both programs at the moment of the swap, so the pair this walks is
+    /// established by the owner rather than validated afterwards.
+    pub(crate) fn reconcile(&mut self, previous: Option<&CompiledGraph>, program: &CompiledGraph) {
+        // `Column::drain` empties the column when its guard drops, so the slots
+        // are released even on the first install, where the left side of the zip
+        // yields nothing.
         let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> = previous
-            .iter()
-            .flat_map(|compiled| compiled.program.e_node_ids.iter().copied())
+            .into_iter()
+            .flat_map(|previous| previous.e_node_ids.iter().copied())
             .zip(self.slots.drain())
             .collect();
-        let program = &installed.program;
         for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
-            let owner = StateOwner {
-                func_id: e_node.func_id,
-                version: e_node.version,
-            };
+            let owner = e_node.func_id;
             let slot = match retained.remove(e_node_id) {
                 Some(mut slot) => {
                     slot.reown(owner);
@@ -246,7 +228,7 @@ impl RuntimeCache {
             };
             self.slots.push(slot);
         }
-        self.release_dead_outputs();
+        self.release_dead_outputs(program);
     }
 
     pub(crate) fn is_resident_current(&self, node_idx: NodeIdx) -> bool {
@@ -265,16 +247,11 @@ impl RuntimeCache {
     /// installed program declares.
     pub(crate) fn read_output_port(
         &mut self,
+        program: &CompiledGraph,
         address: OutputAddr,
         take: bool,
     ) -> Option<DynamicValue> {
-        let arity = self
-            .aligned_to
-            .as_deref()
-            .expect("cache reads require an installed compiled graph")
-            .program[address.node_idx]
-            .outputs
-            .len as usize;
+        let arity = program[address.node_idx].outputs.len as usize;
         let slot = &mut self.slots[address.node_idx];
         debug_assert!(
             slot.output_values()
@@ -293,24 +270,28 @@ impl RuntimeCache {
     /// `executing` is the run's schedule in producer-first order
     /// ([`Scheduled::executing`](crate::execution::schedule::Scheduled::executing));
     /// the cache reads the nodes, not the plan that selected them.
-    pub(crate) fn stamp_digests(&mut self, executing: impl IntoIterator<Item = NodeIdx>) {
+    pub(crate) fn stamp_digests(
+        &mut self,
+        program: &CompiledGraph,
+        executing: impl IntoIterator<Item = NodeIdx>,
+    ) {
         for node_idx in executing {
-            self.stamp_digest(node_idx);
+            self.stamp_digest(program, node_idx);
         }
     }
 
     /// Stamp one node's structural content digest into its slot. The resolver's
     /// pass calls this before exact output demand is known; cache coverage is
     /// probed later by [`probe_reuse`](Self::probe_reuse).
-    pub(crate) fn stamp_digest(&mut self, node_idx: NodeIdx) {
+    pub(crate) fn stamp_digest(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
         // Folded whole before the write, so the fold's read of the slots ends
         // before the slot it stamps is borrowed mutably.
-        let digest = self.node_digest(node_idx);
+        let digest = self.node_digest(program, node_idx);
         self.slots[node_idx].current_digest = digest;
     }
 
     /// A node's **content digest** — the one content key it's cached under, folding its identity
-    /// (func id + version + output types) plus its structural inputs. The single digest the whole
+    /// (func id + output types) plus its structural inputs. The single digest the whole
     /// cache keys on: RAM reuse ([`is_resident_hit`](Self::is_resident_hit)), disk load/store, and
     /// downstream folding all read the node's stamped `current_digest`. Computed producer-first
     /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
@@ -324,15 +305,12 @@ impl RuntimeCache {
     ///   value: unreadable ⇒ `None`, and the run loop re-stamps such a node at reach time, once
     ///   its producers settled.
     ///
-    /// A method on the cache because all three things it folds are the cache's: the slots it
-    /// reads producer digests and delivered values from, and the `fs_paths` memo behind every
-    /// external identity. The *encoding* stays in `digest`, beside the [`DOMAIN`] versioning it.
-    pub(crate) fn node_digest(&self, node_idx: NodeIdx) -> Option<Digest> {
-        let program = &self
-            .aligned_to
-            .as_deref()
-            .expect("digesting requires an installed compiled graph")
-            .program;
+    /// A method on the cache because two of the three things it folds are the cache's: the slots
+    /// it reads producer digests and delivered values from, and the `fs_paths` memo behind every
+    /// external identity. The third — the node's own identity and inputs — is the program's, so
+    /// that arrives as an argument. The *encoding* stays in `digest`, beside the [`DOMAIN`]
+    /// versioning it.
+    pub(crate) fn node_digest(&self, program: &CompiledGraph, node_idx: NodeIdx) -> Option<Digest> {
         let e_node = &program[node_idx];
 
         // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
@@ -344,8 +322,7 @@ impl RuntimeCache {
         let mut hasher = DigestHasher::new();
         hasher
             .write_bytes(DOMAIN)
-            .write_pod(e_node.func_id.as_u128())
-            .write_pod(e_node.version);
+            .write_pod(e_node.func_id.as_u128());
 
         let outputs = &program.outputs[e_node.outputs];
         hasher.write_pod(outputs.len() as u64);
@@ -445,13 +422,14 @@ impl RuntimeCache {
     /// which node it concerns.
     pub(crate) async fn prepare(
         &mut self,
+        program: &CompiledGraph,
         executing: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) {
         // A fresh run identifies afresh.
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
-        let _ = self.identify(executing, cancel).await;
+        let _ = self.identify(program, executing, cancel).await;
     }
 
     /// Identify every path `nodes` reads, in one off-thread pass: queue, then
@@ -459,23 +437,19 @@ impl RuntimeCache {
     /// one.
     async fn identify(
         &mut self,
+        program: &CompiledGraph,
         nodes: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) -> Result<(), StampError> {
         for node_idx in nodes {
-            self.request_node_paths(node_idx);
+            self.request_node_paths(program, node_idx);
         }
         self.walk_queued(cancel).await
     }
 
     /// Queue the paths `node_idx` reads, on top of whatever is already queued,
     /// skipping any this run already identified.
-    fn request_node_paths(&mut self, node_idx: NodeIdx) {
-        let program = &self
-            .aligned_to
-            .as_deref()
-            .expect("resource preparation requires an installed compiled graph")
-            .program;
+    fn request_node_paths(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
         let e_node = &program[node_idx];
         if e_node.behavior != FuncBehavior::Pure {
             return;
@@ -542,23 +516,22 @@ impl RuntimeCache {
     /// rather than a run-wide abort blaming nobody.
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
+        program: &CompiledGraph,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         contexts: &mut ContextStore,
         cancel: CancelToken,
     ) -> Result<bool, StampError> {
-        self.identify(std::iter::once(node_idx), cancel).await?;
-        self.stamp_digest(node_idx);
-        Ok(self.hydrate_reuse(node_idx, demand, contexts).await)
+        self.identify(program, std::iter::once(node_idx), cancel)
+            .await?;
+        self.stamp_digest(program, node_idx);
+        Ok(self
+            .hydrate_reuse(program, node_idx, demand, contexts)
+            .await)
     }
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
-    fn blob_target(&self, node_idx: NodeIdx) -> Option<BlobTarget> {
-        let program = &self
-            .aligned_to
-            .as_deref()
-            .expect("blob lookup requires an installed compiled graph")
-            .program;
+    fn blob_target(&self, program: &CompiledGraph, node_idx: NodeIdx) -> Option<BlobTarget> {
         self.disk_store.blob_target(
             program.e_node_ids[node_idx],
             &program[node_idx],
@@ -580,8 +553,13 @@ impl RuntimeCache {
     /// Takes `&mut self` without mutating anything: the slots hold `Send`-but-not-`Sync`
     /// node state, so a *shared* cache borrow held across this await would make the whole
     /// worker future non-`Send`.
-    pub(crate) async fn probe_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) -> bool {
-        match self.reuse_source(node_idx, demand) {
+    pub(crate) async fn probe_reuse(
+        &mut self,
+        program: &CompiledGraph,
+        node_idx: NodeIdx,
+        demand: &[OutputDemand],
+    ) -> bool {
+        match self.reuse_source(program, node_idx, demand) {
             None => false,
             Some(ReuseSource::Resident) => true,
             Some(ReuseSource::Blob(target)) => self.disk_store.covers_demand(&target, demand).await,
@@ -590,11 +568,16 @@ impl RuntimeCache {
 
     /// Whether this node could be served without running it, and from where.
     /// Shared by the verdict and the load so neither derives its own target.
-    fn reuse_source(&self, node_idx: NodeIdx, demand: &[OutputDemand]) -> Option<ReuseSource> {
+    fn reuse_source(
+        &self,
+        program: &CompiledGraph,
+        node_idx: NodeIdx,
+        demand: &[OutputDemand],
+    ) -> Option<ReuseSource> {
         if self.is_resident_hit(node_idx, demand) {
             return Some(ReuseSource::Resident);
         }
-        self.blob_target(node_idx).map(ReuseSource::Blob)
+        self.blob_target(program, node_idx).map(ReuseSource::Blob)
     }
 
     /// [`probe_reuse`](Self::probe_reuse)'s verdict, but leaving the value readable by the
@@ -609,11 +592,12 @@ impl RuntimeCache {
     /// and recomputes.
     pub(crate) async fn hydrate_reuse(
         &mut self,
+        program: &CompiledGraph,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
     ) -> bool {
-        let target = match self.reuse_source(node_idx, demand) {
+        let target = match self.reuse_source(program, node_idx, demand) {
             None => return false,
             Some(ReuseSource::Resident) => return true,
             Some(ReuseSource::Blob(target)) => target,
@@ -638,13 +622,18 @@ impl RuntimeCache {
     /// digest must not be stamped with — and overwrite — the new digest's blob. In the run loop
     /// the just-stamped value is always a current hit; this guards maintenance flushes when a
     /// disk store is attached.
+    ///
+    /// `use<'a>` rather than a bare `+ 'a`: the program is read while resolving the target,
+    /// synchronously, so the future must not go on borrowing it — the default capture of
+    /// every in-scope lifetime would tie it to a program the caller is free to drop first.
     pub(crate) fn store_node<'a>(
         &'a self,
+        program: &CompiledGraph,
         node_idx: NodeIdx,
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
-    ) -> impl Future<Output = ()> + 'a {
-        let target = self.blob_target(node_idx);
+    ) -> impl Future<Output = ()> + use<'a> {
+        let target = self.blob_target(program, node_idx);
         let resident = self.slots[node_idx].current_snapshot();
         let disk = &self.disk_store;
         async move {
@@ -658,12 +647,7 @@ impl RuntimeCache {
     /// Release resident values that cannot be a future RAM hit under the installed program.
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.
-    pub(crate) fn release_dead_outputs(&mut self) {
-        let program = &self
-            .aligned_to
-            .as_deref()
-            .expect("cache release requires an installed compiled graph")
-            .program;
+    pub(crate) fn release_dead_outputs(&mut self, program: &CompiledGraph) {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let Some(resident_len) = self.slots[node_idx].output_values().map(<[_]>::len) else {
                 continue;
@@ -673,7 +657,7 @@ impl RuntimeCache {
             //
             // The digest is the only other thing keeping a snapshot
             // alive, and it does not have to move: a func that grows an
-            // output while keeping its id *and* version reuses the flat
+            // output while keeping its id reuses the flat
             // node, so `reown` sees no owner change and the stale
             // `produced_under` still equals the stale `current_digest`.
             // Both retention checks passed, and the mismatch surfaced
@@ -700,12 +684,17 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::internals::TestCompiledGraph;
+    use crate::execution::compiled::CompiledGraph;
     use crate::execution::identity::NodeIdx;
 
     impl RuntimeCache {
-        pub(crate) fn reconcile_for_test(&mut self, installed: &TestCompiledGraph) {
-            self.reconcile(installed.shared());
+        /// A first install of `program` — the production pairing without an
+        /// outgoing program to leave. Tests that reinstall name the outgoing one
+        /// themselves, through [`RuntimeCache::reconcile`], the way
+        /// [`ExecutionEngine::install`](crate::execution::engine::ExecutionEngine)
+        /// does.
+        pub(crate) fn install_for_test(&mut self, program: &CompiledGraph) {
+            self.reconcile(None, program);
         }
 
         /// The attached store, for the tests that read its I/O counters or
@@ -718,8 +707,8 @@ pub(crate) mod internals {
         /// pass, without the blocking pool a test has no runtime to reach. A
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
-        pub(crate) fn prepare_node_blocking(&mut self, node_idx: NodeIdx) {
-            self.request_node_paths(node_idx);
+        pub(crate) fn prepare_node_blocking(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
+            self.request_node_paths(program, node_idx);
             let _ = self.stamp_queued(&CancelToken::never());
         }
 
