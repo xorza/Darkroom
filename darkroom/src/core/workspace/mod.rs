@@ -50,10 +50,7 @@ pub(crate) struct Workspace {
 }
 
 impl Workspace {
-    pub(crate) fn new(
-        wake: Wake,
-        preferences: &mut Preferences,
-    ) -> Self {
+    pub(crate) fn new(wake: Wake, preferences: &mut Preferences) -> Self {
         let mut status = StatusLog::default();
         let open = load_preferred_document(preferences, &mut status);
         let mut runtime = RuntimeHost::new(wake, preferences, status);

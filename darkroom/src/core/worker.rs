@@ -1,4 +1,4 @@
-//! The bridge between a frontend's `RuntimeHost` and the headless
+//! The bridge between the editor's `RuntimeHost` and the background
 //! graph-evaluation `Worker` (`scenarium::worker`). The worker runs on its
 //! own tokio runtime; this type owns that runtime, the worker handle, and a
 //! sync channel the worker's callback posts results onto. The host loop

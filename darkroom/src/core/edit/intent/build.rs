@@ -21,9 +21,8 @@ use crate::core::edit::intent::validate;
 /// establishes the full precondition set its `apply` half assumes: an `Ok`
 /// result is a proof that applying the step trips no assert on the way and
 /// leaves the document passing [`Document::validate`]. Widgets only ever
-/// violate the staleness half — they read the identities they emit out of
-/// the live document — but a script's decoded payload reaches this same
-/// entry with arbitrary contents.
+/// violate the staleness half, since they read the identities they emit out
+/// of the live document; anything else reaching here is a bug.
 ///
 /// [`Refusal::Quiet`] covers what a gesture spanning frames does normally:
 /// the anchor node vanished, or the edit is refused by design.
@@ -136,9 +135,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
         Intent::SetInput { input, to } => {
             validate::live_node(graph, input.node_id, "SetInput destination")?;
             if let Some(Binding::Bind(src)) = &to {
-                // A wire held across frames can outlive its producer, and a
-                // script can name one that was never there; either way the
-                // bind would leave the graph with a dangling edge.
+                // A wire held across frames can outlive its producer, and
+                // the bind would leave the graph with a dangling edge.
                 validate::live_node(graph, src.node_id, "SetInput producer")?;
                 // Reject a bind that would close a data cycle: the planner
                 // rejects a cyclic graph outright (`Error::CycleDetected`), so
@@ -158,10 +156,9 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
         Intent::SetSelection { to } => GraphStep::SetSelection {
             from: view.selected.clone(),
             // The rubber band snapshots identities when the drag starts, so
-            // an interleaved undo can remove one before release; a script can
-            // name an item that never existed. Keep the members that still
-            // have a widget rather than recording a selection the view
-            // can't render.
+            // an interleaved undo can remove one before release. Keep the
+            // members that still have a widget rather than recording a
+            // selection the view can't render.
             to: to
                 .into_iter()
                 .filter(|key| view.item_placements.contains_key(key))
