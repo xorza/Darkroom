@@ -13,7 +13,6 @@ use crate::gui::canvas::GraphUI;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
 
 /// One func with an input and an output, so a node projected from it
@@ -77,9 +76,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -88,23 +86,22 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        scene.rebuild(ui, &library, &run_state, doc);
-        let graph = scene.pane(doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
+        graph_ui.prepass(ui, doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, doc, &mut intents);
             });
     };
-    let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &_| {
-        harness.frame(|ui| draw(ui, graph_ui, scene, doc));
+    let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, doc: &_| {
+        harness.frame(|ui| draw(ui, graph_ui, doc));
     };
 
     // Both on screen and recorded, so every glyph has a fresh offset cached.
-    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
-    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
+    frame(&mut harness, &mut graph_ui, &doc);
+    frame(&mut harness, &mut graph_ui, &doc);
     let out_port = PortRef {
         node_id: leaves,
         kind: PortKind::Output,
@@ -121,8 +118,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let before = doc.main_view.item_placements[&leaves];
     let shift = Vec2::new(6000.0, 4000.0);
     doc.main_view.item_placements[&leaves] = before + shift;
-    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
-    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
+    frame(&mut harness, &mut graph_ui, &doc);
+    frame(&mut harness, &mut graph_ui, &doc);
 
     let culled = graph_ui
         .geometry
@@ -139,8 +136,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let live = scene.pane(&doc).expect("projected");
     for id in [stays, leaves] {
+        let live = graph_ui.pane(&doc);
         assert!(
             graph_ui
                 .geometry
@@ -151,7 +148,10 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     }
 
     // Now say the document dropped it. Its entries go; its neighbour's stay.
+    // The pane is re-derived after the eviction: it borrows the projection the
+    // canvas owns, so it cannot be held across a `&mut` call on one.
     graph_ui.retain_nodes(|id| id == stays);
+    let live = graph_ui.pane(&doc);
     assert!(
         graph_ui
             .geometry
@@ -168,7 +168,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     );
     // The port offsets went with it, so the next culled rebuild has nothing
     // left to reconstruct from.
-    frame(&mut harness, &mut graph_ui, &mut scene, &doc);
+    frame(&mut harness, &mut graph_ui, &doc);
     assert_eq!(
         graph_ui.geometry.ports.center(out_port),
         None,
@@ -209,9 +209,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         let mut harness = UiHarness::with_text(UVec2::new(1200, 900));
         restyle(&mut harness.ui().theme);
         let mut graph_ui = GraphUI::default();
-        let mut scene = Scene::default();
 
-        let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+        let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
             let ctx = AppContext {
                 theme,
                 library: &library,
@@ -220,23 +219,22 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 process_memory: 0,
             };
             let mut intents = Intents::default();
-            scene.rebuild(ui, &library, &run_state, &doc);
-            let graph = scene.pane(&doc).expect("projected");
-            graph_ui.prepass(ui, graph, &library, &mut intents);
+            graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
+            graph_ui.prepass(ui, &doc, &library, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    graph_ui.draw(ui, &ctx, graph, &mut intents);
+                    graph_ui.draw(ui, &ctx, &doc, &mut intents);
                 });
         };
 
-        harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene));
+        harness.frame(|ui| draw(ui, &mut graph_ui));
         // Right-click on empty canvas opens the palette; give it two frames so
         // the search field has measured and the cap reads its real height.
         harness.right_click_at(Vec2::new(500.0, 400.0));
-        harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene));
-        harness.frame(|ui| draw(ui, &mut graph_ui, &mut scene));
+        harness.frame(|ui| draw(ui, &mut graph_ui));
+        harness.frame(|ui| draw(ui, &mut graph_ui));
 
         // The same cap `NewNodeUi::apply` resolves, against this harness's
         // 900 px surface.
@@ -346,9 +344,8 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -357,22 +354,21 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, scene.pane(&doc));
-        scene.rebuild(ui, &library, &run_state, &doc);
-        let graph = scene.pane(&doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.scan_hits(ui, &doc);
+        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
+        graph_ui.prepass(ui, &doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, &doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
 
     for _ in 0..2 {
         harness.frame(|ui| {
-            draw(ui, &mut graph_ui, &mut scene);
+            draw(ui, &mut graph_ui);
         });
     }
 
@@ -380,20 +376,20 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     let empty = Vec2::new(20.0, 400.0);
     harness.press_at(empty);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.drag_to(Vec2::new(700.0, 60.0));
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.key(Key::Escape);
-    let cancelled = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let cancelled = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     assert!(
         cancelled.is_empty(),
         "a cancelled band commits nothing: {cancelled:?}"
     );
     harness.release_button(palantir::PointerButton::Left);
-    let after = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let after = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     assert!(
         after.is_empty(),
         "and the release of a cancelled band commits nothing either: {after:?}"
@@ -406,14 +402,14 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     // empty patch well below them.
     harness.press_at(empty);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.drag_to(Vec2::new(150.0, 100.0));
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.release_button(palantir::PointerButton::Left);
-    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     let intents = graph_intents(&emitted);
     assert!(
         matches!(
@@ -458,11 +454,10 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
     // `doc` is a parameter, not a capture, so it can be edited between frames
     // the way an undo would edit the document under a running gesture.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -471,23 +466,22 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        scene.rebuild(ui, &library, &run_state, doc);
-        let graph = scene.pane(doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
+        graph_ui.prepass(ui, doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
 
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     let body = harness
         .rect(node_widget_id(node))
@@ -501,7 +495,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // nowhere near the node, so nothing is marked.
     harness.press_button_at(PointerButton::Right, SCRIBBLE_FROM);
     harness.drag_to(SCRIBBLE_TO);
-    let scribbling = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    let scribbling = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
     assert!(
         scribbling.is_empty(),
         "a scribble in flight severs nothing until release: {scribbling:?}"
@@ -512,11 +506,11 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // is back there — the divergence the probe has to resolve the new way.
     doc.main_view.item_placements[&node] = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
 
     harness.release_button(PointerButton::Right);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
     // The helper carries the pane assertion: a cut commits against the pane
     // the scribble ran on.
     let released = graph_intents(&released);
@@ -549,9 +543,8 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1600, 900));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -562,15 +555,14 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
         let mut intents = Intents::default();
         // Navigation phase first — see the two-pane test for why the sweep
         // reads the pre-rebuild scene.
-        graph_ui.hits.scan(ui, scene.pane(&doc));
-        scene.rebuild(ui, &library, &run_state, &doc);
-        let graph = scene.pane(&doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.scan_hits(ui, &doc);
+        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
+        graph_ui.prepass(ui, &doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, &doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -578,15 +570,15 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     // Two frames so every node body has recorded and carries a hit-testable
     // rect for the clicks below.
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
 
     let on_func = harness.center_of(node_widget_id(func));
     harness.right_click_at(on_func);
-    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     let intents = graph_intents(&emitted);
     assert!(
         matches!(
@@ -621,9 +613,8 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -632,22 +623,21 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.hits.scan(ui, scene.pane(&doc));
-        scene.rebuild(ui, &library, &run_state, &doc);
-        let graph = scene.pane(&doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.scan_hits(ui, &doc);
+        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
+        graph_ui.prepass(ui, &doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, &doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
 
     for _ in 0..2 {
         harness.frame(|ui| {
-            draw(ui, &mut graph_ui, &mut scene);
+            draw(ui, &mut graph_ui);
         });
     }
 
@@ -656,16 +646,16 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let grab = harness.center_of(node_widget_id(dragged));
     harness.press_at(grab);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     let travel = Vec2::new(37.0, -21.0);
     harness.drag_to(grab + travel);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
 
     // Next frame, `NodeUI::prepass` advances the anchor the record latched.
-    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     let intents = graph_intents(&emitted);
     let moves = intents
         .iter()
@@ -716,11 +706,10 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     let run_state = RunState::default();
     let mut harness = UiHarness::new(UVec2::new(1200, 800));
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
 
     // `doc` is a parameter, not a capture, so the graph can gain the edge the
     // first drag commits before the second one runs against it.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene, doc: &Document| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -729,14 +718,13 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        scene.rebuild(ui, &library, &run_state, doc);
-        let graph = scene.pane(doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
+        graph_ui.prepass(ui, doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -744,10 +732,10 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // Two frames to record both nodes, so their port circles have widget ids
     // and `CanvasGeometry` measured centers to hit-test against.
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
 
     let source = port_circle_wid(PortRef {
@@ -765,17 +753,17 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
 
     harness.press_on(source);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.drag_to(drop_at);
-    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
     assert!(
         held.is_empty(),
         "a wire still held commits nothing: {held:?}"
     );
 
     harness.release_button(PointerButton::Left);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
 
     // The helper carries the pane assertion: a wire commits against the pane
     // holding its start node, never the focused one.
@@ -811,18 +799,18 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     });
     let back_drop_at = harness.center_of(back_sink);
     harness.advance_past_double_click(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.press_on(back_source);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.drag_to(back_drop_at);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene, &doc);
+        draw(ui, &mut graph_ui, &doc);
     });
     harness.release_button(PointerButton::Left);
-    let refused = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene, &doc));
+    let refused = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
     assert!(
         refused.is_empty(),
         "a drop that would close a cycle never snaps, so it binds nothing: {refused:?}"
@@ -857,7 +845,6 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     let theme = Theme::default();
     let run_state = RunState::default();
     let mut graph_ui = GraphUI::default();
-    let mut scene = Scene::default();
     let out_port = PortRef {
         node_id: producer,
         kind: PortKind::Output,
@@ -867,7 +854,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     // One frame to record the node so its output circle has a widget id and
     // `CanvasGeometry` a measured center; the gesture refuses an unmeasured
     // port outright.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, scene: &mut Scene| {
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
         let ctx = AppContext {
             theme: &theme,
             library: &library,
@@ -876,23 +863,22 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        scene.rebuild(ui, &library, &run_state, &doc);
-        let graph = scene.pane(&doc).expect("projected");
-        graph_ui.prepass(ui, graph, &library, &mut intents);
+        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
+        graph_ui.prepass(ui, &doc, &library, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph, &mut intents);
+                graph_ui.draw(ui, &ctx, &doc, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
 
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
 
     // Ctrl held, press on the output circle, then drag: the press frame is
@@ -904,7 +890,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     let circle = port_circle_wid(out_port);
     harness.press_on(circle);
     harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &mut scene);
+        draw(ui, &mut graph_ui);
     });
     // `first_drag_started` polls the *drag* edge, not the press, so the
     // pointer has to actually move past palantir's threshold.
@@ -915,7 +901,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         .expect("recorded")
         .center();
     harness.drag_to(from + Vec2::new(90.0, 40.0));
-    let spawned = harness.frame_value(|ui| draw(ui, &mut graph_ui, &mut scene));
+    let spawned = harness.frame_value(|ui| draw(ui, &mut graph_ui));
     harness.set_modifiers(Modifiers::default());
     harness.release_button(PointerButton::Left);
 

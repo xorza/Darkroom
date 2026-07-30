@@ -1,6 +1,6 @@
-//! Editor-side [`Intent::DuplicateNodes`] construction from a selection, and
-//! the [`Intent`]s that remove one. Kept here rather than on `Document` —
-//! that's the persisted model; intent construction is editing machinery.
+//! Editor-side [`Intent::DuplicateNodes`] construction from a selection. Kept
+//! here rather than on `Document` — that's the persisted model; intent
+//! construction is editing machinery.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -121,15 +121,6 @@ pub(crate) fn build_duplicate_intent_for(
         bindings,
         subscriptions,
     })
-}
-
-/// The intents that remove every member of `selected`. Shared by the
-/// Delete/Backspace shortcut and the node context menu's "Remove".
-pub(crate) fn remove_selection_intents(selected: &BTreeSet<NodeId>) -> Vec<Intent> {
-    selected
-        .iter()
-        .map(|&node_id| Intent::RemoveNode { node_id })
-        .collect()
 }
 
 #[cfg(test)]

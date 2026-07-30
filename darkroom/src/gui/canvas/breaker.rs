@@ -298,9 +298,7 @@ impl BreakerUI {
             }
             (Some(b), None) => {
                 let doomed_nodes = std::mem::take(&mut b.broken_nodes);
-                for &node_id in &doomed_nodes {
-                    out.push(Intent::RemoveNode { node_id });
-                }
+                out.push_node_removals(doomed_nodes.iter().copied());
                 for addr in b.broken.drain(..) {
                     if doomed_nodes.contains(&addr.node_id) {
                         continue;

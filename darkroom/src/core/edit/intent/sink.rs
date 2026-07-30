@@ -1,6 +1,8 @@
 //! The frame's pending mutations, each tagged with the graph it commits
 //! against.
 
+use scenarium::NodeId;
+
 use crate::core::document::dock::DockOp;
 use crate::core::edit::intent::types::Intent;
 
@@ -30,6 +32,22 @@ impl Intents {
     /// Queue every intent `iter` yields.
     pub(crate) fn extend(&mut self, iter: impl IntoIterator<Item = Intent>) {
         self.items.extend(iter.into_iter().map(Queued::Scoped));
+    }
+
+    /// Queue the removal of every node `nodes` yields — one
+    /// [`Intent::RemoveNode`] each, which `drain_intents` batches into a
+    /// single undo entry. Shared by the Delete/Backspace chord, the node
+    /// context menu's "Remove", and the breaker's multi-delete.
+    ///
+    /// Takes an iterator rather than a slice because the selection-driven
+    /// callers hold a `BTreeSet` and the breaker a `Vec`; a slice would make
+    /// the first two allocate one just to call this.
+    pub(crate) fn push_node_removals(&mut self, nodes: impl IntoIterator<Item = NodeId>) {
+        self.extend(
+            nodes
+                .into_iter()
+                .map(|node_id| Intent::RemoveNode { node_id }),
+        );
     }
 
     /// Queue a mutation of the dock layout, raised from chrome that is not a
