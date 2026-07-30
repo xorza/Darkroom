@@ -728,6 +728,53 @@ mod tests {
         TabRef::Graph
     }
 
+    /// A refused close leaves the layout alone: the graph pane is never
+    /// closable, and a tab that isn't open anywhere resolves to nothing.
+    #[test]
+    fn close_is_dropped_for_the_graph_pane_or_a_tab_that_is_not_open() {
+        let mut layout = seeded();
+        let before = layout.clone();
+
+        layout.apply(DockOp::CloseTab { tab: main_tab() });
+        layout.apply(DockOp::CloseTab { tab: viewer(99) });
+
+        assert_eq!(layout, before, "neither op removed a tab");
+    }
+
+    /// The invariant the dock's whole click path rests on. An op is built
+    /// from one frame's chip response and applied a phase later, with the
+    /// strip able to rearrange in between. Because ops name their *tab*
+    /// rather than its slot, the rearrangement can't redirect one onto
+    /// whatever slid into that slot.
+    #[test]
+    fn tab_ops_follow_their_tab_across_a_layout_change() {
+        let mut layout = seeded();
+        let primary = layout.primary().id;
+        assert_eq!(
+            layout.group(primary).unwrap().tabs,
+            [main_tab(), TabRef::Preferences, viewer(1)]
+        );
+
+        // Built while the viewer sits at slot 2, applied after `Preferences`
+        // left and the viewer slid down to slot 1.
+        let close_viewer = DockOp::CloseTab { tab: viewer(1) };
+        layout.apply(DockOp::CloseTab {
+            tab: TabRef::Preferences,
+        });
+        assert_eq!(
+            layout.group(primary).unwrap().tabs,
+            [main_tab(), viewer(1)],
+            "the viewer moved to slot 1"
+        );
+
+        layout.apply(close_viewer);
+        assert_eq!(
+            layout.group(primary).unwrap().tabs,
+            [main_tab()],
+            "the op closed the viewer, not whatever now occupies slot 2"
+        );
+    }
+
     /// Default layout + `Preferences` and one viewer tab in the primary
     /// group.
     fn seeded() -> DockLayout {

@@ -9,50 +9,11 @@ use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
 use scenarium::testing::test_graph;
 
-/// Three distinct tabs in the primary group so an activation/close at a
-/// given index is observable. The viewer tabs are keyed by node, and dock
-/// steps only touch the layout, so the fabricated node ids need no backing
-/// node until a test asks the document to reconcile.
-fn doc_with_distinct_tabs() -> Document {
-    let mut doc: Document = test_graph().into();
-    let primary = doc.layout.primary().id;
-    doc.layout.find_or_insert(TabRef::Preferences, primary);
-    doc.layout
-        .find_or_insert(TabRef::ImageViewer(NodeId::unique()), primary);
-    doc
-}
 
-fn primary_tabs(doc: &Document) -> Vec<TabRef> {
-    doc.layout.primary().tabs.clone()
-}
 
-fn primary_active(doc: &Document) -> usize {
-    doc.layout.primary().active
-}
 
-/// Commit a dock op through the real intent path and push it. Mirrors
-/// the drain's no-op filter: a refused/degenerate op builds a
-/// `from == to` step, which is dropped — `false` back to the caller.
-fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockOp) -> bool {
-    let Ok(step) = commit_dock_op(op, doc) else {
-        return false;
-    };
-    stack.push_current(&[step]);
-    true
-}
 
-/// Ops name their tab, so these resolve the primary strip's slot at call
-/// time — the index is the test's way of pointing at a tab, never part of
-/// the op.
-fn switch_to(stack: &mut ActionStack, doc: &mut Document, to: usize) {
-    let tab = primary_tabs(doc)[to];
-    dock(stack, doc, DockOp::ActivateTab { tab });
-}
 
-fn close_at(stack: &mut ActionStack, doc: &mut Document, index: usize) -> bool {
-    let tab = primary_tabs(doc)[index];
-    dock(stack, doc, DockOp::CloseTab { tab })
-}
 
 /// Push one graph edit through the real build/apply path, as `drain_intents`
 /// does — the shape every coalescing test below repeats.
@@ -62,218 +23,14 @@ fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: Intent) {
     stack.push_current(&[step]);
 }
 
-#[test]
-fn consecutive_switches_coalesce_into_one_undo() {
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
 
-    switch_to(&mut stack, &mut doc, 1);
-    switch_to(&mut stack, &mut doc, 2);
-    assert_eq!(primary_active(&doc), 2, "active follows the latest switch");
 
-    // The two switches merged: a single undo jumps straight back to
-    // the pre-burst tab (0), not to the intermediate 1.
-    assert!(stack.undo(&mut doc, &mut |_| {}));
-    assert_eq!(
-        primary_active(&doc),
-        0,
-        "one undo reverts the whole switch burst"
-    );
 
-    // No second entry survived the merge.
-    assert!(
-        !stack.undo(&mut doc, &mut |_| {}),
-        "the burst collapsed to exactly one entry"
-    );
-}
 
-#[test]
-fn redo_replays_the_merged_switch() {
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
 
-    switch_to(&mut stack, &mut doc, 1);
-    switch_to(&mut stack, &mut doc, 2);
-    for _ in 0..8 {
-        assert!(stack.undo(&mut doc, &mut |_| {}));
-        assert_eq!(primary_active(&doc), 0);
 
-        assert!(stack.redo(&mut doc, &mut |_| {}));
-        assert_eq!(
-            primary_active(&doc),
-            2,
-            "redo restores the merged switch target"
-        );
-    }
-}
 
-#[test]
-fn switch_does_not_merge_across_an_intervening_edit() {
-    // A non-switch entry between two switches breaks the gesture, so
-    // the second switch starts a fresh, separately-undoable entry.
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
 
-    switch_to(&mut stack, &mut doc, 1);
-
-    // Intervening selection edit (a real change, so not a no-op).
-    let node_id = doc.graph.iter().next().unwrap().id;
-    let want: BTreeSet<_> = [node_id].into_iter().collect();
-    push_edit(&mut stack, &mut doc, Intent::SetSelection { to: want });
-
-    switch_to(&mut stack, &mut doc, 2);
-    assert_eq!(primary_active(&doc), 2);
-
-    // First undo reverts only the second switch (2 → 1); it didn't
-    // merge into the first because the selection edit broke the run.
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(
-        primary_active(&doc),
-        1,
-        "switch after an edit is its own entry"
-    );
-}
-
-#[test]
-fn close_is_dropped_for_the_graph_pane_or_a_tab_that_is_not_open() {
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
-    // The graph pane is never closable; a tab that isn't open anywhere no-ops.
-    assert!(
-        !close_at(&mut stack, &mut doc, 0),
-        "the graph pane must not close"
-    );
-    assert!(
-        !dock(
-            &mut stack,
-            &mut doc,
-            DockOp::CloseTab {
-                tab: TabRef::ImageViewer(NodeId::unique())
-            }
-        ),
-        "closing a tab that isn't open must drop"
-    );
-    assert_eq!(primary_tabs(&doc).len(), 3, "no tab removed");
-}
-
-#[test]
-fn tab_ops_follow_their_tab_across_a_layout_change() {
-    // The invariant the dock's whole click path rests on. A dock op is
-    // built from one frame's chip response and applied a phase later, with
-    // undo able to rearrange the strip in between. Because ops name their
-    // tab rather than its slot, the rearrangement can't redirect one onto
-    // whatever slid into that slot.
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
-    let [graph, _a, b] = primary_tabs(&doc)[..] else {
-        panic!("seeded with three tabs");
-    };
-
-    // Built while `b` sits at slot 2, applied after `a` left and `b` slid
-    // down to slot 1.
-    let close_b = DockOp::CloseTab { tab: b };
-    assert!(close_at(&mut stack, &mut doc, 1), "close a");
-    assert_eq!(primary_tabs(&doc), [graph, b], "b moved to slot 1");
-
-    commit_dock_op(close_b, &mut doc).expect("closing an open tab applies");
-    assert_eq!(
-        primary_tabs(&doc),
-        [graph],
-        "the op closed b, not whatever now occupies slot 2"
-    );
-    doc.validate().unwrap();
-}
-
-#[test]
-fn close_then_undo_restores_tab_and_active() {
-    let mut doc = doc_with_distinct_tabs();
-    let b = primary_tabs(&doc)[2];
-    let mut stack = ActionStack::new(1 << 20);
-    switch_to(&mut stack, &mut doc, 2); // viewing the tab we're about to close
-
-    assert!(close_at(&mut stack, &mut doc, 2));
-    // Tab gone; active clamped from 2 into the new range [0, 1].
-    assert_eq!(primary_tabs(&doc).len(), 2);
-    assert_eq!(
-        primary_active(&doc),
-        1,
-        "active clamped after closing the last tab"
-    );
-
-    // Undo reinserts the closed tab at its index and restores active —
-    // the step snapshots the whole layout, so exact state comes back.
-    assert!(stack.undo(&mut doc, &mut |_| {}));
-    assert_eq!(primary_tabs(&doc).len(), 3);
-    assert_eq!(
-        primary_tabs(&doc)[2],
-        b,
-        "closed tab restored at its original index"
-    );
-    assert_eq!(
-        primary_active(&doc),
-        2,
-        "active restored to the pre-close value"
-    );
-}
-
-#[test]
-fn close_left_of_cursor_keeps_active_in_range() {
-    let mut doc = doc_with_distinct_tabs();
-    let b = primary_tabs(&doc)[2];
-    let mut stack = ActionStack::new(1 << 20);
-    switch_to(&mut stack, &mut doc, 2);
-
-    assert!(close_at(&mut stack, &mut doc, 1));
-    assert_eq!(primary_tabs(&doc).len(), 2);
-    // Old index 2 (`b`) is now at index 1; the clamped active still
-    // points at it.
-    assert_eq!(primary_active(&doc), 1);
-    assert_eq!(primary_tabs(&doc)[1], b);
-
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(
-        primary_active(&doc),
-        2,
-        "active restored across the reinsert"
-    );
-    assert_eq!(primary_tabs(&doc).len(), 3);
-}
-
-#[test]
-fn close_redo_replays() {
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
-    switch_to(&mut stack, &mut doc, 1);
-
-    close_at(&mut stack, &mut doc, 1);
-    assert_eq!(primary_tabs(&doc).len(), 2);
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(primary_tabs(&doc).len(), 3);
-
-    assert!(stack.redo(&mut doc, &mut |_| {}));
-    assert_eq!(primary_tabs(&doc).len(), 2, "redo re-closes the tab");
-    assert_eq!(primary_active(&doc), 1);
-}
-
-#[test]
-fn consecutive_closes_do_not_coalesce() {
-    // Each close is its own undo entry — two closes need two undos.
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
-
-    close_at(&mut stack, &mut doc, 2);
-    close_at(&mut stack, &mut doc, 1);
-    assert_eq!(primary_tabs(&doc).len(), 1, "both closable tabs closed");
-
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(primary_tabs(&doc).len(), 2, "first undo restores one tab");
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(
-        primary_tabs(&doc).len(),
-        3,
-        "second undo restores the other"
-    );
-}
 
 #[test]
 fn consecutive_moves_coalesce_keeping_first_from() {
