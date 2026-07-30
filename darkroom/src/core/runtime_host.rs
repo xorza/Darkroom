@@ -1,8 +1,7 @@
-//! The runtime services shared by every frontend: the function library,
-//! the evaluation worker, and the scripting-over-TCP host. `App` (GUI) and
-//! `TerminalSession` (tui/headless) share one through a `Workspace` and add
-//! frontend orchestration on top, so worker/script construction and the
-//! drain/run primitives live here once instead of in both shells.
+//! The runtime services behind the editor: the function library and the
+//! evaluation worker. `App` reaches one through a `Workspace` and adds the
+//! frontend orchestration on top, so worker construction and the drain/run
+//! primitives live here rather than in the shell.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,7 +15,6 @@ use scenarium::{Graph, NodeId};
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerBridge;
@@ -35,35 +33,24 @@ pub(crate) struct RuntimeHost {
     compiler: Compiler,
     /// The shared user-facing outcome log: compile failures report here
     /// (from [`Self::compile`]); frontends add their own outcomes (run
-    /// results, file ops) and render it — the TUI as a rolling history, the
-    /// GUI as the sticky error slot in the status bar.
+    /// results, file ops) and renders it as the sticky error slot in the
+    /// status bar.
     pub(crate) status: StatusLog,
-    /// `Some` only when `--script-tcp` bound a listener.
-    script: Option<ScriptHost>,
 }
 
 impl RuntimeHost {
-    /// Assemble the func library, spin up the evaluation worker, and start
-    /// the script host (a no-op `None`
-    /// unless `script_cfg` enabled a listener). The worker + script host are
-    /// both woken through `wake`.
-    pub(crate) fn new(
-        script_cfg: &ScriptConfig,
-        wake: Wake,
-        preferences: &Preferences,
-        status: StatusLog,
-    ) -> Self {
+    /// Assemble the func library and spin up the evaluation worker, which is
+    /// woken through `wake`.
+    pub(crate) fn new(wake: Wake, preferences: &Preferences, status: StatusLog) -> Self {
         let model_paths = (&preferences.ml_models).into();
         let library = RuntimeLibrary::new(&model_paths);
-        let worker = WorkerBridge::new(wake.clone());
-        let script = ScriptHost::start(script_cfg, library.published.clone(), wake);
+        let worker = WorkerBridge::new(wake);
         let host = Self {
             library,
             worker,
             disk_root: None,
             compiler: Compiler::default(),
             status,
-            script,
         };
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
@@ -207,10 +194,9 @@ impl RuntimeHost {
 
     /// Non-blocking drain of worker results posted since the last frame.
     ///
-    /// Owned rather than an iterator, matching [`Self::drain_script`]: both
-    /// callers write back through `self` while handling a report, so a
-    /// borrowing iterator would have to be collected at every call site
-    /// anyway.
+    /// Owned rather than an iterator: the caller writes back through `self`
+    /// while handling a report, so a borrowing iterator would have to be
+    /// collected at the call site anyway.
     pub(crate) fn drain_worker(&self) -> Vec<WorkerReport> {
         self.worker.drain().collect()
     }
@@ -224,15 +210,6 @@ impl RuntimeHost {
     /// for its node, never a step in a sequence.
     pub(crate) fn drain_previews(&self) -> Vec<(ExecutionNodeId, DynamicValue)> {
         self.library.previews.drain()
-    }
-
-    /// Non-blocking drain of everything scripts have pushed since the last
-    /// frame (empty when no listener is running).
-    pub(crate) fn drain_script(&mut self) -> Vec<ScriptMessage> {
-        self.script
-            .as_mut()
-            .map(ScriptHost::drain)
-            .unwrap_or_default()
     }
 }
 

@@ -47,10 +47,10 @@ impl UndoStep {
             // input to node measure, so every cached offset survives. A ratio
             // nudge is even less than that — `Splitter` lays out at the live
             // pointer ratio and writes back only the arranged one, so Pass A
-            // already drew what this step is persisting. A dock op that swaps
-            // the active graph is covered by `Editor::sync_target`, which
-            // handles the never-yet-shown graph the cache can't have entries
-            // for.
+            // already drew what this step is persisting. A dock op that
+            // reveals the canvas is covered by `GraphUI::sync_visibility`,
+            // which handles the never-yet-recorded canvas the cache can't
+            // have entries for.
             UndoStep::Dock(_) => false,
             UndoStep::Graph(g) => match g {
             // A fresh node has no cached port offsets, so its wires have
