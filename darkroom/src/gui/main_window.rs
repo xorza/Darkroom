@@ -18,7 +18,7 @@ use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::preferences_view;
-use crate::gui::scene::Frame;
+use crate::gui::run_state::RunState;
 use crate::gui::status_bar;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
@@ -76,14 +76,14 @@ impl MainWindow {
     pub(crate) fn scan_navigation(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        doc: &Document,
         actions: &mut Vec<UiAction>,
     ) {
-        self.dock.scan(ui, frame.doc, actions);
+        self.dock.scan(ui, doc, actions);
         // One sweep of last frame's node responses, before anything reads
         // one: the canvas's own passes read it later in the frame, and the
         // two chip opens below are why it has to happen this early.
-        self.graph_ui.hits.scan(ui, frame);
+        self.graph_ui.scan_hits(ui, doc);
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
@@ -95,18 +95,38 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        doc: &Document,
         library: &Library,
+        run_state: &RunState,
         out: &mut Intents,
     ) {
-        self.graph_ui.prepass(ui, frame, library, out);
+        // Rebuild the canvas's projection for this frame, before anything
+        // reads it. Unconditional, and outside the loop below: it must run
+        // even with no graph pane up, because the projection's names are
+        // handles into *this* record pass's text arena and rebuilding is what
+        // lets the previous pass's be recycled (see `Scene::rebuild`).
+        //
+        // Placed here rather than gated on the dirty flag because undo/redo
+        // replays steps onto the document during the caller's navigation
+        // phase; prepass and `CanvasGeometry` would otherwise read last
+        // frame's graph.
+        self.graph_ui.rebuild_scene(ui, library, run_state, doc);
+        for tab in doc.layout.active_tabs() {
+            match tab {
+                TabRef::Graph => self.graph_ui.prepass(ui, doc, library, out),
+                // Neither derives a document mutation from input: preferences
+                // edits go through their own widgets, and a viewer only
+                // navigates its own texture.
+                TabRef::Preferences | TabRef::ImageViewer(_) => {}
+            }
+        }
     }
 
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        frame: Frame<'_>,
+        doc: &Document,
         prefs: &mut Preferences,
         out: &mut Intents,
     ) -> Option<AppCommand> {
@@ -127,7 +147,6 @@ impl MainWindow {
         // and nothing signals a rename cheaply enough to cache against. The
         // cost is proportional to *open viewer tabs*, which is normally zero,
         // so it stays off the common path on its own.
-        let doc = frame.doc;
         let viewer_labels: HashMap<NodeId, String> = doc
             .viewer_nodes()
             .map(|node_id| (node_id, image_viewer::node_label(doc, node_id)))
@@ -159,23 +178,16 @@ impl MainWindow {
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph => {
-                        // A graph tab whose projection is missing means the
-                        // pane's graph died this frame; `reconcile_with_graph`
-                        // prunes the tab before the next one.
-                        let Some(graph) = frame.pane() else {
-                            return;
-                        };
                         // Overlay the run/cancel toggle on the canvas's
                         // top-left corner; it hit-tests above the canvas,
-                        // so a click on it never starts a pan. Every id
-                        // below is salted by `target`, so two graph panes
-                        // side by side never record the same widget twice.
+                        // so a click on it never starts a pan.
                         Panel::zstack()
                             .id_salt("graph_overlay")
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
-                                claim(&mut command, || graph_ui.draw(ui, ctx, graph, out));
+                                claim(&mut command, || graph_ui.draw(ui, ctx, doc, out));
                                 claim(&mut command, || {
+                                    let graph = graph_ui.pane(doc);
                                     graph_toolbar::show(ui, ctx, graph, &graph_ui.geometry, out)
                                 });
                             });
@@ -210,19 +222,12 @@ impl MainWindow {
         command
     }
 
-    /// Drop transient input bookkeeping (drag anchors, in-flight
-    /// connection) when the active tab changes so a gesture started on
-    /// one graph can't bleed into another. Keeps `CanvasGeometry`'s offset
-    /// cache so the newly-shown graph's connections render immediately.
-    pub(crate) fn reset_transient(&mut self) {
-        self.graph_ui.clear_gestures();
-    }
-
     /// Release the canvas's cached geometry for nodes the document has
-    /// stopped holding. Paired with the preview store's reconcile: both are
-    /// `NodeId`-keyed caches that outlive the scene on purpose, so both need
-    /// the document to tell them when an entry's subject is gone for good.
-    pub(crate) fn release_dead_nodes(&mut self, document: &Document) {
+    /// stopped holding. The counterpart to the preview store's reconcile:
+    /// both are `NodeId`-keyed caches that outlive the scene on purpose, so
+    /// both need the document to tell them when an entry's subject is gone for
+    /// good, and both run once a frame.
+    pub(crate) fn reconcile(&mut self, document: &Document) {
         self.graph_ui
             .retain_nodes(|node_id| document.holds_node(node_id));
     }

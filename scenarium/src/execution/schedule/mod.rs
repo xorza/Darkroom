@@ -25,7 +25,7 @@
 //! &mut RunSchedule ──plan──▶ Scheduled ──resolve──▶ Resolved ──▶ Executor::run
 //! ```
 //!
-//! Each handle carries the `Program` its columns are `NodeIdx`-aligned to, so the pair
+//! Each handle carries the `CompiledGraph` its columns are `NodeIdx`-aligned to, so the pair
 //! travels as one value instead of two arguments that could disagree. Executing an
 //! unresolved plan, resolving one twice, and resolving against a different program than
 //! you execute against all stop being mistakes the sequencing has to avoid and start
@@ -43,9 +43,9 @@ use ::common::is_debug;
 use crate::common::column::{Column, Idx};
 use crate::common::set::IdxSet;
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::{NodeIdx, OutputIdx};
-use crate::execution::program::{ExecutionBinding, ExecutionInput, Program};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
@@ -183,22 +183,75 @@ pub(crate) struct RunSchedule {
     /// planner writes the structural verdict; the sweep refines it in place.
     pub(crate) states: Column<NodeIdx, NodeState>,
     /// The nodes the backward walk started from — sinks, event subscribers,
-    /// event-trigger owners, and node seeds. The schedule's "must be available" set:
-    /// the sweep seeds liveness from these and prunes any cone reachable only through
-    /// cache-hit consumers (see [`Scheduled::resolve`]).
-    pub(crate) roots: IdxSet<NodeIdx>,
-    /// The node-seeded roots ("run to this node") — a subset of `roots`, carrying a
-    /// per-run seed with
-    /// no persisted counterpart. Every output is demanded from the lambda and delivered
-    /// to the host, while the node's cache mode remains the sole RAM-retention policy.
-    pub(crate) seeded: IdxSet<NodeIdx>,
-    /// Event-owning roots that must execute successfully to initialize the shared
-    /// state their event lambdas consume. Unlike ordinary roots, these bypass cache
-    /// reuse for the event-loop bootstrap run.
-    pub(crate) event_sources: IdxSet<NodeIdx>,
+    /// event-trigger owners, and node seeds — ascending. The schedule's "must be
+    /// available" set: the sweep seeds liveness from these and prunes any cone
+    /// reachable only through cache-hit consumers (see [`Scheduled::resolve`]).
+    ///
+    /// A list, because both readers walk it and neither asks whether a given
+    /// node is in it; what a root *is* is the column below.
+    ///
+    /// Private, unlike the columns above: the two root fields are one fact in
+    /// two records, and [`add_root`](Self::add_root) is what keeps them the same
+    /// fact. Reached from outside by [`roots`](Self::roots) and
+    /// [`root_flags`](Self::root_flags), which cannot write.
+    roots: Vec<NodeIdx>,
+    /// What each node is to this run's roots, aligned to the program's dense
+    /// node vector.
+    ///
+    /// One column rather than a set per property, because the properties are
+    /// not independent: a seeded node and an event source are *kinds of root*,
+    /// and holding them in sets of their own made "seeded ⊆ roots" a pair of
+    /// invariants to validate. Every bit is set through
+    /// [`add_root`](Self::add_root) from a [`RootFlags`] constant that already
+    /// carries [`RootFlags::PLAIN`], so a property off a root is not a state
+    /// this can reach — crate-wide, which the three `pub(crate)` sets this
+    /// replaced could not manage, any of them being insertable on its own.
+    root_flags: Column<NodeIdx, RootFlags>,
     /// Exact per-output demand and live reader counts, written by the sweep
     /// once the state column above is settled.
     pub(crate) outputs: ResolvedOutputs,
+}
+
+/// What one node is to a run's roots: whether the backward walk started from it
+/// at all, and which of the two properties a root can carry it has.
+///
+/// The named constants are the only way in, and each of them includes the root
+/// bit — which is what makes "a seeded node is a root" true by construction
+/// rather than by a check after the fact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RootFlags(u8);
+
+impl RootFlags {
+    /// A root with no property beyond being one — a sink, or an event subscriber.
+    pub(crate) const PLAIN: Self = Self(1 << 0);
+    /// A node-seeded root ("run to this node"), carrying a per-run seed with no
+    /// persisted counterpart. Every output is demanded from the lambda and
+    /// delivered to the host, and the seed overrides the node's `disabled` flag
+    /// for this run, while its cache mode remains the sole RAM-retention policy.
+    pub(crate) const SEEDED: Self = Self(Self::PLAIN.0 | 1 << 1);
+    /// An event-owning root that must execute successfully to initialize the
+    /// shared state its event lambdas consume. Unlike ordinary roots, these
+    /// bypass cache reuse for the event-loop bootstrap run.
+    pub(crate) const EVENT_SOURCE: Self = Self(Self::PLAIN.0 | 1 << 2);
+
+    pub(crate) fn is_root(self) -> bool {
+        self.0 & Self::PLAIN.0 != 0
+    }
+
+    pub(crate) fn is_seeded(self) -> bool {
+        self.0 & Self::SEEDED.0 == Self::SEEDED.0
+    }
+
+    pub(crate) fn is_event_source(self) -> bool {
+        self.0 & Self::EVENT_SOURCE.0 == Self::EVENT_SOURCE.0
+    }
+
+    /// Both sets of properties. A node reached twice by
+    /// [`collect_roots`](RunSchedule::collect_roots) — a sink that also owns a
+    /// subscribed event — keeps what each pass gave it.
+    fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
 }
 
 impl RunSchedule {
@@ -244,14 +297,37 @@ impl RunSchedule {
     /// Clear every column for a run over `program` — including the output half,
     /// so a schedule the sweep has not yet filled cannot be read as the previous
     /// run's demand.
-    pub(crate) fn reset_for_program(&mut self, program: &Program) {
+    pub(crate) fn reset_for_program(&mut self, program: &CompiledGraph) {
         self.process_order.clear();
         self.states
             .reset(program.e_nodes.len(), NodeState::default());
-        self.roots.reset(program.e_nodes.len());
-        self.seeded.reset(program.e_nodes.len());
-        self.event_sources.reset(program.e_nodes.len());
+        self.roots.clear();
+        self.root_flags
+            .reset(program.e_nodes.len(), RootFlags::default());
         self.outputs.reset(program.outputs.len());
+    }
+
+    /// The nodes the backward walk starts from, ascending.
+    pub(crate) fn roots(&self) -> &[NodeIdx] {
+        &self.roots
+    }
+
+    /// What one node is to this run's roots.
+    pub(crate) fn root_flags(&self, node_idx: NodeIdx) -> RootFlags {
+        self.root_flags[node_idx]
+    }
+
+    /// Record `node_idx` as a walk root carrying `flags`.
+    ///
+    /// The one way a root is added, so the list and the column cannot disagree:
+    /// the push happens exactly once per node, on the call that first marks it,
+    /// and a second call over the same node only unions in what it brings.
+    pub(crate) fn add_root(&mut self, node_idx: NodeIdx, flags: RootFlags) {
+        debug_assert!(flags.is_root(), "every root flag carries the root bit");
+        if !self.root_flags[node_idx].is_root() {
+            self.roots.push(node_idx);
+        }
+        self.root_flags[node_idx] = self.root_flags[node_idx].union(flags);
     }
 
     /// Collect the run's walk roots into `self.roots` — the seeds for both the backward
@@ -262,18 +338,17 @@ impl RunSchedule {
     /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
     /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
     /// node — the "when this event fires, re-run the whole graph" trigger.
-    fn collect_roots(&mut self, program: &Program, seeds: &RunSeeds) -> Result<()> {
-        // `reset_for_program` already cleared `roots`/`seeded`; this only pushes into them.
+    fn collect_roots(&mut self, program: &CompiledGraph, seeds: &RunSeeds) -> Result<()> {
+        // `reset_for_program` already emptied the list and the column; this only adds.
 
-        // Node seeds ("run to this node"): each exact execution node is a root and seeded so
-        // every output is computed. `seeded` also records the one-run disabled
-        // override. An id absent from the installed program is inconsistent caller state.
+        // Node seeds ("run to this node"): each exact execution node is a root, seeded so
+        // every output is computed and its `disabled` flag is overridden for this run. An
+        // id absent from the installed program is inconsistent caller state.
         for &e_node_id in &seeds.e_node_ids {
             let Some(&node_idx) = program.e_node_index.get(&e_node_id) else {
                 return Err(Error::NodeSeedNotFound { e_node_id });
             };
-            self.roots.insert(node_idx);
-            self.seeded.insert(node_idx);
+            self.add_root(node_idx, RootFlags::SEEDED);
         }
 
         // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
@@ -292,7 +367,7 @@ impl RunSchedule {
                 if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                     run_sinks = true;
                 } else {
-                    self.roots.insert(sub_idx);
+                    self.add_root(sub_idx, RootFlags::PLAIN);
                 }
             }
         }
@@ -308,17 +383,21 @@ impl RunSchedule {
                 continue;
             }
             if run_sinks && e_node.sink {
-                self.roots.insert(node_idx);
+                self.add_root(node_idx, RootFlags::PLAIN);
             }
             if seeds.event_sources
                 && program.events[e_node.events]
                     .iter()
                     .any(|event| !event.subscribers.is_empty())
             {
-                self.roots.insert(node_idx);
-                self.event_sources.insert(node_idx);
+                self.add_root(node_idx, RootFlags::EVENT_SOURCE);
             }
         }
+        // Ascending, which is the order the previous bitset yielded and so the
+        // order `process_order` was built in — a root list in the order the seeds
+        // happened to name would make an unchanged graph plan differently run to
+        // run. Deduplicated already, by `add_root` pushing once per node.
+        self.roots.sort_unstable();
         Ok(())
     }
 
@@ -326,7 +405,7 @@ impl RunSchedule {
     /// disabled dependencies may remain outside the order.
     pub(crate) fn validate(
         &self,
-        program: &Program,
+        program: &CompiledGraph,
     ) -> std::result::Result<(), RunScheduleValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
             return Err(RunScheduleValidationError::OrderTooLong);
@@ -338,13 +417,7 @@ impl RunSchedule {
         // pool rather than the node vector, hence the per-entry expectation.
         for (set, len, expected) in [
             ("states", self.states.len(), program.e_nodes.len()),
-            ("roots", self.roots.len(), program.e_nodes.len()),
-            ("seeded", self.seeded.len(), program.e_nodes.len()),
-            (
-                "event sources",
-                self.event_sources.len(),
-                program.e_nodes.len(),
-            ),
+            ("root flags", self.root_flags.len(), program.e_nodes.len()),
             (
                 "output demand",
                 self.outputs.demand.len(),
@@ -371,7 +444,7 @@ impl RunSchedule {
             let e_node_id = program.e_node_ids[node_idx];
             let inputs = program
                 .inputs
-                .get(e_node.inputs.range())
+                .get_span(e_node.inputs)
                 .ok_or(RunScheduleValidationError::InputRange { e_node_id })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
@@ -414,26 +487,15 @@ impl RunSchedule {
             }
         }
 
-        // A set bit in the last word's padding survives a release-build
-        // out-of-range `insert`, so an iterated index is checked like any other.
-        for node_idx in self.seeded.iter() {
+        // A root the sweep would index the state and flag columns with. Nothing
+        // else about the roots is checked, and nothing else needs to be: the list
+        // and the column are written only by [`add_root`], which pushes once per
+        // node and unions the flags, so they cannot disagree — and `RootFlags`
+        // cannot spell a property without the root bit, which is what the two
+        // "seeded/event source is not a root" checks here used to establish.
+        for &node_idx in &self.roots {
             if node_idx.idx() >= program.e_nodes.len() {
                 return Err(RunScheduleValidationError::NodeOutOfRange { node_idx });
-            }
-            if !self.roots.contains(node_idx) {
-                return Err(RunScheduleValidationError::SeededNodeNotRoot {
-                    e_node_id: program.e_node_ids[node_idx],
-                });
-            }
-        }
-        for node_idx in self.event_sources.iter() {
-            if node_idx.idx() >= program.e_nodes.len() {
-                return Err(RunScheduleValidationError::NodeOutOfRange { node_idx });
-            }
-            if !self.roots.contains(node_idx) {
-                return Err(RunScheduleValidationError::EventSourceNotRoot {
-                    e_node_id: program.e_node_ids[node_idx],
-                });
             }
         }
 
@@ -441,7 +503,7 @@ impl RunSchedule {
     }
 
     /// Debug-only assert form of [`Self::validate`].
-    pub(crate) fn validate_debug(&self, program: &Program) {
+    pub(crate) fn validate_debug(&self, program: &CompiledGraph) {
         if !is_debug() {
             return;
         }
@@ -461,7 +523,7 @@ impl RunSchedule {
 /// by hand and the types did not police at all.
 #[derive(Debug)]
 pub(crate) struct Scheduled<'a> {
-    program: &'a Program,
+    program: &'a CompiledGraph,
     schedule: &'a mut RunSchedule,
 }
 
@@ -474,14 +536,14 @@ pub(crate) struct Scheduled<'a> {
 /// and the engine keeps one to name the same pair when it closes the run out.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Resolved<'a> {
-    program: &'a Program,
+    program: &'a CompiledGraph,
     schedule: &'a RunSchedule,
 }
 
 impl<'a> Scheduled<'a> {
     /// Issued by [`plan`](planner::Planner::plan) once it has filled `schedule` for
     /// `program`.
-    fn new(program: &'a Program, schedule: &'a mut RunSchedule) -> Self {
+    fn new(program: &'a CompiledGraph, schedule: &'a mut RunSchedule) -> Self {
         Scheduled { program, schedule }
     }
 
@@ -520,7 +582,9 @@ impl<'a> Scheduled<'a> {
     /// reach time once its producers have settled, possibly improving `Run` to a reuse.
     pub(crate) async fn resolve(self, cache: &mut RuntimeCache) -> Resolved<'a> {
         let Scheduled { program, schedule } = self;
-        cache.stamp_digests(schedule.executing());
+        // The cache holds no program of its own, so every question below names
+        // the one this schedule was planned against — the handle's whole point.
+        cache.stamp_digests(program, schedule.executing());
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
         schedule.outputs.reset(program.outputs.len());
@@ -532,12 +596,11 @@ impl<'a> Scheduled<'a> {
             process_order,
             states,
             roots,
-            seeded,
-            event_sources,
+            root_flags,
             outputs,
         } = &mut *schedule;
 
-        for node_idx in roots.iter() {
+        for &node_idx in roots.iter() {
             // Only a root the planner cleared. Promoting a `Disabled` or
             // `MissingInputs` root would overwrite the verdict the run's
             // outcome reports it by — and claim a node the schedule may not
@@ -562,14 +625,13 @@ impl<'a> Scheduled<'a> {
             let output_range = e_node.outputs;
             // A node seed ("run to this node") demands every output the node has:
             // the host asked for the node itself, not for what a consumer reads.
-            if seeded.contains(node_idx) {
-                outputs
-                    .demand
-                    .slice_mut(output_range.range())
-                    .fill(OutputDemand::Produce);
+            if root_flags[node_idx].is_seeded() {
+                outputs.demand[output_range].fill(OutputDemand::Produce);
             }
-            let demand = outputs.demand.slice(output_range.range());
-            if !event_sources.contains(node_idx) && cache.probe_reuse(node_idx, demand).await {
+            let demand = &outputs.demand[output_range];
+            if !root_flags[node_idx].is_event_source()
+                && cache.probe_reuse(program, node_idx, demand).await
+            {
                 states[node_idx] = NodeState::Reuse;
                 continue;
             }
@@ -605,7 +667,7 @@ impl<'a> Scheduled<'a> {
 }
 
 impl<'a> Resolved<'a> {
-    pub(crate) fn program(&self) -> &'a Program {
+    pub(crate) fn program(&self) -> &'a CompiledGraph {
         self.program
     }
 
@@ -618,6 +680,43 @@ impl<'a> Resolved<'a> {
 pub(crate) mod internals {
     use super::*;
 
+    /// Root inspection and the one re-rooting a fixture needs. Production writes
+    /// roots only through [`collect_roots`](RunSchedule::collect_roots) and reads
+    /// them only as a list plus per-node flags, so these exist for the tests that
+    /// assert on one property at a time.
+    impl RunSchedule {
+        /// Drop every root, so a fixture built by another helper can name its own.
+        pub(crate) fn clear_roots(&mut self) {
+            self.roots.clear();
+            self.root_flags
+                .reset(self.states.len(), RootFlags::default());
+        }
+
+        /// The node-seeded roots, ascending — the old `seeded` set spelled out.
+        pub(crate) fn seeded_roots(&self) -> Vec<NodeIdx> {
+            self.roots_where(RootFlags::is_seeded)
+        }
+
+        /// The event-owning roots, ascending — the old `event_sources` set.
+        pub(crate) fn event_source_roots(&self) -> Vec<NodeIdx> {
+            self.roots_where(RootFlags::is_event_source)
+        }
+
+        fn roots_where(&self, property: fn(RootFlags) -> bool) -> Vec<NodeIdx> {
+            self.roots
+                .iter()
+                .copied()
+                .filter(|&node_idx| property(self.root_flags[node_idx]))
+                .collect()
+        }
+
+        /// The root-flag column, for the validation test that shrinks it out from
+        /// under the program it is supposed to span.
+        pub(crate) fn root_flags_mut(&mut self) -> &mut Column<NodeIdx, RootFlags> {
+            &mut self.root_flags
+        }
+    }
+
     /// The one way to mint a phase handle without the pass that would normally issue
     /// it, for fixtures that hand-build the columns a pass would have written — a
     /// sweep test starting from a schedule no planner produced, a run-loop test
@@ -626,13 +725,13 @@ pub(crate) mod internals {
     /// Test-only on purpose: the pairing each handle stands for is *asserted* here
     /// rather than established, which is exactly what production must never do.
     impl<'a> Scheduled<'a> {
-        pub(crate) fn assume(program: &'a Program, schedule: &'a mut RunSchedule) -> Self {
+        pub(crate) fn assume(program: &'a CompiledGraph, schedule: &'a mut RunSchedule) -> Self {
             Scheduled { program, schedule }
         }
     }
 
     impl<'a> Resolved<'a> {
-        pub(crate) fn assume(program: &'a Program, schedule: &'a RunSchedule) -> Self {
+        pub(crate) fn assume(program: &'a CompiledGraph, schedule: &'a RunSchedule) -> Self {
             Resolved { program, schedule }
         }
     }
