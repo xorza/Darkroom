@@ -12,7 +12,7 @@ use crate::core::document::Viewport;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::GestureSlot;
+use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::scene::Pane;
 
