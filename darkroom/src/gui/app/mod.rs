@@ -5,7 +5,6 @@ use palantir::Ui;
 use scenarium::{Library, WorkerError, WorkerReport, WorkerStatusKind};
 
 use crate::core::io::preferences::{Preferences, WindowState};
-use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
@@ -107,14 +106,8 @@ impl App {
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(
-        ui: &mut Ui,
-        handle: HostHandle,
-        script_cfg: ScriptConfig,
-        mut preferences: Preferences,
-    ) -> Self {
-        // The worker + script host wake the winit loop via the host handle;
-        // the headless/tui drivers swap in a tokio `Notify` (see
+    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, mut preferences: Preferences) -> Self {
+        // The worker wakes the winit loop via the host handle (see
         // `crate::core::wake`).
         let wake: Wake = {
             let handle = handle.clone();
@@ -124,7 +117,7 @@ impl App {
         // its saved geometry can size the window at creation.
         let mut app = Self {
             editor: Editor::new(),
-            workspace: Workspace::new(&script_cfg, wake, &mut preferences),
+            workspace: Workspace::new(wake, &mut preferences),
             theme: Theme::default(),
             host_handle: handle,
             preferences,
@@ -190,48 +183,6 @@ impl App {
         // the compile the stream just acknowledged rather than the previous one.
         let previews = self.workspace.runtime.drain_previews();
         self.editor.run_state.ingest_previews(ui, previews);
-    }
-
-    /// Drain the script executor's inbound queue and act on each message:
-    /// graph edits go through the editor's external-intent path (one batch
-    /// = one undo entry), `run()` kicks one evaluation, `shutdown()` quits.
-    /// Runs before the editor's frame so applied edits show the same frame.
-    fn handle_script_inbound(&mut self) {
-        let events = self.workspace.runtime.drain_script();
-        let mut run = false;
-        for event in events {
-            match event {
-                ScriptMessage::Print { msg } => {
-                    self.workspace.runtime.status.info(format!("script: {msg}"))
-                }
-                ScriptMessage::Apply(intents) => {
-                    let rejected = self
-                        .editor
-                        .commit_script_batch(&mut self.workspace.open, intents);
-                    for reason in rejected {
-                        self.workspace
-                            .runtime
-                            .status
-                            .error(format!("script edit refused: {reason}"));
-                    }
-                }
-                ScriptMessage::RunOnce => run = true,
-                // Shutdown is terminal: quit and drop the rest of the batch
-                // (the app is closing, so any remaining edits/runs are moot).
-                // Deliberately not routed through `guard_discard`: an
-                // automated client asked to exit, and a modal it can't
-                // answer would hang the session. The interactive quit paths
-                // still prompt.
-                ScriptMessage::Shutdown => {
-                    self.quit();
-                    return;
-                }
-            }
-        }
-        // Coalesce: many `run()`s in one drain still kick a single run.
-        if run {
-            self.run_graph();
-        }
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -366,10 +317,6 @@ impl palantir::App for App {
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
         self.drain_worker_events(ui);
-
-        // Apply anything scripts pushed since the last frame (graph edits,
-        // run, quit) before the editor rebuilds, so the scene reflects them.
-        self.handle_script_inbound();
 
         self.handle_close_request(ui);
     }
