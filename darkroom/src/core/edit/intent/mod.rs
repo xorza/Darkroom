@@ -22,10 +22,9 @@
 //!     per-intent loop through: build → no-op-filter → apply. Uniform
 //!     across variants — a wildcard-output retype severs nothing
 //!     (mismatched wires are tolerated and flatten as unbound).
-//!   - [`query`] — the six exhaustive per-step predicates (`is_noop`,
-//!     `invalidates_cached_geometry`, `requires_reconcile`,
-//!     `dirties_document`, `gesture_key`, `coalesce`) that drive the undo
-//!     stack and the per-frame pipeline.
+//!   - [`query`] — the five exhaustive per-step predicates (`is_noop`,
+//!     `invalidates_cached_geometry`, `dirties_document`, `gesture_key`,
+//!     `coalesce`) that drive the undo stack and the per-frame pipeline.
 //!   - [`duplicate`] — editor-side `Intent::DuplicateNodes` construction
 //!     from a selection (kept here rather than on `Document`, which is the
 //!     persisted model — intent construction is editing machinery).

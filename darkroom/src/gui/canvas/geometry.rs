@@ -287,9 +287,9 @@ impl CanvasGeometry {
     /// never reused, so a node the document has stopped holding will never be
     /// asked about again and its entries are pure ballast.
     ///
-    /// Driven off the same `requires_reconcile` signal the preview store
-    /// prunes on, so it runs when the document's node set can actually have
-    /// shrunk rather than every frame.
+    /// Run once a frame beside the preview store's reconcile: a lookup per
+    /// cached entry, against a document whose node set only ever shrinks by
+    /// deletion.
     pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
         self.ports.offsets.retain(|key, _| keep(key.node()));
         self.events.offsets.retain(|key, _| keep(key.node()));
