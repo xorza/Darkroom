@@ -379,7 +379,7 @@ impl palantir::App for App {
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
         if self.editor.run_state.activity.is_executing() {
-            ui.request_repaint_after(Duration::from_millis(50));
+            ui.request_repaint_after(Duration::from_millis(100));
         }
 
         // One library snapshot for this record pass (a cheap Arc clone).

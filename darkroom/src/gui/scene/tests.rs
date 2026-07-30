@@ -14,9 +14,7 @@ fn rebuild_entry(scene: &mut Scene, ui: &mut Ui, library: &Library, doc: &Docume
 
 /// The graph pane, over both halves it reads.
 fn entry_pane<'a>(scene: &'a Scene, doc: &'a Document) -> Pane<'a> {
-    Frame { scene, doc }
-        .pane()
-        .expect("the graph pane is projected")
+    scene.pane(doc).expect("the graph pane is projected")
 }
 
 #[test]

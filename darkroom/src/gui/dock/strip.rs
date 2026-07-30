@@ -51,20 +51,6 @@ pub(super) fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph
 }
 
-/// Every widget whose drag can start `tab`'s dock gesture, in the order
-/// [`DockUi::scan`](super::DockUi::scan) tries them.
-///
-/// Not just the chip: a renamable tab draws its label as an
-/// [`InlineRename`](crate::gui::widgets::inline_rename::InlineRename), whose
-/// idle panel senses `DRAG` and **swallows the press**, so the outer chip never
-/// sees `drag.started()` on one. At most
-/// one of these can latch — the label is inside the chip, so whichever
-/// gets the press is the one that reports it, and the same widget must be
-/// polled for the release edge.
-pub(super) fn drag_handles(tab: TabRef) -> impl Iterator<Item = WidgetId> {
-    std::iter::once(tab_chip_wid(tab))
-}
-
 /// Stable id for `tab`'s chip — deterministic so the prepass
 /// (activation clicks, the drag scan) can read it without the live
 /// response. Keyed on the tab, not its strip slot: the prepass reads
@@ -158,8 +144,8 @@ struct StripCtx<'a> {
 }
 
 /// Draw one group's strip. Tab activate / close clicks are handled in
-/// [`DockUi::scan`](super::DockUi::scan) (prepass); graph-rename commits and split-menu
-/// picks push directly into `out` this frame.
+/// [`DockUi::scan`](super::DockUi::scan) (prepass); split-menu picks push
+/// directly into `out` this frame.
 pub(super) fn show(
     ui: &mut Ui,
     theme: &Theme,
@@ -260,11 +246,10 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                 .child_align(Align::v(VAlign::Center))
                 .background(inner_bg)
                 .show(ui, |ui| {
-                    // Graph tab: inline-renamable label. Double-click swaps
-                    // to a `TextEdit`; Enter / blur commits. A single click on
-                    // the label also switches tab (the label's own panel
-                    // captures it, so the outer chip's click handler in
-                    // `DockUi::scan` wouldn't see it).
+                    // A plain label: it senses nothing, so the press falls
+                    // through to the chip around it, which is what
+                    // `DockUi::scan` polls for both the activation click and
+                    // the drag edges.
                     Text::new(label.text.clone()).style(&label_style).show(ui);
 
                     if closable(label.tab) {

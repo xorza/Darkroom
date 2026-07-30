@@ -39,8 +39,8 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
-use crate::execution::program::{ExecutionBinding, Program};
 use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
 
 /// What became of a node this run — the single per-node result map, so the run-time
@@ -134,9 +134,8 @@ impl RemainingOutputReads {
         *remaining == 0
     }
 
-    fn node_drained(&self, program: &Program, node_idx: NodeIdx) -> bool {
-        self.counts
-            .slice(program[node_idx].outputs.range())
+    fn node_drained(&self, program: &CompiledGraph, node_idx: NodeIdx) -> bool {
+        self.counts[program[node_idx].outputs]
             .iter()
             .all(|remaining| *remaining == 0)
     }
@@ -286,7 +285,7 @@ impl Executor {
     /// so it isn't worth a column spanning the program.
     fn missing_inputs(
         &self,
-        program: &Program,
+        program: &CompiledGraph,
         schedule: &RunSchedule,
         node_idx: NodeIdx,
     ) -> Option<NodeExecutionStatus> {
@@ -317,7 +316,7 @@ impl Executor {
 /// the caller's.
 #[derive(Debug)]
 struct ExecutionFrame<'a, 'r> {
-    program: &'a Program,
+    program: &'a CompiledGraph,
     schedule: &'a RunSchedule,
     cache: &'a mut RuntimeCache,
     remaining_reads: &'a mut RemainingOutputReads,
@@ -335,7 +334,7 @@ impl ExecutionFrame<'_, '_> {
     /// producers may already be pruned (see [`resolve`](crate::execution::schedule::Scheduled::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
-        let demand = self.schedule.outputs.demand.slice(e_node.outputs.range());
+        let demand = &self.schedule.outputs.demand[e_node.outputs];
         match self.schedule.states[node_idx] {
             // `process_order` and the state column are written by the same arm
             // of the walk, so a scheduled node without a settled state is a
@@ -394,7 +393,7 @@ impl ExecutionFrame<'_, '_> {
         let program = self.program;
         if !self
             .cache
-            .hydrate_reuse(node_idx, demand, &mut self.ctx.contexts)
+            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
             .await
         {
             let error = RunError::CacheLoadFailed {
@@ -431,7 +430,7 @@ impl ExecutionFrame<'_, '_> {
         let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(node_idx, demand, &mut self.ctx.contexts, cancel)
+            .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
             .await;
         match hydrated {
             // Attributable to exactly this node, so it fails as one rather
@@ -564,7 +563,7 @@ impl ExecutionFrame<'_, '_> {
             return;
         }
 
-        if self.schedule.event_sources.contains(node_idx) {
+        if self.schedule.root_flags(node_idx).is_event_source() {
             self.collect_event_triggers(node_idx, &event_state);
         }
         // Persist this node's cache the moment it finishes (durable as the run progresses),
@@ -572,7 +571,12 @@ impl ExecutionFrame<'_, '_> {
         // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
         // preceding reuse miss proves that no blob can cover this result.
         self.cache
-            .store_node(node_idx, StorePolicy::KnownMiss, &mut self.ctx.contexts)
+            .store_node(
+                program,
+                node_idx,
+                StorePolicy::KnownMiss,
+                &mut self.ctx.contexts,
+            )
             .await;
         self.release_drained_outputs(node_idx);
     }
@@ -642,7 +646,7 @@ impl ExecutionFrame<'_, '_> {
                         && !self.program[address.node_idx].cache.caches_in_ram();
                     let value = self
                         .cache
-                        .read_output_port(address, take)
+                        .read_output_port(self.program, address, take)
                         .expect("a resolved producer output must be resident when consumed");
                     self.complete_planned_read(address);
                     value
@@ -701,16 +705,16 @@ impl ExecutionFrame<'_, '_> {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::execution::compiled::CompiledGraph;
     use crate::execution::executor::{Executor, NodeOutcome};
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::Program;
 
     impl Executor {
         /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e.
         /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
-        pub(crate) fn ran(&self, program: &Program, e_node_id: ExecutionNodeId) -> bool {
+        pub(crate) fn ran(&self, program: &CompiledGraph, e_node_id: ExecutionNodeId) -> bool {
             let node_idx = program.e_node_index[&e_node_id];
             self.outcomes.get(node_idx).is_none_or(|outcome| {
                 matches!(

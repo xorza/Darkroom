@@ -21,7 +21,7 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::node::set_input;
-use crate::gui::scene::{Frame, InputBindingView, Pane};
+use crate::gui::scene::{InputBindingView, Pane};
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
 /// caller to translate into a file-dialog command. The node UI
@@ -72,11 +72,8 @@ pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: Pane<'_>) -> Option<Path
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, frame: Frame<'_>, out: &mut Intents) {
+pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, graph: Pane<'_>, out: &mut Intents) {
     let Some(port) = hits.double_clicked_port() else {
-        return;
-    };
-    let Some(graph) = frame.pane() else {
         return;
     };
     let Some(node) = graph.node(port.node_id) else {

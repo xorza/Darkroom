@@ -303,6 +303,13 @@ impl DockLayout {
         self.groups().flat_map(|g| g.tabs.iter().copied())
     }
 
+    /// What each pane is showing — one tab per group, in [`Self::groups`]
+    /// order. The frame's per-pane passes iterate this: a pane's own logic is
+    /// keyed to the tab it currently displays, not to every tab it holds.
+    pub(crate) fn active_tabs(&self) -> impl Iterator<Item = TabRef> + '_ {
+        self.groups().map(TabGroup::active_tab)
+    }
+
     fn group(&self, id: TabGroupId) -> Option<&TabGroup> {
         self.groups().find(|g| g.id == id)
     }

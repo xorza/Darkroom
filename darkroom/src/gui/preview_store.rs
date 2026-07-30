@@ -6,7 +6,6 @@
 //! upload. Non-image values are formatted on receipt and dropped immediately.
 
 use std::collections::HashMap;
-use std::mem::take;
 
 use glam::UVec2;
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
@@ -24,14 +23,6 @@ pub(crate) struct PreviewStore {
     /// Each preview node's current value, keyed by the node that published it —
     /// a preview *is* the thing on screen, so its identity is the widget's.
     pub(crate) entries: HashMap<NodeId, StoredContent>,
-    /// Whether [`Self::reconcile`] has work to do: the document's retained
-    /// set may have moved, or a fresh value landed that a viewer still needs
-    /// uploaded at full resolution. The flag lives here rather than beside
-    /// `Editor::needs_relayout` because the store is also written *outside*
-    /// the frame — `ingest` runs from the worker drain in `App::update` — so
-    /// a request has to survive until the next frame instead of resetting
-    /// with it.
-    needs_reconcile: bool,
 }
 
 #[derive(Debug)]
@@ -97,28 +88,21 @@ impl PreviewStore {
     /// exists. `reconcile` still drops it once that stops being true.
     pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {
         self.entries.insert(node_id, prepare_content(ui, value));
-        self.needs_reconcile = true;
-    }
-
-    /// Ask for a reconcile pass on the next frame. Raised by every edit whose
-    /// step [`crate::core::edit::intent::types::UndoStep::requires_reconcile`]
-    /// and by the non-undoable half of opening a viewer tab.
-    pub(crate) fn request_reconcile(&mut self) {
-        self.needs_reconcile = true;
-    }
-
-    /// Reconcile only if something asked for it. An idle frame changes
-    /// neither the retained set nor the stored values, so it skips the pass
-    /// entirely.
-    pub(crate) fn reconcile_if_needed(&mut self, ui: &Ui, document: &Document) {
-        if take(&mut self.needs_reconcile) {
-            self.reconcile(ui, document);
-        }
     }
 
     /// Release every presentation resource the document no longer retains and
     /// upload the full-resolution texture each *visible* viewer needs.
-    fn reconcile(&mut self, ui: &Ui, document: &Document) {
+    ///
+    /// Run unconditionally once a frame. Both halves are already idempotent —
+    /// `materialize_full` returns at once for anything not still deferred, and
+    /// the retain is a lookup per stored value — so asking every frame costs a
+    /// pass over the open viewer tabs (normally none) and the handful of nodes
+    /// holding a value. That is cheaper than the bookkeeping a request flag
+    /// needed: the store is written *outside* the frame too (`ingest_preview`
+    /// runs from the worker drain in `App::update`), so a flag had to survive
+    /// until the next frame rather than resetting with it, and every edit path
+    /// that moved the retained set had to remember to raise it.
+    pub(crate) fn reconcile(&mut self, ui: &Ui, document: &Document) {
         // Scoped to what the coming record pass draws: a full texture is up
         // to 8192² RGBA8, so uploading one for a viewer tab stacked behind
         // another in the same pane would cost hundreds of MB unseen.
@@ -383,7 +367,7 @@ mod tests {
         assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
         assert!(matches!(&store.entries[&node], StoredContent::Text(t) if t == "8"));
 
-        store.reconcile_if_needed(arena.ui(), &document);
+        store.reconcile(arena.ui(), &document);
         assert!(
             store.entries.contains_key(&node),
             "a live preview node retains its value"
@@ -394,40 +378,10 @@ mod tests {
         );
 
         document.graph.detach_node(node);
-        store.request_reconcile();
-        store.reconcile_if_needed(arena.ui(), &document);
+        store.reconcile(arena.ui(), &document);
         assert!(
             store.entries.is_empty(),
             "deleting the node releases what it was showing"
-        );
-    }
-
-    #[test]
-    fn the_reconcile_pass_runs_only_when_it_was_requested() {
-        let mut arena = UiHarness::arena();
-        let mut store = PreviewStore::default();
-        let (document, node) = document_with_preview(false);
-        store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(7)));
-
-        // Spend the request `ingest_preview` raised for its own value.
-        store.reconcile_if_needed(arena.ui(), &document);
-        assert!(store.entries.contains_key(&node), "the node retains it");
-
-        // Against a document holding nothing, the entry still survives while
-        // nothing has asked for a pass — that's what makes the gate
-        // load-bearing rather than decorative.
-        let empty = Document::default();
-        store.reconcile_if_needed(arena.ui(), &empty);
-        assert!(
-            store.entries.contains_key(&node),
-            "an unrequested pass releases nothing"
-        );
-
-        store.request_reconcile();
-        store.reconcile_if_needed(arena.ui(), &empty);
-        assert!(
-            store.entries.is_empty(),
-            "a requested pass releases what the document stopped holding"
         );
     }
 }
