@@ -1,7 +1,6 @@
 pub(super) mod header;
 mod memory_row;
 pub(super) mod port_color;
-mod port_rename;
 pub(super) mod port_row;
 pub(super) mod prepass;
 pub(crate) mod preview_row;
@@ -168,7 +167,7 @@ impl NodeUI {
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(rcx.graph.scene);
+        self.drag.drop_if_owner_gone(rcx.graph.scene());
     }
 
     fn draw_one(
@@ -291,8 +290,7 @@ impl NodeUI {
                 click_intents(false, rcx.graph, node.id, out);
                 vec![(node.id, node.pos)]
             };
-            self.drag
-                .latch(node.id, node.owner, start_positions, handle);
+            self.drag.latch(node.id, start_positions, handle);
         }
     }
 
@@ -420,11 +418,10 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
 pub(super) fn click_intents(shift: bool, graph: Pane<'_>, key: NodeId, out: &mut Intents) {
-    let target = graph.target();
-    out.push(target, select_intent(shift, graph, key));
+    out.push(select_intent(shift, graph, key));
     let deselecting = shift && graph.is_selected(key);
     if !deselecting {
-        out.push(target, Intent::Raise { key });
+        out.push(Intent::Raise { key });
     }
 }
 
@@ -448,7 +445,7 @@ fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> Intent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::PortKind;
+
     use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
     use palantir::internals::UiHarness;
 
@@ -465,44 +462,6 @@ mod tests {
         .with_selection(ids.iter().copied())
     }
 
-    #[test]
-    fn a_nodes_drag_handles_are_its_body_and_title_only() {
-        // The header title's idle label senses `DRAG` and swallows the
-        // press, so polling the body alone would miss a title drag —
-        // the same gap that left dock tabs unmovable.
-        let id = NodeId::unique();
-        assert_eq!(
-            drag_handles(id).collect::<Vec<_>>(),
-            [node_widget_id(id), node_rename_wid(id)],
-            "a node drags by its body or its title"
-        );
-
-        // And *only* those two. Every other widget inside the body —
-        // port circles, header chips, value editors — latches a drag of
-        // its own (palantir's latch ignores `Sense`), so widening this
-        // to the node's whole subtree would move the node whenever a
-        // wire was pulled off a port.
-        assert_eq!(drag_handles(id).count(), 2);
-        for wid in [
-            port_row::port_circle_wid(PortRef {
-                node_id: id,
-                kind: PortKind::Output,
-                port_idx: 0,
-            }),
-            header::play_badge_wid(id),
-            header::graph_badge_wid(id),
-        ] {
-            assert!(
-                !drag_handles(id).any(|h| h == wid),
-                "{wid:?} owns its own gesture and must not drag the node"
-            );
-        }
-
-        // Handles are node-keyed, so two nodes never share one.
-        let other = NodeId::unique();
-        assert!(drag_handles(id).all(|h| !drag_handles(other).any(|o| o == h)));
-    }
-
     fn click(shift: bool, scene: &SceneFixture, id: NodeId) -> Vec<Intent> {
         use crate::core::edit::intent::sink::Queued;
 
@@ -510,8 +469,8 @@ mod tests {
         click_intents(shift, scene.only_pane(), id, &mut out);
         out.drain()
             .map(|queued| match queued {
-                Queued::Scoped { intent, .. } => intent,
-                Queued::Global(intent) => panic!("a node click raises nothing global: {intent:?}"),
+                Queued::Scoped(intent) => intent,
+                Queued::Dock(intent) => panic!("a node click raises nothing global: {intent:?}"),
             })
             .collect()
     }

@@ -98,9 +98,7 @@ impl DockUi {
     /// Navigation-phase scan: [`scan_focus`] first (focus follows a press
     /// into a pane), then one pass over every strip's last-frame chip
     /// responses — close clicks (which win over activation), activation
-    /// clicks (a graph tab's inner rename label captures the click, so its
-    /// response is polled too), drag arming off whichever of the tab's
-    /// [`strip::drag_handles`] latched — then the in-flight drag's
+    /// clicks, drag arming off the tab's chip — then the in-flight drag's
     /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
     /// release resolve the pane under the pointer into a
     /// [`DockOp::MoveTab`].
@@ -123,12 +121,14 @@ impl DockUi {
                 actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
             }
             if self.tab_drag.is_none()
-                && let Some(handle) =
-                    strip::drag_handles(tab).find(|w| ui.response_for(*w).left.drag.started())
+                && ui
+                    .response_for(strip::tab_chip_wid(tab))
+                    .left
+                    .drag
+                    .started()
             {
                 self.tab_drag = Some(TabDrag {
                     tab,
-                    handle,
                     text: tab_text(doc, tab).into_owned(),
                 });
             }
@@ -136,14 +136,18 @@ impl DockUi {
         let Some(dragged) = &self.tab_drag else {
             return;
         };
-        let (tab, handle) = (dragged.tab, dragged.handle);
+        let tab = dragged.tab;
         if ui.escape_pressed() || doc.layout.find_tab(tab).is_none() {
             self.tab_drag = None;
             return;
         }
-        // The release edge fires on whichever handle caught the press —
-        // for a renamable tab that's the label, not the chip around it.
-        if ui.response_for(handle).left.drag.stopped() {
+        // The release edge fires on the chip that caught the press.
+        if ui
+            .response_for(strip::tab_chip_wid(tab))
+            .left
+            .drag
+            .stopped()
+        {
             if let Some(target) = drop_target(ui, doc) {
                 actions.push(UiAction::Dock(DockOp::MoveTab {
                     tab,
