@@ -10,7 +10,7 @@ use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
-use crate::core::edit::intent::types::{UndoStep, Intent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::types::{Intent, NodeProperty, Refusal, UndoStep};
 
 /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
 /// `pos`, returning its id.
@@ -77,7 +77,7 @@ fn dirties_document_splits_edits_from_navigation() {
         UndoStep::SetSelection {
             from: BTreeSet::new(),
             to: BTreeSet::from([NodeId::unique()]),
-        }),
+        },
         UndoStep::SetViewport {
             from: Viewport {
                 pan: Vec2::ZERO,
@@ -87,7 +87,7 @@ fn dirties_document_splits_edits_from_navigation() {
                 pan: Vec2::new(10.0, 20.0),
                 zoom: 2.0,
             },
-        }),
+        },
     ];
     for step in &navigation {
         assert!(
@@ -102,11 +102,11 @@ fn dirties_document_splits_edits_from_navigation() {
             node_id: NodeId::unique(),
             from: "a".into(),
             to: "b".into(),
-        }),
+        },
         UndoStep::MoveSelection {
             grabbed: NodeId::unique(),
             moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
-        }),
+        },
     ];
     for step in &content {
         assert!(step.dirties_document(), "content step must dirty: {step:?}",);
@@ -134,7 +134,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         UndoStep::MoveSelection {
             grabbed: node_id,
             moves: vec![(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0))],
-        }),
+        },
         UndoStep::SetViewport {
             from: Viewport {
                 pan: Vec2::ZERO,
@@ -144,17 +144,17 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
                 pan: Vec2::new(10.0, 20.0),
                 zoom: 2.0,
             },
-        }),
+        },
         UndoStep::SetSelection {
             from: BTreeSet::new(),
             to: BTreeSet::from([node_id]),
-        }),
+        },
         // Value-only: the editor stays present at its `Fixed` size.
         UndoStep::SetInput {
             input: port,
             from: cst(1.0),
             to: cst(2.0),
-        }),
+        },
     ];
     for step in &moves {
         assert!(
@@ -174,21 +174,21 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
             node_id,
             from: "a".into(),
             to: "a-much-longer-title".into(),
-        }),
+        },
         // Adding the inline const editor resizes the node and shifts every
         // port row below it.
         UndoStep::SetInput {
             input: port,
             from: None,
             to: cst(1.0),
-        }),
+        },
         // ...and removing it is the connection commit, the case Pass B has
         // always existed for.
         UndoStep::SetInput {
             input: port,
             from: cst(1.0),
             to: None,
-        }),
+        },
     ];
     for step in &resizes {
         assert!(
@@ -758,7 +758,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         &mut doc,
     )
     .expect("a selection with one live member commits");
-    let UndoStep::SetSelection { to, .. }) = &step else {
+    let UndoStep::SetSelection { to, .. } = &step else {
         panic!("expected a SetSelection step, got {step:?}");
     };
     assert_eq!(
@@ -776,7 +776,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         &mut doc,
     )
     .expect("a move with one live member commits");
-    let UndoStep::MoveSelection { moves, .. }) = &step else {
+    let UndoStep::MoveSelection { moves, .. } = &step else {
         panic!("expected a MoveSelection step, got {step:?}");
     };
     assert_eq!(
