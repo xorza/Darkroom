@@ -1,5 +1,5 @@
 use crate::graph::identity::FuncId;
-use crate::graph::interface::{NodeEvents, NodePorts};
+use crate::graph::interface::NodePorts;
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod lambda;
@@ -168,7 +168,7 @@ pub enum OutputType {
     /// A polymorphic passthrough / reroute output whose type mirrors the
     /// resolved type of input `mirrors`. It reads as
     /// the wildcard `Any` until the editor resolves it by following the wire
-    /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
+    /// (see [`OutputTypes`](crate::OutputTypes));
     /// compilation resolves the same type into the cache signature and codec preflight.
     Wildcard { mirrors: usize },
 }
@@ -219,9 +219,6 @@ pub struct FuncEvent {
 #[derive(Default, Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
-    /// Version of this function's output semantics. Folded into pure-node cache keys;
-    /// increment it when the implementation can return different values for the same inputs.
-    pub version: u32,
     pub name: String,
     pub category: String,
     pub sink: bool,
@@ -230,21 +227,6 @@ pub struct Func {
     /// toggle is meaningless on it and hidden.
     /// `false` (the default) means a normal node that offers the toggle.
     pub uncacheable: bool,
-
-    /// This func may only appear in the execution entry graph, never inside a
-    /// graph definition's body. Rejected by
-    /// [`Graph::validate_with`](crate::Graph::validate_with)
-    /// wherever else it appears (see
-    /// [`GraphValidationError::EntryOnlyFunc`](crate::GraphValidationError::EntryOnlyFunc)).
-    /// Library-gated like the other per-func checks — a validate with no library
-    /// cannot resolve the declaration to read this flag — so the rule binds at
-    /// compile, which is the only path to actually running.
-    ///
-    /// For funcs whose effect is tied to one on-screen thing: a definition
-    /// instanced twice runs its body twice, so such a node would have several
-    /// live occurrences behind one identity. `false` (the default) means a
-    /// normal func, placeable anywhere.
-    pub entry_only: bool,
 
     /// The [`CacheMode`] a freshly created node of this func copies into its
     /// `cache`. Defaults to [`CacheMode::None`] (no caching); raise it with the
@@ -299,12 +281,6 @@ impl Func {
     /// that cache their output themselves. See [`Func::uncacheable`].
     pub fn uncacheable(mut self) -> Self {
         self.uncacheable = true;
-        self
-    }
-
-    /// Restrict this func to the entry graph. See [`Func::entry_only`].
-    pub fn entry_only(mut self) -> Self {
-        self.entry_only = true;
         self
     }
 
@@ -363,7 +339,6 @@ impl Func {
 
     /// What this func declares, as instance ports — what a node
     /// instantiating it declares. The leaf counterpart of
-    /// [`GraphDef::ports`](crate::graph::definition::GraphDef::ports), so a
     /// caller asks either declaration the same question.
     pub fn ports(&self) -> NodePorts<'_> {
         NodePorts {
@@ -371,8 +346,8 @@ impl Func {
             description: self.description.as_deref(),
             inputs: &self.inputs,
             outputs: &self.outputs,
-            events: NodeEvents::Func(&self.events),
-            func: Some(self),
+            events: &self.events,
+            func: self,
         }
     }
 
@@ -437,6 +412,7 @@ mod tests {
     use crate::graph::identity::FuncId;
     use std::sync::Arc;
 
+    use crate::async_lambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
     use crate::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
@@ -541,7 +517,7 @@ mod tests {
                 .default(StaticValue::FsPaths(vec!["a.fits".into()])),
             )
             .wildcard_output("value", 0)
-            .lambda(crate::async_lambda!(|_| { Ok(()) }))
+            .lambda(async_lambda!(|_| { Ok(()) }))
             .validate()
             .unwrap();
     }
