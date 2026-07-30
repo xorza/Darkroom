@@ -1,18 +1,16 @@
 //! Read pre-mutation state from a [`Document`] and fold it with an
-//! [`Intent`] (or a [`DocIntent`]) into a complete step — the
+//! [`Intent`] (or a [`DockOp`]) into a complete step — the
 //! diff-capture half of the intent pipeline. Pure: never writes to the
 //! graph.
 
 use std::collections::HashSet;
 
-use glam::Vec2;
-use scenarium::{Binding, Graph, GraphId, GraphLink, Node, NodeId, NodeKind};
+use scenarium::Binding;
 
+use crate::core::document::Document;
 use crate::core::document::dock::DockOp;
-use crate::core::document::{BoundarySide, Document, EditScopeRef, GraphRef};
 use crate::core::edit::intent::types::{
-    DetachedBoundaryPort, DocIntent, DocStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal,
-    UndoStep,
+    DockStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
 };
 use crate::core::edit::intent::validate;
 
@@ -32,83 +30,9 @@ use crate::core::edit::intent::validate;
 /// [`Refusal::Invalid`] means the payload could never have applied.
 /// (`MoveSelection` and `SetSelection` instead drop vanished members
 /// individually rather than refusing the whole intent.)
-pub(crate) fn build_step(
-    intent: Intent,
-    doc: &Document,
-    target: GraphRef,
-) -> Result<UndoStep, Refusal> {
-    if let Intent::RenameBoundaryPort { side, idx, to } = intent {
-        // Boundary ports only exist in a graph interior; the graph is
-        // the active `Local` target's. Drop the rename otherwise.
-        let GraphRef::Local(graph_id) = target else {
-            return Err(Refusal::Quiet);
-        };
-        let from = doc
-            .boundary_port_name(graph_id, side, idx)
-            .ok_or(Refusal::Quiet)?
-            .to_owned();
-        return Ok(UndoStep::Doc(DocStep::RenameBoundaryPort {
-            graph_id,
-            side,
-            idx,
-            from,
-            to,
-        }));
-    }
-    if let Intent::AddBoundaryPort {
-        side,
-        name,
-        data_type,
-    } = intent
-    {
-        let GraphRef::Local(graph_id) = target else {
-            return Err(Refusal::Quiet);
-        };
-        let interface = &doc.graph.find_graph(graph_id).ok_or(Refusal::Quiet)?;
-        let idx = match side {
-            BoundarySide::Input => interface.inputs.len(),
-            BoundarySide::Output => interface.outputs.len(),
-        };
-        return Ok(UndoStep::Doc(DocStep::AddBoundaryPort {
-            graph_id,
-            side,
-            idx,
-            name,
-            data_type,
-        }));
-    }
-    if let Intent::RemoveBoundaryPort { side, idx } = intent {
-        let GraphRef::Local(graph_id) = target else {
-            return Err(Refusal::Quiet);
-        };
-        // Boundary snapshot/detach are *parent* methods (they sever the
-        // owner's instance bindings too), so resolve the def's parent —
-        // the root itself for a top-level def, an ancestor def otherwise.
-        let parent = doc
-            .graph
-            .find_graph_parent(graph_id)
-            .ok_or(Refusal::Quiet)?;
-        let detached = match side {
-            BoundarySide::Input => parent
-                .snapshot_graph_input(graph_id, idx)
-                .map(DetachedBoundaryPort::Input),
-            BoundarySide::Output => parent
-                .snapshot_graph_output(graph_id, idx)
-                .map(DetachedBoundaryPort::Output),
-        }
-        .ok_or(Refusal::Quiet)?;
-        return Ok(UndoStep::Doc(DocStep::RemoveBoundaryPort {
-            graph_id,
-            detached,
-        }));
-    }
-    let EditScopeRef { graph, view } = doc.scope(target).ok_or(Refusal::Quiet)?;
+pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Refusal> {
+    let (graph, view) = (&doc.graph, &doc.main_view);
     let step = match intent {
-        Intent::RenameBoundaryPort { .. }
-        | Intent::AddBoundaryPort { .. }
-        | Intent::RemoveBoundaryPort { .. } => {
-            unreachable!("interface edits are resolved against the interface above")
-        }
         Intent::AddNode {
             pos,
             node_id,
@@ -118,52 +42,14 @@ pub(crate) fn build_step(
             let mut added = HashSet::new();
             validate::fresh_node_id(doc, node_id, &mut added)?;
             validate::finite_position(pos, "AddNode")?;
-            validate::insertable_kind(graph, target, &node)?;
+            validate::insertable_kind(graph, &node)?;
             validate::insertable_bindings(graph, &added, &bindings)?;
             GraphStep::AddNode {
                 pos,
                 node_id,
                 node,
-                graph: None,
                 bindings,
             }
-        }
-        Intent::AddLocalGraph {
-            pos,
-            node_id,
-            graph_id,
-            def,
-        } => {
-            let mut added = HashSet::new();
-            validate::fresh_node_id(doc, node_id, &mut added)?;
-            validate::finite_position(pos, "AddLocalGraph")?;
-            validate::fresh_local_graph(doc, graph_id, &def)?;
-            // A second instance of one library entry shares the copy this
-            // graph already holds rather than forking another — at which
-            // point there is no definition to add and this *is* an instance.
-            match def
-                .origin
-                .and_then(|origin| local_graph_from(graph, origin))
-            {
-                Some(existing) => instance_local_graph(graph, pos, node_id, existing)?,
-                None => GraphStep::AddNode {
-                    pos,
-                    node_id,
-                    node: Node::graph_instance(&def, GraphLink::Local(graph_id)),
-                    bindings: def.ports().default_bindings(node_id).collect(),
-                    graph: Some((graph_id, def)),
-                },
-            }
-        }
-        Intent::AddLocalGraphInstance {
-            pos,
-            node_id,
-            graph_id,
-        } => {
-            let mut added = HashSet::new();
-            validate::fresh_node_id(doc, node_id, &mut added)?;
-            validate::finite_position(pos, "AddLocalGraphInstance")?;
-            instance_local_graph(graph, pos, node_id, graph_id)?
         }
         Intent::DuplicateNodes {
             nodes,
@@ -174,9 +60,7 @@ pub(crate) fn build_step(
             for (pos, node_id, node) in &nodes {
                 validate::fresh_node_id(doc, *node_id, &mut added)?;
                 validate::finite_position(*pos, "DuplicateNodes")?;
-                // A clone shares its original's local definition rather
-                // than bringing one, so the link always resolves already.
-                validate::insertable_kind(graph, target, node)?;
+                validate::insertable_kind(graph, node)?;
             }
             validate::insertable_bindings(graph, &added, &bindings)?;
             for subscription in &subscriptions {
@@ -305,26 +189,6 @@ pub(crate) fn build_step(
             };
             GraphStep::SetNodeProperty { node_id, from, to }
         }
-        Intent::DetachGraph { node_id } => {
-            let NodeKind::Graph(GraphLink::Local(from_id)) =
-                validate::live_node(graph, node_id, "DetachGraph")?.kind
-            else {
-                return Err(Refusal::Quiet); // not a local graph instance — nothing to fork
-            };
-            let to_id = GraphId::unique();
-            let mut copy = graph
-                .graphs
-                .get(&from_id)
-                .ok_or(Refusal::Quiet)?
-                .clone_mapped();
-            copy.origin = None;
-            GraphStep::DetachGraph {
-                node_id,
-                from_id,
-                to_id,
-                graph: Box::new(copy),
-            }
-        }
         Intent::SetViewport { to } => {
             if !to.is_valid() {
                 return Err(Refusal::Invalid(
@@ -367,73 +231,29 @@ pub(crate) fn build_step(
     Ok(UndoStep::Graph(step))
 }
 
-/// The [`build_step`] counterpart for the mutations no graph owns: fold
-/// `intent` with the document-wide state it overwrites into a complete
-/// [`DocStep`]. Takes no target, because there is none to take.
+/// The [`build_step`] counterpart for the layout: fold `op` with the layout it
+/// overwrites into a complete [`DockStep`]. Takes no target, because there is
+/// none to take.
 ///
 /// Same gate contract as `build_step` — an `Ok` is a proof that applying
-/// the step is sound — but the preconditions are thinner: a dock op is
-/// applied to a *copy* of the layout here and recorded as the
-/// before/after pair, so an op the layout refuses simply lands as
-/// `from == to` and drops out through the no-op filter.
-pub(crate) fn build_doc_step(intent: DocIntent, doc: &Document) -> Result<DocStep, Refusal> {
-    match intent {
-        DocIntent::Dock(op) => {
-            let key = match op {
-                DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
-                DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
-                DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
-            };
-            let structural = matches!(op, DockOp::MoveTab { .. });
-            let from = doc.layout.clone();
-            let mut to = from.clone();
-            to.apply(op);
-            Ok(DocStep::Dock {
-                from,
-                to,
-                key,
-                structural,
-            })
-        }
-        DocIntent::RenameGraph { id, to } => {
-            let from = doc.graph.find_graph(id).ok_or(Refusal::Quiet)?.name.clone();
-            Ok(DocStep::RenameGraph { id, from, to })
-        }
-    }
-}
-
-/// Instance the definition `graph_id` names, seeding the const defaults its
-/// interface declares. The one place a bare instance is built, so reusing an
-/// existing copy and picking one out of the palette cannot drift apart.
-///
-/// Only the target graph's *own* definitions resolve through a
-/// `GraphLink::Local` raised over it — the same rule
-/// [`validate::insertable_kind`] enforces for a caller-built node.
-fn instance_local_graph(
-    graph: &Graph,
-    pos: Vec2,
-    node_id: NodeId,
-    graph_id: GraphId,
-) -> Result<GraphStep, Refusal> {
-    let Some(definition) = graph.graphs.get(&graph_id) else {
-        return Err(Refusal::Invalid(format!(
-            "cannot instance local graph {graph_id:?}, which the target graph doesn't hold"
-        )));
+/// the step is sound — but the preconditions are thinner: the op is applied to
+/// a *copy* of the layout here and recorded as the before/after pair, so an op
+/// the layout refuses simply lands as `from == to` and drops out through the
+/// no-op filter.
+pub(crate) fn build_dock_step(op: DockOp, doc: &Document) -> Result<DockStep, Refusal> {
+    let key = match op {
+        DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
+        DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
+        DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
     };
-    Ok(GraphStep::AddNode {
-        pos,
-        node_id,
-        node: Node::graph_instance(definition, GraphLink::Local(graph_id)),
-        graph: None,
-        bindings: definition.ports().default_bindings(node_id).collect(),
+    let structural = matches!(op, DockOp::MoveTab { .. });
+    let from = doc.layout.clone();
+    let mut to = from.clone();
+    to.apply(op);
+    Ok(DockStep {
+        from,
+        to,
+        key,
+        structural,
     })
-}
-
-/// This graph's own copy of the library entry `origin`, if it holds one.
-fn local_graph_from(graph: &Graph, origin: GraphId) -> Option<GraphId> {
-    graph
-        .graphs
-        .iter()
-        .find(|(_, def)| def.origin == Some(origin))
-        .map(|(id, _)| *id)
 }

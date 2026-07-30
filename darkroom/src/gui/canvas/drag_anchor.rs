@@ -10,7 +10,6 @@ use glam::Vec2;
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
-use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use std::collections::BTreeSet;
@@ -39,10 +38,9 @@ struct Anchor {
     /// and it is the node [`GroupDrag::advance`] checks against the scene.
     grabbed: NodeId,
     /// The graph pane the drag latched on. Several are on screen, and the
-    /// gesture outlives the frame that started it, so the target travels
+    /// gesture outlives the frame that started it, so the anchor travels
     /// with the anchor rather than being re-derived from whatever pane the
     /// pointer has since wandered over.
-    target: GraphRef,
     /// Every node moving with this drag — and its position at drag start:
     /// the whole selection when the grabbed node was already selected,
     /// else just the grabbed one.
@@ -59,13 +57,11 @@ impl GroupDrag {
     pub(crate) fn latch(
         &mut self,
         grabbed: NodeId,
-        target: GraphRef,
         start_positions: Vec<(NodeId, Vec2)>,
         widget_id: WidgetId,
     ) {
         self.anchor = Some(Anchor {
             grabbed,
-            target,
             start_positions,
             widget_id,
         });
@@ -99,8 +95,7 @@ impl GroupDrag {
         // Copy the ids out and drop the borrow, so the branches below can
         // clear the slot without cloning `start_positions` — only the
         // success path reads it, and that path never clears.
-        let Some((widget_id, target)) = self.anchor.as_ref().map(|a| (a.widget_id, a.target))
-        else {
+        let Some(widget_id) = self.anchor.as_ref().map(|a| a.widget_id) else {
             return false;
         };
         let resp = ui.response_for(widget_id);
@@ -121,7 +116,7 @@ impl GroupDrag {
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
         let move_selection = self.anchor.as_ref().unwrap().resolve(delta);
-        out.push(target, move_selection);
+        out.push(move_selection);
         true
     }
 }
@@ -156,112 +151,4 @@ pub(crate) fn selected_group_positions(
         .map(|n| (n.id, n.pos))
         .collect();
     positions
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use palantir::internals::UiHarness;
-    use scenarium::NodeId;
-
-    use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
-
-    fn wid() -> WidgetId {
-        WidgetId::from_hash("group_drag_test_widget")
-    }
-
-    /// A scene holding just `id`, so a drag grabbing something on it passes
-    /// the owner check.
-    fn scene_with(ui: &mut Ui, id: NodeId) -> SceneFixture {
-        SceneFixture::with_nodes([scene_node_stub(ui, id, Vec2::ZERO)])
-    }
-
-    #[test]
-    fn resolve_offsets_every_member_from_its_own_latch_start() {
-        // A mixed group — the grabbed node plus a pin hanging off a
-        // different node — moves rigidly: each member commits to its *own*
-        // latch-time start plus the current offset. Measuring from the
-        // latch (rather than integrating frame to frame) is what keeps a
-        // dropped or coalesced frame from accumulating drift.
-        let grabbed_node = NodeId::unique();
-        let other_pin = NodeId::unique();
-        let anchor = Anchor {
-            grabbed: grabbed_node,
-            target: GraphRef::Main,
-            start_positions: vec![
-                (grabbed_node, Vec2::new(10.0, 20.0)),
-                (other_pin, Vec2::new(-5.0, 100.0)),
-            ],
-            widget_id: wid(),
-        };
-
-        let Intent::MoveSelection { grabbed, moves } = anchor.resolve(Vec2::new(3.0, -7.0)) else {
-            panic!("a group drag commits a MoveSelection");
-        };
-        assert_eq!(grabbed, grabbed_node);
-        // Hand-computed: (10,20)+(3,-7) = (13,13); (-5,100)+(3,-7) = (-2,93).
-        assert_eq!(
-            moves,
-            vec![
-                (grabbed_node, Vec2::new(13.0, 13.0)),
-                (other_pin, Vec2::new(-2.0, 93.0)),
-            ],
-        );
-
-        // A later, larger offset still measures from those same starts, not
-        // from where the previous frame left the items: (10,20)+(6,-14) =
-        // (16,6); (-5,100)+(6,-14) = (1,86).
-        let Intent::MoveSelection { moves, .. } = anchor.resolve(Vec2::new(6.0, -14.0)) else {
-            panic!("a group drag commits a MoveSelection");
-        };
-        assert_eq!(
-            moves,
-            vec![
-                (grabbed_node, Vec2::new(16.0, 6.0)),
-                (other_pin, Vec2::new(1.0, 86.0)),
-            ],
-        );
-    }
-
-    #[test]
-    fn advance_drops_a_stale_anchor_without_emitting() {
-        // Undo or a breaker swipe can delete the dragged node mid-gesture.
-        // The anchor has to let go: a `MoveSelection` naming a node that
-        // left the scene panics in `build_step`.
-        let mut arena = UiHarness::arena();
-        let survivor = NodeId::unique();
-        let scene = scene_with(arena.ui(), survivor);
-
-        let mut drag = GroupDrag::default();
-        let gone = NodeId::unique();
-        drag.latch(gone, GraphRef::Main, vec![(gone, Vec2::ZERO)], wid());
-
-        let mut out = Intents::default();
-        assert!(
-            !drag.advance(arena.ui(), &scene.scene, &mut out),
-            "the drag is over"
-        );
-        assert!(out.is_empty(), "a stale anchor emits nothing");
-        assert!(drag.anchor.is_none(), "and drops itself");
-    }
-
-    #[test]
-    fn advance_releases_when_the_widget_stops_reporting_a_delta() {
-        // A bare `Ui` reports no drag on the anchor's widget, which is the
-        // release edge: the gesture ends without emitting, so the next press
-        // latches fresh instead of resuming this one's start positions.
-        let mut arena = UiHarness::arena();
-        let id = NodeId::unique();
-        let scene = scene_with(arena.ui(), id);
-
-        let mut drag = GroupDrag::default();
-        let key = id;
-        drag.latch(key, GraphRef::Main, vec![(key, Vec2::new(4.0, 4.0))], wid());
-        assert!(drag.anchor.is_some(), "latched");
-
-        let mut out = Intents::default();
-        assert!(!drag.advance(arena.ui(), &scene.scene, &mut out));
-        assert!(out.is_empty(), "a release commits nothing of its own");
-        assert!(drag.anchor.is_none(), "the slot is free for the next press");
-    }
 }

@@ -8,11 +8,10 @@ use palantir::{
 };
 use scenarium::Func;
 use scenarium::NodeId;
-use scenarium::{GraphDef, GraphId};
 use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
-use crate::core::document::{GraphRef, PortRef};
+use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
@@ -28,8 +27,6 @@ use crate::gui::scene::Pane;
 enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
-    Graph(GraphId, &'a GraphDef),
-    LocalGraph(&'a LocalDefRow),
 }
 
 impl<'a> PaletteEntry<'a> {
@@ -40,8 +37,6 @@ impl<'a> PaletteEntry<'a> {
         match *self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Graph(_, graph) => &graph.name,
-            PaletteEntry::LocalGraph(local) => &local.name,
         }
     }
 
@@ -49,8 +44,6 @@ impl<'a> PaletteEntry<'a> {
         match *self {
             PaletteEntry::Func(f) => &f.category,
             PaletteEntry::Special(s) => &s.func().category,
-            PaletteEntry::Graph(_, graph) => &graph.category,
-            PaletteEntry::LocalGraph(local) => &local.category,
         }
     }
 }
@@ -58,35 +51,6 @@ impl<'a> PaletteEntry<'a> {
 /// One local definition of the graph the palette was opened over, with its
 /// [`InternedStr`](palantir::InternedStr) name and category read out once
 /// per open frame. The scene holds arena handles behind a `RefCell` the same
-/// `Ui` interns into, so the rows own their text rather than holding borrow
-/// guards across the record pass.
-#[derive(Debug)]
-struct LocalDefRow {
-    id: GraphId,
-    name: String,
-    category: String,
-    /// Library entry this definition was copied from, if any. The library's
-    /// own row for it is dropped: with a copy already in this graph, clicking
-    /// either lands on that copy (`build::local_graph_from`), so two rows
-    /// would offer one outcome under one name.
-    origin: Option<GraphId>,
-}
-
-/// The open graph's own local definitions, read out of the scene once per
-/// frame the palette is up.
-fn local_def_rows(graph: Pane<'_>) -> Vec<LocalDefRow> {
-    graph
-        .local_defs()
-        .iter()
-        .map(|def| LocalDefRow {
-            id: def.id,
-            name: def.name.borrow_str().to_string(),
-            category: def.category.borrow_str().to_string(),
-            origin: def.origin,
-        })
-        .collect()
-}
-
 /// Right-click or double-click on empty canvas → popup that lists every
 /// `Func` in `AppContext::library`, plus the open graph's own local
 /// definitions, grouped by category. Clicking an entry emits the intent that
@@ -112,11 +76,6 @@ pub(super) struct NewNodeUi {
     /// filters the listed entries by name (a matching category name shows
     /// that whole column). Empty ⇒ everything shows.
     search: Search,
-    /// The open graph's own local definitions, read out of the scene once
-    /// **per open** rather than per frame — see [`LocalDefRow`] for why
-    /// they have to be owned at all. Nothing can add one while the palette
-    /// is up: its popup takes the pointer.
-    local_defs: Vec<LocalDefRow>,
 }
 
 /// The palette's search text and its case-folded copy.
@@ -148,8 +107,7 @@ impl NewNodeUi {
         pending_source: Option<PortRef>,
         out: &mut Intents,
     ) {
-        let target = graph.target();
-        let resp = ui.response_for(outer_canvas_widget_id(target));
+        let resp = ui.response_for(outer_canvas_widget_id());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
@@ -159,12 +117,11 @@ impl NewNodeUi {
         {
             self.world_pos = to_world(local, &graph.viewport());
             self.source = pending_source;
-            self.menu.open_at(rect.min + local, target);
+            self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter, read the graph's own
             // definitions once, and focus the search field this frame so
             // the user can type straight away.
             self.search.text.clear();
-            self.local_defs = local_def_rows(graph);
             just_opened = true;
         }
 
@@ -172,7 +129,7 @@ impl NewNodeUi {
         // the display and a last-frame rect — so nothing but an open
         // palette on *this* pane should pay for it. `show` would answer
         // `None` anyway, but only after its arguments were built.
-        if !self.menu.open_on(target) {
+        if !self.menu.open_on() {
             return;
         }
 
@@ -190,30 +147,20 @@ impl NewNodeUi {
             .max(120.0);
         let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
         let search = &mut self.search;
-        let local_defs = &self.local_defs;
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
         let pos = self.world_pos;
         // Inside the body, so the per-frame read only happens on the frames
         // the palette is actually up — `show` skips the body when closed.
-        let chosen = self.menu.show(
-            ui,
-            target,
-            "new_node_popup",
-            Some(max_height),
-            |ui, popup| {
-                let palette = Palette {
-                    ctx,
-                    pos,
-                    target,
-                    local_defs,
-                };
+        let chosen = self
+            .menu
+            .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
+                let palette = Palette { ctx, pos };
                 palette_body(ui, popup, &palette, search, scroll_cap, just_opened)
-            },
-        );
+            });
 
         if let Some(intent) = chosen {
-            out.push(target, intent);
+            out.push(intent);
             // If a dropped connection opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the
             // exact port to land it, rather than it auto-attaching.
@@ -346,10 +293,6 @@ struct Palette<'a> {
     /// World position the open captured — every intent a row raises places
     /// its node here.
     pos: Vec2,
-    /// The pane the chosen node lands in — `Main` is the execution entry, so
-    /// it's what decides whether entry-only funcs are offered.
-    target: GraphRef,
-    local_defs: &'a [LocalDefRow],
 }
 
 /// One category's rows, ready to record.
@@ -360,35 +303,14 @@ struct PaletteColumn<'a> {
 }
 
 impl<'a> Palette<'a> {
-    /// Every row the palette can list, in no particular order. The library's
-    /// row for a graph this document already copied is left out — see
-    /// [`LocalDefRow::origin`].
+    /// Every row the palette can list, in no particular order: the library's
+    /// funcs, then the built-in specials.
     fn entries(&'a self) -> impl Iterator<Item = PaletteEntry<'a>> {
-        // An entry-only func in a definition body is a compile error
-        // (`GraphValidationError::EntryOnlyFunc`), so don't offer one where it
-        // could only ever break the document. Stated against the flag rather
-        // than against any particular func, so a future one is covered too.
-        let entry = self.target == GraphRef::Main;
         self.ctx
             .library
             .funcs()
-            .filter(move |func| entry || !func.entry_only)
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))
-            .chain(
-                self.ctx
-                    .library
-                    .graphs
-                    .iter()
-                    .filter(|(id, _)| {
-                        !self
-                            .local_defs
-                            .iter()
-                            .any(|local| local.origin.as_ref() == Some(id))
-                    })
-                    .map(|(id, graph)| PaletteEntry::Graph(*id, graph)),
-            )
-            .chain(self.local_defs.iter().map(PaletteEntry::LocalGraph))
     }
 
     /// The columns to record: every category holding a matching row, sorted
@@ -514,29 +436,6 @@ impl PaletteEntry<'_> {
                     node
                 })
             }
-            // A library graph localizes on instance: the copy records its
-            // `origin` so it stays linked for a later publish, but it is the
-            // document's to edit from here on.
-            PaletteEntry::Graph(shared_id, graph) => menu_item(ui, popup, &graph.name).then(|| {
-                let mut local = graph.clone_mapped();
-                local.origin = Some(shared_id);
-                Intent::AddLocalGraph {
-                    pos,
-                    node_id: NodeId::unique(),
-                    graph_id: GraphId::unique(),
-                    def: Box::new(local),
-                }
-            }),
-            // No copy: a second instance of a definition this graph already
-            // holds, so editing either instance's interior edits the one
-            // definition.
-            PaletteEntry::LocalGraph(local) => {
-                menu_item(ui, popup, &local.name).then(|| Intent::AddLocalGraphInstance {
-                    pos,
-                    node_id: NodeId::unique(),
-                    graph_id: local.id,
-                })
-            }
         }
     }
 }
@@ -566,11 +465,6 @@ fn add_from_func(
     })
 }
 
-/// Record one plain palette row, reporting whether it was clicked.
-fn menu_item(ui: &mut Ui, popup: &PopupHandle, name: &str) -> bool {
-    MenuItem::new(name).show(ui, popup).left.clicked()
-}
-
 /// Record a row for `func`, hovering its description as a tooltip. The
 /// tooltip has to record whether or not the row was clicked, so the click is
 /// latched first.
@@ -587,24 +481,12 @@ fn menu_row(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> bool {
 pub(crate) mod internals {
     use super::*;
 
-    impl NewNodeUi {
-        /// Names of the local definitions the last open cached, in the order
-        /// the scene listed them — how a canvas test sees *which* graph the
-        /// palette read, and when.
-        pub(crate) fn cached_local_defs(&self) -> Vec<&str> {
-            self.local_defs
-                .iter()
-                .map(|row| row.name.as_str())
-                .collect()
-        }
-    }
+    impl NewNodeUi {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::run_state::RunState;
-    use crate::gui::theme::Theme;
 
     #[test]
     fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
@@ -631,166 +513,5 @@ mod tests {
         assert!(!name_matches("Grün", "grun"));
         // An ASCII name never matches a non-ASCII query.
         assert!(!name_matches("Blur", "blür"));
-    }
-
-    /// A local-definition row built without a scene, for the listing tests.
-    /// The scene's own projection into these rows is covered by
-    /// `gui::scene::tests::local_defs_project_per_pane_ordered_by_id`.
-    fn local_row(name: &str, category: &str) -> LocalDefRow {
-        LocalDefRow {
-            id: GraphId::unique(),
-            name: name.to_owned(),
-            category: category.to_owned(),
-            origin: None,
-        }
-    }
-
-    /// The rows of the column named `category`, or `None` when the query
-    /// leaves that category with no column at all.
-    fn column<'a>(columns: &'a [PaletteColumn<'a>], category: &str) -> Option<Vec<&'a str>> {
-        let found = columns.iter().find(|c| c.category == category)?;
-        Some(found.entries.iter().map(PaletteEntry::name).collect())
-    }
-
-    #[test]
-    fn the_open_graphs_own_definitions_list_beside_the_librarys() {
-        use scenarium::{GraphDef, Library};
-
-        let origin = GraphId::unique();
-        let mut library = Library::default();
-        library.register_graph(origin, GraphDef::new("Published").category("Document"));
-        library.register_graph(
-            GraphId::unique(),
-            GraphDef::new("Untouched").category("Document"),
-        );
-        let theme = Theme::default();
-        let run_state = RunState::default();
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
-        fn palette<'a>(ctx: &'a AppContext<'a>, local_defs: &'a [LocalDefRow]) -> Palette<'a> {
-            Palette {
-                ctx,
-                pos: Vec2::ZERO,
-                target: GraphRef::Main,
-                local_defs,
-            }
-        }
-
-        // Local definitions land in the column their own category names,
-        // interleaved with the library's rows in one alphabetical list, and
-        // a category only they use still gets a column of its own.
-        let rows = [
-            local_row("Sharpen", "Document"),
-            local_row("Blur", "Document"),
-            local_row("Offstage", "Elsewhere"),
-        ];
-        let listed = palette(&ctx, &rows);
-        let columns = listed.columns("");
-        assert_eq!(
-            column(&columns, "Document").as_deref(),
-            Some(["Blur", "Published", "Sharpen", "Untouched"].as_slice())
-        );
-        assert_eq!(
-            column(&columns, "Elsewhere").as_deref(),
-            Some(["Offstage"].as_slice())
-        );
-        assert_eq!(
-            columns.iter().filter(|c| c.category == "Document").count(),
-            1,
-            "one column per category, deduped across the four sources"
-        );
-        // Columns are ordered by category name, so panes don't reshuffle.
-        let mut sorted = columns.iter().map(|c| c.category).collect::<Vec<_>>();
-        sorted.sort();
-        assert_eq!(
-            columns.iter().map(|c| c.category).collect::<Vec<_>>(),
-            sorted
-        );
-
-        // The query filters local rows by name like any other entry; a
-        // matching category name reveals that whole column; a category left
-        // with nothing gets no column at all.
-        assert_eq!(
-            column(&listed.columns("sharp"), "Document").as_deref(),
-            Some(["Sharpen"].as_slice())
-        );
-        assert_eq!(
-            column(&listed.columns("docum"), "Document").map(|rows| rows.len()),
-            Some(4),
-            "a category-name match shows every row under it"
-        );
-        assert_eq!(
-            column(&listed.columns("nothing matches this"), "Document"),
-            None,
-            "a category with no matching row renders no column"
-        );
-
-        // With a local copy of the library entry already in this graph, the
-        // library's own row for it goes: clicking either lands on the copy.
-        let mut copy = local_row("Published", "Document");
-        copy.origin = Some(origin);
-        assert_eq!(
-            column(&palette(&ctx, &[copy]).columns(""), "Document").as_deref(),
-            Some(["Published", "Untouched"].as_slice()),
-            "one row per definition, not two under the same name"
-        );
-    }
-
-    /// An entry-only func is offered in the entry pane and withheld everywhere
-    /// else, because placing one inside a definition body is a compile error
-    /// (`GraphValidationError::EntryOnlyFunc`). Gated on the flag rather than
-    /// on any particular func, so a future entry-only func is covered too.
-    #[test]
-    fn entry_only_funcs_are_offered_only_in_the_entry_pane() {
-        use scenarium::{Func, FuncId, Library, async_lambda};
-
-        use crate::core::preview::preview_func;
-
-        let mut library = Library::default();
-        library.add(preview_func(Default::default()));
-        library.add(
-            Func::new(FuncId::unique(), "Add")
-                .category("System")
-                .lambda(async_lambda!(|_| { Ok(()) })),
-        );
-
-        let theme = Theme::default();
-        let run_state = RunState::default();
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
-        let palette = |target| Palette {
-            ctx: &ctx,
-            pos: Vec2::ZERO,
-            target,
-            local_defs: &[],
-        };
-
-        // "Run on Event" is the `RunSinks` special node, which shares this
-        // category and is placeable anywhere — so it stays in both listings and
-        // shows the filter is the flag's doing, not the category's.
-        assert_eq!(
-            column(&palette(GraphRef::Main).columns(""), "System").as_deref(),
-            Some(["Add", "Preview", "Run on Event"].as_slice()),
-            "the entry pane lists it"
-        );
-        assert_eq!(
-            column(
-                &palette(GraphRef::Local(GraphId::unique())).columns(""),
-                "System"
-            )
-            .as_deref(),
-            Some(["Add", "Run on Event"].as_slice()),
-            "a definition pane withholds it while keeping everything placeable"
-        );
     }
 }

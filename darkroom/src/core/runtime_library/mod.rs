@@ -4,13 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
-use scenarium::{NodeId, math_library, system_library, worker_events_library};
+use scenarium::{math_library, system_library, worker_events_library};
 
-use crate::core::document::{Document, GraphRef};
-use crate::core::edit::publish;
-use crate::core::graph_library::GraphLibrary;
-use crate::core::io::graph_library as graph_library_io;
-use crate::core::io::graph_library::{GraphLibraryLoadError, GraphLibrarySaveError};
 use crate::core::preview::{self, PreviewSink};
 
 #[derive(Clone, Debug)]
@@ -37,73 +32,22 @@ impl PublishedLibrary {
 #[derive(Debug)]
 pub(crate) struct RuntimeLibrary {
     pub(crate) published: PublishedLibrary,
-    graph_library: GraphLibrary,
     model_paths: MlModelPaths,
     /// Where the preview func's lambda publishes. Created once and captured by
-    /// every recomposed snapshot, so the values in flight survive a
-    /// graph-library edit rebuilding the registry underneath them.
+    /// every recomposed snapshot, so the values in flight survive a settings
+    /// change rebuilding the registry underneath them.
     pub(crate) previews: Arc<PreviewSink>,
-}
-
-/// What a graph-library edit did. There is no "changed but unsaved" state:
-/// the file is written before the in-memory library is adopted, so an `Err`
-/// means nothing changed in memory, on disk, or in the document.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum LibraryEdit {
-    Committed,
-    /// Nothing to publish — the node isn't a local graph instance.
-    Skipped,
 }
 
 impl RuntimeLibrary {
     pub(crate) fn new(model_paths: &MlModelPaths) -> Self {
-        Self::with_graph_library(model_paths, GraphLibrary::default())
-    }
-
-    pub(crate) fn load(model_paths: &MlModelPaths) -> Result<Self, GraphLibraryLoadError> {
-        Ok(Self::with_graph_library(
-            model_paths,
-            graph_library_io::load()?,
-        ))
-    }
-
-    fn with_graph_library(model_paths: &MlModelPaths, graph_library: GraphLibrary) -> Self {
         let previews = Arc::new(PreviewSink::default());
-        let current = Arc::new(compose(model_paths, &graph_library, &previews));
+        let current = Arc::new(compose(model_paths, &previews));
         Self {
             published: PublishedLibrary::new(current.clone()),
-            graph_library,
             model_paths: model_paths.clone(),
             previews,
         }
-    }
-
-    /// Publish `node_id`'s local graph to the library. The file is written
-    /// before anything else moves, so a failed save leaves the library, the
-    /// published snapshot, and the document's lineage exactly as they were.
-    pub(crate) fn publish_graph(
-        &mut self,
-        document: &mut Document,
-        target: GraphRef,
-        node_id: NodeId,
-    ) -> Result<LibraryEdit, GraphLibrarySaveError> {
-        let Some(publication) = publish::resolve_publication(document, target, node_id) else {
-            return Ok(LibraryEdit::Skipped);
-        };
-        let committed = graph_library_io::commit_entry(graph_library_io::LibraryEntry {
-            origin: publication.origin,
-            graph: publication.graph,
-        })?;
-        self.adopt(committed.library);
-        publish::link_origin(document, target, publication.local_id, committed.id);
-        Ok(LibraryEdit::Committed)
-    }
-
-    /// Take the library the file now holds in place of our own copy, and
-    /// republish the merged registry built from it.
-    fn adopt(&mut self, graph_library: GraphLibrary) {
-        self.graph_library = graph_library;
-        self.recompose();
     }
 
     pub(crate) fn update_ml_model_paths(&mut self, paths: &MlModelPaths) -> bool {
@@ -116,20 +60,12 @@ impl RuntimeLibrary {
     }
 
     fn recompose(&mut self) {
-        let current = Arc::new(compose(
-            &self.model_paths,
-            &self.graph_library,
-            &self.previews,
-        ));
+        let current = Arc::new(compose(&self.model_paths, &self.previews));
         self.published.replace(current);
     }
 }
 
-fn compose(
-    model_paths: &MlModelPaths,
-    graph_library: &GraphLibrary,
-    previews: &Arc<PreviewSink>,
-) -> ScenariumLibrary {
+fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> ScenariumLibrary {
     let mut library = ScenariumLibrary::default();
     library.add(preview::preview_func(Arc::clone(previews)));
     library.merge(math_library());
@@ -139,9 +75,6 @@ fn compose(
     library.merge(random_library());
     library.merge(image_library());
     library.merge(astro_library(model_paths));
-    for (id, graph) in &graph_library.graphs {
-        library.register_graph(*id, graph.clone_verbatim());
-    }
     library
 }
 
@@ -161,6 +94,3 @@ pub(crate) mod internals {
         library.replace(Arc::new(replacement));
     }
 }
-
-#[cfg(test)]
-mod tests;

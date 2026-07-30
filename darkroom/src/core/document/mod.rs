@@ -1,4 +1,3 @@
-mod auto_layout;
 pub(crate) mod dock;
 pub(crate) mod open_document;
 mod serde;
@@ -7,38 +6,12 @@ pub(crate) mod validate;
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
 use indexmap::IndexMap;
-use scenarium::GraphId;
-use scenarium::GraphLink;
-use scenarium::{DetachedNode, Graph as CoreGraph, GraphDef as CoreGraphDef, NodeId, NodeSearch};
-use scenarium::{Node, NodeKind};
-use std::collections::{BTreeSet, HashMap};
+use scenarium::NodeKind;
+use scenarium::{DetachedNode, Graph as CoreGraph, NodeId};
+use std::collections::BTreeSet;
 
-use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
-use crate::core::document::dock::{DockLayout, TabGroup};
+use crate::core::document::dock::DockLayout;
 use crate::core::preview;
-
-/// Initial placement of a fresh graph's boundary nodes: the input
-/// boundary at the origin, the output boundary one gap to the right and
-/// level with it (instead of the generic auto-layout stacking the two
-/// unconnected nodes in one column).
-const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
-
-/// Palette category a graph created in the editor starts in. A
-/// [`GraphDef`](scenarium::GraphDef) with no category lands in a nameless
-/// palette column, and nothing in the editor can set one
-/// afterwards, so a fresh graph names its own.
-pub(crate) const NEW_GRAPH_CATEGORY: &str = "Document";
-
-/// Which graph an editor tab is pointed at. `Main` is the document root;
-/// `Local(id)` addresses a local graph *anywhere* in the document's nested
-/// graph tree — graph ids are document-unique (upheld by
-/// `Graph::clone_mapped` at every copy boundary and enforced by
-/// `Graph::validate`), so the bare id is a complete address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum GraphRef {
-    Main,
-    Local(GraphId),
-}
 
 /// Whether a port consumes a binding (`Input`) or produces a value
 /// (`Output`). Scoped to the data-port subset until Trigger/Event are
@@ -63,9 +36,7 @@ impl PortKind {
 /// its `WidgetId` (see `crate::gui::node::port_row::port_circle_wid`)
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
-/// the whole document (graph interiors included), so no graph ref is
-/// needed alongside — upheld by `Graph::clone_mapped` at every copy
-/// boundary (import/localize/detach) and enforced by
+/// the whole document, so no graph ref is needed alongside — enforced by
 /// [`Document::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct PortRef {
@@ -74,39 +45,26 @@ pub(crate) struct PortRef {
     pub(crate) port_idx: usize,
 }
 
-/// What an editor tab shows. Most tabs are graphs — the root and any
-/// opened graph interiors ([`TabRef::Graph`]) — but a tab can also be
-/// a non-graph app view like [`TabRef::Preferences`] (the settings window).
-/// Persisted + undoable like the rest of the tab/view state, so reopening
-/// a document restores its open tabs and Ctrl+Z walks tab open/close.
+/// What an editor tab shows: the document's graph ([`TabRef::Graph`]), or a
+/// non-graph app view like [`TabRef::Preferences`] (the settings window) or an
+/// image viewer. Persisted + undoable like the rest of the tab/view state, so
+/// reopening a document restores its open tabs and Ctrl+Z walks tab
+/// open/close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum TabRef {
-    /// A graph pane (root or a local graph interior).
-    Graph(GraphRef),
+    /// The graph pane.
+    Graph,
     /// The app-preferences / settings view — no graph, no canvas.
     Preferences,
     /// A full-resolution viewer of one port's runtime image — one tab per
     /// port, deduped on open. Content is runtime-only
     /// (`crate::gui::image_viewer`): a restored tab pulls any current value
-    /// from `RunState` when drawn. Pruned when its node is deleted, like a
-    /// graph tab whose def vanished.
+    /// from `RunState` when drawn. Pruned when its node is deleted.
     ///
     /// Keyed by the preview node whose value it shows — the same identity the
     /// preview card on the canvas uses, so the two can never disagree about
     /// which value a tab is for.
     ImageViewer(NodeId),
-}
-
-/// Which side of a graph interface a boundary-port edit targets.
-///
-/// The side names the *interface*, not the UI column it shows in: a
-/// boundary node mirrors the interface, so the `GraphOutput` node's
-/// *input column* edits the `Output` side and the `GraphInput` node's
-/// *output column* edits the `Input` side (see `gui::node::port_row`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum BoundarySide {
-    Input,
-    Output,
 }
 
 /// A graph's camera: pan offset (canvas-local px) + zoom factor. One
@@ -135,12 +93,10 @@ impl Default for Viewport {
     }
 }
 
-/// Editor-side view metadata for one graph: per-item positions and paint
-/// order, the viewport, and the selection. One of these exists per
-/// open/edited graph (the root in `Document::main_view`, each graph
-/// interior in `Document::local_views`). The graph *data* itself lives in
-/// the core `Graph`; this is purely how the editor presents and
-/// navigates it.
+/// Editor-side view metadata for the document's graph: per-item positions and
+/// paint order, the viewport, and the selection (`Document::main_view`). The
+/// graph *data* itself lives in the core `Graph`; this is purely how the editor
+/// presents and navigates it.
 ///
 /// **Everything here is persisted and undoable, by design** — reopening
 /// a file restores the exact camera and selection, and Ctrl+Z walks
@@ -174,7 +130,7 @@ impl Eq for GraphView {}
 
 impl GraphView {
     /// A fresh view seeded with a zero-positioned item for every node in
-    /// `graph` (callers usually `auto_layout` right after, which places them).
+    /// `graph`.
     pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
         let mut item_placements = IndexMap::with_capacity(graph.len());
         for node in graph.iter() {
@@ -196,145 +152,56 @@ impl GraphView {
     }
 }
 
-/// A graph plus its view metadata, borrowed together so an edit can
-/// touch both atomically without re-borrowing `Document` through two
-/// methods (the borrow checker can't prove `graph` and `view` are
-/// disjoint across separate accessor calls). Mutable counterpart of
-/// [`EditScopeRef`].
-pub(crate) struct EditScope<'a> {
-    pub(crate) graph: &'a mut CoreGraph,
-    pub(crate) view: &'a mut GraphView,
-}
-
-/// Read-only graph + view pair, for `build_step`'s pre-mutation reads.
-pub(crate) struct EditScopeRef<'a> {
-    pub(crate) graph: &'a CoreGraph,
-    pub(crate) view: &'a GraphView,
-}
-
-impl EditScope<'_> {
-    /// Drop a node from both the graph and its view (its item and any
-    /// selection membership). Mirrors the old `Document::remove_node`.
-    pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
-        self.view.item_placements.retain(|key, _| *key != *node_id);
-        let detached = self.graph.detach_node(*node_id);
-        self.view.selected.retain(|k| *k != *node_id);
-        detached
-    }
-}
-
-/// The thing being edited: the root `Graph` plus the editor view
-/// metadata for each graph the user has open — the root in `main_view`,
-/// every opened graph interior in `local_views`. The `Library` it
-/// resolves against lives one level up on `App` (runtime-owned).
+/// The thing being edited: the authoring `Graph`, the editor view metadata
+/// positioning it, and the pane layout showing it. The `Library` it resolves
+/// against lives one level up on `App` (runtime-owned).
+///
+/// The two halves are public because a caller that touches both wants them
+/// borrowed together, and destructuring is what proves they are disjoint —
+/// a pair of accessor methods would each borrow the whole `Document` and
+/// couldn't be held at once.
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     pub(crate) graph: CoreGraph,
     pub(crate) main_view: GraphView,
-    /// View metadata for local graph interiors, created lazily when a
-    /// graph is first opened in a tab. Keyed by `GraphId`.
-    #[serde(default)]
-    local_views: HashMap<GraphId, GraphView>,
     /// The pane arrangement: open tabs grouped into split panes, plus
     /// the focused group. Persisted + undoable like the rest of the view
-    /// state (every layout mutation is an undoable `DocIntent::Dock`).
+    /// state (every layout mutation is an undoable `DockOp`).
     #[serde(default)]
     pub(crate) layout: DockLayout,
 }
 
-/// Whether a tab still resolves against the graph: `Main` and
-/// `Preferences` always do, a local graph tab lives with its map entry,
-/// and a viewer tab dies with its node. The single predicate behind
-/// [`Document::reconcile_with_graph`]'s fast-path *and* its prune, so
-/// the two can't drift.
+/// Whether a tab still resolves against the graph: the graph pane and
+/// `Preferences` always do, and a viewer tab dies with its node. The single
+/// predicate behind [`Document::reconcile_with_graph`]'s fast-path *and* its
+/// prune, so the two can't drift.
 fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
-        TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
-        TabRef::Graph(GraphRef::Local(id)) => graph.find_graph(id).is_some(),
-        TabRef::ImageViewer(node_id) => graph.find(node_id, NodeSearch::Recursive).is_some(),
+        TabRef::Graph | TabRef::Preferences => true,
+        TabRef::ImageViewer(node_id) => graph.find(node_id).is_some(),
     }
 }
 
 impl Document {
-    /// The graph a target points at, or `None` if it no longer exists
-    /// (e.g. a graph deleted while its tab was open).
-    pub(crate) fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
-        match target {
-            GraphRef::Main => Some(&self.graph),
-            GraphRef::Local(id) => Some(&self.graph.find_graph(id)?.body),
-        }
+    /// Drop a node from both the graph and the view (its placement and any
+    /// selection membership) — the one edit that has to touch both to leave
+    /// the document consistent.
+    pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
+        self.main_view
+            .item_placements
+            .retain(|key, _| *key != *node_id);
+        let detached = self.graph.detach_node(*node_id);
+        self.main_view.selected.retain(|k| *k != *node_id);
+        detached
     }
 
-    /// The view metadata for a target, or `None` when unopened/missing.
-    pub(crate) fn view(&self, target: GraphRef) -> Option<&GraphView> {
-        match target {
-            GraphRef::Main => Some(&self.main_view),
-            GraphRef::Local(id) => self.local_views.get(&id),
-        }
-    }
-
-    pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
-        match target {
-            GraphRef::Main => Some(&mut self.graph),
-            GraphRef::Local(id) => Some(&mut self.graph.find_graph_mut(id)?.body),
-        }
-    }
-
-    /// Graph + view borrowed together for editing the given target.
-    pub(crate) fn scope_mut(&mut self, target: GraphRef) -> Option<EditScope<'_>> {
-        match target {
-            GraphRef::Main => Some(EditScope {
-                graph: &mut self.graph,
-                view: &mut self.main_view,
-            }),
-            GraphRef::Local(id) => {
-                let graph = &mut self.graph.find_graph_mut(id)?.body;
-                let view = self.local_views.get_mut(&id)?;
-                Some(EditScope { graph, view })
-            }
-        }
-    }
-
-    /// Read-only graph + view pair for the given target.
-    pub(crate) fn scope(&self, target: GraphRef) -> Option<EditScopeRef<'_>> {
-        Some(EditScopeRef {
-            graph: self.graph_for(target)?,
-            view: self.view(target)?,
-        })
-    }
-
-    /// Every graph currently on a canvas: one per pane whose *visible*
-    /// tab is a graph, in pane order. What the scene projects, and what
-    /// the canvas prepass loops over. A graph open in two panes at once is
-    /// impossible — a tab lives in exactly one group — so these are
-    /// distinct.
-    pub(crate) fn visible_targets(&self) -> impl Iterator<Item = GraphRef> + '_ {
+    /// Whether the graph is on a canvas — i.e. some pane's visible tab is the
+    /// graph pane. What the scene projects, and what the canvas prepass gates
+    /// on.
+    pub(crate) fn shows_graph(&self) -> bool {
         self.layout
             .groups()
-            .filter_map(|group| match group.active_tab() {
-                TabRef::Graph(target) => Some(target),
-                TabRef::Preferences | TabRef::ImageViewer(_) => None,
-            })
-    }
-
-    /// The graph an edit raised *outside* any canvas belongs to — a menu
-    /// command, a keyboard chord, a script request. The focused pane's
-    /// graph when it shows one, else the first visible graph, else `None`
-    /// (no graph pane open at all).
-    ///
-    /// Edits raised *inside* a canvas don't come through here: they carry
-    /// their own target, since several graphs can be on screen and the
-    /// focused one need not be the one clicked.
-    pub(crate) fn focused_target(&self) -> Option<GraphRef> {
-        let focused = self
-            .layout
-            .groups()
-            .find(|group| group.id == self.layout.focused)
-            .map(TabGroup::active_tab);
-        match focused {
-            Some(TabRef::Graph(target)) => Some(target),
-            _ => self.visible_targets().next(),
-        }
+            .any(|group| matches!(group.active_tab(), TabRef::Graph))
     }
 
     /// Whether the document still holds `node_id` anywhere — every local
@@ -345,18 +212,17 @@ impl Document {
     /// scene: a node absent from the *scene* may just be in a closed tab, but
     /// one absent from here is gone for good — ids are never reused.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
-        self.graph.find(node_id, NodeSearch::Recursive).is_some()
+        self.graph.find(node_id).is_some()
     }
 
-    /// Whether `node_id` is a live preview node in the entry graph — what
-    /// retains the value it published.
+    /// Whether `node_id` is a live preview node — what retains the value it
+    /// published.
     ///
-    /// Top-level only, because [`Func::entry_only`](scenarium::Func::entry_only) is what makes a preview's
-    /// identity answer for exactly one on-screen card; a node id found deeper
-    /// would not be one.
+    /// One node backs one on-screen card, so the node's own id answers for the
+    /// card without anything else alongside it.
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
         self.graph
-            .find(node_id, NodeSearch::TopLevel)
+            .find(node_id)
             .is_some_and(|node| match node.kind {
                 NodeKind::Func(func_id) => preview::is_preview(func_id),
                 _ => false,
@@ -385,41 +251,13 @@ impl Document {
             })
     }
 
-    /// Ensure a `GraphView` exists for a local graph interior,
-    /// auto-laying-out its nodes on first creation. Returns `false` if
-    /// the graph no longer exists.
-    pub(crate) fn ensure_sub_view(&mut self, id: GraphId) -> bool {
-        if self.local_views.contains_key(&id) {
-            return true;
-        }
-        let view = {
-            let Some(def) = self.graph.find_graph(id) else {
-                return false;
-            };
-            let graph = &def.body;
-            let mut view = GraphView::for_graph(graph);
-            view.auto_layout(graph);
-            view
-        };
-        self.local_views.insert(id, view);
-        true
-    }
-
     /// Bring the editor's derived state back in line with the graph: drop
-    /// tabs whose target vanished (collapsing panes that empty), drop
-    /// `local_views` whose graph vanished, and seed a view for any `Local`
-    /// tab missing one — so the scene rebuild always resolves a live graph
-    /// *and* view. `Main` always survives (`graph_for(Main)` is infallible
-    /// and `main_view` always exists).
+    /// tabs whose target vanished, collapsing panes that empty. The graph pane
+    /// always survives — the graph and `main_view` both always exist — so this
+    /// only ever prunes viewer tabs whose node is gone.
     ///
-    /// Both view repairs cover one seam: a `local_views` entry is seeded
-    /// lazily on first open, *outside* the undo record, so undo can remove
-    /// the graph it belongs to without taking it along (`revert_graph`
-    /// edits one target's `EditScope` and can't reach the map), and a
-    /// deserialized or hand-edited document can carry a `Local` tab with
-    /// no entry at all. Either state fails [`Self::validate`], which is why
-    /// this runs every frame in the navigation phase, right after undo/redo
-    /// and the intent drain — well before anything can save.
+    /// Runs every frame in the navigation phase, right after undo/redo and the
+    /// intent drain, so a stale tab can never reach a save.
     pub(crate) fn reconcile_with_graph(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only when something died does the
@@ -429,110 +267,8 @@ impl Document {
             let Document { graph, layout, .. } = self;
             layout.retain_tabs(|t| tab_alive(graph, t));
         }
-        // An orphaned view is dead state, not recoverable state: if the
-        // graph comes back (redo), the next open re-seeds the view from
-        // scratch. Unguarded because the retain allocates nothing.
-        let Document {
-            graph, local_views, ..
-        } = self;
-        local_views.retain(|id, _| graph.find_graph(*id).is_some());
-        // Seed views for any `Local` tab missing one. Guarded by `any`
-        // so the common (all-seeded) case allocates nothing.
-        if self.layout.all_tabs().any(
-            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.local_views.contains_key(&id)),
-        ) {
-            let missing: Vec<GraphId> = self
-                .layout
-                .all_tabs()
-                .filter_map(|t| match t {
-                    TabRef::Graph(GraphRef::Local(id)) if !self.local_views.contains_key(&id) => {
-                        Some(id)
-                    }
-                    _ => None,
-                })
-                .collect();
-            for id in missing {
-                self.ensure_sub_view(id);
-            }
-        }
-    }
-
-    /// Create a fresh, empty local graph with its two boundary nodes inside
-    /// `target`'s scope: the def joins that graph's `graphs` map and the
-    /// instance node lands on its canvas — so New Graph in a local tab
-    /// nests rather than silently dropping the instance at root. `None`
-    /// when the target no longer resolves (e.g. undone away this frame).
-    pub(crate) fn create_graph(&mut self, target: GraphRef) -> Option<GraphId> {
-        let id = GraphId::unique();
-        let view = {
-            let scope = self.scope_mut(target)?;
-            let sibling_count = scope.graph.graphs.len();
-            let mut graph = CoreGraphDef::new(format!("graph {}", sibling_count + 1))
-                .category(NEW_GRAPH_CATEGORY);
-            let input_id = graph.body.add(Node::new(NodeKind::GraphInput));
-            let output_id = graph.body.add(Node::new(NodeKind::GraphOutput));
-            let inst = Node::graph_instance(&graph, GraphLink::Local(id));
-            let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * sibling_count as f32;
-            scope.graph.insert_graph(id, graph);
-            let inst_id = scope.graph.add(inst);
-            scope.view.item_placements.insert(inst_id, inst_pos);
-
-            let mut view = GraphView::default();
-            view.item_placements.insert(input_id, AUTO_LAYOUT_ORIGIN);
-            view.item_placements.insert(
-                output_id,
-                AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
-            );
-            view
-        };
-        self.local_views.insert(id, view);
-
-        Some(id)
-    }
-
-    /// Current name of a nested graph interface port.
-    pub(crate) fn boundary_port_name(
-        &self,
-        graph_id: GraphId,
-        side: BoundarySide,
-        idx: usize,
-    ) -> Option<&str> {
-        let interface = &self.graph.find_graph(graph_id)?;
-        let name = match side {
-            BoundarySide::Input => &interface.inputs.get(idx)?.name,
-            BoundarySide::Output => &interface.outputs.get(idx)?.name,
-        };
-        Some(name)
-    }
-
-    /// Rename the interface port at `idx` on `side` to `new`, provided it
-    /// currently holds `expected` — a stale-step guard (a lingering step
-    /// whose slot was removed, or renamed by other means, no-ops rather
-    /// than clobbering).
-    pub(crate) fn rename_boundary_port(
-        &mut self,
-        graph_id: GraphId,
-        side: BoundarySide,
-        idx: usize,
-        expected: &str,
-        new: &str,
-    ) {
-        let Some(def) = self.graph.find_graph_mut(graph_id) else {
-            return;
-        };
-        let slot = match side {
-            BoundarySide::Input => def.inputs.get_mut(idx).map(|input| &mut input.name),
-            BoundarySide::Output => def.outputs.get_mut(idx).map(|output| &mut output.name),
-        };
-        if let Some(slot) = slot
-            && *slot == expected
-        {
-            *slot = new.to_owned();
-        }
     }
 }
-
-impl Eq for Document {}
 
 impl From<CoreGraph> for Document {
     fn from(graph: CoreGraph) -> Self {
@@ -540,7 +276,6 @@ impl From<CoreGraph> for Document {
         Self {
             graph,
             main_view,
-            local_views: HashMap::new(),
             layout: DockLayout::default(),
         }
     }
@@ -551,221 +286,8 @@ mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
 
-    use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
-
-    fn leaf_graph(name: &str) -> CoreGraphDef {
-        CoreGraphDef::new(name)
-    }
-
-    #[test]
-    fn validate_rejects_duplicate_node_ids_across_graphs() {
-        // The same node id planted in the root graph and a def interior —
-        // unreachable through the editor (import/localize/detach sever
-        // identity via `clone_mapped`), so it's corrupt input validation refuses.
-        let mut doc = Document::default();
-        let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let graph_id = doc.create_graph(GraphRef::Main).unwrap();
-        let dup = Node::new(NodeKind::Func(FuncId::unique()));
-        doc.graph
-            .graphs
-            .get_mut(&graph_id)
-            .unwrap()
-            .body
-            .insert(node_id, dup);
-
-        let err = doc.validate().unwrap_err();
-        assert!(
-            format!("{err:#}").contains("occurs in more than one authoring graph"),
-            "unexpected validation error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn add_node_with_def_round_trips() {
-        use crate::core::edit::intent::apply::{apply_step, revert_step};
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, Intent};
-
-        // Instancing a library graph localizes it: a `Local` def copy
-        // (recording its `origin`) is added alongside the instance node, as
-        // one undoable `AddLocalGraph`.
-        let lib_id = GraphId::unique();
-        let mut local = leaf_graph("Lib").clone_mapped();
-        local.origin = Some(lib_id);
-        let local_id = GraphId::unique();
-        let node_id = NodeId::unique();
-
-        let mut doc = Document::default();
-        let step = build_step(
-            Intent::AddLocalGraph {
-                pos: Vec2::ZERO,
-                node_id,
-                graph_id: local_id,
-                def: Box::new(local),
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .expect("add builds");
-
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(
-            doc.graph.graphs.get(&local_id).is_some(),
-            "local graph added alongside the instance"
-        );
-        assert_eq!(
-            doc.graph.graphs.get(&local_id).unwrap().origin,
-            Some(lib_id),
-            "copy records its library origin"
-        );
-        assert!(
-            doc.graph.find(node_id, NodeSearch::TopLevel).is_some(),
-            "instance node added"
-        );
-
-        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(
-            doc.graph.graphs.get(&local_id).is_none(),
-            "undo removes the def"
-        );
-        assert!(
-            doc.graph.find(node_id, NodeSearch::TopLevel).is_none(),
-            "undo removes the instance node"
-        );
-    }
-
-    /// Localize one library instance into `doc`'s root graph and return
-    /// `(node_id, local_def_id)`. `origin` tags the copy's library
-    /// lineage so a later instance can dedup against it. The one interface
-    /// input carries a default, so the seeded bindings are observable.
-    fn add_library_instance(doc: &mut Document, lib_id: GraphId) -> (NodeId, GraphId) {
-        use crate::core::edit::intent::apply::apply_step;
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, Intent};
-        use scenarium::{DataType, FuncInput, StaticValue};
-
-        let mut local = leaf_graph("Lib")
-            .input(FuncInput::optional("gain", DataType::Float).default(StaticValue::Float(1.5)))
-            .clone_mapped();
-        local.origin = Some(lib_id);
-        let local_id = GraphId::unique();
-        let node_id = NodeId::unique();
-        let step = build_step(
-            Intent::AddLocalGraph {
-                pos: Vec2::ZERO,
-                node_id,
-                graph_id: local_id,
-                def: Box::new(local),
-            },
-            doc,
-            GraphRef::Main,
-        )
-        .expect("add builds");
-        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
-        (node_id, local_id)
-    }
-
-    #[test]
-    fn second_instance_reuses_existing_local_def() {
-        use scenarium::{Binding, InputPort, StaticValue};
-
-        // Two instances of the same library graph dropped into one
-        // graph must share a single local graph: the first materializes the
-        // localized copy, the second re-points at it (no duplicate def).
-        let lib_id = GraphId::unique();
-        let mut doc = Document::default();
-
-        let (node_a, def_a_id) = add_library_instance(&mut doc, lib_id);
-        assert_eq!(doc.graph.graphs.len(), 1, "first instance adds the def");
-
-        let (node_b, def_b_id) = add_library_instance(&mut doc, lib_id);
-        assert_eq!(
-            doc.graph.graphs.len(),
-            1,
-            "second instance reuses the def — no duplicate"
-        );
-        assert!(
-            doc.graph.graphs.get(&def_b_id).is_none(),
-            "the second fresh copy was dropped"
-        );
-        assert_eq!(
-            doc.graph.find(node_b, NodeSearch::TopLevel).unwrap().kind,
-            NodeKind::Graph(GraphLink::Local(def_a_id)),
-            "second instance points at the first instance's local graph"
-        );
-        // Reuse routes through the same instancing path as a bare
-        // `AddLocalGraphInstance`, so the second node's defaults come off the
-        // definition that was *kept*, not the copy that was dropped.
-        for node_id in [node_a, node_b] {
-            assert_eq!(
-                doc.graph.bindings.get(&InputPort::new(node_id, 0)),
-                Some(&Binding::Const(StaticValue::Float(1.5))),
-                "both instances seed the interface default"
-            );
-        }
-    }
-
-    #[test]
-    fn detach_forks_standalone_copy_and_repoints_node() {
-        use crate::core::edit::intent::apply::{apply_step, revert_step};
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, Intent};
-
-        // A node on a library-linked local graph. Detach must fork a fresh
-        // standalone copy (origin cleared), add it, and repoint the node.
-        let lib_id = GraphId::unique();
-        let mut doc = Document::default();
-        let mut local = leaf_graph("Lib");
-        local.origin = Some(lib_id);
-        let local_id = GraphId::unique();
-        doc.graph.insert_graph(local_id, local);
-        let node = Node::graph_instance(
-            doc.graph.graphs.get(&local_id).unwrap(),
-            GraphLink::Local(local_id),
-        );
-        let node_id = doc.graph.add(node);
-        doc.main_view.item_placements.insert(node_id, Vec2::ZERO);
-
-        let step = build_step(Intent::DetachGraph { node_id }, &doc, GraphRef::Main)
-            .expect("detach builds");
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-
-        assert_eq!(doc.graph.graphs.len(), 2, "fork adds a second local graph");
-        let NodeKind::Graph(GraphLink::Local(new_id)) =
-            doc.graph.find(node_id, NodeSearch::TopLevel).unwrap().kind
-        else {
-            panic!("node should still be a local graph");
-        };
-        assert_ne!(new_id, local_id, "node now points at the fork");
-        assert_eq!(
-            doc.graph.graphs.get(&new_id).unwrap().origin,
-            None,
-            "detach clears the library lineage"
-        );
-
-        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert_eq!(doc.graph.graphs.len(), 1, "undo drops the fork");
-        let NodeKind::Graph(GraphLink::Local(restored)) =
-            doc.graph.find(node_id, NodeSearch::TopLevel).unwrap().kind
-        else {
-            panic!("node should still be a local graph");
-        };
-        assert_eq!(restored, local_id, "undo restores the original ref");
-    }
-
-    #[test]
-    fn instances_of_different_library_defs_stay_separate() {
-        // Different library sources must NOT collapse into one local graph.
-        let mut doc = Document::default();
-        add_library_instance(&mut doc, GraphId::unique());
-        add_library_instance(&mut doc, GraphId::unique());
-        assert_eq!(
-            doc.graph.graphs.len(),
-            2,
-            "distinct library origins keep distinct local graphs"
-        );
-    }
+    use scenarium::{FuncId, Node, NodeKind};
 
     /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
     /// `pos`, returning its id.
@@ -774,266 +296,6 @@ mod tests {
         let id = doc.graph.add(node);
         doc.main_view.item_placements.insert(id, pos);
         id
-    }
-
-    #[test]
-    fn set_disabled_round_trips_through_undo() {
-        use crate::core::edit::intent::apply::{apply_step, revert_step};
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, Intent, NodeProperty};
-
-        let mut doc = Document::default();
-        let id = add_node_at(&mut doc, Vec2::ZERO);
-        assert!(
-            !doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
-            "starts enabled"
-        );
-
-        let step = build_step(
-            Intent::SetNodeProperty {
-                node_id: id,
-                to: NodeProperty::Disabled(true),
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .expect("builds");
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(
-            doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
-            "apply disables"
-        );
-
-        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(
-            !doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled,
-            "revert re-enables (restores the captured `from`)"
-        );
-    }
-
-    #[test]
-    fn create_graph_has_only_boundary_nodes() {
-        let mut doc = Document::default();
-        let id = doc.create_graph(GraphRef::Main).unwrap();
-        let def = doc.graph.graphs.get(&id).expect("def added");
-
-        // Exactly the two boundary nodes, nothing else, empty interface.
-        assert_eq!(def.body.len(), 2);
-        assert_eq!(
-            def.body
-                .iter()
-                .filter(|n| matches!(n.kind, NodeKind::GraphInput))
-                .count(),
-            1
-        );
-        assert_eq!(
-            def.body
-                .iter()
-                .filter(|n| matches!(n.kind, NodeKind::GraphOutput))
-                .count(),
-            1
-        );
-        let interface = &def;
-        assert!(interface.inputs.is_empty() && interface.outputs.is_empty());
-        // A category, so the palette has a named column to list it under —
-        // nothing in the editor can set one after the fact.
-        assert_eq!(interface.category, NEW_GRAPH_CATEGORY);
-
-        // Boundary nodes are placed input-left / output-right, level.
-        let input_id = def
-            .body
-            .iter()
-            .find(|n| matches!(n.kind, NodeKind::GraphInput))
-            .unwrap()
-            .id;
-        let output_id = def
-            .body
-            .iter()
-            .find(|n| matches!(n.kind, NodeKind::GraphOutput))
-            .unwrap()
-            .id;
-        let view = doc.local_views.get(&id).expect("view seeded on create");
-        let ip = view.item_placements.get(&input_id).copied().unwrap();
-        let op = view.item_placements.get(&output_id).copied().unwrap();
-        assert!(op.x > ip.x, "output boundary sits right of input");
-        assert_eq!(ip.y, op.y, "boundaries are level");
-
-        // Creating also drops an instance of the new graph into root.
-        let inst = doc
-            .graph
-            .iter()
-            .find(|n| matches!(n.kind, NodeKind::Graph(GraphLink::Local(sid)) if sid == id))
-            .expect("instance added to main graph");
-        assert!(
-            doc.main_view.item_placements.get(&inst.id).is_some(),
-            "instance has a main view item"
-        );
-
-        // Each create mints a distinct id (no overwrite).
-        let id2 = doc.create_graph(GraphRef::Main).unwrap();
-        assert_ne!(id, id2);
-        assert_eq!(doc.graph.graphs.len(), 2);
-    }
-
-    #[test]
-    fn nested_graph_defs_resolve_and_edit_at_depth() {
-        use crate::core::edit::intent::apply::{apply_step, commit_doc_intent, revert_step};
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, DocIntent, Intent};
-        use scenarium::{Binding, DataType, InputPort, StaticValue};
-
-        let mut doc = Document::default();
-        let outer = doc.create_graph(GraphRef::Main).unwrap();
-        let inner = doc.create_graph(GraphRef::Local(outer)).unwrap();
-
-        // Creating inside a local scope nests: the inner def and its
-        // instance node live in the outer graph, not at root.
-        assert!(!doc.graph.graphs.contains_key(&inner));
-        let outer_def = doc.graph.graphs.get(&outer).unwrap();
-        assert!(outer_def.body.graphs.contains_key(&inner));
-        let inst_id = outer_def
-            .body
-            .iter()
-            .find_map(|n| {
-                matches!(n.kind, NodeKind::Graph(GraphLink::Local(id)) if id == inner)
-                    .then_some(n.id)
-            })
-            .expect("instance node lives in the outer graph");
-
-        // A bare id addresses the nested def: resolution, tab liveness,
-        // and validation all reach depth 2.
-        assert!(doc.graph_for(GraphRef::Local(inner)).is_some());
-        let primary = doc.layout.primary().id;
-        doc.layout
-            .find_or_insert(TabRef::Graph(GraphRef::Local(inner)), primary);
-        doc.reconcile_with_graph();
-        assert!(
-            doc.layout
-                .all_tabs()
-                .any(|t| t == TabRef::Graph(GraphRef::Local(inner))),
-            "a depth-2 tab stays alive"
-        );
-        doc.validate().expect("nested document validates");
-
-        // Graph-scoped edits commit against the nested target.
-        let node_id = NodeId::unique();
-        let add_node = build_step(
-            Intent::AddNode {
-                pos: Vec2::ZERO,
-                node_id,
-                node: Node::new(NodeKind::Func(FuncId::unique())),
-                bindings: vec![],
-            },
-            &doc,
-            GraphRef::Local(inner),
-        )
-        .expect("add builds against the nested target");
-        apply_step(
-            &add_node,
-            &mut doc,
-            BatchScope::Graph(GraphRef::Local(inner)),
-        );
-        assert!(
-            doc.graph
-                .graphs
-                .get(&outer)
-                .unwrap()
-                .body
-                .graphs
-                .get(&inner)
-                .unwrap()
-                .body
-                .find(node_id, NodeSearch::TopLevel)
-                .is_some(),
-            "node added inside the depth-2 def"
-        );
-
-        // Boundary-port doc-steps resolve the def — and, for removal, its
-        // *parent* (the outer def, whose instance bindings must be
-        // severed and restored) — recursively.
-        let add_port = build_step(
-            Intent::AddBoundaryPort {
-                side: BoundarySide::Input,
-                name: "in".into(),
-                data_type: DataType::Float,
-            },
-            &doc,
-            GraphRef::Local(inner),
-        )
-        .expect("boundary add builds at depth");
-        apply_step(
-            &add_port,
-            &mut doc,
-            BatchScope::Graph(GraphRef::Local(inner)),
-        );
-        let input_count = |doc: &Document| doc.graph.find_graph(inner).unwrap().inputs.len();
-        assert_eq!(input_count(&doc), 1);
-        let inst_port = InputPort::new(inst_id, 0);
-        let bound = Binding::Const(StaticValue::Float(4.0));
-        doc.graph
-            .find_graph_mut(outer)
-            .unwrap()
-            .body
-            .set_input_binding(inst_port, bound.clone());
-
-        let remove_port = build_step(
-            Intent::RemoveBoundaryPort {
-                side: BoundarySide::Input,
-                idx: 0,
-            },
-            &doc,
-            GraphRef::Local(inner),
-        )
-        .expect("boundary remove builds via the parent");
-        apply_step(
-            &remove_port,
-            &mut doc,
-            BatchScope::Graph(GraphRef::Local(inner)),
-        );
-        assert_eq!(input_count(&doc), 0, "slot removed from the nested def");
-        assert!(
-            !doc.graph
-                .find_graph(outer)
-                .unwrap()
-                .body
-                .bindings
-                .contains_key(&inst_port),
-            "the parent's instance binding was severed"
-        );
-        revert_step(
-            &remove_port,
-            &mut doc,
-            BatchScope::Graph(GraphRef::Local(inner)),
-        );
-        assert_eq!(input_count(&doc), 1, "undo re-attaches the slot");
-        assert_eq!(
-            doc.graph
-                .find_graph(outer)
-                .unwrap()
-                .body
-                .bindings
-                .get(&inst_port),
-            Some(&bound),
-            "undo restores the parent's instance binding"
-        );
-
-        // A rename doc-step writes through to the nested def too.
-        commit_doc_intent(
-            DocIntent::RenameGraph {
-                id: inner,
-                to: "deep".into(),
-            },
-            &mut doc,
-        )
-        .expect("rename applies at depth");
-        assert_eq!(doc.graph.find_graph(inner).unwrap().name, "deep");
-        doc.validate()
-            .expect("document still validates after edits");
-    }
-
-    /// All open tabs across the layout, for order-sensitive asserts.
-    fn all_tabs(doc: &Document) -> Vec<TabRef> {
-        doc.layout.all_tabs().collect()
     }
 
     /// A viewer tab retains its node's value while open, and only the pane's
@@ -1077,160 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn non_graph_tabs_have_no_target_and_survive_validation() {
-        let mut doc = Document::default();
-        let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let primary = doc.layout.primary().id;
-        // With one pane, the focused target is simply its visible tab: a
-        // graph resolves, an activated non-graph tab means no canvas.
-        assert_eq!(doc.focused_target(), Some(GraphRef::Main));
-        assert_eq!(doc.visible_targets().collect::<Vec<_>>(), [GraphRef::Main]);
-        doc.layout.find_or_insert(TabRef::Preferences, primary);
-        doc.layout
-            .find_or_insert(TabRef::ImageViewer(node_id), primary);
-        for tab in [TabRef::Preferences, TabRef::ImageViewer(node_id)] {
-            doc.layout.apply(DockOp::ActivateTab { tab });
-            assert_eq!(
-                doc.focused_target(),
-                None,
-                "a layout of nothing but non-graph tabs has no target"
-            );
-        }
-
-        // Preferences always resolves; a viewer tab resolves while its
-        // node exists — neither is pruned and the activation holds.
-        doc.reconcile_with_graph();
-        assert_eq!(
-            all_tabs(&doc),
-            vec![
-                TabRef::Graph(GraphRef::Main),
-                TabRef::Preferences,
-                TabRef::ImageViewer(node_id)
-            ]
-        );
-        assert_eq!(doc.layout.primary().active, 2);
-        assert_eq!(
-            doc.visible_targets().count(),
-            0,
-            "no pane shows a graph, so nothing gets a canvas"
-        );
-        doc.validate().unwrap();
-    }
-
-    #[test]
-    fn two_graph_panes_are_both_visible_and_focus_picks_the_edit_target() {
-        use crate::core::document::dock::{DockDrop, SplitSide};
-
-        // Split a local graph off into its own pane. Both panes now show a
-        // graph, so both get a canvas — and an edit with no pane of its own
-        // (a menu command, a keyboard chord) lands on whichever is focused.
-        let mut doc = Document::default();
-        let local = doc.create_graph(GraphRef::Main).unwrap();
-        let primary = doc.layout.primary().id;
-        let local_tab = TabRef::Graph(GraphRef::Local(local));
-        doc.layout.find_or_insert(local_tab, primary);
-        doc.layout.apply(DockOp::MoveTab {
-            tab: local_tab,
-            to: DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        });
-        doc.ensure_sub_view(local);
-        doc.validate().unwrap();
-
-        assert_eq!(
-            doc.visible_targets().collect::<Vec<_>>(),
-            [GraphRef::Main, GraphRef::Local(local)],
-            "both panes show a graph, in pane order"
-        );
-        assert_eq!(
-            doc.focused_target(),
-            Some(GraphRef::Local(local)),
-            "the split pane took focus"
-        );
-
-        // Focus back on the root pane; the other graph stays visible.
-        doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::Graph(GraphRef::Main),
-        });
-        assert_eq!(doc.focused_target(), Some(GraphRef::Main));
-        assert_eq!(doc.visible_targets().count(), 2);
-
-        // A focused pane showing a *non*-graph falls back to the first
-        // visible graph rather than reporting none.
-        doc.layout.find_or_insert(TabRef::Preferences, primary);
-        doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::Preferences,
-        });
-        assert_eq!(
-            doc.visible_targets().collect::<Vec<_>>(),
-            [GraphRef::Local(local)],
-            "the root pane now shows preferences"
-        );
-        assert_eq!(doc.focused_target(), Some(GraphRef::Local(local)));
-    }
-
-    #[test]
-    fn reconcile_with_graph_keeps_non_graph_tabs_when_a_graph_tab_vanishes() {
-        let mut doc = Document::default();
-        let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let id = doc.create_graph(GraphRef::Main).unwrap();
-        let primary = doc.layout.primary().id;
-        doc.layout
-            .find_or_insert(TabRef::Graph(GraphRef::Local(id)), primary);
-        doc.layout.find_or_insert(TabRef::Preferences, primary);
-        doc.layout
-            .find_or_insert(TabRef::ImageViewer(node_id), primary);
-        doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(node_id),
-        }); // viewing the image tab
-        // Drop the graph out from under its open tab.
-        doc.graph.graphs.remove(&id);
-
-        doc.reconcile_with_graph();
-        // The dead graph tab is pruned; Main + the non-graph tabs
-        // remain, and the clamped active still points at the image tab
-        // (it slid left one slot with the removal).
-        assert_eq!(
-            all_tabs(&doc),
-            vec![
-                TabRef::Graph(GraphRef::Main),
-                TabRef::Preferences,
-                TabRef::ImageViewer(node_id)
-            ]
-        );
-        assert_eq!(doc.layout.primary().active, 2);
-    }
-
-    #[test]
-    fn reconcile_with_graph_prunes_a_viewer_tab_whose_node_is_gone() {
-        let mut doc = Document::default();
-        let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let primary = doc.layout.primary().id;
-        doc.layout
-            .find_or_insert(TabRef::ImageViewer(node_id), primary);
-        doc.reconcile_with_graph();
-        assert_eq!(
-            all_tabs(&doc).len(),
-            2,
-            "tab survives while the node exists"
-        );
-
-        // Delete the node: the viewer tab dies with it (like a graph
-        // tab whose def vanished).
-        doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
-        let err = doc.validate().unwrap_err();
-        assert!(
-            format!("{err:#}").contains("open tab references a missing target"),
-            "unexpected validation error: {err:#}"
-        );
-        doc.reconcile_with_graph();
-        assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
-        assert_eq!(doc.layout.primary().active, 0);
-    }
-
-    #[test]
     fn dock_layout_round_trips_as_json() {
         use crate::core::document::dock::{DockDrop, SplitSide};
 
@@ -1259,104 +367,9 @@ mod tests {
     }
 
     #[test]
-    fn undo_prunes_the_view_of_a_graph_it_removed() {
-        use crate::core::edit::intent::apply::{apply_step, revert_step};
-        use crate::core::edit::intent::build::build_step;
-        use crate::core::edit::intent::types::{BatchScope, Intent};
-
-        // A `local_views` entry is seeded lazily on first open, *outside*
-        // the undo record, so undoing the edit that created its graph
-        // leaves the view behind — `revert_graph` only reaches one
-        // target's `EditScope` and can't touch the map. An orphaned view
-        // fails `validate`, which save now refuses to write past.
-        let mut local = leaf_graph("Lib").clone_mapped();
-        local.origin = Some(GraphId::unique());
-        let local_id = GraphId::unique();
-
-        let mut doc = Document::default();
-        let step = build_step(
-            Intent::AddLocalGraph {
-                pos: Vec2::ZERO,
-                node_id: NodeId::unique(),
-                graph_id: local_id,
-                def: Box::new(local),
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .expect("add builds");
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(doc.ensure_sub_view(local_id), "the user opens the graph");
-        doc.validate()
-            .expect("an open graph plus its view is valid");
-
-        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(
-            doc.validate().is_err(),
-            "undo takes the graph but strands its view"
-        );
-
-        doc.reconcile_with_graph();
-        doc.validate().expect("reconcile drops the orphaned view");
-        assert!(
-            doc.view(GraphRef::Local(local_id)).is_none(),
-            "the view is gone, not merely ignored"
-        );
-
-        // The same pass leaves a live graph's view alone.
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        assert!(doc.ensure_sub_view(local_id), "redo, reopen");
-        doc.reconcile_with_graph();
-        assert!(
-            doc.view(GraphRef::Local(local_id)).is_some(),
-            "a view whose graph is alive survives the prune"
-        );
-        doc.validate().unwrap();
-    }
-
-    #[test]
     fn document_passes_validation() {
         let doc = build_test_doc();
         doc.validate().unwrap();
-    }
-
-    #[test]
-    fn document_roundtrip() {
-        let view = build_test_doc().main_view;
-        let mut reordered = view.clone();
-        let first_key = *reordered.item_placements.get_index(0).unwrap().0;
-        let last_index = reordered.item_placements.len() - 1;
-        reordered.move_item_to_index(&first_key, last_index);
-        assert_ne!(view, reordered);
-
-        assert_roundtrip();
-
-        let mut invalid = build_test_doc();
-        invalid.graph.insert_graph(
-            GraphId::unique(),
-            CoreGraphDef {
-                origin: Some(GraphId::nil()),
-                ..Default::default()
-            },
-        );
-        let serialized = serde_json::to_vec(&invalid).unwrap();
-        let invalid: Document = serde_json::from_slice(&serialized).unwrap();
-        let error = invalid.validate().unwrap_err().to_string();
-        assert!(error.contains("graph has a nil origin"), "{error}");
-
-        let mut duplicate_bindings = serde_json::to_value(build_test_doc()).unwrap();
-        let bindings = duplicate_bindings["graph"]["bindings"]
-            .as_array_mut()
-            .unwrap();
-        bindings.push(bindings[0].clone());
-        let serialized = serde_json::to_vec(&duplicate_bindings).unwrap();
-        let error = serde_json::from_slice::<Document>(&serialized)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("duplicate binding for input port"),
-            "{error}"
-        );
     }
 
     #[test]
@@ -1367,25 +380,5 @@ mod tests {
 
     fn build_test_doc() -> Document {
         core_test_graph().into()
-    }
-
-    fn assert_roundtrip() {
-        let doc = build_test_doc();
-        doc.validate().unwrap();
-        let serialized = serde_json::to_vec_pretty(&doc).expect("serialize document");
-        assert!(
-            !serialized.is_empty(),
-            "serialized document should not be empty"
-        );
-        let deserialized: Document = serde_json::from_slice(&serialized)
-            .expect("document deserialization should succeed for test payload");
-        deserialized
-            .validate()
-            .expect("deserialized document is valid");
-        deserialized.validate().unwrap();
-        assert_eq!(
-            doc, deserialized,
-            "the complete document should round-trip through JSON"
-        );
     }
 }

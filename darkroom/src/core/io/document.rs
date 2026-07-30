@@ -272,7 +272,7 @@ mod tests {
     use std::io::Read as _;
 
     use common::internals::test_output_path;
-    use scenarium::{GraphDef, GraphId};
+    use scenarium::{Binding, InputPort, NodeId, StaticValue};
 
     use super::*;
 
@@ -339,19 +339,18 @@ mod tests {
         save(&good, &path).expect("a valid document saves");
         let on_disk = std::fs::read(&path).unwrap();
 
+        // A binding whose consumer node isn't in the graph — structurally
+        // invalid without tripping an insertion assert.
         let mut bad = Document::default();
-        bad.graph.insert_graph(
-            GraphId::unique(),
-            GraphDef {
-                origin: Some(GraphId::nil()),
-                ..Default::default()
-            },
+        bad.graph.bindings.insert(
+            InputPort::new(NodeId::unique(), 0),
+            Binding::Const(StaticValue::Int(1)),
         );
         assert!(
             matches!(
                 save(&bad, &path).unwrap_err(),
                 DocumentSaveError::InvalidDocument { path: p, source }
-                    if p == path && source.to_string().contains("nil origin")
+                    if p == path && source.to_string().contains("binding")
             ),
             "the refusal names the path and the reason"
         );
@@ -397,12 +396,9 @@ mod tests {
 
         let invalid = test_output_path("darkroom_document/invalid.darkroom");
         let mut document = Document::default();
-        document.graph.insert_graph(
-            GraphId::unique(),
-            GraphDef {
-                origin: Some(GraphId::nil()),
-                ..Default::default()
-            },
+        document.graph.bindings.insert(
+            InputPort::new(NodeId::unique(), 0),
+            Binding::Const(StaticValue::Int(1)),
         );
         let json = serde_json::to_vec(&document).unwrap();
         write_test_archive(&invalid, DOCUMENT_ENTRY, &json);
@@ -410,7 +406,7 @@ mod tests {
             matches!(
                 load(&invalid).unwrap_err(),
                 DocumentLoadError::InvalidDocument { path, source }
-                    if path == invalid && source.to_string().contains("graph has a nil origin")
+                    if path == invalid && source.to_string().contains("binding")
             ),
             "structural validation retains the archive path and reason"
         );

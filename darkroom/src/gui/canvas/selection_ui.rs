@@ -4,12 +4,11 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
-use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::PaneSlot;
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Pane;
 
@@ -23,7 +22,7 @@ use crate::gui::scene::Pane;
 /// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
 pub(super) struct SelectionUI {
-    band: PaneSlot<RubberBand>,
+    band: GestureSlot<RubberBand>,
     /// The swept set while a band is active — the same type as the
     /// committed selection it stands in for (`GraphView::selected`), so the
     /// draw substitutes one for the other directly. Owned here rather than
@@ -39,7 +38,7 @@ pub(super) struct SelectionUI {
     /// its own, not the band's, because it deliberately outlives the band
     /// by one frame: the release frame paints the final selection while
     /// the `SetSelection` is still draining.
-    preview: PaneSlot<()>,
+    preview: GestureSlot<()>,
 }
 
 #[derive(Clone, Debug)]
@@ -74,8 +73,8 @@ impl SelectionUI {
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
-    pub(super) fn preview(&self, graph: GraphRef) -> Option<&BTreeSet<NodeId>> {
-        self.preview.get(graph)?;
+    pub(super) fn preview(&self) -> Option<&BTreeSet<NodeId>> {
+        self.preview.get()?;
         Some(&self.swept)
     }
 
@@ -100,11 +99,7 @@ impl SelectionUI {
         cancelled: bool,
         out: &mut Intents,
     ) {
-        let target = graph.target();
-        if self.band.elsewhere(target) {
-            return;
-        }
-        let resp = ui.response_for(outer_canvas_widget_id(target));
+        let resp = ui.response_for(outer_canvas_widget_id());
         if self.band.is_idle()
             && gesture == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
@@ -123,12 +118,12 @@ impl SelectionUI {
                     BTreeSet::new()
                 },
             };
-            self.band.latch(target, band);
+            self.band.latch(band);
         }
         if cancelled {
             self.band.clear();
         }
-        let Some(mut band) = self.band.take(target) else {
+        let Some(mut band) = self.band.take() else {
             // No band in flight — just cancelled, or committed last frame.
             // Either way drop the preview so node draw falls back to the
             // committed selection.
@@ -159,8 +154,8 @@ impl SelectionUI {
         // place (node draw reads it via `preview()` for live highlight).
         // A `None` delta is the release edge that commits.
         if resp.left.drag.delta().is_some() {
-            self.band.latch(target, band);
-            self.preview.latch(target, ());
+            self.band.latch(band);
+            self.preview.latch(());
             return;
         }
         // Only the committing frame pays for the owned set the intent
@@ -168,16 +163,16 @@ impl SelectionUI {
         // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        out.push(target, Intent::SetSelection { to: swept.clone() });
-        self.preview.latch(target, ());
+        out.push(Intent::SetSelection { to: swept.clone() });
+        self.preview.latch(());
     }
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active on `graph`'s pane or the rect has
     /// no area yet.
-    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
-        let Some(band) = self.band.get(graph) else {
+    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+        let Some(band) = self.band.get() else {
             return;
         };
         let rect = band.rect();

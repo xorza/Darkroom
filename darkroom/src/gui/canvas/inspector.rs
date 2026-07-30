@@ -124,12 +124,6 @@ impl Inspectors {
             let Some(node) = graph.node(id) else {
                 continue;
             };
-            // Boundary nodes (GraphInput/GraphOutput) are pure
-            // routing — no runtime values or status — and the chip is
-            // suppressed on the header; skip any stale pinned entry too.
-            if node.boundary {
-                continue;
-            }
             // The cached body width places the panel just past the node's
             // right edge — cached (not last frame's response) so the
             // anchor holds when the viewport cull skips the node while its
@@ -155,7 +149,7 @@ impl Inspectors {
         let theme = rcx.theme;
         let graph = rcx.graph;
         let logs = rcx.run_state.logs(node.id);
-        let errors = rcx.run_state.errors(node.id);
+        let error = rcx.run_state.error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -217,10 +211,10 @@ impl Inspectors {
                         ..body_style(ui)
                     },
                 );
-                // The actual failure cause(s) beneath the bare "errored" line,
-                // in the error color — this is what turns a generic status into
+                // The actual failure cause beneath the bare "errored" line, in
+                // the error color — this is what turns a generic status into
                 // an actionable message (e.g. "no light frames provided").
-                for message in errors {
+                if let Some(message) = error {
                     line(
                         ui,
                         message,
@@ -290,10 +284,10 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
 fn outside_action(ui: &Ui, hits: &CanvasHits, frame: Frame<'_>) -> bool {
-    // Any pane counts: an action on one canvas closes a transient panel
-    // opened on another, the same way it closes one on its own.
-    let canvas_acted = frame.panes().any(|graph| {
-        let oc = ui.response_for(outer_canvas_widget_id(graph.target()));
+    // Only while a graph is on screen: with no canvas recorded, its widget
+    // response is the default and would read as "no action" anyway.
+    let canvas_acted = frame.pane().is_some_and(|_| {
+        let oc = ui.response_for(outer_canvas_widget_id());
         // Any-button drag: left rubber-bands, middle pans, right scribbles
         // the breaker — all of them count as "acted on the canvas".
         let dragged =

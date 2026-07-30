@@ -3,7 +3,7 @@
 //! pane with its own strip, and a [`DockSplit`] divides the space
 //! between two child nodes at a draggable `ratio`. Pure data + pure
 //! ops; every mutation is snapshot-diffed by the intent layer
-//! (`DocStep::Dock { from, to }`), so ops apply in place and report
+//! (`DockStep`'s `from`/`to` pair), so ops apply in place and report
 //! nothing.
 //!
 //! **Flat storage.** The tree lives in one `Vec<DockNode>` with
@@ -30,7 +30,7 @@
 use common::id_type;
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::{GraphRef, TabRef};
+use crate::core::document::TabRef;
 
 id_type!(TabGroupId);
 
@@ -177,7 +177,7 @@ pub(crate) enum DockDrop {
 
 /// One dock-layout mutation, executed by [`DockLayout::apply`]. The
 /// single op vocabulary the whole pipeline speaks: the dock UI
-/// constructs one, `UiAction::Dock` transports it, `DocIntent::Dock`
+/// constructs one, `UiAction::Dock` transports it, `Queued::Dock`
 /// records it as a before/after snapshot, and `apply` runs it. Ops fed
 /// something that no longer exists no-op, and the snapshot diff drops
 /// them.
@@ -262,7 +262,7 @@ impl Default for DockLayout {
     fn default() -> Self {
         let primary = TabGroup {
             id: TabGroupId::nil(),
-            tabs: vec![TabRef::Graph(GraphRef::Main)],
+            tabs: vec![TabRef::Graph],
             active: 0,
         };
         Self {
@@ -346,7 +346,7 @@ impl DockLayout {
     /// graph canvases.
     pub(crate) fn primary(&self) -> &TabGroup {
         self.groups()
-            .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
+            .find(|g| g.tabs.contains(&TabRef::Graph))
             .expect("a group holds the Main tab")
     }
 
@@ -407,7 +407,7 @@ impl DockLayout {
     /// emptied by the close collapses out of the tree; a vanished focus
     /// falls back to the primary group.
     fn close_tab(&mut self, tab: TabRef) {
-        if tab == TabRef::Graph(GraphRef::Main) {
+        if tab == TabRef::Graph {
             return;
         }
         let Some(TabAddress { group, index }) = self.find_tab(tab) else {
@@ -675,7 +675,7 @@ impl DockLayout {
         // Resolved by hand rather than via `primary()`, which `expect`s —
         // a corrupt layout may hold no Main tab at all.
         self.groups()
-            .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
+            .find(|g| g.tabs.contains(&TabRef::Graph))
             .ok_or(DockValidationError::MissingMainTab)?;
         let mut seen = Vec::new();
         let mut seen_groups = Vec::new();
@@ -718,7 +718,7 @@ mod tests {
     }
 
     fn main_tab() -> TabRef {
-        TabRef::Graph(GraphRef::Main)
+        TabRef::Graph
     }
 
     /// Default layout + `Preferences` and one viewer tab in the primary
@@ -747,56 +747,6 @@ mod tests {
         assert_eq!(l.primary().tabs, [main_tab()]);
         assert_eq!(l.focused, l.primary().id);
         assert_eq!(l.all_tabs().collect::<Vec<_>>(), [main_tab()]);
-    }
-
-    #[test]
-    fn a_graph_tab_splits_off_into_its_own_pane() {
-        use scenarium::GraphId;
-
-        // The multi-canvas rule: a graph tab is an ordinary tab, so
-        // dragging one onto a pane edge puts two graphs on screen at once.
-        let local = TabRef::Graph(GraphRef::Local(GraphId::from_u128(7)));
-        let mut l = DockLayout::default();
-        let primary = l.primary().id;
-        l.insert_tab(primary, local);
-
-        l.move_tab(
-            local,
-            DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        );
-        l.validate().unwrap();
-        let (_, first, second) = root_split(&l);
-        let (DockNode::Group(first), DockNode::Group(second)) = (first, second) else {
-            panic!("both children are groups");
-        };
-        assert_eq!(first.tabs, [main_tab()], "Main keeps the primary pane");
-        assert_eq!(second.tabs, [local], "the local graph took the new pane");
-        assert_eq!(l.focused, second.id);
-        // Both panes show a graph — the state the single-canvas rule made
-        // unrepresentable.
-        assert_eq!(
-            l.groups().map(|g| g.active_tab()).collect::<Vec<_>>(),
-            [main_tab(), local],
-        );
-
-        // Main itself moves too; only *closing* it is refused, which is
-        // what keeps a primary group (and so the tree) alive.
-        l.move_tab(
-            main_tab(),
-            DockDrop::Into {
-                group: second.id,
-                index: 0,
-            },
-        );
-        l.validate().unwrap();
-        assert!(
-            matches!(l.node(DockLayout::ROOT), DockNode::Group(_)),
-            "the emptied pane collapsed"
-        );
-        assert_eq!(l.primary().tabs, [main_tab(), local]);
     }
 
     /// Pointer-driven focus moves `focused` and nothing else — no pane

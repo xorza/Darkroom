@@ -9,8 +9,7 @@
 //! The value crosses threads through [`PreviewSink`], which the closure
 //! captures at library-composition time. Scenarium knows nothing about any of
 //! this: the node is a sink (so an ambient run reaches it), it reads its input
-//! like any consumer, and `Func::entry_only` is the one thing the engine
-//! enforces on its behalf.
+//! like any consumer, and nothing about it is special to the engine.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -58,19 +57,15 @@ impl PreviewSink {
 /// refresh without the editor naming it as a seed. `uncacheable()` because it
 /// has no output to persist, and it stays `Impure` (the default) because
 /// `Func::validate` refuses an outputless func that claims to be pure.
-/// `entry_only()` because one node backs one on-screen card: inside a
-/// definition instanced twice it would have two live occurrences behind one
-/// identity, and the last to finish would win arbitrarily.
 pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
     Func::new(PREVIEW_FUNC_ID, "Preview")
         .category("System")
         .sink()
         .uncacheable()
-        .entry_only()
         .description(
             "Shows the value wired into it. The value goes to the editor \
              rather than to a consumer, so watching one never changes what the \
-             rest of the graph computes. Only allowed in the top-level graph.",
+             rest of the graph computes.",
         )
         .input(
             FuncInput::optional("Value", DataType::Any)
@@ -105,10 +100,9 @@ mod tests {
     use scenarium::{AnyState, ContextManager, OutputDemand, SharedAnyState, StaticValue};
 
     #[test]
-    fn the_declaration_is_an_entry_only_sink_that_produces_nothing() {
+    fn the_declaration_is_a_sink_that_produces_nothing() {
         let func = preview_func(Arc::default());
         assert!(func.sink, "an ambient sinks run must reach it");
-        assert!(func.entry_only, "one node backs one card");
         assert!(func.uncacheable, "no output to persist");
         assert!(func.outputs.is_empty());
         assert!(func.events.is_empty());

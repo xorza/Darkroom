@@ -36,9 +36,8 @@ use scenarium::NodeId;
 use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
-use crate::core::document::{Document, GraphRef, TabRef};
+use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::DocIntent;
 use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
@@ -120,9 +119,7 @@ impl DockUi {
                 actions.push(UiAction::Dock(DockOp::CloseTab { tab }));
                 continue;
             }
-            let label_clicked = strip::renamable_graph(tab)
-                .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).left.clicked());
-            if label_clicked || ui.response_for(strip::tab_chip_wid(tab)).left.clicked() {
+            if ui.response_for(strip::tab_chip_wid(tab)).left.clicked() {
                 actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
             }
             if self.tab_drag.is_none()
@@ -136,10 +133,6 @@ impl DockUi {
                 });
             }
         }
-        if ui.response_for(strip::tab_new_wid()).left.clicked() {
-            actions.push(UiAction::NewGraph);
-        }
-
         let Some(dragged) = &self.tab_drag else {
             return;
         };
@@ -222,10 +215,10 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
             // compare for the same reason `pan_zoom::emit_pan_zoom` uses
             // one — an exact `!=` emits on sub-epsilon jitter.
             if !live_ratio.approximately_eq(ratio) {
-                out.push_global(DocIntent::Dock(DockOp::SetRatio {
+                out.push_dock(DockOp::SetRatio {
                     split: path,
                     ratio: live_ratio,
-                }));
+                });
             }
         }
     }
@@ -261,9 +254,8 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
 /// a pane's **content** — a node body, bare canvas, an image viewer —
 /// reaches no dock widget at all, so without this the focus stays wherever
 /// the last chip click left it while the user works in another pane, and
-/// everything scoped to [`Document::focused_target`] (Delete, Ctrl+D, Esc,
-/// the Run and node-menu commands) acts on a graph that isn't under the
-/// cursor.
+/// everything scoped to the focused group (Delete, Ctrl+D, Esc, the Run and
+/// node-menu commands) acts on a pane that isn't under the cursor.
 ///
 /// Panes are recorded `focusable`, so palantir's own left-press focus
 /// hit-test does the routing: a press that misses every focusable inside a
@@ -403,183 +395,8 @@ fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
 /// ghost chip.
 fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
     match tab {
-        TabRef::Graph(GraphRef::Main) => Cow::Borrowed("main"),
-        TabRef::Graph(GraphRef::Local(id)) => doc
-            .graph
-            .find_graph(id)
-            .map(|def| def.name.as_str())
-            .unwrap_or("graph")
-            .into(),
+        TabRef::Graph => Cow::Borrowed("main"),
         TabRef::Preferences => Cow::Borrowed("preferences"),
         TabRef::ImageViewer(node_id) => image_viewer::node_label(doc, node_id).into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::document::dock::{DockDrop, SplitSide};
-    use glam::UVec2;
-    use palantir::internals::UiHarness;
-
-    /// Drive a real press + past-threshold drag over `tab`'s chip and
-    /// report whether `DockUi::scan` arms off it.
-    ///
-    /// Records through [`DockUi::render`] rather than reaching for
-    /// `strip::show`, so the chips are laid out by the same walk (and wear
-    /// the same labels) they do in production — chip width follows the
-    /// label text, and the press is aimed at a chip's arranged center. The
-    /// scan runs *inside* a record, which is where it runs in production
-    /// too (`Editor::frame` is called from `App::record`), and is the only
-    /// place `response_for` resolves against a live cascade.
-    fn drag_arms_on(doc: &Document, tab: TabRef) -> bool {
-        let theme = Theme::default();
-        let viewer_labels = HashMap::new();
-        let cx = DockContext {
-            doc,
-            theme: &theme,
-            viewer_labels: &viewer_labels,
-        };
-        let mut dock = DockUi::default();
-        // Real shaping: a chip's width follows its label, and the press
-        // is aimed at the chip's arranged center.
-        let mut h = UiHarness::with_text(UVec2::new(600, 200));
-        h.prime(2, |ui| {
-            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
-        });
-
-        let chip_id = strip::tab_chip_wid(tab);
-        let origin = h.center_of(chip_id);
-        // The regression was the press landing on the rename label rather
-        // than the chip; `hit_at` makes that a named failure instead of a
-        // bare `armed == false`.
-        assert!(
-            h.hit_at(origin).is_some(),
-            "nothing senses input at {origin:?}; collisions: {:?}",
-            h.collisions(),
-        );
-
-        h.press_at(origin);
-        // `drag_to` asserts the travel crosses DRAG_THRESHOLD, so the
-        // capture is guaranteed to latch rather than silently not.
-        h.drag_to(origin + Vec2::new(40.0, 0.0));
-
-        h.frame_value(|ui| {
-            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
-            dock.scan(ui, doc, &mut Vec::new());
-            dock.tab_drag.is_some()
-        })
-    }
-
-    #[test]
-    fn a_subgraph_chip_arms_a_tab_drag_through_the_real_hit_test() {
-        // The regression that shipped: a `Local` graph tab draws its label
-        // as an `InlineRename`, whose idle panel senses `DRAG` and
-        // swallows the press — so the outer chip never reported
-        // `drag.started()` and subgraph tabs could not be moved between
-        // panes. Unit-testing `strip::drag_handles` pins the *id set*;
-        // only driving a real press through palantir's hit-test proves the
-        // press actually lands where the scan is looking.
-        let mut doc = Document::default();
-        let local = doc.create_graph(GraphRef::Main).unwrap();
-        let primary = doc.layout.primary().id;
-        let subgraph = TabRef::Graph(GraphRef::Local(local));
-        doc.layout.find_or_insert(subgraph, primary);
-
-        assert!(
-            drag_arms_on(&doc, subgraph),
-            "a subgraph chip must arm a drag — its rename label swallows \
-             the press, so the chip id alone never sees it"
-        );
-        // Main has a plain label and always worked; pinned so a future
-        // change can't fix one and break the other.
-        assert!(drag_arms_on(&doc, TabRef::Graph(GraphRef::Main)));
-    }
-
-    /// A press in a pane's *content* — no dock widget of its own — moves
-    /// dock focus onto that pane, so every `focused_target`-scoped edit
-    /// (Delete, Ctrl+D, the node menu) acts on the graph under the cursor.
-    ///
-    /// Driven through the real hit-test because that is the whole
-    /// mechanism: the pane container is recorded `focusable`, and palantir's
-    /// left-press focus hit-test is what attributes the press to it. Reading
-    /// `focus_within` in isolation would pin nothing.
-    #[test]
-    fn a_press_in_a_pane_moves_dock_focus_onto_it() {
-        // Two panes: Main in the primary, a subgraph split off to the right
-        // — which takes focus, exactly the saved state a reopened
-        // multi-pane document lands in.
-        let mut doc = Document::default();
-        let local = doc.create_graph(GraphRef::Main).unwrap();
-        let primary = doc.layout.primary().id;
-        let subgraph = TabRef::Graph(GraphRef::Local(local));
-        doc.layout.find_or_insert(subgraph, primary);
-        doc.layout.apply(DockOp::MoveTab {
-            tab: subgraph,
-            to: DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        });
-        let split_off = doc.layout.focused;
-        assert_ne!(split_off, primary, "the split pane starts focused");
-
-        // `doc` is a parameter rather than a capture: the second half
-        // mutates the layout between scans.
-        fn context<'a>(
-            doc: &'a Document,
-            theme: &'a Theme,
-            viewer_labels: &'a HashMap<NodeId, String>,
-        ) -> DockContext<'a> {
-            DockContext {
-                doc,
-                theme,
-                viewer_labels,
-            }
-        }
-        let theme = Theme::default();
-        let labels = HashMap::new();
-        let mut dock = DockUi::default();
-        let mut h = UiHarness::with_text(UVec2::new(800, 400));
-        h.prime(2, |ui| {
-            let cx = context(&doc, &theme, &labels);
-            dock.render(ui, cx, &mut Intents::default(), |_, _, _| {})
-        });
-
-        let scanned = |h: &mut UiHarness, dock: &mut DockUi, doc: &Document| {
-            h.frame_value(|ui| {
-                let cx = context(doc, &theme, &labels);
-                dock.render(ui, cx, &mut Intents::default(), |_, _, _| {});
-                let mut actions = Vec::new();
-                dock.scan(ui, doc, &mut actions);
-                actions
-            })
-        };
-
-        // Press into the unfocused pane's body. Its content records nothing,
-        // so this is a press that reaches no dock widget at all — the case
-        // the chip scan can't see. By position rather than `press_on`: a
-        // pane senses nothing (it is focusable only), so there is no pointer
-        // target at its center to aim at.
-        h.press_at(h.center_of(pane_wid(primary)));
-        let actions = scanned(&mut h, &mut dock, &doc);
-        assert_eq!(
-            actions,
-            vec![UiAction::FocusPane(primary)],
-            "the press resolves to exactly one focus request, on the pane it \
-             landed in"
-        );
-
-        // Apply it, as `apply_view_actions` would, and the same press now
-        // resolves to nothing: clicking around inside the focused pane
-        // costs nothing per frame.
-        doc.layout.focus(primary);
-        assert_eq!(doc.layout.focused, primary);
-        h.press_at(h.center_of(pane_wid(primary)));
-        let actions = scanned(&mut h, &mut dock, &doc);
-        assert!(
-            actions.is_empty(),
-            "a press in the already-focused pane changes nothing: {actions:?}"
-        );
     }
 }

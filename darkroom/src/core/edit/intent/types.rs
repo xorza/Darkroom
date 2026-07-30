@@ -1,5 +1,5 @@
-//! The [`Intent`] / [`DocIntent`] / [`UndoStep`] / [`GraphStep`] /
-//! [`DocStep`] / [`BatchScope`] / [`GestureKey`] type model, plus the
+//! The [`Intent`] / [`UndoStep`] / [`GraphStep`] / [`DockStep`] /
+//! [`GestureKey`] type model, plus the
 //! [`Refusal`] a commit answers with when no step comes out of it.
 //!
 //! An [`Intent`] is "what the caller wants the graph to look like
@@ -12,21 +12,20 @@
 //! constructed inconsistently — there's no `(Intent::A, Snapshot::B)`
 //! mismatch to worry about at runtime.
 //!
-//! The same split runs the other way, by *scope*: an [`Intent`] always
-//! edits one graph and is therefore always accompanied by a `GraphRef`,
-//! while a [`DocIntent`] edits the document as a whole and names no graph
-//! at all. Neither can be mistaken for the other, so no code path has to
-//! carry a target it will not read, or ignore one it was handed.
+//! The same split runs the other way, by *scope*: an [`Intent`] edits the
+//! graph, while a [`DockOp`](crate::core::document::dock::DockOp) edits the
+//! layout around it. Neither can be mistaken for the other, so no code path has
+//! to carry state it will not read.
 
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{Binding, CacheMode, DataType, InputPort, Node, NodeId, Subscription};
-use scenarium::{DetachedGraphInput, DetachedGraphOutput, DetachedNode, GraphDef, GraphId};
+use scenarium::DetachedNode;
+use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::dock::{DockLayout, DockOp, DockPath};
-use crate::core::document::{BoundarySide, GraphRef, Viewport};
+use crate::core::document::Viewport;
+use crate::core::document::dock::{DockLayout, DockPath};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -68,20 +67,17 @@ pub(crate) enum Refusal {
 /// the previous Y at commit time via
 /// [`build_step`](crate::core::edit::intent::build::build_step).
 ///
-/// Every variant here is meaningless without the graph it applies to, so
-/// one always travels beside it — as a `GraphRef` argument on the commit
-/// path, and as [`Queued::Scoped`](crate::core::edit::intent::sink::Queued)
-/// in the frame's queue. A mutation with no graph to name is a
-/// [`DocIntent`] instead.
+/// Every variant here edits the graph, and travels the frame's queue as
+/// [`Queued::Scoped`](crate::core::edit::intent::sink::Queued). A mutation of
+/// the layout instead of the graph is a
+/// [`DockOp`](crate::core::document::dock::DockOp), queued as
+/// [`Queued::Dock`](crate::core::edit::intent::sink::Queued).
 ///
 /// **Adding a variant** — touch these spots:
 ///   1. add the variant here on `Intent`,
-///   2. add the matching variant on [`GraphStep`] (edited through the
-///      target's `EditScope`) or [`DocStep`] (writes state that sits
-///      outside any one graph body — the dock layout, or a graph's
-///      interface — so it resolves no scope), carrying
-///      both the forward "to" and backward "from" payloads (or just
-///      forward fields for pure-creation intents),
+///   2. add the matching variant on [`GraphStep`], edited through the
+///      target's `EditScope`, carrying both the forward "to" and backward
+///      "from" payloads (or just forward fields for pure-creation intents),
 ///   3. add an arm to
 ///      [`build_step`](crate::core::edit::intent::build::build_step) (read
 ///      `from` from `&Document` and combine with the intent's `to` into a
@@ -100,9 +96,8 @@ pub(crate) enum Refusal {
 ///      undo history.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Intent {
-    /// Add one node that links state the document already resolves — a func,
-    /// a built-in special, or a graph instance whose definition is in place.
-    /// Bringing a definition along is [`Self::AddLocalGraph`]'s job.
+    /// Add one node that links state the document already resolves: a func in
+    /// the library, or a built-in special.
     AddNode {
         /// Where the node lands on the canvas; its view item is created
         /// alongside it, at the top of the paint stack.
@@ -115,25 +110,6 @@ pub(crate) enum Intent {
         /// fully unbound. Applied atomically with the node, so one undo
         /// removes node + seeds together.
         bindings: Vec<(InputPort, Binding)>,
-    },
-    /// Add a local definition *and* the first instance of it — the palette's
-    /// row for a library graph, which localizes on instance.
-    ///
-    /// The two halves are one intent because they are one undo entry: a
-    /// revert that left the definition behind would leave an orphan the
-    /// palette still lists.
-    AddLocalGraph {
-        pos: Vec2,
-        node_id: NodeId,
-        graph_id: GraphId,
-        def: Box<GraphDef>,
-    },
-    /// Instance a local definition the target graph already holds — the
-    /// palette's row for one of its own nested graphs.
-    AddLocalGraphInstance {
-        pos: Vec2,
-        node_id: NodeId,
-        graph_id: GraphId,
     },
     /// Paste a set of pre-cloned nodes (fresh ids, offset positions) plus
     /// the connections *among* them, and select the copies. The caller
@@ -194,45 +170,8 @@ pub(crate) enum Intent {
         node_id: NodeId,
         to: NodeProperty,
     },
-    /// Fork a private standalone copy of a `Graph(Local(_))` node's
-    /// nested graph and re-point the node at it (the G-badge "Detach" action).
-    /// The copy gets fresh ids and a cleared `origin`, so it diverges
-    /// from any sibling instances *and* from the library it came from.
-    /// `build_step` reads the source graph from the active graph; dropped
-    /// when the node isn't a local graph instance.
-    DetachGraph {
-        node_id: NodeId,
-    },
     SetViewport {
         to: Viewport,
-    },
-    /// Rename a subgraph definition's interface port. Scoped to the
-    /// active `Local` target — `build_step` reads the `GraphId` from
-    /// the drain `target`, so the intent only carries the side + index +
-    /// new name. Dropped when the target isn't a graph interior.
-    RenameBoundaryPort {
-        side: BoundarySide,
-        idx: usize,
-        to: String,
-    },
-    /// Append a new interface port to the active graph interior's
-    /// definition. Emitted right before the `SetInput` that wires the
-    /// boundary placeholder it stands for — same batch, one undo entry.
-    /// Scoped to the active `Local` target like
-    /// [`Intent::RenameBoundaryPort`]; dropped elsewhere.
-    AddBoundaryPort {
-        side: BoundarySide,
-        name: String,
-        data_type: DataType,
-    },
-    /// Remove an interface port (the boundary port row's context menu).
-    /// The step captures every binding and pin the removal severs — on
-    /// both sides of the boundary — so undo restores the exact wiring.
-    /// Dropped when the slot doesn't exist or its ports are pinned
-    /// (unpin first; refusing beats reconciling preview widgets).
-    RemoveBoundaryPort {
-        side: BoundarySide,
-        idx: usize,
     },
     /// Add (`subscribe = true`) or remove (`false`) an event subscription:
     /// `subscriber` ← `emitter`'s event `event_idx`. An event wire dropped on,
@@ -248,54 +187,6 @@ pub(crate) enum Intent {
     },
 }
 
-/// What the caller wants to change **about the document as a whole** —
-/// the mutations no single graph owns, and so the ones no `GraphRef`
-/// describes.
-///
-/// Kept apart from [`Intent`] rather than sharing the enum with a target
-/// nobody reads: these commit through
-/// [`build_doc_step`](crate::core::edit::intent::build::build_doc_step),
-/// which takes a `&Document` and nothing else, and the pipeline carries
-/// them as [`Queued::Global`](crate::core::edit::intent::sink::Queued) with
-/// no target beside them. The boundary-port intents are *not* here — they
-/// produce [`DocStep`]s but read their `GraphId` off the graph they were
-/// raised in, so they stay scoped.
-///
-/// Not serde: scripts drive graph edits only (`Intent`), so nothing
-/// decodes a `DocIntent` from a payload.
-///
-/// **Adding a variant**: a matching [`DocStep`], an arm in `build_doc_step`
-/// and in each `apply_doc` / `revert_doc`, plus the exhaustive `DocStep`
-/// predicates in [`crate::core::edit::intent::query`].
-#[derive(Debug)]
-pub(crate) enum DocIntent {
-    /// Mutate the dock layout (activate/close a tab, move one between
-    /// panes, resize a split). `build_doc_step` snapshots the whole layout
-    /// before/after (it's tiny), so every dock op is one uniform, trivially
-    /// reversible step.
-    Dock(DockOp),
-    /// Rename a local graph's subgraph definition — it works regardless of
-    /// which tab is active, since the `GraphId` names the definition
-    /// outright. Drives the tab-strip's double-click-to-rename label.
-    RenameGraph { id: GraphId, to: String },
-}
-
-/// What one undo entry's steps resolve against, recorded per batch by
-/// [`ActionStack::push_current`](crate::core::edit::action_stack::ActionStack::push_current)
-/// and read back on undo/redo — the step-level echo of the
-/// [`Intent`] / [`DocIntent`] split.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BatchScope {
-    /// Built from [`Intent`]s against one graph: every [`GraphStep`] in the
-    /// entry writes through that graph's `EditScope`. A [`DocStep`] sharing
-    /// the entry (a boundary-port edit) carries its own `GraphId` and
-    /// ignores this.
-    Graph(GraphRef),
-    /// Built from a [`DocIntent`]: the entry holds document-global steps
-    /// only, and nothing in it resolves a graph.
-    Document,
-}
-
 /// Self-contained undo-stack entry. Each leaf variant carries both
 /// halves: the forward "to" payload (read by `apply_step`) and the
 /// backward "from" payload (read by `revert_step`). Built from an
@@ -303,34 +194,26 @@ pub(crate) enum BatchScope {
 /// from `&Document` at commit time.
 ///
 /// Split by scope so apply/revert dispatch on the type: a [`GraphStep`]
-/// is resolved against a `(graph, view)` `EditScope` for the batch's
-/// target, while a [`DocStep`] mutates `Document` fields that live
-/// outside any single graph. The graph path therefore can't even *name*
-/// a document-global variant — no convention-only `unreachable!` arms.
+/// is resolved against a `(graph, view)` `EditScope`, while a [`DockStep`]
+/// mutates the layout, which sits outside the graph. The graph path
+/// therefore can't even *name* a layout variant — no convention-only
+/// `unreachable!` arms.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
     Graph(GraphStep),
-    Doc(DocStep),
+    Dock(DockStep),
 }
 
-/// Steps applied through an `EditScope` (graph + view) for the batch's
-/// `GraphRef` target.
+/// Steps applied through an `EditScope` — the document's graph and the view
+/// metadata beside it.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
-    /// implicit — undo removes the node by id and its new nested graph.
-    ///
-    /// The one undo representation behind all three add intents
-    /// ([`Intent::AddNode`], [`Intent::AddLocalGraph`],
-    /// [`Intent::AddLocalGraphInstance`]): they differ in what the *caller*
-    /// may say and what `build_step` must resolve, not in what applying and
-    /// reverting do. `graph` is `Some` only for the one that materializes a
-    /// definition.
+    /// implicit — undo removes the node by id.
     AddNode {
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        graph: Option<(GraphId, Box<GraphDef>)>,
         bindings: Vec<(InputPort, Binding)>,
     },
     /// Add a batch of nodes + their internal wiring and swap the
@@ -395,14 +278,6 @@ pub(crate) enum GraphStep {
         from: NodeProperty,
         to: NodeProperty,
     },
-    /// Fork + re-point: a fresh graph joins the local map and the node
-    /// swaps from `from_id` to `to_id`. Undo restores the old link.
-    DetachGraph {
-        node_id: NodeId,
-        from_id: GraphId,
-        to_id: GraphId,
-        graph: Box<GraphDef>,
-    },
     SetViewport {
         from: Viewport,
         to: Viewport,
@@ -420,74 +295,29 @@ pub(crate) enum GraphStep {
     },
 }
 
-/// Document-global steps — they mutate fields that aren't scoped to a
-/// single graph (active tab, the tab list, a graph's interface), so
-/// they bypass the `EditScope` resolution entirely.
+/// Whole-layout snapshot around one [`DockOp`](crate::core::document::dock::DockOp)
+/// (activate/close/move/resize).
+/// The layout tree is a handful of nodes, so both halves ride the step and
+/// apply/revert are plain assignments — which is why one step type covers every
+/// dock op instead of one per op.
+///
+/// It mutates the layout rather than the graph, so it bypasses the `EditScope`
+/// resolution entirely.
+///
+/// `key` is the gesture this op coalesces under (a switch burst, one divider's
+/// drag); `structural` marks a `DockOp::MoveTab` (a split or a move —
+/// invested arrangement work, so it dirties the document, unlike
+/// activations/closes/ratio nudges). Both derived from the op at build time.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum DocStep {
-    /// Whole-layout snapshot around one dock op (activate/close/move/
-    /// resize) — the tree is a handful of nodes, so both halves ride the
-    /// step and apply/revert are plain assignments. `key` is the gesture
-    /// this op coalesces under (a switch burst, one divider's drag);
-    /// `structural` marks a [`DockOp::MoveTab`] (a split or a move —
-    /// invested arrangement work, so it dirties the document, unlike
-    /// activations/closes/ratio nudges). Both derived from the op at
-    /// build time.
-    Dock {
-        from: DockLayout,
-        to: DockLayout,
-        key: Option<GestureKey>,
-        structural: bool,
-    },
-    /// `graph_id` is resolved at build time so apply/revert are
-    /// self-contained (don't need the drain target). Carries both names;
-    /// the slot is addressed by `idx` directly (interface indices only
-    /// move through recorded steps, so LIFO replay keeps them valid), with
-    /// the expected current name as a stale-step guard.
-    RenameBoundaryPort {
-        graph_id: GraphId,
-        side: BoundarySide,
-        idx: usize,
-        from: String,
-        to: String,
-    },
-    /// Append (`apply`) / pop (`revert`) one interface port. `idx` is the
-    /// list length at build time — the placeholder is always the trailing
-    /// slot — so no remapping is involved on either half.
-    AddBoundaryPort {
-        graph_id: GraphId,
-        side: BoundarySide,
-        idx: usize,
-        name: String,
-        data_type: DataType,
-    },
-    /// Detach (`apply`) / attach (`revert`) one interface port with all
-    /// the wiring it severs, via the scenarium detach/attach pair — the
-    /// interface-port sibling of [`GraphStep::RemoveNode`].
-    RemoveBoundaryPort {
-        graph_id: GraphId,
-        detached: DetachedBoundaryPort,
-    },
-    /// Rename a local graph. Self-contained on the step (both
-    /// names) so apply/revert don't need to re-read the doc.
-    RenameGraph {
-        id: GraphId,
-        from: String,
-        to: String,
-    },
+pub(crate) struct DockStep {
+    pub(crate) from: DockLayout,
+    pub(crate) to: DockLayout,
+    pub(crate) key: Option<GestureKey>,
+    pub(crate) structural: bool,
 }
 
-/// The removed interface port a [`DocStep::RemoveBoundaryPort`] carries —
-/// scenarium's detached record, tagged by side (the two sides detach
-/// different spec types).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum DetachedBoundaryPort {
-    Input(DetachedGraphInput),
-    Output(DetachedGraphOutput),
-}
-
-/// Serde because [`DocStep::Dock`] stores its key on the step (the undo
-/// stack packs steps with bitcode).
+/// Serde because [`DockStep`] stores its key on the step (the undo stack packs
+/// steps with bitcode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum GestureKey {
     Viewport,

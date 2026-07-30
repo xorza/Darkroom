@@ -11,18 +11,12 @@ use palantir::{
     Align, Background, Configure, ContextMenu, Corners, InternedStr, MenuItem, Panel, Sense,
     Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };
-use scenarium::GraphId;
 
+use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
-use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::DocIntent;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{colored_text, muted_text};
-
-/// Character cap for a graph name in the inline rename editor.
-const GRAPH_NAME_MAX_CHARS: usize = 32;
 
 /// Font size of every chip label — the tabs' and the "+" chip's alike.
 const CHIP_LABEL_PX: f32 = 13.0;
@@ -54,28 +48,21 @@ pub(super) struct TabLabel {
 
 /// Every tab except the pinned `Main` graph carries a close button.
 pub(super) fn closable(tab: TabRef) -> bool {
-    tab != TabRef::Graph(GraphRef::Main)
-}
-
-/// The graph behind an inline-renamable tab (a `Local` graph tab).
-pub(super) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
-    match tab {
-        TabRef::Graph(GraphRef::Local(id)) => Some(id),
-        _ => None,
-    }
+    tab != TabRef::Graph
 }
 
 /// Every widget whose drag can start `tab`'s dock gesture, in the order
 /// [`DockUi::scan`](super::DockUi::scan) tries them.
 ///
 /// Not just the chip: a renamable tab draws its label as an
-/// [`InlineRename`], whose idle panel senses `DRAG` and **swallows the
-/// press**, so the outer chip never sees `drag.started()` on one. At most
+/// [`InlineRename`](crate::gui::widgets::inline_rename::InlineRename), whose
+/// idle panel senses `DRAG` and **swallows the press**, so the outer chip never
+/// sees `drag.started()` on one. At most
 /// one of these can latch — the label is inside the chip, so whichever
 /// gets the press is the one that reports it, and the same widget must be
 /// polled for the release edge.
 pub(super) fn drag_handles(tab: TabRef) -> impl Iterator<Item = WidgetId> {
-    std::iter::once(tab_chip_wid(tab)).chain(renamable_graph(tab).map(tab_rename_wid))
+    std::iter::once(tab_chip_wid(tab))
 }
 
 /// Stable id for `tab`'s chip — deterministic so the prepass
@@ -101,13 +88,6 @@ pub(super) fn tab_close_wid(tab: TabRef) -> WidgetId {
 /// Stable id for `tab`'s split context menu.
 fn tab_menu_wid(tab: TabRef) -> WidgetId {
     WidgetId::from_hash(("dock.tab_menu", tab))
-}
-
-/// Stable id for the rename editor on a graph tab, keyed on the graph
-/// id like every other chip widget. A click landing on the label is
-/// captured there, so the scan polls this id alongside the outer chip's.
-pub(crate) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
-    WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
 
 /// Stable id for the trailing "+" new-graph chip.
@@ -205,7 +185,7 @@ pub(super) fn show(
             for label in labels {
                 tab_chip(ui, &mut strip, label);
             }
-            if group.tabs.contains(&TabRef::Graph(GraphRef::Main)) {
+            if group.tabs.contains(&TabRef::Graph) {
                 new_tab_chip(ui, theme);
             }
         });
@@ -285,32 +265,8 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                     // the label also switches tab (the label's own panel
                     // captures it, so the outer chip's click handler in
                     // `DockUi::scan` wouldn't see it).
-                    if let Some(graph_id) = renamable_graph(label.tab) {
-                        // `clicked` is *not* forwarded to an activation intent
-                        // here — `DockUi::scan` polls the same response in
-                        // the prepass and pushes the activation as a
-                        // `UiAction`, so the switch settles before this frame's
-                        // record. Push-on-click during record would defer the
-                        // switch to the post-record drain, landing the new tab
-                        // in Pass B with no measured layouts and dropping its
-                        // connections for a frame.
-                        let ev = InlineRename::new(
-                            tab_rename_wid(graph_id),
-                            label.text.clone(),
-                            &theme.inline_rename,
-                        )
-                        .max_chars(GRAPH_NAME_MAX_CHARS)
-                        .style(&label_style)
-                        .show(ui);
-                        if let Some(to) = ev.committed {
-                            s.out
-                                .push_global(DocIntent::RenameGraph { id: graph_id, to });
-                        }
-                    } else {
-                        // Main / non-graph tab: plain label, activation handled
-                        // by the outer chip in `DockUi::scan`.
-                        Text::new(label.text.clone()).style(&label_style).show(ui);
-                    }
+                    Text::new(label.text.clone()).style(&label_style).show(ui);
+
                     if closable(label.tab) {
                         close_button(ui, theme, tab_close_wid(label.tab));
                     }
@@ -370,51 +326,13 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {
-                s.out.push_global(DocIntent::Dock(DockOp::MoveTab {
+                s.out.push_dock(DockOp::MoveTab {
                     tab,
                     to: DockDrop::Split {
                         group: s.group,
                         side,
                     },
-                }));
+                });
             }
         });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use scenarium::NodeId;
-
-    #[test]
-    fn a_renamable_tab_offers_its_label_as_a_drag_handle() {
-        // Regression: subgraph tabs could not be dragged between panes.
-        // A `Local` graph tab draws its label as an `InlineRename`, whose
-        // idle panel senses `DRAG` and swallows the press — so the outer
-        // chip never reports `drag.started()` for one. Polling the chip
-        // alone is what left them stuck; the label has to be a candidate
-        // too, and it must come back so the release edge is polled on the
-        // same widget.
-        let id = GraphId::from_u128(9);
-        let local = TabRef::Graph(GraphRef::Local(id));
-        assert_eq!(
-            drag_handles(local).collect::<Vec<_>>(),
-            [tab_chip_wid(local), tab_rename_wid(id)],
-            "a renamable tab is draggable by its chip or its label"
-        );
-
-        // Main and non-graph tabs draw a plain label that captures
-        // nothing, so their chip is the only handle.
-        for tab in [
-            TabRef::Graph(GraphRef::Main),
-            TabRef::Preferences,
-            TabRef::ImageViewer(NodeId::from_u128(1)),
-        ] {
-            assert_eq!(
-                drag_handles(tab).collect::<Vec<_>>(),
-                [tab_chip_wid(tab)],
-                "{tab:?} has no inline-rename label to swallow the press"
-            );
-        }
-    }
 }

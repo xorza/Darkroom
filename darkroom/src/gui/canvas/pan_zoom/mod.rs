@@ -8,32 +8,24 @@ use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
-use crate::core::document::{GraphRef, Viewport};
+use crate::core::document::Viewport;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::PaneSlot;
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::scene::Pane;
 
-/// Fold `owner`'s live pan drag into `pan`: `anchor + delta` while the
-/// drag is held; a missing delta after a latch is the release edge and
-/// drops the anchor. A call from a pane that doesn't hold it does nothing
-/// at all — neither panning nor releasing.
+/// Fold a live pan drag into `pan`: `anchor + delta` while the drag is
+/// held; a missing delta after a latch is the release edge and drops the
+/// anchor. A call before anything latched does nothing at all — neither
+/// panning nor releasing.
 ///
 /// Measured from the latch rather than integrated per frame, so a pan
 /// lands exactly where the pointer says however many frames it took (no
-/// per-frame rounding drift). The keying is what makes the "does nothing"
-/// clause load-bearing: [`emit_pan_zoom`] runs once per visible pane, and
-/// without it every idle pane's `None` would read as the release edge and
-/// tear down the live drag.
-pub(super) fn fold_pan_drag(
-    anchor: &mut PaneSlot<Vec2>,
-    owner: GraphRef,
-    delta: Option<Vec2>,
-    pan: &mut Vec2,
-) {
-    let Some(&start) = anchor.get(owner) else {
+/// per-frame rounding drift).
+pub(super) fn fold_pan_drag(anchor: &mut GestureSlot<Vec2>, delta: Option<Vec2>, pan: &mut Vec2) {
+    let Some(&start) = anchor.get() else {
         return;
     };
     match delta {
@@ -128,22 +120,21 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
 pub(super) fn emit_pan_zoom(
-    pan_anchor: &mut PaneSlot<Vec2>,
+    pan_anchor: &mut GestureSlot<Vec2>,
     ui: &Ui,
     graph: Pane<'_>,
     gesture: Option<CanvasGesture>,
     out: &mut Intents,
 ) {
-    let target = graph.target();
     let viewport = graph.viewport();
-    let resp = ui.response_for(outer_canvas_widget_id(target));
+    let resp = ui.response_for(outer_canvas_widget_id());
     let mut v = viewport;
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
     if gesture == Some(CanvasGesture::Pan) {
-        pan_anchor.latch(target, viewport.pan);
+        pan_anchor.latch(viewport.pan);
     }
-    fold_pan_drag(pan_anchor, target, resp.middle.drag.delta(), &mut v.pan);
+    fold_pan_drag(pan_anchor, resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
@@ -152,7 +143,7 @@ pub(super) fn emit_pan_zoom(
     // idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.push(target, Intent::SetViewport { to: v });
+        out.push(Intent::SetViewport { to: v });
     }
 }
 
@@ -222,10 +213,7 @@ pub(crate) fn view_action_intent(
     graph: Pane<'_>,
     action: ViewAction,
 ) -> Option<Intent> {
-    let vp = ui
-        .response_for(outer_canvas_widget_id(graph.target()))
-        .layout_rect?
-        .size;
+    let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
     let pane = Vec2::new(vp.w, vp.h);
     let to = match action {
         ViewAction::Reset => reset_target(geometry, graph, pane),

@@ -7,7 +7,6 @@
 mod background_runtime;
 pub(crate) mod document;
 pub(crate) mod edit;
-mod graph_library;
 pub(crate) mod io;
 pub(crate) mod preview;
 mod runtime_host;

@@ -2,14 +2,13 @@ use glam::Vec2;
 use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::GraphRef;
-use crate::gui::canvas::hits::{CanvasHits, MenuTrigger};
-use crate::gui::canvas::pane::PaneSlot;
+use crate::gui::canvas::hits::CanvasHits;
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::scene::Pane;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
-/// only the surface-space anchor, the graph pane it belongs to, and the
+/// only the surface-space anchor and the
 /// dismiss bookkeeping; each caller stores its own per-open extras (target
 /// node, drop position, …) as plain fields set at open-time and read at
 /// pick-time.
@@ -20,38 +19,28 @@ use crate::gui::scene::Pane;
 /// click-outside dismiss), and the "a pick or an outside dismiss closes
 /// the menu" resolution.
 ///
-/// **One pane records it.** Every visible graph pane runs its own scan +
-/// `show` pass, so without the `graph` latch an open popup would be
-/// recorded once per pane — the same widget ids twice in one frame.
-/// [`Self::show`] answers `None` for every pane but the one that opened it.
 #[derive(Default, Debug)]
 pub(super) struct AnchoredMenu {
-    /// The surface-space anchor, on the pane that opened the menu.
-    ///
-    /// One slot rather than an `Option<Vec2>` beside an
-    /// `Option<GraphRef>`: those were always both set or both clear, and
-    /// nothing said so.
-    anchor: PaneSlot<Vec2>,
+    /// The surface-space anchor the menu opened at.
+    anchor: GestureSlot<Vec2>,
 }
 
 impl AnchoredMenu {
-    /// Open (or re-anchor) the menu at a surface-space point, on `graph`'s
-    /// pane.
-    pub(super) fn open_at(&mut self, anchor: Vec2, graph: GraphRef) {
-        self.anchor.latch(graph, anchor);
+    /// Open (or re-anchor) the menu at a surface-space point.
+    pub(super) fn open_at(&mut self, anchor: Vec2) {
+        self.anchor.latch(anchor);
     }
 
-    /// Whether the menu is open on `graph`'s pane.
+    /// Whether the menu is open.
     ///
     /// For a caller with per-frame setup to skip: [`Self::show`] answers
     /// `None` for a closed menu anyway, but only *after* its arguments
     /// have been built.
-    pub(super) fn open_on(&self, graph: GraphRef) -> bool {
-        self.anchor.get(graph).is_some()
+    pub(super) fn open_on(&self) -> bool {
+        self.anchor.get().is_some()
     }
 
-    /// Show the menu when open **and** `graph` is the pane that opened it,
-    /// recording `body` inside the shared popup chrome. `body` records the
+    /// Show the menu when open, recording `body` inside the shared popup chrome. `body` records the
     /// items and returns the pick (if any); returning `Some` — or an Esc /
     /// outside-click dismiss — closes the menu. The pick is handed back for
     /// the caller to act on. `max_height` caps the popup so a tall body
@@ -60,14 +49,12 @@ impl AnchoredMenu {
     pub(super) fn show<T>(
         &mut self,
         ui: &mut Ui,
-        graph: GraphRef,
         id_salt: &'static str,
         max_height: Option<f32>,
         body: impl FnOnce(&mut Ui, &PopupHandle) -> Option<T>,
     ) -> Option<T> {
-        // `None` for every pane but the one that opened it, and for a
-        // menu that isn't open at all.
-        let anchor = *self.anchor.get(graph)?;
+        // `None` for a menu that isn't open.
+        let anchor = *self.anchor.get()?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate `escape_pressed` here.
         //
@@ -102,17 +89,14 @@ impl AnchoredMenu {
     }
 }
 
-/// A context popup latched by a right-click on one node's own widget — the
-/// whole shape both canvas node menus share, from the trigger scan to the pick.
-/// Wraps [`AnchoredMenu`] with the one per-open extra they have in common: the
-/// node the menu was opened on, which the open latched frames before the pick
-/// that needs it.
+/// A context popup latched by a right-click on a node's body — the whole shape
+/// a canvas node menu takes, from the trigger scan to the pick. Wraps
+/// [`AnchoredMenu`] with the one per-open extra it needs: the node the menu was
+/// opened on, which the open latched frames before the pick that needs it.
 ///
-/// What each caller still owns is which widget triggers it (one
-/// [`MenuTrigger`]), the items, and where a pick goes — an `AppCommand`, an
-/// `Intent`, or a stash for the `Editor` to resolve. Which nodes offer the
-/// menu at all is settled by [`CanvasHits::scan`], alongside the same guard
-/// that decides whether the trigger widget draws.
+/// What the caller still owns is the items and where a pick goes — an
+/// `AppCommand`, an `Intent`, or a stash for the `Editor` to resolve. Which
+/// nodes offer the menu at all is settled by [`CanvasHits::scan`].
 #[derive(Default, Debug)]
 pub(super) struct NodeContextMenu {
     menu: AnchoredMenu,
@@ -123,46 +107,41 @@ pub(super) struct NodeContextMenu {
 }
 
 impl NodeContextMenu {
-    /// Open on the secondary click `trigger` names, anchored at the pointer,
-    /// and report the node it opened on (`None` on every other frame).
+    /// Open on this frame's secondary click, anchored at the pointer, and
+    /// report the node it opened on (`None` on every other frame).
     ///
-    /// The hit comes from this frame's sweep, which already applied the
-    /// trigger widget's draw guard; all that is left here is confirming the
-    /// node still belongs to `graph` — the sweep spans every pane and ran
-    /// against last frame's projection.
+    /// The hit comes from this frame's sweep, which already applied the trigger
+    /// widget's draw guard; all that is left here is confirming the node still
+    /// belongs to `graph` — the sweep ran against last frame's projection.
     pub(super) fn latch(
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
         graph: Pane<'_>,
-        trigger: MenuTrigger,
     ) -> Option<NodeId> {
-        let clicked = hits.menu(trigger).filter(|&id| graph.contains(id))?;
+        let clicked = hits.menu().filter(|&id| graph.contains(id))?;
         // A press that opened the menu has a pointer position by construction;
         // the `?` is only for the frames where the pointer left the window
         // between the click and this read.
         let at = ui.pointer_pos()?;
         self.node_id = Some(clicked);
-        self.menu.open_at(at, graph.target());
+        self.menu.open_at(at);
         Some(clicked)
     }
 
-    /// Show the menu — see [`AnchoredMenu::show`] for the pane scoping and the
-    /// close rules. `body` records the items against the node the open latched
-    /// and returns the pick, which comes back paired with that node.
+    /// Show the menu — see [`AnchoredMenu::show`] for the close rules. `body`
+    /// records the items against the node the open latched and returns the
+    /// pick, which comes back paired with that node.
     pub(super) fn show<T>(
         &mut self,
         ui: &mut Ui,
-        graph: Pane<'_>,
         id_salt: &'static str,
         body: impl FnOnce(&mut Ui, &PopupHandle, NodeId) -> Option<T>,
     ) -> Option<NodePick<T>> {
         let node_id = self.node_id?;
         let choice = self
             .menu
-            .show(ui, graph.target(), id_salt, None, |ui, popup| {
-                body(ui, popup, node_id)
-            })?;
+            .show(ui, id_salt, None, |ui, popup| body(ui, popup, node_id))?;
         Some(NodePick { node_id, choice })
     }
 }

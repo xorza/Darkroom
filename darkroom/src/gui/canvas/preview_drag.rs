@@ -13,7 +13,7 @@
 use palantir::Ui;
 use scenarium::{Library, NodeId};
 
-use crate::core::document::{GraphRef, PortKind, PortRef};
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::preview;
 use crate::gui::canvas::drag_anchor::GroupDrag;
@@ -48,12 +48,7 @@ impl PreviewDrag {
         let Some(port) = scan_output_drag_start(geometry, frame.scene) else {
             return;
         };
-        let Some(graph) = frame.owner(port.node_id) else {
-            return;
-        };
-        // A preview is `entry_only`, so spawning one in a definition pane would
-        // author a compile error.
-        if graph.target() != GraphRef::Main {
+        if !frame.projects(port.node_id) {
             return;
         }
         let Some(func) = preview::registered(library) else {
@@ -71,19 +66,12 @@ impl PreviewDrag {
         let node_id = NodeId::unique();
         // Start it *at* the port so it visually grows out of the circle;
         // the drag below carries it from there.
-        out.extend(
-            graph.target(),
-            add_preview_intents(func, port, center, node_id),
-        );
+        out.extend(add_preview_intents(func, port, center, node_id));
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
-        self.drag.latch(
-            node_id,
-            graph.target(),
-            vec![(node_id, center)],
-            port_circle_wid(port),
-        );
+        self.drag
+            .latch(node_id, vec![(node_id, center)], port_circle_wid(port));
     }
 }
 

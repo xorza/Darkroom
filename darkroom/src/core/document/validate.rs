@@ -1,6 +1,6 @@
 //! Structural validation for documents and their per-graph editor views.
 
-use scenarium::{Graph as CoreGraph, GraphId, GraphValidationError, NodeId};
+use scenarium::{Graph as CoreGraph, GraphValidationError, NodeId};
 
 use crate::core::document::dock::DockValidationError;
 use crate::core::document::{Document, GraphView, TabRef, tab_alive};
@@ -23,18 +23,8 @@ pub(crate) enum GraphViewValidationError {
 pub(crate) enum DocumentValidationError {
     #[error(transparent)]
     Graph(#[from] GraphValidationError),
-    #[error("entry graph cannot contain interface boundary nodes")]
-    EntryBoundaryNodes,
     #[error("main view: {source}")]
     MainView {
-        #[source]
-        source: GraphViewValidationError,
-    },
-    #[error("local_views entry references missing local graph {graph_id:?}")]
-    MissingLocalGraph { graph_id: GraphId },
-    #[error("graph {graph_id:?} view: {source}")]
-    LocalView {
-        graph_id: GraphId,
         #[source]
         source: GraphViewValidationError,
     },
@@ -80,25 +70,9 @@ impl Document {
     /// Full structural validation for untrusted documents.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
-        if self.graph.iter().any(|node| node.kind.is_boundary()) {
-            return Err(DocumentValidationError::EntryBoundaryNodes);
-        }
-
         self.main_view
             .validate(&self.graph)
             .map_err(|source| DocumentValidationError::MainView { source })?;
-        for (id, view) in &self.local_views {
-            let graph = &self
-                .graph
-                .find_graph(*id)
-                .ok_or(DocumentValidationError::MissingLocalGraph { graph_id: *id })?
-                .body;
-            view.validate(graph)
-                .map_err(|source| DocumentValidationError::LocalView {
-                    graph_id: *id,
-                    source,
-                })?;
-        }
 
         self.layout.validate()?;
         for tab in self.layout.all_tabs() {

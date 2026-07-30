@@ -4,4 +4,3 @@
 
 pub(crate) mod action_stack;
 pub(crate) mod intent;
-pub(crate) mod publish;
