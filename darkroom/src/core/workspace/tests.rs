@@ -9,7 +9,6 @@ use crate::core::io::cache::document_cache_root;
 use crate::core::io::document;
 use crate::core::io::preferences::{MlModelPreferences, Preferences};
 use crate::core::runtime_host::internals;
-use crate::core::script::ScriptConfig;
 use crate::core::status::StatusLog;
 use crate::core::workspace::{self as workspace_module, Workspace};
 
@@ -18,7 +17,7 @@ fn stale_wiring_survives_install_and_still_compiles() {
     use scenarium::{Binding, Graph, InputPort};
 
     let mut preferences = Preferences::default();
-    let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
+    let mut workspace = Workspace::new(Arc::new(|| {}), &mut preferences);
 
     // Library drift: a wire into an output the func doesn't declare.
     // Nothing prunes it — the document keeps the authored wiring (it
@@ -67,7 +66,7 @@ fn startup_applies_preferences_and_replacement_repoints_the_runtime_cache() {
         },
         ..Preferences::default()
     };
-    let mut workspace = Workspace::new(&ScriptConfig::default(), Arc::new(|| {}), &mut preferences);
+    let mut workspace = Workspace::new(Arc::new(|| {}), &mut preferences);
 
     assert_eq!(workspace.open.path, Some(first_path.clone()));
     assert_eq!(

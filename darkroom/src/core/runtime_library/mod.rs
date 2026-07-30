@@ -77,20 +77,3 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
     library.merge(astro_library(model_paths));
     library
 }
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use std::sync::Arc;
-
-    use scenarium::Library;
-
-    use crate::core::runtime_library::PublishedLibrary;
-
-    pub(crate) fn published_library(library: Library) -> PublishedLibrary {
-        PublishedLibrary::new(Arc::new(library))
-    }
-
-    pub(crate) fn replace(library: &PublishedLibrary, replacement: Library) {
-        library.replace(Arc::new(replacement));
-    }
-}

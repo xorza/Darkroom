@@ -8,7 +8,6 @@ use crate::core::document::open_document::OpenDocument;
 use crate::core::io::document::DocumentSaveError;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::script::ScriptConfig;
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 
@@ -52,13 +51,12 @@ pub(crate) struct Workspace {
 
 impl Workspace {
     pub(crate) fn new(
-        script_config: &ScriptConfig,
         wake: Wake,
         preferences: &mut Preferences,
     ) -> Self {
         let mut status = StatusLog::default();
         let open = load_preferred_document(preferences, &mut status);
-        let mut runtime = RuntimeHost::new(script_config, wake, preferences, status);
+        let mut runtime = RuntimeHost::new(wake, preferences, status);
         runtime.set_document_cache(open.path.as_deref());
         Self { open, runtime }
     }
