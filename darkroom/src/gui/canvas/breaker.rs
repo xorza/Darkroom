@@ -3,11 +3,10 @@ use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui
 use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
-use crate::core::document::GraphRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::pane::PaneSlot;
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Pane;
@@ -252,7 +251,7 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
 /// can flag intersections inline.
 #[derive(Default, Debug)]
 pub(super) struct BreakerUI {
-    state: PaneSlot<BreakerState>,
+    state: GestureSlot<BreakerState>,
 }
 
 impl BreakerUI {
@@ -273,31 +272,23 @@ impl BreakerUI {
         cancelled: bool,
         out: &mut Intents,
     ) {
-        let target = graph.target();
-        // One scribble at a time, and it belongs to the pane it started
-        // on — every other pane leaves it alone.
-        if self.state.elsewhere(target) {
-            return;
-        }
-        let resp = ui.response_for(outer_canvas_widget_id(target));
+        let resp = ui.response_for(outer_canvas_widget_id());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
         if let Some(CanvasGesture::Breaker(button)) = gesture
             && self.state.is_idle()
             && let Some(p) = resp.pointer_local
         {
-            self.state.latch(
-                target,
-                BreakerState::start(to_world(p, &graph.viewport()), button),
-            );
+            self.state
+                .latch(BreakerState::start(to_world(p, &graph.viewport()), button));
         }
         if cancelled {
             self.state.clear();
             return;
         }
-        let button = self.state.get(target).map(|b| b.button);
+        let button = self.state.get().map(|b| b.button);
         match (
-            self.state.get_mut(target),
+            self.state.get_mut(),
             button.and_then(|b| resp.button(b).drag.delta()),
         ) {
             (Some(b), Some(_)) => {
@@ -308,19 +299,16 @@ impl BreakerUI {
             (Some(b), None) => {
                 let doomed_nodes = std::mem::take(&mut b.broken_nodes);
                 for &node_id in &doomed_nodes {
-                    out.push(target, Intent::RemoveNode { node_id });
+                    out.push(Intent::RemoveNode { node_id });
                 }
                 for addr in b.broken.drain(..) {
                     if doomed_nodes.contains(&addr.node_id) {
                         continue;
                     }
-                    out.push(
-                        target,
-                        Intent::SetInput {
-                            input: addr,
-                            to: None,
-                        },
-                    );
+                    out.push(Intent::SetInput {
+                        input: addr,
+                        to: None,
+                    });
                 }
                 // A removed node already drops its subscriptions
                 // (RemoveNode's undo step captures every edge touching
@@ -330,15 +318,12 @@ impl BreakerUI {
                     if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
                         continue;
                     }
-                    out.push(
-                        target,
-                        Intent::SetSubscription {
-                            emitter: s.emitter,
-                            event_idx: s.event_idx,
-                            subscriber: s.subscriber,
-                            subscribe: false,
-                        },
-                    );
+                    out.push(Intent::SetSubscription {
+                        emitter: s.emitter,
+                        event_idx: s.event_idx,
+                        subscriber: s.subscriber,
+                        subscribe: false,
+                    });
                 }
                 self.state.clear();
             }
@@ -358,8 +343,8 @@ impl BreakerUI {
     /// also keeps `begin_frame` to one call per frame: this runs once per
     /// visible pane, and a second call would clear the marks the owning
     /// pane just recorded.
-    pub(super) fn probe(&mut self, graph: GraphRef) -> BreakerProbe<'_> {
-        let mut state = self.state.get_mut(graph);
+    pub(super) fn probe(&mut self) -> BreakerProbe<'_> {
+        let mut state = self.state.get_mut();
         if let Some(b) = state.as_deref_mut() {
             b.begin_frame();
         }
@@ -368,8 +353,8 @@ impl BreakerUI {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
-    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>, graph: GraphRef) {
-        let Some(b) = self.state.get(graph) else {
+    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+        let Some(b) = self.state.get() else {
             return;
         };
         if b.points.len() < 2 {
@@ -390,36 +375,6 @@ impl BreakerUI {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_scribble_is_inert_on_every_pane_but_its_own() {
-        // Regression: the probe handed the live state to *every* visible
-        // pane. The polyline lives in its own graph's pre-transform world
-        // coordinates, so an unscoped probe tests one pane's scribble
-        // against another's rects — marking wires and nodes broken in a
-        // graph the pointer never touched, and deleting them on release.
-        // It also let each pane's `begin_frame` clear the marks the owning
-        // pane had just recorded.
-        let other = GraphRef::Local(scenarium::GraphId::from_u128(1));
-        let mut ui = BreakerUI::default();
-        ui.state.latch(
-            GraphRef::Main,
-            BreakerState::start(Vec2::ZERO, PointerButton::Right),
-        );
-        // A rect the scribble genuinely crosses, offered by the wrong pane.
-        let crossed = Rect::new(-10.0, -10.0, 20.0, 20.0);
-        assert!(
-            !ui.probe(other).is_active(),
-            "a foreign pane sees no gesture at all"
-        );
-        assert!(
-            !ui.probe(other).crosses_rect(crossed),
-            "and so cannot register a hit on its own geometry"
-        );
-        // The owning pane still probes normally.
-        let mine = ui.probe(GraphRef::Main);
-        assert!(mine.is_active() && mine.crosses_rect(crossed));
-    }
 
     #[test]
     fn begin_frame_clears_every_broken_collection() {
@@ -444,25 +399,6 @@ mod tests {
         assert!(b.broken.is_empty());
         assert!(b.broken_nodes.is_empty());
         assert!(b.broken_subscriptions.is_empty());
-    }
-
-    #[test]
-    fn probe_clears_stale_hits_from_a_prior_frame() {
-        // `BreakerUI::probe` is the one call site `begin_frame` is driven
-        // from — exercise it through that entry point too, not just the
-        // underlying `BreakerState` method.
-        let mut ui = BreakerUI::default();
-        ui.state.latch(
-            GraphRef::Main,
-            BreakerState::start(Vec2::ZERO, PointerButton::Right),
-        );
-        ui.state
-            .get_mut(GraphRef::Main)
-            .unwrap()
-            .broken_nodes
-            .push(NodeId::from_u128(1));
-        let probe = ui.probe(GraphRef::Main);
-        assert!(probe.state.unwrap().broken_nodes.is_empty());
     }
 
     #[test]

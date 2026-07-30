@@ -14,40 +14,14 @@
 use std::sync::Arc;
 
 use scenarium::Binding;
-use scenarium::GraphLink;
 use scenarium::InputPort;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
-use crate::core::document::GraphRef;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::UiAction;
-use crate::gui::canvas::hits::{CanvasHits, Chip};
+use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::node::set_input;
 use crate::gui::scene::{Frame, InputBindingView, Pane};
-
-/// Prepass scan: surface an `OpenGraph` for the graph node whose `G`
-/// chip was clicked. Detecting the open here — *before* the record — lets
-/// `App` switch the active graph ahead of Pass A, so the graph records a
-/// pass earlier and its connections draw with no first-frame gap. Linked
-/// graphs aren't editable targets yet, so only `Local` opens.
-///
-/// Whole-scene rather than per-pane: the chip is keyed by a
-/// document-unique `NodeId`, so there is one hit to resolve however many
-/// panes are open.
-pub(crate) fn emit_graph_opens(hits: &CanvasHits, frame: Frame<'_>, actions: &mut Vec<UiAction>) {
-    // Instances are always `Local` (library graphs are localized on
-    // instance), so the "G" chip opens the graph directly. The badge draws
-    // for any link, which is why the `Local` filter is here and not on the
-    // scan's draw guard.
-    if let Some(node) = hits
-        .chip(Chip::OpenGraph)
-        .and_then(|id| frame.scene.nodes.get(&id))
-        && let Some(GraphLink::Local(id)) = node.graph
-    {
-        actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
-    }
-}
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
 /// caller to translate into a file-dialog command. The node UI
@@ -99,19 +73,15 @@ pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: Pane<'_>) -> Option<Path
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
 pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, frame: Frame<'_>, out: &mut Intents) {
-    // Whole-scene: the hit is keyed by a document-unique `PortRef`, so the
-    // pane it edits comes off the node it names rather than from a loop
-    // over the panes asking each whether it holds it.
     let Some(port) = hits.double_clicked_port() else {
         return;
     };
-    let Some(graph) = frame.owner(port.node_id) else {
+    let Some(graph) = frame.pane() else {
         return;
     };
     let Some(node) = graph.node(port.node_id) else {
         return;
     };
-    let target = graph.target();
     match port.kind {
         PortKind::Input => {
             let Some(input) = graph.inputs(node.inputs).get(port.port_idx) else {
@@ -124,31 +94,26 @@ pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, frame: Frame<'_>, out: &mut
                 // an unbound one has nothing to seed (its label double-click
                 // renames).
                 InputBindingView::None => {
-                    if !node.boundary
-                        && let Some(default) = &input.default
-                    {
-                        out.push(target, set_input(port, Binding::Const(default.clone())));
+                    if true && let Some(default) = &input.default {
+                        out.push(set_input(port, Binding::Const(default.clone())));
                     }
                 }
                 // Already bound → clear it.
-                _ => out.push(target, set_input(port, None)),
+                _ => out.push(set_input(port, None)),
             }
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
             for (consumer, producer) in graph.connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
-                    out.push(
-                        target,
-                        set_input(
-                            PortRef {
-                                node_id: consumer.node_id,
-                                kind: PortKind::Input,
-                                port_idx: consumer.port_idx,
-                            },
-                            None,
-                        ),
-                    );
+                    out.push(set_input(
+                        PortRef {
+                            node_id: consumer.node_id,
+                            kind: PortKind::Input,
+                            port_idx: consumer.port_idx,
+                        },
+                        None,
+                    ));
                 }
             }
         }

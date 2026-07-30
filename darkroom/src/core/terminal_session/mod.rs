@@ -6,7 +6,7 @@
 
 use scenarium::{WorkerReport, WorkerStatusKind};
 
-use crate::core::document::{Document, GraphRef};
+use crate::core::document::Document;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::types::{Intent, Refusal};
 use crate::core::io::preferences::Preferences;
@@ -112,10 +112,9 @@ impl TerminalSession {
 /// drops silently; a script's payload is decoded straight into an [`Intent`],
 /// so one that could never have applied answers back instead.
 fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> Vec<String> {
-    let target = document.focused_target().unwrap_or(GraphRef::Main);
     intents
         .into_iter()
-        .filter_map(|intent| match commit_intent(intent, document, target) {
+        .filter_map(|intent| match commit_intent(intent, document) {
             Ok(_) | Err(Refusal::Quiet) => None,
             Err(Refusal::Invalid(reason)) => Some(reason),
         })

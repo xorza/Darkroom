@@ -5,7 +5,6 @@ mod connection_ui;
 pub(crate) mod cull;
 pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
-mod graph_menu;
 pub(crate) mod hits;
 pub(crate) mod inspector;
 mod new_node_ui;
@@ -15,8 +14,6 @@ mod pane;
 mod preview_drag;
 mod selection_ui;
 mod subscription_ui;
-#[cfg(test)]
-mod tests;
 mod wire;
 
 use glam::Vec2;
@@ -26,7 +23,7 @@ use palantir::{
 use scenarium::{Library, NodeId};
 use std::collections::BTreeSet;
 
-use crate::core::document::{GraphRef, Viewport};
+use crate::core::document::Viewport;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
@@ -38,12 +35,11 @@ use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::graph_menu::GraphMenuUi;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
-use crate::gui::canvas::pane::PaneSlot;
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::preview_drag::PreviewDrag;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
@@ -60,10 +56,8 @@ use crate::gui::scene::{Frame, Pane};
 /// everything here is either keyed by a document-unique id (geometry,
 /// inspectors) or inherently singular (there is one pointer, so one drag,
 /// one rubber band, one open popup). What *is* per-pane — the canvas
-/// widget ids, the viewport, the paint stack — comes from the
-/// [`Pane`] handed to [`Self::draw`], and each gesture that spans
-/// frames records the [`GraphRef`] it latched on so the other panes'
-/// passes leave it alone.
+/// widget ids, the viewport, the paint stack — comes from the [`Pane`] handed
+/// to [`Self::draw`].
 ///
 /// The frame splits accordingly:
 /// - [`Self::prepass`] runs **once** over the whole scene, with a small
@@ -106,7 +100,7 @@ pub(crate) struct GraphUI {
     /// This frame's bare-canvas gesture and the pane it latched on,
     /// resolved once in [`Self::prepass`] and read back by [`Self::draw`].
     /// At most one pane can own a press, so one slot is enough.
-    gesture: Option<PaneGesture>,
+    gesture: Option<CanvasGesture>,
     /// Whether this frame cancels whatever gesture is in flight (Esc).
     ///
     /// Resolved once in [`Self::prepass`], beside the classification —
@@ -124,13 +118,6 @@ pub(crate) struct GraphUI {
     gestures: Gestures,
 }
 
-/// A bare-canvas gesture together with the pane whose canvas it landed on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct PaneGesture {
-    target: GraphRef,
-    gesture: CanvasGesture,
-}
-
 /// The resettable, one-gesture-lifetime controllers. Everything here is
 /// dropped on a tab switch, and nothing here carries meaning across frames.
 #[derive(Default, Debug)]
@@ -141,7 +128,6 @@ struct Gestures {
     preview_drag: PreviewDrag,
     subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
-    graph_menu: GraphMenuUi,
     node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
@@ -150,7 +136,7 @@ struct Gestures {
     /// bookkeeping (lifetime = one gesture), not viewport state — and
     /// keyed because `emit_pan_zoom` runs once per visible pane, so the
     /// idle ones must not consume the live one's release edge.
-    pan_anchor: PaneSlot<Vec2>,
+    pan_anchor: GestureSlot<Vec2>,
 }
 
 impl GraphUI {
@@ -173,11 +159,10 @@ impl GraphUI {
         self.inspectors.close_unpinned();
     }
 
-    /// Take the node context-menu action picked this frame, if any, with the
-    /// pane it was picked in. The `Editor` resolves it against that pane's
-    /// live selection (it owns the `Document` needed to build the duplicate /
-    /// removal intents).
-    pub(crate) fn take_node_menu_action(&mut self) -> Option<(NodeMenuAction, GraphRef)> {
+    /// Take the node context-menu action picked this frame, if any. The
+    /// `Editor` resolves it against the live selection (it owns the
+    /// `Document` needed to build the duplicate / removal intents).
+    pub(crate) fn take_node_menu_action(&mut self) -> Option<NodeMenuAction> {
         self.gestures.node_menu.take_action()
     }
 
@@ -223,12 +208,9 @@ impl GraphUI {
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
         self.cancelled = ui.escape_pressed();
-        for pane in frame.panes() {
-            let target = pane.target();
-            let gesture = classify_canvas_gesture(ui, target);
-            if let Some(gesture) = gesture {
-                self.gesture = Some(PaneGesture { target, gesture });
-            }
+        if let Some(pane) = frame.pane() {
+            let gesture = classify_canvas_gesture(ui);
+            self.gesture = gesture;
             pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, pane, gesture, out);
         }
         self.gestures.node_ui.prepass(ui, frame.scene, out);
@@ -286,12 +268,8 @@ impl GraphUI {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
         // transform below reads the up-to-date viewport directly. The
-        // gesture was classified there too; only the pane that owns this
-        // frame's press sees a `Some`.
-        let gesture = self
-            .gesture
-            .filter(|g| g.target == graph.target())
-            .map(|g| g.gesture);
+        // gesture was classified there too.
+        let gesture = self.gesture;
         let command = self.resolve_gestures(ui, ctx, graph, gesture, out);
         self.record_canvas(ui, ctx, graph, out);
         command
@@ -309,7 +287,6 @@ impl GraphUI {
         gesture: Option<CanvasGesture>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
-        let target = graph.target();
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
@@ -317,12 +294,9 @@ impl GraphUI {
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
         if gesture == Some(CanvasGesture::Deselect) && !graph.selected().is_empty() {
-            out.push(
-                target,
-                Intent::SetSelection {
-                    to: BTreeSet::new(),
-                },
-            );
+            out.push(Intent::SetSelection {
+                to: BTreeSet::new(),
+            });
         }
         // `CanvasGeometry` was already rebuilt in `prepass` against every
         // visible graph's scene — `App` rebuilds the scene *before* prepass
@@ -362,9 +336,8 @@ impl GraphUI {
         // pure reads over last frame's responses, so `or_else` short-circuits
         // past them once a menu has answered.
         self.gestures
-            .graph_menu
+            .node_menu
             .apply(ui, &self.hits, graph, out)
-            .or(self.gestures.node_menu.apply(ui, &self.hits, graph, out))
             .or_else(|| emit_chip_command(&self.hits, graph))
     }
 
@@ -397,7 +370,6 @@ impl GraphUI {
         graph: Pane<'_>,
         out: &mut Intents,
     ) {
-        let target = graph.target();
         let Self {
             background,
             geometry,
@@ -413,7 +385,6 @@ impl GraphUI {
                     preview_drag: _,
                     subscription_ui,
                     new_node_ui: _,
-                    graph_menu: _,
                     node_menu: _,
                     selection_ui,
                     pan_anchor: _,
@@ -425,7 +396,7 @@ impl GraphUI {
         // a band is in flight over *this* pane, else its committed set.
         // Kept off `Scene` so the projection stays a read-only mirror of
         // `Document`.
-        let selected = selection_ui.preview(target).unwrap_or(graph.selected());
+        let selected = selection_ui.preview().unwrap_or(graph.selected());
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -448,7 +419,7 @@ impl GraphUI {
         // damage threshold sees ratio ≫ 1 and trips `Damage::Full`
         // every pan/zoom tick.
         Panel::canvas()
-            .id(outer_canvas_widget_id(target))
+            .id(outer_canvas_widget_id())
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
@@ -456,9 +427,9 @@ impl GraphUI {
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
-                background.draw(ui, ctx, target, pan_val, zoom_val);
+                background.draw(ui, ctx, pan_val, zoom_val);
                 Panel::canvas()
-                    .id(inner_canvas_widget_id(target))
+                    .id(inner_canvas_widget_id())
                     .size((Sizing::FILL, Sizing::FILL))
                     .transform(TranslateScale::new(pan_val, zoom_val))
                     .show(ui, |ui| {
@@ -470,18 +441,18 @@ impl GraphUI {
                         // shapes), so port `layout_rect`s and bezier
                         // endpoints stay aligned at every zoom.
                         let canvas_origin = ui
-                            .response_for(inner_canvas_widget_id(target))
+                            .response_for(inner_canvas_widget_id())
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
                         let cull = CullRegion::from_canvas(
-                            ui.response_for(outer_canvas_widget_id(target)).layout_rect,
+                            ui.response_for(outer_canvas_widget_id()).layout_rect,
                             canvas_origin,
                             &viewport,
                         );
                         // Painted first so it sits beneath the
                         // connections and node bodies.
-                        selection_ui.draw(ui, ctx, target);
+                        selection_ui.draw(ui, ctx);
                         // One bundle for everything this pane records: the
                         // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
@@ -497,7 +468,7 @@ impl GraphUI {
                             run_state: ctx.run_state,
                         };
                         {
-                            let mut probe = breaker_ui.probe(target);
+                            let mut probe = breaker_ui.probe();
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
@@ -533,7 +504,7 @@ impl GraphUI {
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
                         inspectors.draw_panels(ui, rcx);
-                        breaker_ui.draw(ui, ctx, target);
+                        breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, graph, geometry, canvas_origin);
                         subscription_ui.draw_in_flight(ui, ctx, graph, geometry, canvas_origin);
                     });
@@ -585,11 +556,11 @@ enum CanvasGesture {
 ///
 /// This only ever sees presses that *missed* every node and port: a
 /// node/badge widget captures its own press, so a right-click on a node
-/// body or `G` badge routes to `node_menu` / `graph_menu` (which read
+/// body routes to `node_menu` (which reads
 /// those widgets' `secondary_clicked` directly) and never reaches here —
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
-fn classify_canvas_gesture(ui: &mut Ui, target: GraphRef) -> Option<CanvasGesture> {
-    let resp = ui.response_for(outer_canvas_widget_id(target));
+fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
+    let resp = ui.response_for(outer_canvas_widget_id());
     if resp.middle.drag.started() {
         return Some(CanvasGesture::Pan);
     }
@@ -663,13 +634,16 @@ fn pointer_world(ui: &mut Ui, graph: Pane<'_>, canvas_origin: Vec2) -> Option<Ve
 /// Stable id for one pane's outer (pan-capture) canvas. Keyed by the graph
 /// it shows, so two panes side by side hit-test independently and a
 /// gesture polled by target reaches the right canvas.
-pub(crate) fn outer_canvas_widget_id(target: GraphRef) -> WidgetId {
-    WidgetId::from_hash(("graph.canvas.outer", target))
+pub(crate) fn outer_canvas_widget_id() -> WidgetId {
+    WidgetId::from_hash("graph.canvas.outer")
 }
 
 /// Stable id for one pane's inner (transformed) canvas. Used as the widget
 /// seed and for resolving the canvas's pre-transform origin in connection
 /// draws.
-fn inner_canvas_widget_id(target: GraphRef) -> WidgetId {
-    WidgetId::from_hash(("graph.canvas.inner", target))
+fn inner_canvas_widget_id() -> WidgetId {
+    WidgetId::from_hash("graph.canvas.inner")
 }
+
+#[cfg(test)]
+mod tests;

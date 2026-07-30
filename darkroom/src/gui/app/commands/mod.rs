@@ -14,14 +14,12 @@ use crate::gui::app::App;
 
 pub(crate) mod edit;
 pub(crate) mod file;
-pub(crate) mod graph;
 pub(crate) mod prefs;
 pub(crate) mod run;
 pub(crate) mod shell;
 
 use edit::EditCommand;
 use file::FileCommand;
-use graph::GraphCommand;
 use prefs::PrefsCommand;
 use run::RunCommand;
 use shell::ShellCommand;
@@ -33,8 +31,6 @@ use shell::ShellCommand;
 pub(crate) enum AppCommand {
     /// Document file lifecycle — [`file`](mod@file).
     File(FileCommand),
-    /// Graph → library publishing — [`graph`].
-    Graph(GraphCommand),
     /// Graph execution + worker event loop — [`run`].
     Run(RunCommand),
     /// Preferences edits — [`prefs`].
@@ -50,7 +46,6 @@ impl App {
     pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
         match command {
             AppCommand::File(c) => self.handle_file(c),
-            AppCommand::Graph(c) => self.handle_graph(c),
             AppCommand::Run(c) => self.handle_run(c),
             AppCommand::Prefs(c) => self.handle_prefs(ui, c),
             AppCommand::Edit(c) => self.handle_edit(c),

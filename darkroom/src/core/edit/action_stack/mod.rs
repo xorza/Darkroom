@@ -27,7 +27,7 @@ use common::SerdeFormat;
 
 use crate::core::document::Document;
 use crate::core::edit::intent::apply::{apply_step, revert_step};
-use crate::core::edit::intent::types::{BatchScope, GestureKey, UndoStep};
+use crate::core::edit::intent::types::{GestureKey, UndoStep};
 
 #[derive(Debug)]
 struct Entry {
@@ -37,10 +37,6 @@ struct Entry {
     /// entry. Only set for single-step batches that identify as a
     /// gesture.
     gesture_key: Option<GestureKey>,
-    /// What this batch mutated: one graph — so undo/redo re-resolve the
-    /// right graph+view even when the user has since switched tabs — or
-    /// the document itself, for an entry built from a `DocIntent`.
-    scope: BatchScope,
 }
 
 #[derive(Debug)]
@@ -82,19 +78,10 @@ impl ActionStack {
 
     /// Push a batch of just-applied steps that mutated `scope`. `steps`
     /// is a single undo entry — undoing/redoing replays the whole batch
-    /// atomically against the graph it names (or, for a document-global
-    /// entry, against the document alone).
-    pub(crate) fn push_current(&mut self, scope: BatchScope, steps: &[UndoStep]) {
+    pub(crate) fn push_current(&mut self, steps: &[UndoStep]) {
         if steps.is_empty() {
             return;
         }
-        // What lets `apply_step` demand a target for every `GraphStep` it
-        // replays: `commit_queued` records a document-global intent as an
-        // entry of its own, so nothing graph-scoped can ride along.
-        debug_assert!(
-            scope != BatchScope::Document || steps.iter().all(|s| matches!(s, UndoStep::Doc(_))),
-            "a document-global entry can only hold document-global steps",
-        );
         // A fresh edit makes the undone tail unreachable; drop it.
         self.discard_redo();
 
@@ -106,21 +93,17 @@ impl ActionStack {
         };
 
         // Gesture coalescing: if this push matches the previous entry's
-        // cached key *on the same graph*, merge in place — keep the
-        // existing "from" half, replace the "to" half. Cross-frame
-        // zoom/pan collapses to one undo step.
+        // cached key, merge in place — keep the existing "from" half,
+        // replace the "to" half. Cross-frame zoom/pan collapses to one
+        // undo step.
         if let Some(key) = gesture_key
-            && self.try_merge_with_last(&steps[0], key, scope)
+            && self.try_merge_with_last(&steps[0], key)
         {
             return;
         }
 
         let range = Self::append_steps(&mut self.actions, steps);
-        self.entries.push_back(Entry {
-            range,
-            gesture_key,
-            scope,
-        });
+        self.entries.push_back(Entry { range, gesture_key });
         self.cursor = self.entries.len();
         self.trim_to_limit();
     }
@@ -130,14 +113,12 @@ impl ActionStack {
             return false;
         }
         self.cursor -= 1;
-        // `revert_step` resolves the right graph+view from `scope` and
         // no-ops if it's gone (graph deleted). The entry stays in the
         // buffer — it just moved into the redoable region.
         let entry = &self.entries[self.cursor];
-        let scope = entry.scope;
         let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter().rev() {
-            revert_step(step, doc, scope);
+            revert_step(step, doc);
             on_step(step);
         }
         true
@@ -148,10 +129,9 @@ impl ActionStack {
             return false;
         }
         let entry = &self.entries[self.cursor];
-        let scope = entry.scope;
         let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter() {
-            apply_step(step, doc, scope);
+            apply_step(step, doc);
             on_step(step);
         }
         self.cursor += 1;
@@ -212,18 +192,13 @@ impl ActionStack {
         );
     }
 
-    fn try_merge_with_last(
-        &mut self,
-        new_step: &UndoStep,
-        key: GestureKey,
-        scope: BatchScope,
-    ) -> bool {
+    fn try_merge_with_last(&mut self, new_step: &UndoStep, key: GestureKey) -> bool {
         // `discard_redo` ran first, so the last entry is the last applied
         // one and its bytes are the buffer tail.
         let Some(last) = self.entries.back() else {
             return false;
         };
-        if last.gesture_key != Some(key) || last.scope != scope {
+        if last.gesture_key != Some(key) {
             return false;
         }
         let last_range = last.range.clone();
@@ -251,7 +226,6 @@ impl ActionStack {
         self.entries.push_back(Entry {
             range,
             gesture_key: Some(key),
-            scope,
         });
         self.cursor = self.entries.len();
         true

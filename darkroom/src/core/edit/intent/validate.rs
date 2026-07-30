@@ -23,11 +23,9 @@
 use std::collections::HashSet;
 
 use glam::Vec2;
-use scenarium::{
-    Binding, Graph, GraphDef, GraphId, GraphLink, InputPort, Node, NodeId, NodeKind, NodeSearch,
-};
+use scenarium::{Binding, Graph, InputPort, Node, NodeId, NodeKind};
 
-use crate::core::document::{Document, GraphRef};
+use crate::core::document::Document;
 use crate::core::edit::intent::types::Refusal;
 
 /// Resolve a node the intent points at. A nil id is malformed rather than
@@ -40,9 +38,7 @@ pub(super) fn live_node<'a>(
     if node_id.is_nil() {
         return Err(Refusal::Invalid(format!("{role} node id is nil")));
     }
-    graph
-        .find(node_id, NodeSearch::TopLevel)
-        .ok_or(Refusal::Quiet)
+    graph.find(node_id).ok_or(Refusal::Quiet)
 }
 
 /// A node id an insertion introduces, checked against the ids the same
@@ -62,7 +58,7 @@ pub(super) fn fresh_node_id(
             "node {node_id:?} appears twice in one insertion"
         )));
     }
-    if doc.graph.find(node_id, NodeSearch::Recursive).is_some() {
+    if doc.graph.find(node_id).is_some() {
         return Err(Refusal::Invalid(format!(
             "node {node_id:?} already exists in the document"
         )));
@@ -70,88 +66,16 @@ pub(super) fn fresh_node_id(
     Ok(())
 }
 
-/// A local definition arriving alongside a new node: sound on its own, and
-/// reusing no id the document already holds — graph *and* node ids are
-/// document-unique, so a colliding one makes the whole document invalid.
-pub(super) fn fresh_local_graph(
-    doc: &Document,
-    graph_id: GraphId,
-    definition: &GraphDef,
-) -> Result<(), Refusal> {
-    if graph_id.is_nil() {
-        return Err(Refusal::Invalid("new local graph id is nil".to_owned()));
-    }
-    if doc.graph.find_graph(graph_id).is_some() {
-        return Err(Refusal::Invalid(format!(
-            "local graph {graph_id:?} already exists in the document"
-        )));
-    }
-    definition
-        .validate()
-        .map_err(|error| Refusal::Invalid(format!("new local graph is invalid: {error}")))?;
-    fresh_interior_ids(doc, &definition.body)
-}
-
-/// Every id inside an arriving definition, checked against the document.
-/// The recursion is bounded: the caller validated the definition first,
-/// which caps its nesting depth and proves its ids are non-nil.
-fn fresh_interior_ids(doc: &Document, body: &Graph) -> Result<(), Refusal> {
-    for node in body.iter() {
-        if doc.graph.find(node.id, NodeSearch::Recursive).is_some() {
-            return Err(Refusal::Invalid(format!(
-                "new local graph reuses node {:?}",
-                node.id
-            )));
-        }
-    }
-    for (graph_id, nested) in &body.graphs {
-        if doc.graph.find_graph(*graph_id).is_some() {
-            return Err(Refusal::Invalid(format!(
-                "new local graph reuses graph {graph_id:?}"
-            )));
-        }
-        fresh_interior_ids(doc, &nested.body)?;
-    }
-    Ok(())
-}
-
-/// A newly inserted node's kind has to name state the document already
-/// holds. A definition arriving in the same step is
-/// [`Intent::AddLocalGraph`](crate::core::edit::intent::types::Intent::AddLocalGraph)'s
-/// business, and `build_step` builds that node itself rather than validating
-/// a caller's.
-pub(super) fn insertable_kind(graph: &Graph, target: GraphRef, node: &Node) -> Result<(), Refusal> {
+/// A newly inserted node's kind has to name state the document already holds:
+/// a func the library resolves, or a built-in special.
+pub(super) fn insertable_kind(_graph: &Graph, node: &Node) -> Result<(), Refusal> {
     match &node.kind {
         NodeKind::Func(func_id) => {
             if func_id.is_nil() {
                 return Err(Refusal::Invalid("new node has a nil func id".to_owned()));
             }
         }
-        NodeKind::Graph(link) => {
-            if link.id().is_nil() {
-                return Err(Refusal::Invalid("new node has a nil graph id".to_owned()));
-            }
-            if let GraphLink::Local(graph_id) = link
-                && !graph.graphs.contains_key(graph_id)
-            {
-                return Err(Refusal::Invalid(format!(
-                    "new node links local graph {graph_id:?}, which the target graph doesn't hold"
-                )));
-            }
-        }
         NodeKind::Special(_) => {}
-        kind @ (NodeKind::GraphInput | NodeKind::GraphOutput) => {
-            if target == GraphRef::Main {
-                return Err(Refusal::Invalid(
-                    "the entry graph cannot hold interface boundary nodes".to_owned(),
-                ));
-            }
-            if graph.iter().any(|existing| &existing.kind == kind) {
-                return Err(Refusal::Invalid(
-                    "the graph already holds that side's boundary node".to_owned(),
-                ));
-            }
-        }
     }
     Ok(())
 }
@@ -184,7 +108,7 @@ pub(super) fn present_node(
     if node_id.is_nil() {
         return Err(Refusal::Invalid(format!("{role} node id is nil")));
     }
-    if added.contains(&node_id) || graph.find(node_id, NodeSearch::TopLevel).is_some() {
+    if added.contains(&node_id) || graph.find(node_id).is_some() {
         return Ok(());
     }
     Err(Refusal::Invalid(format!(

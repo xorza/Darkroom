@@ -1,7 +1,7 @@
 //! Graph execution + the worker event loop. Commands only request work;
 //! worker status reports drive the toolbar's execution and loop state.
 
-use scenarium::{NodeId, NodeSearch};
+use scenarium::NodeId;
 
 use crate::gui::app::App;
 
@@ -54,14 +54,7 @@ impl App {
         // the *node's* graph, not the focused pane's: with several graph
         // panes open, a root node's chip stays valid while focus sits
         // elsewhere.
-        if self
-            .workspace
-            .open
-            .document
-            .graph
-            .find(node_id, NodeSearch::TopLevel)
-            .is_none()
-        {
+        if self.workspace.open.document.graph.find(node_id).is_none() {
             debug_assert!(false, "run-node reached for a node outside the root graph");
             return;
         }

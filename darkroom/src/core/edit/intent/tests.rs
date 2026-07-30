@@ -1,20 +1,18 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
+use scenarium::FuncId;
 use scenarium::StaticValue;
-use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch};
-use scenarium::{DataType, FuncId, FuncInput};
-use scenarium::{GraphDef, GraphId, GraphLink, Subscription};
+use scenarium::Subscription;
+use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, GraphRef, Viewport};
-use crate::core::edit::intent::apply::{apply_step, commit_doc_intent, commit_intent, revert_step};
-use crate::core::edit::intent::build::{build_doc_step, build_step};
+use crate::core::document::{Document, Viewport};
+use crate::core::edit::intent::apply::{apply_step, commit_dock_op, commit_intent, revert_step};
+use crate::core::edit::intent::build::{build_dock_step, build_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
-use crate::core::edit::intent::types::{
-    BatchScope, DocIntent, DocStep, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
-};
+use crate::core::edit::intent::types::{GraphStep, Intent, NodeProperty, Refusal, UndoStep};
 
 /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
 /// `pos`, returning its id.
@@ -29,7 +27,6 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
 fn dirties_document_splits_edits_from_navigation() {
     use crate::core::document::TabRef;
     use crate::core::document::dock::{DockDrop, SplitSide};
-    use scenarium::GraphId;
 
     // A doc with a movable Preferences tab, for the dock steps below
     // (both built through the real `build_step` pipeline so the
@@ -37,7 +34,7 @@ fn dirties_document_splits_edits_from_navigation() {
     let mut dock_doc = Document::default();
     let primary = dock_doc.layout.primary().id;
     dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
-    let dock_step = |op: DockOp| build_doc_step(DocIntent::Dock(op), &dock_doc).map(UndoStep::Doc);
+    let dock_step = |op: DockOp| build_dock_step(op, &dock_doc).map(UndoStep::Dock);
 
     // Navigation-only steps: camera, selection, tab focus — the user
     // doesn't "save" these, so they must not flip the unsaved flag.
@@ -90,11 +87,6 @@ fn dirties_document_splits_edits_from_navigation() {
             grabbed: NodeId::unique(),
             moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
         }),
-        UndoStep::Doc(DocStep::RenameGraph {
-            id: GraphId::unique(),
-            from: "s".into(),
-            to: "t".into(),
-        }),
     ];
     for step in &content {
         assert!(step.dirties_document(), "content step must dirty: {step:?}",);
@@ -110,7 +102,7 @@ fn dirties_document_splits_edits_from_navigation() {
 fn invalidates_cached_geometry_splits_resizes_from_moves() {
     use crate::core::document::TabRef;
     use crate::core::document::dock::{DockDrop, DockPath, SplitSide};
-    use scenarium::{GraphId, StaticValue};
+    use scenarium::StaticValue;
 
     let mut dock_doc = Document::default();
     let primary = dock_doc.layout.primary().id;
@@ -118,20 +110,19 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     // Split Preferences into its own pane, then keep the step: it is both a
     // structural dock op for the table below and what gives `SetRatio` a
     // real divider to name instead of a refused no-op.
-    let split = commit_doc_intent(
-        DocIntent::Dock(DockOp::MoveTab {
+    let split = commit_dock_op(
+        DockOp::MoveTab {
             tab: TabRef::Preferences,
             to: DockDrop::Split {
                 group: primary,
                 side: SplitSide::Right,
             },
-        }),
+        },
         &mut dock_doc,
     )
     .expect("splitting a second tab off the primary group");
-    let dock_step = |op: DockOp| {
-        UndoStep::Doc(build_doc_step(DocIntent::Dock(op), &dock_doc).expect("a real dock op"))
-    };
+    let dock_step =
+        |op: DockOp| UndoStep::Dock(build_dock_step(op, &dock_doc).expect("a real dock op"));
     let node_id = NodeId::unique();
     let port = InputPort::new(node_id, 0);
     let cst = |v: f64| Some(Binding::Const(StaticValue::Float(v)));
@@ -169,9 +160,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         split,
         // Focus back to the other pane — Preferences is the focused one
         // after the split, so activating it again would be a no-op.
-        dock_step(DockOp::ActivateTab {
-            tab: TabRef::Graph(GraphRef::Main),
-        }),
+        dock_step(DockOp::ActivateTab { tab: TabRef::Graph }),
         // Value-only: the editor stays present at its `Fixed` size.
         UndoStep::Graph(GraphStep::SetInput {
             input: port,
@@ -211,11 +200,6 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
             input: port,
             from: cst(1.0),
             to: None,
-        }),
-        UndoStep::Doc(DocStep::RenameGraph {
-            id: GraphId::unique(),
-            from: "s".into(),
-            to: "t".into(),
         }),
     ];
     for step in &resizes {
@@ -266,7 +250,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
     ];
     for to in invalid {
         assert!(
-            commit_intent(Intent::SetViewport { to }, &mut doc, GraphRef::Main).is_err(),
+            commit_intent(Intent::SetViewport { to }, &mut doc).is_err(),
             "invalid viewport {to:?} must be dropped"
         );
         assert_eq!(
@@ -280,7 +264,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
         zoom: 2.0,
     };
     assert!(
-        commit_intent(Intent::SetViewport { to: valid }, &mut doc, GraphRef::Main).is_ok(),
+        commit_intent(Intent::SetViewport { to: valid }, &mut doc).is_ok(),
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
@@ -300,53 +284,35 @@ fn subscribe_unsubscribe_commit_and_undo() {
     };
 
     // Subscribe commits and writes the edge.
-    let step = commit_intent(
-        set_sub(emitter, 0, subscriber, true),
-        &mut doc,
-        GraphRef::Main,
-    )
-    .expect("subscribe commits");
+    let step =
+        commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc).expect("subscribe commits");
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // A second identical subscribe is a no-op (from == to == true).
     assert!(
-        commit_intent(
-            set_sub(emitter, 0, subscriber, true),
-            &mut doc,
-            GraphRef::Main
-        )
-        .is_err(),
+        commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc).is_err(),
         "re-subscribing the same edge is a no-op"
     );
 
     // Undo removes it; redo restores it.
-    revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+    revert_step(&step, &mut doc);
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
-    apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+    apply_step(&step, &mut doc);
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
-    let step = commit_intent(
-        set_sub(emitter, 0, subscriber, false),
-        &mut doc,
-        GraphRef::Main,
-    )
-    .expect("unsubscribe commits");
+    let step = commit_intent(set_sub(emitter, 0, subscriber, false), &mut doc)
+        .expect("unsubscribe commits");
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
-    revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+    revert_step(&step, &mut doc);
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // Redo the unsubscribe (apply writes the `to = unsubscribed` half),
     // then unsubscribing the now-absent edge is a no-op.
-    apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+    apply_step(&step, &mut doc);
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
     assert!(
-        commit_intent(
-            set_sub(emitter, 0, subscriber, false),
-            &mut doc,
-            GraphRef::Main
-        )
-        .is_err(),
+        commit_intent(set_sub(emitter, 0, subscriber, false), &mut doc).is_err(),
         "unsubscribing a missing edge is a no-op"
     );
 }
@@ -375,7 +341,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
         nodes,
         bindings,
         subscriptions,
-    }) = build_duplicate_intent(&doc, GraphRef::Main)
+    }) = build_duplicate_intent(&doc)
     else {
         panic!("expected a DuplicateNodes intent");
     };
@@ -432,7 +398,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
         nodes: incoming_nodes,
         bindings: incoming,
         ..
-    }) = build_duplicate_intent_for(&doc, GraphRef::Main, &node_ids, true)
+    }) = build_duplicate_intent_for(&doc, &node_ids, true)
     else {
         panic!("expected a DuplicateNodes intent");
     };
@@ -460,7 +426,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
 fn duplicate_intent_none_without_selection() {
     let mut doc = Document::default();
     add_node_at(&mut doc, Vec2::ZERO);
-    assert!(build_duplicate_intent(&doc, GraphRef::Main).is_none());
+    assert!(build_duplicate_intent(&doc).is_none());
 }
 
 #[test]
@@ -468,11 +434,8 @@ fn set_node_property_commits_and_reverts() {
     let mut doc = Document::default();
     let id = add_node_at(&mut doc, Vec2::ZERO);
     // Fresh nodes default to no caching (None) and enabled.
-    assert_eq!(
-        doc.graph.find(id, NodeSearch::TopLevel).unwrap().cache,
-        CacheMode::None
-    );
-    assert!(!doc.graph.find(id, NodeSearch::TopLevel).unwrap().disabled);
+    assert_eq!(doc.graph.find(id).unwrap().cache, CacheMode::None);
+    assert!(!doc.graph.find(id).unwrap().disabled);
 
     // Both properties ride the one `SetNodeProperty` path. A representative flip
     // each (the cache header chips: None→Both/Ram/Disk; the disable chip: →on),
@@ -485,13 +448,9 @@ fn set_node_property_commits_and_reverts() {
         NodeProperty::Disabled(true),
     ];
     for to in cases {
-        let step = commit_intent(
-            Intent::SetNodeProperty { node_id: id, to },
-            &mut doc,
-            GraphRef::Main,
-        )
-        .unwrap_or_else(|_| panic!("{to:?} is a real change, not a no-op"));
-        let node = doc.graph.find(id, NodeSearch::TopLevel).unwrap();
+        let step = commit_intent(Intent::SetNodeProperty { node_id: id, to }, &mut doc)
+            .unwrap_or_else(|_| panic!("{to:?} is a real change, not a no-op"));
+        let node = doc.graph.find(id).unwrap();
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
@@ -504,8 +463,8 @@ fn set_node_property_commits_and_reverts() {
             step.gesture_key().is_none(),
             "each toggle is its own undo entry"
         );
-        revert_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        let node = doc.graph.find(id, NodeSearch::TopLevel).unwrap();
+        revert_step(&step, &mut doc);
+        let node = doc.graph.find(id).unwrap();
         assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
         assert!(!node.disabled, "revert restores the disable flag");
     }
@@ -516,12 +475,7 @@ fn set_node_property_commits_and_reverts() {
         NodeProperty::Disabled(false),
     ] {
         assert!(
-            commit_intent(
-                Intent::SetNodeProperty { node_id: id, to },
-                &mut doc,
-                GraphRef::Main,
-            )
-            .is_err(),
+            commit_intent(Intent::SetNodeProperty { node_id: id, to }, &mut doc,).is_err(),
             "{to:?} equals the current value → writes nothing"
         );
     }
@@ -529,27 +483,24 @@ fn set_node_property_commits_and_reverts() {
 
 #[test]
 fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
-    use crate::core::document::{BoundarySide, TabRef};
-    use scenarium::DataType;
+    use crate::core::document::TabRef;
 
     let mut doc = Document::default();
     let node = add_node_at(&mut doc, Vec2::ZERO);
     let primary = doc.layout.primary().id;
     doc.layout
         .find_or_insert(TabRef::ImageViewer(node), primary);
-    let def_id = GraphId::unique();
 
     // Steps that can move the set of live preview nodes, so the store has to
     // re-derive it and release or upload accordingly.
     let movers = [
         // Any step that adds or removes nodes can add or remove a preview.
-        build_step(Intent::RemoveNode { node_id: node }, &doc, GraphRef::Main)
+        build_step(Intent::RemoveNode { node_id: node }, &doc)
             .expect("removing a live node builds"),
         UndoStep::Graph(GraphStep::AddNode {
             pos: Vec2::ZERO,
             node_id: NodeId::unique(),
             node: func_node(),
-            graph: None,
             bindings: Vec::new(),
         }),
         UndoStep::Graph(GraphStep::DuplicateNodes {
@@ -561,11 +512,11 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
         }),
         // Any dock op is a whole-layout swap, so it can open, close, or
         // relocate a viewer tab.
-        UndoStep::Doc(
-            build_doc_step(
-                DocIntent::Dock(DockOp::CloseTab {
+        UndoStep::Dock(
+            build_dock_step(
+                DockOp::CloseTab {
                     tab: TabRef::ImageViewer(node),
-                }),
+                },
                 &doc,
             )
             .expect("closing an open viewer tab builds"),
@@ -581,12 +532,6 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
     // Everything else leaves the set exactly as it was — a preview is
     // entry-only, so forking a definition cannot carry one along either.
     let others = [
-        UndoStep::Graph(GraphStep::DetachGraph {
-            node_id: node,
-            from_id: def_id,
-            to_id: GraphId::unique(),
-            graph: Box::new(GraphDef::new("fork")),
-        }),
         UndoStep::Graph(GraphStep::MoveSelection {
             grabbed: node,
             moves: vec![(node, Vec2::ZERO, Vec2::new(9.0, 9.0))],
@@ -632,18 +577,6 @@ fn requires_reconcile_splits_retained_set_movers_from_the_rest() {
                 zoom: 2.0,
             },
         }),
-        UndoStep::Doc(DocStep::RenameGraph {
-            id: def_id,
-            from: "s".into(),
-            to: "t".into(),
-        }),
-        UndoStep::Doc(DocStep::AddBoundaryPort {
-            graph_id: def_id,
-            side: BoundarySide::Input,
-            idx: 0,
-            name: "input0".into(),
-            data_type: DataType::Int,
-        }),
     ];
     for step in &others {
         assert!(
@@ -672,7 +605,6 @@ fn commit_intent_rejects_cycle_forming_bind() {
                 to: Some(Binding::bind(b, 0)),
             },
             &mut doc,
-            GraphRef::Main,
         )
         .is_err(),
         "a bind that closes a cycle is rejected"
@@ -697,7 +629,6 @@ fn commit_intent_rejects_cycle_forming_bind() {
                 to: Some(Binding::bind(b, 0)),
             },
             &mut doc,
-            GraphRef::Main,
         )
         .is_ok(),
         "an acyclic bind commits"
@@ -708,28 +639,14 @@ fn commit_intent_rejects_cycle_forming_bind() {
     );
 }
 
-/// A document holding an empty local graph "S" plus the interior view, so
-/// `Local`-target intents resolve a scope.
-fn doc_with_local_graph() -> (Document, GraphRef, GraphId) {
-    let mut doc = Document::default();
-    let id = GraphId::unique();
-    doc.graph.insert_graph(id, GraphDef::new("S"));
-    assert!(doc.ensure_sub_view(id));
-    (doc, GraphRef::Local(id), id)
-}
-
-/// Commit `intent` expecting an `Invalid` refusal, then prove the document
-/// is both unchanged and still structurally valid — a refusal that already
-/// wrote half of itself would defeat the point.
-#[track_caller]
-fn assert_invalid(doc: &mut Document, target: GraphRef, intent: Intent, what: &str) {
-    let nodes = doc.scope(target).expect("target resolves").graph.len();
-    match commit_intent(intent, doc, target) {
+fn assert_invalid(doc: &mut Document, intent: Intent, what: &str) {
+    let nodes = doc.graph.len();
+    match commit_intent(intent, doc) {
         Err(Refusal::Invalid(_)) => {}
         other => panic!("{what}: expected an Invalid refusal, got {other:?}"),
     }
     assert_eq!(
-        doc.scope(target).expect("target resolves").graph.len(),
+        doc.graph.len(),
         nodes,
         "{what}: a refused intent must not mutate the graph"
     );
@@ -739,8 +656,8 @@ fn assert_invalid(doc: &mut Document, target: GraphRef, intent: Intent, what: &s
 
 /// Commit `intent` expecting a quiet refusal — the drop widgets rely on.
 #[track_caller]
-fn assert_quiet(doc: &mut Document, target: GraphRef, intent: Intent, what: &str) {
-    match commit_intent(intent, doc, target) {
+fn assert_quiet(doc: &mut Document, intent: Intent, what: &str) {
+    match commit_intent(intent, doc) {
         Err(Refusal::Quiet) => {}
         other => panic!("{what}: expected a quiet refusal, got {other:?}"),
     }
@@ -798,26 +715,8 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
         ),
     ];
     for (what, intent) in cases {
-        assert_invalid(&mut doc, GraphRef::Main, intent, what);
+        assert_invalid(&mut doc, intent, what);
     }
-
-    // A node id that's live *inside a nested graph* collides just as hard:
-    // scenarium requires ids to be unique across the whole authoring tree,
-    // so a top-level-only check would let this through to `Document::validate`.
-    let nested_id = GraphId::unique();
-    let mut nested = GraphDef::new("S");
-    let buried = nested.body.add(func_node());
-    doc.graph.insert_graph(nested_id, nested);
-    let instance = doc
-        .graph
-        .add(Node::new(NodeKind::Graph(GraphLink::Local(nested_id))));
-    doc.main_view.item_placements.insert(instance, Vec2::ZERO);
-    assert_invalid(
-        &mut doc,
-        GraphRef::Main,
-        add_node(Vec2::ZERO, buried, func_node()),
-        "AddNode over an id buried in a nested graph",
-    );
 }
 
 #[test]
@@ -832,8 +731,6 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
 
     let mut nil_func = func_node();
     nil_func.kind = NodeKind::Func(FuncId::nil());
-    let mut dangling_link = func_node();
-    dangling_link.kind = NodeKind::Graph(GraphLink::Local(GraphId::unique()));
 
     let cases = [
         (
@@ -843,10 +740,6 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         (
             "AddNode with a nil func id",
             add_node(Vec2::ZERO, NodeId::unique(), nil_func),
-        ),
-        (
-            "AddNode linking a local graph the target doesn't hold",
-            add_node(Vec2::ZERO, NodeId::unique(), dangling_link),
         ),
         (
             "AddNode seeding a binding from a producer that isn't there",
@@ -885,203 +778,10 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
                 subscribe: true,
             },
         ),
-        (
-            "AddLocalGraphInstance naming a graph the target doesn't hold",
-            Intent::AddLocalGraphInstance {
-                pos: Vec2::ZERO,
-                node_id: NodeId::unique(),
-                graph_id: GraphId::unique(),
-            },
-        ),
-        (
-            "AddLocalGraphInstance with a nil graph id",
-            Intent::AddLocalGraphInstance {
-                pos: Vec2::ZERO,
-                node_id: NodeId::unique(),
-                graph_id: GraphId::nil(),
-            },
-        ),
-        (
-            "AddLocalGraphInstance over a live node id",
-            Intent::AddLocalGraphInstance {
-                pos: Vec2::ZERO,
-                node_id: live,
-                graph_id: GraphId::unique(),
-            },
-        ),
-        (
-            "AddLocalGraphInstance at a non-finite position",
-            Intent::AddLocalGraphInstance {
-                pos: nan,
-                node_id: NodeId::unique(),
-                graph_id: GraphId::unique(),
-            },
-        ),
-        (
-            "AddLocalGraph with a nil graph id",
-            Intent::AddLocalGraph {
-                pos: Vec2::ZERO,
-                node_id: NodeId::unique(),
-                graph_id: GraphId::nil(),
-                def: Box::new(GraphDef::new("nil")),
-            },
-        ),
-        (
-            "AddLocalGraph over a live node id",
-            Intent::AddLocalGraph {
-                pos: Vec2::ZERO,
-                node_id: live,
-                graph_id: GraphId::unique(),
-                def: Box::new(GraphDef::new("collides")),
-            },
-        ),
-        (
-            "AddLocalGraph at a non-finite position",
-            Intent::AddLocalGraph {
-                pos: nan,
-                node_id: NodeId::unique(),
-                graph_id: GraphId::unique(),
-                def: Box::new(GraphDef::new("nan")),
-            },
-        ),
     ];
     for (what, intent) in cases {
-        assert_invalid(&mut doc, GraphRef::Main, intent, what);
+        assert_invalid(&mut doc, intent, what);
     }
-
-    // A definition arriving with a new node must not reuse a graph id the
-    // document already holds — `Graph::validate` rejects a duplicate.
-    let taken = GraphId::unique();
-    doc.graph.insert_graph(taken, GraphDef::new("S"));
-    assert_invalid(
-        &mut doc,
-        GraphRef::Main,
-        Intent::AddLocalGraph {
-            pos: Vec2::ZERO,
-            node_id: NodeId::unique(),
-            graph_id: taken,
-            def: Box::new(GraphDef::new("clash")),
-        },
-        "AddLocalGraph bringing a definition under an id already in use",
-    );
-
-    // The entry graph has no interface, so a boundary node there is
-    // `DocumentValidationError::EntryBoundaryNodes` on the next load.
-    assert_invalid(
-        &mut doc,
-        GraphRef::Main,
-        add_node(
-            Vec2::ZERO,
-            NodeId::unique(),
-            Node::new(NodeKind::GraphInput),
-        ),
-        "AddNode putting a boundary node in the entry graph",
-    );
-
-    // A graph interior accepts one boundary node per side, never two.
-    let (mut doc, target, _) = doc_with_local_graph();
-    assert!(
-        commit_intent(
-            add_node(
-                Vec2::ZERO,
-                NodeId::unique(),
-                Node::new(NodeKind::GraphInput)
-            ),
-            &mut doc,
-            target,
-        )
-        .is_ok(),
-        "the interior's first boundary input commits"
-    );
-    assert_invalid(
-        &mut doc,
-        target,
-        add_node(
-            Vec2::ZERO,
-            NodeId::unique(),
-            Node::new(NodeKind::GraphInput),
-        ),
-        "AddNode adding a second boundary input",
-    );
-}
-
-#[test]
-fn instancing_a_local_graph_reads_its_definition_out_of_the_target() {
-    // The palette hands over an id and nothing else, so this is where the
-    // node's name and its interface's const defaults come from. Two ports:
-    // one defaulted, one not, so the seeded bindings are a filter and not
-    // "one per input".
-    let mut doc = Document::default();
-    let graph_id = GraphId::unique();
-    doc.graph.insert_graph(
-        graph_id,
-        GraphDef::new("Blur")
-            .input(FuncInput::optional("radius", DataType::Float).default(StaticValue::Float(2.5)))
-            .input(FuncInput::required("image", DataType::Float)),
-    );
-
-    let node_id = NodeId::unique();
-    let instance = |node_id| Intent::AddLocalGraphInstance {
-        pos: Vec2::new(12.0, 34.0),
-        node_id,
-        graph_id,
-    };
-    commit_intent(instance(node_id), &mut doc, GraphRef::Main).expect("instancing commits");
-
-    let node = doc
-        .graph
-        .find(node_id, NodeSearch::TopLevel)
-        .expect("instance node added");
-    assert_eq!(node.kind, NodeKind::Graph(GraphLink::Local(graph_id)));
-    assert_eq!(node.name, "Blur", "the node is named after the definition");
-    assert_eq!(
-        doc.graph.graphs.len(),
-        1,
-        "the definition was already there — instancing copies nothing"
-    );
-    assert_eq!(
-        doc.main_view.item_placements[&node_id],
-        Vec2::new(12.0, 34.0)
-    );
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(node_id, 0)),
-        Some(&Binding::Const(StaticValue::Float(2.5))),
-        "the defaulted interface input is seeded"
-    );
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(node_id, 1)),
-        None,
-        "an input with no default stays unbound"
-    );
-
-    // A second instance shares the one definition rather than forking it.
-    let second = NodeId::unique();
-    commit_intent(instance(second), &mut doc, GraphRef::Main).expect("a second instance commits");
-    assert_eq!(doc.graph.graphs.len(), 1);
-    assert_eq!(
-        doc.graph.find(second, NodeSearch::TopLevel).unwrap().kind,
-        NodeKind::Graph(GraphLink::Local(graph_id))
-    );
-    doc.validate().expect("document valid after instancing");
-
-    // A `Local` link resolves only against the graph that holds the
-    // definition, so a sibling scope cannot instance it — the definition
-    // above lives in root, and this target is a different graph's interior.
-    let (mut nested_doc, nested_target, _) = doc_with_local_graph();
-    let outsider = GraphId::unique();
-    nested_doc
-        .graph
-        .insert_graph(outsider, GraphDef::new("Elsewhere"));
-    assert_invalid(
-        &mut nested_doc,
-        nested_target,
-        Intent::AddLocalGraphInstance {
-            pos: Vec2::ZERO,
-            node_id: NodeId::unique(),
-            graph_id: outsider,
-        },
-        "AddLocalGraphInstance naming a definition held by another graph",
-    );
 }
 
 #[test]
@@ -1111,7 +811,6 @@ fn stale_references_still_refuse_quietly() {
                 to: NodeProperty::Disabled(true),
             },
         ),
-        ("DetachGraph", Intent::DetachGraph { node_id: gone }),
         ("Raise", Intent::Raise { key: gone }),
         (
             "SetInput onto a vanished node",
@@ -1151,7 +850,7 @@ fn stale_references_still_refuse_quietly() {
         ),
     ];
     for (what, intent) in cases {
-        assert_quiet(&mut doc, GraphRef::Main, intent, what);
+        assert_quiet(&mut doc, intent, what);
     }
     assert!(doc.graph.bindings.is_empty(), "nothing was written");
     doc.validate().expect("document stays valid");
@@ -1173,7 +872,6 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
             to: [live, gone].into_iter().collect(),
         },
         &mut doc,
-        GraphRef::Main,
     )
     .expect("a selection with one live member commits");
     let UndoStep::Graph(GraphStep::SetSelection { to, .. }) = &step else {
@@ -1192,7 +890,6 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
             moves: vec![(live, Vec2::new(5.0, 6.0)), (gone, Vec2::new(7.0, 8.0))],
         },
         &mut doc,
-        GraphRef::Main,
     )
     .expect("a move with one live member commits");
     let UndoStep::Graph(GraphStep::MoveSelection { moves, .. }) = &step else {
@@ -1204,43 +901,4 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         "only the surviving member is recorded"
     );
     doc.validate().expect("document stays valid");
-}
-
-#[test]
-fn duplicating_a_selection_skips_the_boundary_node() {
-    // A graph holds at most one boundary node per side, so copying one
-    // would make the interior invalid. Ctrl+D over a selection that
-    // includes it duplicates the rest.
-    let mut doc = Document::default();
-    let id = GraphId::unique();
-    let mut def = GraphDef::new("S");
-    let boundary = def.body.add(Node::new(NodeKind::GraphInput));
-    let func = def.body.add(func_node());
-    doc.graph.insert_graph(id, def);
-    assert!(doc.ensure_sub_view(id));
-    let target = GraphRef::Local(id);
-
-    let selection: BTreeSet<NodeId> = [boundary, func].into_iter().collect();
-    let intent = build_duplicate_intent_for(&doc, target, &selection, false)
-        .expect("the func node is duplicable");
-    let Intent::DuplicateNodes { nodes, .. } = &intent else {
-        panic!("expected DuplicateNodes, got {intent:?}");
-    };
-    assert_eq!(nodes.len(), 1, "only the func node is cloned");
-    assert!(
-        !nodes.iter().any(|(_, id, _)| *id == boundary),
-        "the clone gets a fresh id and is never the boundary node"
-    );
-
-    commit_intent(intent, &mut doc, target).expect("the duplicate commits");
-    doc.validate()
-        .expect("the interior keeps exactly one boundary input");
-
-    // A selection of nothing but the boundary node yields no intent at all,
-    // rather than an empty batch that would just clear the selection.
-    let only_boundary: BTreeSet<NodeId> = [boundary].into_iter().collect();
-    assert!(
-        build_duplicate_intent_for(&doc, target, &only_boundary, false).is_none(),
-        "nothing duplicable means no intent"
-    );
 }

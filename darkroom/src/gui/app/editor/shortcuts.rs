@@ -79,41 +79,30 @@ impl Editor {
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
         let delete = ui.key_pressed(Shortcut::key(Key::Delete))
             || ui.key_pressed(Shortcut::key(Key::Backspace));
-        let Some(target) = open.document.focused_target() else {
-            return;
-        };
-        let Some(view) = open.document.view(target) else {
-            return;
-        };
+        let view = &open.document.main_view;
         let has_selection = !view.selected.is_empty();
         let pan = view.viewport.pan;
         let document = &open.document;
         let out = &mut self.intents;
         if escape && has_selection {
-            out.push(
-                target,
-                Intent::SetSelection {
-                    to: BTreeSet::new(),
-                },
-            );
+            out.push(Intent::SetSelection {
+                to: BTreeSet::new(),
+            });
         }
         if reset_zoom {
-            out.push(
-                target,
-                Intent::SetViewport {
-                    to: Viewport { pan, zoom: 1.0 },
-                },
-            );
+            out.push(Intent::SetViewport {
+                to: Viewport { pan, zoom: 1.0 },
+            });
         }
-        if duplicate && let Some(intent) = build_duplicate_intent(document, target) {
-            out.push(target, intent);
+        if duplicate && let Some(intent) = build_duplicate_intent(document) {
+            out.push(intent);
         }
         // Delete/Backspace removes the whole selection — one
         // `RemoveNode` each. `drain_intents` batches a frame's intents into a single
         // undo entry, so it's one Cmd-Z (mirrors the breaker's
         // multi-delete).
         if delete {
-            out.extend(target, remove_selection_intents(&view.selected));
+            out.extend(remove_selection_intents(&view.selected));
         }
     }
 

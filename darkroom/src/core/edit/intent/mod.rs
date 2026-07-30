@@ -3,8 +3,8 @@
 //! on [`types`].
 //!
 //! Split by responsibility:
-//!   - [`types`] — the `Intent` / `DocIntent` / `UndoStep` / `GraphStep` /
-//!     `DocStep` / `BatchScope` / `GestureKey` model.
+//!   - [`types`] — the `Intent` / `UndoStep` / `GraphStep` / `DockStep` /
+//!     `GestureKey` model.
 //!   - [`build`] — `build_step` / `build_doc_step`: read the pre-mutation
 //!     snapshot from `&Document`, fold with the incoming intent, return a
 //!     fully-populated step. Pure. Also *the* validation gate: it's the
@@ -18,7 +18,7 @@
 //!   - [`apply`] — `apply_step` / `revert_step` write the "to"/"from" half
 //!     of an `UndoStep` to `&mut Document` (used by initial commit,
 //!     undo-stack redo, and undo respectively), plus the `commit_intent` /
-//!     `commit_doc_intent` entries the live frontends drive their
+//!     `commit_dock_op` entries the live frontends drive their
 //!     per-intent loop through: build → no-op-filter → apply. Uniform
 //!     across variants — a wildcard-output retype severs nothing
 //!     (mismatched wires are tolerated and flatten as unbound).
@@ -30,7 +30,7 @@
 //!     from a selection (kept here rather than on `Document`, which is the
 //!     persisted model — intent construction is editing machinery).
 //!   - [`sink`] — `Intents`, the frame's queue: an `Intent` paired with the
-//!     graph it commits against, or a bare `DocIntent`. Several graph panes
+//!     graph it commits against, or a bare `DockOp`. Several graph panes
 //!     can be on screen, so a target travels with every scoped intent rather
 //!     than being resolved once per frame.
 

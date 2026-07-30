@@ -13,11 +13,9 @@ use scenarium::{
 };
 use scenarium::{Graph, NodeId};
 
-use crate::core::document::{Document, GraphRef};
 use crate::core::io::cache::prepare_document_cache_root;
-use crate::core::io::graph_library::GraphLibrarySaveError;
 use crate::core::io::preferences::Preferences;
-use crate::core::runtime_library::{LibraryEdit, RuntimeLibrary};
+use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
@@ -45,24 +43,18 @@ pub(crate) struct RuntimeHost {
 }
 
 impl RuntimeHost {
-    /// Assemble the func lib (builtins + the on-disk graph library), spin
-    /// up the evaluation worker, and start the script host (a no-op `None`
+    /// Assemble the func library, spin up the evaluation worker, and start
+    /// the script host (a no-op `None`
     /// unless `script_cfg` enabled a listener). The worker + script host are
     /// both woken through `wake`.
     pub(crate) fn new(
         script_cfg: &ScriptConfig,
         wake: Wake,
         preferences: &Preferences,
-        mut status: StatusLog,
+        status: StatusLog,
     ) -> Self {
         let model_paths = (&preferences.ml_models).into();
-        let library = match RuntimeLibrary::load(&model_paths) {
-            Ok(library) => library,
-            Err(error) => {
-                status.error(format!("graph library load failed: {error}"));
-                RuntimeLibrary::new(&model_paths)
-            }
-        };
+        let library = RuntimeLibrary::new(&model_paths);
         let worker = WorkerBridge::new(wake.clone());
         let script = ScriptHost::start(script_cfg, library.published.clone(), wake);
         let host = Self {
@@ -83,36 +75,6 @@ impl RuntimeHost {
         let model_paths = (&preferences.ml_models).into();
         if self.library.update_ml_model_paths(&model_paths) {
             self.sync_worker_disk_store();
-        }
-    }
-
-    pub(crate) fn publish_graph_to_library(
-        &mut self,
-        document: &mut Document,
-        target: GraphRef,
-        node_id: NodeId,
-    ) -> bool {
-        let edit = self.library.publish_graph(document, target, node_id);
-        self.report_library_edit(edit)
-    }
-
-    /// Report a graph-library edit and say whether it landed. A persist
-    /// failure reports and answers `false`: the library is written before
-    /// anything adopts it, so a failed edit changed nothing anywhere and
-    /// the caller must not treat it as work done.
-    fn report_library_edit(&mut self, edit: Result<LibraryEdit, GraphLibrarySaveError>) -> bool {
-        match edit {
-            Ok(LibraryEdit::Committed) => {
-                self.status.error = None;
-                self.sync_worker_disk_store();
-                true
-            }
-            Ok(LibraryEdit::Skipped) => false,
-            Err(error) => {
-                self.status
-                    .error(format!("graph library save failed: {error:#}"));
-                false
-            }
         }
     }
 
@@ -166,30 +128,26 @@ impl RuntimeHost {
         true
     }
 
-    /// Compile `graph` and evaluate what authored `node_id` covers, delivering
-    /// its outputs for the preview fetch ("run to this node"). A func node
-    /// resolves to itself; a graph instance resolves to the interior producers
-    /// behind its output ports plus its interior sinks
-    /// ([`CompiledGraph::run_targets`]). The explicit node seeds override
-    /// disabled occurrences during planning.
+    /// Compile `graph` and evaluate authored `node_id`, delivering its outputs
+    /// for the preview fetch ("run to this node"). The node seeds the run
+    /// explicitly, which overrides its `disabled` flag during planning.
     ///
     /// `false` means nothing reached the worker — either the compile failed
-    /// (reported to [`Self::status`]) or the node has no execution footprint
-    /// at all, which is a boundary node or one the program dropped. Results
-    /// arrive via [`Self::drain_worker`].
+    /// (reported to [`Self::status`]) or the node has no execution footprint at
+    /// all, i.e. the program dropped it. Results arrive via
+    /// [`Self::drain_worker`].
     pub(crate) fn run_node(&mut self, graph: &Graph, node_id: NodeId) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        let targets = compiled.run_targets(node_id);
-        if targets.is_empty() {
+        let Some(target) = compiled.run_target(node_id) else {
             self.status
                 .error("nothing to run: this node has no compiled work".to_owned());
             return false;
-        }
+        };
         self.dispatch(|worker| {
             worker.install(compiled)?;
-            worker.run_nodes(targets)
+            worker.run_nodes(vec![target])
         });
         true
     }

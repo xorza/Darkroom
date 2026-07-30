@@ -1,12 +1,11 @@
 //! On-disk I/O and session state: zipped [`document`] archives, the
-//! persisted [`graph_library`], preferences, and the per-document
+//! preferences and the per-document
 //! disk-[`cache`] location.
 
 use std::path::PathBuf;
 
 pub(crate) mod cache;
 pub(crate) mod document;
-pub(crate) mod graph_library;
 pub(crate) mod preferences;
 
 /// `name` resolved relative to the process working directory — the shared

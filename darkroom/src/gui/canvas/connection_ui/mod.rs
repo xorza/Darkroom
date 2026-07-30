@@ -1,14 +1,14 @@
 use glam::Vec2;
-use palantir::{CurveBrush, InternedStr, PointerButton, PointerEvent, PointerWake, Ui};
+use palantir::{CurveBrush, PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
 use scenarium::{Binding, InputPort};
 
-use crate::core::document::{BoundarySide, PortKind, PortRef};
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::{Held, PaneSlot};
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
@@ -24,12 +24,12 @@ use crate::gui::theme::Theme;
 /// which needs nothing from here.
 #[derive(Default, Debug)]
 pub(super) struct ConnectionUI {
-    state: PaneSlot<InFlight>,
+    state: GestureSlot<InFlight>,
     /// Source port of a wire dropped on empty canvas this frame. Handed to
     /// the new-node popup so it opens; the wire then resumes *floating*
     /// once a node is picked (see [`DragMode::Floating`]). Taken by the
     /// canvas the same frame.
-    pending_open: PaneSlot<PortRef>,
+    pending_open: GestureSlot<PortRef>,
     /// Set when a floating wire ended on a right-click this frame, so the
     /// canvas can suppress the new-node popup that same right-click would
     /// otherwise open — a right-click then reads purely as "cancel".
@@ -91,42 +91,31 @@ impl ConnectionUI {
         let scene = frame.scene;
         self.ended_on_secondary = false;
 
-        // A just-spawned node hands its dropped wire back to float. The
-        // latch scans every pane — there is one press — so the owning pane
-        // is resolved here, once, and rides the slot from then on.
+        // A just-spawned node hands its dropped wire back to float, but only
+        // while the node it starts from is still on screen.
         if let Some(start) = resume
-            && let Some(graph) = frame.owner(start.node_id)
+            && frame.projects(start.node_id)
         {
-            self.state.latch(
-                graph.target(),
-                InFlight {
-                    drag: GlyphDrag::new(start),
-                    mode: DragMode::Floating,
-                },
-            );
+            self.state.latch(InFlight {
+                drag: GlyphDrag::new(start),
+                mode: DragMode::Floating,
+            });
         }
         // Latch a fresh port drag only when idle.
         let candidates = drag_candidates(scene, preview_drag_modifier(ui));
         if self.state.is_idle()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
-            && let Some(graph) = frame.owner(drag.node())
+            && frame.projects(drag.node())
         {
-            self.state.latch(
-                graph.target(),
-                InFlight {
-                    drag,
-                    mode: DragMode::Held,
-                },
-            );
+            self.state.latch(InFlight {
+                drag,
+                mode: DragMode::Held,
+            });
         }
         if cancelled {
             self.state.clear();
         }
-        let Some(Held {
-            graph: target,
-            mut state,
-        }) = self.state.take_held()
-        else {
+        let Some(mut state) = self.state.take() else {
             return;
         };
         // Both modes span frames, and undo runs before this prepass, so the
@@ -136,20 +125,17 @@ impl ConnectionUI {
         // silently, and `port_data_type` would meanwhile report the start
         // as untyped (which `scan_snap_target` reads as "compatible with
         // anything").
-        let Some(graph) = frame
-            .pane(target)
-            .filter(|pane| pane.contains(state.drag.node()))
-        else {
+        let Some(graph) = frame.pane().filter(|pane| pane.contains(state.drag.node())) else {
             return;
         };
 
         // Refresh the compatible port under the pointer for both modes.
         state.drag.snap = scan_snap_target(geometry, ui, graph, state.drag.from);
-        self.state.latch(target, state);
+        self.state.latch(state);
 
         match state.mode {
             DragMode::Held => self.resolve_held(ui, graph, geometry, state.drag, out),
-            DragMode::Floating => self.resolve_floating(ui, graph, state.drag, out),
+            DragMode::Floating => self.resolve_floating(ui, state.drag, out),
         }
     }
 
@@ -158,16 +144,16 @@ impl ConnectionUI {
     /// new-node popup to open it. Every pane's draw asks, so the ownership
     /// test and the take are one call: a pane that doesn't own the wire
     /// must not consume it.
-    pub(super) fn take_pending_connection_in(&mut self, graph: Pane<'_>) -> Option<PortRef> {
-        self.pending_open.take(graph.target())
+    pub(super) fn take_pending_connection_in(&mut self, _graph: Pane<'_>) -> Option<PortRef> {
+        self.pending_open.take()
     }
 
     /// Whether a new-connection gesture is in flight **over `graph`'s
     /// pane** — feeds that pane's wire-fade tier. Scoped, so pulling a
     /// wire in one pane doesn't dim the standing wires in every other.
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
-    pub(super) fn dragging_in(&self, graph: Pane<'_>) -> bool {
-        self.state.get(graph.target()).is_some()
+    pub(super) fn dragging_in(&self, _graph: Pane<'_>) -> bool {
+        self.state.get().is_some()
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
@@ -191,13 +177,13 @@ impl ConnectionUI {
             return;
         }
         if let Some(end) = drag.snap {
-            commit_connection(graph, drag.from, end, out);
+            commit_connection(drag.from, end, out);
         } else if let Some(intent) = const_drop(ui, graph, geometry, drag.from) {
-            out.push(graph.target(), intent);
+            out.push(intent);
         } else if dropped_on_empty_canvas(ui, graph, geometry) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
-            self.pending_open.latch(graph.target(), drag.from);
+            self.pending_open.latch(drag.from);
         }
         self.state.clear();
     }
@@ -211,7 +197,6 @@ impl ConnectionUI {
     fn resolve_floating(
         &mut self,
         ui: &mut Ui,
-        graph: Pane<'_>,
         drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Intents,
     ) {
@@ -231,7 +216,7 @@ impl ConnectionUI {
         match ended {
             Some(PointerButton::Left) => {
                 if let Some(end) = drag.snap {
-                    commit_connection(graph, drag.from, end, out);
+                    commit_connection(drag.from, end, out);
                 }
                 self.state.clear();
             }
@@ -249,7 +234,7 @@ impl ConnectionUI {
     /// every widget but the drag-capture owner while a drag is live, so the
     /// snapped-but-not-captured target would otherwise stay at its idle color.
     pub(super) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
-        if let Some(snap) = self.state.held().and_then(|state| state.drag.snap) {
+        if let Some(snap) = self.state.get().and_then(|state| state.drag.snap) {
             geometry.ports.set_hovered(snap);
         }
     }
@@ -271,7 +256,7 @@ impl ConnectionUI {
         // its own `canvas_origin` and under its own transform, so the
         // wire's graph-space endpoints landed as a phantom curve over an
         // unrelated graph.
-        let Some(state) = self.state.get(graph.target()).copied() else {
+        let Some(state) = self.state.get().copied() else {
             return;
         };
         let start_port = state.drag.from;
@@ -400,15 +385,9 @@ fn scan_snap_target(
     if input_const_only(pane, start) {
         return None;
     }
-    // A passthrough (graph input boundary wired straight to the output
-    // boundary) leaves the relayed value untyped at execution and panics
-    // the worker — disallow it by never snapping one boundary node onto
-    // the other. The only boundary→boundary link possible is exactly that
-    // passthrough, so a blanket reject is precise.
-    let start_boundary = pane.node(start.node_id).is_some_and(|n| n.boundary);
     let candidates = pane
         .nodes()
-        .filter(|n| n.id != start.node_id && !(start_boundary && n.boundary))
+        .filter(|n| n.id != start.node_id)
         .flat_map(|n| n.ports(start.kind.opposite()))
         // A const-only input is never a valid wire target.
         .filter(|&port| !input_const_only(pane, port));
@@ -440,7 +419,7 @@ fn accepts_wire(pane: Pane<'_>, start: PortRef, port: PortRef) -> bool {
         PortKind::Output => (start.node_id, port.node_id),
         PortKind::Input => (port.node_id, start.node_id),
     };
-    compatible && !pane.body.produces_cycle(producer, consumer)
+    compatible && !pane.body().produces_cycle(producer, consumer)
 }
 
 /// "Set const" gesture: an input-port drag released over its own
@@ -464,7 +443,7 @@ fn const_drop(
     }
     let node = graph.node(start.node_id)?;
     // Boundary ports route the interface, not literal values.
-    if node.boundary {
+    if false {
         return None;
     }
     // Don't overwrite an existing const value.
@@ -481,12 +460,12 @@ fn const_drop(
 /// palette. Both halves are screen-space, the frame the raw pointer is in;
 /// the node half comes off `CanvasGeometry`'s snapshot of this frame's body
 /// rects, taken in the same sweep `const_drop` reads.
-fn dropped_on_empty_canvas(ui: &mut Ui, graph: Pane<'_>, geometry: &CanvasGeometry) -> bool {
+fn dropped_on_empty_canvas(ui: &mut Ui, _graph: Pane<'_>, geometry: &CanvasGeometry) -> bool {
     let Some(pointer) = ui.pointer_pos() else {
         return false;
     };
     let over_canvas = ui
-        .response_for(outer_canvas_widget_id(graph.target()))
+        .response_for(outer_canvas_widget_id())
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas && !geometry.over_any_node(pointer)
@@ -511,11 +490,7 @@ fn port_data_type(graph: Pane<'_>, port: PortRef) -> Option<DataType> {
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
 /// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
 /// the warning color, and flattens as unbound.
-///
-/// An endpoint that is a boundary node's trailing "+" placeholder first
-/// materializes the interface port it stands for (`Intent::AddBoundaryPort`)
-/// in the same batch, so add + bind undo as one entry.
-fn commit_connection(graph: Pane<'_>, start: PortRef, end: PortRef, out: &mut Intents) {
+fn commit_connection(start: PortRef, end: PortRef, out: &mut Intents) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
@@ -526,101 +501,10 @@ fn commit_connection(graph: Pane<'_>, start: PortRef, end: PortRef, out: &mut In
         // that just doesn't land.
         (a, b) => unreachable!("a wire committed a {a:?} → {b:?} pair"),
     };
-    let target = graph.target();
-    out.extend(target, add_boundary_port_intent(graph, output, input));
-    out.extend(target, add_boundary_port_intent(graph, input, output));
-    out.push(
-        target,
-        Intent::SetInput {
-            input: InputPort::new(input.node_id, input.port_idx),
-            to: Some(Binding::bind(output.node_id, output.port_idx)),
-        },
-    );
-}
-
-/// When `port` is a boundary node's trailing placeholder, the
-/// `Intent::AddBoundaryPort` that materializes its interface slot. Named
-/// `input{N}`/`output{N}` (first free N over the node's existing ports)
-/// and typed from `opposite` — the placeholder itself is untyped; the
-/// other endpoint carries the type (a consumer's declared input type, a
-/// producer's resolved output type). `None` for ordinary ports.
-fn add_boundary_port_intent(graph: Pane<'_>, port: PortRef, opposite: PortRef) -> Option<Intent> {
-    let node = graph.node(port.node_id)?;
-    if !node.boundary {
-        return None;
-    }
-    // A boundary node mirrors the interface: the `GraphInput` node's
-    // *output* column is the graph's `Input` side and vice versa.
-    let (side, prefix) = match port.kind {
-        PortKind::Output => (BoundarySide::Input, "input"),
-        PortKind::Input => (BoundarySide::Output, "output"),
-    };
-    // The two columns hold different row types, so each kind reads its own —
-    // but reads it once, and both hand back the same answer.
-    let taken = match port.kind {
-        PortKind::Output => taken_suffixes(
-            graph.outputs(node.outputs).iter().map(|o| &o.name),
-            port.port_idx,
-            prefix,
-        ),
-        PortKind::Input => taken_suffixes(
-            graph.inputs(node.inputs).iter().map(|i| &i.name),
-            port.port_idx,
-            prefix,
-        ),
-    }?;
-    Some(Intent::AddBoundaryPort {
-        side,
-        name: fresh_port_name(prefix, taken),
-        data_type: port_data_type(graph, opposite).unwrap_or_default(),
-    })
-}
-
-/// The `{prefix}{n}` numbers the ports *before* `idx` already use, or `None`
-/// when `idx` isn't the column's trailing "+" placeholder.
-///
-/// Takes the names rather than the rows because a boundary node's two columns
-/// hold different row types and this is the only thing either is asked for.
-/// A name that isn't the prefix followed by a decimal number can't collide
-/// with a generated one, so it contributes nothing and is dropped here.
-fn taken_suffixes<'a>(
-    names: impl ExactSizeIterator<Item = &'a InternedStr>,
-    idx: usize,
-    prefix: &str,
-) -> Option<Vec<usize>> {
-    if idx + 1 != names.len() {
-        return None; // an existing interface port, not the trailing placeholder
-    }
-    Some(
-        names
-            .take(idx)
-            .filter_map(|name| {
-                let text = name.borrow_str();
-                text.strip_prefix(prefix)?.parse().ok()
-            })
-            .collect(),
-    )
-}
-
-/// The lowest free `{prefix}{n}` over the already-`taken` suffixes.
-///
-/// Resolved on the numbers alone: a generated name collides only with the
-/// prefix followed by a number, so sorting the taken ones and walking to the
-/// first gap answers it without building a candidate `String` per probe or
-/// comparing a single pair of strings. Duplicates in `taken` are tolerated —
-/// the walk steps past a repeat rather than counting it twice.
-fn fresh_port_name(prefix: &str, mut taken: Vec<usize>) -> String {
-    taken.sort_unstable();
-    let mut free = 0;
-    for n in taken {
-        if n > free {
-            break; // the run of used numbers ends before `free`
-        }
-        if n == free {
-            free += 1;
-        }
-    }
-    format!("{prefix}{free}")
+    out.push(Intent::SetInput {
+        input: InputPort::new(input.node_id, input.port_idx),
+        to: Some(Binding::bind(output.node_id, output.port_idx)),
+    });
 }
 
 #[cfg(test)]

@@ -41,11 +41,11 @@
 //! The port half has no such gap — it fills after the rebuild.
 
 use palantir::{ResponseState, Ui, WidgetId};
-use scenarium::{GraphLink, InputPort, NodeId};
+use scenarium::{InputPort, NodeId};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::canvas::inspector::inspect_badge_wid;
-use crate::gui::node::header::{cache_eviction_badge_wid, graph_badge_wid, play_badge_wid};
+use crate::gui::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::node::preview_row::preview_image_wid;
 use crate::gui::node::{drag_handles, node_widget_id};
@@ -63,21 +63,8 @@ pub(crate) enum Chip {
     EvictCache,
     /// `i` — cycle the node's inspection panel.
     Inspect,
-    /// `G` — open the node's graph in a tab.
-    OpenGraph,
     /// A preview card's image area — open it in an image viewer.
     PreviewImage,
-}
-
-/// Which widget a right-click opened a node context menu from. The two
-/// menus are distinct affordances on the same node, so the trigger has to
-/// travel with the hit.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum MenuTrigger {
-    /// The node body — the structural menu (duplicate, remove, run).
-    Body,
-    /// The `G` badge — the graph-instance menu (publish, detach).
-    GraphBadge,
 }
 
 /// The drag handle a fresh body drag latched onto, and the node it moves.
@@ -91,12 +78,6 @@ struct HandleLatch {
 struct ChipHit {
     node: NodeId,
     chip: Chip,
-}
-
-#[derive(Copy, Clone, Debug)]
-struct MenuHit {
-    node: NodeId,
-    trigger: MenuTrigger,
 }
 
 /// Last frame's canvas interactions. Every field is rewritten by
@@ -114,7 +95,7 @@ pub(crate) struct CanvasHits {
     /// node but has never counted as "acted on a node body".
     body_acted: Option<NodeId>,
     latched: Option<HandleLatch>,
-    menu: Option<MenuHit>,
+    menu: Option<NodeId>,
     port_dbl: Option<PortRef>,
     const_editor: Option<InputPort>,
 }
@@ -141,11 +122,9 @@ impl CanvasHits {
             .map(|latch| latch.handle)
     }
 
-    /// The node whose `trigger` widget was right-clicked.
-    pub(crate) fn menu(&self, trigger: MenuTrigger) -> Option<NodeId> {
+    /// The node whose body was right-clicked, opening its context menu.
+    pub(crate) fn menu(&self) -> Option<NodeId> {
         self.menu
-            .filter(|hit| hit.trigger == trigger)
-            .map(|hit| hit.node)
     }
 
     /// The port whose circle — or, on an input, its label cell — was
@@ -167,10 +146,11 @@ impl CanvasHits {
     /// costs, and which pass fills the port half.
     pub(crate) fn scan(&mut self, ui: &Ui, frame: Frame<'_>) {
         *self = Self::default();
-        for graph in frame.panes() {
-            for node in graph.nodes() {
-                self.scan_node(ui, graph, node);
-            }
+        let Some(graph) = frame.pane() else {
+            return;
+        };
+        for node in graph.nodes() {
+            self.scan_node(ui, graph, node);
         }
     }
 
@@ -186,13 +166,8 @@ impl CanvasHits {
         if body.layout_rect.is_none() {
             return;
         }
-        // Boundary nodes carry no structural identity to duplicate or
-        // remove, so they offer no body menu.
-        if body.right.clicked() && !node.boundary {
-            self.menu.get_or_insert(MenuHit {
-                node: node.id,
-                trigger: MenuTrigger::Body,
-            });
+        if body.right.clicked() {
+            self.menu.get_or_insert(node.id);
         }
         if let Some(handle) =
             drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
@@ -218,12 +193,7 @@ impl CanvasHits {
                 node.can_evict_cache,
                 cache_eviction_badge_wid(node.id),
             ),
-            (Chip::Inspect, !node.boundary, inspect_badge_wid(node.id)),
-            (
-                Chip::OpenGraph,
-                node.graph.is_some(),
-                graph_badge_wid(node.id),
-            ),
+            (Chip::Inspect, true, inspect_badge_wid(node.id)),
             (Chip::PreviewImage, node.preview, preview_image_wid(node.id)),
         ];
         for (chip, drawn, wid) in candidates {
@@ -235,19 +205,6 @@ impl CanvasHits {
                 self.chip.get_or_insert(ChipHit {
                     node: node.id,
                     chip,
-                });
-            }
-            // The `G` badge is the only chip carrying a menu of its own,
-            // and that menu is narrower than the badge: the badge draws
-            // for either link kind, but publish and detach are both
-            // `Local`-only.
-            if chip == Chip::OpenGraph
-                && response.right.clicked()
-                && matches!(node.graph, Some(GraphLink::Local(_)))
-            {
-                self.menu.get_or_insert(MenuHit {
-                    node: node.id,
-                    trigger: MenuTrigger::GraphBadge,
                 });
             }
         }

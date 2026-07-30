@@ -5,9 +5,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
-use scenarium::{Binding, InputPort, NodeId, NodeSearch, Subscription};
+use scenarium::{Binding, InputPort, NodeId, Subscription};
 
-use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView};
+use crate::core::document::{Document, GraphView};
 use crate::core::edit::intent::types::Intent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
@@ -24,16 +24,16 @@ pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
 /// Thin wrapper over [`build_duplicate_intent_for`] with the selected node
 /// bodies and incoming (external) wires dropped — the Ctrl+D path.
-pub(crate) fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
-    let EditScopeRef { view, .. } = doc.scope(target)?;
+pub(crate) fn build_duplicate_intent(doc: &Document) -> Option<Intent> {
+    let view = &doc.main_view;
     let node_ids = selected_node_ids(view);
     if node_ids.is_empty() {
         return None;
     }
-    build_duplicate_intent_for(doc, target, &node_ids, false)
+    build_duplicate_intent_for(doc, &node_ids, false)
 }
 
-/// Build an [`Intent::DuplicateNodes`] cloning `node_ids` in `target`: each
+/// Build an [`Intent::DuplicateNodes`] cloning `node_ids`: each
 /// node gets a fresh id and an offset position, const-value bindings copy
 /// verbatim, and the data + event connections *among* `node_ids` are
 /// recreated against the clones. A `Bind` whose source is *outside* the set
@@ -44,11 +44,10 @@ pub(crate) fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option
 /// of the intent machinery rather than on the `Document` model.
 pub(crate) fn build_duplicate_intent_for(
     doc: &Document,
-    target: GraphRef,
     node_ids: &BTreeSet<NodeId>,
     include_incoming: bool,
 ) -> Option<Intent> {
-    let EditScopeRef { graph, view } = doc.scope(target)?;
+    let (graph, view) = (&doc.graph, &doc.main_view);
     if node_ids.is_empty() {
         return None;
     }
@@ -56,14 +55,9 @@ pub(crate) fn build_duplicate_intent_for(
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
     for old_id in node_ids {
-        let Some(node) = graph.find(*old_id, NodeSearch::TopLevel) else {
+        let Some(node) = graph.find(*old_id) else {
             continue;
         };
-        // A boundary node *is* the graph's interface, and a graph holds at
-        // most one per side, so a copy would make the graph invalid.
-        if node.kind.is_boundary() {
-            continue;
-        }
         let new_id = NodeId::unique();
         id_map.insert(*old_id, new_id);
         let clone = node.clone();
@@ -85,7 +79,7 @@ pub(crate) fn build_duplicate_intent_for(
     let mut bindings = Vec::new();
     for old_id in node_ids {
         let Some(&new_id) = id_map.get(old_id) else {
-            continue; // skipped above (vanished, or a boundary node)
+            continue; // skipped above (the node vanished)
         };
         // This node's *own* inputs. `bindings_touching` would also hand back
         // every binding that *reads* the node — cloned into a fresh `Vec`,

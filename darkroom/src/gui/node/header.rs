@@ -171,24 +171,21 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             // Inspect toggle: filled (checked) when pinned, accent outline
             // when open, muted-grey outline (`text_muted`) when closed. The
             // click is consumed in `Inspectors::apply` via this chip's
-            // deterministic id, so the returned flag is ignored here. Hidden on
-            // boundary nodes — pure routing, no runtime values worth inspecting.
-            if !node.boundary {
-                let mode = rcx.inspectors.mode(node.id);
-                let color = if mode.is_some() {
-                    theme.colors.badge_graph
-                } else {
-                    theme.colors.text_muted
-                };
-                Badge::control(
-                    "i",
-                    color,
-                    mode == Some(InspectMode::Pinned),
-                    inspect_badge_wid(node.id),
-                    "Inspect — values, status, log",
-                )
-                .show(ui);
-            }
+            // deterministic id, so the returned flag is ignored here.
+            let mode = rcx.inspectors.mode(node.id);
+            let color = if mode.is_some() {
+                theme.colors.badge_graph
+            } else {
+                theme.colors.text_muted
+            };
+            Badge::control(
+                "i",
+                color,
+                mode == Some(InspectMode::Pinned),
+                inspect_badge_wid(node.id),
+                "Inspect — values, status, log",
+            )
+            .show(ui);
         });
 }
 
@@ -244,21 +241,6 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // Interactive controls: what you can *do* to the node. Bordered
             // chips that lift on hover.
             //
-            // Graph chip is the open-in-tab affordance. We only *draw* it
-            // here (with its stable id); the click is read next frame in
-            // `emit_graph_opens` (prepass) so the open applies before the
-            // record — letting the graph record a pass earlier and its
-            // connections draw with no first-frame gap.
-            if node.graph.is_some() {
-                Badge::control(
-                    "G",
-                    theme.colors.badge_graph,
-                    true,
-                    graph_badge_wid(node.id),
-                    "Open graph",
-                )
-                .show(ui);
-            }
             // Only runnable sinks can be disabled from Darkroom, so running a
             // disabled node can still evaluate its ordinary upstream cone.
             if node.can_disable() {
@@ -371,13 +353,10 @@ fn property_chip(
     )
     .show(ui)
     {
-        out.push(
-            node.owner,
-            Intent::SetNodeProperty {
-                node_id: node.id,
-                to: chip.to,
-            },
-        );
+        out.push(Intent::SetNodeProperty {
+            node_id: node.id,
+            to: chip.to,
+        });
     }
 }
 
@@ -424,9 +403,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`Intent::RenameNode`], single-click
-/// selects (the label would otherwise swallow the body's click). Same
-/// widget + style as the boundary-port rename in
-/// [`crate::gui::node::port_rename`].
+/// selects (the label would otherwise swallow the body's click).
 fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
@@ -441,13 +418,10 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
         click_intents(shift, rcx.graph, node.id, out);
     }
     if let Some(to) = ev.committed {
-        out.push(
-            node.owner,
-            Intent::RenameNode {
-                node_id: node.id,
-                to,
-            },
-        );
+        out.push(Intent::RenameNode {
+            node_id: node.id,
+            to,
+        });
     }
 }
 
@@ -460,10 +434,4 @@ pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
 
 pub(crate) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
     node_wid("cache_eviction_badge", node_id)
-}
-
-/// The open-in-tab chip. `pub(crate)` for the same reason as
-/// [`play_badge_wid`] — the open is read a frame ahead, in the prepass.
-pub(crate) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
-    node_wid("graph_badge", node_id)
 }

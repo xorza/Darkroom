@@ -3,26 +3,22 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, GraphRef, TabRef};
-use crate::core::edit::intent::apply::{apply_step, commit_doc_intent};
+use crate::core::document::{Document, TabRef};
+use crate::core::edit::intent::apply::{apply_step, commit_dock_op};
 use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::{DocIntent, Intent};
+use crate::core::edit::intent::types::Intent;
 use scenarium::testing::test_graph;
-use scenarium::{GraphDef, GraphId, NodeSearch};
 
-/// Three tabs with distinct `Local` targets in the primary group so an
-/// activation/close at a given index is observable. Dock steps are
-/// document-global (they only touch the layout, never resolve a graph),
-/// so the fabricated graph ids need no backing graph.
+/// Three distinct tabs in the primary group so an activation/close at a
+/// given index is observable. The viewer tabs are keyed by node, and dock
+/// steps only touch the layout, so the fabricated node ids need no backing
+/// node until a test asks the document to reconcile.
 fn doc_with_distinct_tabs() -> Document {
-    let a: GraphId = "11111111-1111-1111-1111-111111111111".into();
-    let b: GraphId = "22222222-2222-2222-2222-222222222222".into();
     let mut doc: Document = test_graph().into();
     let primary = doc.layout.primary().id;
+    doc.layout.find_or_insert(TabRef::Preferences, primary);
     doc.layout
-        .find_or_insert(TabRef::Graph(GraphRef::Local(a)), primary);
-    doc.layout
-        .find_or_insert(TabRef::Graph(GraphRef::Local(b)), primary);
+        .find_or_insert(TabRef::ImageViewer(NodeId::unique()), primary);
     doc
 }
 
@@ -38,10 +34,10 @@ fn primary_active(doc: &Document) -> usize {
 /// the drain's no-op filter: a refused/degenerate op builds a
 /// `from == to` step, which is dropped — `false` back to the caller.
 fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockOp) -> bool {
-    let Ok(step) = commit_doc_intent(DocIntent::Dock(op), doc) else {
+    let Ok(step) = commit_dock_op(op, doc) else {
         return false;
     };
-    stack.push_current(BatchScope::Document, &[step]);
+    stack.push_current(&[step]);
     true
 }
 
@@ -56,6 +52,14 @@ fn switch_to(stack: &mut ActionStack, doc: &mut Document, to: usize) {
 fn close_at(stack: &mut ActionStack, doc: &mut Document, index: usize) -> bool {
     let tab = primary_tabs(doc)[index];
     dock(stack, doc, DockOp::CloseTab { tab })
+}
+
+/// Push one graph edit through the real build/apply path, as `drain_intents`
+/// does — the shape every coalescing test below repeats.
+fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: Intent) {
+    let step = build_step(intent, doc).unwrap();
+    apply_step(&step, doc);
+    stack.push_current(&[step]);
 }
 
 #[test]
@@ -114,11 +118,8 @@ fn switch_does_not_merge_across_an_intervening_edit() {
 
     // Intervening selection edit (a real change, so not a no-op).
     let node_id = doc.graph.iter().next().unwrap().id;
-    let mut want = BTreeSet::new();
-    want.insert(node_id);
-    let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
-    apply_step(&sel, &mut doc, BatchScope::Graph(GraphRef::Main));
-    stack.push_current(BatchScope::Graph(GraphRef::Main), &[sel]);
+    let want: BTreeSet<_> = [node_id].into_iter().collect();
+    push_edit(&mut stack, &mut doc, Intent::SetSelection { to: want });
 
     switch_to(&mut stack, &mut doc, 2);
     assert_eq!(primary_active(&doc), 2);
@@ -134,17 +135,20 @@ fn switch_does_not_merge_across_an_intervening_edit() {
 }
 
 #[test]
-fn close_is_dropped_for_main_or_a_tab_that_is_not_open() {
+fn close_is_dropped_for_the_graph_pane_or_a_tab_that_is_not_open() {
     let mut doc = doc_with_distinct_tabs();
     let mut stack = ActionStack::new(1 << 20);
-    // Main is never closable; a tab that isn't open anywhere no-ops.
-    assert!(!close_at(&mut stack, &mut doc, 0), "Main must not close");
+    // The graph pane is never closable; a tab that isn't open anywhere no-ops.
+    assert!(
+        !close_at(&mut stack, &mut doc, 0),
+        "the graph pane must not close"
+    );
     assert!(
         !dock(
             &mut stack,
             &mut doc,
             DockOp::CloseTab {
-                tab: TabRef::Preferences
+                tab: TabRef::ImageViewer(NodeId::unique())
             }
         ),
         "closing a tab that isn't open must drop"
@@ -161,20 +165,20 @@ fn tab_ops_follow_their_tab_across_a_layout_change() {
     // whatever slid into that slot.
     let mut doc = doc_with_distinct_tabs();
     let mut stack = ActionStack::new(1 << 20);
-    let [main, _a, b] = primary_tabs(&doc)[..] else {
+    let [graph, _a, b] = primary_tabs(&doc)[..] else {
         panic!("seeded with three tabs");
     };
 
     // Built while `b` sits at slot 2, applied after `a` left and `b` slid
     // down to slot 1.
-    let close_b = DocIntent::Dock(DockOp::CloseTab { tab: b });
+    let close_b = DockOp::CloseTab { tab: b };
     assert!(close_at(&mut stack, &mut doc, 1), "close a");
-    assert_eq!(primary_tabs(&doc), [main, b], "b moved to slot 1");
+    assert_eq!(primary_tabs(&doc), [graph, b], "b moved to slot 1");
 
-    commit_doc_intent(close_b, &mut doc).expect("closing an open tab applies");
+    commit_dock_op(close_b, &mut doc).expect("closing an open tab applies");
     assert_eq!(
         primary_tabs(&doc),
-        [main],
+        [graph],
         "the op closed b, not whatever now occupies slot 2"
     );
     doc.validate().unwrap();
@@ -252,23 +256,43 @@ fn close_redo_replays() {
 }
 
 #[test]
+fn consecutive_closes_do_not_coalesce() {
+    // Each close is its own undo entry — two closes need two undos.
+    let mut doc = doc_with_distinct_tabs();
+    let mut stack = ActionStack::new(1 << 20);
+
+    close_at(&mut stack, &mut doc, 2);
+    close_at(&mut stack, &mut doc, 1);
+    assert_eq!(primary_tabs(&doc).len(), 1, "both closable tabs closed");
+
+    stack.undo(&mut doc, &mut |_| {});
+    assert_eq!(primary_tabs(&doc).len(), 2, "first undo restores one tab");
+    stack.undo(&mut doc, &mut |_| {});
+    assert_eq!(
+        primary_tabs(&doc).len(),
+        3,
+        "second undo restores the other"
+    );
+}
+
+#[test]
 fn consecutive_moves_coalesce_keeping_first_from() {
     use glam::Vec2;
 
     let mut doc: Document = test_graph().into();
-    let node = doc.graph.iter().next().unwrap().id;
-    let key = node;
+    let key = doc.graph.iter().next().unwrap().id;
     let start = *doc.main_view.item_placements.get(&key).unwrap();
     let mut stack = ActionStack::new(1 << 20);
 
     let drag_to = |stack: &mut ActionStack, doc: &mut Document, to: Vec2| {
-        let intent = Intent::MoveSelection {
-            grabbed: key,
-            moves: vec![(key, to)],
-        };
-        let step = build_step(intent, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
-        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
+        push_edit(
+            stack,
+            doc,
+            Intent::MoveSelection {
+                grabbed: key,
+                moves: vec![(key, to)],
+            },
+        );
     };
     drag_to(&mut stack, &mut doc, Vec2::new(10.0, 10.0));
     drag_to(&mut stack, &mut doc, Vec2::new(20.0, 20.0));
@@ -286,7 +310,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
     );
     // ...and redo replays to the last `to`.
     assert!(stack.redo(&mut doc, &mut |_| {}));
-    assert_eq!(doc.main_view.item_placements[&key], Vec2::new(20.0, 20.0),);
+    assert_eq!(doc.main_view.item_placements[&key], Vec2::new(20.0, 20.0));
 }
 
 #[test]
@@ -298,21 +322,62 @@ fn moves_of_different_nodes_do_not_coalesce() {
     let b = doc.graph.iter().nth(1).unwrap().id;
     let mut stack = ActionStack::new(1 << 20);
 
-    for (node, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
-        let key = node;
-        let intent = Intent::MoveSelection {
-            grabbed: key,
-            moves: vec![(key, to)],
-        };
-        let step = build_step(intent, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
+    for (key, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
+        push_edit(
+            &mut stack,
+            &mut doc,
+            Intent::MoveSelection {
+                grabbed: key,
+                moves: vec![(key, to)],
+            },
+        );
     }
     // Different grabbed nodes ⇒ different `SelectionDrag` keys ⇒ two entries.
     assert!(stack.undo(&mut doc, &mut |_| {}));
     assert!(
         stack.undo(&mut doc, &mut |_| {}),
         "moves of distinct nodes stay separate undo entries"
+    );
+}
+
+#[test]
+fn group_drag_moves_all_and_undoes_as_one() {
+    use glam::Vec2;
+
+    let mut doc: Document = test_graph().into();
+    let ka = doc.graph.iter().next().unwrap().id;
+    let kb = doc.graph.iter().nth(1).unwrap().id;
+    let a0 = doc.main_view.item_placements[&ka];
+    let b0 = doc.main_view.item_placements[&kb];
+    let mut stack = ActionStack::new(1 << 20);
+
+    // Two frames of a group drag (grabbed = a), each frame moving both nodes
+    // by the running offset. Same grabbed ⇒ one coalesced entry.
+    let drag = |stack: &mut ActionStack, doc: &mut Document, off: Vec2| {
+        push_edit(
+            stack,
+            doc,
+            Intent::MoveSelection {
+                grabbed: ka,
+                moves: vec![(ka, a0 + off), (kb, b0 + off)],
+            },
+        );
+    };
+    drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
+    drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
+
+    // Both ended at origin + last offset.
+    let item_pos = |doc: &Document, key: &NodeId| -> Vec2 { doc.main_view.item_placements[key] };
+    assert_eq!(item_pos(&doc, &ka), a0 + Vec2::new(25.0, 5.0));
+    assert_eq!(item_pos(&doc, &kb), b0 + Vec2::new(25.0, 5.0));
+
+    // One undo restores both to their pre-drag positions (first `from`).
+    assert!(stack.undo(&mut doc, &mut |_| {}));
+    assert_eq!(item_pos(&doc, &ka), a0);
+    assert_eq!(item_pos(&doc, &kb), b0);
+    assert!(
+        !stack.undo(&mut doc, &mut |_| {}),
+        "the group drag collapsed to exactly one entry"
     );
 }
 
@@ -335,18 +400,18 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let mut stack = ActionStack::new(1 << 20);
     let mut batch = Vec::new();
     for node_id in [a, b] {
-        let step = build_step(Intent::RemoveNode { node_id }, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
+        let step = build_step(Intent::RemoveNode { node_id }, &doc).unwrap();
+        apply_step(&step, &mut doc);
         batch.push(step);
     }
-    stack.push_current(BatchScope::Graph(GraphRef::Main), &batch);
+    stack.push_current(&batch);
 
-    assert!(doc.graph.find(a, NodeSearch::TopLevel).is_none());
-    assert!(doc.graph.find(b, NodeSearch::TopLevel).is_none());
+    assert!(doc.graph.find(a).is_none());
+    assert!(doc.graph.find(b).is_none());
 
     assert!(stack.undo(&mut doc, &mut |_| {}));
-    assert!(doc.graph.find(a, NodeSearch::TopLevel).is_some());
-    assert!(doc.graph.find(b, NodeSearch::TopLevel).is_some());
+    assert!(doc.graph.find(a).is_some());
+    assert!(doc.graph.find(b).is_some());
     match doc.graph.bindings.get(&InputPort::new(b, 0)) {
         Some(Binding::Bind(src)) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
         other => panic!("expected restored a->b edge, got {other:?}"),
@@ -358,88 +423,34 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 }
 
 #[test]
-fn group_drag_moves_all_and_undoes_as_one() {
-    use glam::Vec2;
-
-    let mut doc: Document = test_graph().into();
-    let a = doc.graph.iter().next().unwrap().id;
-    let b = doc.graph.iter().nth(1).unwrap().id;
-    let (ka, kb) = (a, b);
-    let a0 = doc.main_view.item_placements[&ka];
-    let b0 = doc.main_view.item_placements[&kb];
-    let mut stack = ActionStack::new(1 << 20);
-
-    // Two frames of a group drag (grabbed = a), each frame moving both nodes
-    // by the running offset. Same grabbed ⇒ one coalesced entry.
-    let drag = |stack: &mut ActionStack, doc: &mut Document, off: Vec2| {
-        let intent = Intent::MoveSelection {
-            grabbed: ka,
-            moves: vec![(ka, a0 + off), (kb, b0 + off)],
-        };
-        let step = build_step(intent, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
-        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
-    };
-    drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
-    drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
-
-    // Both ended at origin + last offset.
-    let item_pos = |doc: &Document, key: &NodeId| -> Vec2 { doc.main_view.item_placements[key] };
-    assert_eq!(item_pos(&doc, &ka), a0 + Vec2::new(25.0, 5.0));
-    assert_eq!(item_pos(&doc, &kb), b0 + Vec2::new(25.0, 5.0));
-
-    // One undo restores both to their pre-drag positions (first `from`).
-    assert!(stack.undo(&mut doc, &mut |_| {}));
-    assert_eq!(item_pos(&doc, &ka), a0);
-    assert_eq!(item_pos(&doc, &kb), b0);
-    assert!(
-        !stack.undo(&mut doc, &mut |_| {}),
-        "the group drag collapsed to exactly one entry"
-    );
-}
-
-#[test]
 fn new_edit_discards_the_redo_tail() {
     let mut doc: Document = test_graph().into();
     let node = doc.graph.iter().next().unwrap().id;
     let mut stack = ActionStack::new(1 << 20);
 
-    let select = |stack: &mut ActionStack, doc: &mut Document, set: BTreeSet<_>| {
-        let step = build_step(Intent::SetSelection { to: set }, doc, GraphRef::Main).unwrap();
-        apply_step(&step, doc, BatchScope::Graph(GraphRef::Main));
-        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
-    };
     let one: BTreeSet<_> = [node].into_iter().collect();
-    select(&mut stack, &mut doc, one.clone()); // A: {} -> {node}
-    select(&mut stack, &mut doc, BTreeSet::new()); // B: {node} -> {}
+    push_edit(&mut stack, &mut doc, Intent::SetSelection { to: one }); // A: {} -> {node}
+    push_edit(
+        &mut stack,
+        &mut doc,
+        Intent::SetSelection {
+            to: BTreeSet::new(),
+        },
+    ); // B: {node} -> {}
 
     // Undo B → selection back to {node}, B now redoable.
     assert!(stack.undo(&mut doc, &mut |_| {}));
     // A fresh edit while a redo is pending must discard it.
-    select(&mut stack, &mut doc, BTreeSet::new()); // C: {node} -> {}
+    push_edit(
+        &mut stack,
+        &mut doc,
+        Intent::SetSelection {
+            to: BTreeSet::new(),
+        },
+    ); // C: {node} -> {}
     assert!(
         !stack.redo(&mut doc, &mut |_| {}),
         "a new edit invalidates the redoable tail"
-    );
-}
-
-#[test]
-fn consecutive_closes_do_not_coalesce() {
-    // Each close is its own undo entry — two closes need two undos.
-    let mut doc = doc_with_distinct_tabs();
-    let mut stack = ActionStack::new(1 << 20);
-
-    close_at(&mut stack, &mut doc, 2);
-    close_at(&mut stack, &mut doc, 1);
-    assert_eq!(primary_tabs(&doc).len(), 1, "both graph tabs closed");
-
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(primary_tabs(&doc).len(), 2, "first undo restores one tab");
-    stack.undo(&mut doc, &mut |_| {});
-    assert_eq!(
-        primary_tabs(&doc).len(),
-        3,
-        "second undo restores the other"
     );
 }
 
@@ -458,9 +469,7 @@ fn history_bounded_by_byte_budget() {
         } else {
             BTreeSet::new()
         };
-        let step = build_step(Intent::SetSelection { to }, &doc, GraphRef::Main).unwrap();
-        apply_step(&step, &mut doc, BatchScope::Graph(GraphRef::Main));
-        stack.push_current(BatchScope::Graph(GraphRef::Main), &[step]);
+        push_edit(&mut stack, &mut doc, Intent::SetSelection { to });
         // The *live* region stays within budget (entries are far
         // smaller than 256 B, so no single-entry overflow)...
         let live = stack.actions.len() - stack.head;
@@ -487,305 +496,5 @@ fn history_bounded_by_byte_budget() {
     assert!(
         stack.undo(&mut doc, &mut |_| {}),
         "the most recent edit stays undoable"
-    );
-}
-
-/// A document carrying a graph "S" with interface inputs
-/// `[A]` and outputs `[R]`, plus that `Local` target.
-fn doc_with_def() -> (Document, GraphRef) {
-    use scenarium::DataType;
-    use scenarium::{FuncInput, FuncOutput};
-
-    let mut doc: Document = test_graph().into();
-    let id: GraphId = "00000000-0000-0000-0000-0000000000bb".into();
-    let def = GraphDef::new("S")
-        .category("Graph")
-        .input(FuncInput::optional("A", DataType::Int))
-        .output(FuncOutput::new("R", DataType::Int));
-    doc.graph.insert_graph(id, def);
-    (doc, GraphRef::Local(id))
-}
-
-fn interface(doc: &Document, id: GraphId) -> &GraphDef {
-    &doc.graph.graphs[&id]
-}
-
-fn interface_mut(doc: &mut Document, id: GraphId) -> &mut GraphDef {
-    doc.graph.graphs.get_mut(&id).unwrap()
-}
-
-#[test]
-fn rename_boundary_port_applies_and_reverts() {
-    use crate::core::document::BoundarySide;
-    use crate::core::edit::intent::apply::revert_step;
-
-    let (mut doc, target) = doc_with_def();
-    let GraphRef::Local(def_id) = target else {
-        unreachable!()
-    };
-    let step = build_step(
-        Intent::RenameBoundaryPort {
-            side: BoundarySide::Input,
-            idx: 0,
-            to: "alpha".into(),
-        },
-        &doc,
-        target,
-    )
-    .expect("rename builds against a Local target");
-
-    apply_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(interface(&doc, def_id).inputs[0].name, "alpha");
-
-    revert_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(
-        interface(&doc, def_id).inputs[0].name,
-        "A",
-        "revert restores the captured `from` name"
-    );
-}
-
-#[test]
-fn rename_boundary_port_renames_outputs_side() {
-    use crate::core::document::BoundarySide;
-
-    let (mut doc, target) = doc_with_def();
-    let GraphRef::Local(def_id) = target else {
-        unreachable!()
-    };
-    let step = build_step(
-        Intent::RenameBoundaryPort {
-            side: BoundarySide::Output,
-            idx: 0,
-            to: "result".into(),
-        },
-        &doc,
-        target,
-    )
-    .unwrap();
-    apply_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(interface(&doc, def_id).outputs[0].name, "result");
-}
-
-#[test]
-fn rename_boundary_port_dropped_off_local_target_or_oob() {
-    use crate::core::document::BoundarySide;
-
-    let (doc, target) = doc_with_def();
-    // Main target has no def interface to rename.
-    assert!(
-        build_step(
-            Intent::RenameBoundaryPort {
-                side: BoundarySide::Input,
-                idx: 0,
-                to: "x".into(),
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .is_err()
-    );
-    // Out-of-range index on the right target also drops.
-    assert!(
-        build_step(
-            Intent::RenameBoundaryPort {
-                side: BoundarySide::Input,
-                idx: 9,
-                to: "x".into(),
-            },
-            &doc,
-            target,
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn stale_rename_step_no_ops_instead_of_clobbering() {
-    use crate::core::document::BoundarySide;
-    use crate::core::edit::intent::apply::revert_step;
-    use scenarium::DataType;
-    use scenarium::FuncInput;
-
-    let finput = |n: &str| FuncInput::optional(n, DataType::Int);
-    let mut doc: Document = test_graph().into();
-    let def_id: GraphId = "00000000-0000-0000-0000-0000000000cc".into();
-    let def = GraphDef::new("S")
-        .category("Graph")
-        .inputs([finput("A"), finput("B")]);
-    doc.graph.insert_graph(def_id, def);
-    let target = GraphRef::Local(def_id);
-
-    // Rename inputs[1] "B" -> "beta".
-    let step = build_step(
-        Intent::RenameBoundaryPort {
-            side: BoundarySide::Input,
-            idx: 1,
-            to: "beta".into(),
-        },
-        &doc,
-        target,
-    )
-    .unwrap();
-    apply_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(interface(&doc, def_id).inputs[1].name, "beta");
-
-    // An out-of-band edit removes input 0, shifting "beta" to index 0.
-    // The step's slot addressing is now stale: its idx (1) is out of
-    // range, so undo no-ops instead of touching the wrong slot.
-    interface_mut(&mut doc, def_id).inputs.remove(0);
-    revert_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
-
-    // Same guard by name: a slot at the recorded index but holding an
-    // unexpected name is left alone.
-    interface_mut(&mut doc, def_id).inputs.push(finput("other"));
-    revert_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(interface(&doc, def_id).inputs[0].name, "beta");
-    assert_eq!(interface(&doc, def_id).inputs[1].name, "other");
-}
-
-#[test]
-fn add_boundary_port_applies_and_reverts_on_both_sides() {
-    use crate::core::document::BoundarySide;
-    use crate::core::edit::intent::apply::revert_step;
-    use scenarium::DataType;
-
-    let (mut doc, target) = doc_with_def();
-    let GraphRef::Local(def_id) = target else {
-        unreachable!()
-    };
-    for (side, name) in [
-        (BoundarySide::Input, "input1"),
-        (BoundarySide::Output, "output1"),
-    ] {
-        let step = build_step(
-            Intent::AddBoundaryPort {
-                side,
-                name: name.into(),
-                data_type: DataType::Float,
-            },
-            &doc,
-            target,
-        )
-        .expect("add builds against a Local target");
-        apply_step(&step, &mut doc, BatchScope::Graph(target));
-        let interface = interface(&doc, def_id);
-        match side {
-            BoundarySide::Input => {
-                assert_eq!(interface.inputs.len(), 2, "appended after A");
-                assert_eq!(interface.inputs[1].name, name);
-                assert_eq!(interface.inputs[1].data_type, DataType::Float);
-            }
-            BoundarySide::Output => {
-                assert_eq!(interface.outputs.len(), 2, "appended after R");
-                assert_eq!(interface.outputs[1].name, name);
-                assert_eq!(interface.outputs[1].ty.declared(), DataType::Float);
-            }
-        }
-        revert_step(&step, &mut doc, BatchScope::Graph(target));
-    }
-    // Both reverts leave the original one-in/one-out interface.
-    assert_eq!(interface(&doc, def_id).inputs.len(), 1);
-    assert_eq!(interface(&doc, def_id).outputs.len(), 1);
-    // Off a Local target the intent drops.
-    assert!(
-        build_step(
-            Intent::AddBoundaryPort {
-                side: BoundarySide::Input,
-                name: "x".into(),
-                data_type: DataType::Int,
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn remove_boundary_port_round_trips_severed_wiring() {
-    use crate::core::document::BoundarySide;
-    use crate::core::edit::intent::apply::revert_step;
-    use scenarium::DataType;
-    use scenarium::{Binding, FuncInput, InputPort, Node, NodeKind};
-
-    // Child [A, B] with a GraphInput boundary feeding an interior
-    // consumer from both slots; the root instance binds both slots.
-    let finput = |n: &str| FuncInput::optional(n, DataType::Int);
-    let mut child = GraphDef::new("S")
-        .category("Graph")
-        .inputs([finput("A"), finput("B")]);
-    let boundary = child.body.add(Node::new(NodeKind::GraphInput));
-    let consumer = child
-        .body
-        .add(Node::new(NodeKind::Func(scenarium::FuncId::unique())));
-    child
-        .body
-        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(boundary, 0));
-    child
-        .body
-        .set_input_binding(InputPort::new(consumer, 1), Binding::bind(boundary, 1));
-
-    let mut doc: Document = test_graph().into();
-    let def_id: GraphId = "00000000-0000-0000-0000-0000000000dd".into();
-    let instance = doc.graph.add(Node::graph_instance(
-        &child,
-        scenarium::GraphLink::Local(def_id),
-    ));
-    doc.main_view
-        .item_placements
-        .insert(instance, glam::Vec2::ZERO);
-    doc.graph.insert_graph(def_id, child);
-    doc.graph
-        .set_input_binding(InputPort::new(instance, 0), Binding::Const(1i64.into()));
-    doc.graph
-        .set_input_binding(InputPort::new(instance, 1), Binding::Const(2i64.into()));
-    let target = GraphRef::Local(def_id);
-    let original = doc.graph.clone_verbatim();
-
-    let step = build_step(
-        Intent::RemoveBoundaryPort {
-            side: BoundarySide::Input,
-            idx: 0,
-        },
-        &doc,
-        target,
-    )
-    .expect("remove builds against an existing slot");
-    apply_step(&step, &mut doc, BatchScope::Graph(target));
-
-    // "B" survives at index 0 on both sides of the boundary; the removed
-    // slot's wiring is gone.
-    assert_eq!(interface(&doc, def_id).inputs.len(), 1);
-    assert_eq!(interface(&doc, def_id).inputs[0].name, "B");
-    let child = &doc.graph.graphs[&def_id];
-    assert_eq!(child.body.bindings.get(&InputPort::new(consumer, 0)), None);
-    assert_eq!(
-        child.body.bindings.get(&InputPort::new(consumer, 1)),
-        Some(&Binding::bind(boundary, 0)),
-        "surviving interior edge shifted 1 -> 0"
-    );
-    assert_eq!(
-        doc.graph.bindings.get(&InputPort::new(instance, 0)),
-        Some(&Binding::Const(2i64.into())),
-        "surviving instance binding shifted 1 -> 0"
-    );
-    assert_eq!(doc.graph.bindings.get(&InputPort::new(instance, 1)), None);
-
-    revert_step(&step, &mut doc, BatchScope::Graph(target));
-    assert_eq!(doc.graph, original, "undo restores the exact wiring");
-
-    // A slot that doesn't exist drops the intent.
-    assert!(
-        build_step(
-            Intent::RemoveBoundaryPort {
-                side: BoundarySide::Input,
-                idx: 9,
-            },
-            &doc,
-            target,
-        )
-        .is_err()
     );
 }

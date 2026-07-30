@@ -5,7 +5,7 @@
 
 use scenarium::Binding;
 
-use crate::core::edit::intent::types::{DocStep, GestureKey, GraphStep, UndoStep};
+use crate::core::edit::intent::types::{DockStep, GestureKey, GraphStep, UndoStep};
 
 /// 1e-4 is the threshold below which two pan/scale samples are
 /// considered the same gesture — keeps idle pan/zoom from polluting
@@ -19,7 +19,7 @@ impl UndoStep {
     pub(crate) fn is_noop(&self) -> bool {
         match self {
             UndoStep::Graph(g) => g.is_noop(),
-            UndoStep::Doc(d) => d.is_noop(),
+            UndoStep::Dock(d) => d.is_noop(),
         }
     }
 
@@ -43,30 +43,16 @@ impl UndoStep {
     /// strands the cache.
     pub(crate) fn invalidates_cached_geometry(&self) -> bool {
         match self {
-        // A dock op reshapes panes, never a node: pane extent is not an
-        // input to node measure, so every cached offset survives. A ratio
-        // nudge is even less than that — `Splitter` lays out at the live
-        // pointer ratio and writes back only the arranged one, so Pass A
-        // already drew what this step is persisting. A dock op that swaps
-        // the active graph is covered by `Editor::sync_target`, which
-        // handles the never-yet-shown graph the cache can't have entries
-        // for.
-        UndoStep::Doc(DocStep::Dock { .. }) => false,
-        // A port rename changes a label's width so the node remeasures;
-        // adding/removing an interface port resizes the boundary node and
-        // shifts every wire hanging off it.
-        UndoStep::Doc(
-            DocStep::RenameBoundaryPort { .. }
-            | DocStep::AddBoundaryPort { .. }
-            | DocStep::RemoveBoundaryPort { .. }
-            // Graph rename changes the tab-strip label's width. Nothing on
-            // the canvas moves, but the strip's own chip rects are polled
-            // from last frame's responses by the drag-docking scan; a
-            // rename commit is rare enough to eat the pass rather than
-            // reason about that interaction.
-            | DocStep::RenameGraph { .. },
-        ) => true,
-        UndoStep::Graph(g) => match g {
+            // A dock op reshapes panes, never a node: pane extent is not an
+            // input to node measure, so every cached offset survives. A ratio
+            // nudge is even less than that — `Splitter` lays out at the live
+            // pointer ratio and writes back only the arranged one, so Pass A
+            // already drew what this step is persisting. A dock op that swaps
+            // the active graph is covered by `Editor::sync_target`, which
+            // handles the never-yet-shown graph the cache can't have entries
+            // for.
+            UndoStep::Dock(_) => false,
+            UndoStep::Graph(g) => match g {
             // A fresh node has no cached port offsets, so its wires have
             // nothing to anchor to until it has recorded once. Removal is
             // true for its *revert*, which puts that node back.
@@ -75,11 +61,7 @@ impl UndoStep {
             | GraphStep::RemoveNode { .. }
             // A title width change remeasures the header, shifting every
             // port row below it.
-            | GraphStep::RenameNode { .. }
-            // Forks an identical-interface graph, so the node doesn't
-            // resize — but it's a structural edit and rare, so eat one
-            // pass rather than reason about it staying in lockstep.
-            | GraphStep::DetachGraph { .. } => true,
+            | GraphStep::RenameNode { .. } => true,
             // Nothing remeasures: every member keeps its size and its
             // cached intra-node offsets, and `CanvasGeometry` recomputes
             // centers from this frame's `pos`. The drag also drains
@@ -110,7 +92,7 @@ impl UndoStep {
             // node remeasure.
             | GraphStep::SetSubscription { .. } => false,
         },
-    }
+        }
     }
 
     /// Whether replaying this step can move the set of preview nodes whose
@@ -126,24 +108,14 @@ impl UndoStep {
         match self {
             // The whole layout is swapped by assignment, so any dock op can
             // open, close, or relocate a viewer tab.
-            UndoStep::Doc(DocStep::Dock { .. }) => true,
-            // An interface edit moves ports, never nodes.
-            UndoStep::Doc(
-                DocStep::AddBoundaryPort { .. }
-                | DocStep::RemoveBoundaryPort { .. }
-                | DocStep::RenameBoundaryPort { .. }
-                | DocStep::RenameGraph { .. },
-            ) => false,
+            UndoStep::Dock(_) => true,
             UndoStep::Graph(g) => match g {
                 // Any step that adds or removes nodes can add or remove a
                 // preview among them — including undo, which puts one back.
                 GraphStep::AddNode { .. }
                 | GraphStep::DuplicateNodes { .. }
                 | GraphStep::RemoveNode { .. } => true,
-                // A preview is entry-only, so a definition's interior never
-                // holds one and forking a definition cannot move the set.
-                GraphStep::DetachGraph { .. }
-                | GraphStep::MoveSelection { .. }
+                GraphStep::MoveSelection { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
@@ -166,7 +138,7 @@ impl UndoStep {
             // A structural dock op (a tab moved or split into its own
             // pane) is invested arrangement work worth the exit prompt;
             // activations, closes, and ratio nudges stay navigation.
-            UndoStep::Doc(DocStep::Dock { structural, .. }) => *structural,
+            UndoStep::Dock(step) => step.structural,
             // Navigation only — panning, zooming, selecting, or
             // restacking is view state the user doesn't "save".
             // Stacking order rides in `item_placements` and still writes on any
@@ -185,14 +157,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetNodeProperty { .. }
-                | GraphStep::DetachGraph { .. }
                 | GraphStep::SetSubscription { .. },
-            )
-            | UndoStep::Doc(
-                DocStep::RenameBoundaryPort { .. }
-                | DocStep::AddBoundaryPort { .. }
-                | DocStep::RemoveBoundaryPort { .. }
-                | DocStep::RenameGraph { .. },
             ) => true,
         }
     }
@@ -210,7 +175,7 @@ impl UndoStep {
             // The key was derived from the dock intent at build time:
             // tab-switch bursts and one divider's drag frames collapse
             // into single entries; a close or move never coalesces.
-            UndoStep::Doc(DocStep::Dock { key, .. }) => *key,
+            UndoStep::Dock(step) => step.key,
             // Everything else is its own undo entry.
             UndoStep::Graph(
                 GraphStep::AddNode { .. }
@@ -221,14 +186,7 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
-                | GraphStep::DetachGraph { .. }
                 | GraphStep::SetSubscription { .. },
-            )
-            | UndoStep::Doc(
-                DocStep::RenameBoundaryPort { .. }
-                | DocStep::AddBoundaryPort { .. }
-                | DocStep::RemoveBoundaryPort { .. }
-                | DocStep::RenameGraph { .. },
             ) => None,
         }
     }
@@ -278,21 +236,13 @@ impl UndoStep {
                     moves,
                 }))
             }
-            (
-                UndoStep::Doc(DocStep::Dock {
-                    from,
-                    key,
-                    structural,
-                    ..
-                }),
-                UndoStep::Doc(DocStep::Dock { to, .. }),
-            ) => Some(UndoStep::Doc(DocStep::Dock {
-                from: from.clone(),
-                to: to.clone(),
-                key: *key,
+            (UndoStep::Dock(first), UndoStep::Dock(next)) => Some(UndoStep::Dock(DockStep {
+                from: first.from.clone(),
+                to: next.to.clone(),
+                key: first.key,
                 // Only non-structural ops carry a gesture key, so a
                 // coalesced run can't smuggle a move past the flag.
-                structural: *structural,
+                structural: first.structural,
             })),
             _ => None,
         }
@@ -305,9 +255,7 @@ impl GraphStep {
     /// flip is the change).
     fn is_noop(&self) -> bool {
         match self {
-            GraphStep::AddNode { .. }
-            | GraphStep::RemoveNode { .. }
-            | GraphStep::DetachGraph { .. } => false,
+            GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
             GraphStep::MoveSelection { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
@@ -329,19 +277,13 @@ impl GraphStep {
     }
 }
 
-impl DocStep {
-    /// `pub(super)` for `commit_doc_intent`, which filters a step it never
-    /// wraps in an [`UndoStep`] until it survives.
+impl DockStep {
+    /// `pub(super)` for `commit_dock_op`, which filters a step it never wraps
+    /// in an [`UndoStep`] until it survives.
+    ///
+    /// Covers every degenerate dock op in one comparison: same-tab activation,
+    /// a refused close/move, an unchanged ratio.
     pub(super) fn is_noop(&self) -> bool {
-        match self {
-            // Covers every degenerate dock op in one comparison: same-tab
-            // activation, a refused close/move, an unchanged ratio.
-            DocStep::Dock { from, to, .. } => from == to,
-            DocStep::RenameBoundaryPort { from, to, .. } => from == to,
-            DocStep::RenameGraph { from, to, .. } => from == to,
-            // Adding/removing an interface port is never a no-op — the
-            // slot's existence flip is the change.
-            DocStep::AddBoundaryPort { .. } | DocStep::RemoveBoundaryPort { .. } => false,
-        }
+        self.from == self.to
     }
 }

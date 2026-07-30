@@ -7,7 +7,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::{Held, PaneSlot};
+use crate::gui::canvas::pane::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::{Frame, Pane, SceneNode};
@@ -29,7 +29,7 @@ use crate::gui::scene::{Frame, Pane, SceneNode};
 /// new-node spawn.
 #[derive(Default, Debug)]
 pub(super) struct SubscriptionUI {
-    state: PaneSlot<InFlight>,
+    state: GestureSlot<InFlight>,
 }
 
 /// The in-flight event wire, discriminated by which end it started from —
@@ -60,8 +60,8 @@ impl SubscriptionUI {
     /// pane** — feeds that pane's wire-fade tier. Scoped, so dragging an
     /// event wire in one pane doesn't dim every other pane's wires.
     /// (A method, not a `pub(super)` field: `InFlight` is module-private.)
-    pub(super) fn dragging_in(&self, graph: Pane<'_>) -> bool {
-        self.state.get(graph.target()).is_some()
+    pub(super) fn dragging_in(&self, _graph: Pane<'_>) -> bool {
+        self.state.get().is_some()
     }
 
     /// Drive the in-flight subscription wire: latch a fresh drag from either
@@ -97,27 +97,20 @@ impl SubscriptionUI {
             // the commit lands on. Resolved here, once, then it rides the
             // slot.
             if let Some(latched) = latched
-                && let Some(graph) = frame.owner(latched.node())
+                && frame.projects(latched.node())
             {
-                self.state.latch(graph.target(), latched);
+                self.state.latch(latched);
             }
         }
         if cancelled {
             self.state.clear();
         }
-        let Some(Held {
-            graph: target,
-            mut state,
-        }) = self.state.take_held()
-        else {
+        let Some(mut state) = self.state.take() else {
             return;
         };
         // A pane closed mid-drag, or a fixed end deleted under it, drops
         // the wire — not re-latching is how.
-        let Some(graph) = frame
-            .pane(target)
-            .filter(|pane| pane.contains(state.node()))
-        else {
+        let Some(graph) = frame.pane().filter(|pane| pane.contains(state.node())) else {
             return;
         };
         // Refresh the snapped opposite end, then read the source glyph's drag
@@ -133,7 +126,7 @@ impl SubscriptionUI {
                 !drag.held(&geometry.subs)
             }
         };
-        self.state.latch(target, state);
+        self.state.latch(state);
         if !released {
             return;
         }
@@ -147,15 +140,12 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber(GlyphDrag {
                 from: subscriber,
                 snap: Some(emitter),
-            }) => out.push(
-                graph.target(),
-                Intent::SetSubscription {
-                    emitter: emitter.node_id,
-                    event_idx: emitter.event_idx,
-                    subscriber,
-                    subscribe: true,
-                },
-            ),
+            }) => out.push(Intent::SetSubscription {
+                emitter: emitter.node_id,
+                event_idx: emitter.event_idx,
+                subscriber,
+                subscribe: true,
+            }),
             _ => {}
         }
         self.state.clear();
@@ -168,7 +158,7 @@ impl SubscriptionUI {
     /// owner while a drag is live, so without this the snapped-but-not-
     /// captured target stays at its idle color.
     pub(super) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
-        match self.state.held() {
+        match self.state.get() {
             Some(InFlight::FromEmitter(drag)) => {
                 if let Some(sub) = drag.snap {
                     geometry.subs.set_hovered(sub);
@@ -199,7 +189,7 @@ impl SubscriptionUI {
         // Scoped to the pane holding the drag's fixed end — see
         // `ConnectionUI::draw_in_flight` for what an unscoped preview
         // paints on the neighbouring canvases.
-        let (p0, p3) = match self.state.get(graph.target()).copied() {
+        let (p0, p3) = match self.state.get().copied() {
             None => return,
             Some(InFlight::FromEmitter(drag)) => {
                 let Some(p0) = geometry.events.center(drag.from) else {

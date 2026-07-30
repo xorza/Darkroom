@@ -1,7 +1,7 @@
 use glam::Vec2;
 use scenarium::FuncId;
 use scenarium::StaticValue;
-use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
+use scenarium::{Binding, InputPort, Node, NodeId, NodeKind};
 
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
@@ -28,10 +28,7 @@ fn apply_intents_adds_node() {
 
     apply_intents(&mut doc, vec![intent]);
     assert_eq!(doc.graph.len(), 1);
-    assert!(
-        doc.graph.find(id, NodeSearch::TopLevel).is_some(),
-        "node landed in the graph"
-    );
+    assert!(doc.graph.find(id).is_some(), "node landed in the graph");
 }
 
 #[test]

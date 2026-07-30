@@ -92,8 +92,8 @@ impl WorkerBridge {
     }
 
     /// Execute these exact nodes in the installed program and deliver their
-    /// outputs. One authored node can cover several — a graph instance seeds
-    /// the interior producers behind its outputs plus its interior sinks.
+    /// outputs. Plural because a run is seeded with a set — a "run to this
+    /// node" contributes one.
     pub(crate) fn run_nodes(&self, e_node_ids: Vec<ExecutionNodeId>) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::Run {
             seeds: RunSeeds::nodes(e_node_ids),
