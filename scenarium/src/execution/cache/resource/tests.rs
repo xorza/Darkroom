@@ -6,13 +6,12 @@ use ::common::CancelToken;
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compiled::internals::TestCompiledGraph;
+use crate::execution::compiled::{
+    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
+};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
-use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
-};
-use crate::execution::schedule::{NodeState, RunSchedule};
+use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::{DataType, StaticValue};
 
@@ -275,7 +274,7 @@ fn file_identity_separates_pre_epoch_mtimes() {
 #[derive(Debug)]
 struct ConstPathFixture {
     /// A real outer compiled artifact around the hand-built program.
-    program: TestCompiledGraph,
+    program: CompiledGraph,
     schedule: RunSchedule,
     first: ExecutionNodeId,
     second: ExecutionNodeId,
@@ -284,7 +283,7 @@ struct ConstPathFixture {
 fn const_path_fixture(path: &str) -> ConstPathFixture {
     let first = ExecutionNodeId::from_u128(1);
     let second = ExecutionNodeId::from_u128(2);
-    let mut program = Program::default();
+    let mut program = CompiledGraph::default();
     let input_ranges = [
         program.inputs.append([ExecutionInput {
             binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
@@ -323,10 +322,10 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
     schedule.reset_for_program(&program);
     schedule.process_order.extend([NodeIdx(0), NodeIdx(1)]);
     schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
-    schedule.roots.insert(NodeIdx(0));
-    schedule.roots.insert(NodeIdx(1));
+    schedule.add_root(NodeIdx(0), RootFlags::PLAIN);
+    schedule.add_root(NodeIdx(1), RootFlags::PLAIN);
     ConstPathFixture {
-        program: TestCompiledGraph::new(program),
+        program,
         schedule,
         first,
         second,
@@ -340,15 +339,25 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     std::fs::write(&file, b"x").unwrap();
     let fixture = const_path_fixture(&file.to_string_lossy());
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&fixture.program);
+    cache.install_for_test(&fixture.program);
 
     cache
-        .prepare(fixture.schedule.executing(), CancelToken::never())
+        .prepare(
+            &fixture.program,
+            fixture.schedule.executing(),
+            CancelToken::never(),
+        )
         .await;
-    cache.stamp_digest(fixture.program.e_node_index[&fixture.first]);
+    cache.stamp_digest(
+        &fixture.program,
+        fixture.program.e_node_index[&fixture.first],
+    );
 
     std::fs::write(&file, b"longer").unwrap();
-    cache.stamp_digest(fixture.program.e_node_index[&fixture.second]);
+    cache.stamp_digest(
+        &fixture.program,
+        fixture.program.e_node_index[&fixture.second],
+    );
     assert_eq!(
         cache[fixture.program.e_node_index[&fixture.first]].current_digest,
         cache[fixture.program.e_node_index[&fixture.second]].current_digest,
@@ -357,9 +366,16 @@ async fn same_path_uses_one_identity_until_the_next_run() {
 
     let first_run = cache[fixture.program.e_node_index[&fixture.first]].current_digest;
     cache
-        .prepare(fixture.schedule.executing(), CancelToken::never())
+        .prepare(
+            &fixture.program,
+            fixture.schedule.executing(),
+            CancelToken::never(),
+        )
         .await;
-    cache.stamp_digest(fixture.program.e_node_index[&fixture.first]);
+    cache.stamp_digest(
+        &fixture.program,
+        fixture.program.e_node_index[&fixture.first],
+    );
     assert_ne!(
         cache[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
         "the next run refreshes resource identity"

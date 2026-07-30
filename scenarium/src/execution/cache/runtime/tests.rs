@@ -1,15 +1,13 @@
 use crate::graph::identity::FuncId;
 use std::sync::Arc;
 
-use crate::common::column::Column;
-use crate::common::pool::PoolRange;
+use crate::common::column::{Column, Span};
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
-use crate::execution::compiled::internals::TestCompiledGraph;
+use crate::execution::compiled::{CompiledGraph, ExecutionNode, ExecutionOutput};
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::execution::program::{ExecutionNode, ExecutionOutput, Program};
+use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
@@ -25,7 +23,7 @@ fn out() -> Vec<DynamicValue> {
 /// `release_dead_outputs` compares a resident snapshot's length against
 /// the node's declared port count, so a fixture node declaring none while
 /// holding a value is not a shape any real program produces.
-fn one_output(program: &mut Program) -> PoolRange<ExecutionOutput> {
+fn one_output(program: &mut CompiledGraph) -> Span<OutputIdx> {
     program.outputs.append([ExecutionOutput {
         data_type: DataType::Int,
     }])
@@ -60,13 +58,13 @@ fn keyed_slot(current_digest: Option<Digest>) -> RuntimeSlot {
 
 /// A program of `nodes`, ids `from_u128(idx + 1)` in order, one `Int` output
 /// each — the shape the slot fixtures above hold values for.
-fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> TestCompiledGraph {
-    let mut program = Program::default();
+fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> CompiledGraph {
+    let mut program = CompiledGraph::default();
     for (index, mut e_node) in nodes.into_iter().enumerate() {
         e_node.outputs = one_output(&mut program);
         program.push(ExecutionNodeId::from_u128(index as u128 + 1), e_node);
     }
-    TestCompiledGraph::new(program)
+    program
 }
 
 /// A `Pure` node retained in RAM — the default the residency fixtures assume.
@@ -83,13 +81,27 @@ fn ram_node() -> ExecutionNode {
 /// together, so a fixture cannot leave the cache describing itself wrongly.
 fn install(
     cache: &mut RuntimeCache,
-    program: &TestCompiledGraph,
+    program: &CompiledGraph,
     slots: impl IntoIterator<Item = RuntimeSlot>,
 ) {
-    cache.reconcile_for_test(program);
+    cache.install_for_test(program);
     for (index, slot) in slots.into_iter().enumerate() {
         cache.slots[NodeIdx(index as u32)] = slot;
     }
+}
+
+/// Recompile: move the slots from the program they belong to onto `next`,
+/// handing back the newly installed one so a chain of reinstalls always names
+/// the program it is leaving — what
+/// [`ExecutionEngine::install`](crate::execution::engine::ExecutionEngine) does
+/// with the two it holds at the swap.
+fn reinstall(
+    cache: &mut RuntimeCache,
+    previous: CompiledGraph,
+    next: CompiledGraph,
+) -> CompiledGraph {
+    cache.reconcile(Some(&previous), &next);
+    next
 }
 
 #[tokio::test]
@@ -101,9 +113,10 @@ async fn eviction_clears_only_the_output_cache() {
 
     let mut cache = RuntimeCache::default();
     let node_idx = NodeIdx(0);
-    install(&mut cache, &program_of([ram_node()]), [slot]);
+    let program = program_of([ram_node()]);
+    install(&mut cache, &program, [slot]);
     let e_node_id = ExecutionNodeId::from_u128(1);
-    let failures = cache.evict(&[e_node_id]).await;
+    let failures = cache.evict(&program, &[e_node_id]).await;
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
@@ -230,7 +243,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         }),
     );
 
-    cache.release_dead_outputs();
+    cache.release_dead_outputs(&program);
 
     for (index, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -254,7 +267,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     // every node retains in RAM, and the second is the recompile that downgrades
     // each node to its case's mode.
     let build = |modes: [CacheMode; 4]| {
-        let mut program = Program::default();
+        let mut program = CompiledGraph::default();
         for (index, mode) in modes.into_iter().enumerate() {
             let outputs = one_output(&mut program);
             program.push(
@@ -267,18 +280,19 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
                 },
             );
         }
-        TestCompiledGraph::new(program)
+        program
     };
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&build([CacheMode::Ram; 4]));
+    let retaining = build([CacheMode::Ram; 4]);
+    cache.install_for_test(&retaining);
     for (index, _) in cases.iter().enumerate() {
         let slot = &mut cache.slots[NodeIdx(index as u32)];
         slot.current_digest = Some(digest);
         slot.load_output(complete_snapshot(out()), Some(digest));
     }
 
-    cache.reconcile_for_test(&build(cases.map(|(mode, _)| mode)));
+    cache.reconcile(Some(&retaining), &build(cases.map(|(mode, _)| mode)));
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
@@ -295,25 +309,25 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let e_node_id = ExecutionNodeId::from_u128(1);
     // Each install is its own program — the owner change under test is what a
     // recompile does to the node, not an edit to the program already installed.
-    let build = move |func_id, version| {
-        let mut program = Program::default();
+    let build = move |func_id| {
+        let mut program = CompiledGraph::default();
         let outputs = one_output(&mut program);
         program.push(
             e_node_id,
             ExecutionNode {
                 func_id,
-                version,
                 cache: CacheMode::Ram,
                 behavior: FuncBehavior::Pure,
                 outputs,
                 ..Default::default()
             },
         );
-        TestCompiledGraph::new(program)
+        program
     };
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&build(func_id, 0));
+    let mut installed = build(func_id);
+    cache.install_for_test(&installed);
     let digest = Digest([5u8; 32]);
     let node_idx = NodeIdx(0);
     let slot = &mut cache.slots[node_idx];
@@ -322,8 +336,8 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     slot.current_digest = Some(digest);
     slot.load_output(complete_snapshot(out()), Some(digest));
 
-    // Same (func, version): everything survives.
-    cache.reconcile_for_test(&build(func_id, 0));
+    // Same func: everything survives.
+    installed = reinstall(&mut cache, installed, build(func_id));
     assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
         cache.slots[node_idx].event_state.lock().await.get::<u32>(),
@@ -331,25 +345,17 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
         "a same-owner reconcile must keep event state"
     );
 
-    // Bumped version: state and event state drop; the resident value stays —
-    // its validity is digest-keyed and the digest folds the version.
-    cache.reconcile_for_test(&build(func_id, 1));
+    // Changed func id: state and event state drop; the resident value stays —
+    // its validity is digest-keyed and the digest folds the func identity.
+    reinstall(&mut cache, installed, build(FuncId::from_u128(78)));
     assert!(
         cache.slots[node_idx].state.is_none(),
-        "a version bump must drop the predecessor's state"
+        "a func change must drop the predecessor's state"
     );
     assert!(cache.slots[node_idx].event_state.lock().await.is_none());
     assert!(
         cache.slots[node_idx].output_values().is_some(),
         "reowning must not touch the digest-keyed value"
-    );
-
-    // Changed func id at the same version: state drops too.
-    cache.slots[node_idx].state.set(31_u32);
-    cache.reconcile_for_test(&build(FuncId::from_u128(78), 1));
-    assert!(
-        cache.slots[node_idx].state.is_none(),
-        "a func change must drop the predecessor's state"
     );
 }
 
@@ -359,7 +365,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 #[test]
 fn reconcile_follows_ids_when_the_index_space_shifts() {
     let build = |ids: &[u128]| {
-        let mut program = Program::default();
+        let mut program = CompiledGraph::default();
         for id in ids {
             program.push(
                 ExecutionNodeId::from_u128(*id),
@@ -370,13 +376,14 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
                 },
             );
         }
-        TestCompiledGraph::new(program)
+        program
     };
     let digest = |id: u128| Digest([id as u8; 32]);
 
     // Ids 1, 2, 3 at indices 0, 1, 2 — each slot stamped with its own digest.
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&build(&[1, 2, 3]));
+    let installed = build(&[1, 2, 3]);
+    cache.install_for_test(&installed);
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
         slot.current_digest = Some(digest(i as u128 + 1));
@@ -385,9 +392,9 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     }
 
     // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
-    // surviving node slides down one index. Only the new program is named —
-    // the one being left is the cache's own.
-    cache.reconcile_for_test(&build(&[2, 3, 4]));
+    // surviving node slides down one index. Both programs are named, the way
+    // `ExecutionEngine::install` names them at the swap.
+    reinstall(&mut cache, installed, build(&[2, 3, 4]));
 
     assert_eq!(
         cache.slots[NodeIdx(0)].current_digest,
@@ -487,7 +494,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
 
     // Two declared outputs, one resident value: the arity check must fire.
-    let mut program = Program::default();
+    let mut program = CompiledGraph::default();
     let outputs = program
         .outputs
         .append([ExecutionOutput::default(), ExecutionOutput::default()]);
@@ -501,12 +508,13 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     let mut cache = RuntimeCache::default();
     install(
         &mut cache,
-        &TestCompiledGraph::new(program),
+        &program,
         [resident_slot(None, None, vec![DynamicValue::Unbound])],
     );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
             cache.read_output_port(
+                &program,
                 OutputAddr {
                     node_idx: NodeIdx(0),
                     port_idx: 0,
