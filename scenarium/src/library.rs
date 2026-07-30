@@ -1,14 +1,12 @@
-use crate::graph::identity::{FuncId, GraphId};
+use crate::graph::identity::FuncId;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::CustomValueCodec;
-use crate::execution::codec::Codecs;
-use crate::graph::definition::GraphDef;
+use crate::data::codec::Codecs;
 use crate::graph::func::{Func, FuncInput, OutputType};
 use crate::{DataType, EnumVariants, FsPathMode, StaticValue, TypeId};
-use hashbrown::HashMap as GraphMap;
 
 #[derive(Clone, Debug)]
 enum TypeEntryKind {
@@ -95,16 +93,12 @@ impl TypeEntry {
 }
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes
-/// instantiate, the shared graphs, and the nominal types (with
-/// their disk codecs). This is runtime registry state, not a persistence format;
+/// instantiate, and the nominal types (with their disk codecs). This is runtime registry state, not a persistence format;
 /// authored graphs serialize function and type ids and resolve them against a
 /// process-assembled library.
 #[derive(Default, Debug)]
 pub struct Library {
     funcs: HashMap<FuncId, Func>,
-
-    /// Shared graphs. Editing one propagates to every shared instance.
-    pub graphs: GraphMap<GraphId, GraphDef>,
 
     /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
     /// for type metadata and the disk codecs the output cache dispatches through.
@@ -148,24 +142,6 @@ impl Library {
 
     pub fn remove(&mut self, id: FuncId) -> Option<Func> {
         self.funcs.remove(&id)
-    }
-
-    pub fn graph_by_id(&self, id: GraphId) -> Option<&GraphDef> {
-        assert!(!id.is_nil());
-        self.graphs.get(&id)
-    }
-
-    /// Register a shared graph definition. Panics on a duplicate id, like
-    /// [`Self::add`] and [`Self::register_type`] — and unlike
-    /// [`Graph::insert_graph`](crate::graph::Graph::insert_graph), whose
-    /// map-`insert` semantics undo/redo replay depends on.
-    pub fn register_graph(&mut self, id: GraphId, graph: GraphDef) {
-        assert!(!id.is_nil());
-        assert!(
-            !self.graphs.contains_key(&id),
-            "duplicate graph registration"
-        );
-        self.graphs.insert(id, graph);
     }
 
     /// Register a nominal type. Panics on a duplicate id — two decls for one type
@@ -269,9 +245,6 @@ impl Library {
         let other = other.into();
         for func in other.funcs.into_values() {
             self.add(func);
-        }
-        for (id, graph) in other.graphs {
-            self.register_graph(id, graph);
         }
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
@@ -401,14 +374,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::identity::{FuncId, GraphId};
+    use crate::graph::identity::FuncId;
     use std::sync::Arc;
 
     use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::FuncOutput;
     use crate::Invocation;
-    use crate::graph::definition::GraphDef;
     use crate::graph::func::error::InvokeError;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::func::{Func, FuncInput};
@@ -459,14 +431,6 @@ mod tests {
         }));
         assert!(duplicate_func.is_err());
         assert_eq!(library.by_id(func_id).unwrap().name, "Before");
-
-        let graph_id = GraphId::unique();
-        library.register_graph(graph_id, GraphDef::new("Before"));
-        let duplicate_graph = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            library.register_graph(graph_id, GraphDef::new("After"));
-        }));
-        assert!(duplicate_graph.is_err());
-        assert_eq!(library.graph_by_id(graph_id).unwrap().name, "Before");
 
         let type_id = TypeId::unique();
         library.register_type(type_id, TypeEntry::custom("Before"));
