@@ -185,7 +185,7 @@ impl NodeUI {
         // `node_world_rect` the cull above and the rubber band test — this
         // frame's position plus the cached measured size — so all three agree
         // on where the node is even when the document moved it out from under
-        // a live gesture (an undo, a scripted edit). A node that has never
+        // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
         // frame: acceptable, since the user can't aim at something unpainted.
         let broken = rcx
